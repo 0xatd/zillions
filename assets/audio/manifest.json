@@ -7,6 +7,17 @@
     "Voice samples use distinct generic ElevenLabs voices through Venice audio generation.",
     "No API keys, prompts with secrets, or source credentials are stored in this repo."
   ],
+  "clickPack": {
+    "status": "generated",
+    "lineCount": 60,
+    "categories": [
+      "selection",
+      "repeated",
+      "move",
+      "attack"
+    ],
+    "file": "click-pack/index.json"
+  },
   "voices": [
     {
       "hero": "alex",

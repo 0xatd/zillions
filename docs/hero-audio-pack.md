@@ -4,6 +4,15 @@ These are saved concept assets for Zillions. They are short, Warcraft III / Dota
 
 The current game still synthesizes runtime sound through WebAudio. These files are stored so the voice direction, map music, and line writing do not get lost.
 
+## Generated Click-Pack
+
+The full generated click-pack is in `assets/audio/click-pack/`.
+
+- `assets/audio/click-pack/index.json` lists every line and file.
+- Each hero has 20 individual MP3 barks.
+- Categories are `selection`, `repeated`, `move`, and `attack`.
+- File names use the format `hero_category_number_slug.mp3`.
+
 ## Voice Direction
 
 | Hero | Location flavor | Voice sample | Direction |
