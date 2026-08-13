@@ -690,6 +690,7 @@ class App {
   setBuildMode(key) {
     if (!this.game) return;
     this.buildMode = key;
+    this.canvas.style.cursor = key ? 'crosshair' : 'default';
     this.ui.setActiveBuild(key);
     if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; }
     if (key) {

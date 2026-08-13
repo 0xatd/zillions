@@ -9,8 +9,11 @@ export class FlowField {
   constructor(map) {
     this.map = map;
     const n = map.size * map.size;
-    this.dist = new Float32Array(n);
-    this.cost = new Float32Array(n);
+    // dist MUST be float64: storing float64 relaxations into a Float32Array
+    // can round *up*, making the same relaxation an "improvement" forever —
+    // an infinite Dijkstra loop.
+    this.dist = new Float64Array(n);
+    this.cost = new Float64Array(n);
   }
 
   // occ: Int32Array of building ids (+1) per tile, 0 = empty.

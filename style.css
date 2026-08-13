@@ -17,6 +17,13 @@ body {
 }
 
 #game { position: fixed; inset: 0; display: block; }
+
+/* soft vignette over the world */
+body::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, 0.38));
+}
 #ui { position: fixed; inset: 0; pointer-events: none; }
 #ui > * { pointer-events: auto; }
 

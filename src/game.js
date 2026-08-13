@@ -424,8 +424,12 @@ export class Game {
         if (d < 0.42) {
           const push = (0.42 - d) * 0.5;
           dx /= d; dz /= d;
-          a.x -= dx * push; a.z -= dz * push;
-          b.x += dx * push; b.z += dz * push;
+          // Never shove a zombie onto unwalkable ground — dense hordes used
+          // to ferry each other across narrow water onto unreachable shores.
+          const ax = a.x - dx * push, az = a.z - dz * push;
+          if (this.map.isWalkable(ax | 0, az | 0)) { a.x = ax; a.z = az; }
+          const bx = b.x + dx * push, bz = b.z + dz * push;
+          if (this.map.isWalkable(bx | 0, bz | 0)) { b.x = bx; b.z = bz; }
         }
       }
     }
@@ -437,6 +441,7 @@ export class Game {
       zb.atkT -= dt;
 
       if (zb.state === IDLE) {
+        if (zb.wave) { zb.state = AGGRO; continue; } // horde zombies never rest
         if (zb.timer <= 0) {
           zb.state = WANDER;
           const a = this.rng() * Math.PI * 2;
@@ -449,10 +454,49 @@ export class Game {
       }
 
       if (zb.state === WANDER) {
-        if (zb.timer <= 0) { zb.state = IDLE; zb.timer = 3 + this.rng() * 6; continue; }
-        if (this.flow.distAt(zb.x | 0, zb.z | 0) < 11) { zb.state = AGGRO; continue; }
+        if (zb.timer <= 0) { zb.burst = false; zb.state = zb.wave ? AGGRO : IDLE; zb.timer = 3 + this.rng() * 6; continue; }
+        if (!zb.burst && this.flow.distAt(zb.x | 0, zb.z | 0) < 11) { zb.state = AGGRO; continue; }
         this._moveZombie(zb, zb.dirX, zb.dirZ, zb.def.speed * 0.6 * nightMul, dt, false);
         continue;
+      }
+
+      // Stuck detector: an aggro zombie that hasn't gone anywhere for a few
+      // seconds (wedged in a terrain notch) takes a short random walk to
+      // shake free, then re-acquires the flow field.
+      zb.progressT = (zb.progressT || 0) + dt;
+      if (zb.progressT > 4) {
+        zb.progressT = 0;
+        const moved = dist2(zb.x, zb.z, zb.px || 0, zb.pz || 0);
+        zb.px = zb.x; zb.pz = zb.z;
+        // Marooned on ground the colony can't be reached from (e.g. shoved
+        // across water)? Relocate the horde zombie to a valid spawn edge so
+        // the final wave can always be finished.
+        if (zb.wave && this.flow.distAt(zb.x | 0, zb.z | 0) === Infinity) {
+          const N = this.map.size;
+          for (let tries = 0; tries < 60; tries++) {
+            const edge = (this.rng() * 4) | 0;
+            const along = this.rng() * (N - 4) + 2;
+            const depth = this.rng() * 5;
+            let x, z;
+            if (edge === 0) { x = along; z = 1 + depth; }
+            else if (edge === 1) { x = N - 2 - depth; z = along; }
+            else if (edge === 2) { x = along; z = N - 2 - depth; }
+            else { x = 1 + depth; z = along; }
+            if (this.map.isWalkable(x | 0, z | 0) && this.flow.distAt(x | 0, z | 0) < Infinity) {
+              zb.x = x; zb.z = z;
+              break;
+            }
+          }
+          continue;
+        }
+        if (moved < 0.25 && zb.atkT <= -1) { // not moving and not attacking
+          zb.state = WANDER;
+          zb.burst = true;
+          const a = this.rng() * Math.PI * 2;
+          zb.dirX = Math.cos(a); zb.dirZ = Math.sin(a);
+          zb.timer = 2 + this.rng() * 2;
+          continue;
+        }
       }
 
       // AGGRO
