@@ -1,0 +1,65 @@
+{
+  "name": "Zillions hero voice and map soundtrack pack",
+  "created": "2026-08-13",
+  "status": "concept-assets",
+  "notes": [
+    "Generated samples are saved for iteration and are not wired into the runtime yet.",
+    "Voice samples use distinct generic ElevenLabs voices through Venice audio generation.",
+    "No API keys, prompts with secrets, or source credentials are stored in this repo."
+  ],
+  "voices": [
+    {
+      "hero": "alex",
+      "displayName": "0xATD / The Midnight Operator",
+      "locationFlavor": "near Portland",
+      "voice": "ElevenLabs Will",
+      "file": "voices/alex-midnight-operator-elevenlabs-will.mp3"
+    },
+    {
+      "hero": "scott",
+      "displayName": "Scott / Chicago",
+      "locationFlavor": "Chicago",
+      "voice": "ElevenLabs Roger",
+      "file": "voices/scott-chicago-elevenlabs-roger.mp3"
+    },
+    {
+      "hero": "danny",
+      "displayName": "Danny / San Francisco",
+      "locationFlavor": "San Francisco",
+      "voice": "ElevenLabs Charlie",
+      "file": "voices/danny-san-francisco-elevenlabs-charlie.mp3"
+    }
+  ],
+  "music": [
+    {
+      "id": "hero_select",
+      "name": "Midnight Operator Hero Select",
+      "vibe": "fantasy MOBA hero-select loop with modern game-menu energy",
+      "file": "music/hero-select/midnight-operator-hero-select-loop-elevenlabs-music.mp3"
+    },
+    {
+      "id": "portland_rainwood",
+      "name": "Portland Rainwood",
+      "vibe": "wet forest, moss, hunt",
+      "file": "music/maps/portland-rainwood-loop.mp3"
+    },
+    {
+      "id": "chicago_ironfront",
+      "name": "Chicago Ironfront",
+      "vibe": "cold city, steel, brawl",
+      "file": "music/maps/chicago-ironfront-loop.mp3"
+    },
+    {
+      "id": "san_francisco_fogspire",
+      "name": "San Francisco Fogspire",
+      "vibe": "fog, hills, weird magic",
+      "file": "music/maps/san-francisco-fogspire-loop.mp3"
+    },
+    {
+      "id": "midnight_bazaar",
+      "name": "Midnight Bazaar",
+      "vibe": "time-decay market, arcane economy",
+      "file": "music/maps/midnight-bazaar-loop.mp3"
+    }
+  ]
+}

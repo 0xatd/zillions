@@ -64,6 +64,6 @@ Each kit honors the squad's favorite heroes from WC3/Dota/Diablo:
 
 - **Three.js r160** (vendored in `vendor/`), custom flat-shaded terrain mesh with per-tile vertex colors.
 - Zombies are **instanced meshes** (thousands at 60 fps) driven by a multi-source **Dijkstra flow field**; units use A*.
-- All **sound is synthesized** at runtime with WebAudio — zero audio assets.
+- Core **sound is synthesized** at runtime with WebAudio. Generated concept voice/music assets live in `assets/audio/` and are documented in `docs/hero-audio-pack.md`.
 - GPU particles (blood, dust, muzzle flashes, smoke), soft shadows, ACES tone mapping, day/night lighting.
 - Fixed-timestep simulation (30 Hz) decoupled from rendering, with 1×/2×/4× game speed.
