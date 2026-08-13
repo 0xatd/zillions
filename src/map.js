@@ -158,7 +158,7 @@ export class GameMap {
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
     const waterMat = new THREE.MeshLambertMaterial({
-      color: 0x3e77c9, transparent: true, opacity: 0.75,
+      color: 0x27435e, transparent: true, opacity: 0.8,
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
@@ -190,7 +190,7 @@ export class GameMap {
     const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.75 ? 1 : 2));
     const g = new THREE.Group();
     const trunkGeo = new THREE.CylinderGeometry(0.07, 0.1, 0.5, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2c });
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3e3020 });
     const canopyGeo = new THREE.ConeGeometry(0.42, 1.15, 6);
     const canopyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
@@ -211,7 +211,8 @@ export class GameMap {
       pos.y = (0.5 + 0.45) * s.s;
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
-      c.setHSL(0.29 + rng() * 0.06, 0.45 + rng() * 0.2, 0.26 + rng() * 0.1);
+      // Black-pine palette: desaturated, murky greens.
+      c.setHSL(0.27 + rng() * 0.05, 0.28 + rng() * 0.15, 0.15 + rng() * 0.08);
       canopies.setColorAt(i, c);
     }
     g.add(trunks, canopies);
@@ -221,7 +222,7 @@ export class GameMap {
   _buildRocks() {
     const spots = this._scatter(TILE.MOUNTAIN, (rng) => (rng() < 0.4 ? 1 : 0));
     const geo = new THREE.DodecahedronGeometry(0.4, 0);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x9b968a });
+    const mat = new THREE.MeshLambertMaterial({ color: 0x6a675f });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
     mesh.castShadow = true;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();

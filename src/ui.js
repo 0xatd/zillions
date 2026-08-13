@@ -1,5 +1,8 @@
 // DOM HUD: resource bar, build menu, minimap, selection panel, banners, menus.
-import { BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH } from './config.js';
+import {
+  BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH,
+  HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
+} from './config.js';
 import { formatTime } from './utils.js';
 
 export class UI {
@@ -36,6 +39,7 @@ export class UI {
       <div id="banner"></div>
       <div id="messages"></div>
 
+      <div id="heropanel" class="hidden"></div>
       <div id="selpanel" class="hidden"></div>
 
       <div id="bottombar">
@@ -53,21 +57,46 @@ export class UI {
       <div id="overlay" class="screen">
         <div class="panel">
           <h1>🧟 ZILLIONS</h1>
-          <p class="tagline">The dead cover the earth. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
+          <p class="tagline">In the grim darkness of the frontier, there are only the dead. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
           <div class="howto">
-            <div><b>🏗️ Build</b> tents for gold &amp; colonists, farms for food, windmills for energy.</div>
-            <div><b>⚔️ Defend</b> with walls, ballista towers and trained soldiers.</div>
+            <div><b>🏗️ Build</b> hab-tents for gold &amp; colonists, farms for food, generators for energy.</div>
+            <div><b>⚔️ Defend</b> with rockcrete walls, sentry towers and trained troopers.</div>
             <div><b>🤫 Beware:</b> gunfire attracts the dead… and every tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
+            <div><b>⭐ Your hero</b> earns XP from nearby kills — level up, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
           </div>
+          <div class="herorow" id="herorow"></div>
           <div class="diffrow" id="diffrow"></div>
           <div class="controls">
-            <span><b>WASD / edge</b> pan</span><span><b>wheel</b> zoom</span>
+            <span><b>WASD / edge</b> pan</span><span><b>wheel</b> zoom</span><span><b>Z / C</b> rotate</span>
             <span><b>1-9</b> build</span><span><b>drag</b> select</span>
-            <span><b>right-click</b> move / cancel</span><span><b>space</b> pause</span>
+            <span><b>right-click</b> move / cancel</span><span><b>F</b> select hero (×2 = center)</span>
+            <span><b>Q W E R</b> hero abilities (hero selected)</span><span><b>space</b> pause</span>
           </div>
         </div>
       </div>`;
+
+    // Hero picker.
+    this.selectedHero = 'scott';
+    const herorow = this.root.querySelector('#herorow');
+    for (const [key, h] of Object.entries(HEROES)) {
+      const card = document.createElement('button');
+      card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
+      card.dataset.key = key;
+      card.innerHTML = `
+        <span class="hicon">${h.icon}</span>
+        <b>${h.name}</b>
+        <small>${h.tagline}</small>
+        <span class="habils">${h.abilities.map((a) => a.icon).join(' ')}</span>`;
+      card.onclick = () => {
+        this.selectedHero = key;
+        for (const c of herorow.children) c.classList.toggle('sel', c === card);
+      };
+      card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
+      card.onmousemove = (e) => this._moveTip(e);
+      card.onmouseleave = () => this._hideTip();
+      herorow.appendChild(card);
+    }
 
     // Difficulty buttons.
     const diffrow = this.root.querySelector('#diffrow');
@@ -75,7 +104,7 @@ export class UI {
       const b = document.createElement('button');
       b.className = 'diffbtn' + (key === 'normal' ? ' primary' : '');
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
-      b.onclick = () => this.cb.onStart(key);
+      b.onclick = () => this.cb.onStart(key, this.selectedHero);
       diffrow.appendChild(b);
     }
 
@@ -160,6 +189,92 @@ export class UI {
     if (fx.length) rows.push(`<span class="tfx">${fx.join('  ')}</span>`);
     rows.push(`<span class="tdesc">${d.desc}</span>`);
     return rows.join('<br>');
+  }
+
+  _heroTip(h) {
+    const rows = h.abilities.map((a) =>
+      `<span class="tfx">${a.icon} <b>${a.name}</b>${a.ult ? ' (ULT)' : a.passive ? ' (passive)' : ''}</span><br><span class="tdesc">${a.desc}</span>`);
+    return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` + rows.join('<br>');
+  }
+
+  // Build the hero panel once game (and hero) exist.
+  initHeroPanel(hero) {
+    const hp = this.root.querySelector('#heropanel');
+    hp.classList.remove('hidden');
+    const d = hero.def;
+    hp.innerHTML = `
+      <div class="hprow">
+        <span class="hpportrait">${d.icon}</span>
+        <div class="hpinfo">
+          <b>${d.name}</b> <span class="hplvl" id="hp-lvl">Lv 1</span>
+          <div class="hpbar herohp"><div class="hpfill" id="hp-hp"></div></div>
+          <div class="hpbar heroxp"><div class="xpfill" id="hp-xp"></div></div>
+        </div>
+      </div>
+      <div class="hpabils" id="hp-abils"></div>
+      <div class="hppoints hidden" id="hp-points"></div>`;
+    const row = hp.querySelector('#hp-abils');
+    this.abilBtns = [];
+    d.abilities.forEach((ab, i) => {
+      const b = document.createElement('button');
+      b.className = 'abtn';
+      b.innerHTML = `
+        <span class="aicon">${ab.icon}</span>
+        <span class="ahot">${ab.hotkey}</span>
+        <span class="apips" id="ap-${i}"></span>
+        <span class="acd hidden" id="cd-${i}"></span>
+        <span class="alearn hidden" id="lr-${i}">+</span>`;
+      b.onclick = (e) => {
+        if (!b.querySelector('.alearn').classList.contains('hidden') && (e.target.classList.contains('alearn') || hero.abil[i].rank === 0)) {
+          this.cb.onLearn(i);
+        } else {
+          this.cb.onCast(i);
+        }
+      };
+      b.onmouseenter = (e) => this._showTip(e, this._abilTip(hero, i));
+      b.onmousemove = (e) => this._moveTip(e);
+      b.onmouseleave = () => this._hideTip();
+      row.appendChild(b);
+      this.abilBtns.push(b);
+    });
+  }
+
+  _abilTip(hero, i) {
+    const ab = hero.def.abilities[i];
+    const st = hero.abil[i];
+    const req = ab.ult ? `hero level ${ULT_REQ_LEVEL}` : `hero level ${rankReqLevel(st.rank + 1)}`;
+    const status = ab.passive
+      ? (st.rank > 0 ? `PASSIVE — rank ${st.rank}/${ab.maxRank}` : 'PASSIVE — not learned')
+      : st.rank > 0 ? `Rank ${st.rank}/${ab.maxRank} · ${ab.cd}s cooldown` : 'Not learned';
+    const next = st.rank < ab.maxRank ? `<br><span class="tdesc">Next rank: ${req}, costs 1 skill point.</span>` : '';
+    return `<b>${ab.icon} ${ab.name}</b>${ab.ult ? ' <span class="tcost">ULTIMATE</span>' : ''}<br>` +
+      `<span class="tfx">${status}</span><br><span class="tdesc">${ab.desc}</span>${next}`;
+  }
+
+  updateHero(game) {
+    const h = game.hero;
+    if (!h || !this.abilBtns) return;
+    const q = (id) => this.root.querySelector(id);
+    q('#hp-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
+    q('#hp-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+    const need = xpForLevel(h.level);
+    q('#hp-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
+    const pts = q('#hp-points');
+    pts.classList.toggle('hidden', h.points <= 0);
+    if (h.points > 0) pts.textContent = `⭐ ${h.points} skill point${h.points > 1 ? 's' : ''} — click + to learn`;
+
+    h.def.abilities.forEach((ab, i) => {
+      const st = h.abil[i];
+      const pips = q(`#ap-${i}`);
+      pips.textContent = '●'.repeat(st.rank) + '○'.repeat(ab.maxRank - st.rank);
+      const cd = q(`#cd-${i}`);
+      const onCd = !ab.passive && st.cd > 0 && st.rank > 0;
+      cd.classList.toggle('hidden', !onCd);
+      if (onCd) cd.textContent = Math.ceil(st.cd);
+      q(`#lr-${i}`).classList.toggle('hidden', !game.canLearn(i));
+      this.abilBtns[i].classList.toggle('unlearned', st.rank === 0);
+      this.abilBtns[i].classList.toggle('ready', st.rank > 0 && !ab.passive && st.cd <= 0 && !h.dead);
+    });
   }
 
   _unitTip(d) {
@@ -343,7 +458,10 @@ export class UI {
       ctx.fillRect(b.x, b.z, b.size, b.size);
     }
     ctx.fillStyle = '#43d17c';
-    for (const u of game.units) ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
+    for (const u of game.units) {
+      if (u.hero) { ctx.fillStyle = '#ffd75e'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }
+      else ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
+    }
     ctx.fillStyle = '#e6493a';
     for (const zb of game.zombies) ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
 

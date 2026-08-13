@@ -44,7 +44,9 @@ class App {
       onTrain: (k) => { this.audio.init(); this.game && this.game.trainUnit(k); },
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
-      onStart: (d) => this.startGame(d),
+      onStart: (d, hero) => this.startGame(d, hero),
+      onCast: (i) => { if (this.game) this.game.castAbility(i); },
+      onLearn: (i) => { if (this.game) this.game.learnAbility(i); },
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
       onDemolish: (b) => { this.game.demolish(b); this.selectedBuilding = null; this.ui.showSelection(null); },
@@ -78,21 +80,23 @@ class App {
 
   // ---------------- setup ----------------
 
-  startGame(difficulty) {
+  startGame(difficulty, heroKey) {
     this.audio.init();
     this.map = new GameMap((Math.random() * 1e9) | 0);
-    this.game = new Game(this.map, difficulty);
+    this.game = new Game(this.map, difficulty, heroKey);
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
+    this.ui.initHeroPanel(this.game.hero);
     this.setSpeed(1);
     this.ui.showBanner('Day 1 — fortify before nightfall', '', 3000);
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
   }
 
   _setupLights() {
-    this.sun = new THREE.DirectionalLight(0xfff2dc, 2.6);
+    // Grimdark mood: low amber sun through ashen haze.
+    this.sun = new THREE.DirectionalLight(0xffd9a8, 2.3);
     this.sun.position.set(60, 90, 30);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -100,12 +104,12 @@ class App {
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 260 });
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xbdd7ff, 0x54633e, 0.9);
+    this.hemi = new THREE.HemisphereLight(0x8fa3b8, 0x3a4230, 0.75);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x404860, 0.4);
+    this.amb = new THREE.AmbientLight(0x3a3e50, 0.45);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.FogExp2(0x9fb8d0, 0.0055);
-    this.scene.background = new THREE.Color(0x9fb8d0);
+    this.scene.fog = new THREE.FogExp2(0x707a84, 0.0075);
+    this.scene.background = new THREE.Color(0x707a84);
   }
 
   _setupPicking() {
@@ -364,61 +368,61 @@ class App {
 
     switch (key) {
       case 'hq': {
-        box(3.6, 1.1, 3.6, 0x8a6f52, 0, 0.55);
-        box(2.4, 0.9, 2.4, 0x6d5740, 0, 1.95);
-        cyl(0.5, 0.6, 1.6, 0x9c8264, 1.1, 1.6, 1.1);
-        cone(0.75, 0.8, 0xb03a2e, 1.1, 2.75, 1.1);
+        box(3.6, 1.1, 3.6, 0x45474d, 0, 0.55);
+        box(2.4, 0.9, 2.4, 0x33353a, 0, 1.95);
+        cyl(0.5, 0.6, 1.6, 0x565a62, 1.1, 1.6, 1.1);
+        cone(0.75, 0.8, 0x6e1f1f, 1.1, 2.75, 1.1);
         box(0.06, 1.6, 0.06, 0x333333, -1, 3.1, -1);
-        const flag = box(0.7, 0.4, 0.02, 0xd8433b, -0.62, 3.6, -1);
+        const flag = box(0.7, 0.4, 0.02, 0xa8232d, -0.62, 3.6, -1);
         g.userData.flag = flag;
-        cone(1.7, 1.0, 0x9c4b3b, 0, 2.9, 0);
+        cone(1.7, 1.0, 0x50242a, 0, 2.9, 0);
         break;
       }
       case 'tent': {
-        cone(1.15, 1.15, 0xcbb27a, 0, 0.57);
-        box(0.34, 0.5, 0.06, 0x8a7146, 0, 0.25, 0.72);
+        cone(1.15, 1.15, 0x6e6250, 0, 0.57);
+        box(0.34, 0.5, 0.06, 0x4a4237, 0, 0.25, 0.72);
         break;
       }
       case 'farm': {
-        box(2.9, 0.12, 2.9, 0x7a5c38, 0, 0.06);
-        for (let r = 0; r < 3; r++) box(2.5, 0.14, 0.5, 0x86b04a, 0, 0.15, -0.9 + r * 0.9);
-        box(0.7, 0.6, 0.7, 0xa8814f, 1.0, 0.35, 1.0);
-        cone(0.62, 0.5, 0x8a4d38, 1.0, 0.9, 1.0);
+        box(2.9, 0.12, 2.9, 0x463a28, 0, 0.06);
+        for (let r = 0; r < 3; r++) box(2.5, 0.14, 0.5, 0x5c6e38, 0, 0.15, -0.9 + r * 0.9);
+        box(0.7, 0.6, 0.7, 0x54473a, 1.0, 0.35, 1.0);
+        cone(0.62, 0.5, 0x5c3028, 1.0, 0.9, 1.0);
         break;
       }
       case 'sawmill': {
-        box(1.5, 0.9, 1.3, 0x9c7a4e, -0.1, 0.45);
-        cone(1.15, 0.7, 0x77502f, -0.1, 1.25);
-        const log1 = cyl(0.14, 0.14, 1.1, 0xb08b57, 0.65, 0.15, 0.55);
+        box(1.5, 0.9, 1.3, 0x5a4a38, -0.1, 0.45);
+        cone(1.15, 0.7, 0x3f3428, -0.1, 1.25);
+        const log1 = cyl(0.14, 0.14, 1.1, 0x6e563c, 0.65, 0.15, 0.55);
         log1.rotation.z = Math.PI / 2;
-        const log2 = cyl(0.12, 0.12, 1.0, 0xa07845, 0.65, 0.4, 0.55);
+        const log2 = cyl(0.12, 0.12, 1.0, 0x60492f, 0.65, 0.4, 0.55);
         log2.rotation.z = Math.PI / 2;
         break;
       }
       case 'quarry': {
-        box(2.8, 0.3, 2.8, 0x8f8b80, 0, 0.15);
-        box(1.1, 0.8, 1.1, 0x7c786d, -0.7, 0.7, -0.7);
-        cyl(0.07, 0.07, 2.0, 0x5c5850, 0.5, 1.15, 0.5);
-        const arm = box(1.6, 0.1, 0.1, 0x6b675e, 1.1, 2.0, 0.5);
+        box(2.8, 0.3, 2.8, 0x55534c, 0, 0.15);
+        box(1.1, 0.8, 1.1, 0x484640, -0.7, 0.7, -0.7);
+        cyl(0.07, 0.07, 2.0, 0x3a3835, 0.5, 1.15, 0.5);
+        const arm = box(1.6, 0.1, 0.1, 0x44423c, 1.1, 2.0, 0.5);
         arm.rotation.z = -0.3;
         break;
       }
       case 'mine': {
-        box(2.8, 0.25, 2.8, 0x97815d, 0, 0.13);
-        box(0.9, 0.9, 0.9, 0x6d5740, 0, 0.7);
-        box(0.12, 2.0, 0.12, 0x54442f, -0.5, 1.2, -0.5);
-        box(0.12, 2.0, 0.12, 0x54442f, 0.5, 1.2, -0.5);
-        box(1.3, 0.15, 0.5, 0x54442f, 0, 2.2, -0.5);
+        box(2.8, 0.25, 2.8, 0x5e5442, 0, 0.13);
+        box(0.9, 0.9, 0.9, 0x33353a, 0, 0.7);
+        box(0.12, 2.0, 0.12, 0x2e3033, -0.5, 1.2, -0.5);
+        box(0.12, 2.0, 0.12, 0x2e3033, 0.5, 1.2, -0.5);
+        box(1.3, 0.15, 0.5, 0x2e3033, 0, 2.2, -0.5);
         cyl(0.35, 0.35, 0.18, 0xf3c53d, 0, 2.2, -0.5, 12).rotation.x = Math.PI / 2;
         break;
       }
       case 'mill': {
-        cyl(0.55, 0.75, 2.4, 0xd8cfb4, 0, 1.2, 0, 8);
-        cone(0.7, 0.7, 0x8a4d38, 0, 2.75, 0, 8);
+        cyl(0.55, 0.75, 2.4, 0x6e6a5c, 0, 1.2, 0, 8);
+        cone(0.7, 0.7, 0x5c3028, 0, 2.75, 0, 8);
         const rotor = new THREE.Group();
         rotor.position.set(0, 2.35, 0.62);
         for (let i = 0; i < 4; i++) {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0xf0e8d2));
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0x8a8578));
           blade.position.y = 0.8;
           blade.castShadow = true;
           const pivot = new THREE.Group();
@@ -431,26 +435,26 @@ class App {
         break;
       }
       case 'tower': {
-        cyl(0.72, 0.9, 2.4, 0xa49e90, 0, 1.2, 0, 8);
-        box(1.7, 0.25, 1.7, 0x8a8478, 0, 2.5);
+        cyl(0.72, 0.9, 2.4, 0x4f5258, 0, 1.2, 0, 8);
+        box(1.7, 0.25, 1.7, 0x3f4147, 0, 2.5);
         for (const [dx, dz] of [[-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]]) {
-          box(0.22, 0.35, 0.22, 0x8a8478, dx, 2.8, dz);
+          box(0.22, 0.35, 0.22, 0x3f4147, dx, 2.8, dz);
         }
-        const bal = box(0.5, 0.25, 0.9, 0x6b4a2c, 0, 2.75, 0);
+        const bal = box(0.5, 0.25, 0.9, 0x2e3033, 0, 2.75, 0);
         g.userData.head = bal;
         break;
       }
       case 'wall': {
-        box(0.92, 0.85, 0.92, 0xb59a6a, 0, 0.42);
-        box(0.98, 0.2, 0.98, 0x8f7648, 0, 0.95);
+        box(0.92, 0.85, 0.92, 0x565349, 0, 0.42);
+        box(0.98, 0.2, 0.98, 0x3e3c35, 0, 0.95);
         break;
       }
       case 'barracks': {
-        box(2.7, 1.1, 1.9, 0x87584a, 0, 0.55);
-        cone(1.85, 0.9, 0x5f3d33, 0, 1.55);
+        box(2.7, 1.1, 1.9, 0x44464c, 0, 0.55);
+        cone(1.85, 0.9, 0x2f3136, 0, 1.55);
         box(0.06, 1.9, 0.06, 0x333333, 1.15, 1.7, 0.75);
-        box(0.55, 0.35, 0.02, 0x3f6fae, 0.85, 2.35, 0.75);
-        box(0.7, 0.7, 0.1, 0x6b4a2c, 0, 0.35, 0.98);
+        box(0.55, 0.35, 0.02, 0x8f1f1f, 0.85, 2.35, 0.75);
+        box(0.7, 0.7, 0.1, 0x2e3033, 0, 0.35, 0.98);
         break;
       }
     }
@@ -483,26 +487,60 @@ class App {
 
   // ---------------- units ----------------
 
-  _makeUnitMesh(key) {
-    const d = UNITS[key];
+  _makeUnitMesh(u) {
     const g = new THREE.Group();
-    const M = (c) => new THREE.MeshLambertMaterial({ color: c });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.62, 8), M(d.color));
-    body.position.y = 0.45;
-    body.castShadow = true;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), M(0xe8c39a));
-    head.position.y = 0.92;
-    head.castShadow = true;
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color));
-    hat.position.y = 1.02;
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x3a3a3a));
-    gun.position.set(0.2, 0.62, 0.18);
+    const M = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
+
+    if (u.turret) {
+      // Sentry servitor: squat tripod, rotating barrel, glowing eye.
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 0.3, 6), M(0x3c3f42)), 0, 0.15, 0);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.4), M(0x54585c)), 0, 0.45, 0);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), M(0x1e1f21)), 0.1, 0.55, 0.25);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), M(0x1e1f21)), -0.1, 0.55, 0.25);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), M(0xff3322, 0.9)), 0, 0.62, 0.18);
+    } else if (u.hero) {
+      // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
+      const d = u.def;
+      const armor = M(d.color), trim = M(d.trim);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.26), M(0x26282c)), 0, 0.2, 0);          // legs
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.36), armor), 0, 0.62, 0);                 // torso
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.05), trim), 0, 0.68, 0.19);               // chest plate
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), -0.34, 0.86, 0);               // pauldron L
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), 0.34, 0.86, 0);                // pauldron R
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 0.22), M(0x3a3d42)), 0, 1.0, 0);           // helm
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), M(0x35ff70, 0.9)), 0, 1.0, 0.12);   // visor glow
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x2e3033)), 0, 0.72, -0.26);       // backpack
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26); // vent L
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);  // vent R
+      if (d.melee) {
+        const blade = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.16), trim), 0.42, 0.6, 0.22);
+        blade.rotation.x = 0.5;
+      } else {
+        add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // bolt rifle
+      }
+      // Faint always-on hero halo.
+      const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
+      haloGeo.rotateX(-Math.PI / 2);
+      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.5, depthWrite: false }));
+      halo.position.y = 0.03;
+      g.add(halo);
+      g.scale.setScalar(1.18);
+    } else {
+      // Guardsman-style trooper.
+      const d = u.def;
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.62, 8), M(d.color)), 0, 0.45, 0);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), M(0xc4a37e)), 0, 0.92, 0);
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color)), 0, 1.02, 0);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18);
+    }
+
     const ringGeo = new THREE.RingGeometry(0.36, 0.46, 24);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x59ff9c, transparent: true, opacity: 0.9, depthWrite: false }));
     ring.position.y = 0.03;
     ring.visible = false;
-    g.add(body, head, hat, gun, ring);
+    g.add(ring);
     g.userData.ring = ring;
     return g;
   }
@@ -514,7 +552,7 @@ class App {
       seen.add(u.id);
       let rec = this.unitMeshes.get(u.id);
       if (!rec) {
-        const mesh = this._makeUnitMesh(u.key);
+        const mesh = this._makeUnitMesh(u);
         this.scene.add(mesh);
         rec = { mesh, u };
         this.unitMeshes.set(u.id, rec);
@@ -525,6 +563,46 @@ class App {
     }
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) { this.scene.remove(rec.mesh); this.unitMeshes.delete(id); }
+    }
+    // Purge dead units from the current selection.
+    if (this.selection.some((u) => u.dead)) {
+      this.selection = this.selection.filter((u) => !u.dead);
+      this.ui.showSelection(this.selection.length ? this.selection : null, g);
+    }
+  }
+
+  _syncPickups() {
+    if (!this.pickupMeshes) this.pickupMeshes = new Map();
+    const seen = new Set();
+    for (const p of this.game.pickups) {
+      seen.add(p.id);
+      if (!this.pickupMeshes.has(p.id)) {
+        const g = new THREE.Group();
+        if (p.kind === 'gold') {
+          const chest = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.26),
+            new THREE.MeshLambertMaterial({ color: 0xc9a44a, emissive: 0xc9a44a, emissiveIntensity: 0.35 }));
+          chest.castShadow = true;
+          g.add(chest);
+        } else {
+          const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.3),
+            new THREE.MeshLambertMaterial({ color: 0xe8e4da }));
+          const cross1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.07),
+            new THREE.MeshLambertMaterial({ color: 0xd23c3c, emissive: 0xd23c3c, emissiveIntensity: 0.5 }));
+          cross1.position.y = 0.14;
+          const cross2 = cross1.clone();
+          cross2.rotation.y = Math.PI / 2;
+          box.castShadow = true;
+          g.add(box, cross1, cross2);
+        }
+        g.position.set(p.x, 0.3, p.z);
+        this.scene.add(g);
+        this.pickupMeshes.set(p.id, g);
+      }
+    }
+    const t = this.clock.elapsedTime;
+    for (const [id, mesh] of this.pickupMeshes) {
+      if (!seen.has(id)) { this.scene.remove(mesh); this.pickupMeshes.delete(id); }
+      else { mesh.position.y = 0.3 + Math.sin(t * 2.5 + id) * 0.08; mesh.rotation.y = t * 1.2; }
     }
   }
 
@@ -541,7 +619,10 @@ class App {
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.pause(); this.ui.showHelp(); }
       else if (k === 'escape') { this.setBuildMode(null); this._clearSelection(); }
-      else {
+      else if (k === 'f' || k === 'f1') { e.preventDefault(); this._selectHero(); }
+      else if (this._heroSelected() && ['q', 'w', 'e', 'r'].includes(k)) {
+        this.game.castAbility(['q', 'w', 'e', 'r'].indexOf(k));
+      } else {
         for (const [bk, bd] of Object.entries(BUILDINGS)) {
           if (bd.hotkey === k) this.setBuildMode(bk);
         }
@@ -687,6 +768,27 @@ class App {
     this.ui.showSelection(null);
   }
 
+  _heroSelected() {
+    const h = this.game && this.game.hero;
+    return !!(h && !h.dead && this.selection.includes(h));
+  }
+
+  // F selects the hero; pressed again quickly, centers the camera on him.
+  _selectHero() {
+    const h = this.game.hero;
+    if (!h || h.dead) return;
+    const now = performance.now();
+    if (this._heroSelected() && now - (this._lastHeroSel || 0) < 450) {
+      this.focus.x = h.x; this.focus.z = h.z;
+    }
+    this._lastHeroSel = now;
+    this._clearSelection();
+    h.selected = true;
+    this.selection = [h];
+    this.audio.click();
+    this.ui.showSelection(this.selection, this.game);
+  }
+
   setBuildMode(key) {
     if (!this.game) return;
     this.buildMode = key;
@@ -763,8 +865,8 @@ class App {
         else if (this.mouse.cy > window.innerHeight - m) pz += 1;
       }
     }
-    if (this.keys.has('q')) this.camYaw += dt * 1.6;
-    if (this.keys.has('e')) this.camYaw -= dt * 1.6;
+    if (this.keys.has('z')) this.camYaw += dt * 1.6;
+    if (this.keys.has('c')) this.camYaw -= dt * 1.6;
 
     const cos = Math.cos(this.camYaw), sin = Math.sin(this.camYaw);
     this.focus.x += (px * cos - pz * sin) * panSpeed;
@@ -819,11 +921,12 @@ class App {
     else if (f < 0.94) b = 0.25;
     else b = lerp(0.25, 1, (f - 0.94) / 0.06);
 
-    this.sun.intensity = lerp(0.25, 2.6, b);
-    this.sun.color.setHSL(0.09, lerp(0.3, 0.35, b), lerp(0.6, 0.92, b));
-    this.hemi.intensity = lerp(0.22, 0.9, b);
-    this.amb.intensity = lerp(0.55, 0.4, b);
-    const sky = new THREE.Color().setHSL(0.6, lerp(0.45, 0.3, b), lerp(0.09, 0.72, b));
+    // Grimdark sky: rust-amber day, near-black night with a cold blue cast.
+    this.sun.intensity = lerp(0.2, 2.3, b);
+    this.sun.color.setHSL(0.07, lerp(0.35, 0.42, b), lerp(0.55, 0.8, b));
+    this.hemi.intensity = lerp(0.18, 0.75, b);
+    this.amb.intensity = lerp(0.5, 0.45, b);
+    const sky = new THREE.Color().setHSL(lerp(0.62, 0.08, b * 0.35), lerp(0.5, 0.16, b), lerp(0.05, 0.5, b));
     this.scene.background = sky;
     this.scene.fog.color.copy(sky);
   }
@@ -833,7 +936,14 @@ class App {
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
-          this.audio.shoot(e.kind);
+          if (e.kind === 'melee') {
+            // Chainblade hit: metal spark arc at the victim, no tracer.
+            this.audio.melee();
+            this.burst(e.tx, 0.7, e.tz, { count: 8, color: 0xffd27a, speed: 2.4, life: 0.25, size: 0.4, up: 1.4 });
+            this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
+            break;
+          }
+          this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind);
           this.burst(e.fx, e.fy || 0.7, e.fz, { count: 3, color: 0xffe08a, speed: 0.8, life: 0.12, size: 0.5, spread: 0.1, up: 0.3 });
           this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
           // tracer: a few sparks along the line
@@ -868,7 +978,7 @@ class App {
         case 'bhit':
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
-          this.burst(e.x, 0.6, e.z, { count: 2, color: 0xb59a6a, speed: 1.4, life: 0.3, size: 0.35, up: 1.2 });
+          this.burst(e.x, 0.6, e.z, { count: 2, color: 0x565349, speed: 1.4, life: 0.3, size: 0.35, up: 1.2 });
           break;
         case 'bdestroyed':
           this.audio.demolish();
@@ -886,6 +996,44 @@ class App {
         case 'train': this.audio.train(); break;
         case 'deny': this.audio.deny(); break;
         case 'move': this.audio.click(); break;
+        case 'learn': this.audio.train(); break;
+        case 'cast': {
+          this.audio.cast(e.key);
+          // Expanding shock ring drawn with particles.
+          const R = e.radius;
+          const n = Math.min(40, Math.round(R * 6));
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2;
+            this.burst(e.x + Math.cos(a) * R * 0.85, 0.25, e.z + Math.sin(a) * R * 0.85,
+              { count: 1, color: 0xffe9a8, speed: 0.5, life: 0.45, size: 0.55, spread: 0.15, up: 1.4 });
+          }
+          this.burst(e.x, 0.4, e.z, { count: 14, color: 0xfff2c8, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
+          this.shake = Math.max(this.shake, 0.18);
+          break;
+        }
+        case 'levelup':
+          this.audio.levelup();
+          this.burst(e.x, 0.3, e.z, { count: 30, color: 0xffd75e, speed: 1.6, life: 0.9, size: 0.55, up: 3.2 });
+          break;
+        case 'herodown':
+          this.audio.herodown();
+          this.shake = Math.max(this.shake, 0.5);
+          break;
+        case 'revive':
+          this.audio.revive();
+          this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
+          break;
+        case 'pickup':
+          this.audio.pickup(e.kind);
+          this.burst(e.x, 0.4, e.z, { count: 10, color: e.kind === 'gold' ? 0xffd75e : 0xff8a8a, speed: 1.4, life: 0.5, size: 0.45, up: 2 });
+          break;
+        case 'turret':
+          this.audio.build();
+          this.burst(e.x, 0.3, e.z, { count: 12, color: 0x8ad6e8, speed: 1.8, life: 0.5, size: 0.5, up: 1.8 });
+          break;
+        case 'turretend':
+          this.burst(e.x, 0.3, e.z, { count: 10, color: 0x777777, speed: 1.2, life: 0.6, size: 0.55, up: 1.4 });
+          break;
         case 'victory':
           this.audio.victory();
           this.pause();
@@ -922,6 +1070,7 @@ class App {
       this._consumeEvents();
       this._syncBuildings();
       this._syncUnits();
+      this._syncPickups();
       this._updateZombieMeshes(t);
       this._updateBars();
       this._updateGhost();
@@ -963,6 +1112,7 @@ class App {
       }
 
       this.ui.update(this.game, this.game.zombies.length);
+      this.ui.updateHero(this.game);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
 
       this.minimapT -= dt;

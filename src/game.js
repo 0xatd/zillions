@@ -3,6 +3,7 @@
 import {
   BUILDINGS, UNITS, ZOMBIES, WAVES, TILE, DAY_LENGTH, FINAL_DAY,
   START_RESOURCES, ZOMBIE_CAP, UNIT_CAP, DIFFICULTY,
+  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
 import { clamp, dist2, makeRNG } from './utils.js';
@@ -12,7 +13,7 @@ const IDLE = 0, WANDER = 1, AGGRO = 2;
 let nextId = 1;
 
 export class Game {
-  constructor(map, difficulty = 'normal') {
+  constructor(map, difficulty = 'normal', heroKey = 'scott') {
     this.map = map;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.rng = makeRNG(999);
@@ -41,6 +42,10 @@ export class Game {
     this.eco = { energyProd: 0, energyUse: 0, workersUsed: 0, popCap: 0, gold: 0, wood: 0, stone: 0, food: 0 };
     this.starving = false;
 
+    this.heroKey = heroKey;
+    this.hero = null;
+    this.pickups = [];
+
     this._setupStart();
   }
 
@@ -51,9 +56,10 @@ export class Game {
     this.hq = this._placeRaw('hq', c - 2, c - 2);
     for (let i = 0; i < 3; i++) this._spawnUnit('ranger', c - 4 + i * 1.5, c + 3);
     this._spawnUnit('soldier', c + 3, c + 3);
+    this._spawnHero(this.heroKey, c, c + 4);
     this._scatterInitialZombies();
     this.recalcEconomy();
-    this.msg('Colony established. Build tents, farms and mills — the dead are coming.', 'info');
+    this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
   }
 
   _scatterInitialZombies() {
@@ -133,10 +139,10 @@ export class Game {
       return { ok: false, why: 'Not enough resources' };
     }
     if ((d.workers || 0) > 0 && this.eco.workersUsed + d.workers > this.eco.popCap) {
-      return { ok: false, why: 'Not enough colonists — build tents' };
+      return { ok: false, why: 'Not enough colonists — build hab-tents' };
     }
     if (d.energy < 0 && this.eco.energyProd - this.eco.energyUse + d.energy < 0) {
-      return { ok: false, why: 'Not enough energy — build windmills' };
+      return { ok: false, why: 'Not enough energy — build generators' };
     }
     return { ok: true };
   }
@@ -196,7 +202,7 @@ export class Game {
           this._spawnZombie('walker', b.cx + (this.rng() - 0.5) * 2, b.cz + (this.rng() - 0.5) * 2, true);
         }
         this.emit({ type: 'infection', x: b.cx, z: b.cz });
-        this.msg('A tent has fallen — its residents have joined the horde!', 'bad');
+        this.msg('A hab-tent has fallen — its residents have joined the horde!', 'bad');
       } else if (b.key === 'hq') {
         this._gameOver(false);
       } else {
@@ -230,10 +236,197 @@ export class Game {
     return u;
   }
 
+  // ---------- hero ----------
+
+  _spawnHero(key, x, z) {
+    const d = HEROES[key];
+    const h = {
+      id: nextId++, key, def: d, hero: true, x, z,
+      hp: d.hp, maxHp: d.hp,
+      path: null, pathI: 0, cooldown: 0, target: null, selected: false,
+      facing: 0, retargetT: 0,
+      level: 1, xp: 0, points: 1,
+      abil: d.abilities.map(() => ({ rank: 0, cd: 0 })),
+      buffT: 0, buffMult: 1, hasteT: 0, hasteMult: 1,
+      reviveT: 0,
+    };
+    this.units.push(h);
+    this.hero = h;
+    return h;
+  }
+
+  heroDmg(h) {
+    return h.def.dmg + h.def.levelDmg * (h.level - 1);
+  }
+
+  addXp(amount) {
+    const h = this.hero;
+    if (!h || h.dead || h.level >= HERO_MAX_LEVEL) return;
+    h.xp += amount;
+    while (h.level < HERO_MAX_LEVEL && h.xp >= xpForLevel(h.level)) {
+      h.xp -= xpForLevel(h.level);
+      h.level++;
+      h.points++;
+      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
+      h.hp = h.maxHp; // WC3-style full heal on level up
+      this.emit({ type: 'levelup', x: h.x, z: h.z });
+      this.msg(`⭐ ${h.def.name} reached level ${h.level}!`, 'info');
+    }
+    if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
+  }
+
+  canLearn(i) {
+    const h = this.hero;
+    if (!h || h.points <= 0) return false;
+    const ab = h.def.abilities[i];
+    const st = h.abil[i];
+    if (st.rank >= ab.maxRank) return false;
+    if (ab.ult) return h.level >= ULT_REQ_LEVEL;
+    return h.level >= rankReqLevel(st.rank + 1);
+  }
+
+  learnAbility(i) {
+    if (!this.canLearn(i)) { this.emit({ type: 'deny' }); return; }
+    const h = this.hero;
+    h.abil[i].rank++;
+    h.points--;
+    this.emit({ type: 'learn' });
+    this.msg(`${h.def.abilities[i].icon} ${h.def.abilities[i].name} — rank ${h.abil[i].rank}`, 'info');
+  }
+
+  castAbility(i) {
+    const h = this.hero;
+    if (!h || h.dead) return;
+    const ab = h.def.abilities[i];
+    const st = h.abil[i];
+    if (ab.passive) return;
+    if (st.rank === 0 || st.cd > 0) { this.emit({ type: 'deny' }); return; }
+    const r = st.rank - 1;
+    st.cd = ab.cd;
+
+    switch (ab.cast) {
+      case 'aoeDmg': {
+        const r2 = ab.radius * ab.radius;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
+            if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
+            if (ab.slow) { zb.slowT = ab.slowDur; zb.slowMul = ab.slow; }
+            this.damageZombie(zb, ab.dmg[r]);
+          }
+        }
+        break;
+      }
+      case 'volley': {
+        const r2 = ab.radius * ab.radius;
+        const targets = this.zombies
+          .filter((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2)
+          .sort((a, b) => dist2(h.x, h.z, a.x, a.z) - dist2(h.x, h.z, b.x, b.z))
+          .slice(0, ab.count[r]);
+        for (const zb of targets) {
+          this.emit({ type: 'shot', kind: 'ranger', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
+          this.damageZombie(zb, ab.dmg[r]);
+        }
+        break;
+      }
+      case 'buff': {
+        const r2 = ab.radius * ab.radius;
+        for (const u of this.units) {
+          if (u.dead || u.turret) continue;
+          if (dist2(h.x, h.z, u.x, u.z) <= r2) { u.buffT = ab.dur; u.buffMult = ab.mult[r]; }
+        }
+        break;
+      }
+      case 'haste':
+        h.hasteT = ab.dur[r];
+        h.hasteMult = ab.mult[r];
+        break;
+      case 'towerBuff': {
+        const r2 = ab.radius * ab.radius;
+        for (const b of this.buildings) {
+          if (!b.alive || b.key !== 'tower') continue;
+          if (dist2(h.x, h.z, b.cx, b.cz) <= r2) { b.rofBuffT = ab.dur; b.rofBuffMult = ab.mult[r]; }
+        }
+        break;
+      }
+      case 'repair': {
+        const r2 = ab.radius * ab.radius;
+        for (const b of this.buildings) {
+          if (!b.alive) continue;
+          if (dist2(h.x, h.z, b.cx, b.cz) <= r2) b.hp = Math.min(b.maxHp, b.hp + ab.amount[r]);
+        }
+        break;
+      }
+      case 'turret': {
+        const t = {
+          id: nextId++, key: 'turret', turret: true, hero: false,
+          def: { name: 'Auto-Turret', dmg: ab.dmg, range: ab.range, rof: ab.rof, speed: 0, noise: 8, color: 0x58b7c9 },
+          x: h.x + 0.8, z: h.z, hp: ab.hp, maxHp: ab.hp,
+          path: null, pathI: 0, cooldown: 0, target: null, selected: false,
+          facing: 0, retargetT: 0, life: ab.life,
+        };
+        this.units.push(t);
+        this.emit({ type: 'turret', x: t.x, z: t.z });
+        break;
+      }
+    }
+    this.wakeZombies(h.x, h.z, 10);
+    this.emit({ type: 'cast', x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
+  }
+
+  _updateHero(dt) {
+    const h = this.hero;
+    if (!h) return;
+    for (const st of h.abil) if (st.cd > 0) st.cd -= dt;
+    if (h.dead) {
+      h.reviveT -= dt;
+      if (h.reviveT <= 0) {
+        h.dead = false;
+        h.hp = h.maxHp;
+        h.x = this.hq.cx + 2.5;
+        h.z = this.hq.cz + 2.5;
+        h.path = null; h.target = null;
+        this.units.push(h);
+        this.emit({ type: 'revive', x: h.x, z: h.z });
+        this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
+      }
+      return;
+    }
+    // Regen.
+    const regen = h.def.regen + 0.25 * (h.level - 1);
+    h.hp = Math.min(h.maxHp, h.hp + regen * dt);
+    if (h.hasteT > 0) h.hasteT -= dt;
+    // Toxin Arrows-style passives are applied at attack time in _updateUnits.
+  }
+
+  _updatePickups(dt) {
+    for (const p of this.pickups) {
+      p.t -= dt;
+      if (p.t <= 0) { p.gone = true; continue; }
+      for (const u of this.units) {
+        if (u.dead || u.turret) continue;
+        if (dist2(u.x, u.z, p.x, p.z) < 1.1) {
+          p.gone = true;
+          if (p.kind === 'gold') {
+            this.res.gold += p.amount;
+            this.msg(`💰 Scavenged ${p.amount} gold!`, 'info');
+          } else {
+            u.hp = Math.min(u.maxHp, u.hp + DROPS.healAmount);
+            this.msg('❤️ Medkit recovered!', 'info');
+          }
+          this.emit({ type: 'pickup', x: p.x, z: p.z, kind: p.kind });
+          break;
+        }
+      }
+    }
+    if (this.pickups.some((p) => p.gone)) this.pickups = this.pickups.filter((p) => !p.gone);
+  }
+
   orderMove(units, tx, tz) {
     // Fan destinations out a bit so groups don't stack on one point.
     let i = 0;
     for (const u of units) {
+      if (u.turret || u.dead) continue;
       const ang = (i / Math.max(1, units.length)) * Math.PI * 2;
       const r = i === 0 ? 0 : 0.9 + 0.55 * Math.floor((i - 1) / 6);
       const dx = tx + Math.cos(ang) * r, dz = tz + Math.sin(ang) * r;
@@ -306,6 +499,18 @@ export class Game {
       zb.dead = true;
       this.stats.kills++;
       this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute' });
+      // WC3-style shared XP for kills near the hero.
+      const h = this.hero;
+      if (h && !h.dead && dist2(h.x, h.z, zb.x, zb.z) < XP_RADIUS * XP_RADIUS) {
+        this.addXp(zb.def.score * 8);
+      }
+      // Creep-style loot drops.
+      if (zb.type === 'brute') {
+        const kind = this.rng() < 0.6 ? 'gold' : 'heal';
+        this.pickups.push({ id: nextId++, x: zb.x, z: zb.z, kind, amount: DROPS.bruteGold, t: DROPS.life });
+      } else if (this.rng() < DROPS.smallChance) {
+        this.pickups.push({ id: nextId++, x: zb.x, z: zb.z, kind: 'gold', amount: DROPS.smallGold, t: DROPS.life });
+      }
     }
   }
 
@@ -321,7 +526,13 @@ export class Game {
     if (u.hp <= 0) {
       u.dead = true;
       this.emit({ type: 'udeath', x: u.x, z: u.z });
-      this.msg(`A ${u.def.name} has been devoured!`, 'bad');
+      if (u.hero) {
+        u.reviveT = 18 + 4 * u.level;
+        this.emit({ type: 'herodown' });
+        this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Command Center in ${Math.round(u.reviveT)}s…`, 'bad');
+      } else if (!u.turret) {
+        this.msg(`A ${u.def.name} has been devoured!`, 'bad');
+      }
     }
   }
 
@@ -345,6 +556,8 @@ export class Game {
     this._updateZombies(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
+    this._updateHero(dt);
+    this._updatePickups(dt);
     this._cleanup();
     this._checkEnd();
   }
@@ -440,6 +653,12 @@ export class Game {
       zb.timer -= dt;
       zb.atkT -= dt;
 
+      // Hero ability debuffs.
+      if (zb.stunT > 0) { zb.stunT -= dt; continue; }
+      let speedMul = nightMul;
+      if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
+      zb.speedMul = speedMul;
+
       if (zb.state === IDLE) {
         if (zb.wave) { zb.state = AGGRO; continue; } // horde zombies never rest
         if (zb.timer <= 0) {
@@ -456,7 +675,7 @@ export class Game {
       if (zb.state === WANDER) {
         if (zb.timer <= 0) { zb.burst = false; zb.state = zb.wave ? AGGRO : IDLE; zb.timer = 3 + this.rng() * 6; continue; }
         if (!zb.burst && this.flow.distAt(zb.x | 0, zb.z | 0) < 11) { zb.state = AGGRO; continue; }
-        this._moveZombie(zb, zb.dirX, zb.dirZ, zb.def.speed * 0.6 * nightMul, dt, false);
+        this._moveZombie(zb, zb.dirX, zb.dirZ, zb.def.speed * 0.6 * zb.speedMul, dt, false);
         continue;
       }
 
@@ -521,7 +740,7 @@ export class Game {
         if (d < 0.75) {
           if (zb.atkT <= 0) { zb.atkT = 0.8; this._damageUnit(u, zb.def.dmg); this.emit({ type: 'bite', x: u.x, z: u.z }); }
         } else {
-          this._moveZombie(zb, dx / d, dz / d, zb.def.chase * nightMul, dt, true);
+          this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
         }
         continue;
       }
@@ -529,13 +748,13 @@ export class Game {
       // 2) Follow the flow field toward the colony.
       const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
       if (dir) {
-        this._moveZombie(zb, dir[0], dir[1], zb.def.chase * nightMul, dt, true);
+        this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
       } else if (this.hq && this.hq.alive) {
         // Off the flow field (local dead spot) — shamble straight at the HQ
         // until the field picks us up again. Horde zombies never give up.
         const dx = this.hq.cx - zb.x, dz = this.hq.cz - zb.z;
         const d = Math.hypot(dx, dz) || 1;
-        this._moveZombie(zb, dx / d, dz / d, zb.def.chase * 0.7 * nightMul, dt, true);
+        this._moveZombie(zb, dx / d, dz / d, zb.def.chase * 0.7 * zb.speedMul, dt, true);
         if (!zb.wave) {
           zb.stuckT = (zb.stuckT || 0) + dt;
           if (zb.stuckT > 6) { // ambient zombies do give up eventually
@@ -586,6 +805,11 @@ export class Game {
       if (u.dead) continue;
       u.cooldown -= dt;
       u.retargetT -= dt;
+      if (u.buffT > 0) u.buffT -= dt;
+      if (u.turret) {
+        u.life -= dt;
+        if (u.life <= 0) { u.dead = true; this.emit({ type: 'turretend', x: u.x, z: u.z }); continue; }
+      }
 
       // Movement along path.
       if (u.path) {
@@ -619,10 +843,23 @@ export class Game {
         if (u.target && !u.target.dead && u.cooldown <= 0) {
           const zb = u.target;
           if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
-            u.cooldown = 1 / u.def.rof;
+            const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
+            u.cooldown = 1 / (u.def.rof * haste);
             u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-            this.damageZombie(zb, u.def.dmg, u.x, u.z);
-            this.emit({ type: 'shot', kind: u.key, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: 0.7 });
+            let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
+            if (u.buffT > 0) dmg *= u.buffMult;
+            this.damageZombie(zb, dmg, u.x, u.z);
+            // Scarlet's Toxin Arrows passive.
+            if (u.hero) {
+              const toxin = u.def.abilities.findIndex((a) => a.key === 'toxin');
+              if (toxin >= 0 && u.abil[toxin].rank > 0) {
+                const ab = u.def.abilities[toxin];
+                zb.slowT = ab.dur;
+                zb.slowMul = ab.slow[u.abil[toxin].rank - 1];
+              }
+            }
+            const kind = u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
+            this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
             if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
           } else {
             u.target = null;
@@ -636,6 +873,7 @@ export class Game {
     for (const b of this.buildings) {
       if (!b.alive || b.key !== 'tower') continue;
       b.cooldown -= dt;
+      if (b.rofBuffT > 0) b.rofBuffT -= dt;
       if (b.cooldown > 0) continue;
       const r2 = b.def.range * b.def.range;
       let best = null, bd = r2;
@@ -645,7 +883,8 @@ export class Game {
         if (d < bd) { bd = d; best = zb; }
       }
       if (best) {
-        b.cooldown = 1 / b.def.rof;
+        const haste = b.rofBuffT > 0 ? b.rofBuffMult : 1;
+        b.cooldown = 1 / (b.def.rof * haste);
         this.damageZombie(best, b.def.dmg, b.cx, b.cz);
         this.emit({ type: 'shot', kind: 'tower', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
         this.wakeZombies(b.cx, b.cz, 9);

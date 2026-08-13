@@ -87,6 +87,52 @@ export class AudioSys {
     }
   }
 
+  melee() {
+    this._noise(0.1, { freq: 900, q: 1.5, gain: 0.14, sweep: -500 });
+    this._tone(0.07, { freq: 180, type: 'square', gain: 0.07, slide: -90 });
+  }
+
+  cast(key) {
+    if (key === 'quake' || key === 'storm') {
+      this._noise(0.7, { freq: 220, q: 0.7, gain: 0.32, type: 'lowpass', sweep: -140 });
+      this._tone(0.6, { freq: 70, type: 'sawtooth', gain: 0.14, slide: -40 });
+    } else if (key === 'coil' || key === 'overcharge') {
+      this._noise(0.25, { freq: 2600, q: 3, gain: 0.14, sweep: -1800 });
+      this._tone(0.22, { freq: 1100, type: 'sawtooth', gain: 0.06, slide: -700 });
+    } else if (key === 'repair') {
+      for (let i = 0; i < 3; i++) setTimeout(() => this._tone(0.06, { freq: 600 + i * 150, type: 'triangle', gain: 0.08 }), i * 70);
+    } else if (key === 'warcry') {
+      this._tone(0.5, { freq: 190, type: 'sawtooth', gain: 0.12, slide: 70, attack: 0.03 });
+      this._tone(0.5, { freq: 254, type: 'sawtooth', gain: 0.09, slide: 90, attack: 0.03 });
+    } else {
+      this._noise(0.3, { freq: 800, q: 1, gain: 0.2, sweep: -500 });
+      this._tone(0.25, { freq: 300, type: 'square', gain: 0.08, slide: -150 });
+    }
+  }
+
+  levelup() {
+    const notes = [392, 523, 659, 784];
+    notes.forEach((f, i) => setTimeout(() => this._tone(0.3, { freq: f, type: 'triangle', gain: 0.12 }), i * 90));
+  }
+
+  herodown() {
+    this._tone(0.9, { freq: 200, type: 'sawtooth', gain: 0.13, slide: -140, attack: 0.02 });
+    this._noise(0.6, { freq: 300, q: 0.8, gain: 0.18, type: 'lowpass', sweep: -180 });
+  }
+
+  revive() {
+    [262, 392, 523].forEach((f, i) => setTimeout(() => this._tone(0.35, { freq: f, type: 'triangle', gain: 0.11 }), i * 110));
+  }
+
+  pickup(kind) {
+    if (kind === 'gold') {
+      this._tone(0.07, { freq: 900, type: 'triangle', gain: 0.1, slide: 250 });
+      this._tone(0.1, { freq: 1350, type: 'triangle', gain: 0.08, slide: 200 });
+    } else {
+      this._tone(0.15, { freq: 520, type: 'sine', gain: 0.1, slide: 240 });
+    }
+  }
+
   zombieDeath() {
     this._noise(0.22, { freq: 300, q: 1.4, gain: 0.13, sweep: -180, type: 'lowpass' });
     this._tone(0.18, { freq: 130 + Math.random() * 60, type: 'sawtooth', gain: 0.05, slide: -80 });
