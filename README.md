@@ -30,11 +30,19 @@ The dead cover the earth. Found a colony on a procedurally generated map, grow i
 
 Pick one of three space marines at the start. Your hero earns **XP from kills within 14 tiles**, levels **1–10** (full heal on level-up), and gains a **skill point per level** to spend on four abilities — ranks unlock at hero levels 1/3/5, the ultimate at **level 6**. If your hero falls, he revives at Fortress Command. Brutes drop **loot crates** (gold or medkits) worth scooping up.
 
+Each kit honors the squad's favorite heroes from WC3/Dota/Diablo:
+
 | Hero | Range | Q | W | E | R (ultimate) |
 |---|---|---|---|---|---|
-| ⚔️ Captain Scott | close (melee tank) | Chainblade Sweep | War Cry (ally dmg) | Seismic Stomp (stun) | Orbital Strike |
-| 🔥 Alexander | mid (run-and-gun) | Frag Grenade | Adrenal Rush (move + fire speed) | Ricochet Rounds (chaining shots, passive) | Storm of Lead |
-| 🎯 Danny | far (sniper) | Kill Volley | Combat Stims (haste) | Incendiary Shells (slow, passive) | Frag Storm |
+| ⚔️ Captain Scott | close (melee tank) | Whirlwind (spin while moving) | War Cry (ally dmg) | Purifying Light (heal + burn) | Sun Strike |
+| 🌿 Alexander | mid | Entangling Roots (AoE root) | Teleportation (channel, then TP anywhere) | Marksman's Focus (passive: mini-stuns + permanent dmg per kill) | Assassinate (deletes the biggest zombie) |
+| 🗡️ Danny | far (sniper) | Death Pulse (dmg + ally heal) | Beetle Swarm (latching DoT) | Cloak & Dagger (passive: fade invisible, huge backstab shot) | Time Lapse (5s rewind) |
+
+## Built for old WC3 / Dota players
+
+- **You are the hero.** The 🤖 **Overseer** bot runs the colony's economy and defenses — generators, farms, hab-tents, mines, tower rings, walls — so you fight instead of spreadsheet. Toggle it off any time to build manually (it always leaves you a gold reserve for troops).
+- **The controls you remember:** `F` selects your hero (double-tap centers), `Q/W/E/R` casts, `T` selects your whole army, right-click moves, drag selects. Units fire while moving, Dota-style.
+- Minimap **pings** on horde spawns and "colony under attack" warnings; day/night announcements; buildings slowly self-repair when zombies leave them alone.
 
 ## Controls
 

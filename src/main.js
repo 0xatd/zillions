@@ -45,8 +45,14 @@ class App {
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
       onStart: (d, hero) => this.startGame(d, hero),
-      onCast: (i) => { if (this.game) this.game.castAbility(i); },
+      onCast: (i) => this.tryCast(i),
       onLearn: (i) => { if (this.game) this.game.learnAbility(i); },
+      onAuto: () => {
+        if (!this.game) return;
+        this.game.autoBuild = !this.game.autoBuild;
+        this.ui.setAutoUI(this.game.autoBuild);
+        this.game.msg(this.game.autoBuild ? '🤖 Overseer resumed — economy is handled.' : '🔧 Overseer paused — you\'re building manually now.', 'info');
+      },
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
       onDemolish: (b) => { this.game.demolish(b); this.selectedBuilding = null; this.ui.showSelection(null); },
@@ -499,6 +505,16 @@ class App {
       add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), M(0x1e1f21)), 0.1, 0.55, 0.25);
       add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), M(0x1e1f21)), -0.1, 0.55, 0.25);
       add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), M(0xff3322, 0.9)), 0, 0.62, 0.18);
+    } else if (u.key === 'treant') {
+      // Little walking tree.
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 0.55, 6), M(0x3e3020)), 0, 0.28, 0);
+      add(new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.8, 6), M(0x3a5c2e)), 0, 0.95, 0);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.045, 5, 4), M(0xffe08a, 0.8)), -0.08, 0.5, 0.16);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.045, 5, 4), M(0xffe08a, 0.8)), 0.08, 0.5, 0.16);
+      const armL = add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.06), M(0x4a3a28)), -0.24, 0.45, 0);
+      armL.rotation.z = 0.5;
+      const armR = add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.06), M(0x4a3a28)), 0.24, 0.45, 0);
+      armR.rotation.z = -0.5;
     } else if (u.hero) {
       // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
       const d = u.def;
@@ -562,8 +578,21 @@ class App {
         this.unitMeshes.set(u.id, rec);
       }
       rec.mesh.position.set(u.x, 0, u.z);
-      rec.mesh.rotation.y = u.facing;
+      rec.mesh.rotation.y = u.hero && u.whirlT > 0 ? this.clock.elapsedTime * 18 : u.facing;
       rec.mesh.userData.ring.visible = u.selected;
+      // Cloaked heroes fade to a ghost.
+      if (u.hero) {
+        const wantOp = u.stealth ? 0.3 : 1;
+        if (rec.op !== wantOp) {
+          rec.op = wantOp;
+          rec.mesh.traverse((o) => {
+            if (o.isMesh && o !== rec.mesh.userData.ring) {
+              o.material.transparent = true;
+              o.material.opacity = wantOp;
+            }
+          });
+        }
+      }
     }
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) { this.scene.remove(rec.mesh); this.unitMeshes.delete(id); }
@@ -622,10 +651,11 @@ class App {
       if (k === ' ') { e.preventDefault(); this.setSpeed(0); }
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.pause(); this.ui.showHelp(); }
-      else if (k === 'escape') { this.setBuildMode(null); this._clearSelection(); }
+      else if (k === 'escape') { this.targeting = null; this.canvas.style.cursor = 'default'; this.setBuildMode(null); this._clearSelection(); }
       else if (k === 'f' || k === 'f1') { e.preventDefault(); this._selectHero(); }
+      else if (k === 't') { this._selectArmy(); }
       else if (this._heroSelected() && ['q', 'w', 'e', 'r'].includes(k)) {
-        this.game.castAbility(['q', 'w', 'e', 'r'].indexOf(k));
+        this.tryCast(['q', 'w', 'e', 'r'].indexOf(k));
       } else {
         for (const [bk, bd] of Object.entries(BUILDINGS)) {
           if (bd.hotkey === k) this.setBuildMode(bk);
@@ -648,6 +678,12 @@ class App {
       this.audio.init();
       if (!this.game) return;
       this._updateMouse(e);
+      if (e.button === 0 && this.targeting != null) {
+        this.game.castAbility(this.targeting, this.mouse.gx, this.mouse.gz);
+        this.targeting = null;
+        this.canvas.style.cursor = 'default';
+        return;
+      }
       if (e.button === 0) {
         this.mouse.down = true;
         if (this.buildMode) {
@@ -660,6 +696,7 @@ class App {
         }
       } else if (e.button === 2) {
         this.mouse.rdown = true;
+        if (this.targeting != null) { this.targeting = null; this.canvas.style.cursor = 'default'; return; }
         if (this.buildMode) { this.setBuildMode(null); return; }
         if (this.selection.length) {
           this.game.orderMove(this.selection, this.mouse.gx, this.mouse.gz);
@@ -775,6 +812,38 @@ class App {
   _heroSelected() {
     const h = this.game && this.game.hero;
     return !!(h && !h.dead && this.selection.includes(h));
+  }
+
+  // Cast ability i — teleport-style abilities enter click-targeting mode first.
+  tryCast(i) {
+    if (!this.game) return;
+    const h = this.game.hero;
+    if (!h || h.dead) return;
+    const ab = h.def.abilities[i];
+    const st = h.abil[i];
+    if (ab.cast === 'teleport') {
+      if (st.rank === 0 || st.cd > 0 || h.channelT > 0) { this.audio.deny(); return; }
+      this.targeting = i;
+      this.canvas.style.cursor = 'crosshair';
+      this.game.msg('🌀 Teleport: click a destination (right-click to cancel).', 'info');
+      return;
+    }
+    this.game.castAbility(i);
+  }
+
+  // T selects the whole army (hero + troops + summons).
+  _selectArmy() {
+    if (!this.game) return;
+    this._clearSelection();
+    for (const u of this.game.units) {
+      if (u.dead || u.turret) continue;
+      u.selected = true;
+      this.selection.push(u);
+    }
+    if (this.selection.length) {
+      this.audio.click();
+      this.ui.showSelection(this.selection, this.game);
+    }
   }
 
   // F selects the hero; pressed again quickly, centers the camera on him.
@@ -1014,18 +1083,40 @@ class App {
         case 'learn': this.audio.train(); break;
         case 'cast': {
           this.audio.cast(e.key);
+          const CAST_COLORS = {
+            roots: 0x5fae4a, deathpulse: 0x7fdc6a, holy: 0xfff2c8, sunstrike: 0xffb23c,
+            whirlwind: 0xd8d2c2, warcry: 0xffd75e, swarm: 0x9c6ede, teleport: 0x7fd6ff,
+          };
+          const col = CAST_COLORS[e.key] || 0xffe9a8;
           // Expanding shock ring drawn with particles.
           const R = e.radius;
           const n = Math.min(40, Math.round(R * 6));
           for (let i = 0; i < n; i++) {
             const a = (i / n) * Math.PI * 2;
             this.burst(e.x + Math.cos(a) * R * 0.85, 0.25, e.z + Math.sin(a) * R * 0.85,
-              { count: 1, color: 0xffe9a8, speed: 0.5, life: 0.45, size: 0.55, spread: 0.15, up: 1.4 });
+              { count: 1, color: col, speed: 0.5, life: 0.45, size: 0.55, spread: 0.15, up: 1.4 });
           }
-          this.burst(e.x, 0.4, e.z, { count: 14, color: 0xfff2c8, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
+          this.burst(e.x, 0.4, e.z, { count: 14, color: col, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
           this.shake = Math.max(this.shake, 0.18);
           break;
         }
+        case 'backstab':
+          this.audio.backstab();
+          this.burst(e.x, 0.7, e.z, { count: 16, color: 0x9c6ede, speed: 2.4, life: 0.45, size: 0.55, up: 1.8 });
+          break;
+        case 'stealth':
+          this.audio.stealthOn();
+          this.burst(e.x, 0.5, e.z, { count: 12, color: 0x8a8f96, speed: 0.8, life: 0.8, size: 0.8, up: 0.8 });
+          break;
+        case 'ping':
+          this.ui.addPing(e.x, e.z);
+          break;
+        case 'underattack':
+          this.audio.underattack();
+          break;
+        case 'night':
+          this.audio.night();
+          break;
         case 'levelup':
           this.audio.levelup();
           this.burst(e.x, 0.3, e.z, { count: 30, color: 0xffd75e, speed: 1.6, life: 0.9, size: 0.55, up: 3.2 });
@@ -1045,6 +1136,29 @@ class App {
         case 'turret':
           this.audio.build();
           this.burst(e.x, 0.3, e.z, { count: 12, color: 0x8ad6e8, speed: 1.8, life: 0.5, size: 0.5, up: 1.8 });
+          break;
+        case 'hook': {
+          this.audio.hook();
+          const steps = 10;
+          for (let i = 0; i <= steps; i++) {
+            const t2 = i / steps;
+            this.burst(lerp(e.fx, e.tx, t2), 0.7, lerp(e.fz, e.tz, t2),
+              { count: 2, color: 0xd8d2c2, speed: 0.3, life: 0.35, size: 0.4, spread: 0.05, up: 0.3 });
+          }
+          this.burst(e.tx, 0.6, e.tz, { count: 10, color: 0x9c1f1f, speed: 2, life: 0.4, size: 0.5, up: 1.5 });
+          break;
+        }
+        case 'whirl':
+          this.whirlSfxT = (this.whirlSfxT || 0) - 1;
+          if (this.whirlSfxT <= 0) { this.audio.melee(); this.whirlSfxT = 2; }
+          for (let i = 0; i < 6; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.burst(e.x + Math.cos(a) * e.r * 0.8, 0.5, e.z + Math.sin(a) * e.r * 0.8,
+              { count: 1, color: 0xd8d2c2, speed: 1.5, life: 0.3, size: 0.4, spread: 0.1, up: 1 });
+          }
+          break;
+        case 'treants':
+          this.burst(e.x, 0.3, e.z, { count: 20, color: 0x5fae4a, speed: 1.8, life: 0.7, size: 0.55, up: 2.2 });
           break;
         case 'turretend':
           this.burst(e.x, 0.3, e.z, { count: 10, color: 0x777777, speed: 1.2, life: 0.6, size: 0.55, up: 1.4 });
@@ -1094,6 +1208,34 @@ class App {
       // Ambient groans when the horde is active.
       const aggro = this.game.aggroCount();
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
+
+      // Teleport channel: pulse at the destination.
+      const hh = this.game.hero;
+      if (hh && hh.channelT > 0 && hh.tpX != null) {
+        this.tpFxT = (this.tpFxT || 0) - dt;
+        if (this.tpFxT <= 0) {
+          this.tpFxT = 0.12;
+          this.burst(hh.tpX, 0.2, hh.tpZ, { count: 4, color: 0x7fd6ff, speed: 0.8, life: 0.5, size: 0.6, spread: 0.8, up: 2 });
+          this.burst(hh.x, 0.3, hh.z, { count: 2, color: 0x7fd6ff, speed: 0.5, life: 0.4, size: 0.5, spread: 0.4, up: 1.6 });
+        }
+      }
+
+      // Ability ground zones: ambient particles while active.
+      this.fieldFxT = (this.fieldFxT || 0) - dt;
+      if (this.fieldFxT <= 0 && this.game.fields.length) {
+        this.fieldFxT = 0.12;
+        for (const f of this.game.fields) {
+          const a = Math.random() * Math.PI * 2;
+          const rr = Math.sqrt(Math.random()) * f.r;
+          if (f.fx === 'smoke') {
+            this.burst(f.x + Math.cos(a) * rr, 0.3, f.z + Math.sin(a) * rr,
+              { count: 2, color: 0x8a8f96, speed: 0.25, life: 1.3, size: 1.0, spread: 0.3, up: 0.5 });
+          } else {
+            this.burst(f.x + Math.cos(a) * rr, 0.15, f.z + Math.sin(a) * rr,
+              { count: 2, color: 0xff9a3c, speed: 0.8, life: 0.35, size: 0.45, spread: 0.2, up: 1.4 });
+          }
+        }
+      }
 
       // Smoke from damaged buildings.
       this.smokeT -= dt;

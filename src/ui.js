@@ -32,6 +32,7 @@ export class UI {
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn speed" data-s="4">4×</button>
+        <button class="tbtn active" id="b-auto" title="Overseer auto-build — the bot runs your economy. Click to build manually.">🤖</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
         <button class="tbtn" id="b-help" title="Help (H)">?</button>
       </div>
@@ -59,19 +60,19 @@ export class UI {
           <h1>🧟 ZILLIONS</h1>
           <p class="tagline">The frontier belongs to the dead. Take it back. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
           <div class="howto">
-            <div><b>🏗️ Build</b> hab-tents for gold &amp; colonists, farms for food, generators for energy.</div>
-            <div><b>⚔️ Defend</b> with palisade walls, sentry towers and trained troopers.</div>
-            <div><b>🤫 Beware:</b> gunfire attracts the dead… and every tent that falls joins the horde.</div>
+            <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
+            <div><b>🤖 The Overseer</b> builds your economy and defenses for you — focus on the fight. (Toggle it off to build manually.)</div>
+            <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
-            <div><b>⭐ Your hero</b> earns XP from nearby kills — level up, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
+            <div><b>💰 Spare gold?</b> Train troops at the barracks and command them like it's 2003.</div>
           </div>
           <div class="herorow" id="herorow"></div>
           <div class="diffrow" id="diffrow"></div>
           <div class="controls">
-            <span><b>WASD / edge</b> pan</span><span><b>wheel</b> zoom</span><span><b>Z / C</b> rotate</span>
-            <span><b>1-9</b> build</span><span><b>drag</b> select</span>
-            <span><b>right-click</b> move / cancel</span><span><b>F</b> select hero (×2 = center)</span>
-            <span><b>Q W E R</b> hero abilities (hero selected)</span><span><b>space</b> pause</span>
+            <span><b>F</b> select hero (×2 = center)</span><span><b>Q W E R</b> abilities</span>
+            <span><b>T</b> select army</span><span><b>right-click</b> move</span><span><b>drag</b> select</span>
+            <span><b>WASD / edge / minimap</b> pan</span><span><b>wheel</b> zoom</span><span><b>Z / C</b> rotate</span>
+            <span><b>1-9</b> build (manual)</span><span><b>space</b> pause</span>
           </div>
         </div>
       </div>`;
@@ -145,6 +146,8 @@ export class UI {
     for (const b of this.root.querySelectorAll('.speed')) b.onclick = () => this.cb.onSpeed(+b.dataset.s);
     this.root.querySelector('#b-mute').onclick = () => this.cb.onMute();
     this.root.querySelector('#b-help').onclick = () => this.cb.onHelp();
+    this.root.querySelector('#b-auto').onclick = () => this.cb.onAuto();
+    this.pings = [];
 
     // Minimap clicks.
     const mmWrap = this.root.querySelector('#minimap-wrap');
@@ -321,6 +324,10 @@ export class UI {
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
 
+  setAutoUI(on) { this.root.querySelector('#b-auto').classList.toggle('active', on); }
+
+  addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
+
   hideStart() { this.root.querySelector('#overlay').classList.add('hidden'); }
 
   showHelp() {
@@ -409,7 +416,7 @@ export class UI {
     }
 
     const rate = (v) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
-    q('#r-gold').innerHTML = `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? 0 : e.gold)}</small>`;
+    q('#r-gold').innerHTML = `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`;
     q('#r-wood').innerHTML = `🪵 ${Math.floor(game.res.wood)} <small>${rate(e.wood)}</small>`;
     q('#r-stone').innerHTML = `🪨 ${Math.floor(game.res.stone)} <small>${rate(e.stone)}</small>`;
     q('#r-food').innerHTML = `🍞 <small>${rate(e.food)}</small>${game.starving ? ' ⚠️' : ''}`;
@@ -464,6 +471,18 @@ export class UI {
     }
     ctx.fillStyle = '#e6493a';
     for (const zb of game.zombies) ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
+
+    // WC3-style pings: expanding red circles.
+    for (const p of this.pings) {
+      p.t -= 0.15;
+      const phase = 1 - ((p.t * 2) % 1);
+      ctx.strokeStyle = `rgba(255,60,50,${Math.max(0, 1 - phase)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.z, 3 + phase * 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    this.pings = this.pings.filter((p) => p.t > 0);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 1.5;

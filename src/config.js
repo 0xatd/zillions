@@ -68,7 +68,7 @@ export const BUILDINGS = {
     key: 'tower', name: 'Sentry Tower', icon: '🏹', hotkey: '7', size: 2,
     cost: { gold: 200, wood: 70, stone: 50 }, workers: 1, pop: 0,
     energy: -1, hp: 650,
-    range: 11, dmg: 14, rof: 1.6,
+    range: 11, dmg: 16, rof: 1.7,
     desc: 'Automated defense. Shoots zombies within range. Loud — attracts stragglers.',
   },
   wall: {
@@ -86,7 +86,7 @@ export const BUILDINGS = {
   hq: {
     key: 'hq', name: 'Fortress Command', icon: '🏛️', size: 4,
     cost: { gold: 0, wood: 0, stone: 0 }, workers: 0, pop: 10,
-    energy: 14, gold: 2, food: 2, hp: 3200,
+    energy: 14, gold: 2, food: 2, hp: 4500,
     desc: 'The heart of the colony. If it falls, all is lost.',
   },
 };
@@ -126,8 +126,8 @@ export const WAVES = [
   { day: 2,  size: 26,  types: { walker: 1 } },
   { day: 4,  size: 60,  types: { walker: 0.9, runner: 0.1 } },
   { day: 6,  size: 120, types: { walker: 0.8, runner: 0.18, brute: 0.02 } },
-  { day: 8,  size: 210, types: { walker: 0.72, runner: 0.24, brute: 0.04 } },
-  { day: FINAL_DAY, size: 420, types: { walker: 0.66, runner: 0.27, brute: 0.07 }, final: true },
+  { day: 8,  size: 190, types: { walker: 0.72, runner: 0.24, brute: 0.04 } },
+  { day: FINAL_DAY, size: 380, types: { walker: 0.66, runner: 0.27, brute: 0.07 }, final: true },
 ];
 
 // ---------- WC3-style heroes ----------
@@ -138,66 +138,69 @@ export const xpForLevel = (lvl) => 90 + 80 * (lvl - 1);   // XP to go from lvl -
 export const rankReqLevel = (rank) => [1, 3, 5][rank - 1] || 99; // ability rank -> hero level needed
 export const ULT_REQ_LEVEL = 6;
 
-// Three space marines. Close / mid / long range.
+// Three space marines with kits honoring the squad's favorite heroes.
+// Scott: Diablo's Barbarian (+ a taste of Lina/Invoker/Omniknight).
+// Alexander: Nature's Prophet / Sniper / Pudge.
+// Danny: Necrophos / Weaver / Riki.
 export const HEROES = {
   scott: {
     key: 'scott', name: 'Captain Scott', icon: '⚔️', color: 0x8f1f1f, trim: 0xc9a44a,
-    tagline: 'Close combat. Crimson-armored breacher — his chainblade never sleeps.',
-    hp: 420, dmg: 28, range: 1.8, rof: 1.1, speed: 4.2, noise: 4,
-    levelHp: 42, levelDmg: 4, regen: 2.4, melee: true,
+    tagline: 'Close combat. A whirlwind of steel with fire in his fists.',
+    hp: 440, dmg: 28, range: 1.8, rof: 1.1, speed: 4.2, noise: 4,
+    levelHp: 44, levelDmg: 4, regen: 2.6, melee: true,
     abilities: [
-      { key: 'cleave', name: 'Chainblade Sweep', icon: '🌀', hotkey: 'Q', maxRank: 3, cd: 7,
-        cast: 'aoeDmg', radius: 3.6, dmg: [45, 80, 120],
-        desc: 'A roaring sweep of the chainblade — shreds every zombie around Scott.' },
+      { key: 'whirlwind', name: 'Whirlwind', icon: '🌪️', hotkey: 'Q', maxRank: 3, cd: 14,
+        cast: 'whirlwind', radius: 2.5, dur: [3, 4, 5], dps: [45, 70, 100],
+        desc: 'Scott spins into a cyclone of steel — grinds everything around him while he keeps moving.' },
       { key: 'warcry', name: 'War Cry', icon: '📣', hotkey: 'W', maxRank: 3, cd: 16,
         cast: 'buff', radius: 9, mult: [1.35, 1.55, 1.8], dur: 7,
-        desc: 'A thunderous roar — nearby troops deal bonus damage for 7s.' },
-      { key: 'stomp', name: 'Seismic Stomp', icon: '💥', hotkey: 'E', maxRank: 3, cd: 13,
-        cast: 'aoeDmg', radius: 4.6, dmg: [25, 40, 60], stun: [1.6, 2.1, 2.6],
-        desc: 'Power-armored boots crack the earth — damages and stuns the dead around him.' },
-      { key: 'quake', name: 'Orbital Strike', icon: '☄️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
-        cast: 'aoeDmg', radius: 8.5, dmg: [340], stun: [2.6],
-        desc: 'ULTIMATE: calls fire from the heavens onto everything around him.' },
+        desc: 'A barbarian bellow — nearby troops deal bonus damage for 7s.' },
+      { key: 'holy', name: 'Purifying Light', icon: '✨', hotkey: 'E', maxRank: 3, cd: 15,
+        cast: 'pulse', radius: 6, dmg: [40, 70, 105], heal: [50, 85, 130],
+        desc: 'A burst of holy light — heals Scott and nearby troops, sears the dead around them.' },
+      { key: 'sunstrike', name: 'Sun Strike', icon: '☀️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
+        cast: 'aoeDmg', radius: 8.5, dmg: [360], stun: [2.5],
+        desc: 'ULTIMATE: calls down a column of pure solar fire onto everything around him.' },
     ],
   },
   alexander: {
-    key: 'alexander', name: 'Alexander', icon: '🔥', color: 0x1f3a6e, trim: 0xc9a44a,
-    tagline: 'Mid range. Run-and-gun. Never stops moving, never stops shooting.',
-    hp: 310, dmg: 22, range: 7, rof: 2.1, speed: 4.6, noise: 14,
-    levelHp: 30, levelDmg: 3.5, regen: 2.0,
+    key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
+    tagline: 'Mid range. Roots, teleports, and a rifle that never misses twice.',
+    hp: 320, dmg: 24, range: 7, rof: 1.8, speed: 4.5, noise: 14,
+    levelHp: 32, levelDmg: 3.5, regen: 2.0,
     abilities: [
-      { key: 'frag', name: 'Frag Grenade', icon: '🧨', hotkey: 'Q', maxRank: 3, cd: 9,
-        cast: 'aoeDmg', radius: 5.5, dmg: [45, 75, 110],
-        desc: 'Cooks a grenade and drops it at his feet — shreds everything around Alexander.' },
-      { key: 'surge', name: 'Adrenal Rush', icon: '⚡', hotkey: 'W', maxRank: 3, cd: 16,
-        cast: 'surge', mult: [1.6, 1.9, 2.3], move: 1.6, dur: [5, 6, 7],
-        desc: 'Adrenaline floods his veins — he runs AND shoots dramatically faster for a few seconds.' },
-      { key: 'ricochet', name: 'Ricochet Rounds', icon: '🔫', hotkey: 'E', maxRank: 3, passive: true,
-        chain: [1, 2, 3], chainDmg: 0.6, chainRange: 4.5,
-        desc: 'PASSIVE: every shot ricochets into extra nearby zombies for 60% damage.' },
-      { key: 'barrage', name: 'Storm of Lead', icon: '🌪️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
-        cast: 'barrage', radius: 9.5, dmg: [230],
-        desc: 'ULTIMATE: empties every magazine he carries — hits EVERY zombie around him.' },
+      { key: 'roots', name: 'Entangling Roots', icon: '🌿', hotkey: 'Q', maxRank: 3, cd: 12,
+        cast: 'aoeDmg', radius: 5.5, dmg: [15, 25, 35], stun: [2.2, 2.8, 3.4],
+        desc: 'Roots erupt from the soil — every zombie around Alexander is held fast while you line up shots.' },
+      { key: 'teleport', name: 'Teleportation', icon: '🌀', hotkey: 'W', maxRank: 3, cd: [50, 40, 30],
+        cast: 'teleport', channel: 2,
+        desc: 'Channels for 2s, then teleports ANYWHERE on the map. Defend every front at once. Higher ranks recharge faster.' },
+      { key: 'focus', name: 'Marksman’s Focus', icon: '🎯', hotkey: 'E', maxRank: 3, passive: true,
+        stunChance: [0.18, 0.24, 0.3], stunDur: 0.5, heap: [0.3, 0.5, 0.7], heapCap: [40, 70, 100],
+        desc: 'PASSIVE: shots have a chance to mini-stun. Every kill permanently sharpens his aim — bonus damage that never fades (up to a cap).' },
+      { key: 'assassinate', name: 'Assassinate', icon: '🎯', hotkey: 'R', ult: true, maxRank: 1, cd: 60,
+        cast: 'assassinate', radius: 20, dmg: [600],
+        desc: 'ULTIMATE: takes aim… and deletes the biggest zombie in a huge radius.' },
     ],
   },
   danny: {
-    key: 'danny', name: 'Danny', icon: '🎯', color: 0x36503a, trim: 0xa8b394,
-    tagline: 'Long range. Master sniper — one shell, one corpse.',
-    hp: 260, dmg: 34, range: 13, rof: 1.0, speed: 4.5, noise: 12,
-    levelHp: 24, levelDmg: 5, regen: 1.5,
+    key: 'danny', name: 'Danny', icon: '🗡️', color: 0x36503a, trim: 0xa8b394,
+    tagline: 'Long range. Now you see him. They never do.',
+    hp: 270, dmg: 32, range: 13, rof: 1.1, speed: 4.5, noise: 12,
+    levelHp: 25, levelDmg: 4.5, regen: 1.8,
     abilities: [
-      { key: 'volley', name: 'Kill Volley', icon: '🎯', hotkey: 'Q', maxRank: 3, cd: 8,
-        cast: 'volley', radius: 14, count: [4, 6, 9], dmg: [50, 65, 85],
-        desc: 'Danny rapid-cycles his long rifle — instantly executes several zombies in range.' },
-      { key: 'adren', name: 'Combat Stims', icon: '⚡', hotkey: 'W', maxRank: 3, cd: 18,
-        cast: 'haste', mult: [1.8, 2.2, 2.7], dur: [5, 6, 7],
-        desc: 'Battle-stimulants flood his armor — dramatically faster fire for a few seconds.' },
-      { key: 'toxin', name: 'Incendiary Shells', icon: '🧪', hotkey: 'E', maxRank: 3, passive: true,
-        slow: [0.72, 0.6, 0.45], dur: 2.5,
-        desc: 'PASSIVE: burning rounds sear the dead, slowing them.' },
-      { key: 'storm', name: 'Frag Storm', icon: '🌪️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
-        cast: 'aoeDmg', radius: 7.5, dmg: [300],
-        desc: 'ULTIMATE: a ring of frag charges shreds everything around Danny.' },
+      { key: 'deathpulse', name: 'Death Pulse', icon: '💀', hotkey: 'Q', maxRank: 3, cd: 9,
+        cast: 'pulse', radius: 5.5, dmg: [45, 75, 110], heal: [35, 60, 90],
+        desc: 'A wave of necrotic energy — damages the dead around Danny and mends his allies.' },
+      { key: 'swarm', name: 'Beetle Swarm', icon: '🐞', hotkey: 'W', maxRank: 3, cd: 15,
+        cast: 'swarm', radius: 11, count: [4, 6, 8], dps: 10, dur: 6, slow: 0.85,
+        desc: 'Releases a swarm of flesh-eating beetles that latch onto nearby zombies and gnaw them down.' },
+      { key: 'cloak', name: 'Cloak & Dagger', icon: '🗡️', hotkey: 'E', maxRank: 3, passive: true,
+        fade: [5, 3.5, 2], backstab: [2.2, 2.6, 3.0],
+        desc: 'PASSIVE: stop firing for a few seconds and Danny vanishes — zombies cannot see him. His next shot from the shadows deals massive bonus damage.' },
+      { key: 'timelapse', name: 'Time Lapse', icon: '⏪', hotkey: 'R', ult: true, maxRank: 1, cd: 60,
+        cast: 'timelapse', back: 5,
+        desc: 'ULTIMATE: rewinds Danny 5 seconds — back to where he stood, with the health he had.' },
     ],
   },
 };
@@ -208,7 +211,7 @@ export const DROPS = {
 };
 
 export const DIFFICULTY = {
-  casual: { label: 'Casual', mult: 0.6, ambient: 0.6 },
+  casual: { label: 'Casual', mult: 0.5, ambient: 0.6 },
   normal: { label: 'Normal', mult: 1.0, ambient: 1.0 },
   brutal: { label: 'Brutal', mult: 1.7, ambient: 1.5 },
 };

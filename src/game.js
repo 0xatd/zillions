@@ -6,6 +6,7 @@ import {
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
+import { Overseer } from './bot.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
@@ -45,6 +46,9 @@ export class Game {
     this.heroKey = heroKey;
     this.hero = null;
     this.pickups = [];
+    this.fields = [];            // ability ground zones
+    this.autoBuild = true;       // the Overseer runs the economy by default
+    this.bot = new Overseer(this);
 
     this._setupStart();
   }
@@ -256,7 +260,7 @@ export class Game {
   }
 
   heroDmg(h) {
-    return h.def.dmg + h.def.levelDmg * (h.level - 1);
+    return h.def.dmg + h.def.levelDmg * (h.level - 1) + (h.bonusDmg || 0);
   }
 
   addXp(amount) {
@@ -294,17 +298,135 @@ export class Game {
     this.msg(`${h.def.abilities[i].icon} ${h.def.abilities[i].name} — rank ${h.abil[i].rank}`, 'info');
   }
 
-  castAbility(i) {
+  castAbility(i, tx, tz) {
     const h = this.hero;
     if (!h || h.dead) return;
     const ab = h.def.abilities[i];
     const st = h.abil[i];
     if (ab.passive) return;
-    if (st.rank === 0 || st.cd > 0) { this.emit({ type: 'deny' }); return; }
+    if (st.rank === 0 || st.cd > 0 || h.channelT > 0) { this.emit({ type: 'deny' }); return; }
     const r = st.rank - 1;
-    st.cd = ab.cd;
+
+    // Targeted casts fizzle without a target — don't burn the cooldown.
+    if (ab.cast === 'hook' || ab.cast === 'assassinate' || ab.cast === 'swarm') {
+      const rr = (ab.range || ab.radius) ** 2;
+      if (!this.zombies.some((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= rr)) {
+        this.msg('No target in range.', 'warn');
+        this.emit({ type: 'deny' });
+        return;
+      }
+    }
+    st.cd = Array.isArray(ab.cd) ? ab.cd[r] : ab.cd;
 
     switch (ab.cast) {
+      case 'teleport':
+        if (tx == null) { st.cd = 0; return; }
+        h.channelT = ab.channel;
+        h.tpX = tx; h.tpZ = tz;
+        h.path = null; h.target = null;
+        this.msg('Channeling teleport…', 'info');
+        break;
+      case 'whirlwind':
+        h.whirlT = ab.dur[r];
+        h.whirlDps = ab.dps[r];
+        h.whirlR = ab.radius;
+        break;
+      case 'pulse': {
+        const r2 = ab.radius * ab.radius;
+        for (const zb of this.zombies) {
+          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, ab.dmg[r]);
+        }
+        for (const u of this.units) {
+          if (!u.dead && !u.turret && dist2(h.x, h.z, u.x, u.z) <= r2) u.hp = Math.min(u.maxHp, u.hp + ab.heal[r]);
+        }
+        break;
+      }
+      case 'hook': {
+        const rr = ab.range * ab.range;
+        let best = null, bd = rr;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          const d = dist2(h.x, h.z, zb.x, zb.z);
+          if (d < bd && d > 2) { bd = d; best = zb; }
+        }
+        if (best) {
+          this.emit({ type: 'hook', fx: h.x, fz: h.z, tx: best.x, tz: best.z });
+          const dx = best.x - h.x, dz = best.z - h.z;
+          const d = Math.hypot(dx, dz) || 1;
+          const nx = h.x + (dx / d) * 1.2, nz = h.z + (dz / d) * 1.2;
+          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
+            best.x = nx; best.z = nz;
+          }
+          best.stunT = Math.max(best.stunT || 0, ab.stun);
+          this.damageZombie(best, ab.dmg[r]);
+        }
+        break;
+      }
+      case 'zone':
+        this.fields.push({
+          x: h.x, z: h.z, r: ab.radius,
+          t: Array.isArray(ab.dur) ? ab.dur[r] : ab.dur,
+          dps: ab.dps ? ab.dps[r] : 0,
+          slow: ab.slow || 1, blind: !!ab.blind, fx: ab.fx,
+        });
+        break;
+      case 'summon': {
+        for (let i = 0; i < ab.count[r]; i++) {
+          const a = (i / ab.count[r]) * Math.PI * 2;
+          this.units.push({
+            id: nextId++, key: 'treant', summon: true,
+            def: { name: 'Treant', dmg: ab.dmg, range: 1.3, rof: 1.1, speed: ab.speed, noise: 0, color: 0x3a5c2e },
+            x: h.x + Math.cos(a) * 1.5, z: h.z + Math.sin(a) * 1.5,
+            hp: ab.hp, maxHp: ab.hp, life: ab.life,
+            path: null, pathI: 0, cooldown: 0, target: null, selected: false,
+            facing: 0, retargetT: 0,
+          });
+        }
+        this.emit({ type: 'treants', x: h.x, z: h.z });
+        break;
+      }
+      case 'swarm': {
+        const rr = ab.radius * ab.radius;
+        const targets = this.zombies
+          .filter((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= rr)
+          .sort((a, b) => dist2(h.x, h.z, a.x, a.z) - dist2(h.x, h.z, b.x, b.z))
+          .slice(0, ab.count[r]);
+        for (const zb of targets) {
+          zb.dotT = ab.dur;
+          zb.dotDps = ab.dps;
+          zb.slowT = ab.dur;
+          zb.slowMul = ab.slow;
+          this.emit({ type: 'shot', kind: 'ricochet', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
+        }
+        break;
+      }
+      case 'assassinate': {
+        const rr = ab.radius * ab.radius;
+        let best = null, bhp = -1;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) <= rr && zb.hp > bhp) { bhp = zb.hp; best = zb; }
+        }
+        if (best) {
+          this.emit({ type: 'shot', kind: 'sniper', fx: h.x, fz: h.z, tx: best.x, tz: best.z, fy: 1.0 });
+          this.damageZombie(best, ab.dmg[r]);
+        }
+        break;
+      }
+      case 'timelapse': {
+        const hist = h.hist && h.hist.length ? h.hist[0] : null;
+        if (hist) {
+          const [hx, hz, hhp] = hist;
+          if (this.map.isWalkable(hx | 0, hz | 0) && this.occ[(hz | 0) * this.map.size + (hx | 0)] === 0) {
+            h.x = hx; h.z = hz;
+          }
+          h.hp = Math.min(h.maxHp, Math.max(h.hp, hhp));
+          h.path = null; h.target = null;
+          h.hist.length = 0;
+          this.emit({ type: 'revive', x: h.x, z: h.z });
+        }
+        break;
+      }
       case 'aoeDmg': {
         const r2 = ab.radius * ab.radius;
         for (const zb of this.zombies) {
@@ -415,7 +537,83 @@ export class Game {
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     if (h.hasteT > 0) h.hasteT -= dt;
     if (h.moveT > 0) h.moveT -= dt;
+
+    // Teleport channel.
+    if (h.channelT > 0) {
+      h.channelT -= dt;
+      if (h.channelT <= 0 && h.tpX != null) {
+        let placed = false;
+        outer: for (let ring = 0; ring < 6 && !placed; ring++) {
+          for (let dz = -ring; dz <= ring; dz++) {
+            for (let dx = -ring; dx <= ring; dx++) {
+              if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+              const nx = (h.tpX | 0) + dx, nz = (h.tpZ | 0) + dz;
+              if (this.map.isWalkable(nx, nz) && this.occ[nz * this.map.size + nx] === 0) {
+                h.x = nx + 0.5; h.z = nz + 0.5;
+                placed = true;
+                break outer;
+              }
+            }
+          }
+        }
+        h.tpX = null;
+        this.emit({ type: 'revive', x: h.x, z: h.z });
+      }
+    }
+
+    // Cloak & Dagger: fade to invisibility after a few quiet seconds.
+    const ci = h.def.abilities.findIndex((a) => a.key === 'cloak');
+    if (ci >= 0 && h.abil[ci].rank > 0) {
+      h.sinceAtk = (h.sinceAtk || 0) + dt;
+      const fade = h.def.abilities[ci].fade[h.abil[ci].rank - 1];
+      if (!h.stealth && h.sinceAtk >= fade) {
+        h.stealth = true;
+        this.emit({ type: 'stealth', x: h.x, z: h.z });
+      }
+    }
+
+    // Position/HP history for Time Lapse (~5s window, sampled 4x/s).
+    h.histT = (h.histT || 0) - dt;
+    if (h.histT <= 0) {
+      h.histT = 0.25;
+      if (!h.hist) h.hist = [];
+      h.hist.push([h.x, h.z, h.hp]);
+      if (h.hist.length > 20) h.hist.shift();
+    }
+
+    // Whirlwind channel: grind everything nearby while it lasts.
+    if (h.whirlT > 0) {
+      h.whirlT -= dt;
+      h.whirlTick = (h.whirlTick || 0) - dt;
+      if (h.whirlTick <= 0) {
+        h.whirlTick = 0.3;
+        const r2 = h.whirlR * h.whirlR;
+        for (const zb of this.zombies) {
+          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, h.whirlDps * 0.3);
+        }
+        this.emit({ type: 'whirl', x: h.x, z: h.z, r: h.whirlR });
+      }
+    }
     // Toxin Arrows-style passives are applied at attack time in _updateUnits.
+  }
+
+  _updateFields(dt) {
+    if (!this.fields.length) return;
+    for (const f of this.fields) {
+      f.t -= dt;
+      const r2 = f.r * f.r;
+      for (const zb of this.zombies) {
+        if (zb.dead) continue;
+        if (dist2(zb.x, zb.z, f.x, f.z) > r2) continue;
+        if (f.dps) this.damageZombie(zb, f.dps * dt);
+        if (f.slow < 1) {
+          zb.slowT = Math.max(zb.slowT || 0, 0.2);
+          zb.slowMul = f.slow;
+        }
+        if (f.blind) zb.blindT = 0.25;
+      }
+    }
+    this.fields = this.fields.filter((f) => f.t > 0);
   }
 
   _updatePickups(dt) {
@@ -445,7 +643,7 @@ export class Game {
     // Fan destinations out a bit so groups don't stack on one point.
     let i = 0;
     for (const u of units) {
-      if (u.turret || u.dead) continue;
+      if (u.turret || u.summon || u.dead) continue;
       const ang = (i / Math.max(1, units.length)) * Math.PI * 2;
       const r = i === 0 ? 0 : 0.9 + 0.55 * Math.floor((i - 1) / 6);
       const dx = tx + Math.cos(ang) * r, dz = tz + Math.sin(ang) * r;
@@ -536,7 +734,15 @@ export class Game {
   _damageBuilding(b, dmg) {
     if (!b.alive) return;
     b.hp -= dmg;
+    b.hitT = this.time;
     this.emit({ type: 'bhit', x: b.cx, z: b.cz });
+    // WC3-style "under attack" warning, throttled.
+    if (this.time - (this._uaT || -99) > 20) {
+      this._uaT = this.time;
+      this.msg('⚔️ Your colony is under attack!', 'warn');
+      this.emit({ type: 'ping', x: b.cx, z: b.cz });
+      this.emit({ type: 'underattack' });
+    }
     if (b.hp <= 0) this._destroyBuilding(b, true);
   }
 
@@ -569,26 +775,60 @@ export class Game {
     const prevTime = this.time;
     this.time += dt;
 
+    // Day/night announcements.
+    const night = this.isNight;
+    if (night && !this._wasNight) { this.msg('🌙 Night falls — the dead grow bold…', 'warn'); this.emit({ type: 'night' }); }
+    else if (!night && this._wasNight) this.msg('☀️ Dawn breaks. You survived the night.', 'info');
+    this._wasNight = night;
+
     this._updateWaves(prevTime);
     this._updateEconomy(dt);
+    if (this.autoBuild) this.bot.update(dt);
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
     this._updateHero(dt);
+    this._updateFields(dt);
     this._updatePickups(dt);
     this._cleanup();
     this._checkEnd();
   }
 
   _updateWaves(prevTime) {
+    // Second pulse of the final horde.
+    if (this.pendingWave && this.time >= this.pendingWave.at) {
+      const p = this.pendingWave;
+      this.pendingWave = null;
+      this._spawnHorde(p.size, p.edges, p.types);
+      const N = this.map.size;
+      const mid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
+      for (const ed of p.edges) this.emit({ type: 'ping', x: mid[ed][0], z: mid[ed][1] });
+      this.msg('☠️ The second pulse of the horde crashes in!', 'bad');
+      this.emit({ type: 'horde', final: true });
+    }
     for (const w of WAVES) {
       const at = (w.day - 1) * DAY_LENGTH;
       if (prevTime < at && this.time >= at && !this.wavesDone.has(w.day)) {
         this.wavesDone.add(w.day);
-        const size = Math.round(w.size * this.diff.mult);
-        const edges = w.final ? [0, 1, 2, 3] : [(this.rng() * 4) | 0];
+        let size = Math.round(w.size * this.diff.mult);
+        let edges;
+        if (w.final) {
+          // Two fronts, two pulses — an epic but defensible finale.
+          const e1 = (this.rng() * 4) | 0;
+          const e2 = (e1 + 1 + ((this.rng() * 3) | 0)) % 4;
+          edges = [e1, e2];
+          const pulse2 = Math.round(size * 0.4);
+          size -= pulse2;
+          this.pendingWave = { at: this.time + 45, size: pulse2, edges, types: w.types };
+        } else {
+          edges = [(this.rng() * 4) | 0];
+        }
         this._spawnHorde(size, edges, w.types);
+        // WC3-style minimap pings at the spawn edges.
+        const N = this.map.size;
+        const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
+        for (const ed of edges) this.emit({ type: 'ping', x: edgeMid[ed][0], z: edgeMid[ed][1] });
         const dirName = w.final ? 'ALL DIRECTIONS' : ['the NORTH', 'the EAST', 'the SOUTH', 'the WEST'][edges[0]];
         this.msg(w.final
           ? `☠️ THE FINAL HORDE HAS ARRIVED FROM ${dirName}! Survive this and the land is yours!`
@@ -611,10 +851,18 @@ export class Game {
   _updateEconomy(dt) {
     const e = this.eco;
     this.starving = e.food < 0;
-    const goldRate = this.starving ? Math.min(e.gold, 0) : e.gold;
+    // Starving slows the economy rather than freezing it — less punishing micro.
+    const goldRate = this.starving ? e.gold * 0.4 : e.gold;
     this.res.gold = Math.max(0, this.res.gold + goldRate * dt);
     this.res.wood += e.wood * dt;
     this.res.stone += e.stone * dt;
+
+    // Buildings slowly mend themselves once zombies leave them alone.
+    for (const b of this.buildings) {
+      if (b.alive && b.hp < b.maxHp && this.time - (b.hitT || 0) > 12) {
+        b.hp = Math.min(b.maxHp, b.hp + (2 + b.maxHp * 0.004) * dt);
+      }
+    }
   }
 
   _updateFlow(dt) {
@@ -673,7 +921,15 @@ export class Game {
       zb.atkT -= dt;
 
       // Hero ability debuffs.
+      if (zb.dotT > 0) { zb.dotT -= dt; this.damageZombie(zb, zb.dotDps * dt); if (zb.dead) continue; }
       if (zb.stunT > 0) { zb.stunT -= dt; continue; }
+      if (zb.blindT > 0) {
+        // Blinded: shuffle harmlessly, no targets, no attacks.
+        zb.blindT -= dt;
+        const a = zb.phase + this.time * 0.7;
+        this._moveZombie(zb, Math.cos(a), Math.sin(a), zb.def.speed * 0.35, dt, false);
+        continue;
+      }
       let speedMul = nightMul;
       if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
       zb.speedMul = speedMul;
@@ -738,14 +994,14 @@ export class Game {
       }
 
       // AGGRO
-      // 1) Chase a nearby living unit if close.
-      if (zb.targetU && (zb.targetU.dead || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
+      // 1) Chase a nearby living unit if close. Stealthed heroes are invisible.
+      if (zb.targetU && (zb.targetU.dead || zb.targetU.stealth || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
       zb.retarget = (zb.retarget || 0) - dt;
       if (!zb.targetU && zb.retarget <= 0) {
         zb.retarget = 0.4 + this.rng() * 0.3;
         let best = null, bd = 100; // within 10 tiles
         for (const u of this.units) {
-          if (u.dead) continue;
+          if (u.dead || (u.hero && u.stealth)) continue;
           const d = dist2(zb.x, zb.z, u.x, u.z);
           if (d < bd) { bd = d; best = u; }
         }
@@ -825,7 +1081,7 @@ export class Game {
       u.cooldown -= dt;
       u.retargetT -= dt;
       if (u.buffT > 0) u.buffT -= dt;
-      if (u.turret) {
+      if (u.turret || u.summon) {
         u.life -= dt;
         if (u.life <= 0) { u.dead = true; this.emit({ type: 'turretend', x: u.x, z: u.z }); continue; }
       }
@@ -847,60 +1103,66 @@ export class Game {
         }
       }
 
-      // Auto-attack when not moving (units fight while holding position).
-      if (!u.path) {
-        if (u.retargetT <= 0 || (u.target && u.target.dead)) {
-          u.retargetT = 0.25;
-          const r2 = u.def.range * u.def.range;
-          let best = null, bd = r2;
-          for (const zb of this.zombies) {
-            if (zb.dead) continue;
-            const d = dist2(u.x, u.z, zb.x, zb.z);
-            if (d < bd) { bd = d; best = zb; }
-          }
-          u.target = best;
+      // Heroes can't act while channeling a teleport.
+      if (u.hero && u.channelT > 0) continue;
+
+      // Auto-attack — Dota-style, units fire even while moving.
+      if (u.retargetT <= 0 || (u.target && u.target.dead)) {
+        u.retargetT = 0.25;
+        const r2 = u.def.range * u.def.range;
+        let best = null, bd = r2;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          const d = dist2(u.x, u.z, zb.x, zb.z);
+          if (d < bd) { bd = d; best = zb; }
         }
-        if (u.target && !u.target.dead && u.cooldown <= 0) {
-          const zb = u.target;
-          if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
-            const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
-            u.cooldown = 1 / (u.def.rof * haste);
-            u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-            let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
-            if (u.buffT > 0) dmg *= u.buffMult;
-            this.damageZombie(zb, dmg, u.x, u.z);
-            // Hero passives.
-            if (u.hero) {
-              const toxin = u.def.abilities.findIndex((a) => a.key === 'toxin');
-              if (toxin >= 0 && u.abil[toxin].rank > 0) {
-                const ab = u.def.abilities[toxin];
-                zb.slowT = ab.dur;
-                zb.slowMul = ab.slow[u.abil[toxin].rank - 1];
-              }
-              // Ricochet Rounds: shots bounce into extra zombies near the target.
-              const rico = u.def.abilities.findIndex((a) => a.key === 'ricochet');
-              if (rico >= 0 && u.abil[rico].rank > 0) {
-                const ab = u.def.abilities[rico];
-                const chains = ab.chain[u.abil[rico].rank - 1];
-                const cr2 = ab.chainRange * ab.chainRange;
-                let hit = 0;
-                for (const other of this.zombies) {
-                  if (hit >= chains) break;
-                  if (other === zb || other.dead) continue;
-                  if (dist2(zb.x, zb.z, other.x, other.z) <= cr2) {
-                    hit++;
-                    this.damageZombie(other, dmg * ab.chainDmg);
-                    this.emit({ type: 'shot', kind: 'ricochet', fx: zb.x, fz: zb.z, tx: other.x, tz: other.z, fy: 0.6 });
-                  }
-                }
-              }
-            }
-            const kind = u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
-            this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
-            if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
-          } else {
-            u.target = null;
+        u.target = best;
+      }
+      // Summons chase their prey instead of waiting for it.
+      if (u.summon && !u.path && u.target && !u.target.dead) {
+        const dx = u.target.x - u.x, dz = u.target.z - u.z;
+        const d = Math.hypot(dx, dz);
+        if (d > u.def.range * 0.9) {
+          const nx = u.x + (dx / d) * u.def.speed * dt;
+          const nz = u.z + (dz / d) * u.def.speed * dt;
+          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
+            u.x = nx; u.z = nz;
           }
+          u.facing = Math.atan2(dx, dz);
+        }
+      }
+      if (u.target && !u.target.dead && u.cooldown <= 0) {
+        const zb = u.target;
+        if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
+          const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
+          u.cooldown = 1 / (u.def.rof * haste);
+          u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
+          let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
+          if (u.buffT > 0) dmg *= u.buffMult;
+          // Cloak & Dagger: the shot that breaks stealth hits like a truck.
+          if (u.hero && u.stealth) {
+            const ci = u.def.abilities.findIndex((a) => a.key === 'cloak');
+            if (ci >= 0 && u.abil[ci].rank > 0) dmg *= u.def.abilities[ci].backstab[u.abil[ci].rank - 1];
+            u.stealth = false;
+            this.emit({ type: 'backstab', x: zb.x, z: zb.z });
+          }
+          u.sinceAtk = 0;
+          this.damageZombie(zb, dmg, u.x, u.z);
+          // Marksman's Focus: chance to mini-stun; kills permanently add damage.
+          if (u.hero) {
+            const fi = u.def.abilities.findIndex((a) => a.key === 'focus');
+            if (fi >= 0 && u.abil[fi].rank > 0) {
+              const ab = u.def.abilities[fi];
+              const rk = u.abil[fi].rank - 1;
+              if (!zb.dead && this.rng() < ab.stunChance[rk]) zb.stunT = Math.max(zb.stunT || 0, ab.stunDur);
+              if (zb.dead) u.bonusDmg = Math.min(ab.heapCap[rk], (u.bonusDmg || 0) + ab.heap[rk]);
+            }
+          }
+          const kind = u.summon ? 'melee' : u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
+          this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
+          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+        } else {
+          u.target = null;
         }
       }
     }
@@ -936,7 +1198,7 @@ export class Game {
 
   _checkEnd() {
     if (this.over) return;
-    if (this.finalSpawned) {
+    if (this.finalSpawned && !this.pendingWave) {
       let waveLeft = 0;
       for (const zb of this.zombies) if (zb.wave) waveLeft++;
       if (waveLeft === 0) this._gameOver(true);
