@@ -57,10 +57,10 @@ export class UI {
       <div id="overlay" class="screen">
         <div class="panel">
           <h1>🧟 ZILLIONS</h1>
-          <p class="tagline">In the grim darkness of the frontier, there are only the dead. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
+          <p class="tagline">The frontier belongs to the dead. Take it back. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
           <div class="howto">
             <div><b>🏗️ Build</b> hab-tents for gold &amp; colonists, farms for food, generators for energy.</div>
-            <div><b>⚔️ Defend</b> with rockcrete walls, sentry towers and trained troopers.</div>
+            <div><b>⚔️ Defend</b> with palisade walls, sentry towers and trained troopers.</div>
             <div><b>🤫 Beware:</b> gunfire attracts the dead… and every tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
             <div><b>⭐ Your hero</b> earns XP from nearby kills — level up, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>

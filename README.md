@@ -20,7 +20,7 @@ Then open **http://localhost:8000**.
 
 The dead cover the earth. Found a colony on a procedurally generated map, grow its economy, and survive **10 days** — hordes strike on days 2, 4, 6 and 8, and a massive final wave hits from all directions on day 10.
 
-- 🏗️ **Build** hab-tents (gold + colonists), hydro-farms (food), sawmills, quarries, gold mines, wind generators (energy), rockcrete walls, sentry towers and a barracks.
+- 🏗️ **Build** hab-tents (gold + colonists), hydro-farms (food), sawmills, quarries, gold mines, wind generators (energy), palisade walls, sentry towers and a barracks.
 - ⚔️ **Train** scouts (quiet), troopers (loud) and snipers (very loud) — gunfire **attracts** the dead.
 - ☣️ **Infection**: every hab-tent that falls to zombies spawns its residents into the horde.
 - 🌙 **Day/night cycle**: zombies are faster and bolder at night.
@@ -30,11 +30,11 @@ The dead cover the earth. Found a colony on a procedurally generated map, grow i
 
 Pick one of three space marines at the start. Your hero earns **XP from kills within 14 tiles**, levels **1–10** (full heal on level-up), and gains a **skill point per level** to spend on four abilities — ranks unlock at hero levels 1/3/5, the ultimate at **level 6**. If your hero falls, he revives at Fortress Command. Brutes drop **loot crates** (gold or medkits) worth scooping up.
 
-| Hero | Role | Q | W | E | R (ultimate) |
+| Hero | Range | Q | W | E | R (ultimate) |
 |---|---|---|---|---|---|
-| ⚔️ Brother-Captain Scott | melee tank | Chainblade Sweep | Battle Litany (ally dmg) | Seismic Stomp (stun) | Orbital Strike |
-| 🎯 Brother Alexander | marksman | Bolt Barrage | Combat Stims (haste) | Hellfire Shells (slow, passive) | Frag Storm |
-| 🔧 Tech-Brother Daniel | engineer | Machine Fury (tower haste) | Rites of Iron (repair) | Arc Lash (dmg + slow) | Sentry Servitor (turret) |
+| ⚔️ Captain Scott | close (melee tank) | Chainblade Sweep | War Cry (ally dmg) | Seismic Stomp (stun) | Orbital Strike |
+| 🔧 Alexander | mid (engineer) | Overclock (tower haste) | Field Repairs | Arc Lash (dmg + slow) | Sentry Gun (turret) |
+| 🎯 Danny | far (sniper) | Kill Volley | Combat Stims (haste) | Incendiary Shells (slow, passive) | Frag Storm |
 
 ## Controls
 
