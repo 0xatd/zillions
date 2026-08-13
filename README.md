@@ -33,7 +33,7 @@ Pick one of three space marines at the start. Your hero earns **XP from kills wi
 | Hero | Range | Q | W | E | R (ultimate) |
 |---|---|---|---|---|---|
 | ⚔️ Captain Scott | close (melee tank) | Chainblade Sweep | War Cry (ally dmg) | Seismic Stomp (stun) | Orbital Strike |
-| 🔧 Alexander | mid (engineer) | Overclock (tower haste) | Field Repairs | Arc Lash (dmg + slow) | Sentry Gun (turret) |
+| 🔥 Alexander | mid (run-and-gun) | Frag Grenade | Adrenal Rush (move + fire speed) | Ricochet Rounds (chaining shots, passive) | Storm of Lead |
 | 🎯 Danny | far (sniper) | Kill Volley | Combat Stims (haste) | Incendiary Shells (slow, passive) | Frag Storm |
 
 ## Controls

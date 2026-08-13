@@ -13,7 +13,7 @@ const IDLE = 0, WANDER = 1, AGGRO = 2;
 let nextId = 1;
 
 export class Game {
-  constructor(map, difficulty = 'normal', heroKey = 'scott') {
+  constructor(map, difficulty = 'normal', heroKey = 'alexander') {
     this.map = map;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.rng = makeRNG(999);
@@ -341,6 +341,24 @@ export class Game {
         h.hasteT = ab.dur[r];
         h.hasteMult = ab.mult[r];
         break;
+      case 'surge':
+        h.hasteT = ab.dur[r];
+        h.hasteMult = ab.mult[r];
+        h.moveT = ab.dur[r];
+        h.moveMult = ab.move;
+        break;
+      case 'barrage': {
+        const r2 = ab.radius * ab.radius;
+        let tracers = 0;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
+            if (tracers++ < 24) this.emit({ type: 'shot', kind: 'ricochet', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
+            this.damageZombie(zb, ab.dmg[r]);
+          }
+        }
+        break;
+      }
       case 'towerBuff': {
         const r2 = ab.radius * ab.radius;
         for (const b of this.buildings) {
@@ -396,6 +414,7 @@ export class Game {
     const regen = h.def.regen + 0.25 * (h.level - 1);
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     if (h.hasteT > 0) h.hasteT -= dt;
+    if (h.moveT > 0) h.moveT -= dt;
     // Toxin Arrows-style passives are applied at attack time in _updateUnits.
   }
 
@@ -820,7 +839,8 @@ export class Game {
           u.pathI++;
           if (u.pathI >= u.path.length) { u.path = null; u.holdX = u.x; u.holdZ = u.z; }
         } else {
-          const sp = u.def.speed * dt;
+          const moveMult = u.hero && u.moveT > 0 ? u.moveMult : 1;
+          const sp = u.def.speed * moveMult * dt;
           u.x += (dx / d) * Math.min(sp, d);
           u.z += (dz / d) * Math.min(sp, d);
           u.facing = Math.atan2(dx, dz);
@@ -849,13 +869,30 @@ export class Game {
             let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
             if (u.buffT > 0) dmg *= u.buffMult;
             this.damageZombie(zb, dmg, u.x, u.z);
-            // Scarlet's Toxin Arrows passive.
+            // Hero passives.
             if (u.hero) {
               const toxin = u.def.abilities.findIndex((a) => a.key === 'toxin');
               if (toxin >= 0 && u.abil[toxin].rank > 0) {
                 const ab = u.def.abilities[toxin];
                 zb.slowT = ab.dur;
                 zb.slowMul = ab.slow[u.abil[toxin].rank - 1];
+              }
+              // Ricochet Rounds: shots bounce into extra zombies near the target.
+              const rico = u.def.abilities.findIndex((a) => a.key === 'ricochet');
+              if (rico >= 0 && u.abil[rico].rank > 0) {
+                const ab = u.def.abilities[rico];
+                const chains = ab.chain[u.abil[rico].rank - 1];
+                const cr2 = ab.chainRange * ab.chainRange;
+                let hit = 0;
+                for (const other of this.zombies) {
+                  if (hit >= chains) break;
+                  if (other === zb || other.dead) continue;
+                  if (dist2(zb.x, zb.z, other.x, other.z) <= cr2) {
+                    hit++;
+                    this.damageZombie(other, dmg * ab.chainDmg);
+                    this.emit({ type: 'shot', kind: 'ricochet', fx: zb.x, fz: zb.z, tx: other.x, tz: other.z, fy: 0.6 });
+                  }
+                }
               }
             }
             const kind = u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;

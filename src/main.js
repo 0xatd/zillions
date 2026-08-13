@@ -516,8 +516,12 @@ class App {
       if (d.melee) {
         const blade = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.16), trim), 0.42, 0.6, 0.22);
         blade.rotation.x = 0.5;
+      } else if (u.key === 'alexander') {
+        // Twin guns for the run-and-gunner.
+        add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), 0.3, 0.64, 0.24);
+        add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), -0.3, 0.64, 0.24);
       } else {
-        add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // bolt rifle
+        add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // long rifle
       }
       // Faint always-on hero halo.
       const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
@@ -936,6 +940,17 @@ class App {
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
+          if (e.kind === 'ricochet') {
+            // Silent bounce tracer: sparks along the line, no gunshot.
+            const steps = 4;
+            for (let i = 0; i <= steps; i++) {
+              const t2 = i / steps;
+              this.burst(lerp(e.fx, e.tx, t2), lerp(e.fy || 0.6, 0.6, t2), lerp(e.fz, e.tz, t2),
+                { count: 1, color: 0xffca6e, speed: 0.15, life: 0.14, size: 0.34, spread: 0.02, up: 0 });
+            }
+            this.burst(e.tx, 0.6, e.tz, { count: 3, color: 0x9c1f1f, speed: 1.3, life: 0.3, size: 0.35, up: 1 });
+            break;
+          }
           if (e.kind === 'melee') {
             // Chainblade hit: metal spark arc at the victim, no tracer.
             this.audio.melee();

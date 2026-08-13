@@ -93,6 +93,19 @@ export class AudioSys {
   }
 
   cast(key) {
+    if (key === 'frag') {
+      this._noise(0.35, { freq: 350, q: 0.8, gain: 0.3, type: 'lowpass', sweep: -220 });
+      this._tone(0.25, { freq: 110, type: 'square', gain: 0.1, slide: -70 });
+      return;
+    }
+    if (key === 'barrage') {
+      // Sustained gunfire rattle.
+      for (let i = 0; i < 10; i++) {
+        setTimeout(() => this._noise(0.09, { freq: 1400, q: 1.4, gain: 0.14, sweep: -800 }), i * 70);
+      }
+      this._noise(0.8, { freq: 300, q: 0.7, gain: 0.2, type: 'lowpass', sweep: -150 });
+      return;
+    }
     if (key === 'quake' || key === 'storm') {
       this._noise(0.7, { freq: 220, q: 0.7, gain: 0.32, type: 'lowpass', sweep: -140 });
       this._tone(0.6, { freq: 70, type: 'sawtooth', gain: 0.14, slide: -40 });

@@ -77,7 +77,7 @@ export class UI {
       </div>`;
 
     // Hero picker.
-    this.selectedHero = 'scott';
+    this.selectedHero = 'alexander';
     const herorow = this.root.querySelector('#herorow');
     for (const [key, h] of Object.entries(HEROES)) {
       const card = document.createElement('button');
