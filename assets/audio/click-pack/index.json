@@ -1,0 +1,362 @@
+{
+  "name": "Zillions full hero click-pack",
+  "created": "2026-08-13",
+  "status": "generated-assets",
+  "model": "tts-elevenlabs-turbo-v2-5",
+  "lineCount": 60,
+  "notes": [
+    "One MP3 per short click bark.",
+    "Voices are distinct generic ElevenLabs voices generated through Venice.",
+    "No source API key or secret is stored in this repository."
+  ],
+  "heroes": {
+    "alex": {
+      "displayName": "Alex / 0xATD",
+      "locationFlavor": "near Portland",
+      "voice": "Will",
+      "direction": "Sharp founder/operator energy. Fast, impatient, money-minded.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Ship it.",
+            "file": "alex/selection/alex_selection_01_ship_it.mp3",
+            "bytes": 14673
+          },
+          {
+            "line": "Portland-adjacent and fully online.",
+            "file": "alex/selection/alex_selection_02_portland_adjacent_and_fully_online.mp3",
+            "bytes": 39333
+          },
+          {
+            "line": "What moves money?",
+            "file": "alex/selection/alex_selection_03_what_moves_money.mp3",
+            "bytes": 23032
+          },
+          {
+            "line": "Show me the wedge.",
+            "file": "alex/selection/alex_selection_04_show_me_the_wedge.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Rain check? No. Launch check.",
+            "file": "alex/selection/alex_selection_05_rain_check_no_launch_check.mp3",
+            "bytes": 37661
+          }
+        ],
+        "repeated": [
+          {
+            "line": "Stop clicking and ship.",
+            "file": "alex/repeated/alex_repeated_01_stop_clicking_and_ship.mp3",
+            "bytes": 25958
+          },
+          {
+            "line": "This is not the bottleneck.",
+            "file": "alex/repeated/alex_repeated_02_this_is_not_the_bottleneck.mp3",
+            "bytes": 25958
+          },
+          {
+            "line": "You are burning runway.",
+            "file": "alex/repeated/alex_repeated_03_you_are_burning_runway.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "Did we instrument this?",
+            "file": "alex/repeated/alex_repeated_04_did_we_instrument_this.mp3",
+            "bytes": 25958
+          },
+          {
+            "line": "If you click me again, I'm launching another product.",
+            "file": "alex/repeated/alex_repeated_05_if_you_click_me_again_i_m_launching_another_.mp3",
+            "bytes": 42258
+          }
+        ],
+        "move": [
+          {
+            "line": "Cut scope.",
+            "file": "alex/move/alex_move_01_cut_scope.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Find demand.",
+            "file": "alex/move/alex_move_02_find_demand.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "Route around it.",
+            "file": "alex/move/alex_move_03_route_around_it.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "Into the mist.",
+            "file": "alex/move/alex_move_04_into_the_mist.mp3",
+            "bytes": 19271
+          },
+          {
+            "line": "Automate the rest.",
+            "file": "alex/move/alex_move_05_automate_the_rest.mp3",
+            "bytes": 20525
+          }
+        ],
+        "attack": [
+          {
+            "line": "Bad funnel.",
+            "file": "alex/attack/alex_attack_01_bad_funnel.mp3",
+            "bytes": 17181
+          },
+          {
+            "line": "Thin moat.",
+            "file": "alex/attack/alex_attack_02_thin_moat.mp3",
+            "bytes": 17181
+          },
+          {
+            "line": "No distribution.",
+            "file": "alex/attack/alex_attack_03_no_distribution.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "I found the spread.",
+            "file": "alex/attack/alex_attack_04_i_found_the_spread.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "Midnight UTC.",
+            "file": "alex/attack/alex_attack_05_midnight_utc.mp3",
+            "bytes": 23032
+          }
+        ]
+      }
+    },
+    "scott": {
+      "displayName": "Scott",
+      "locationFlavor": "Chicago",
+      "voice": "Roger",
+      "direction": "Deeper and steadier. Dry, practical, pressure-forward.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Yeah?",
+            "file": "scott/selection/scott_selection_01_yeah.mp3",
+            "bytes": 11747
+          },
+          {
+            "line": "Chicago online.",
+            "file": "scott/selection/scott_selection_02_chicago_online.mp3",
+            "bytes": 25122
+          },
+          {
+            "line": "What's the angle?",
+            "file": "scott/selection/scott_selection_03_what_s_the_angle.mp3",
+            "bytes": 19271
+          },
+          {
+            "line": "Keep it sharp.",
+            "file": "scott/selection/scott_selection_04_keep_it_sharp.mp3",
+            "bytes": 19271
+          },
+          {
+            "line": "Wind's at our back.",
+            "file": "scott/selection/scott_selection_05_wind_s_at_our_back.mp3",
+            "bytes": 24286
+          }
+        ],
+        "repeated": [
+          {
+            "line": "You done?",
+            "file": "scott/repeated/scott_repeated_01_you_done.mp3",
+            "bytes": 14673
+          },
+          {
+            "line": "I heard you.",
+            "file": "scott/repeated/scott_repeated_02_i_heard_you.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "This is not deep dish strategy.",
+            "file": "scott/repeated/scott_repeated_03_this_is_not_deep_dish_strategy.mp3",
+            "bytes": 34735
+          },
+          {
+            "line": "Click me again and pay the city tax.",
+            "file": "scott/repeated/scott_repeated_04_click_me_again_and_pay_the_city_tax.mp3",
+            "bytes": 39333
+          },
+          {
+            "line": "Very bold for someone in tower range.",
+            "file": "scott/repeated/scott_repeated_05_very_bold_for_someone_in_tower_range.mp3",
+            "bytes": 37661
+          }
+        ],
+        "move": [
+          {
+            "line": "Taking the Loop.",
+            "file": "scott/move/scott_move_01_taking_the_loop.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Across the river.",
+            "file": "scott/move/scott_move_02_across_the_river.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "Good route.",
+            "file": "scott/move/scott_move_03_good_route.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "Rotating.",
+            "file": "scott/move/scott_move_04_rotating.mp3",
+            "bytes": 17181
+          },
+          {
+            "line": "Cold path, clean kill.",
+            "file": "scott/move/scott_move_05_cold_path_clean_kill.mp3",
+            "bytes": 32645
+          }
+        ],
+        "attack": [
+          {
+            "line": "South side pressure.",
+            "file": "scott/attack/scott_attack_01_south_side_pressure.mp3",
+            "bytes": 24286
+          },
+          {
+            "line": "Windy City work.",
+            "file": "scott/attack/scott_attack_02_windy_city_work.mp3",
+            "bytes": 24286
+          },
+          {
+            "line": "Bad positioning.",
+            "file": "scott/attack/scott_attack_03_bad_positioning.mp3",
+            "bytes": 21360
+          },
+          {
+            "line": "No permit for that.",
+            "file": "scott/attack/scott_attack_04_no_permit_for_that.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "That's getting towed.",
+            "file": "scott/attack/scott_attack_05_that_s_getting_towed.mp3",
+            "bytes": 23032
+          }
+        ]
+      }
+    },
+    "danny": {
+      "displayName": "Danny",
+      "locationFlavor": "San Francisco",
+      "voice": "Charlie",
+      "direction": "Lighter and more theatrical. Performer energy with foggy SF weirdness.",
+      "categories": {
+        "selection": [
+          {
+            "line": "I'm on.",
+            "file": "danny/selection/danny_selection_01_i_m_on.mp3",
+            "bytes": 12583
+          },
+          {
+            "line": "SF checking in.",
+            "file": "danny/selection/danny_selection_02_sf_checking_in.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "What's my cue?",
+            "file": "danny/selection/danny_selection_03_what_s_my_cue.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "Fog's rolling.",
+            "file": "danny/selection/danny_selection_04_fog_s_rolling.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "Let's make it weird.",
+            "file": "danny/selection/danny_selection_05_let_s_make_it_weird.mp3",
+            "bytes": 20525
+          }
+        ],
+        "repeated": [
+          {
+            "line": "You know I can hear that.",
+            "file": "danny/repeated/danny_repeated_01_you_know_i_can_hear_that.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Again? Bold choice.",
+            "file": "danny/repeated/danny_repeated_02_again_bold_choice.mp3",
+            "bytes": 25958
+          },
+          {
+            "line": "This UX needs work.",
+            "file": "danny/repeated/danny_repeated_03_this_ux_needs_work.mp3",
+            "bytes": 24286
+          },
+          {
+            "line": "That's not rhythm. That's harassment.",
+            "file": "danny/repeated/danny_repeated_04_that_s_not_rhythm_that_s_harassment.mp3",
+            "bytes": 37243
+          },
+          {
+            "line": "Very San Francisco of you.",
+            "file": "danny/repeated/danny_repeated_05_very_san_francisco_of_you.mp3",
+            "bytes": 28048
+          }
+        ],
+        "move": [
+          {
+            "line": "Up the hill.",
+            "file": "danny/move/danny_move_01_up_the_hill.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "Through the fog.",
+            "file": "danny/move/danny_move_02_through_the_fog.mp3",
+            "bytes": 19271
+          },
+          {
+            "line": "I know a side street.",
+            "file": "danny/move/danny_move_03_i_know_a_side_street.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "Entrance left.",
+            "file": "danny/move/danny_move_04_entrance_left.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "With feeling.",
+            "file": "danny/move/danny_move_05_with_feeling.mp3",
+            "bytes": 17181
+          }
+        ],
+        "attack": [
+          {
+            "line": "Wrong neighborhood.",
+            "file": "danny/attack/danny_attack_01_wrong_neighborhood.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Hit the mark.",
+            "file": "danny/attack/danny_attack_02_hit_the_mark.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "That's the remix.",
+            "file": "danny/attack/danny_attack_03_that_s_the_remix.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Bridge toll.",
+            "file": "danny/attack/danny_attack_04_bridge_toll.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "And blackout.",
+            "file": "danny/attack/danny_attack_05_and_blackout.mp3",
+            "bytes": 17599
+          }
+        ]
+      }
+    }
+  }
+}

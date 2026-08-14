@@ -1,7 +1,16 @@
 // Procedural WebAudio: no sound assets, everything synthesized.
 
+const BARK_HERO = { alexander: 'alex', scott: 'scott', danny: 'danny' };
+
 export class AudioSys {
   constructor() {
+    this.barkIndex = null;
+    this.lastBarkT = 0;
+    this.barkEl = null;
+    fetch('assets/audio/click-pack/index.json')
+      .then((r) => r.json())
+      .then((d) => { this.barkIndex = d; })
+      .catch(() => {});
     this.ctx = null;
     this.muted = false;
     this.master = null;
@@ -9,6 +18,25 @@ export class AudioSys {
     this.noiseBuf = null;
     this.lastGroan = 0;
     this.musicTimer = null;
+  }
+
+  // WC3-style hero click barks (pre-generated MP3s; silently no-ops if absent).
+  bark(heroKey, category) {
+    if (this.muted || !this.barkIndex) return;
+    const now = performance.now();
+    if (now - this.lastBarkT < 1400) return;
+    const hero = this.barkIndex.heroes[BARK_HERO[heroKey]];
+    if (!hero) return;
+    const items = hero.categories[category];
+    if (!items || !items.length) return;
+    const pick = items[(Math.random() * items.length) | 0];
+    this.lastBarkT = now;
+    try {
+      if (this.barkEl) this.barkEl.pause();
+      this.barkEl = new Audio('assets/audio/click-pack/' + pick.file);
+      this.barkEl.volume = 0.75;
+      this.barkEl.play().catch(() => {});
+    } catch { /* no-op */ }
   }
 
   init() {
@@ -84,6 +112,121 @@ export class AudioSys {
     } else {
       this._noise(0.12, { freq: 1500, q: 1.2, gain: 0.18, sweep: -900 });
       this._tone(0.08, { freq: 340, type: 'square', gain: 0.06, slide: -220 });
+    }
+  }
+
+  melee() {
+    this._noise(0.1, { freq: 900, q: 1.5, gain: 0.14, sweep: -500 });
+    this._tone(0.07, { freq: 180, type: 'square', gain: 0.07, slide: -90 });
+  }
+
+  hook() {
+    this._noise(0.15, { freq: 1800, q: 2, gain: 0.14, sweep: -1200 });
+    this._tone(0.2, { freq: 500, type: 'square', gain: 0.08, slide: -320 });
+  }
+
+  backstab() {
+    this._noise(0.12, { freq: 3000, q: 2, gain: 0.16, sweep: -2000 });
+    this._tone(0.15, { freq: 700, type: 'sawtooth', gain: 0.08, slide: -450 });
+  }
+
+  stealthOn() {
+    this._noise(0.4, { freq: 900, q: 0.8, gain: 0.08, type: 'lowpass', sweep: -600 });
+  }
+
+  night() {
+    // A distant, mournful howl.
+    this._tone(1.4, { freq: 320, type: 'sine', gain: 0.06, slide: 90, attack: 0.5 });
+    this._tone(1.6, { freq: 240, type: 'sine', gain: 0.05, slide: -60, attack: 0.7 });
+  }
+
+  bossHorn() {
+    this._tone(1.2, { freq: 65, type: 'sawtooth', gain: 0.18, slide: -15, attack: 0.05 });
+    this._tone(1.2, { freq: 98, type: 'sawtooth', gain: 0.12, slide: -20, attack: 0.08 });
+    this._noise(1.0, { freq: 180, q: 0.7, gain: 0.2, type: 'lowpass', sweep: -80 });
+  }
+
+  roar() {
+    this._noise(0.8, { freq: 2400, q: 1.2, gain: 0.22, sweep: -1800 });
+    this._tone(0.7, { freq: 900, type: 'sawtooth', gain: 0.1, slide: -650, attack: 0.02 });
+  }
+
+  underattack() {
+    this._tone(0.16, { freq: 520, type: 'square', gain: 0.09 });
+    setTimeout(() => this._tone(0.16, { freq: 440, type: 'square', gain: 0.09 }), 180);
+  }
+
+  cast(key) {
+    switch (key) {
+      case 'hook':
+      case 'assassinate':
+        return; // handled by their own hit/shot sounds
+      case 'shrapnel':
+        this._noise(0.35, { freq: 350, q: 0.8, gain: 0.3, type: 'lowpass', sweep: -220 });
+        this._tone(0.25, { freq: 110, type: 'square', gain: 0.1, slide: -70 });
+        return;
+      case 'sunstrike':
+        this._noise(0.8, { freq: 220, q: 0.7, gain: 0.32, type: 'lowpass', sweep: -140 });
+        this._tone(0.7, { freq: 70, type: 'sawtooth', gain: 0.14, slide: -40 });
+        this._tone(0.5, { freq: 1200, type: 'sine', gain: 0.08, slide: -900, attack: 0.01 });
+        return;
+      case 'holy':
+      case 'deathpulse':
+        for (let i = 0; i < 3; i++) {
+          setTimeout(() => this._tone(0.12, { freq: (key === 'holy' ? 620 : 380) + i * 140, type: 'triangle', gain: 0.09 }), i * 70);
+        }
+        return;
+      case 'timelapse':
+        this._tone(0.5, { freq: 1400, type: 'sine', gain: 0.1, slide: -1100 });
+        this._tone(0.35, { freq: 250, type: 'triangle', gain: 0.09, slide: 700, attack: 0.02 });
+        return;
+      case 'smoke':
+        this._noise(0.6, { freq: 600, q: 0.6, gain: 0.18, type: 'lowpass', sweep: -350 });
+        return;
+      case 'roots':
+        this._noise(0.3, { freq: 280, q: 1.2, gain: 0.22, type: 'lowpass', sweep: 160 });
+        this._tone(0.25, { freq: 90, type: 'sawtooth', gain: 0.08, slide: 60 });
+        return;
+      case 'teleport':
+        this._tone(0.6, { freq: 400, type: 'sine', gain: 0.1, slide: 900, attack: 0.05 });
+        this._tone(0.5, { freq: 800, type: 'triangle', gain: 0.06, slide: 700, attack: 0.1 });
+        return;
+      case 'swarm':
+        this._noise(0.7, { freq: 1800, q: 4, gain: 0.1, sweep: -600 });
+        return;
+      case 'whirlwind':
+        this._noise(0.7, { freq: 900, q: 0.8, gain: 0.2, sweep: -400 });
+        return;
+      case 'warcry':
+        this._tone(0.5, { freq: 190, type: 'sawtooth', gain: 0.12, slide: 70, attack: 0.03 });
+        this._tone(0.5, { freq: 254, type: 'sawtooth', gain: 0.09, slide: 90, attack: 0.03 });
+        return;
+      default:
+        this._noise(0.3, { freq: 800, q: 1, gain: 0.2, sweep: -500 });
+        this._tone(0.25, { freq: 300, type: 'square', gain: 0.08, slide: -150 });
+    }
+  }
+
+  levelup() {
+    const notes = [392, 523, 659, 784];
+    notes.forEach((f, i) => setTimeout(() => this._tone(0.3, { freq: f, type: 'triangle', gain: 0.12 }), i * 90));
+  }
+
+  herodown() {
+    this._tone(0.9, { freq: 200, type: 'sawtooth', gain: 0.13, slide: -140, attack: 0.02 });
+    this._noise(0.6, { freq: 300, q: 0.8, gain: 0.18, type: 'lowpass', sweep: -180 });
+  }
+
+  revive() {
+    [262, 392, 523].forEach((f, i) => setTimeout(() => this._tone(0.35, { freq: f, type: 'triangle', gain: 0.11 }), i * 110));
+  }
+
+  pickup(kind) {
+    if (kind === 'gold') {
+      this._tone(0.07, { freq: 900, type: 'triangle', gain: 0.1, slide: 250 });
+      this._tone(0.1, { freq: 1350, type: 'triangle', gain: 0.08, slide: 200 });
+    } else {
+      this._tone(0.15, { freq: 520, type: 'sine', gain: 0.1, slide: 240 });
     }
   }
 

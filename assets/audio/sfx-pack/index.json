@@ -1,0 +1,277 @@
+{
+  "name": "Zillions generated sound effects pack",
+  "created": "2026-08-13",
+  "status": "generated-assets",
+  "model": "elevenlabs-sound-effects-v2",
+  "soundCount": 29,
+  "quotedTotalUsd": 0.31,
+  "notes": [
+    "Short sound effects for UI, weapons, aliens, zombies, robots, and town/colony actions.",
+    "28 effects were generated through Venice; mine_collapse uses a local synthetic fallback because the final Venice retrieve failed after generation.",
+    "These are concept assets and are not wired into runtime playback yet.",
+    "No API keys or source secrets are stored in this repository."
+  ],
+  "sounds": [
+    {
+      "id": "acid_spit",
+      "group": "aliens",
+      "durationSeconds": 3,
+      "prompt": "Alien acid spit projectile, wet pressure launch, sizzling corrosive impact, short creature attack sound.",
+      "source": "venice",
+      "file": "aliens/acid_spit.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "alien_screech",
+      "group": "aliens",
+      "durationSeconds": 3,
+      "prompt": "Alien brood screech, insectoid and wet, aggressive warning cry, game-ready creature vocalization.",
+      "source": "venice",
+      "file": "aliens/alien_screech.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "psychic_pulse",
+      "group": "aliens",
+      "durationSeconds": 4,
+      "prompt": "Alien psychic pulse attack, low brain-rattling hum, warped chime, pressure wave, sci-fi horror RTS.",
+      "source": "venice",
+      "file": "aliens/psychic_pulse.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "spore_cloud_release",
+      "group": "aliens",
+      "durationSeconds": 4,
+      "prompt": "Toxic spore cloud release, organic sac burst, hiss, floating particles, unsettling alien ambience.",
+      "source": "venice",
+      "file": "aliens/spore_cloud_release.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "mech_laser",
+      "group": "robots",
+      "durationSeconds": 3,
+      "prompt": "Heavy mech laser cannon, charging tone then thick energy beam zap, short RTS weapon sound.",
+      "source": "venice",
+      "file": "robots/mech_laser.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "robot_death_spark",
+      "group": "robots",
+      "durationSeconds": 3,
+      "prompt": "Robot unit death, sparks, servo collapse, short electric failure sound.",
+      "source": "venice",
+      "file": "robots/robot_death_spark.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "servo_march",
+      "group": "robots",
+      "durationSeconds": 4,
+      "prompt": "Robot squad servo march, synchronized metal feet, hydraulic whirs, mechanical army movement loop.",
+      "source": "venice",
+      "file": "robots/servo_march.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "shield_overload",
+      "group": "robots",
+      "durationSeconds": 4,
+      "prompt": "Sci-fi shield overload, rising electric strain then pop and crackle, clean game effect.",
+      "source": "venice",
+      "file": "robots/shield_overload.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "construction_hammer",
+      "group": "town",
+      "durationSeconds": 4,
+      "prompt": "RTS building construction, hammering wood and metal, small generator tools, frontier colony work sound.",
+      "source": "venice",
+      "file": "town/construction_hammer.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "generator_hum",
+      "group": "town",
+      "durationSeconds": 5,
+      "prompt": "Wind generator power hum, low electrical thrum, rotating machinery, loopable colony ambience.",
+      "source": "venice",
+      "file": "town/generator_hum.mp3",
+      "bytes": 81128
+    },
+    {
+      "id": "mine_collapse",
+      "group": "town",
+      "durationSeconds": 4,
+      "prompt": "Quarry or mine collapse, rocks cracking, dust burst, workers shouting far away, short RTS alert sound.",
+      "source": "local-synth-fallback",
+      "file": "town/mine_collapse.mp3",
+      "bytes": 64940
+    },
+    {
+      "id": "town_bell_alarm",
+      "group": "town",
+      "durationSeconds": 4,
+      "prompt": "Frontier town bell alarm, urgent iron bell, distant frightened crowd, grim survival colony.",
+      "source": "venice",
+      "file": "town/town_bell_alarm.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "hero_level_up_relic",
+      "group": "ui",
+      "durationSeconds": 4,
+      "prompt": "Hero level up sting, Warcraft 3 inspired, holy relic shimmer, brass hit, magical chimes, triumphant short game cue.",
+      "source": "venice",
+      "file": "ui/hero_level_up_relic.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "hero_revive_drop_pod",
+      "group": "ui",
+      "durationSeconds": 4,
+      "prompt": "Hero revive sound, sci-fi drop pod ignition mixed with magical resurrection shimmer, short powerful game cue.",
+      "source": "venice",
+      "file": "ui/hero_revive_drop_pod.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "horde_alarm_siren",
+      "group": "ui",
+      "durationSeconds": 4,
+      "prompt": "Incoming horde alarm for grim colony RTS, distant siren, warning klaxon, low drums, urgent but not too loud.",
+      "source": "venice",
+      "file": "ui/horde_alarm_siren.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "ui_click_dark_rts",
+      "group": "ui",
+      "durationSeconds": 2,
+      "prompt": "Dark sci-fi RTS UI click, short metallic tick with subtle holographic chirp, clean game interface sound.",
+      "source": "venice",
+      "file": "ui/ui_click_dark_rts.mp3",
+      "bytes": 33062
+    },
+    {
+      "id": "ui_deny_grim",
+      "group": "ui",
+      "durationSeconds": 2,
+      "prompt": "Warcraft style command denied sound, short low error buzz, grim sci-fi interface, not musical.",
+      "source": "venice",
+      "file": "ui/ui_deny_grim.mp3",
+      "bytes": 33062
+    },
+    {
+      "id": "waypoint_ping_arcane",
+      "group": "ui",
+      "durationSeconds": 2,
+      "prompt": "RTS minimap waypoint ping, bright arcane sci-fi blip with tiny echo, clean and readable.",
+      "source": "venice",
+      "file": "ui/waypoint_ping_arcane.mp3",
+      "bytes": 33062
+    },
+    {
+      "id": "bolter_burst",
+      "group": "weapons",
+      "durationSeconds": 3,
+      "prompt": "Heavy space marine bolter burst, three chunky explosive rifle shots, shell clacks, grimdark battlefield.",
+      "source": "venice",
+      "file": "weapons/bolter_burst.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "chainsword_swing",
+      "group": "weapons",
+      "durationSeconds": 3,
+      "prompt": "Chainsword rev and swing, brutal motorized blade, metal bite, short melee attack sound for grimdark RTS.",
+      "source": "venice",
+      "file": "weapons/chainsword_swing.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "flamethrower_burst",
+      "group": "weapons",
+      "durationSeconds": 4,
+      "prompt": "Short flamethrower burst, pressurized fuel ignition, roaring flame, scorched zombie battlefield.",
+      "source": "venice",
+      "file": "weapons/flamethrower_burst.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "grenade_explosion_dirt",
+      "group": "weapons",
+      "durationSeconds": 4,
+      "prompt": "RTS grenade explosion, dirt and metal debris, compact battlefield blast, no long cinematic tail.",
+      "source": "venice",
+      "file": "weapons/grenade_explosion_dirt.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "lasgun_volley",
+      "group": "weapons",
+      "durationSeconds": 3,
+      "prompt": "Squad lasgun volley, thin red energy rifle shots in rapid sequence, StarCraft style sci-fi infantry fire.",
+      "source": "venice",
+      "file": "weapons/lasgun_volley.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "plasma_rifle_charge",
+      "group": "weapons",
+      "durationSeconds": 4,
+      "prompt": "Plasma rifle charge and release, rising electric whine, hot blue energy blast, heavy sci-fi weapon impact.",
+      "source": "venice",
+      "file": "weapons/plasma_rifle_charge.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "sniper_railshot",
+      "group": "weapons",
+      "durationSeconds": 3,
+      "prompt": "Futuristic sniper railgun shot, sharp crack, electromagnetic snap, distant echo, powerful but clean.",
+      "source": "venice",
+      "file": "weapons/sniper_railshot.mp3",
+      "bytes": 48945
+    },
+    {
+      "id": "brute_roar",
+      "group": "zombies",
+      "durationSeconds": 4,
+      "prompt": "Huge undead brute roar, wet chest resonance, angry monster bellow, short boss enemy sound.",
+      "source": "venice",
+      "file": "zombies/brute_roar.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "flesh_impact",
+      "group": "zombies",
+      "durationSeconds": 2,
+      "prompt": "Wet zombie melee hit, flesh impact against armor, short crunchy combat sound.",
+      "source": "venice",
+      "file": "zombies/flesh_impact.mp3",
+      "bytes": 33062
+    },
+    {
+      "id": "infection_burst",
+      "group": "zombies",
+      "durationSeconds": 4,
+      "prompt": "Building infection burst, wet plague pop, many small undead whispers, colony horror RTS sound.",
+      "source": "venice",
+      "file": "zombies/infection_burst.mp3",
+      "bytes": 65245
+    },
+    {
+      "id": "zombie_horde_groan",
+      "group": "zombies",
+      "durationSeconds": 5,
+      "prompt": "Large zombie horde groan, layered undead voices, distant but threatening, loopable RTS ambience.",
+      "source": "venice",
+      "file": "zombies/zombie_horde_groan.mp3",
+      "bytes": 81128
+    }
+  ]
+}
