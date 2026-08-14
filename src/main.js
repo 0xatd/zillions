@@ -1197,48 +1197,40 @@ class App {
     pips.tex.needsUpdate = true;
   }
 
+  // The Thronefall "stump", sci-fi: one small survey beacon per plot — a
+  // gunmetal pylon with a spinning amber holo-gem. Everything else (ghost,
+  // pips, icon) only appears when you ride up close.
+  _makeBeacon(x, z) {
+    const grp = new THREE.Group();
+    const pylon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.11, 0.55, 6),
+      new THREE.MeshLambertMaterial({ color: 0x565c60 }),
+    );
+    pylon.position.set(x, 0.28, z);
+    pylon.castShadow = true;
+    grp.add(pylon);
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.17, 0),
+      new THREE.MeshLambertMaterial({ color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
+    );
+    gem.position.set(x, 0.95, z);
+    grp.add(gem);
+    grp.userData.gem = gem;
+    return grp;
+  }
+
   _makePlotGroup(plot) {
     const g = new THREE.Group();
     const kind = PLOT_KINDS[plot.kind];
-    if (plot.kind === 'wall') {
-      // Rubble stubs along the future rampart; a marker at the gate.
-      const stubGeo = new THREE.BoxGeometry(0.55, 0.18, 0.55);
-      const stubMat = new THREE.MeshLambertMaterial({ color: 0x4c4a44 });
-      for (const [x, z] of plot.tiles) {
-        const m = new THREE.Mesh(stubGeo, stubMat);
-        m.position.set(x + 0.5, 0.09, z + 0.5);
-        m.rotation.y = (x * 7 + z * 13) % 1;
-        g.add(m);
-      }
-      const [gx, gz] = plot.gate;
-      const label = this._makeLabelSprite(kind.icon, '');
-      label.position.set(gx + 0.5, 2.0, gz + 0.5);
-      g.add(label);
-      g.userData.label = label;
-      g.userData.labelPos = [gx + 0.5, gz + 0.5];
-    } else {
-      // Stone foundation pad + corner posts + hovering icon.
-      const s = plot.size;
-      const pad = new THREE.Mesh(
-        new THREE.BoxGeometry(s + 0.3, 0.14, s + 0.3),
-        new THREE.MeshLambertMaterial({ color: 0x7a8082 }),
-      );
-      pad.position.set(plot.cx, 0.07, plot.cz);
-      pad.receiveShadow = true;
-      g.add(pad);
-      const postGeo = new THREE.BoxGeometry(0.14, 0.5, 0.14);
-      const postMat = new THREE.MeshLambertMaterial({ color: 0x8a9092 });
-      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        const p = new THREE.Mesh(postGeo, postMat);
-        p.position.set(plot.cx + dx * s * 0.45, 0.32, plot.cz + dz * s * 0.45);
-        g.add(p);
-      }
-      const label = this._makeLabelSprite(kind.icon, '');
-      label.position.set(plot.cx, 2.1, plot.cz);
-      g.add(label);
-      g.userData.label = label;
-      g.userData.labelPos = [plot.cx, plot.cz];
-    }
+    const [mx, mz] = plot.kind === 'wall' ? [plot.gate[0] + 0.5, plot.gate[1] + 0.5] : [plot.cx, plot.cz];
+    const beacon = this._makeBeacon(mx, mz);
+    g.add(beacon);
+    g.userData.beacon = beacon;
+    const label = this._makeLabelSprite(kind.icon, '');
+    label.position.set(mx, 2.1, mz);
+    g.add(label);
+    g.userData.label = label;
+    g.userData.labelPos = [mx, mz];
 
     // Ghost preview: a translucent night-blue silhouette of the building that
     // WILL rise here — you see what you're paying for (Thronefall's trick).
@@ -1329,11 +1321,18 @@ class App {
 
       const heroNear = mh && !mh.dead &&
         (mh.x - ud.payPoint[0]) ** 2 + (mh.z - ud.payPoint[1]) ** 2 < 100;
-      // Label: just the icon — the coin pips below carry the price visually.
+      // Minimal at distance: only the beacon marks a plot. Icon, ghost and
+      // pips appear when this is the plot you'd actually fund.
+      const active = plot.id === pipPlotId || (nt.branch && heroNear);
+      if (ud.ghost) ud.ghost.visible = !built && plot.id === pipPlotId;
+      if (ud.beacon.visible) {
+        const gem = ud.beacon.userData.gem;
+        gem.rotation.y = t * 2;
+        gem.position.y = 0.95 + Math.sin(t * 2.4 + plot.id) * 0.08;
+      }
       const wantSub = nt.branch ? 'choose!' : '';
       const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
-      // Built plots advertise their upgrade only when you ride close.
-      ud.label.visible = !built || heroNear;
+      ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
@@ -1532,12 +1531,30 @@ class App {
           e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
           s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
         };
-        const H = tier >= 2 ? 1.3 : 0.95;
-        const stone = tier >= 2 ? 0xa2a8a8 : 0x8f9698;
+        // Barrier ladder: razorwire fence → plasteel barricade → shock/bastion.
+        const shock = b.branch === 'shock';
+        const bastion = b.branch === 'bastion';
         const capCol = 0x3d4246;
+        const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
+        if (tier === 1 && !b.gate) {
+          // Razorwire: gunmetal post + taut wire strands to each neighbor.
+          box(0.16, 0.78, 0.16, 0x565c60, 0, 0.39);
+          box(0.2, 0.06, 0.2, 0xe8a83c, 0, 0.81); // hazard cap
+          const wires = [
+            nb.e && [0.5, 0.25, 0], nb.w && [0.5, -0.25, 0],
+            nb.s && [0, 0, 0.25], nb.n && [0, 0, -0.25],
+          ].filter(Boolean);
+          for (const [wx, px, pz] of wires) {
+            for (const wy of [0.3, 0.6]) {
+              box(wx ? 0.5 : 0.045, 0.045, wx ? 0.045 : 0.5, 0x9aa0a2, px, wy, pz);
+            }
+          }
+          break;
+        }
+        const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
+        const stone = bastion ? 0xa8aeae : tier === 1 ? 0x767c7e : 0x8f9698;
         if (b.gate) {
           // Gatehouse: two towers flanking the passage, an arch overhead.
-          const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
           const towH = H + 0.75;
           for (const side of [-1, 1]) {
             const px = alongX ? 0 : side * 0.38, pz = alongX ? side * 0.38 : 0;
@@ -1560,6 +1577,17 @@ class App {
         for (const [w, dep, px, pz] of panels) {
           box(w, H, dep, stone, px, H / 2, pz);
           box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
+          // Shock fence: a live plasma conduit runs the parapet — glows at night.
+          if (shock) {
+            const strip = box(w === 0.5 ? 0.52 : 0.1, 0.07, dep === 0.5 ? 0.52 : 0.1, 0x4dd8c8, px, H + 0.19, pz);
+            strip.material.emissive.setHex(0x4dd8c8);
+            strip.material.emissiveIntensity = 0.9;
+          }
+        }
+        if (shock) {
+          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, 0, H + 0.34);
+          core.material.emissive.setHex(0x4dd8c8);
+          core.material.emissiveIntensity = 1.0;
         }
         if (!panels.length) box(0.9, H, 0.9, stone, 0, H / 2); // stranded stub (shouldn't happen)
         break;
@@ -2154,6 +2182,9 @@ class App {
           this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : 0.18);
           break;
         }
+        case 'zap':
+          this.burst(e.x, 0.6, e.z, { count: 5, color: 0x4dd8c8, speed: 1.8, life: 0.25, size: 0.4, up: 1.4 });
+          break;
         case 'weavehit':
           this.burst(e.x, 0.7, e.z, { count: 8, color: 0x7fd85e, speed: 2.0, life: 0.35, size: 0.5, up: 1.5 });
           this.burst(e.x, 0.6, e.z, { count: 4, color: 0x9c1f1f, speed: 1.4, life: 0.3, size: 0.4, up: 1.2 });

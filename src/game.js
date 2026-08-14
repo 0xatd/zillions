@@ -261,7 +261,10 @@ export class Game {
     if (!t) return null;
     if (t.branch) {
       const opt = t.options[plot.branch];
-      return opt ? { ...opt, branch: plot.branch } : null;
+      if (!opt) return null;
+      const def = { ...opt, branch: plot.branch };
+      if (kind.perTile) def.cost = Math.ceil(def.cost * plot.tiles.length);
+      return def;
     }
     if (kind.perTile) {
       return { ...t, cost: Math.ceil(t.cost * plot.tiles.length) };
@@ -1347,7 +1350,16 @@ export class Game {
       if (zb.atkT <= 0) {
         zb.atkT = 0.85;
         const b = this.buildings.find((o) => o.id === occId);
-        if (b) this._damageBuilding(b, zb.def.dmg);
+        if (b) {
+          this._damageBuilding(b, zb.def.dmg);
+          // Shock fence: every bite bites back.
+          if (b.def.zap) {
+            this.damageZombie(zb, b.def.zap, b.cx, b.cz);
+            zb.slowT = Math.max(zb.slowT || 0, 0.9);
+            zb.slowMul = Math.min(zb.slowMul || 1, 0.7);
+            this.emit({ type: 'zap', x: zb.x, z: zb.z });
+          }
+        }
       }
       return;
     }

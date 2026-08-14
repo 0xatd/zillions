@@ -52,6 +52,11 @@ of tower plots. Chokepoints, by design.
 - **Raze the hives.** Nests are guarded but destroyable — attack one by day
   and it never spawns again. Raze every nest on a campaign map and the land
   is won outright, boss or no boss.
+- **Barriers are bought whole.** Each rampart segment is ONE purchase at its
+  gate — pay once and the entire stretch rises, never piece by piece.
+  Upgrade the same way: Razorwire Fence → Plasteel Barricade → then choose
+  its final form: **Shock Fence** (electrified, zaps and slows whatever
+  chews it) or **Bastion Wall** (double armor).
 - **Ruins rebuild free at dawn** — losing a building costs you its function for
   the night and its dawn payout, not the building itself.
 - **Camps field troops** that respawn each dawn and fight entirely on their

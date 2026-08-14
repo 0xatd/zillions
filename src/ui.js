@@ -497,7 +497,7 @@ export class UI {
     if (this._branchId === info.plot.id) return;
     this._branchId = info.plot.id;
     panel.classList.remove('hidden');
-    panel.innerHTML = `<div class="branchtitle">Choose a doctrine for this tower:</div>`;
+    panel.innerHTML = `<div class="branchtitle">${info.plot.kind === 'wall' ? "Choose this barrier's final form:" : 'Choose a doctrine for this tower:'}</div>`;
     const row = document.createElement('div');
     row.className = 'branchrow';
     for (const [key, opt] of Object.entries(info.options)) {

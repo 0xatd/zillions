@@ -95,13 +95,22 @@ export const PLOT_KINDS = {
     desc: 'Automated defense. At the top tier, choose ballista or flame.',
   },
   wall: {
-    name: 'Wall', icon: '🧱',
-    perTile: true, // cost scales with segment length
+    name: 'Barrier', icon: '🧱',
+    perTile: true, // cost scales with segment length — but it's ONE purchase
     tiers: [
-      { name: 'Palisade', cost: 1.4, hp: 380 },
-      { name: 'Stone Wall', cost: 2.6, hp: 820 },
+      { name: 'Razorwire Fence', cost: 0.8, hp: 220 },
+      { name: 'Plasteel Barricade', cost: 1.8, hp: 520 },
+      {
+        branch: true, // stand at the gate and choose the segment's final form
+        options: {
+          shock: { name: 'Shock Fence', icon: '⚡', cost: 2.8, hp: 700, zap: 7,
+            blurb: 'Electrified — everything chewing it takes damage and slows.' },
+          bastion: { name: 'Bastion Wall', icon: '🧱', cost: 2.8, hp: 1400,
+            blurb: 'Twice the armor. The dead gnaw a long time.' },
+        },
+      },
     ],
-    desc: 'A rampart with a gate your troops can pass. The dead must chew through.',
+    desc: 'ONE payment at the gate raises this ENTIRE segment — never piece by piece. Upgrade it the same way; at the top, choose shock or bastion.',
   },
   camp_militia: {
     name: 'Militia Camp', icon: '⚔️',
