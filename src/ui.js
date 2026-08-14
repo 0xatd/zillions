@@ -24,7 +24,7 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by holding B at a foundation">🪙 <b>0</b></div>
+        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by holding SPACE at a foundation">🪙 <b>0</b></div>
         <div class="res" id="r-day" title="Day and time until nightfall">☀️ <b>Day 1</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
         <div class="sep"></div>
@@ -42,8 +42,8 @@ export class UI {
       <div id="messages"></div>
 
       <div id="actionbar" class="hidden">
-        <div class="rallyhints">
-          <span><b>1</b> rally all</span><span><b>2</b> militia</span><span><b>3</b> ranged</span>
+        <div class="rallyhints" id="stancebar">
+          <span class="stance" data-st="defend"><b>1</b> 🛡️ defend</span><span class="stance" data-st="guard"><b>2</b> 🚩 guard</span><span class="stance" data-st="attack"><b>3</b> ⚔️ attack</span>
         </div>
         <div class="actionmain">
           <div id="heroplate">
@@ -148,12 +148,12 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to sprint. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Your buildings pay coins every dawn. Ride through coins to collect them.</div>
-            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>B</b> — coins fly from your purse until it rises. Same to upgrade. Top-tier towers let you choose a doctrine.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> — coins fly from your purse until it rises (a ghost shows what will be built). Same to upgrade. Top-tier towers let you choose a doctrine.</div>
             <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
-            <div><b>🔔 Ready early?</b> Press SPACE by day to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
-            <div><b>🚩 Your troops fight alone,</b> but press 1 to rally the army to you — press 1 again and they hold position. 2 = militia, 3 = ranged.</div>
+            <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
+            <div><b>⚔️ Your army fights on its own</b> — you only set its stance: <b>1</b> DEFEND (hold the city), <b>2</b> GUARD (escort you), <b>3</b> ATTACK (march out, hunt the dead, push the hives).</div>
             <div><b>👑 Level up</b> from nearby kills. Your special grows stronger at levels 4 and 7.</div>
             <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
           </div>
@@ -365,6 +365,9 @@ export class UI {
   initHUD(game, p) {
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
+    for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
+      chip.onclick = () => this.cb.onStance && this.cb.onStance(chip.dataset.st);
+    }
     const h = game.heroes[p];
     const d = h.def;
     const face = this.root.querySelector('#a-face');
@@ -401,6 +404,14 @@ export class UI {
           ? `${phase} <b>Night ${game.night} falls…</b>`
           : `${phase} <b>Day ${game.night}</b>${game.mode === 'survival' ? '' : ' / ' + FINAL_NIGHT}`;
     q('#r-day').classList.toggle('danger', game.isNight || game.belling);
+
+    // Active army stance chip.
+    if (this._stance !== game.stance) {
+      this._stance = game.stance;
+      for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
+        chip.classList.toggle('sel', chip.dataset.st === game.stance);
+      }
+    }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
     // Hero plate.
@@ -432,7 +443,7 @@ export class UI {
       } else if (game.phase === 'day' && !game.belling) {
         this._bigMode = 'bell';
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE</small></span>`;
+        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE at the Keep</small></span>`;
         big.disabled = false;
       } else {
         this._bigMode = 'cast';

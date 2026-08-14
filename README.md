@@ -42,9 +42,10 @@ circles it all. The only ways in are the four gates, each flanked by a pair
 of tower plots. Chokepoints, by design.
 
 - **Days are untimed.** Collect the coins your buildings paid out at dawn,
-  then walk to a glowing foundation and **hold B** — coins arc out of your
-  purse one by one until the building pops up (partial payments persist).
-  Hold B beside a built structure to upgrade it. Top-tier towers make you
+  then walk to a glowing foundation and **hold Space** — coins arc out of
+  your purse one by one into the coin slots above the plot while a ghost
+  shows the building to come (partial payments persist). Hold Space beside
+  a built structure to upgrade it. Top-tier towers make you
   choose a doctrine: ballista (single-target sniper) or flame (splash).
 - **Ring the bell** (Space) when ready — night falls, and the horde marches
   out of its hive nests (red-beaconed all day). Night ends when the wave dies.
@@ -53,8 +54,10 @@ of tower plots. Chokepoints, by design.
   is won outright, boss or no boss.
 - **Ruins rebuild free at dawn** — losing a building costs you its function for
   the night and its dawn payout, not the building itself.
-- **Camps field troops** that respawn each dawn. Press 1/2/3 to rally the
-  army / militia / ranged to follow you, press again to hold position.
+- **Camps field troops** that respawn each dawn and fight entirely on their
+  own, creep-style — you never micro them, you only set the army's stance:
+  **1 Defend** holds the city, **2 Guard** escorts your hero, **3 Attack**
+  sends them out to hunt the dead and push the hive nests.
 - **Campaign**: survive 10 nights (or raze every hive); a unique boss leads
   the final horde on each of the 5 maps. **Survival**: endless nights, a boss
   every fifth — your record is the number of nights you lasted.
@@ -92,11 +95,11 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 | Input | Action |
 | --- | --- |
 | WASD / arrows | Move your hero (camera follows) |
-| Shift | Sprint |
-| Space | Found the city (at a site) · Day: ring the bell · Night: cast your special |
-| B (hold) | Build / upgrade the foundation you're standing at |
+| Shift | Gallop (full health only, like Thronefall) |
+| Space | THE interact key: found the city at a site · HOLD at a foundation to build · ring the bell at the Keep · cast your special at night |
+| B (hold) | Build / upgrade (alias for holding Space) |
 | Q | Cast your special |
-| 1 / 2 / 3 | Rally army / militia / ranged (toggle follow ↔ hold) |
+| 1 / 2 / 3 | Army stance: Defend (hold city) / Guard (escort you) / Attack (hunt & push hives) |
 | Mouse wheel | Zoom |
 | Z / C | Rotate camera |
 | P | Pause (solo) |

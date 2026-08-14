@@ -69,6 +69,7 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k, camp: this.campFor(k) }); },
       onFound: () => this._tryFound(),
+      onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => location.reload(),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
@@ -175,6 +176,7 @@ class App {
     const level = LEVELS[levelId - 1] || LEVELS[0];
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
+    this.pal = level.theme.palette; // drives sky/fog grading
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -350,10 +352,10 @@ class App {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD B — your coins build it. Coins appear at dawn — ride through them!'],
+      [14, '💰 Walk to a glowing foundation and HOLD SPACE — your coins build it. Coins appear at dawn — ride through them!'],
       [24, '🌙 The horde marches every night from the hive nests. Raze a nest by day and it never spawns again!'],
-      [36, '🔔 Ready early? Press SPACE to ring the bell and start the night.'],
-      [48, '🚩 Press 1 to rally your troops to you. Press 1 again and they hold position.'],
+      [36, '🔔 Ready early? Ride to the KEEP and press SPACE to ring the bell and start the night.'],
+      [48, '⚔️ Your army fights by itself — set its stance: 1 defend the city, 2 guard you, 3 attack!'],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -726,21 +728,23 @@ class App {
   }
 
   _setupLights() {
-    // Grimdark mood: low amber sun through ashen haze.
-    this.sun = new THREE.DirectionalLight(0xffd9a8, 2.3);
-    this.sun.position.set(60, 90, 30);
+    // Cel look: one warm sun sitting LOW so every tree and tower throws a
+    // long graphic shadow; shadows are filled with saturated cool ambient
+    // (navy, never black) — the reference's colored-shadow trick.
+    this.sun = new THREE.DirectionalLight(0xfff0cf, 2.6);
+    this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    const s = 55;
-    Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 260 });
+    const s = 62;
+    Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0x8fa3b8, 0x3a4230, 0.75);
+    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x35507a, 0.85);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x3a3e50, 0.45);
+    this.amb = new THREE.AmbientLight(0x33406e, 0.5);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.FogExp2(0x707a84, 0.0075);
-    this.scene.background = new THREE.Color(0x707a84);
+    this.scene.fog = new THREE.FogExp2(0xa8cfc4, 0.0045);
+    this.scene.background = new THREE.Color(0xa8cfc4);
   }
 
   // ---------------- particles ----------------
@@ -907,12 +911,18 @@ class App {
     armGeo.translate(0, 0.6, 0.28);
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
+    // Glowing eye-strip (unlit material — burns through the navy night).
+    const eyeGeo = new THREE.BoxGeometry(0.18, 0.05, 0.04);
+    eyeGeo.translate(0, 0.87, 0.16);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
     this.zBody = new THREE.InstancedMesh(bodyGeo, mat, ZMAX);
     this.zHead = new THREE.InstancedMesh(headGeo, mat.clone(), ZMAX);
     this.zArm = new THREE.InstancedMesh(armGeo, mat.clone(), ZMAX);
-    for (const m of [this.zBody, this.zHead, this.zArm]) {
+    this.zEyes = new THREE.InstancedMesh(eyeGeo, eyeMat, ZMAX);
+    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.castShadow = true;
+      m.castShadow = m !== this.zEyes;
       m.frustumCulled = false;
       m.count = 0;
       this.scene.add(m);
@@ -939,14 +949,18 @@ class App {
       this.zBody.setMatrixAt(i, d.matrix);
       this.zHead.setMatrixAt(i, d.matrix);
       this.zArm.setMatrixAt(i, d.matrix);
+      this.zEyes.setMatrixAt(i, d.matrix);
       if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
       else c.setHex(zb.def.color);
       this.zBody.setColorAt(i, c);
       this.zArm.setColorAt(i, c);
       c.multiplyScalar(0.8);
       this.zHead.setColorAt(i, c);
+      // Eyes: hunting dead burn red, idle wanderers smoulder amber.
+      c.setHex(zb.state === 2 ? 0xff4636 : 0xd8973a);
+      this.zEyes.setColorAt(i, c);
     }
-    for (const m of [this.zBody, this.zHead, this.zArm]) {
+    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
       m.count = n;
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
@@ -1142,6 +1156,47 @@ class App {
     return sp;
   }
 
+  _makePipSprite() {
+    const cnv = document.createElement('canvas');
+    cnv.width = 256; cnv.height = 96;
+    const tex = new THREE.CanvasTexture(cnv);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    sprite.scale.set(3.0, 1.125, 1);
+    return { sprite, ctx: cnv.getContext('2d'), tex, key: -1 };
+  }
+
+  // Draw `total` coin slots, `filled` of them paid — gold discs vs open rings.
+  _drawPips(pips, total, filled) {
+    const key = total * 100 + filled;
+    if (pips.key === key) return;
+    pips.key = key;
+    const ctx = pips.ctx;
+    ctx.clearRect(0, 0, 256, 96);
+    const perRow = Math.min(total, 6);
+    const rows = Math.ceil(total / perRow);
+    for (let i = 0; i < total; i++) {
+      const row = (i / perRow) | 0;
+      const inRow = row === rows - 1 ? total - perRow * row : perRow;
+      const cx = 128 - (inRow * 36) / 2 + 18 + (i - row * perRow) * 36;
+      const cy = 30 + row * 38 - (rows - 1) * 10;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 13, 0, Math.PI * 2);
+      if (i < filled) {
+        ctx.fillStyle = '#f5c542';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#8a6a1e';
+      } else {
+        ctx.fillStyle = 'rgba(10,14,30,0.3)';
+        ctx.fill();
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      }
+      ctx.stroke();
+    }
+    pips.tex.needsUpdate = true;
+  }
+
   _makePlotGroup(plot) {
     const g = new THREE.Group();
     const kind = PLOT_KINDS[plot.kind];
@@ -1166,13 +1221,13 @@ class App {
       const s = plot.size;
       const pad = new THREE.Mesh(
         new THREE.BoxGeometry(s + 0.3, 0.14, s + 0.3),
-        new THREE.MeshLambertMaterial({ color: 0x55524a }),
+        new THREE.MeshLambertMaterial({ color: 0x7a8082 }),
       );
       pad.position.set(plot.cx, 0.07, plot.cz);
       pad.receiveShadow = true;
       g.add(pad);
       const postGeo = new THREE.BoxGeometry(0.14, 0.5, 0.14);
-      const postMat = new THREE.MeshLambertMaterial({ color: 0x6a6152 });
+      const postMat = new THREE.MeshLambertMaterial({ color: 0x8a9092 });
       for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         const p = new THREE.Mesh(postGeo, postMat);
         p.position.set(plot.cx + dx * s * 0.45, 0.32, plot.cz + dz * s * 0.45);
@@ -1184,6 +1239,31 @@ class App {
       g.userData.label = label;
       g.userData.labelPos = [plot.cx, plot.cz];
     }
+
+    // Ghost preview: a translucent night-blue silhouette of the building that
+    // WILL rise here — you see what you're paying for (Thronefall's trick).
+    if (plot.kind !== 'wall' && plot.kind !== 'hq') {
+      const fake = {
+        kind: plot.kind, branch: null, plotTier: 1, gate: false,
+        size: plot.size, x: plot.x, z: plot.z, cx: plot.cx, cz: plot.cz, id: 0,
+      };
+      const ghost = this._makeBuildingMesh(fake);
+      if (!this._ghostMat) {
+        // Unlit night-blue: reads as a shadow of the future, never as stone.
+        this._ghostMat = new THREE.MeshBasicMaterial({ color: 0x1c2438, transparent: true, opacity: 0.45, depthWrite: false });
+      }
+      ghost.traverse((o) => { if (o.isMesh) { o.material = this._ghostMat; o.castShadow = false; o.receiveShadow = false; } });
+      ghost.position.set(plot.cx, 0, plot.cz);
+      g.add(ghost);
+      g.userData.ghost = ghost;
+    }
+
+    // Coin pips: the cost as a row of slots that FILL as your gold streams in.
+    const pips = this._makePipSprite();
+    const [lx0, lz0] = g.userData.labelPos;
+    pips.sprite.position.set(lx0, 3.0, lz0);
+    g.add(pips.sprite);
+    g.userData.pips = pips;
 
     // Glow ring at the pay point + radial progress arc.
     const [px, pz] = this.game.payPoint(plot);
@@ -1210,6 +1290,19 @@ class App {
   _syncPlots(t) {
     const g = this.game;
     const mh = this.myHero();
+    if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
+    // Pips belong to ONE plot: the nearest fundable one within reach.
+    let pipPlotId = -1;
+    if (mh && !mh.dead) {
+      let bd = 4.5 * 4.5;
+      for (const plot of g.plots) {
+        const nt = g.nextTier(plot);
+        if (!nt || nt.branch) continue;
+        const [px, pz] = g.payPoint(plot);
+        const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
+        if (d < bd) { bd = d; pipPlotId = plot.id; }
+      }
+    }
     for (const plot of g.plots) {
       let rec = this.plotMeshes.get(plot.id);
       if (!rec) {
@@ -1221,22 +1314,23 @@ class App {
       const ud = rec.group.userData;
       const nt = g.nextTier(plot);
       const built = plot.tier > 0;
-      // Foundation scenery (pad, posts, rubble) hides once something stands here.
+      // Foundation scenery (pad, posts, rubble, ghost) hides once built.
       rec.group.children.forEach((ch) => {
-        if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog) ch.visible = !built;
+        if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
       });
 
       if (!nt) { // fully built & maxed
         ud.label.visible = false;
         ud.ring.visible = false;
         ud.prog.visible = false;
+        if (ud.pips) ud.pips.sprite.visible = false;
         continue;
       }
 
       const heroNear = mh && !mh.dead &&
         (mh.x - ud.payPoint[0]) ** 2 + (mh.z - ud.payPoint[1]) ** 2 < 100;
-      // Label: icon + cost, only interesting while there's something to buy.
-      const wantSub = nt.branch ? 'choose!' : `${Math.max(1, Math.ceil(nt.cost - plot.paid))}`;
+      // Label: just the icon — the coin pips below carry the price visually.
+      const wantSub = nt.branch ? 'choose!' : '';
       const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
       // Built plots advertise their upgrade only when you ride close.
       ud.label.visible = !built || heroNear;
@@ -1249,6 +1343,18 @@ class App {
         rec.group.add(ud.label);
       }
       if (ud.label.visible) ud.label.position.y = (built ? 3.1 : 2.1) + Math.sin(t * 2 + plot.id) * 0.12;
+
+      // Coin pips: cost as slots, filling as gold streams in — shown only
+      // when you ride close (a city of floating rings is noise, not info).
+      if (ud.pips) {
+        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        if (ud.pips.sprite.visible) {
+          const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
+          const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
+          this._drawPips(ud.pips, total, filled);
+          ud.pips.sprite.position.y = (built ? 4.1 : 3.0) + Math.sin(t * 2 + plot.id) * 0.12;
+        }
+      }
 
       // Ring: pulse when affordable, glow bright while paying.
       ud.ring.visible = true;
@@ -1310,53 +1416,53 @@ class App {
 
     switch (b.kind) {
       case 'hq': {
-        box(3.6, 1.2, 3.6, 0x45474d, 0, 0.6);
-        box(2.5, 1.1, 2.5, 0x393b41, 0, 1.7);
-        cyl(0.55, 0.65, 2.2, 0x565a62, 1.15, 1.8, 1.15, 8);
-        cone(0.8, 0.9, 0x6e1f1f, 1.15, 3.3, 1.15);
-        if (tier >= 2) { cyl(0.55, 0.65, 2.2, 0x565a62, -1.15, 1.8, -1.15, 8); cone(0.8, 0.9, 0x6e1f1f, -1.15, 3.3, -1.15); }
+        box(3.6, 1.2, 3.6, 0xd8d4c6, 0, 0.6);
+        box(2.5, 1.1, 2.5, 0xc9c4b4, 0, 1.7);
+        cyl(0.55, 0.65, 2.2, 0xcfcaba, 1.15, 1.8, 1.15, 8);
+        cone(0.8, 0.9, 0xa8352e, 1.15, 3.3, 1.15);
+        if (tier >= 2) { cyl(0.55, 0.65, 2.2, 0xcfcaba, -1.15, 1.8, -1.15, 8); cone(0.8, 0.9, 0xa8352e, -1.15, 3.3, -1.15); }
         if (tier >= 3) {
-          box(1.6, 1.2, 1.6, 0x4e5058, 0, 2.9);
-          cone(1.2, 1.1, 0x8f1f1f, 0, 4.1);
+          box(1.6, 1.2, 1.6, 0xd4cfc0, 0, 2.9);
+          cone(1.2, 1.1, 0xbf3f34, 0, 4.1);
         } else {
-          cone(1.7, 1.0, 0x50242a, 0, 2.7, 0);
+          cone(1.7, 1.0, 0x8f2d28, 0, 2.7, 0);
         }
         box(0.06, 1.8, 0.06, 0x333333, -1.1, 3.3, -1.1);
-        const flag = box(0.7, 0.4, 0.02, 0xa8232d, -0.72, 3.9, -1.1);
+        const flag = box(0.7, 0.4, 0.02, 0xc85a48, -0.72, 3.9, -1.1);
         g.userData.flag = flag;
         windows(6, 1.0, 1.75);
         break;
       }
       case 'house': {
         if (tier === 1) {
-          box(1.3, 0.7, 1.1, 0x6a5c48, 0, 0.35);
-          cone(1.0, 0.7, 0x5c3028, 0, 1.05);
+          box(1.3, 0.7, 1.1, 0xd8d4c6, 0, 0.35);
+          cone(1.0, 0.7, 0xa8352e, 0, 1.05);
         } else if (tier === 2) {
-          box(1.5, 1.0, 1.3, 0x6e6050, 0, 0.5);
-          cone(1.15, 0.8, 0x5c3028, 0, 1.4);
-          box(0.35, 0.5, 0.06, 0x4a4237, 0, 0.25, 0.68);
+          box(1.5, 1.0, 1.3, 0xdcd8ca, 0, 0.5);
+          cone(1.15, 0.8, 0xa8352e, 0, 1.4);
+          box(0.35, 0.5, 0.06, 0x565c60, 0, 0.25, 0.68);
         } else {
-          box(1.6, 1.5, 1.4, 0x746656, 0, 0.75);
-          box(1.0, 0.8, 1.0, 0x66584a, 0.5, 1.9, 0.3);
-          cone(1.25, 0.9, 0x50242a, 0, 2.0);
-          cone(0.8, 0.7, 0x50242a, 0.5, 2.6, 0.3);
+          box(1.6, 1.5, 1.4, 0xe0dccd, 0, 0.75);
+          box(1.0, 0.8, 1.0, 0xbfbaaa, 0.5, 1.9, 0.3);
+          cone(1.25, 0.9, 0x8f2d28, 0, 2.0);
+          cone(0.8, 0.7, 0x8f2d28, 0.5, 2.6, 0.3);
         }
         windows(tier + 1, tier >= 3 ? 0.8 : 0.4, 0.72);
         break;
       }
       case 'farm': {
-        box(1.9, 0.1, 1.9, 0x463a28, 0, 0.05);
-        for (let r = 0; r < 3; r++) box(1.7, 0.16, 0.34, tier >= 2 ? 0x6e8138 : 0x5c6e38, 0, 0.14, -0.6 + r * 0.6);
-        if (tier >= 2) { box(0.6, 0.55, 0.6, 0x54473a, 0.65, 0.32, 0.65); cone(0.55, 0.45, 0x5c3028, 0.65, 0.82, 0.65); }
+        box(1.9, 0.1, 1.9, 0x6e5a40, 0, 0.05);
+        for (let r = 0; r < 3; r++) box(1.7, 0.16, 0.34, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.14, -0.6 + r * 0.6);
+        if (tier >= 2) { box(0.6, 0.55, 0.6, 0xd8d4c6, 0.65, 0.32, 0.65); cone(0.55, 0.45, 0xa8352e, 0.65, 0.82, 0.65); }
         break;
       }
       case 'mill': {
-        cyl(0.5, 0.7, tier >= 2 ? 2.8 : 2.2, 0x6e6a5c, 0, tier >= 2 ? 1.4 : 1.1, 0, 8);
-        cone(0.66, 0.7, 0x5c3028, 0, tier >= 2 ? 3.15 : 2.5, 0, 8);
+        cyl(0.5, 0.7, tier >= 2 ? 2.8 : 2.2, 0xd4cfc0, 0, tier >= 2 ? 1.4 : 1.1, 0, 8);
+        cone(0.66, 0.7, 0xa8352e, 0, tier >= 2 ? 3.15 : 2.5, 0, 8);
         const rotor = new THREE.Group();
         rotor.position.set(0, tier >= 2 ? 2.7 : 2.1, 0.58);
         for (let i = 0; i < 4; i++) {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0x8a8578));
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0xd9d2ba));
           blade.position.y = 0.8;
           blade.castShadow = true;
           const pivot = new THREE.Group();
@@ -1369,40 +1475,40 @@ class App {
         break;
       }
       case 'mine': {
-        box(1.9, 0.22, 1.9, 0x5e5442, 0, 0.11);
-        box(0.8, 0.8, 0.8, 0x33353a, 0, 0.62);
-        box(0.12, 1.8, 0.12, 0x2e3033, -0.45, 1.1, -0.45);
-        box(0.12, 1.8, 0.12, 0x2e3033, 0.45, 1.1, -0.45);
-        box(1.2, 0.14, 0.5, 0x2e3033, 0, 2.0, -0.45);
+        box(1.9, 0.22, 1.9, 0x8a9094, 0, 0.11);
+        box(0.8, 0.8, 0.8, 0x565c60, 0, 0.62);
+        box(0.12, 1.8, 0.12, 0x4a4440, -0.45, 1.1, -0.45);
+        box(0.12, 1.8, 0.12, 0x4a4440, 0.45, 1.1, -0.45);
+        box(1.2, 0.14, 0.5, 0x4a4440, 0, 2.0, -0.45);
         const wheel = cyl(0.34, 0.34, 0.16, 0xf3c53d, 0, 2.0, -0.45, 12);
         wheel.rotation.x = Math.PI / 2;
         g.userData.rotor = wheel;
-        if (tier >= 2) box(1.0, 0.5, 0.7, 0x4a4438, 0.55, 0.25, 0.6);
+        if (tier >= 2) box(1.0, 0.5, 0.7, 0x6e7478, 0.55, 0.25, 0.6);
         break;
       }
       case 'tower': {
         const h = 2.2 + tier * 0.45;
-        cyl(0.65, 0.85, h, tier >= 3 ? 0x5a5450 : 0x4f5258, 0, h / 2, 0, 8);
-        box(1.6, 0.22, 1.6, 0x3f4147, 0, h + 0.11);
+        cyl(0.65, 0.85, h, tier >= 3 ? 0xb0b4b2 : 0xa6aaa8, 0, h / 2, 0, 8);
+        box(1.6, 0.22, 1.6, 0x3d4246, 0, h + 0.11);
         for (const [dx, dz] of [[-0.65, -0.65], [0.65, -0.65], [-0.65, 0.65], [0.65, 0.65]]) {
-          box(0.2, 0.32, 0.2, 0x3f4147, dx, h + 0.35, dz);
+          box(0.2, 0.32, 0.2, 0x3d4246, dx, h + 0.35, dz);
         }
         const head = new THREE.Group();
         head.position.y = h + 0.35;
         if (b.branch === 'flame') {
-          const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3a3025));
+          const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
           head.add(bowl);
           const fire = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.55, 6), M(0xff7a2e, 0.9));
           fire.position.y = 0.4;
           head.add(fire);
           g.userData.flame = fire;
         } else {
-          const bal = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, b.branch === 'ballista' ? 1.5 : 0.9), M(0x2e3033));
+          const bal = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, b.branch === 'ballista' ? 1.5 : 0.9), M(0x4a4440));
           bal.position.z = 0.1;
           bal.castShadow = true;
           head.add(bal);
           if (b.branch === 'ballista') {
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.08), M(0x4a3f30));
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.08), M(0x565c60));
             arm.position.set(0, 0.1, 0.55);
             head.add(arm);
           }
@@ -1427,8 +1533,8 @@ class App {
           s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
         };
         const H = tier >= 2 ? 1.3 : 0.95;
-        const stone = tier >= 2 ? 0x63615a : 0x585448;
-        const capCol = 0x3e3c35;
+        const stone = tier >= 2 ? 0xa2a8a8 : 0x8f9698;
+        const capCol = 0x3d4246;
         if (b.gate) {
           // Gatehouse: two towers flanking the passage, an arch overhead.
           const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
@@ -1438,7 +1544,7 @@ class App {
             box(alongX ? 0.9 : 0.34, towH, alongX ? 0.34 : 0.9, stone, px, towH / 2, pz);
             box(alongX ? 1.0 : 0.44, 0.16, alongX ? 0.44 : 1.0, capCol, px, towH + 0.08, pz);
           }
-          box(alongX ? 0.9 : 0.34, 0.22, alongX ? 0.34 : 0.9, 0x6a5a40, 0, H + 0.35); // lintel
+          box(alongX ? 0.9 : 0.34, 0.22, alongX ? 0.34 : 0.9, 0xe8a83c, 0, H + 0.35); // hazard-striped lintel
           const ban = assetClone('banner', 0.7);
           if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
           break;
@@ -1462,11 +1568,11 @@ class App {
       case 'camp_ranger':
       case 'camp_sniper': {
         const col = b.kind === 'camp_militia' ? 0x3a566e : b.kind === 'camp_ranger' ? 0x4a6e3a : 0x5c4a72;
-        cone(1.0, 1.0, 0x6e6250, -0.4, 0.5, -0.3);
-        box(1.1, 0.7, 0.8, 0x44464c, 0.5, 0.35, 0.5);
+        cone(1.0, 1.0, 0xd8d4c6, -0.4, 0.5, -0.3);
+        box(1.1, 0.7, 0.8, 0x6e7478, 0.5, 0.35, 0.5);
         box(0.06, 1.7, 0.06, 0x333333, 0.9, 1.1, -0.6);
         box(0.55, 0.35, 0.02, col, 0.62, 1.7, -0.6);
-        if (tier >= 2) { box(0.8, 0.5, 0.6, 0x3f4147, -0.6, 0.25, 0.7); }
+        if (tier >= 2) { box(0.8, 0.5, 0.6, 0x3d4246, -0.6, 0.25, 0.7); }
         break;
       }
     }
@@ -1549,7 +1655,7 @@ class App {
       addB(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), 0.34, 0.86, 0);                // pauldron R
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 0.22), M(0x3a3d42)), 0, 1.0, 0);           // helm
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), M(0x35ff70, 0.9)), 0, 1.0, 0.12);   // visor glow
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x2e3033)), 0, 0.72, -0.26);       // backpack
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x4a4440)), 0, 0.72, -0.26);       // backpack
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26);
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);
       if (u.key === 'scott') {
@@ -1684,16 +1790,25 @@ class App {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (k === ' ') {
         e.preventDefault();
-        // Thronefall Space: found the city on the frontier, start the night
-        // by day, unleash your special by night.
+        // Thronefall Space — THE interact key: found the city, HOLD at a
+        // foundation to build, ring the bell AT THE KEEP, special by night.
         if (this.game.phase === 'found') this._tryFound();
-        else if (this.game.phase === 'day' && !this.game.belling) this.issue({ t: 'bell', p: this.myPlayer });
-        else this.tryCast();
+        else if (this.game.phase === 'day' && !this.game.belling) {
+          const h = this.myHero();
+          const target = h && !h.dead && this.game.buildTargetFor(h);
+          if (target) { /* hold-to-build — _updateHeroInput streams while held */ }
+          else if (h && !h.dead && this.game.hq && (h.x - this.game.hq.cx) ** 2 + (h.z - this.game.hq.cz) ** 2 < 81) {
+            this.issue({ t: 'bell', p: this.myPlayer });
+          } else {
+            this.audio.deny();
+            this.ui.showBanner('⌨️ Hold SPACE at a foundation to build · ring the bell AT THE KEEP to start the night', '', 2600);
+          }
+        } else this.tryCast();
       }
       else if (k === 'q') this.tryCast();
-      else if (k === '1') this.issue({ t: 'rally', g: 'all', p: this.myPlayer });
-      else if (k === '2') this.issue({ t: 'rally', g: 'melee', p: this.myPlayer });
-      else if (k === '3') this.issue({ t: 'rally', g: 'ranged', p: this.myPlayer });
+      else if (k === '1') this.issue({ t: 'stance', s: 'defend', p: this.myPlayer });
+      else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
+      else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();
@@ -1728,8 +1843,12 @@ class App {
       this.lastDir = { x: wx, z: wz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: +wx.toFixed(3), z: +wz.toFixed(3), s });
     }
-    // Hold B to build (Thronefall press-and-hold, Space is taken by the bell).
-    const pay = this.keys.has('b');
+    // Thronefall hold-to-build: SPACE held at a foundation streams your gold
+    // (B works too). Space only pays by day, near a plot — night Space casts.
+    const h = this.myHero();
+    const spacePays = this.keys.has(' ') && this.game && this.game.phase === 'day' && !this.game.belling
+      && h && !h.dead && !!this.game.buildTargetFor(h);
+    const pay = this.keys.has('b') || spacePays;
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -1845,19 +1964,27 @@ class App {
 
   _updateDayNight(dt) {
     const g = this.game;
-    // Phase-driven lighting with smooth transitions: bright day, blood dusk
-    // in the last seconds, near-black night.
+    // Cel-look clock: sun-drenched teal day → salmon dusk while the bell
+    // tolls → deep-NAVY night that stays fully readable (the whole scene
+    // shifts blue; warm windows and torches carry the light).
     let want;
-    if (g.phase === 'day') want = g.belling ? 0.45 : 1;
-    else want = 0.22;
+    if (g.phase === 'day' || g.phase === 'found') want = g.belling ? 0.42 : 1;
+    else want = 0;
     this._bright = this._bright === undefined ? want : this._bright + (want - this._bright) * (1 - Math.exp(-2.2 * dt));
     const b = this._bright;
+    const daySky = new THREE.Color(this.pal && this.pal.sky ? this.pal.sky : 0xa8cfc4);
+    const duskSky = new THREE.Color(0xd98a6a);
+    const nightSky = new THREE.Color(0x232b4e);
 
-    this.sun.intensity = lerp(0.2, 2.3, b);
-    this.sun.color.setHSL(0.07, lerp(0.35, 0.42, b), lerp(0.55, 0.8, b));
-    this.hemi.intensity = lerp(0.18, 0.75, b);
-    this.amb.intensity = lerp(0.5, 0.45, b);
-    const sky = new THREE.Color().setHSL(lerp(0.62, 0.08, b * 0.35), lerp(0.5, 0.16, b), lerp(0.05, 0.5, b));
+    this.sun.intensity = lerp(0.85, 2.6, b);
+    // Warm cream by day, ember at dusk, cool moon-blue at night.
+    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xfff0cf), b));
+    if (g.belling) this.sun.color.lerp(new THREE.Color(0xffb070), 0.5);
+    this.hemi.intensity = lerp(0.35, 0.85, b);
+    this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
+    this.amb.intensity = lerp(0.85, 0.5, b);
+    this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
+    const sky = nightSky.clone().lerp(g.belling ? duskSky : daySky, b);
     this.scene.background = sky;
     this.scene.fog.color.copy(sky);
 
@@ -2274,7 +2401,7 @@ class App {
           const cost = Math.max(1, Math.ceil(nt.cost - plot.paid));
           hint = mh.payHold
             ? (this.game.gold < 1 ? '🪙 Purse empty — collect coins at dawn!' : `🪙 ${cost} to go…`)
-            : `Hold <kbd>B</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)`;
+            : `Hold <kbd>SPACE</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)`;
         }
       }
       this.ui.showBuildHint(hint);

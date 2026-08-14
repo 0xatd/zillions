@@ -50,6 +50,7 @@ export class Game {
       return { id: i, x: s[0] + 0.5, z: s[1] + 0.5, hp, maxHp: hp, alive: true };
     });
 
+    this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
     this.night = 1;              // current day/night number (1..FINAL_NIGHT)
     this.phase = 'day';
@@ -90,6 +91,7 @@ export class Game {
       belling: this.belling ? +this.bellT.toFixed(3) : -1,
       gold: +this.gold.toFixed(3),
       site: this.site,
+      stance: this.stance,
       relics: [...this.relics],
       nests: this.nests.map((n) => [Math.round(n.hp), n.alive ? 1 : 0]),
       nightPlan: this.nightPlan ? { ...this.nightPlan } : null,
@@ -102,7 +104,7 @@ export class Game {
       coins: this.coins.map((cn) => [+cn.x.toFixed(2), +cn.z.toFixed(2), cn.v]),
       units: this.units.filter((u) => !u.hero).map((u) => ({
         id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
-        hp: +u.hp.toFixed(2), camp: u.camp || 0, follow: u.follow == null ? -1 : u.follow,
+        hp: +u.hp.toFixed(2), camp: u.camp || 0,
         hx: +(u.holdX || u.x).toFixed(2), hz: +(u.holdZ || u.z).toFixed(2),
       })),
       heroes: this.heroes.map((h) => ({
@@ -123,6 +125,7 @@ export class Game {
     if (snap.belling != null && snap.belling >= 0) { this.belling = true; this.bellT = snap.belling; }
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
+    this.stance = snap.stance || 'defend';
     if (this.site >= 0) this.plots = generatePlots(this.map, this.map.sites[this.site]);
     this.relics = [...(snap.relics || [])];
     this.relicMods = itemMods(this.relics);
@@ -149,7 +152,6 @@ export class Game {
       const u = this._spawnUnit(us.k, us.x, us.z, us.camp || null);
       u.id = us.id; // keep saved ids so they can't collide with future spawns
       u.hp = us.hp;
-      u.follow = us.follow < 0 ? null : us.follow;
       u.holdX = us.hx; u.holdZ = us.hz;
     }
     for (const hs of snap.heroes) {
@@ -658,38 +660,26 @@ export class Game {
     const d = UNITS[key];
     const u = {
       id: nextId++, key, def: d, x, z, hp: d.hp, maxHp: d.hp,
-      camp, follow: null, path: null, pathI: 0, cooldown: 0, target: null,
+      camp, path: null, pathI: 0, cooldown: 0, target: null,
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
     };
     this.units.push(u);
     return u;
   }
 
-  // Thronefall-style rally: press once → the group follows you; again → they
-  // hold where they stand.
-  rally(group, p = 0) {
-    const inGroup = (u) => {
-      if (u.hero) return false;
-      if (group === 'all') return true;
-      if (group === 'melee') return u.key === 'soldier';
-      return u.key === 'ranger' || u.key === 'sniper';
-    };
-    const members = this.units.filter((u) => !u.dead && inGroup(u));
-    if (!members.length) { this.emit({ type: 'deny' }); return; }
-    const allMine = members.every((u) => u.follow === p);
-    for (const u of members) {
-      if (allMine) {
-        u.follow = null;
-        u.holdX = u.x; u.holdZ = u.z;
-        u.path = null;
-      } else {
-        u.follow = p;
-        u.path = null;
-      }
-    }
-    const label = group === 'all' ? 'The army' : group === 'melee' ? 'The militia' : 'The rangers';
-    this.msg(allMine ? `🛑 ${label} holds position.` : `🚩 ${label} rallies to ${this.heroes[p].def.name}!`, 'info');
-    this.emit({ type: allMine ? 'hold' : 'rally', x: this.heroes[p].x, z: this.heroes[p].z });
+  // Army stance — DotA-creep control: no unit micro, just one order for the
+  // whole army. DEFEND holds the city, GUARD escorts the heroes, ATTACK
+  // marches out to hunt the dead and push the hives on its own.
+  setStance(st, p = 0) {
+    if (!['defend', 'guard', 'attack'].includes(st) || st === this.stance) return;
+    this.stance = st;
+    // Defenders remember where home is right now.
+    if (st === 'defend') for (const u of this.units) if (!u.hero && !u.dead) { u.holdX = u.x; u.holdZ = u.z; }
+    const h = this.heroes[p];
+    this.msg(st === 'defend' ? '🛡️ The army falls back to hold the line.'
+      : st === 'guard' ? `🚩 The army forms up around ${h ? h.def.name : 'the heroes'}.`
+      : '⚔️ The army marches out to hunt!', 'info');
+    this.emit({ type: st === 'defend' ? 'hold' : 'rally', x: h ? h.x : 0, z: h ? h.z : 0 });
   }
 
   // ---------- hero ----------
@@ -731,7 +721,7 @@ export class Game {
         if (h) h.payHold = !!c.on;
         break;
       }
-      case 'rally': this.rally(c.g, c.p || 0); break;
+      case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'bell': this.bell(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
@@ -867,7 +857,9 @@ export class Game {
     // as standing, so nuzzling a structure funds its upgrade.
     if (h.mx !== 0 || h.mz !== 0) {
       const len = Math.hypot(h.mx, h.mz) || 1;
-      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed) * (h.sprint ? 1.5 : 1)
+      // Thronefall gallop rule: sprint only at full health.
+      const canSprint = h.sprint && h.hp >= h.maxHp - 0.5;
+      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed) * (canSprint ? 1.5 : 1)
         * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
@@ -1385,10 +1377,15 @@ export class Game {
       if (u.dead) continue;
 
       if (!u.hero) {
-        if (u.follow != null) {
-          // Rally: shadow the hero, loosely fanned out by id.
-          const h = this.heroes[u.follow];
-          if (h && !h.dead) {
+        if (this.stance === 'guard') {
+          // GUARD: escort the nearest living hero, loosely fanned out by id.
+          let h = null, hd = Infinity;
+          for (const hh of this.heroes) {
+            if (hh.dead) continue;
+            const d = dist2(u.x, u.z, hh.x, hh.z);
+            if (d < hd) { hd = d; h = hh; }
+          }
+          if (h) {
             const a = (u.id % 8) / 8 * Math.PI * 2;
             const tx = h.x + Math.cos(a) * 1.8, tz = h.z + Math.sin(a) * 1.8;
             const dx = tx - u.x, dz = tz - u.z;
@@ -1400,8 +1397,23 @@ export class Game {
               u.moving = true;
             } else u.moving = false;
           }
+        } else if (this.stance === 'attack') {
+          // ATTACK: creep-wave — close on the hunted target, else push the
+          // nearest hive. The army fights entirely on its own.
+          let gx = null, gz = null, stopAt = 0;
+          if (u.target && !u.target.dead) { gx = u.target.x; gz = u.target.z; stopAt = u.def.range * 0.85; }
+          else if (u.targetNest && u.targetNest.alive) { gx = u.targetNest.x; gz = u.targetNest.z; stopAt = u.def.range + 1.2; }
+          if (gx != null) {
+            const dx = gx - u.x, dz = gz - u.z;
+            const d = Math.hypot(dx, dz);
+            if (d > stopAt) {
+              this._moveActor(u, dx / d, dz / d, u.def.speed * (d > 14 ? 1.25 : 1), dt);
+              u.facing = Math.atan2(dx, dz);
+              u.moving = true;
+            } else u.moving = false;
+          } else u.moving = false;
         } else {
-          // Hold: drift back to the hold point if shoved away.
+          // DEFEND: drift back to the hold point if shoved away.
           const dx = u.holdX - u.x, dz = u.holdZ - u.z;
           const d = Math.hypot(dx, dz);
           if (d > 1.4) {
@@ -1417,19 +1429,22 @@ export class Game {
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
-        const r2 = u.def.range * u.def.range;
-        let best = null, bd = r2;
+        // Attacking troops HUNT (see far beyond weapon range); everyone else
+        // only engages what wanders into range.
+        const hunting = !u.hero && this.stance === 'attack';
+        const seek = hunting ? 30 : u.def.range;
+        let best = null, bd = seek * seek;
         for (const zb of this.zombies) {
           if (zb.dead) continue;
           const d = dist2(u.x, u.z, zb.x, zb.z);
           if (d < bd) { bd = d; best = zb; }
         }
         u.target = best;
-        // No dead in range? The living turn their guns on the hive itself.
+        // No dead around? The living turn their guns on the hive itself —
+        // attackers will cross the whole map to do it.
         u.targetNest = null;
         if (!best) {
-          const nr2 = (u.def.range + 1.5) ** 2;
-          let bn = null, bnd = nr2;
+          let bn = null, bnd = hunting ? Infinity : (u.def.range + 1.5) ** 2;
           for (const n of this.nests) {
             if (!n.alive) continue;
             const d = dist2(u.x, u.z, n.x, n.z);
@@ -1438,6 +1453,7 @@ export class Game {
           u.targetNest = bn;
         }
       }
+      const chasing = !u.hero && this.stance === 'attack'; // hunters keep far targets and close in
       const rofMult = (u.hero && u.hasteT > 0 ? u.hasteMult : 1) * (u.hero ? 1 + u.mods.rof : 1);
       const hitDmg = () => (u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg));
       if (u.target && !u.target.dead && u.cooldown <= 0) {
@@ -1458,7 +1474,7 @@ export class Game {
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
-        } else {
+        } else if (!chasing) {
           u.target = null;
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
@@ -1470,7 +1486,7 @@ export class Game {
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
-        } else {
+        } else if (!chasing) {
           u.targetNest = null;
         }
       }

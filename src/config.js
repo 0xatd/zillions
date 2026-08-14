@@ -20,14 +20,14 @@ export const TILE = {
 
 // Grimdark palette: ashen moorland, black pines, oily water, bone-dry ash.
 export const TILE_INFO = {
-  [TILE.GRASS]:    { walk: true,  build: true,  color: 0x4e5c38 },
-  [TILE.FOREST]:   { walk: true,  build: false, color: 0x33422a },
-  [TILE.WATER]:    { walk: false, build: false, color: 0x24384e },
-  [TILE.MOUNTAIN]: { walk: false, build: false, color: 0x5c5a54 },
-  [TILE.SAND]:     { walk: true,  build: true,  color: 0x8a7d5e },
-  [TILE.GOLDORE]:  { walk: true,  build: true,  color: 0x6e6240 },
-  [TILE.STONEORE]: { walk: true,  build: true,  color: 0x5e6a72 },
-  [TILE.PATH]:     { walk: true,  build: true,  color: 0x6b6353 },
+  [TILE.GRASS]:    { walk: true,  build: true,  color: 0x5a8a52 },
+  [TILE.FOREST]:   { walk: false, build: false, color: 0x35603c }, // woods are walls — hordes funnel around them
+  [TILE.WATER]:    { walk: false, build: false, color: 0x3fa0a8 },
+  [TILE.MOUNTAIN]: { walk: false, build: false, color: 0xb8b4a6 },
+  [TILE.SAND]:     { walk: true,  build: true,  color: 0xb8a878 },
+  [TILE.GOLDORE]:  { walk: true,  build: true,  color: 0x9a8448 },
+  [TILE.STONEORE]: { walk: true,  build: true,  color: 0x8a9490 },
+  [TILE.PATH]:     { walk: true,  build: true,  color: 0x8a7a5e },
 };
 
 // ---------- Plots: the city is pre-designed; you buy it to life ----------
@@ -137,23 +137,23 @@ export const START_GOLD = 14;
 export const UNITS = {
   ranger: {
     key: 'ranger', name: 'Ranger', icon: '🏹',
-    hp: 70, dmg: 7, range: 7, rof: 1.4, speed: 4.6, noise: 6, color: 0x4a6e3a,
+    hp: 70, dmg: 7, range: 7, rof: 1.4, speed: 4.6, noise: 6, color: 0x5f9e56,
   },
   soldier: {
     key: 'soldier', name: 'Trooper', icon: '🔫',
-    hp: 140, dmg: 16, range: 8, rof: 2.2, speed: 3.4, noise: 16, color: 0x3a566e,
+    hp: 140, dmg: 16, range: 8, rof: 2.2, speed: 3.4, noise: 16, color: 0x4a7ab8,
   },
   sniper: {
     key: 'sniper', name: 'Sniper', icon: '🎯',
-    hp: 90, dmg: 65, range: 14, rof: 0.55, speed: 3.0, noise: 24, color: 0x5c4a72,
+    hp: 90, dmg: 65, range: 14, rof: 0.55, speed: 3.0, noise: 24, color: 0x8a6ac8,
   },
 };
 
 // Plague-glow palette: sickly greens, jaundiced runners, bruised-purple brutes.
 export const ZOMBIES = {
-  walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x7fa843, scale: 1.0, score: 1 },
-  runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xa8983a, scale: 0.92, score: 2 },
-  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0x6e4a82, scale: 1.75, score: 8 },
+  walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x86c24e, scale: 1.0, score: 1 },
+  runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xd0c052, scale: 0.92, score: 2 },
+  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8 },
 };
 
 // A wave EVERY night, Thronefall-style, growing to a final-night crescendo.
@@ -293,7 +293,7 @@ export const LEVELS = [
     ],
     blurb: 'Rolling moorland and black pines. Learn to hold a line.',
     theme: { water: 0.33, mountain: 0.74, forest: 0.55,
-      palette: { grass: 0x4e5c38, forest: 0x33422a, water: 0x24384e, mountain: 0x5c5a54, sand: 0x8a7d5e } },
+      palette: { grass: 0x5a8a52, forest: 0x35603c, water: 0x3fa0a8, mountain: 0xb8b4a6, sand: 0xb8a878, path: 0x8a7a5e, sky: 0x9cc4b0 } },
     boss: { name: 'The Butcher', icon: '🔪', hp: 2600, dmg: 60, speed: 1.1, chase: 2.1, scale: 3.0,
       color: 0x9c2f2f, score: 60, enrage: 0.5,
       desc: 'A mountain of meat and cleavers. Enrages at half health.' },
@@ -307,7 +307,7 @@ export const LEVELS = [
     ],
     blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
     theme: { water: 0.40, mountain: 0.78, forest: 0.52,
-      palette: { grass: 0x46543a, forest: 0x2e3d2a, water: 0x1e3a35, mountain: 0x565a50, sand: 0x74705a } },
+      palette: { grass: 0x4e6a4a, forest: 0x314e38, water: 0x4e9a68, mountain: 0x9a9488, sand: 0x8a8562, path: 0x6e6a4e, sky: 0x8aa896 } },
     boss: { name: 'Plague Mother', icon: '🪳', hp: 3400, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
       color: 0x6e8f3a, score: 80, spawn: { every: 9, count: 5, type: 'walker' },
       desc: 'Every few seconds she births another brood. Kill her fast.' },
@@ -321,7 +321,7 @@ export const LEVELS = [
     ],
     blurb: 'Ash plains under a burnt sky. Nothing grows here but the horde.',
     theme: { water: 0.28, mountain: 0.66, forest: 0.66,
-      palette: { grass: 0x6a5f4a, forest: 0x4a4434, water: 0x2e3440, mountain: 0x4e4a44, sand: 0x8a7a60 } },
+      palette: { grass: 0xa86a42, forest: 0x6e4e36, water: 0xc25a2e, mountain: 0xcf9a6a, sand: 0xc28a58, path: 0x8a5e40, sky: 0xd8a878 } },
     boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
       color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },
       desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
@@ -335,7 +335,7 @@ export const LEVELS = [
     ],
     blurb: 'Grave-cold hills. The ground itself is on their side.',
     theme: { water: 0.30, mountain: 0.70, forest: 0.60,
-      palette: { grass: 0x4c4a56, forest: 0x35334a, water: 0x232840, mountain: 0x5a5866, sand: 0x6e6a78 } },
+      palette: { grass: 0x4e5c80, forest: 0x38466a, water: 0x5a9ac8, mountain: 0xc8d2e0, sand: 0x7a84a0, path: 0x8a7a88, sky: 0x7a8ab0 } },
     boss: { name: 'Gravelord', icon: '⚰️', hp: 5600, dmg: 55, speed: 0.95, chase: 1.8, scale: 3.4,
       color: 0x3f4b66, score: 130, armor: 0.35, spawn: { every: 12, count: 8, type: 'walker' },
       desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
@@ -349,7 +349,7 @@ export const LEVELS = [
     ],
     blurb: 'Where the plague began. Everything ends here.',
     theme: { water: 0.31, mountain: 0.72, forest: 0.62,
-      palette: { grass: 0x3a4032, forest: 0x252e22, water: 0x1a2432, mountain: 0x46443e, sand: 0x5e584a } },
+      palette: { grass: 0x453a5e, forest: 0x2f2848, water: 0x6a4a9a, mountain: 0x8a7aa2, sand: 0x5e5578, path: 0x6a5a72, sky: 0x584e78 } },
     boss: { name: 'The Zillion', icon: '👁️', hp: 9000, dmg: 75, speed: 1.0, chase: 2.2, scale: 4.2,
       color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.2,
       spawn: { every: 10, count: 6, type: 'runner' }, roar: { every: 15, radius: 14, dur: 3.5 },

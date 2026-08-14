@@ -20,7 +20,10 @@ export class GameMap {
   colorOf(t) {
     if (this.theme && this.theme.palette) {
       const p = this.theme.palette;
-      const map = { [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water, [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand };
+      const map = {
+        [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
+        [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
+      };
       if (map[t] !== undefined) return map[t];
     }
     return TILE_INFO[t].color;
@@ -112,6 +115,21 @@ export class GameMap {
         }
       }
       this.nestSpots.push([x, z]);
+      // Forests are impassable now — carve a natural pass from every hive
+      // toward the heart of the map so the horde always has a road to war.
+      let px = x, pz = z;
+      let guard2 = 0;
+      while (Math.hypot(px - cx, pz - cz) > 6 && guard2++ < N * 3) {
+        const ang2 = Math.atan2(cz - pz, cx - px) + (this.rng() - 0.5) * 0.7;
+        px = clamp(px + Math.cos(ang2) * 1.2, 2, N - 3);
+        pz = clamp(pz + Math.sin(ang2) * 1.2, 2, N - 3);
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const k = this.idx((px | 0) + dx, (pz | 0) + dz);
+            if (this.tiles[k] === TILE.FOREST || this.tiles[k] === TILE.MOUNTAIN) this.tiles[k] = TILE.GRASS;
+          }
+        }
+      }
     }
 
     // Precompute tile heights (corners get averaged later).
@@ -176,18 +194,19 @@ export class GameMap {
     const N = this.size;
     const group = new THREE.Group();
 
-    // Terrain: 2 triangles per tile, flat-shaded, per-tile color with variation.
+    // Terrain: 2 triangles per tile. Cel look: large SMOOTH fields of color —
+    // variation is low-frequency noise, never per-tile jitter (no checkering).
     const positions = new Float32Array(N * N * 6 * 3);
     const colors = new Float32Array(N * N * 6 * 3);
     const col = new THREE.Color();
-    const rng = makeRNG(1234);
+    const varNoise = makeNoise(makeRNG(1234));
     let p = 0;
 
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
         const t = this.tiles[this.idx(x, z)];
         col.setHex(this.colorOf(t));
-        const v = (rng() - 0.5) * 0.07;
+        const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.05;
         col.offsetHSL(0, 0, v);
 
         const h00 = this.cornerHeight(x, z);
@@ -220,18 +239,52 @@ export class GameMap {
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
     const waterMat = new THREE.MeshLambertMaterial({
-      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x27435e,
-      transparent: true, opacity: 0.8,
+      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
+      transparent: true, opacity: 0.85,
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(N / 2, -0.22, N / 2);
     group.add(water);
 
+    group.add(this._buildRipples());
     group.add(this._buildTrees());
     group.add(this._buildRocks());
     group.add(this._buildOre());
     return group;
+  }
+
+  // White foam dashes: a bright ring hugging every shoreline plus sparse
+  // open-water ripples — the hand-inked water read from the reference.
+  _buildRipples() {
+    const N = this.size;
+    const rng = makeRNG(555);
+    const spots = [];
+    for (let z = 1; z < N - 1; z++) {
+      for (let x = 1; x < N - 1; x++) {
+        if (this.tiles[this.idx(x, z)] !== TILE.WATER) continue;
+        const shore = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
+          const t = this.tiles[this.idx(x + dx, z + dz)];
+          return t !== TILE.WATER;
+        });
+        if (shore) spots.push({ x: x + 0.5, z: z + 0.5, w: 0.55 + rng() * 0.25, r: 0 });
+        else if (rng() < 0.055) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
+      }
+    }
+    const geo = new THREE.PlaneGeometry(1, 0.1);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
+    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    spots.forEach((s, i) => {
+      q.identity();
+      sc.set(s.w, 1, 1);
+      pos.set(s.x, -0.16, s.z);
+      m.compose(pos, q, sc);
+      mesh.setMatrixAt(i, m);
+    });
+    mesh.count = spots.length;
+    return mesh;
   }
 
   _scatter(tile, perTile) {
@@ -250,11 +303,12 @@ export class GameMap {
   }
 
   _buildTrees() {
-    const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.75 ? 1 : 2));
+    // Storybook pines: chunkier cones, pale trunks, sparser stands.
+    const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
     const g = new THREE.Group();
-    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.1, 0.5, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3e3020 });
-    const canopyGeo = new THREE.ConeGeometry(0.42, 1.15, 6);
+    const trunkGeo = new THREE.CylinderGeometry(0.09, 0.13, 0.55, 5);
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0xcbbfa0 });
+    const canopyGeo = new THREE.ConeGeometry(0.56, 1.35, 6);
     const canopyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
@@ -274,8 +328,9 @@ export class GameMap {
       pos.y = (0.5 + 0.45) * s.s;
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
-      // Black-pine palette: desaturated, murky greens.
-      c.setHSL(0.27 + rng() * 0.05, 0.28 + rng() * 0.15, 0.15 + rng() * 0.08);
+      // Canopies key off the map's forest color — one hue family per map.
+      c.setHex(this.colorOf(TILE.FOREST));
+      c.offsetHSL((rng() - 0.5) * 0.02, 0.04, (rng() - 0.5) * 0.06 - 0.02);
       canopies.setColorAt(i, c);
     }
     g.add(trunks, canopies);
@@ -285,7 +340,9 @@ export class GameMap {
   _buildRocks() {
     const spots = this._scatter(TILE.MOUNTAIN, (rng) => (rng() < 0.4 ? 1 : 0));
     const geo = new THREE.DodecahedronGeometry(0.4, 0);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x6a675f });
+    const mat = new THREE.MeshLambertMaterial({
+      color: this.theme && this.theme.palette ? this.theme.palette.mountain : 0xe9e2cd,
+    });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
     mesh.castShadow = true;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();

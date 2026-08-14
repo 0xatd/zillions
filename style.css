@@ -157,6 +157,17 @@ body::after {
   background: rgba(0, 0, 0, 0.6); border-radius: 12px; font-size: 22px; font-weight: 800;
 }
 
+/* army stance chips */
+#stancebar .stance { cursor: pointer; padding: 3px 8px; border-radius: 7px; border: 1px solid transparent; transition: all 0.12s; }
+#stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
+#stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
+
+/* soft vignette over the battlefield (cel-look framing) */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(8, 12, 28, 0.38) 100%);
+}
+
 /* hero items (campaign gear) */
 #a-items { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; min-height: 0; }
 .hitem {
