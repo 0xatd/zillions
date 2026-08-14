@@ -2,7 +2,7 @@
 // Pure logic — rendering/audio consume `game.events` each frame.
 import {
   BUILDINGS, UNITS, ZOMBIES, WAVES, TILE, DAY_LENGTH, FINAL_DAY,
-  START_RESOURCES, ZOMBIE_CAP, UNIT_CAP, DIFFICULTY,
+  START_RESOURCES, ZOMBIE_CAP, UNIT_CAP, DIFFICULTY, LEVELS,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
@@ -17,10 +17,13 @@ const setNextId = (v) => { nextId = v; };
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null) {
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1) {
     this.map = map;
     this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
+    this.levelId = snap ? snap.level : levelId;
+    this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
+    this.boss = null;
     this.rng = makeRNG(999);
 
     this.res = { ...START_RESOURCES };
@@ -73,7 +76,7 @@ export class Game {
       def: (u.turret || u.summon) ? { ...u.def } : undefined,
     });
     return {
-      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys,
+      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId,
       time: this.time, res: { gold: +this.res.gold.toFixed(3), wood: +this.res.wood.toFixed(3), stone: +this.res.stone.toFixed(3) },
       autoBuild: this.autoBuild, finalSpawned: this.finalSpawned,
       wavesDone: [...this.wavesDone], pendingWave: this.pendingWave || null,
@@ -88,7 +91,7 @@ export class Game {
         abil: h.abil.map((a) => ({ r: a.rank, cd: +a.cd.toFixed(1) })),
         bonusDmg: +(h.bonusDmg || 0).toFixed(1),
       })),
-      zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0]),
+      zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0]),
       pickups: this.pickups.map((p) => ({ ...p })),
     };
   }
@@ -144,7 +147,17 @@ export class Game {
 
     // Zombies re-roll their idle timers from the restored RNG — identical on
     // every peer since they all restore the same stream position afterwards.
-    for (const [type, x, z, hp, state, wave] of snap.zombies) {
+    for (const [type, x, z, hp, state, wave, boss, enraged] of snap.zombies) {
+      if (boss) {
+        this._spawnBoss(0);
+        const zb = this.boss;
+        zb.x = x; zb.z = z; zb.hp = hp;
+        if (enraged) {
+          zb.enraged = true;
+          zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
+        }
+        continue;
+      }
       const zb = this._spawnZombie(type, x, z, state === 2, !!wave);
       if (zb) { zb.hp = hp; zb.state = state; }
     }
@@ -809,6 +822,66 @@ export class Game {
     return zb;
   }
 
+  _spawnBoss(edge) {
+    const N = this.map.size;
+    const B = this.level.boss;
+    let x = N / 2, z = N / 2;
+    if (edge === 0) z = 4; else if (edge === 1) x = N - 4; else if (edge === 2) z = N - 4; else x = 4;
+    // Nudge to walkable ground.
+    for (let r = 0; r < 12; r++) {
+      if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
+      if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }
+    }
+    const def = {
+      hp: Math.round(B.hp * this.diff.mult), dmg: B.dmg, speed: B.speed, chase: B.chase,
+      color: B.color, scale: B.scale, score: B.score,
+    };
+    const zb = {
+      id: nextId++, type: 'boss', def, x, z,
+      hp: def.hp, maxHp: def.hp,
+      state: AGGRO, dirX: 0, dirZ: 0, timer: 0,
+      atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
+      wave: true, hitFlash: 0, boss: true,
+      armor: B.armor || 0, spawnT: B.spawn ? B.spawn.every : 0, roarT: B.roar ? B.roar.every : 0,
+    };
+    this.zombies.push(zb);
+    this.boss = zb;
+    this.msg(`${B.icon} ${B.name} has entered the field: "${B.desc}"`, 'bad');
+    this.emit({ type: 'bossspawn', x, z });
+    this.emit({ type: 'ping', x, z });
+  }
+
+  _updateBoss(zb, dt) {
+    const B = this.level.boss;
+    // Bosses shrug off most crowd control.
+    if (zb.stunT > 0.8) zb.stunT = 0.8;
+    if (zb.slowT > 0 && zb.slowMul < 0.75) zb.slowMul = 0.75;
+    if (B.spawn) {
+      zb.spawnT -= dt;
+      if (zb.spawnT <= 0) {
+        zb.spawnT = B.spawn.every;
+        for (let i = 0; i < B.spawn.count; i++) {
+          const a = (i / B.spawn.count) * Math.PI * 2;
+          this._spawnZombie(B.spawn.type, zb.x + Math.cos(a) * 2, zb.z + Math.sin(a) * 2, true, true);
+        }
+        this.emit({ type: 'brood', x: zb.x, z: zb.z });
+      }
+    }
+    if (B.roar) {
+      zb.roarT -= dt;
+      if (zb.roarT <= 0) {
+        zb.roarT = B.roar.every;
+        const r2 = B.roar.radius * B.roar.radius;
+        let hit = 0;
+        for (const b of this.buildings) {
+          if (b.alive && b.key === 'tower' && dist2(zb.x, zb.z, b.cx, b.cz) <= r2) { b.stunT = B.roar.dur; hit++; }
+        }
+        this.emit({ type: 'roarwave', x: zb.x, z: zb.z, r: B.roar.radius });
+        if (hit) this.msg(`${B.icon} The shriek overloads ${hit} sentry tower${hit > 1 ? 's' : ''}!`, 'warn');
+      }
+    }
+  }
+
   wakeZombies(x, z, r) {
     const r2 = r * r;
     for (const zb of this.zombies) {
@@ -847,12 +920,24 @@ export class Game {
 
   damageZombie(zb, dmg, sx, sz) {
     if (zb.hp <= 0) return;
+    if (zb.armor) dmg *= 1 - zb.armor;
     zb.hp -= dmg;
+    if (zb.boss && this.level.boss.enrage && !zb.enraged && zb.hp < zb.maxHp * this.level.boss.enrage) {
+      zb.enraged = true;
+      zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
+      this.msg(`${this.level.boss.icon} ${this.level.boss.name} ENRAGES!`, 'bad');
+      this.emit({ type: 'enrage', x: zb.x, z: zb.z });
+    }
     zb.hitFlash = 0.15;
     if (zb.state !== AGGRO) zb.state = AGGRO;
     if (zb.hp <= 0) {
       zb.dead = true;
       this.stats.kills++;
+      if (zb.boss) {
+        this.boss = null;
+        this.msg(`🏆 ${this.level.boss.name} IS SLAIN! Purge the stragglers!`, 'info');
+        this.emit({ type: 'bossdown', x: zb.x, z: zb.z });
+      }
       // Launch vector for corpse physics: away from the damage source.
       let ldx, ldz;
       if (sx !== undefined) {
@@ -961,7 +1046,7 @@ export class Game {
       const at = (w.day - 1) * DAY_LENGTH;
       if (prevTime < at && this.time >= at && !this.wavesDone.has(w.day)) {
         this.wavesDone.add(w.day);
-        let size = Math.round(w.size * this.diff.mult);
+        let size = Math.round(w.size * this.diff.mult * this.level.mult);
         let edges;
         if (w.final) {
           // Two fronts, two pulses — an epic but defensible finale.
@@ -975,6 +1060,7 @@ export class Game {
           edges = [(this.rng() * 4) | 0];
         }
         this._spawnHorde(size, edges, w.types);
+        if (w.final) this._spawnBoss(edges[0]);
         // WC3-style minimap pings at the spawn edges.
         const N = this.map.size;
         const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
@@ -1069,6 +1155,8 @@ export class Game {
       if (zb.hitFlash > 0) zb.hitFlash -= dt;
       zb.timer -= dt;
       zb.atkT -= dt;
+
+      if (zb.boss) this._updateBoss(zb, dt);
 
       // Hero ability debuffs.
       if (zb.dotT > 0) { zb.dotT -= dt; this.damageZombie(zb, zb.dotDps * dt); if (zb.dead) continue; }
@@ -1323,6 +1411,7 @@ export class Game {
       if (!b.alive || b.key !== 'tower') continue;
       b.cooldown -= dt;
       if (b.rofBuffT > 0) b.rofBuffT -= dt;
+      if (b.stunT > 0) { b.stunT -= dt; continue; }
       if (b.cooldown > 0) continue;
       const r2 = b.def.range * b.def.range;
       let best = null, bd = r2;

@@ -1,6 +1,6 @@
 // Rendering, input and orchestration.
 import * as THREE from 'three';
-import { BUILDINGS, UNITS, SIM_DT, MAP_SIZE, FINAL_DAY } from './config.js';
+import { BUILDINGS, UNITS, SIM_DT, MAP_SIZE, FINAL_DAY, LEVELS } from './config.js';
 import { GameMap } from './map.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
@@ -49,10 +49,10 @@ class App {
       onStart: (d, hero) => {
         if (this.mpRole === 'guest') return; // host launches the match
         if (this.mpRole === 'host' && this.peers.length) {
-          const seed = (Math.random() * 1e9) | 0;
+          const level = this.ui.selectedLevel || 1;
           const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.peers.forEach((p, i) => p.send({ t: 'start', seed, d, heroes, you: i + 1 }));
-          this.startGame(d, null, { seed, heroes, myPlayer: 0, role: 'host' });
+          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level }));
+          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level });
         } else {
           this.startGame(d, hero);
         }
@@ -119,6 +119,7 @@ class App {
 
     // Surface profile + resumable save on the menu.
     this.ui.setProfile(this.profile);
+    this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
@@ -138,10 +139,12 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
-    const seed = snap ? snap.seed : mp ? mp.seed : (Math.random() * 1e9) | 0;
-    this.map = new GameMap(seed);
+    const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
+    const level = LEVELS[levelId - 1] || LEVELS[0];
+    const seed = snap ? snap.seed : level.seed;
+    this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
-    this.game = new Game(this.map, difficulty, heroKeys, snap);
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId);
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
@@ -159,7 +162,7 @@ class App {
     this.ui.hideStart();
     this.ui.initHeroPanel(this.game.heroes[this.myPlayer]);
     this.setSpeed(1);
-    this.ui.showBanner(mp ? 'Co-op colony founded — hold the line together!' : 'Day 1 — fortify before nightfall', '', 3000);
+    this.ui.showBanner(`${level.name} — ${level.boss.icon} ${level.boss.name} awaits on day ${FINAL_DAY}`, '', 4000);
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
   }
 
@@ -199,7 +202,10 @@ class App {
   _recordGameEnd(won) {
     const p = this.profile;
     p.games++;
-    if (won) p.wins++;
+    if (won) {
+      p.wins++;
+      p.campaign = Math.max(p.campaign || 0, this.game.levelId);
+    }
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, Math.min(this.game.day, FINAL_DAY));
     p.lastHero = this.ui.selectedHero;
@@ -303,7 +309,7 @@ class App {
     else if (m.t === 'w') this.inbox.set(m.w, m.c);
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else this.startGame(m.d, null, { seed: m.seed, heroes: m.heroes, myPlayer: m.you, role: 'guest' });
+      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level });
     }
     else if (m.t === 'desync' && !this.desynced) {
       this.desynced = true;
@@ -1483,6 +1489,35 @@ class App {
         case 'night':
           this.audio.night();
           break;
+        case 'bossspawn':
+          this.audio.bossHorn();
+          this.shake = Math.max(this.shake, 1.2);
+          this.burst(e.x, 0.5, e.z, { count: 30, color: 0xff3c2e, speed: 3, life: 1, size: 0.8, up: 3 });
+          break;
+        case 'bossdown':
+          this.audio.victory();
+          this.shake = Math.max(this.shake, 1.4);
+          this.burst(e.x, 0.6, e.z, { count: 60, color: 0xffd75e, speed: 4.5, life: 1.2, size: 0.8, up: 4 });
+          this.burst(e.x, 0.5, e.z, { count: 40, color: 0x8c1a1a, speed: 3.5, life: 0.9, size: 0.7, up: 3 });
+          break;
+        case 'enrage':
+          this.audio.bossHorn();
+          this.burst(e.x, 0.8, e.z, { count: 24, color: 0xff5d2e, speed: 2.5, life: 0.8, size: 0.7, up: 2.5 });
+          break;
+        case 'roarwave': {
+          this.audio.roar();
+          const n = 36;
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2;
+            this.burst(e.x + Math.cos(a) * e.r * 0.7, 0.4, e.z + Math.sin(a) * e.r * 0.7,
+              { count: 1, color: 0xb98fdc, speed: 1.2, life: 0.5, size: 0.6, spread: 0.2, up: 1.4 });
+          }
+          this.shake = Math.max(this.shake, 0.4);
+          break;
+        }
+        case 'brood':
+          this.burst(e.x, 0.4, e.z, { count: 14, color: 0x8fae3a, speed: 2, life: 0.6, size: 0.55, up: 2 });
+          break;
         case 'levelup':
           this.audio.levelup();
           this.burst(e.x, 0.3, e.z, { count: 30, color: 0xffd75e, speed: 1.6, life: 0.9, size: 0.55, up: 3.2 });
@@ -1677,6 +1712,7 @@ class App {
 
       this.ui.update(this.game, this.game.zombies.length);
       this.ui.updateHero(this.game, this.myPlayer);
+      this.ui.updateBoss(this.game);
       this.ui.setAutoUI(this.game.autoBuild);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
 

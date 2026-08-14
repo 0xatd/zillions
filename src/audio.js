@@ -140,6 +140,17 @@ export class AudioSys {
     this._tone(1.6, { freq: 240, type: 'sine', gain: 0.05, slide: -60, attack: 0.7 });
   }
 
+  bossHorn() {
+    this._tone(1.2, { freq: 65, type: 'sawtooth', gain: 0.18, slide: -15, attack: 0.05 });
+    this._tone(1.2, { freq: 98, type: 'sawtooth', gain: 0.12, slide: -20, attack: 0.08 });
+    this._noise(1.0, { freq: 180, q: 0.7, gain: 0.2, type: 'lowpass', sweep: -80 });
+  }
+
+  roar() {
+    this._noise(0.8, { freq: 2400, q: 1.2, gain: 0.22, sweep: -1800 });
+    this._tone(0.7, { freq: 900, type: 'sawtooth', gain: 0.1, slide: -650, attack: 0.02 });
+  }
+
   underattack() {
     this._tone(0.16, { freq: 520, type: 'square', gain: 0.09 });
     setTimeout(() => this._tone(0.16, { freq: 440, type: 'square', gain: 0.09 }), 180);

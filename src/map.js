@@ -4,12 +4,23 @@ import { MAP_SIZE, TILE, TILE_INFO } from './config.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
 export class GameMap {
-  constructor(seed) {
+  // theme (optional): per-level generation thresholds + palette overrides.
+  constructor(seed, theme = null) {
     this.seed = seed;
+    this.theme = theme;
     this.size = MAP_SIZE;
     this.tiles = new Uint8Array(this.size * this.size);
     this.rng = makeRNG(seed);
     this.generate();
+  }
+
+  colorOf(t) {
+    if (this.theme && this.theme.palette) {
+      const p = this.theme.palette;
+      const map = { [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water, [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand };
+      if (map[t] !== undefined) return map[t];
+    }
+    return TILE_INFO[t].color;
   }
 
   idx(x, z) { return z * this.size + x; }
@@ -33,11 +44,15 @@ export class GameMap {
         const centerFlat = clamp(1 - dc / 26, 0, 1);
         const elev = e * (1 - centerFlat * 0.55) + 0.45 * centerFlat * 0.55;
 
+        const th = this.theme || {};
+        const waterLv = th.water ?? 0.33;
+        const mountainLv = th.mountain ?? 0.72;
+        const forestLv = th.forest ?? 0.58;
         let t = TILE.GRASS;
-        if (elev < 0.33) t = TILE.WATER;
-        else if (elev < 0.365) t = TILE.SAND;
-        else if (elev > 0.72) t = TILE.MOUNTAIN;
-        else if (m > 0.58 && elev > 0.4) t = TILE.FOREST;
+        if (elev < waterLv) t = TILE.WATER;
+        else if (elev < waterLv + 0.035) t = TILE.SAND;
+        else if (elev > mountainLv) t = TILE.MOUNTAIN;
+        else if (m > forestLv && elev > waterLv + 0.07) t = TILE.FOREST;
         this.tiles[this.idx(x, z)] = t;
       }
     }
@@ -125,7 +140,7 @@ export class GameMap {
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
         const t = this.tiles[this.idx(x, z)];
-        col.setHex(TILE_INFO[t].color);
+        col.setHex(this.colorOf(t));
         const v = (rng() - 0.5) * 0.07;
         col.offsetHSL(0, 0, v);
 
@@ -159,7 +174,8 @@ export class GameMap {
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
     const waterMat = new THREE.MeshLambertMaterial({
-      color: 0x27435e, transparent: true, opacity: 0.8,
+      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x27435e,
+      transparent: true, opacity: 0.8,
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
@@ -273,7 +289,7 @@ export class GameMap {
     const c = new THREE.Color();
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        c.setHex(TILE_INFO[this.tiles[this.idx(x, z)]].color);
+        c.setHex(this.colorOf(this.tiles[this.idx(x, z)]));
         const o = (z * N + x) * 4;
         img.data[o] = c.r * 255; img.data[o + 1] = c.g * 255; img.data[o + 2] = c.b * 255; img.data[o + 3] = 255;
       }

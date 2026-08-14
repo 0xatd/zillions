@@ -5,7 +5,7 @@ const PORTRAITS = {
   danny: 'assets/heroes/images/danny_assassin.png',
 };
 import {
-  BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH,
+  BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
 } from './config.js';
 import { formatTime } from './utils.js';
@@ -44,6 +44,7 @@ export class UI {
 
       <div id="banner"></div>
       <div id="waitind" class="hidden">⏳ Waiting for the other player…</div>
+      <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
 
       <div id="heropanel" class="hidden"></div>
@@ -77,6 +78,7 @@ export class UI {
             <span id="prof-stats"></span>
           </div>
           <div class="herorow" id="herorow"></div>
+          <div class="levelrow" id="levelrow"></div>
           <div id="continuerow"></div>
           <div class="diffrow" id="diffrow"></div>
           <div class="mprow">
@@ -117,6 +119,10 @@ export class UI {
       card.onmouseleave = () => this._hideTip();
       herorow.appendChild(card);
     }
+
+    // Campaign level picker.
+    this.selectedLevel = 1;
+    this._buildLevelRow(0);
 
     // Difficulty buttons.
     const diffrow = this.root.querySelector('#diffrow');
@@ -192,6 +198,46 @@ export class UI {
     this.tooltip = this.root.querySelector('#tooltip');
     this.banner = this.root.querySelector('#banner');
     this.selpanel = this.root.querySelector('#selpanel');
+  }
+
+  _buildLevelRow(cleared) {
+    const row = this.root.querySelector('#levelrow');
+    row.innerHTML = '';
+    this.selectedLevel = Math.min(cleared + 1, LEVELS.length);
+    for (const lv of LEVELS) {
+      const locked = lv.id > cleared + 1;
+      const done = lv.id <= cleared;
+      const card = document.createElement('button');
+      card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '') + (locked ? ' locked' : '');
+      card.dataset.level = lv.id;
+      card.disabled = locked;
+      card.innerHTML = `
+        <span class="lvnum">${done ? '✅' : locked ? '🔒' : lv.id}</span>
+        <b>${lv.name}</b>
+        <small>${lv.blurb}</small>
+        <span class="lvboss">${lv.boss.icon} ${lv.boss.name}</span>`;
+      if (!locked) {
+        card.onclick = () => {
+          this.selectedLevel = lv.id;
+          for (const c of row.children) c.classList.toggle('sel', c === card);
+        };
+        card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`);
+        card.onmousemove = (e) => this._moveTip(e);
+        card.onmouseleave = () => this._hideTip();
+      }
+      row.appendChild(card);
+    }
+  }
+
+  setCampaign(cleared) { this._buildLevelRow(cleared || 0); }
+
+  updateBoss(game) {
+    const bar = this.root.querySelector('#bossbar');
+    const zb = game.boss;
+    if (!zb || zb.dead) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    this.root.querySelector('#boss-name').textContent = `${game.level.boss.icon} ${game.level.boss.name}${zb.enraged ? ' — ENRAGED' : ''}`;
+    this.root.querySelector('#boss-fill').style.width = `${Math.max(0, (zb.hp / zb.maxHp) * 100)}%`;
   }
 
   _costStr(cost) {
@@ -766,6 +812,12 @@ export class UI {
     }
     ctx.fillStyle = '#e6493a';
     for (const zb of game.zombies) ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
+    if (game.boss && !game.boss.dead) {
+      ctx.fillStyle = '#ff2d1f';
+      ctx.fillRect(game.boss.x - 2.5, game.boss.z - 2.5, 5, 5);
+      ctx.strokeStyle = '#ffd75e';
+      ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
+    }
 
     // WC3-style pings: expanding red circles.
     for (const p of this.pings) {

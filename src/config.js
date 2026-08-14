@@ -210,6 +210,58 @@ export const DROPS = {
   bruteGold: 90, smallGold: 30, smallChance: 0.04, healAmount: 100, life: 40,
 };
 
+// ---------- Campaign: 5 levels, 5 maps, 5 bosses ----------
+// Fixed seeds mean every player fights on the same battlegrounds.
+
+export const LEVELS = [
+  {
+    id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8,
+    blurb: 'Rolling moorland and black pines. Learn to hold a line.',
+    theme: { water: 0.33, mountain: 0.74, forest: 0.55,
+      palette: { grass: 0x4e5c38, forest: 0x33422a, water: 0x24384e, mountain: 0x5c5a54, sand: 0x8a7d5e } },
+    boss: { name: 'The Butcher', icon: '🔪', hp: 2600, dmg: 60, speed: 1.1, chase: 2.1, scale: 3.0,
+      color: 0x9c2f2f, score: 60, enrage: 0.5,
+      desc: 'A mountain of meat and cleavers. Enrages at half health.' },
+  },
+  {
+    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0,
+    blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
+    theme: { water: 0.40, mountain: 0.78, forest: 0.52,
+      palette: { grass: 0x46543a, forest: 0x2e3d2a, water: 0x1e3a35, mountain: 0x565a50, sand: 0x74705a } },
+    boss: { name: 'Plague Mother', icon: '🪳', hp: 3400, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
+      color: 0x6e8f3a, score: 80, spawn: { every: 9, count: 5, type: 'walker' },
+      desc: 'Every few seconds she births another brood. Kill her fast.' },
+  },
+  {
+    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3,
+    blurb: 'Ash plains under a burnt sky. Wood is scarce; the dead are not.',
+    theme: { water: 0.28, mountain: 0.66, forest: 0.66,
+      palette: { grass: 0x6a5f4a, forest: 0x4a4434, water: 0x2e3440, mountain: 0x4e4a44, sand: 0x8a7a60 } },
+    boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
+      color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },
+      desc: 'Its scream overloads sentry towers, silencing them for seconds at a time.' },
+  },
+  {
+    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6,
+    blurb: 'Grave-cold hills. The ground itself is on their side.',
+    theme: { water: 0.30, mountain: 0.70, forest: 0.60,
+      palette: { grass: 0x4c4a56, forest: 0x35334a, water: 0x232840, mountain: 0x5a5866, sand: 0x6e6a78 } },
+    boss: { name: 'Gravelord', icon: '⚰️', hp: 5600, dmg: 55, speed: 0.95, chase: 1.8, scale: 3.4,
+      color: 0x3f4b66, score: 130, armor: 0.35, spawn: { every: 12, count: 8, type: 'walker' },
+      desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
+  },
+  {
+    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0,
+    blurb: 'Where the plague began. Everything ends here.',
+    theme: { water: 0.31, mountain: 0.72, forest: 0.62,
+      palette: { grass: 0x3a4032, forest: 0x252e22, water: 0x1a2432, mountain: 0x46443e, sand: 0x5e584a } },
+    boss: { name: 'The Zillion', icon: '👁️', hp: 9000, dmg: 75, speed: 1.0, chase: 2.2, scale: 4.2,
+      color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.2,
+      spawn: { every: 10, count: 6, type: 'runner' }, roar: { every: 15, radius: 14, dur: 3.5 },
+      desc: 'All of it, at once: armored, enraging, screaming, and endlessly spawning.' },
+  },
+];
+
 export const DIFFICULTY = {
   casual: { label: 'Casual', mult: 0.5, ambient: 0.6 },
   normal: { label: 'Normal', mult: 1.0, ambient: 1.0 },
