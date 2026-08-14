@@ -168,7 +168,7 @@ export class Game {
     this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2, c + 3.5));
     this._scatterCreeps();
     this._planNight();
-    this.msg('☀️ Dawn over the ruins. Collect coins, stand on glowing foundations to build — night is coming.', 'info');
+    this.msg('☀️ Dawn over the ruins. Collect coins, hold B at glowing foundations to build — night is coming.', 'info');
   }
 
   _scatterCreeps() {
@@ -238,37 +238,48 @@ export class Game {
     return plot._plate;
   }
 
-  // Thronefall funding: get close to a foundation and your gold streams in.
-  // Each hero funds only the nearest pending plot; partial payments persist,
-  // so brushing past a plot never wastes anything.
+  // The hero's nearest fundable plot — what holding the build key would pay
+  // into. Shared by the sim and by the HUD prompt.
+  buildTargetFor(h) {
+    let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null;
+    for (const plot of this.plots) {
+      const nt = this.nextTier(plot);
+      if (!nt || nt.branch) continue;
+      const [px, pz] = this.payPoint(plot);
+      const d = dist2(h.x, h.z, px, pz);
+      if (d <= bd) { bd = d; best = plot; bestNt = nt; }
+    }
+    return best ? { plot: best, nt: bestNt } : null;
+  }
+
+  // Thronefall building: walk to a foundation and HOLD the build key — coins
+  // fly from your purse into the plot one by one until it rises. Partial
+  // payments persist, so letting go never wastes anything.
   _updatePlots(dt) {
     if (this.over) return;
     if (this.phase !== 'day') return; // no building at night — fight!
     for (const h of this.heroes) {
-      if (h.dead) continue;
-      let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null;
-      for (const plot of this.plots) {
-        const nt = this.nextTier(plot);
-        if (!nt || nt.branch) continue;
-        const [px, pz] = this.payPoint(plot);
-        const d = dist2(h.x, h.z, px, pz);
-        if (d <= bd) { bd = d; best = plot; bestNt = nt; }
-      }
-      // Dwell gate: linger ~half a second before coins start streaming, so
-      // riding across a plate never buys anything.
-      if (!best) { h._payId = null; h._payT = 0; continue; }
-      if (h._payId !== best.id) { h._payId = best.id; h._payT = 0; }
-      h._payT += dt;
-      if (h._payT < 0.45) continue;
-      const need = bestNt.cost - best.paid;
+      if (h.dead || !h.payHold) continue;
+      const target = this.buildTargetFor(h);
+      if (!target) continue;
+      const { plot, nt } = target;
+      const need = nt.cost - plot.paid;
       const pay = Math.min(PAY_RATE * dt, this.gold, need);
       if (pay <= 0) continue;
       this.gold -= pay;
-      best.paid += pay;
-      best.payFx = 0.3; // renderer hint
-      if (best.paid >= bestNt.cost - 1e-6) {
-        best.paid = 0;
-        this._construct(best);
+      plot.paid += pay;
+      plot.payFx = 0.3; // renderer hint
+      // Emit one arc-coin per whole gold piece — the Thronefall purse animation.
+      const [px, pz] = this.payPoint(plot);
+      h._coinAcc = (h._coinAcc || 0) + pay;
+      if (h._coinAcc >= 1) {
+        const n = Math.floor(h._coinAcc);
+        h._coinAcc -= n;
+        this.emit({ type: 'paycoin', fx: h.x, fz: h.z, tx: px, tz: pz, n: Math.min(n, 4) });
+      }
+      if (plot.paid >= nt.cost - 1e-6) {
+        plot.paid = 0;
+        this._construct(plot);
       }
     }
   }
@@ -362,7 +373,7 @@ export class Game {
     if (!nt || !nt.branch || !nt.options[branch]) return;
     plot.branch = branch;
     this.emit({ type: 'branch', x: plot.cx, z: plot.cz });
-    this.msg(`${nt.options[branch].icon} Doctrine chosen: ${nt.options[branch].name}. Stand close to fund it.`, 'info');
+    this.msg(`${nt.options[branch].icon} Doctrine chosen: ${nt.options[branch].name}. Hold B beside it to fund it.`, 'info');
   }
 
   _destroyBuilding(b, byZombie) {
@@ -629,6 +640,11 @@ export class Game {
         break;
       }
       case 'cast': this.castAbility(c.p || 0); break;
+      case 'pay': { // hold-to-build: the build key is down/up
+        const h = this.heroes[c.p || 0];
+        if (h) h.payHold = !!c.on;
+        break;
+      }
       case 'rally': this.rally(c.g, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'bell': this.bell(c.p || 0); break;
@@ -972,10 +988,43 @@ export class Game {
     this._updateCoins();
     this._updateFlow(dt);
     this._updateZombies(dt);
+    this._updateAuras(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
     this._updateHero(dt);
     this._cleanup();
+  }
+
+  // Hero auras — the passive third of the kit (auto-attack, aura, special).
+  // Each hero hums one effect into the ground around them, always on.
+  _updateAuras(dt) {
+    for (const u of this.units) if (!u.hero) u.auraDmg = 1;
+    for (const h of this.heroes) {
+      if (h.dead) continue;
+      const aura = h.def.aura;
+      if (!aura) continue;
+      const r2 = aura.radius * aura.radius;
+      if (aura.dmgMult || aura.regen) {
+        for (const u of this.units) {
+          if (u.dead || u === h) continue;
+          if (dist2(h.x, h.z, u.x, u.z) > r2) continue;
+          if (aura.dmgMult && !u.hero) u.auraDmg = Math.max(u.auraDmg, aura.dmgMult);
+          if (aura.regen) u.hp = Math.min(u.maxHp, u.hp + aura.regen * dt);
+        }
+      }
+      if (aura.slow) {
+        h._auraT = (h._auraT || 0) - dt;
+        if (h._auraT <= 0) {
+          h._auraT = 0.3;
+          for (const zb of this.zombies) {
+            if (zb.dead) continue;
+            if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
+            zb.slowT = Math.max(zb.slowT || 0, 0.5);
+            zb.slowMul = aura.slow;
+          }
+        }
+      }
+    }
   }
 
   _updateFlow(dt) {
@@ -988,7 +1037,7 @@ export class Game {
           sources.push((b.z + dz) * this.map.size + (b.x + dx));
         }
       }
-      this.flow.compute(this.occ, sources);
+      this.flow.compute(this.occ, sources, this.gateIds);
       this.flowDirty = false;
       this.flowTimer = 2.5;
     }
@@ -1235,7 +1284,7 @@ export class Game {
           const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
           u.cooldown = 1 / (u.def.rof * haste);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-          let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
+          let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1);
           // Shadow Veil: the shot that breaks it hits like a falling star.
           if (u.hero && u.stealth) {
             dmg *= u.veilBackstab || 2;

@@ -1,8 +1,10 @@
 // The pre-designed city: every map gets a fixed, aesthetic layout of build
 // plots arranged around the Keep — plaza houses, farm lanes, mills, mines on
-// the ore, tower rings, and a walled rampart with gates at the compass points.
+// the ore, gate-flanking towers, and a fully CLOSED rampart with gates at the
+// compass points. The city footprint is levelled to clean ground first, so the
+// wall always connects and the layout reads Thronefall-simple on every map.
 // Deterministic from the map alone, so every peer generates the same city.
-import { TILE } from './config.js';
+import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
 
 export function generatePlots(map) {
@@ -11,6 +13,19 @@ export function generatePlots(map) {
   const rng = makeRNG(map.seed * 7 + 13);
   const plots = [];
   const taken = new Set(); // tile keys reserved by already-placed plots
+
+  const WALL_R = CITY_WALL_R;
+
+  // --- Found the city: level everything inside the rampart to clean ground.
+  // Ore veins survive (money), everything else becomes buildable grass. This
+  // is what guarantees a CLOSED wall and a tidy, symmetric town on any map.
+  for (let z = 0; z < N; z++) {
+    for (let x = 0; x < N; x++) {
+      if (Math.hypot(x + 0.5 - c, z + 0.5 - c) > WALL_R + 2.5) continue;
+      const t = map.tiles[z * N + x];
+      if (t !== TILE.GOLDORE && t !== TILE.STONEORE) map.tiles[z * N + x] = TILE.GRASS;
+    }
+  }
 
   const reserve = (x, z, size, pad = 1) => {
     for (let dz = -pad; dz < size + pad; dz++) {
@@ -61,9 +76,96 @@ export function generatePlots(map) {
   add('hq', c - 2, c - 2, 4);
   reserve(c - 4, c - 4, 8, 0); // keep the plaza clear around it
 
+  // --- Wall FIRST: a closed, 4-connected ring — every tile shares an edge
+  // with the next, so the rendered rampart is one continuous wall with the
+  // only ways in being the 4 gates. Corner steps get a filler tile.
+  const ringTiles = [];
+  {
+    const seen = new Set();
+    const steps = 1440;
+    let last = null;
+    const A0 = -Math.PI * 0.75; // start on the NW diagonal (segment boundary)
+    const put = (x, z, ang) => {
+      const k = z * N + x;
+      if (seen.has(k)) return;
+      seen.add(k);
+      ringTiles.push({ x, z, ang });
+    };
+    for (let s = 0; s < steps; s++) {
+      const ang = A0 + (s / steps) * Math.PI * 2;
+      const x = Math.round(c + Math.cos(ang) * WALL_R);
+      const z = Math.round(c + Math.sin(ang) * WALL_R);
+      if (last && x !== last[0] && z !== last[1]) put(x, last[1], ang); // 4-connect the corner
+      put(x, z, ang);
+      last = [x, z];
+    }
+    // Close the loop: if the ring's tail meets its head diagonally, bridge it.
+    const first = ringTiles[0];
+    if (last && first && first.x !== last[0] && first.z !== last[1]) put(first.x, last[1], A0);
+  }
+
+  // Split the ring into 4 named segments at the diagonals; gate at each
+  // segment's compass point.
+  const norm = (a) => { while (a < -Math.PI * 0.75) a += Math.PI * 2; while (a >= Math.PI * 1.25) a -= Math.PI * 2; return a; };
+  const segDefs = [
+    { name: 'North Wall', a0: -Math.PI * 0.75, a1: -Math.PI * 0.25, gate: -Math.PI / 2 },
+    { name: 'East Wall', a0: -Math.PI * 0.25, a1: Math.PI * 0.25, gate: 0 },
+    { name: 'South Wall', a0: Math.PI * 0.25, a1: Math.PI * 0.75, gate: Math.PI / 2 },
+    { name: 'West Wall', a0: Math.PI * 0.75, a1: Math.PI * 1.25, gate: Math.PI },
+  ];
+  const gates = [];
+  for (const seg of segDefs) {
+    const tiles = [];
+    for (const t of ringTiles) {
+      const a = norm(t.ang);
+      if (a >= seg.a0 && a < seg.a1) tiles.push([t.x, t.z]);
+    }
+    if (tiles.length < 6) continue;
+    // Gate: the wall tile closest to the segment's compass point.
+    const gx = c + Math.cos(seg.gate) * WALL_R, gz = c + Math.sin(seg.gate) * WALL_R;
+    let gate = tiles[0], gd = Infinity;
+    for (const t of tiles) {
+      const d = (t[0] - gx) ** 2 + (t[1] - gz) ** 2;
+      if (d < gd) { gd = d; gate = t; }
+    }
+    gates.push({ gate, ang: seg.gate });
+    const p = {
+      id: nextId++, kind: 'wall', name: seg.name,
+      x: tiles[0][0], z: tiles[0][1], size: 1,
+      cx: c + Math.cos(seg.gate) * WALL_R,
+      cz: c + Math.sin(seg.gate) * WALL_R,
+      tiles, gate, tier: 0, paid: 0, branch: null,
+    };
+    for (const [x, z] of tiles) taken.add(z * N + x);
+    plots.push(p);
+  }
+
+  // --- Roads: a dirt lane from each gate straight to the plaza. Purely for
+  // readability — the city looks designed before a single coin is spent.
+  for (const { gate, ang } of gates) {
+    const dx = -Math.cos(ang), dz = -Math.sin(ang); // inward
+    for (let d = 1; d <= WALL_R - 5.4; d += 0.5) {
+      const x = Math.round(gate[0] + dx * d), z = Math.round(gate[1] + dz * d);
+      const k = z * N + x;
+      if (taken.has(k)) continue;
+      if (map.tiles[k] === TILE.GRASS) map.tiles[k] = TILE.PATH;
+      taken.add(k); // keep plots off the lanes
+    }
+  }
+
   const ringSpot = (r, ang) => [c + Math.cos(ang) * r - 1, c + Math.sin(ang) * r - 1];
 
-  // --- Plaza ring: houses close to the Keep, angled like a real square ---
+  // --- Gate towers: a pair flanking every gate, just inside the wall. THIS
+  // is the chokepoint kit — whatever chews the gate stands in a crossfire.
+  for (const { ang } of gates) {
+    for (const side of [-1, 1]) {
+      const [x, z] = ringSpot(WALL_R - 2.6, ang + side * 0.22);
+      add('tower', x, z, 2);
+    }
+  }
+
+  // --- Plaza ring: houses close to the Keep, angled like a real square
+  // (offset from the compass roads so the lanes stay open) ---
   for (let i = 0; i < 8; i++) {
     const ang = (i / 8) * Math.PI * 2 + Math.PI / 8;
     const [x, z] = ringSpot(6.8, ang);
@@ -76,62 +178,21 @@ export function generatePlots(map) {
     const [x, z] = ringSpot(10.4, ang);
     add('farm', x, z, 2);
   }
-  add('mill', ...ringSpot(10.4, -Math.PI / 2), 2);
-  add('mill', ...ringSpot(10.4, Math.PI / 2), 2);
+  add('mill', ...ringSpot(10.4, -Math.PI / 2 + 0.4), 2);
+  add('mill', ...ringSpot(10.4, Math.PI / 2 - 0.4), 2);
 
   const campKinds = ['camp_militia', 'camp_ranger', 'camp_sniper'];
   campKinds.forEach((kind, i) => {
-    const ang = Math.PI / 2 + (i - 1) * 0.55; // fan just south of the Keep
+    const ang = Math.PI / 2 + (i - 1) * 0.6 + 0.3; // fan just south of the Keep, off the road
     const [x, z] = ringSpot(8.6, ang);
     add(kind, x, z, 2);
   });
 
-  // --- Tower ring: 8 towers between the houses and the wall ---
-  for (let i = 0; i < 8; i++) {
-    const ang = (i / 8) * Math.PI * 2;
-    const [x, z] = ringSpot(13.2, ang);
+  // --- Mid towers on the diagonals: the ring between houses and wall ---
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const [x, z] = ringSpot(13.0, ang);
     add('tower', x, z, 2);
-  }
-
-  // --- Wall: a rampart ring split into 4 segments, gates at the compass points ---
-  const WALL_R = 15.6;
-  const segDefs = [
-    { name: 'North Wall', a0: -Math.PI * 0.75, a1: -Math.PI * 0.25, gate: -Math.PI / 2 },
-    { name: 'East Wall', a0: -Math.PI * 0.25, a1: Math.PI * 0.25, gate: 0 },
-    { name: 'South Wall', a0: Math.PI * 0.25, a1: Math.PI * 0.75, gate: Math.PI / 2 },
-    { name: 'West Wall', a0: Math.PI * 0.75, a1: Math.PI * 1.25, gate: Math.PI },
-  ];
-  for (const seg of segDefs) {
-    const tiles = [];
-    const seen = new Set();
-    const steps = 90;
-    for (let s = 0; s <= steps; s++) {
-      const ang = seg.a0 + (s / steps) * (seg.a1 - seg.a0);
-      const x = Math.round(c + Math.cos(ang) * WALL_R);
-      const z = Math.round(c + Math.sin(ang) * WALL_R);
-      const k = z * N + x;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      if (!map.isBuildable(x, z) || taken.has(k)) continue; // terrain makes natural gaps
-      tiles.push([x, z]);
-    }
-    if (tiles.length < 6) continue;
-    // Gate: the wall tile closest to the segment's compass point.
-    const gx = c + Math.cos(seg.gate) * WALL_R, gz = c + Math.sin(seg.gate) * WALL_R;
-    let gate = tiles[0], gd = Infinity;
-    for (const t of tiles) {
-      const d = (t[0] - gx) ** 2 + (t[1] - gz) ** 2;
-      if (d < gd) { gd = d; gate = t; }
-    }
-    const p = {
-      id: nextId++, kind: 'wall', name: seg.name,
-      x: tiles[0][0], z: tiles[0][1], size: 1,
-      cx: c + Math.cos((seg.a0 + seg.a1) / 2) * WALL_R,
-      cz: c + Math.sin((seg.a0 + seg.a1) / 2) * WALL_R,
-      tiles, gate, tier: 0, paid: 0, branch: null,
-    };
-    for (const [x, z] of tiles) taken.add(z * N + x);
-    plots.push(p);
   }
 
   // --- Gold mines on real ore veins (the risky money), with a guard tower ---

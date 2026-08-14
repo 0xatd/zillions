@@ -7,7 +7,7 @@ import { GameMap } from './map.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, assetClone, hasAsset } from './assets.js';
+import { loadAssets, assetClone } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS } from './online.js';
 import { clamp, lerp } from './utils.js';
@@ -37,6 +37,9 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
+    this.lastPay = false;       // build key (B) held state, mirrored into the sim
+    this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
+    this.payTickT = 0;
 
     this.audio = new AudioSys();
     this.ui = new UI(document.getElementById('ui'), {
@@ -172,6 +175,10 @@ class App {
     this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    this._wallTiles = null; // wall adjacency cache is per-map
+    for (const c of this.payCoins) this.scene.remove(c.mesh);
+    this.payCoins = [];
+    this.lastPay = false;
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
@@ -226,7 +233,7 @@ class App {
   _startTutorial() {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
-      [7, '💰 Stand ON a glowing foundation and your gold streams into it. Coins appear at dawn — ride through them!'],
+      [7, '💰 Walk to a glowing foundation and HOLD B — your coins build it. Coins appear at dawn — ride through them!'],
       [16, '🌙 The horde comes every night from the red beacons. Build towers and walls on that side!'],
       [30, '🔔 Ready early? Press SPACE to ring the bell and start the night.'],
       [45, '🚩 Press 1 to rally your troops to you. Press 1 again and they hold position.'],
@@ -630,6 +637,54 @@ class App {
       const v = 0.75 + Math.random() * 0.35;
       this.pCol[k] = c.r * v; this.pCol[k + 1] = c.g * v; this.pCol[k + 2] = c.b * v;
       this.pSize[j] = size * (0.7 + Math.random() * 0.6);
+    }
+  }
+
+  // Thronefall build animation: real little coins pop out of the hero's purse
+  // one by one and arc into the plot. Meshes are pooled and reused.
+  _spawnPayCoins(fx, fz, tx, tz, n) {
+    if (!this._payCoinGeo) {
+      this._payCoinGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.05, 10);
+      this._payCoinMat = new THREE.MeshLambertMaterial({ color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
+    }
+    for (let i = 0; i < n; i++) {
+      if (this.payCoins.length >= 48) return;
+      const mesh = new THREE.Mesh(this._payCoinGeo, this._payCoinMat);
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+      this.payCoins.push({
+        mesh,
+        fx: fx + (Math.random() - 0.5) * 0.3, fz: fz + (Math.random() - 0.5) * 0.3,
+        tx: tx + (Math.random() - 0.5) * 0.5, tz: tz + (Math.random() - 0.5) * 0.5,
+        t: -i * 0.06, // stagger the purse
+        dur: 0.34 + Math.random() * 0.08,
+        spin: 4 + Math.random() * 6,
+      });
+    }
+  }
+
+  _updatePayCoins(dt) {
+    if (!this.payCoins.length) return;
+    for (let i = this.payCoins.length - 1; i >= 0; i--) {
+      const c = this.payCoins[i];
+      c.t += dt;
+      if (c.t < 0) { c.mesh.visible = false; continue; }
+      const p = Math.min(1, c.t / c.dur);
+      c.mesh.visible = true;
+      c.mesh.position.set(
+        lerp(c.fx, c.tx, p),
+        lerp(0.95, 0.2, p) + Math.sin(p * Math.PI) * 1.1,
+        lerp(c.fz, c.tz, p),
+      );
+      c.mesh.rotation.x = c.t * c.spin;
+      c.mesh.rotation.z = c.t * c.spin * 0.6;
+      if (p >= 1) {
+        this.burst(c.tx, 0.35, c.tz, { count: 2, color: 0xffe9a8, speed: 0.7, life: 0.2, size: 0.35, up: 0.8 });
+        this.payTickT -= 1;
+        if (this.payTickT <= 0) { this.audio.payTick(); this.payTickT = 2; }
+        this.scene.remove(c.mesh);
+        this.payCoins.splice(i, 1);
+      }
     }
   }
 
@@ -1040,11 +1095,7 @@ class App {
         ud.prog.geometry = new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, Math.max(0.01, frac * Math.PI * 2));
       }
 
-      // Coin stream FX while someone funds this plot.
-      if (paying && mh) {
-        this.stream(mh.x, 0.8, mh.z, ud.payPoint[0], 0.4, ud.payPoint[1], { count: 3 });
-        this.audio.payTick();
-      }
+      // (Coin flight itself rides the 'paycoin' event — see _spawnPayCoins.)
     }
   }
 
@@ -1189,28 +1240,50 @@ class App {
         break;
       }
       case 'wall': {
-        if (hasAsset('wall')) {
-          const seg = assetClone(Math.random() < 0.3 ? 'wallCracked' : 'wall', 1.06);
-          if (seg) {
-            g.add(seg);
-            g.userData.wallSeg = seg;
-            if (b.gate) {
-              const arch = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.18, 1.06), M(0x6a5a40));
-              arch.position.y = 1.15;
-              g.add(arch);
-              const ban = assetClone('banner', 0.7);
-              if (ban) { ban.position.set(0.4, 0, 0.4); g.add(ban); }
-            }
-            break;
+        // Connected rampart: each tile grows curtain panels toward every
+        // neighboring wall tile, so the whole ring reads as ONE wall — no
+        // corner gaps, no floating cubes. Gates become real gatehouses.
+        const N = this.game.map.size;
+        if (!this._wallTiles) {
+          this._wallTiles = new Set();
+          for (const p of this.game.plots) {
+            if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
           }
         }
+        const nb = {
+          e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
+          s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
+        };
+        const H = tier >= 2 ? 1.3 : 0.95;
+        const stone = tier >= 2 ? 0x63615a : 0x585448;
+        const capCol = 0x3e3c35;
         if (b.gate) {
-          box(0.94, 1.15, 0.3, 0x6a5a40, 0, 0.57);
-          box(0.94, 0.2, 0.94, 0x50483a, 0, 1.2);
-        } else {
-          box(0.92, tier >= 2 ? 1.15 : 0.85, 0.92, tier >= 2 ? 0x62605a : 0x565349, 0, tier >= 2 ? 0.57 : 0.42);
-          box(0.98, 0.2, 0.98, 0x3e3c35, 0, tier >= 2 ? 1.25 : 0.95);
+          // Gatehouse: two towers flanking the passage, an arch overhead.
+          const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
+          const towH = H + 0.75;
+          for (const side of [-1, 1]) {
+            const px = alongX ? 0 : side * 0.38, pz = alongX ? side * 0.38 : 0;
+            box(alongX ? 0.9 : 0.34, towH, alongX ? 0.34 : 0.9, stone, px, towH / 2, pz);
+            box(alongX ? 1.0 : 0.44, 0.16, alongX ? 0.44 : 1.0, capCol, px, towH + 0.08, pz);
+          }
+          box(alongX ? 0.9 : 0.34, 0.22, alongX ? 0.34 : 0.9, 0x6a5a40, 0, H + 0.35); // lintel
+          const ban = assetClone('banner', 0.7);
+          if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
+          break;
         }
+        // Center pier, slightly proud of the curtains.
+        box(0.56, H + 0.14, 0.56, stone, 0, (H + 0.14) / 2);
+        box(0.66, 0.15, 0.66, capCol, 0, H + 0.21);
+        // Curtain panels out to each neighboring wall tile's edge.
+        const panels = [
+          nb.e && [0.5, 0.36, 0.25, 0], nb.w && [0.5, 0.36, -0.25, 0],
+          nb.s && [0.36, 0.5, 0, 0.25], nb.n && [0.36, 0.5, 0, -0.25],
+        ].filter(Boolean);
+        for (const [w, dep, px, pz] of panels) {
+          box(w, H, dep, stone, px, H / 2, pz);
+          box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
+        }
+        if (!panels.length) box(0.9, H, 0.9, stone, 0, H / 2); // stranded stub (shouldn't happen)
         break;
       }
       case 'camp_militia':
@@ -1268,18 +1341,6 @@ class App {
         b.branch = plot ? plot.branch : null;
         const mesh = this._makeBuildingMesh(b);
         mesh.position.set(b.cx, 0, b.cz);
-        if (b.kind === 'wall' && mesh.userData.wallSeg) {
-          const N = g.map.size;
-          const isWall = (x, z) => {
-            const id = g.occ[z * N + x];
-            if (!id) return false;
-            const nb = g.buildings.find((o) => o.id === id);
-            return nb && nb.kind === 'wall';
-          };
-          const ew = isWall(b.x - 1, b.z) || isWall(b.x + 1, b.z);
-          const ns = isWall(b.x, b.z - 1) || isWall(b.x, b.z + 1);
-          mesh.userData.wallSeg.rotation.y = ns && !ew ? Math.PI / 2 : 0;
-        }
         this.scene.add(mesh);
         rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime };
         this.buildingMeshes.set(b.id, rec);
@@ -1333,6 +1394,17 @@ class App {
       const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.5, depthWrite: false }));
       halo.position.y = 0.03;
       g.add(halo);
+      // Passive aura: a soft breathing ring at the aura's true radius.
+      // (The whole hero group is scaled 1.18×, so compensate.)
+      if (d.aura) {
+        const S = 1.18;
+        const auraGeo = new THREE.RingGeometry((d.aura.radius - 0.3) / S, d.aura.radius / S, 56);
+        auraGeo.rotateX(-Math.PI / 2);
+        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
+        aura.position.y = 0.05;
+        g.add(aura);
+        g.userData.aura = aura;
+      }
       g.scale.setScalar(1.18);
     } else {
       // Guardsman-style trooper.
@@ -1382,6 +1454,11 @@ class App {
               o.material.opacity = wantOp;
             }
           });
+        }
+        const aura = rec.mesh.userData.aura;
+        if (aura) {
+          aura.visible = !u.stealth; // veiled heroes hum nothing
+          aura.material.opacity = 0.13 + Math.sin(t * 2.2 + u.id) * 0.05;
         }
       }
     }
@@ -1474,6 +1551,12 @@ class App {
     if (Math.abs(wx - last.x) > 0.001 || Math.abs(wz - last.z) > 0.001 || s !== last.s) {
       this.lastDir = { x: wx, z: wz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: +wx.toFixed(3), z: +wz.toFixed(3), s });
+    }
+    // Hold B to build (Thronefall press-and-hold, Space is taken by the bell).
+    const pay = this.keys.has('b');
+    if (pay !== this.lastPay) {
+      this.lastPay = pay;
+      this.issue({ t: 'pay', p: this.myPlayer, on: pay });
     }
   }
 
@@ -1656,6 +1739,9 @@ class App {
         case 'branch':
           this.audio.train();
           this.burst(e.x, 0.4, e.z, { count: 14, color: 0xb98fdc, speed: 1.6, life: 0.5, size: 0.5, up: 1.8 });
+          break;
+        case 'paycoin':
+          this._spawnPayCoins(e.fx, e.fz, e.tx, e.tz, e.n || 1);
           break;
         case 'coinspawn':
           if (e.fx !== undefined) {
@@ -1947,6 +2033,20 @@ class App {
       }
       this.ui.showBranch(branchPlot);
 
+      // "Hold B" prompt while parked on something fundable by day.
+      let hint = null;
+      if (mh && !mh.dead && this.game.phase === 'day' && !branchPlot) {
+        const target = this.game.buildTargetFor(mh);
+        if (target) {
+          const { plot, nt } = target;
+          const cost = Math.max(1, Math.ceil(nt.cost - plot.paid));
+          hint = mh.payHold
+            ? (this.game.gold < 1 ? '🪙 Purse empty — collect coins at dawn!' : `🪙 ${cost} to go…`)
+            : `Hold <kbd>B</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)`;
+        }
+      }
+      this.ui.showBuildHint(hint);
+
       this.ui.update(this.game, this.myPlayer);
       this.ui.updateBoss(this.game);
 
@@ -1966,6 +2066,7 @@ class App {
 
     this._updateParticles(dt);
     this._updateCorpses(dt);
+    this._updatePayCoins(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }

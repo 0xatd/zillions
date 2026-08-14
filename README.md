@@ -31,13 +31,17 @@ Then open:
 
 ## How It Plays
 
-Every map generates the same designed city around the Keep: a plaza ring of
-house plots, farm and mill lanes, gold mines out on the ore veins, a ring of
-tower plots, and a walled rampart with gates at the compass points.
+Every map generates the same designed city around the Keep: the ground inside
+the rampart is levelled clean, dirt lanes run from each gate to the plaza, a
+ring of house plots surrounds the Keep, farm and mill lanes sit behind them,
+gold mines wait out on the ore veins, and a fully **closed** rampart circles it
+all — the only ways in are the four gates, each flanked by a pair of tower
+plots. Chokepoints, by design.
 
 - **Days are untimed.** Collect the coins your buildings paid out at dawn,
-  stand on glowing foundations to fund them (partial payments persist), linger
-  at a built structure's pay plate to upgrade it. Top-tier towers make you
+  then walk to a glowing foundation and **hold B** — coins arc out of your
+  purse one by one until the building pops up (partial payments persist).
+  Hold B beside a built structure to upgrade it. Top-tier towers make you
   choose a doctrine: ballista (single-target sniper) or flame (splash).
 - **Ring the bell** (Space) when ready — night falls, and a horde marches from
   the red beacons that were visible all day. Night ends when the wave dies.
@@ -51,13 +55,14 @@ tower plots, and a walled rampart with gates at the compass points.
 
 ## Hero Roster
 
-Heroes auto-attack on their own — you steer, position, and fire the special.
+The kit is Thronefall-simple: heroes auto-attack on their own, a passive aura
+hums around them, and Space at night fires the one special. You steer.
 
-| Hero | Style | Special (Space/Q) |
-| --- | --- | --- |
-| Captain Scott | Melee whirlwind of steel | Whirlwind — spin-to-win while moving |
-| Alexander | Mid-range marksman | Entangling Roots — AoE root + damage |
-| Danny | Long-range sniper | Shadow Veil — vanish, then a massive backstab shot |
+| Hero | Style | Aura (passive) | Special (Space/Q) |
+| --- | --- | --- | --- |
+| Captain Scott | Melee whirlwind of steel | Warbanner — nearby troops +35% damage | Whirlwind — spin-to-win while moving |
+| Alexander | Mid-range marksman | Lifebloom — heals nearby troops & heroes | Entangling Roots — AoE root + damage |
+| Danny | Long-range sniper | Dread — nearby dead move 28% slower | Shadow Veil — vanish, then a massive backstab shot |
 
 Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
 up automatically at levels 4 and 7. A fallen hero revives at the Keep.
@@ -69,6 +74,7 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 | WASD / arrows | Move your hero (camera follows) |
 | Shift | Sprint |
 | Space | Day: ring the bell · Night: cast your special |
+| B (hold) | Build / upgrade the foundation you're standing at |
 | Q | Cast your special |
 | 1 / 2 / 3 | Rally army / militia / ranged (toggle follow ↔ hold) |
 | Mouse wheel | Zoom |

@@ -4,6 +4,7 @@
 import { TILE, TILE_INFO } from './config.js';
 
 const WALL_COST = 55;
+const GATE_COST = 16; // hordes prefer pouring through gates — into the tower crossfire
 
 export class FlowField {
   constructor(map) {
@@ -16,8 +17,9 @@ export class FlowField {
     this.cost = new Float64Array(n);
   }
 
-  // occ: Int32Array of building ids (+1) per tile, 0 = empty.
-  compute(occ, sourceTiles) {
+  // occ: Int32Array of building ids per tile, 0 = empty. gateIds: building ids
+  // that are gates — cheaper to path through, so hordes funnel at chokepoints.
+  compute(occ, sourceTiles, gateIds = null) {
     const { map } = this;
     const N = map.size, n = N * N;
     const dist = this.dist, cost = this.cost;
@@ -27,7 +29,7 @@ export class FlowField {
       const t = map.tiles[i];
       if (!TILE_INFO[t].walk) { cost[i] = Infinity; continue; }
       let c = t === TILE.FOREST ? 1.6 : 1;
-      if (occ[i] > 0) c = WALL_COST;
+      if (occ[i] > 0) c = gateIds && gateIds.has(occ[i]) ? GATE_COST : WALL_COST;
       cost[i] = c;
     }
 

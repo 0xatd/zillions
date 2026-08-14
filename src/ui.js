@@ -24,7 +24,7 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by standing on foundations">🪙 <b>0</b></div>
+        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by holding B at a foundation">🪙 <b>0</b></div>
         <div class="res" id="r-day" title="Day and time until nightfall">☀️ <b>Day 1</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
         <div class="sep"></div>
@@ -57,6 +57,7 @@ export class UI {
           <button id="bigaction" class="bigaction"></button>
         </div>
         <div id="branchpanel" class="hidden"></div>
+        <div id="buildhint" class="hidden"></div>
       </div>
 
       <div id="minimap-wrap">
@@ -146,9 +147,9 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to sprint. You auto-attack anything in range — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to sprint. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Your buildings pay coins every dawn. Ride through coins to collect them.</div>
-            <div><b>🏗️ The city is pre-planned.</b> Stand on a glowing foundation and your gold streams into it. Stay to upgrade. Top-tier towers let you choose a doctrine.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>B</b> — coins fly from your purse until it rises. Same to upgrade. Top-tier towers let you choose a doctrine.</div>
             <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
             <div><b>🔔 Ready early?</b> Press SPACE by day to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
             <div><b>🚩 Your troops fight alone,</b> but press 1 to rally the army to you — press 1 again and they hold position. 2 = militia, 3 = ranged.</div>
@@ -222,7 +223,7 @@ export class UI {
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
-        <span class="habils">${h.ability.icon} ${h.ability.name}</span>`;
+        <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
@@ -351,7 +352,9 @@ export class UI {
 
   _heroTip(h) {
     const a = h.ability;
+    const au = h.aura;
     return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
+      (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       `<span class="tfx">${a.icon} <b>${a.name}</b> — SPACE/Q, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
       `<br><span class="tdesc">Ranks up automatically at hero levels 4 and 7.</span>`;
   }
@@ -436,6 +439,21 @@ export class UI {
       setTimeout(() => { div.remove(); }, 7000);
       if (m.kind === 'bad') this.showBanner(m.text, 'bad');
     }
+  }
+
+  // Contextual "hold B" prompt while standing on a fundable foundation.
+  showBuildHint(html) {
+    const el = this.root.querySelector('#buildhint');
+    if (!html) {
+      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+      this._buildHint = null;
+      return;
+    }
+    if (this._buildHint !== html) {
+      this._buildHint = html;
+      el.innerHTML = html;
+    }
+    el.classList.remove('hidden');
   }
 
   // Branch doctrine picker, shown while standing at a branch-ready plot.

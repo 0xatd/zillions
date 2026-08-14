@@ -10,11 +10,12 @@ export const NIGHT_MAX = 150;          // safety: a night never lasts longer tha
 export const FINAL_NIGHT = 10;         // survive this many nights to win
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
-export const PAY_RADIUS = 1.1;         // stand this close to a pay plate to fund it
-export const PAY_RATE = 15;            // gold per second streamed into a plot
+export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
+export const PAY_RATE = 22;            // gold per second streamed into a plot (hold B)
+export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
 
 export const TILE = {
-  GRASS: 0, FOREST: 1, WATER: 2, MOUNTAIN: 3, SAND: 4, GOLDORE: 5, STONEORE: 6,
+  GRASS: 0, FOREST: 1, WATER: 2, MOUNTAIN: 3, SAND: 4, GOLDORE: 5, STONEORE: 6, PATH: 7,
 };
 
 // Grimdark palette: ashen moorland, black pines, oily water, bone-dry ash.
@@ -26,6 +27,7 @@ export const TILE_INFO = {
   [TILE.SAND]:     { walk: true,  build: true,  color: 0x8a7d5e },
   [TILE.GOLDORE]:  { walk: true,  build: true,  color: 0x6e6240 },
   [TILE.STONEORE]: { walk: true,  build: true,  color: 0x5e6a72 },
+  [TILE.PATH]:     { walk: true,  build: true,  color: 0x6b6353 },
 };
 
 // ---------- Plots: the city is pre-designed; you buy it to life ----------
@@ -164,7 +166,9 @@ export function waveForNight(night, mult) {
   return { size, types, edges, final: night === FINAL_NIGHT };
 }
 
-// ---------- Heroes: auto-attack + ONE signature ability ----------
+// ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
+// The whole kit, Thronefall-simple: you steer, your weapon fires itself, an
+// aura hums around you, and SPACE at night fires the special.
 // Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
 export const HERO_MAX_LEVEL = 10;
@@ -178,6 +182,10 @@ export const HEROES = {
     tagline: 'Close combat. A whirlwind of steel.',
     hp: 480, dmg: 30, range: 1.8, rof: 1.1, speed: 4.3, noise: 4,
     levelHp: 46, levelDmg: 4.5, regen: 3.0, melee: true,
+    aura: {
+      key: 'courage', name: 'Warbanner', icon: '🚩', radius: 5.5, dmgMult: 1.35, color: 0xd8a03c,
+      desc: 'Troops fighting beside Scott hit 35% harder.',
+    },
     ability: {
       key: 'whirlwind', name: 'Whirlwind', icon: '🌪️', cd: 11,
       cast: 'whirlwind', radius: 2.6, dur: [3, 4, 5], dps: [50, 80, 115],
@@ -189,6 +197,10 @@ export const HEROES = {
     tagline: 'Mid range. The ground itself fights for him.',
     hp: 350, dmg: 26, range: 7, rof: 1.8, speed: 4.5, noise: 14,
     levelHp: 34, levelDmg: 3.5, regen: 2.2,
+    aura: {
+      key: 'lifebloom', name: 'Lifebloom', icon: '💚', radius: 5.5, regen: 6, color: 0x59c86a,
+      desc: 'Troops and allied heroes near Alexander knit their wounds (+6 hp/s).',
+    },
     ability: {
       key: 'roots', name: 'Entangling Roots', icon: '🌿', cd: 10,
       cast: 'aoeDmg', radius: 6, dmg: [25, 45, 70], stun: [2.2, 2.8, 3.4],
@@ -200,6 +212,10 @@ export const HEROES = {
     tagline: 'Long range. Now you see him. They never do.',
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
     levelHp: 27, levelDmg: 5, regen: 2.0,
+    aura: {
+      key: 'dread', name: 'Dread', icon: '🕸️', radius: 5.5, slow: 0.72, color: 0x9c8ad8,
+      desc: 'The dead falter near Danny — 28% slower inside his shadow.',
+    },
     ability: {
       key: 'veil', name: 'Shadow Veil', icon: '🌫️', cd: 12,
       cast: 'veil', dur: [3.5, 4.5, 6], backstab: [2.4, 3.0, 3.6], haste: 1.3,
