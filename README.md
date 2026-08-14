@@ -74,7 +74,7 @@ Hero rules:
 
 | Input | Action |
 | --- | --- |
-| WASD / arrows / screen edge | Pan camera |
+| WASD / arrows / mouse at screen edge | Pan camera |
 | Mouse wheel | Zoom |
 | Z / C | Rotate camera |
 | F | Select hero |

@@ -11,6 +11,7 @@ import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leave
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
+const EDGE_PAN_MARGIN = 42;
 
 class App {
   constructor() {
@@ -36,7 +37,7 @@ class App {
     this.paused = true;        // starts paused behind the menu
     this.acc = 0;
     this.keys = new Set();
-    this.mouse = { x: 0, y: 0, gx: 0, gz: 0, down: false, rdown: false };
+    this.mouse = { x: 0, y: 0, gx: 0, gz: 0, down: false, rdown: false, cx: undefined, cy: undefined };
     this.dragStart = null;
     this.wallDrag = false;
     this.lastWallTile = null;
@@ -1230,6 +1231,8 @@ class App {
       if (this.wallDrag && this.mouse.down) this._tryPlace(true);
       if (this.dragStart) this._updateDragRect(e);
     });
+    window.addEventListener('blur', () => this._clearMousePosition());
+    document.addEventListener('mouseleave', () => this._clearMousePosition());
 
     window.addEventListener('pointerup', (e) => {
       if (e.button === 0) {
@@ -1259,6 +1262,11 @@ class App {
       this.mouse.gx = clamp(pt.x, 0, MAP_SIZE);
       this.mouse.gz = clamp(pt.z, 0, MAP_SIZE);
     }
+  }
+
+  _clearMousePosition() {
+    this.mouse.cx = undefined;
+    this.mouse.cy = undefined;
   }
 
   _updateDragRect(e) {
@@ -1462,21 +1470,19 @@ class App {
   }
 
   _updateCamera(dt) {
-    const panSpeed = this.camDist * 0.9 * dt;
+    const panSpeed = this.camDist * 0.95 * dt;
     let px = 0, pz = 0;
     if (this.keys.has('w') || this.keys.has('arrowup')) pz -= 1;
     if (this.keys.has('s') || this.keys.has('arrowdown')) pz += 1;
     if (this.keys.has('a') || this.keys.has('arrowleft')) px -= 1;
     if (this.keys.has('d') || this.keys.has('arrowright')) px += 1;
-    // Edge pan.
-    if (this.game && !document.querySelector('#overlay:not(.hidden)')) {
-      const m = 18;
-      if (this.mouse.cx !== undefined) {
-        if (this.mouse.cx < m) px -= 1;
-        else if (this.mouse.cx > window.innerWidth - m) px += 1;
-        if (this.mouse.cy < m) pz -= 1;
-        else if (this.mouse.cy > window.innerHeight - m) pz += 1;
-      }
+    const edge = this._edgePanVector();
+    px += edge.x;
+    pz += edge.z;
+    const panLen = Math.hypot(px, pz);
+    if (panLen > 1) {
+      px /= panLen;
+      pz /= panLen;
     }
     if (this.keys.has('z')) this.camYaw += dt * 1.6;
     if (this.keys.has('c')) this.camYaw -= dt * 1.6;
@@ -1505,6 +1511,27 @@ class App {
     // Shadow camera follows focus.
     this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
     this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+  }
+
+  _edgePanVector() {
+    if (!this.game || document.querySelector('#overlay:not(.hidden)')) return { x: 0, z: 0 };
+    if (document.hidden || this.mouse.cx === undefined || this.mouse.cy === undefined) return { x: 0, z: 0 };
+    if (this.mouse.cx < 0 || this.mouse.cy < 0 || this.mouse.cx > window.innerWidth || this.mouse.cy > window.innerHeight) {
+      return { x: 0, z: 0 };
+    }
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return { x: 0, z: 0 };
+    return {
+      x: this._edgePanAxis(this.mouse.cx, window.innerWidth),
+      z: this._edgePanAxis(this.mouse.cy, window.innerHeight),
+    };
+  }
+
+  _edgePanAxis(pos, size) {
+    const margin = Math.min(EDGE_PAN_MARGIN, Math.max(24, size * 0.08));
+    if (pos < margin) return -Math.pow((margin - pos) / margin, 0.65);
+    if (pos > size - margin) return Math.pow((pos - (size - margin)) / margin, 0.65);
+    return 0;
   }
 
   _updateGhost() {
