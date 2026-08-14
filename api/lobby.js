@@ -9,6 +9,7 @@ const ACTIVE_MS = 60_000;
 const MESSAGE_LIMIT = 50;
 const VALID_MODES = new Set(['survival', 'labyrinth', 'smoke']);
 const VALID_HEROES = new Set(['alexander', 'scott', 'danny']);
+const VALID_RULES = new Set(['survival-plots', 'survival']);
 
 function send(res, status, body) {
   res.writeHead(status, JSON_HEADERS);
@@ -44,6 +45,11 @@ function cleanMode(value) {
 function cleanHero(value) {
   const hero = cleanId(value, 'alexander');
   return VALID_HEROES.has(hero) ? hero : 'alexander';
+}
+
+function cleanRules(value) {
+  const rules = cleanId(value, 'survival-plots');
+  return VALID_RULES.has(rules) ? rules : 'survival-plots';
 }
 
 function playerPath(mode, playerId) {
@@ -87,7 +93,8 @@ async function readLobby(mode) {
           playerId: cleanId(player.playerId),
           name: cleanName(player.name),
           hero: cleanHero(player.hero),
-          status: cleanText(player.status, 'in-lobby').slice(0, 32),
+          rules: cleanRules(player.rules),
+          status: cleanText(player.status, 'in-lobby').slice(0, 80),
           updatedAt: player.updatedAt,
         });
       }
@@ -135,7 +142,7 @@ async function readLobby(mode) {
   };
 }
 
-async function upsertPresence({ mode, playerId, name, hero, status = 'in-lobby' }) {
+async function upsertPresence({ mode, playerId, name, hero, rules, status = 'in-lobby' }) {
   const now = Date.now();
   const presence = {
     schema: 'zillions.lobby_presence.v1',
@@ -143,7 +150,8 @@ async function upsertPresence({ mode, playerId, name, hero, status = 'in-lobby' 
     playerId: cleanId(playerId),
     name: cleanName(name),
     hero: cleanHero(hero),
-    status: cleanText(status, 'in-lobby').slice(0, 32),
+    rules: cleanRules(rules),
+    status: cleanText(status, 'in-lobby').slice(0, 80),
     updatedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + ACTIVE_MS).toISOString(),
   };
@@ -204,6 +212,7 @@ export default async function handler(req, res) {
           playerId,
           name: body.name,
           hero: body.hero,
+          rules: body.rules,
           status: body.status || 'in-lobby',
         });
         return send(res, 200, {
@@ -217,7 +226,7 @@ export default async function handler(req, res) {
       if (action === 'chat') {
         const text = cleanText(body.text);
         if (!text) return send(res, 400, { ok: false, error: 'empty_chat' });
-        await upsertPresence({ mode, playerId, name: body.name, hero: body.hero, status: 'in-lobby' });
+        await upsertPresence({ mode, playerId, name: body.name, hero: body.hero, rules: body.rules, status: 'in-lobby' });
         const message = await writeChat({ mode, playerId, name: body.name, hero: body.hero, text });
         return send(res, 200, {
           ok: true,

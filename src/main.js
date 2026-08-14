@@ -8,6 +8,7 @@ import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
 import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leaveLobby, putState, sendLobbyChat } from './backend.js';
+import { PLOT_PAY_RADIUS, plotInfo, plotPaidTotal } from './plots.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -47,6 +48,7 @@ class App {
     this.profile = this._loadProfile();
     this.settings = this._loadSettings();
     this.lobbyMode = 'survival';
+    this.selectedRules = this.settings.rules === 'survival' ? 'survival' : 'survival-plots';
     this.lobbyJoined = false;
     this.lobbyTimer = null;
     this.ui = new UI(document.getElementById('ui'), {
@@ -59,15 +61,18 @@ class App {
         this.settings.muted = this.audio.muted;
         this._saveSettings();
       },
-      onStart: (d, hero) => {
+      onStart: (d, hero, rules = this.selectedRules || 'survival-plots') => {
+        this.selectedRules = rules;
+        this.settings.rules = rules;
+        this._saveSettings();
         if (this.mpRole === 'guest') return; // host launches the match
         if (this.mpRole === 'host' && this.peers.length) {
           const level = this.ui.selectedLevel || 1;
           const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level }));
-          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level });
+          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode: rules }));
+          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode: rules });
         } else {
-          this.startGame(d, hero);
+          this.startGame(d, hero, null, null, rules);
         }
       },
       onCast: (i) => this.tryCast(i),
@@ -88,6 +93,16 @@ class App {
         this._heartbeatLobby();
       },
       onModePick: (mode) => { this.lobbyMode = mode; this.refreshPublicLobby(); },
+      onRulesPick: (rules) => {
+        this.selectedRules = rules === 'survival' ? 'survival' : 'survival-plots';
+        this.settings.rules = this.selectedRules;
+        this._saveSettings();
+        this._heartbeatLobby();
+      },
+      onLobbyStart: (rules, hero) => {
+        this.startGame('normal', hero || this.ui.selectedHero || 'alexander', null, null, rules || this.selectedRules || 'survival-plots');
+      },
+      onLobbyHost: () => this.hostGame(),
       onLobbyJoin: () => this.joinPublicLobby(),
       onLobbyRefresh: () => this.refreshPublicLobby(),
       onLobbyChat: (text) => this.sendPublicLobbyChat(text),
@@ -102,6 +117,7 @@ class App {
       onContinue: () => this.continueGame(),
       onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); this._heartbeatLobby(); },
     });
+    this.ui.preselectRules(this.selectedRules);
     this.audio.setScene('menu', this.ui.selectedLevel || 1);
     this._setupAudioUnlock();
 
@@ -113,6 +129,7 @@ class App {
     this._setupInput();
 
     this.buildingMeshes = new Map();
+    this.plotMeshes = new Map();
     this.unitMeshes = new Map();
     this.ghost = null;
     this.rangeRing = this._makeRangeRing();
@@ -179,9 +196,11 @@ class App {
     window.addEventListener('keydown', unlock);
   }
 
-  async startGame(difficulty, heroKey, mp = null, snap = null) {
+  async startGame(difficulty, heroKey, mp = null, snap = null, modeOverride = null) {
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const level = LEVELS[levelId - 1] || LEVELS[0];
+    const requestedMode = snap ? snap.mode || 'survival' : modeOverride || mp?.mode || this.selectedRules || 'survival-plots';
+    const mode = requestedMode === 'survival' ? 'survival' : 'survival-plots';
     this.audio.init('game', levelId);
     this.audio.setScene('game', levelId);
     this._leaveLobby(false);
@@ -193,7 +212,7 @@ class App {
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId);
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.ui.setLocalPlayer(this.myPlayer);
@@ -212,7 +231,8 @@ class App {
     this.ui.hideStart();
     this.ui.initHeroPanel(this.game.heroes[this.myPlayer]);
     this.setSpeed(1);
-    this.ui.showBanner(`${level.name} — ${level.boss.icon} ${level.boss.name} awaits on day ${FINAL_DAY}`, '', 4000);
+    const modeLabel = mode === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
+    this.ui.showBanner(`${modeLabel}: ${level.name} — ${level.boss.icon} ${level.boss.name} awaits on day ${FINAL_DAY}`, '', 4000);
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
   }
 
@@ -240,8 +260,8 @@ class App {
 
   _loadSettings() {
     try {
-      return { muted: false, ...JSON.parse(localStorage.getItem('zillions_settings') || '{}') };
-    } catch { return { muted: false }; }
+      return { muted: false, rules: 'survival-plots', ...JSON.parse(localStorage.getItem('zillions_settings') || '{}') };
+    } catch { return { muted: false, rules: 'survival-plots' }; }
   }
 
   _saveSettings() {
@@ -282,6 +302,7 @@ class App {
     this._mirrorState('game', `${Date.now()}`, {
       endedAt: Date.now(),
       won,
+      mode: this.game.mode,
       difficulty: this.game.diffKey,
       level: this.game.levelId,
       heroKeys: this.game.heroKeys,
@@ -289,6 +310,7 @@ class App {
       kills: this.game.stats.kills,
       built: this.game.stats.built,
       lost: this.game.stats.lost,
+      plots: this.game.stats.plots || 0,
       players: this.game.heroKeys.length,
     });
     deleteState('save', 'latest').catch(() => {});
@@ -300,11 +322,16 @@ class App {
   }
 
   _lobbyProfile(status = 'in-lobby') {
+    const rules = this.selectedRules === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
+    const stats = this.profile.games
+      ? `${this.profile.wins}W/${this.profile.games - this.profile.wins}L · best day ${this.profile.bestDay}`
+      : 'first deployment';
     return {
       mode: this.lobbyMode || 'survival',
       name: this.profile.name || 'Commander',
       hero: this.ui.selectedHero || 'alexander',
-      status,
+      rules: this.selectedRules || 'survival-plots',
+      status: status === 'in-lobby' ? `${rules} · ${stats}` : status,
     };
   }
 
@@ -393,6 +420,8 @@ class App {
         localStorage.setItem('zillions_settings', JSON.stringify(this.settings));
         this.audio.setMuted(!!this.settings.muted);
         this.ui.setMuteUI(this.audio.muted);
+        this.selectedRules = this.settings.rules === 'survival' ? 'survival' : 'survival-plots';
+        this.ui.preselectRules(this.selectedRules);
       }
       const localSave = this._loadSave();
       if (save?.snap && (!localSave?.when || save.when > localSave.when)) {
@@ -500,7 +529,7 @@ class App {
     else if (m.t === 'w') this.inbox.set(m.w, m.c);
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level });
+      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode || 'survival-plots' });
     }
     else if (m.t === 'desync' && !this.desynced) {
       this.desynced = true;
@@ -525,6 +554,12 @@ class App {
     h = (h * 31 + g.units.length) | 0;
     h = (h * 31 + g.buildings.length) | 0;
     h = (h * 31 + g.stats.kills) | 0;
+    h = (h * 31 + (g.plotMode ? 17 : 3)) | 0;
+    if (g.plotMode) {
+      for (const plot of g.plots) {
+        h = (h * 31 + (plot.built ? 1 : 0) + Math.round(plotPaidTotal(plot) * 1000)) | 0;
+      }
+    }
     for (const hr of g.heroes) {
       h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     }
@@ -1025,6 +1060,67 @@ class App {
     }
   }
 
+  _makePlotMesh(plot) {
+    const info = plotInfo(plot.key);
+    const group = new THREE.Group();
+    const color = info.color;
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(plot.size + 0.35, 0.05, plot.size + 0.35),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }),
+    );
+    base.position.y = 0.04;
+    const ringGeo = new THREE.RingGeometry(Math.max(0.55, plot.size * 0.55), Math.max(0.72, plot.size * 0.55 + 0.16), 36);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false }),
+    );
+    ring.position.y = 0.08;
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, 1.5, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }),
+    );
+    beacon.position.y = 0.78;
+    group.add(base, ring, beacon);
+    group.userData = { base, ring, beacon };
+    group.renderOrder = 2;
+    return group;
+  }
+
+  _syncPlots() {
+    if (!this.game?.plotMode) {
+      for (const rec of this.plotMeshes.values()) this.scene.remove(rec.mesh);
+      this.plotMeshes.clear();
+      return;
+    }
+    const seen = new Set();
+    const activeId = this.game.activePlot?.id || null;
+    const t = this.clock.elapsedTime;
+    for (const plot of this.game.plots) {
+      if (plot.built) continue;
+      seen.add(plot.id);
+      let rec = this.plotMeshes.get(plot.id);
+      if (!rec) {
+        rec = { mesh: this._makePlotMesh(plot), plot };
+        this.scene.add(rec.mesh);
+        this.plotMeshes.set(plot.id, rec);
+      }
+      const progress = plotPaidTotal(plot);
+      rec.mesh.position.set(plot.cx, 0, plot.cz);
+      rec.mesh.rotation.y = t * 0.18;
+      rec.mesh.userData.base.material.opacity = 0.16 + progress * 0.22;
+      rec.mesh.userData.ring.material.opacity = (plot.id === activeId ? 0.9 : 0.42) + progress * 0.18;
+      rec.mesh.userData.beacon.visible = plot.id === activeId || progress > 0.02;
+      rec.mesh.userData.beacon.scale.y = 0.55 + progress * 1.4 + (plot.id === activeId ? Math.sin(t * 5) * 0.12 : 0);
+    }
+    for (const [id, rec] of this.plotMeshes) {
+      if (!seen.has(id)) {
+        this.scene.remove(rec.mesh);
+        this.plotMeshes.delete(id);
+      }
+    }
+  }
+
   // ---------------- units ----------------
 
   _makeUnitMesh(u) {
@@ -1229,6 +1325,13 @@ class App {
         this._resetOrderMode();
         return;
       }
+      if (e.button === 0 && !this.buildMode) {
+        const plot = this._plotUnderMouse();
+        if (plot) {
+          this._moveHeroToPlot(plot);
+          return;
+        }
+      }
       if (e.button === 0) {
         this.mouse.down = true;
         if (this.buildMode) {
@@ -1286,6 +1389,9 @@ class App {
       this.mouse.gx = clamp(pt.x, 0, MAP_SIZE);
       this.mouse.gz = clamp(pt.z, 0, MAP_SIZE);
     }
+    if (this.game?.plotMode && !this.buildMode && !this.orderMode && this.targeting == null) {
+      this.canvas.style.cursor = this._plotUnderMouse() ? 'pointer' : 'default';
+    }
   }
 
   _clearMousePosition() {
@@ -1301,6 +1407,34 @@ class App {
     else if (live.some((u) => !u.hero)) this.audio.faction('army', 'move');
     this.issue({ t: 'move', ids: live.map((u) => u.id), x, z });
     this.burst(x, 0.1, z, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
+  }
+
+  _plotUnderMouse() {
+    if (!this.game?.plotMode) return null;
+    let best = null;
+    let bd = PLOT_PAY_RADIUS * PLOT_PAY_RADIUS;
+    for (const plot of this.game.plots) {
+      if (plot.built) continue;
+      const rx = Math.max(Math.abs(this.mouse.gx - plot.cx) - plot.size * 0.5, 0);
+      const rz = Math.max(Math.abs(this.mouse.gz - plot.cz) - plot.size * 0.5, 0);
+      const d = rx * rx + rz * rz;
+      if (d < bd) { bd = d; best = plot; }
+    }
+    return best;
+  }
+
+  _moveHeroToPlot(plot) {
+    const hero = this.myHero();
+    if (!hero || hero.dead) return;
+    this._clearSelection();
+    hero.selected = true;
+    this.selection = [hero];
+    this.ui.showSelection(this.selection, this.game);
+    this.audio.bark(hero.key, 'move');
+    this.issue({ t: 'move', ids: [hero.id], x: plot.cx, z: plot.cz });
+    const info = plotInfo(plot.key);
+    this.game.msg(`${info.label}: move onto the foundation to fund it.`, 'info');
+    this.burst(plot.cx, 0.1, plot.cz, { count: 10, color: info.color, speed: 1.2, life: 0.5, size: 0.35, up: 1.2 });
   }
 
   _selectionBark(units, category = 'selection') {
@@ -1755,6 +1889,11 @@ class App {
           this.audio.build();
           this.burst(e.x, 0.3, e.z, { count: 16, color: 0xc9b48a, speed: 2.2, life: 0.5, size: 0.6, up: 1.6, spread: 0.9 });
           break;
+        case 'plotpay': {
+          const info = plotInfo(e.key);
+          this.burst(e.x, 0.18, e.z, { count: 8, color: info.color, speed: 1.0, life: 0.35, size: 0.36, up: 1.1, spread: 0.6 });
+          break;
+        }
         case 'demolish':
           this.audio.demolish();
           this.burst(e.x, 0.4, e.z, { count: 18, color: 0xa89878, speed: 2.4, life: 0.6, size: 0.6, up: 2 });
@@ -1969,6 +2108,7 @@ class App {
       }
 
       this._consumeEvents();
+      this._syncPlots();
       this._syncBuildings();
       this._syncUnits();
       this._syncPickups();

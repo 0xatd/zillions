@@ -13,6 +13,7 @@ import {
   BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
 } from './config.js';
+import { plotCostText, plotInfo, plotPaidTotal } from './plots.js';
 import { formatTime } from './utils.js';
 
 export class UI {
@@ -29,6 +30,7 @@ export class UI {
       <div id="topbar">
         <div class="res" id="r-day" title="Day / time of day">☀️ <b>Day 1</b></div>
         <div class="res" id="r-wave" title="Time until the next horde">⏳ --:--</div>
+        <div class="res hidden" id="r-plot" title="Current Plot Lab foundation">🏗️ Plot Lab</div>
         <div class="sep"></div>
         <div class="res" id="r-gold" title="Gold — taxes from tents and gold mines">💰 0</div>
         <div class="res" id="r-wood" title="Wood — produced by sawmills">🪵 0</div>
@@ -78,6 +80,7 @@ export class UI {
           <div class="howto">
             <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
             <div><b>🤖 The Overseer</b> builds your economy and defenses for you — focus on the fight. (Toggle it off to build manually.)</div>
+            <div><b>🏗️ Plot Lab</b> uses Thronefall-style foundations. Ride onto a glowing plot during the day to fund and build it.</div>
             <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
             <div><b>💰 Spare gold?</b> Train troops at the barracks and command them like it's 2003.</div>
@@ -96,6 +99,16 @@ export class UI {
               <small>Coming soon.</small>
             </button>
           </div>
+          <div class="survivalstyle" id="survivalstyle">
+            <button class="stylecard sel" data-rules="survival-plots" type="button">
+              <b>Plot Lab</b>
+              <small>Planned city, coin-run pacing, day builds.</small>
+            </button>
+            <button class="stylecard" data-rules="survival" type="button">
+              <b>Classic RTS</b>
+              <small>Free-place buildings and Overseer economy.</small>
+            </button>
+          </div>
           <div class="herorow" id="herorow"></div>
           <div class="levelrow" id="levelrow"></div>
           <div id="continuerow"></div>
@@ -106,6 +119,8 @@ export class UI {
               <span id="lobby-count">-- active</span>
             </div>
             <div class="lobbyactions">
+              <button class="tbtn" id="lobby-start" type="button">Start solo</button>
+              <button class="tbtn" id="lobby-host" type="button">Host co-op</button>
               <button class="tbtn" id="lobby-join" type="button">Join lobby</button>
               <button class="tbtn" id="lobby-refresh" type="button">Refresh</button>
             </div>
@@ -134,6 +149,7 @@ export class UI {
 
     // Mode picker.
     this.selectedMode = 'survival';
+    this.selectedRules = 'survival-plots';
     const moderow = this.root.querySelector('#moderow');
     for (const card of moderow.querySelectorAll('.modecard')) {
       card.onclick = () => {
@@ -146,6 +162,15 @@ export class UI {
         for (const c of moderow.children) c.classList.toggle('sel', c === card);
         this.root.querySelector('#lobby-mode').textContent = 'Survival';
         if (this.cb.onModePick) this.cb.onModePick(mode);
+      };
+    }
+    const stylerow = this.root.querySelector('#survivalstyle');
+    for (const card of stylerow.querySelectorAll('.stylecard')) {
+      card.onclick = () => {
+        this.selectedRules = card.dataset.rules || 'survival-plots';
+        for (const c of stylerow.children) c.classList.toggle('sel', c === card);
+        this.setLobbyStatus(`${this.selectedRules === 'survival-plots' ? 'Plot Lab' : 'Classic RTS'} selected.`, true);
+        if (this.cb.onRulesPick) this.cb.onRulesPick(this.selectedRules);
       };
     }
 
@@ -185,7 +210,7 @@ export class UI {
       const b = document.createElement('button');
       b.className = 'diffbtn' + (key === 'normal' ? ' primary' : '');
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
-      b.onclick = () => this.cb.onStart(key, this.selectedHero);
+      b.onclick = () => this.cb.onStart(key, this.selectedHero, this.selectedRules);
       diffrow.appendChild(b);
     }
 
@@ -244,6 +269,8 @@ export class UI {
     });
 
     this.root.querySelector('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
+    this.root.querySelector('#lobby-start').onclick = () => this.cb.onLobbyStart && this.cb.onLobbyStart(this.selectedRules, this.selectedHero);
+    this.root.querySelector('#lobby-host').onclick = () => this.cb.onLobbyHost && this.cb.onLobbyHost();
     this.root.querySelector('#lobby-join').onclick = () => this.cb.onLobbyJoin && this.cb.onLobbyJoin();
     this.root.querySelector('#lobby-refresh').onclick = () => this.cb.onLobbyRefresh && this.cb.onLobbyRefresh();
     this.root.querySelector('#lobby-form').addEventListener('submit', (e) => {
@@ -480,6 +507,13 @@ export class UI {
     this._syncHeroCinematics();
   }
 
+  preselectRules(rules) {
+    const card = this.root.querySelector(`.stylecard[data-rules=${rules}]`);
+    if (!card) return;
+    this.selectedRules = rules;
+    for (const c of this.root.querySelectorAll('.stylecard')) c.classList.toggle('sel', c === card);
+  }
+
   _syncHeroCinematics() {
     for (const card of this.root.querySelectorAll('.herocard')) {
       const video = card.querySelector('video');
@@ -499,7 +533,8 @@ export class UI {
     if (!snap) { row.innerHTML = ''; return; }
     const day = Math.floor(snap.time / DAY_LENGTH) + 1;
     const players = snap.heroKeys.length;
-    row.innerHTML = `<button class="diffbtn primary" id="b-continue">📂 Continue — Day ${day}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</button>`;
+    const mode = snap.mode === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
+    row.innerHTML = `<button class="diffbtn primary" id="b-continue">📂 Continue — ${mode}, Day ${day}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
@@ -554,7 +589,8 @@ export class UI {
         const name = document.createElement('span');
         name.textContent = `${hero.icon} ${player.name || 'Commander'}`;
         const status = document.createElement('small');
-        status.textContent = player.status || 'in-lobby';
+        const rules = player.rules === 'survival-plots' ? 'Plot Lab' : player.rules === 'survival' ? 'Classic RTS' : '';
+        status.textContent = player.status || rules || 'in-lobby';
         row.append(name, status);
         playerList.appendChild(row);
       }
@@ -684,6 +720,7 @@ export class UI {
         <div class="howto stats">
           <div>🧟 Zombies slain: <b>${stats.kills}</b></div>
           <div>🏗️ Buildings raised: <b>${stats.built}</b></div>
+          ${stats.plots ? `<div>📍 Plot builds funded: <b>${stats.plots}</b></div>` : ''}
           <div>🔥 Buildings lost: <b>${stats.lost}</b></div>
           <div>☀️ Days survived: <b>${Math.min(day, FINAL_DAY)}</b></div>
         </div>
@@ -886,6 +923,22 @@ export class UI {
     q('#r-energy').innerHTML = `⚡ <small>${energyFree}/${e.energyProd}</small>`;
     q('#r-pop').innerHTML = `👷 ${e.workersUsed}/${e.popCap}`;
     q('#r-z').innerHTML = `🧟 ${zombieCount}`;
+    const plotHud = q('#r-plot');
+    if (plotHud) {
+      plotHud.classList.toggle('hidden', !game.plotMode);
+      if (game.plotMode) {
+        const active = game.activePlot;
+        if (active) {
+          const info = plotInfo(active.key);
+          plotHud.innerHTML = `🏗️ ${info.label} <small>${Math.round(plotPaidTotal(active) * 100)}% · ${plotCostText(active)}</small>`;
+          plotHud.classList.add('active');
+        } else {
+          const left = game.plots.filter((p) => !p.built).length;
+          plotHud.innerHTML = `🏗️ Plot Lab <small>${left} foundations</small>`;
+          plotHud.classList.remove('active');
+        }
+      }
+    }
 
     // Gray out unaffordable build buttons.
     for (const key of BUILD_ORDER) {
@@ -924,6 +977,16 @@ export class UI {
     for (const b of game.buildings) {
       ctx.fillStyle = b.key === 'hq' ? '#ffd75e' : b.key === 'wall' ? '#c9b48a' : '#efeadb';
       ctx.fillRect(b.x, b.z, b.size, b.size);
+    }
+    if (game.plotMode) {
+      for (const plot of game.plots) {
+        if (plot.built) continue;
+        const info = plotInfo(plot.key);
+        ctx.fillStyle = `#${info.color.toString(16).padStart(6, '0')}`;
+        ctx.globalAlpha = 0.55 + plotPaidTotal(plot) * 0.35;
+        ctx.fillRect(plot.x, plot.z, Math.max(1, plot.size), Math.max(1, plot.size));
+      }
+      ctx.globalAlpha = 1;
     }
     ctx.fillStyle = '#43d17c';
     for (const u of game.units) {

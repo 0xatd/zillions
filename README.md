@@ -35,14 +35,17 @@ The dead cover the map. You found a colony, build an economy, train defenders, a
 
 Current modes:
 
-- **Survival**: the active mode. Play solo, or gather players in the online lobby and start co-op.
+- **Survival Plot Lab**: the default active mode. It keeps the RTS combat, but the city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day to fund and build it.
+- **Classic Survival RTS**: the original free-build survival mode with the Overseer economy bot.
 - **Labyrinth**: planned second mode. It is visible in the menu but not playable yet.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
 Core systems:
 
+- Pick **Plot Lab** or **Classic RTS** before a run. Plot Lab is the Thronefall-style ruleset. Classic keeps free-placement building.
 - Build hab-tents, hydro-farms, sawmills, quarries, gold mines, wind generators, walls, towers, and barracks.
+- In Plot Lab, foundations around the Command Center show where the city can grow. Stand on a foundation to spend resources into it. Completed foundations become real buildings.
 - Train scouts, troopers, and snipers.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
@@ -84,6 +87,7 @@ Hero rules:
 | Left click / drag | Select units |
 | Right click | Move squad or cancel build |
 | Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
+| Left click a Plot Lab foundation | Send your hero to fund that plot |
 | T | Select whole army |
 | 1-9 | Manual build hotkeys |
 | U / I / O | Train scout / trooper / sniper |
@@ -94,7 +98,7 @@ Hero rules:
 
 ## Co-op multiplayer (up to 3 players, no server)
 
-On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players for Survival and includes simple chat. GitHub Pages and local static servers still run without the lobby backend.
+On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players, their selected hero, their preferred Survival ruleset, and basic profile stats. It also includes simple chat plus direct **Start solo** and **Host co-op** actions. GitHub Pages and local static servers still run without the lobby backend.
 
 Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
 
@@ -103,7 +107,7 @@ Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero
 ## Profiles & Saved Games
 
 - **Commander profile**: set your name on the menu; the game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
-- **Settings**: mute state is persisted.
+- **Settings**: mute state and preferred Survival ruleset are persisted.
 - **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 - **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
 
@@ -115,7 +119,7 @@ POST   /api/state  { playerId, kind: "profile" | "settings" | "save" | "game", i
 DELETE /api/state?playerId=<id>&kind=save&id=latest
 
 GET    /api/lobby?mode=survival
-POST   /api/lobby  { action: "join" | "heartbeat" | "chat" | "leave", playerId, mode, name?, hero?, text? }
+POST   /api/lobby  { action: "join" | "heartbeat" | "chat" | "leave", playerId, mode, name?, hero?, rules?, text? }
 DELETE /api/lobby?mode=survival&playerId=<id>
 ```
 
@@ -162,6 +166,7 @@ assets-page.css         Asset browser styles
 assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
+src/plots.js            Plot Lab foundation plan and funding helpers
 src/config.js           Balance, heroes, buildings, units, waves
 src/audio.js            Runtime MP3 audio plus WebAudio fallback
 src/backend.js          Browser client for cloud state and lobby APIs

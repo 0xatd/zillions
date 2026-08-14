@@ -7,6 +7,7 @@ import {
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
 import { Overseer } from './bot.js';
+import { generatePlots, plotComplete, plotCost, plotCostText, PLOT_PAY_RADIUS, PLOT_PAY_RATE } from './plots.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
@@ -17,16 +18,20 @@ const setNextId = (v) => { nextId = v; };
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1) {
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'survival') {
     this.map = map;
     this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.levelId = snap ? snap.level : levelId;
+    this.mode = snap ? snap.mode || 'survival' : mode;
+    this.plotMode = this.mode === 'survival-plots';
     this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
     this.boss = null;
     this.rng = makeRNG(999);
 
     this.res = { ...START_RESOURCES };
+    this.plots = this.plotMode ? generatePlots(map) : [];
+    this.activePlot = null;
     this.buildings = [];
     this.units = [];
     this.zombies = [];
@@ -45,7 +50,7 @@ export class Game {
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
 
-    this.stats = { kills: 0, built: 0, lost: 0 };
+    this.stats = { kills: 0, built: 0, lost: 0, plots: 0 };
 
     this.eco = { energyProd: 0, energyUse: 0, workersUsed: 0, popCap: 0, gold: 0, wood: 0, stone: 0, food: 0 };
     this.starving = false;
@@ -55,7 +60,7 @@ export class Game {
     this.hero = null;            // heroes[0], kept for solo call sites
     this.pickups = [];
     this.fields = [];            // ability ground zones
-    this.autoBuild = true;       // the Overseer runs the economy by default
+    this.autoBuild = !this.plotMode; // Plot Lab is manual by default.
     this.bot = new Overseer(this);
 
     if (snap) this._restore(snap);
@@ -76,13 +81,20 @@ export class Game {
       def: (u.turret || u.summon) ? { ...u.def } : undefined,
     });
     return {
-      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId,
+      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       time: this.time, res: { gold: +this.res.gold.toFixed(3), wood: +this.res.wood.toFixed(3), stone: +this.res.stone.toFixed(3) },
       autoBuild: this.autoBuild, finalSpawned: this.finalSpawned,
       wavesDone: [...this.wavesDone], pendingWave: this.pendingWave || null,
       ambientTimer: this.ambientTimer, stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
-      buildings: this.buildings.map((b) => ({ id: b.id, k: b.key, x: b.x, z: b.z, hp: +b.hp.toFixed(1) })),
+      plots: this.plotMode ? this.plots.map((p) => ({
+        id: p.id, built: !!p.built, paid: {
+          gold: +(p.paid.gold || 0).toFixed(2),
+          wood: +(p.paid.wood || 0).toFixed(2),
+          stone: +(p.paid.stone || 0).toFixed(2),
+        },
+      })) : undefined,
+      buildings: this.buildings.map((b) => ({ id: b.id, k: b.key, x: b.x, z: b.z, hp: +b.hp.toFixed(1), p: b.plotId || 0 })),
       units: this.units.filter((u) => !u.hero).map(unit),
       heroes: this.heroes.map((h) => ({
         k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
@@ -106,13 +118,25 @@ export class Game {
     this.ambientTimer = snap.ambientTimer;
     this.stats = { ...snap.stats };
     this.bot.greeted = true;
+    if (this.plotMode && Array.isArray(snap.plots)) {
+      for (const ps of snap.plots) {
+        const plot = this.plots.find((p) => p.id === ps.id);
+        if (!plot) continue;
+        plot.built = !!ps.built;
+        plot.paid = {
+          gold: ps.paid?.gold || 0,
+          wood: ps.paid?.wood || 0,
+          stone: ps.paid?.stone || 0,
+        };
+      }
+    }
 
     for (const b of snap.buildings) {
       const d = BUILDINGS[b.k];
       const nb = {
         id: b.id, key: b.k, def: d, x: b.x, z: b.z, size: d.size,
         cx: b.x + d.size / 2, cz: b.z + d.size / 2,
-        hp: b.hp, maxHp: d.hp, alive: true, cooldown: 0,
+        hp: b.hp, maxHp: d.hp, alive: true, cooldown: 0, plotId: b.p || null,
       };
       this.buildings.push(nb);
       for (let dz = 0; dz < d.size; dz++) for (let dx = 0; dx < d.size; dx++) {
@@ -181,7 +205,11 @@ export class Game {
     this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
     this._scatterInitialZombies();
     this.recalcEconomy();
-    this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
+    if (this.plotMode) {
+      this.msg('Survival Plot Lab online: ride onto glowing foundations to fund the city plan.', 'info');
+    } else {
+      this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
+    }
   }
 
   _scatterInitialZombies() {
@@ -232,7 +260,7 @@ export class Game {
     this.eco = e;
   }
 
-  canPlace(key, x, z) {
+  canPlace(key, x, z, opts = {}) {
     const d = BUILDINGS[key];
     const s = d.size;
     if (x < 0 || z < 0 || x + s > this.map.size || z + s > this.map.size) return { ok: false, why: 'Out of bounds' };
@@ -257,13 +285,13 @@ export class Game {
       }
       if (!found) return { ok: false, why: d.needs === 'goldore' ? 'Must cover a gold deposit' : 'Must cover a stone deposit' };
     }
-    if (this.res.gold < d.cost.gold || this.res.wood < d.cost.wood || this.res.stone < (d.cost.stone || 0)) {
+    if (!opts.ignoreCost && (this.res.gold < d.cost.gold || this.res.wood < d.cost.wood || this.res.stone < (d.cost.stone || 0))) {
       return { ok: false, why: 'Not enough resources' };
     }
-    if ((d.workers || 0) > 0 && this.eco.workersUsed + d.workers > this.eco.popCap) {
+    if (!opts.ignoreCost && (d.workers || 0) > 0 && this.eco.workersUsed + d.workers > this.eco.popCap) {
       return { ok: false, why: 'Not enough colonists — build hab-tents' };
     }
-    if (d.energy < 0 && this.eco.energyProd - this.eco.energyUse + d.energy < 0) {
+    if (!opts.ignoreCost && d.energy < 0 && this.eco.energyProd - this.eco.energyUse + d.energy < 0) {
       return { ok: false, why: 'Not enough energy — build generators' };
     }
     return { ok: true };
@@ -280,12 +308,13 @@ export class Game {
     return b;
   }
 
-  _placeRaw(key, x, z) {
+  _placeRaw(key, x, z, opts = {}) {
     const d = BUILDINGS[key];
     const b = {
       id: nextId++, key, def: d, x, z, size: d.size,
       cx: x + d.size / 2, cz: z + d.size / 2,
       hp: d.hp, maxHp: d.hp, alive: true, cooldown: 0,
+      plotId: opts.plotId || null,
     };
     this.buildings.push(b);
     for (let dz = 0; dz < d.size; dz++) for (let dx = 0; dx < d.size; dx++) {
@@ -293,6 +322,38 @@ export class Game {
     }
     this.flowDirty = true;
     this.recalcEconomy();
+    return b;
+  }
+
+  buildPlot(id, charge = true) {
+    if (!this.plotMode) return null;
+    const plot = this.plots.find((p) => p.id === id);
+    if (!plot || plot.built) return null;
+    const b = charge ? this.place(plot.key, plot.x, plot.z) : this._constructPlot(plot);
+    if (b) {
+      b.plotId = plot.id;
+      plot.built = true;
+      plot.paid = { ...plotCost(plot.key) };
+      plot.buildingId = b.id;
+      if (charge) this.stats.plots = (this.stats.plots || 0) + 1;
+    }
+    return b;
+  }
+
+  _constructPlot(plot) {
+    const chk = this.canPlace(plot.key, plot.x, plot.z, { ignoreCost: true });
+    if (!chk.ok) {
+      this.emit({ type: 'deny' });
+      this.msg(`Could not build ${BUILDINGS[plot.key].name}: ${chk.why}`, 'warn');
+      return null;
+    }
+    const b = this._placeRaw(plot.key, plot.x, plot.z, { plotId: plot.id });
+    plot.built = true;
+    plot.buildingId = b.id;
+    this.stats.built++;
+    this.stats.plots = (this.stats.plots || 0) + 1;
+    this.emit({ type: 'build', key: plot.key, x: b.cx, z: b.cz });
+    this.msg(`${BUILDINGS[plot.key].icon} ${BUILDINGS[plot.key].name} funded and built.`, 'info');
     return b;
   }
 
@@ -313,6 +374,14 @@ export class Game {
       if (this.occ[i] === b.id) this.occ[i] = 0;
     }
     this.buildings = this.buildings.filter((o) => o !== b);
+    if (this.plotMode && b.plotId) {
+      const plot = this.plots.find((p) => p.id === b.plotId);
+      if (plot) {
+        plot.built = false;
+        plot.buildingId = null;
+        plot.paid = { gold: 0, wood: 0, stone: 0 };
+      }
+    }
     this.flowDirty = true;
     this.recalcEconomy();
     if (byZombie) {
@@ -384,6 +453,7 @@ export class Game {
     switch (c.t) {
       case 'place': this.place(c.k, c.x, c.z); break;
       case 'quietPlace': if (this.canPlace(c.k, c.x, c.z).ok) this.place(c.k, c.x, c.z); break;
+      case 'plotBuild': this.buildPlot(c.id, true); break;
       case 'demolish': { const b = this.buildings.find((o) => o.id === c.id); if (b) this.demolish(b); break; }
       case 'train': this.trainUnit(c.k); break;
       case 'move': {
@@ -1030,7 +1100,8 @@ export class Game {
 
     this._updateWaves(prevTime);
     this._updateEconomy(dt);
-    if (this.autoBuild) this.bot.update(dt);
+    if (this.plotMode) this._updatePlotFunding(dt);
+    if (this.autoBuild && !this.plotMode) this.bot.update(dt);
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateUnits(dt);
@@ -1111,6 +1182,47 @@ export class Game {
         b.hp = Math.min(b.maxHp, b.hp + (2 + b.maxHp * 0.004) * dt);
       }
     }
+  }
+
+  _updatePlotFunding(dt) {
+    this.activePlot = null;
+    if (this.isNight) return;
+    for (const h of this.heroes) {
+      if (!h || h.dead) continue;
+      let best = null;
+      let bd = PLOT_PAY_RADIUS * PLOT_PAY_RADIUS;
+      for (const plot of this.plots) {
+        plot.payFx = Math.max(0, (plot.payFx || 0) - dt);
+        if (plot.built) continue;
+        const d = dist2(h.x, h.z, plot.cx, plot.cz);
+        if (d < bd) { bd = d; best = plot; }
+      }
+      if (!best) continue;
+      this.activePlot = best;
+      if (this._activePlotId !== best.id) {
+        this._activePlotId = best.id;
+        this.msg(`Funding ${BUILDINGS[best.key].name}: ${plotCostText(best)} remaining.`, 'info');
+      }
+      const cost = plotCost(best.key);
+      let paid = false;
+      for (const res of ['gold', 'wood', 'stone']) {
+        const need = cost[res] - (best.paid[res] || 0);
+        if (need <= 0) continue;
+        const spend = Math.min(need, this.res[res] || 0, (PLOT_PAY_RATE[res] || 80) * dt);
+        if (spend <= 0) continue;
+        this.res[res] -= spend;
+        best.paid[res] = (best.paid[res] || 0) + spend;
+        paid = true;
+      }
+      if (paid) {
+        if ((best.payFx || 0) <= 0) {
+          best.payFx = 0.35;
+          this.emit({ type: 'plotpay', x: best.cx, z: best.cz, key: best.key });
+        }
+      }
+      if (plotComplete(best)) this._constructPlot(best);
+    }
+    if (!this.activePlot) this._activePlotId = null;
   }
 
   _updateFlow(dt) {

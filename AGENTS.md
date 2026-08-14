@@ -6,7 +6,7 @@ Zillions is a browser survival RTS.
 
 It should feel like They Are Billions mixed with Warcraft III hero mechanics, StarCraft command flow, and Warhammer-style grim space marines.
 
-The player builds a colony, survives zombie waves, controls a hero, and can let the Overseer bot handle economy/defense automation.
+The player builds a colony, survives zombie waves, controls a hero, and can let the Overseer bot handle economy/defense automation in Classic mode.
 
 ## Hard Constraints
 
@@ -23,6 +23,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `assets.html` - Audio/asset browser for GitHub Pages.
 - `src/config.js` - Balance, heroes, buildings, units, zombies, waves.
 - `src/game.js` - Main simulation.
+- `src/plots.js` - Survival Plot Lab foundations and funding helpers.
 - `src/main.js` - Bootstraps renderer, UI, game loop, profiles, saves, and Vercel backend mirroring.
 - `src/backend.js` - Browser client for optional cloud state and lobby APIs.
 - `src/ui.js` - DOM HUD and hero picker.
@@ -42,8 +43,11 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 ## Current Modes
 
 - Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
+- Survival has two rulesets:
+  - Plot Lab is the default. It is the Thronefall-style layer: pre-planned city plots around the Command Center, visible glowing foundations, and stand-near-to-fund construction.
+  - Classic RTS keeps free building placement and the Overseer economy/defense bot.
 - Labyrinth is a planned second mode. It can appear as locked or coming soon, but do not build gameplay for it unless Alex asks.
-- The Vercel online lobby is presence and chat only. It helps players gather before Survival. The actual co-op simulation still uses WebRTC invite/reply codes.
+- The Vercel online lobby is presence and chat. It shows active players, selected hero, preferred Survival ruleset, and profile-style status. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
 - The bottom bar is intentionally context-sensitive like Warcraft III / Dota 2. With no selection it shows build/train commands. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
 
 ## Audio State
@@ -78,6 +82,8 @@ Before you call a change good:
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
 - Confirm the game screen does not show a repo-only asset browser link.
+- Start Plot Lab and confirm glowing foundations render, clicking one sends the hero there, and standing on it funds construction.
+- Start Classic RTS and confirm free build placement and the Overseer still work.
 - Select a unit group and confirm the bottom command bar updates. Selection cards should focus units, and double-clicking a card should select that unit type.
 - Open `/assets.html` and confirm manifests load.
 - If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.
