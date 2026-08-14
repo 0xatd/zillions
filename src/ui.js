@@ -7,7 +7,7 @@ const PORTRAITS = {
   danny: 'assets/heroes/images/danny_assassin.png',
 };
 import {
-  PLOT_KINDS, DIFFICULTY, FINAL_NIGHT, LEVELS,
+  PLOT_KINDS, DIFFICULTY, FINAL_NIGHT, LEVELS, ITEMS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
@@ -52,6 +52,7 @@ export class UI {
               <b id="a-name"></b> <span class="hplvl" id="a-lvl">Lv 1</span>
               <div class="hpbar herohp"><div class="hpfill" id="a-hp"></div></div>
               <div class="hpbar heroxp"><div class="xpfill" id="a-xp"></div></div>
+              <div id="a-items"></div>
             </div>
           </div>
           <button id="bigaction" class="bigaction"></button>
@@ -371,7 +372,8 @@ export class UI {
     this.root.querySelector('#a-name').textContent = d.name;
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
-      if (this._bigMode === 'bell') this.cb.onBell();
+      if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
+      else if (this._bigMode === 'bell') this.cb.onBell();
       else this.cb.onCast();
     };
     big.onmouseenter = (e) => {
@@ -388,14 +390,16 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
 
-    const phase = game.isNight ? '🌙' : game.belling ? '🌇' : '☀️';
+    const phase = game.phase === 'found' ? '🏳️' : game.isNight ? '🌙' : game.belling ? '🌇' : '☀️';
     let waveLeft = 0;
     for (const zb of game.zombies) if (zb.wave) waveLeft++;
-    q('#r-day').innerHTML = game.isNight
-      ? `${phase} <b>Night ${game.mode === 'survival' ? game.night : Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
-      : game.belling
-        ? `${phase} <b>Night ${game.night} falls…</b>`
-        : `${phase} <b>Day ${game.night}</b>${game.mode === 'survival' ? '' : ' / ' + FINAL_NIGHT}`;
+    q('#r-day').innerHTML = game.phase === 'found'
+      ? `${phase} <b>Claim your ground</b>`
+      : game.isNight
+        ? `${phase} <b>Night ${game.mode === 'survival' ? game.night : Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
+        : game.belling
+          ? `${phase} <b>Night ${game.night} falls…</b>`
+          : `${phase} <b>Day ${game.night}</b>${game.mode === 'survival' ? '' : ' / ' + FINAL_NIGHT}`;
     q('#r-day').classList.toggle('danger', game.isNight || game.belling);
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
@@ -407,10 +411,25 @@ export class UI {
       const need = xpForLevel(h.level);
       q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
 
-      // The one big contextual button: bell by day, special by night.
+      // Item row: the gear this hero carries through the campaign.
+      const itemsKey = (h.items || []).join(',');
+      if (this._itemsKey !== itemsKey) {
+        this._itemsKey = itemsKey;
+        q('#a-items').innerHTML = (h.items || [])
+          .map((k) => (ITEMS[k] ? `<span class="hitem" title="${ITEMS[k].name} — ${ITEMS[k].desc}">${ITEMS[k].icon}</span>` : ''))
+          .join('');
+      }
+
+      // The one big contextual button: found the city, bell by day, special by night.
       const big = q('#bigaction');
       const ab = h.def.ability;
-      if (game.phase === 'day' && !game.belling) {
+      if (game.phase === 'found') {
+        this._bigMode = 'found';
+        const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
+        big.className = 'bigaction bell';
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>SPACE</small></span>`;
+        big.disabled = !near || h.dead;
+      } else if (game.phase === 'day' && !game.belling) {
         this._bigMode = 'bell';
         big.className = 'bigaction bell';
         big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE</small></span>`;
@@ -534,6 +553,24 @@ export class UI {
         ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: night ${p.bestDay}`
         : 'first deployment';
     }
+    this.refreshHeroBadges(p);
+  }
+
+  // WC3-style campaign persistence, shown right on the hero cards.
+  refreshHeroBadges(p) {
+    for (const card of this.root.querySelectorAll('.herocard')) {
+      const ch = (p.campaignHeroes || {})[card.dataset.key];
+      let badge = card.querySelector('.hpersist');
+      if (!ch || (ch.level <= 1 && !(ch.items || []).length)) { if (badge) badge.remove(); continue; }
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'hpersist';
+        card.appendChild(badge);
+      }
+      const items = ch.items || [];
+      badge.textContent = `⭐ Lv ${ch.level}${items.length ? ` · ${items.length} item${items.length > 1 ? 's' : ''}` : ''}`;
+      badge.title = items.map((k) => ITEMS[k] ? `${ITEMS[k].icon} ${ITEMS[k].name}` : k).join('\n');
+    }
   }
 
   preselectHero(key) {
@@ -631,11 +668,16 @@ export class UI {
     this.pauseOpen = false;
   }
 
-  showPause(netMode, help = false) {
+  showPause(netMode, help = false, quests = null) {
     this.pauseOpen = true;
     this._showScreen(help ? 'help' : 'pause');
     const note = this.root.querySelector('#p-note');
-    note.textContent = netMode ? '⚠️ Co-op keeps running while this menu is open.' : '';
+    const questHtml = (quests || []).map((q) => {
+      const it = ITEMS[q.reward];
+      return `<div class="questrow ${q.claimed ? 'done' : q.done ? 'done' : ''}">${q.claimed ? '🏅' : q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}${it ? ` <span class="qreward">${it.icon} ${it.name}</span>` : ''}</div>`;
+    }).join('');
+    note.innerHTML = (questHtml ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questHtml}</div>` : '')
+      + (netMode ? '⚠️ Co-op keeps running while this menu is open.' : '');
   }
 
   hidePause() {
@@ -643,12 +685,18 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
-  showEnd(won, stats, night, levelId, mode = 'campaign', best = 0) {
+  showEnd(won, stats, night, levelId, mode = 'campaign', best = 0, extra = null) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     const lv = LEVELS[(levelId || 1) - 1];
     const survival = mode === 'survival';
+    const questRows = (extra && extra.quests || []).map((q) => {
+      const it = ITEMS[q.reward];
+      return `<div class="questrow ${q.done ? 'done' : ''}">${q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}
+        <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
+    }).join('');
+    const grants = (extra && extra.grants || []).map((k) => ITEMS[k]).filter(Boolean);
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${survival ? `💀 NIGHT ${night}` : won ? '🏆 VICTORY' : '💀 THE CITY HAS FALLEN'}</h1>
@@ -660,10 +708,13 @@ export class UI {
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
+          <div>🔥 Hive nests razed: <b>${stats.nests || 0}</b></div>
           <div>🏗️ Structures raised: <b>${stats.built}</b></div>
-          <div>🔥 Structures lost: <b>${stats.lost}</b></div>
           <div>🌙 Nights survived: <b>${survival ? night - 1 : Math.min(night, FINAL_NIGHT)}</b></div>
         </div>
+        ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
+        ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${grants.length
+          ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
         ${!survival && won && lv.id < LEVELS.length ? `<p class="tagline">🔓 Unlocked: <b>${LEVELS[lv.id].name}</b></p>` : ''}
         <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
       </div>`;
@@ -799,17 +850,34 @@ export class UI {
       ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
     }
 
-    // Next-wave beacons during the day.
+    // Hive nests: living hives glow violet; tonight's spawners pulse red.
+    for (const n of game.nests || []) {
+      if (!n.alive) continue;
+      ctx.fillStyle = '#b44dff';
+      ctx.fillRect(n.x - 2, n.z - 2, 4, 4);
+    }
     if (!game.isNight && game.nightPlan) {
-      const mid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
       const ph = (performance.now() / 700) % 1;
-      for (const e of game.nightPlan.edges) {
+      for (const id of game.nightPlan.nests || []) {
+        const n = game.nests[id];
+        if (!n) continue;
         ctx.strokeStyle = `rgba(255,60,50,${0.9 - ph * 0.7})`;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(mid[e][0], mid[e][1], 3 + ph * 8, 0, Math.PI * 2);
+        ctx.arc(n.x, n.z, 3 + ph * 8, 0, Math.PI * 2);
         ctx.stroke();
       }
+    }
+    // Un-founded: candidate sites blink gold.
+    if (game.phase === 'found') {
+      const ph = (performance.now() / 600) % 1;
+      (game.map.sites || []).forEach((s) => {
+        ctx.strokeStyle = `rgba(255,215,94,${0.9 - ph * 0.6})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(s.x, s.z, 4 + ph * 6, 0, Math.PI * 2);
+        ctx.stroke();
+      });
     }
 
     // Pings: expanding red circles.

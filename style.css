@@ -157,6 +157,25 @@ body::after {
   background: rgba(0, 0, 0, 0.6); border-radius: 12px; font-size: 22px; font-weight: 800;
 }
 
+/* hero items (campaign gear) */
+#a-items { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; min-height: 0; }
+.hitem {
+  font-size: 13px; line-height: 1; padding: 2px 3px; cursor: default;
+  background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(201, 164, 74, 0.4); border-radius: 5px;
+}
+.hpersist {
+  display: block; margin-top: 3px; font-size: 10.5px; color: #ffd75e; font-weight: 700;
+}
+
+/* side quests */
+.questbox {
+  margin: 8px 0; padding: 8px 10px; text-align: left;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--panel-border); border-radius: 10px;
+}
+.questrow { font-size: 12.5px; margin: 3px 0; opacity: 0.85; }
+.questrow.done { opacity: 1; color: #b8e6a0; }
+.questrow .qreward { color: #ffd75e; font-size: 11.5px; margin-left: 4px; }
+
 /* hold-B build prompt */
 #buildhint {
   background: var(--panel); border: 1px solid rgba(255, 215, 94, 0.5);

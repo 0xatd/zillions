@@ -230,12 +230,67 @@ export const DROPS = {
   smallChance: 0.05, bruteCoins: 4, bossCoins: 20,
 };
 
+// ---------- Items: WC3-style persistent gear ----------
+// Hero gear rides with a hero across the whole campaign; town relics belong
+// to the civilization and empower every city you found. All passive — the
+// kit stays auto-attack + aura + one special; items just make it meaner.
+
+export const ITEMS = {
+  // Hero gear (quest rewards)
+  targeting_optic: { name: 'Targeting Optic', icon: '🔭', kind: 'hero', dmg: 0.20, desc: '+20% attack damage.' },
+  blast_padding: { name: 'Blast Padding', icon: '🦺', kind: 'hero', hp: 120, desc: '+120 max HP.' },
+  servo_legs: { name: 'Servo Legs', icon: '🦿', kind: 'hero', speed: 0.10, desc: '+10% move speed.' },
+  magnet_gauntlet: { name: 'Magnet Gauntlet', icon: '🧲', kind: 'hero', magnet: 2, desc: 'Coins leap to you from 2 tiles further.' },
+  stim_rig: { name: 'Stim Rig', icon: '⚡', kind: 'hero', rof: 0.15, desc: '+15% attack rate.' },
+  medicae: { name: 'Medicae Implant', icon: '💉', kind: 'hero', regen: 3, desc: '+3 HP/s regeneration.' },
+  aura_amp: { name: 'Aura Amplifier', icon: '📡', kind: 'hero', auraR: 0.4, desc: '+40% aura radius.' },
+  reactor_core: { name: 'Reactor Core', icon: '⚛️', kind: 'hero', cdr: 0.25, desc: 'Special recharges 25% faster.' },
+  void_shard: { name: 'Void Shard', icon: '🔮', kind: 'hero', dmg: 0.35, desc: '+35% attack damage. It hums.' },
+  chrono_loop: { name: 'Chrono Loop', icon: '⏳', kind: 'hero', cdr: 0.2, rof: 0.1, desc: 'Special -20% cooldown, +10% attack rate.' },
+  // Boss signatures (dropped on first campaign kill)
+  butchers_cleaver: { name: "Butcher's Cleaver", icon: '🔪', kind: 'hero', dmg: 0.25, desc: '+25% attack damage. Still warm.' },
+  broodmother_heart: { name: "Broodmother's Heart", icon: '🫀', kind: 'hero', regen: 4, desc: '+4 HP/s. It still beats.' },
+  shrieker_lung: { name: "Shrieker's Lung", icon: '🫁', kind: 'hero', auraR: 0.5, desc: '+50% aura radius.' },
+  gravelord_plate: { name: "Gravelord's Plate", icon: '🛡️', kind: 'hero', hp: 200, desc: '+200 max HP.' },
+  zillion_eye: { name: "The Zillion's Eye", icon: '👁️', kind: 'hero', cdr: 0.3, dmg: 0.1, desc: 'Special -30% cooldown, +10% damage.' },
+  // Town relics (the civilization's treasures — help every city you found)
+  masonry_codex: { name: 'Masonry Codex', icon: '📜', kind: 'relic', buildingHp: 0.25, desc: 'All structures +25% HP.' },
+  tithe_ledger: { name: 'Tithe Ledger', icon: '📒', kind: 'relic', income: 0.2, desc: 'Dawn income +20%.' },
+  banner_keep: { name: 'Banner of the Keep', icon: '🚩', kind: 'relic', troopDmg: 0.2, desc: 'Troops +20% damage.' },
+  ballistics_manual: { name: 'Ballistics Manual', icon: '📘', kind: 'relic', towerDmg: 0.2, desc: 'Towers +20% damage.' },
+  warlord_crest: { name: "Warlord's Crest", icon: '🏵️', kind: 'relic', troopDmg: 0.15, towerDmg: 0.15, desc: 'Troops and towers +15% damage.' },
+};
+
+export const BOSS_DROPS = { 1: 'butchers_cleaver', 2: 'broodmother_heart', 3: 'shrieker_lung', 4: 'gravelord_plate', 5: 'zillion_eye' };
+
+const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
+export function itemMods(items) {
+  const m = {};
+  for (const k of MOD_KEYS) m[k] = 0;
+  for (const key of items || []) {
+    const it = ITEMS[key];
+    if (!it) continue;
+    for (const k of MOD_KEYS) if (it[k]) m[k] += it[k];
+  }
+  return m;
+}
+
 // ---------- Campaign: 5 levels, 5 maps, 5 bosses ----------
 // Fixed seeds mean every player fights on the same battlegrounds.
+// Castle-defense shape: each map is a big frontier with hive nests (the
+// enemy's bases — nightly waves march out of them, and they can be razed)
+// and 3 candidate city sites. Ride out, pick your ground, found the city.
+// Each map also carries 3 side quests; rewards are items and relics that
+// persist across the campaign (WC3-style).
 
 export const LEVELS = [
   {
-    id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8,
+    id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8, size: 160, nests: 3,
+    quests: [
+      { id: 'l1q1', name: 'First Blood', desc: 'Slay 150 of the dead', reward: 'targeting_optic', check: (g) => g.stats.kills >= 150 },
+      { id: 'l1q2', name: 'Not One Stone', desc: 'Win without losing a single building', reward: 'masonry_codex', check: (g) => g.stats.lost === 0 },
+      { id: 'l1q3', name: 'Burn the Nest', desc: 'Raze a hive nest', reward: 'blast_padding', check: (g) => g.stats.nests >= 1 },
+    ],
     blurb: 'Rolling moorland and black pines. Learn to hold a line.',
     theme: { water: 0.33, mountain: 0.74, forest: 0.55,
       palette: { grass: 0x4e5c38, forest: 0x33422a, water: 0x24384e, mountain: 0x5c5a54, sand: 0x8a7d5e } },
@@ -244,7 +299,12 @@ export const LEVELS = [
       desc: 'A mountain of meat and cleavers. Enrages at half health.' },
   },
   {
-    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0,
+    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 160, nests: 3,
+    quests: [
+      { id: 'l2q1', name: 'Drain the Fen', desc: 'Raze 2 hive nests', reward: 'tithe_ledger', check: (g) => g.stats.nests >= 2 },
+      { id: 'l2q2', name: 'Untouchable', desc: 'Win without your hero falling', reward: 'servo_legs', check: (g) => g.stats.heroDeaths === 0 },
+      { id: 'l2q3', name: 'Deep Pockets', desc: 'Collect 250 gold in one run', reward: 'magnet_gauntlet', check: (g) => g.stats.coins >= 250 },
+    ],
     blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
     theme: { water: 0.40, mountain: 0.78, forest: 0.52,
       palette: { grass: 0x46543a, forest: 0x2e3d2a, water: 0x1e3a35, mountain: 0x565a50, sand: 0x74705a } },
@@ -253,7 +313,12 @@ export const LEVELS = [
       desc: 'Every few seconds she births another brood. Kill her fast.' },
   },
   {
-    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3,
+    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 160, nests: 4,
+    quests: [
+      { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
+      { id: 'l3q2', name: 'High Keep', desc: 'Upgrade the Keep to its final tier', reward: 'banner_keep', check: (g) => { const hq = g.plots.find((p) => p.kind === 'hq'); return hq && hq.tier >= 3; } },
+      { id: 'l3q3', name: 'Ashes to Ashes', desc: 'Slay 600 of the dead', reward: 'medicae', check: (g) => g.stats.kills >= 600 },
+    ],
     blurb: 'Ash plains under a burnt sky. Nothing grows here but the horde.',
     theme: { water: 0.28, mountain: 0.66, forest: 0.66,
       palette: { grass: 0x6a5f4a, forest: 0x4a4434, water: 0x2e3440, mountain: 0x4e4a44, sand: 0x8a7a60 } },
@@ -262,7 +327,12 @@ export const LEVELS = [
       desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
   },
   {
-    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6,
+    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 160, nests: 4,
+    quests: [
+      { id: 'l4q1', name: 'Tomb Raider', desc: 'Raze 3 hive nests', reward: 'ballistics_manual', check: (g) => g.stats.nests >= 3 },
+      { id: 'l4q2', name: 'Deathless', desc: 'Win without your hero falling', reward: 'aura_amp', check: (g) => g.stats.heroDeaths === 0 },
+      { id: 'l4q3', name: 'A City That Stands', desc: 'End with 20 buildings standing (walls aside)', reward: 'reactor_core', check: (g) => g.buildings.filter((b) => b.alive && b.kind !== 'wall').length >= 20 },
+    ],
     blurb: 'Grave-cold hills. The ground itself is on their side.',
     theme: { water: 0.30, mountain: 0.70, forest: 0.60,
       palette: { grass: 0x4c4a56, forest: 0x35334a, water: 0x232840, mountain: 0x5a5866, sand: 0x6e6a78 } },
@@ -271,7 +341,12 @@ export const LEVELS = [
       desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
   },
   {
-    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0,
+    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 160, nests: 5,
+    quests: [
+      { id: 'l5q1', name: 'Blind the Eye', desc: 'Kill The Zillion within 120s', reward: 'void_shard', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 120 },
+      { id: 'l5q2', name: 'Scour the Vale', desc: 'Raze every hive nest', reward: 'warlord_crest', check: (g) => g.nests.length > 0 && g.nests.every((n) => !n.alive) },
+      { id: 'l5q3', name: 'Legend', desc: 'Slay 1500 of the dead', reward: 'chrono_loop', check: (g) => g.stats.kills >= 1500 },
+    ],
     blurb: 'Where the plague began. Everything ends here.',
     theme: { water: 0.31, mountain: 0.72, forest: 0.62,
       palette: { grass: 0x3a4032, forest: 0x252e22, water: 0x1a2432, mountain: 0x46443e, sand: 0x5e584a } },

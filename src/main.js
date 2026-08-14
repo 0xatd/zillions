@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, FINAL_NIGHT, LEVELS, PAY_RADIUS, DAY_TIME,
+  ITEMS, BOSS_DROPS,
 } from './config.js';
 import { GameMap } from './map.js';
 import { Game } from './game.js';
@@ -48,7 +49,7 @@ class App {
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
           const level = this.ui.selectedLevel || 1;
-          const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+          const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
           this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
           this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode });
           if (this.lobby && this.lobby.game) this.lobby.touchGame({ status: 'playing' });
@@ -66,7 +67,8 @@ class App {
       onJoin: (code) => this.joinGame(code),
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
-      onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k }); },
+      onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k, camp: this.campFor(k) }); },
+      onFound: () => this._tryFound(),
       onRestart: () => location.reload(),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
@@ -172,13 +174,14 @@ class App {
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = LEVELS[levelId - 1] || LEVELS[0];
     const seed = snap ? snap.seed : level.seed;
-    this.map = new GameMap(seed, level.theme);
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
+    this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
     this._wallTiles = null; // wall adjacency cache is per-map
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
     this.lastPay = false;
+    this._endExtras = null;
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
@@ -192,7 +195,17 @@ class App {
     }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
-    this.scene.add(this._buildPlaza());
+    // The plaza and city appear where (and when) the city is founded.
+    if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
+    this._clearSiteMarkers();
+    this._clearNestMeshes();
+    if (this.game.site >= 0) {
+      const s = this.map.sites[this.game.site];
+      this.plaza = this._buildPlaza(s.x, s.z);
+      this.scene.add(this.plaza);
+    } else {
+      this._makeSiteMarkers();
+    }
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer);
@@ -207,15 +220,14 @@ class App {
 
   // A cobbled plaza + lanes radiating to the districts — the city looks
   // designed even before anything is built.
-  _buildPlaza() {
+  _buildPlaza(cx, cz) {
     const g = new THREE.Group();
-    const c = MAP_SIZE / 2;
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(7.2, 40),
       new THREE.MeshLambertMaterial({ color: 0x565149 }),
     );
     disc.rotation.x = -Math.PI / 2;
-    disc.position.set(c, 0.015, c);
+    disc.position.set(cx, 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
     const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
@@ -224,19 +236,124 @@ class App {
       const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 10.5), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(c + Math.cos(a) * 10.5, 0.012, c + Math.sin(a) * 10.5);
+      lane.position.set(cx + Math.cos(a) * 10.5, 0.012, cz + Math.sin(a) * 10.5);
       g.add(lane);
     }
     return g;
   }
 
+  // ---------------- city sites & hive nests ----------------
+
+  _makeSiteMarkers() {
+    this.siteMarkers = [];
+    for (let i = 0; i < this.map.sites.length; i++) {
+      const s = this.map.sites[i];
+      const gr = new THREE.Group();
+      const ringGeo = new THREE.RingGeometry(5.4, 6.0, 48);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.5, depthWrite: false }));
+      ring.position.set(s.x, 0.06, s.z);
+      gr.add(ring);
+      gr.userData.ring = ring;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), new THREE.MeshLambertMaterial({ color: 0x3a3228 }));
+      pole.position.set(s.x, 2.5, s.z);
+      gr.add(pole);
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), new THREE.MeshLambertMaterial({ color: 0xc9a44a }));
+      flag.position.set(s.x + 0.85, 4.4, s.z);
+      gr.add(flag);
+      gr.userData.flag = flag;
+      const label = this._makeLabelSprite('🏳️', `SITE ${i + 1}`);
+      label.position.set(s.x, 6.3, s.z);
+      label.scale.set(4.2, 2.1, 1);
+      gr.add(label);
+      this.scene.add(gr);
+      this.siteMarkers.push(gr);
+    }
+  }
+
+  _clearSiteMarkers() {
+    for (const m of this.siteMarkers || []) this.scene.remove(m);
+    this.siteMarkers = [];
+  }
+
+  _makeNestMesh(n) {
+    const g = new THREE.Group();
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshLambertMaterial({ color: 0x3a2a4a }));
+    mound.scale.y = 0.55;
+    mound.position.y = 0.4;
+    mound.castShadow = true;
+    g.add(mound);
+    g.userData.mound = mound;
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.4;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.3 + (i % 2) * 0.7, 5), new THREE.MeshLambertMaterial({ color: 0x2c2038 }));
+      spike.position.set(Math.cos(a) * 1.5, 0.9, Math.sin(a) * 1.5);
+      spike.rotation.z = Math.cos(a) * 0.5;
+      spike.rotation.x = -Math.sin(a) * 0.5;
+      spike.castShadow = true;
+      g.add(spike);
+    }
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 1.1;
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0xb44dff, emissive: 0xb44dff, emissiveIntensity: 0.8 }));
+      blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
+      g.add(blob);
+    }
+    g.position.set(n.x, 0, n.z);
+    return g;
+  }
+
+  _syncNests(t) {
+    if (!this.game) return;
+    this.nestMeshes = this.nestMeshes || new Map();
+    for (const n of this.game.nests) {
+      let mesh = this.nestMeshes.get(n.id);
+      if (n.alive && !mesh) {
+        mesh = this._makeNestMesh(n);
+        this.scene.add(mesh);
+        this.nestMeshes.set(n.id, mesh);
+      } else if (!n.alive && mesh) {
+        this.scene.remove(mesh);
+        this.nestMeshes.delete(n.id);
+      }
+      if (mesh) {
+        const beat = 1 + Math.sin(t * 2.2 + n.id * 2) * 0.05;
+        mesh.userData.mound.scale.set(beat, 0.55 * beat, beat);
+      }
+    }
+  }
+
+  _clearNestMeshes() {
+    for (const m of (this.nestMeshes || new Map()).values()) this.scene.remove(m);
+    this.nestMeshes = new Map();
+  }
+
+  // Found the city at the nearest site — if the hero is standing on one.
+  _tryFound() {
+    const h = this.myHero();
+    if (!h || h.dead || !this.game || this.game.phase !== 'found') return;
+    let best = -1, bd = 8 * 8;
+    this.map.sites.forEach((s, i) => {
+      const d = (h.x - s.x) ** 2 + (h.z - s.z) ** 2;
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best < 0) {
+      this.ui.showBanner('🏳️ Ride to a marked site to found your city there.', '', 2200);
+      this.audio.deny();
+      return;
+    }
+    this.issue({ t: 'found', s: best, p: this.myPlayer });
+  }
+
   _startTutorial() {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
-      [7, '💰 Walk to a glowing foundation and HOLD B — your coins build it. Coins appear at dawn — ride through them!'],
-      [16, '🌙 The horde comes every night from the red beacons. Build towers and walls on that side!'],
-      [30, '🔔 Ready early? Press SPACE to ring the bell and start the night.'],
-      [45, '🚩 Press 1 to rally your troops to you. Press 1 again and they hold position.'],
+      [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
+      [14, '💰 Walk to a glowing foundation and HOLD B — your coins build it. Coins appear at dawn — ride through them!'],
+      [24, '🌙 The horde marches every night from the hive nests. Raze a nest by day and it never spawns again!'],
+      [36, '🔔 Ready early? Press SPACE to ring the bell and start the night.'],
+      [48, '🚩 Press 1 to rally your troops to you. Press 1 again and they hold position.'],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -252,8 +369,22 @@ class App {
 
   _loadProfile() {
     try {
-      return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, tutorialDone: false, ...JSON.parse(localStorage.getItem('zillions_profile') || '{}') };
-    } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null }; }
+      return {
+        name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, tutorialDone: false,
+        campaignHeroes: {}, relics: [], questsDone: {},
+        ...JSON.parse(localStorage.getItem('zillions_profile') || '{}'),
+      };
+    } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {} }; }
+  }
+
+  // The WC3-style persistent campaign hero this profile brings into a run.
+  campFor(key) {
+    const ch = (this.profile.campaignHeroes || {})[key] || {};
+    return {
+      level: ch.level || 1, xp: ch.xp || 0,
+      items: ch.items ? [...ch.items] : [],
+      relics: [...(this.profile.relics || [])],
+    };
   }
 
   _saveProfile() {
@@ -263,7 +394,7 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 2 ? s : null;
+      return s && s.snap && s.snap.v === 3 ? s : null;
     } catch { return null; }
   }
 
@@ -289,6 +420,44 @@ class App {
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, Math.min(this.game.night, FINAL_NIGHT));
     p.lastHero = this.ui.selectedHero;
+
+    // WC3-style persistence: the campaign hero keeps every level and item —
+    // and quest/boss rewards granted here await them on the next map.
+    this._endExtras = null;
+    const h = this.game.heroes[this.myPlayer];
+    if (h && this.game.mode === 'campaign') {
+      p.campaignHeroes = p.campaignHeroes || {};
+      p.relics = p.relics || [];
+      p.questsDone = p.questsDone || {};
+      const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [] });
+      if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
+        cur.level = h.level;
+        cur.xp = Math.round(h.xp);
+      }
+      cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
+      const grants = [];
+      for (const q of this.game.questResults || []) {
+        if (!q.done || p.questsDone[q.id]) continue;
+        p.questsDone[q.id] = true;
+        const it = ITEMS[q.reward];
+        if (!it) continue;
+        if (it.kind === 'relic') {
+          if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
+        } else if (!cur.items.includes(q.reward)) {
+          cur.items.push(q.reward);
+          grants.push(q.reward);
+        }
+      }
+      if (won) {
+        const drop = BOSS_DROPS[this.game.levelId];
+        if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+      }
+      this._endExtras = {
+        heroKey: h.key, heroName: h.def.name, level: cur.level, grants,
+        quests: this.game.questResults || [],
+      };
+      this.ui.refreshHeroBadges(p);
+    }
     this._saveProfile();
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
@@ -343,7 +512,7 @@ class App {
   }
 
   _onHostMsg(idx, m) {
-    if (m.t === 'hero') { this.guestHeroes[idx] = m.k; this.ui.mpLobby(this.peers.length, this.peers.length < 2); }
+    if (m.t === 'hero') { this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k; this.ui.mpLobby(this.peers.length, this.peers.length < 2); }
     else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
   }
@@ -930,6 +1099,9 @@ class App {
     for (const b of g.buildings) {
       if (b.hp < b.maxHp) add(b.cx, this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
     }
+    for (const n of g.nests) {
+      if (n.alive && n.hp < n.maxHp) add(n.x, 2.6, n.z, n.hp / n.maxHp, 2.2);
+    }
     for (const u of g.units) {
       if (u.hp < u.maxHp) add(u.x, 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
@@ -1402,7 +1574,8 @@ class App {
       // (The whole hero group is scaled 1.18×, so compensate.)
       if (d.aura) {
         const S = 1.18;
-        const auraGeo = new THREE.RingGeometry((d.aura.radius - 0.3) / S, d.aura.radius / S, 56);
+        const auraR = d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
+        const auraGeo = new THREE.RingGeometry((auraR - 0.3) / S, auraR / S, 56);
         auraGeo.rotateX(-Math.PI / 2);
         const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
         aura.position.y = 0.05;
@@ -1473,12 +1646,9 @@ class App {
 
   // ---------------- wave markers ----------------
 
-  _setWaveMarkers(edges) {
+  _setWaveMarkers(spots) {
     this._clearWaveMarkers();
-    const N = MAP_SIZE;
-    const mid = [[N / 2, 4], [N - 4, N / 2], [N / 2, N - 4], [4, N / 2]];
-    for (const e of edges) {
-      const [x, z] = mid[e];
+    for (const [x, z] of spots || []) {
       const gr = new THREE.Group();
       const pillar = new THREE.Mesh(
         new THREE.CylinderGeometry(0.5, 1.4, 14, 10, 1, true),
@@ -1514,8 +1684,10 @@ class App {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (k === ' ') {
         e.preventDefault();
-        // Thronefall Space: start the night by day, unleash your special by night.
-        if (this.game.phase === 'day' && !this.game.belling) this.issue({ t: 'bell', p: this.myPlayer });
+        // Thronefall Space: found the city on the frontier, start the night
+        // by day, unleash your special by night.
+        if (this.game.phase === 'found') this._tryFound();
+        else if (this.game.phase === 'day' && !this.game.belling) this.issue({ t: 'bell', p: this.myPlayer });
         else this.tryCast();
       }
       else if (k === 'q') this.tryCast();
@@ -1579,7 +1751,18 @@ class App {
     if (!this.game) return;
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
-    this.ui.showPause(this.netMode, help);
+    this.ui.showPause(this.netMode, help, this._questStatus());
+  }
+
+  // Live side-quest status for the pause menu (campaign only).
+  _questStatus() {
+    if (!this.game || this.game.mode !== 'campaign') return null;
+    const lv = LEVELS[this.game.levelId - 1];
+    return (lv.quests || []).map((q) => ({
+      name: q.name, desc: q.desc, reward: q.reward,
+      claimed: !!(this.profile.questsDone || {})[q.id],
+      done: !!q.check(this.game),
+    }));
   }
 
   closePauseMenu() {
@@ -1779,7 +1962,29 @@ class App {
           this.audio.dawn();
           break;
         case 'nightplan':
-          this._setWaveMarkers(e.edges);
+          this._setWaveMarkers(e.spots);
+          break;
+        case 'founded': {
+          // The chosen ground is levelled and the city plan appears — rebuild
+          // the terrain mesh (tiles changed), plant the plaza, redraw the map.
+          this.scene.remove(this.terrain);
+          this.terrain = this.map.buildTerrain();
+          this.scene.add(this.terrain);
+          if (this.plaza) this.scene.remove(this.plaza);
+          this.plaza = this._buildPlaza(e.x, e.z);
+          this.scene.add(this.plaza);
+          this.map.drawMinimap(document.getElementById('minimap-base'));
+          this._clearSiteMarkers();
+          this.audio.build();
+          this.shake = Math.max(this.shake, 0.3);
+          this.burst(e.x, 0.5, e.z, { count: 40, color: 0xffd75e, speed: 3, life: 0.9, size: 0.7, up: 3 });
+          break;
+        }
+        case 'nestdown':
+          this.audio.demolish();
+          this.shake = Math.max(this.shake, 0.4);
+          this.burst(e.x, 0.8, e.z, { count: 40, color: 0xb44dff, speed: 3.4, life: 0.9, size: 0.7, up: 3 });
+          this.burst(e.x, 0.5, e.z, { count: 24, color: 0x3a2a4a, speed: 2.6, life: 0.8, size: 0.7, up: 2.4 });
           break;
         case 'rally':
           this.audio.train();
@@ -1888,15 +2093,15 @@ class App {
         case 'victory':
           this.audio.victory();
           this.pause();
-          this.ui.showEnd(true, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0);
           this._recordGameEnd(true);
+          this.ui.showEnd(true, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
-          this.ui.showEnd(false, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0);
           this._recordGameEnd(false);
+          this.ui.showEnd(false, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
           break;
       }
     }
@@ -1988,7 +2193,16 @@ class App {
       this._consumeEvents();
       this._syncBuildings();
       this._syncUnits(t);
+      this._syncNests(t);
       this._syncPlots(t);
+
+      // Site flags ripple until the city is founded.
+      for (const m of this.siteMarkers || []) {
+        m.userData.flag.rotation.y = Math.sin(t * 2.5) * 0.3;
+        const ph = (t * 0.8) % 1;
+        m.userData.ring.scale.setScalar(1 + ph * 0.25);
+        m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
+      }
       this._updateCoins(t);
       this._updateZombieMeshes(t);
       this._updateBars();

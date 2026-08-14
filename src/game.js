@@ -5,7 +5,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   NIGHT_MAX, FINAL_NIGHT, waveForNight,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
-  ZOMBIE_CAP, UNIT_CAP, DROPS,
+  ZOMBIE_CAP, UNIT_CAP, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
 } from './config.js';
 import { FlowField } from './flowfield.js';
@@ -32,7 +32,8 @@ export class Game {
 
     this.gold = START_GOLD;
     this.coins = [];             // physical coins on the ground
-    this.plots = generatePlots(map);
+    this.site = -1;              // chosen city site index (-1 = not founded yet)
+    this.plots = [];             // generated when the city is founded
     this.buildings = [];
     this.units = [];
     this.zombies = [];
@@ -41,6 +42,13 @@ export class Game {
     this.flow = new FlowField(map);
     this.flowDirty = true;
     this.flowTimer = 0;
+
+    // Hive nests: the enemy's bases. Nightly waves march from them, and they
+    // can be razed — raze them all on a campaign map and the land is won.
+    this.nests = (map.nestSpots || []).map((s, i) => {
+      const hp = Math.round(2200 * this.level.mult * Math.max(0.6, this.diff.mult));
+      return { id: i, x: s[0] + 0.5, z: s[1] + 0.5, hp, maxHp: hp, alive: true };
+    });
 
     this.time = 0;
     this.night = 1;              // current day/night number (1..FINAL_NIGHT)
@@ -54,9 +62,18 @@ export class Game {
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
 
-    this.stats = { kills: 0, built: 0, lost: 0, coins: 0 };
+    this.stats = { kills: 0, built: 0, lost: 0, coins: 0, nests: 0, heroDeaths: 0, bossKillT: null };
 
-    this.heroKeys = Array.isArray(heroKeys) ? heroKeys : [heroKeys];
+    // heroKeys entries: 'scott' (fresh) or { k, camp: { level, xp, items, relics } }
+    // — the WC3-style persistent campaign hero each player brings along.
+    this.heroSetups = (Array.isArray(heroKeys) ? heroKeys : [heroKeys])
+      .map((e) => (typeof e === 'string' ? { k: e, camp: null } : { k: e.k, camp: e.camp || null }));
+    this.heroKeys = this.heroSetups.map((e) => e.k);
+    this.relics = [];
+    for (const e of this.heroSetups) {
+      for (const r of (e.camp && e.camp.relics) || []) if (!this.relics.includes(r)) this.relics.push(r);
+    }
+    this.relicMods = itemMods(this.relics);
     this.heroes = [];
     this.hero = null;            // heroes[0], kept for solo call sites
 
@@ -68,10 +85,13 @@ export class Game {
 
   snapshot() {
     return {
-      v: 2, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
+      v: 3, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       time: +this.time.toFixed(3), night: this.night, phase: this.phase, phaseT: +this.phaseT.toFixed(3),
       belling: this.belling ? +this.bellT.toFixed(3) : -1,
       gold: +this.gold.toFixed(3),
+      site: this.site,
+      relics: [...this.relics],
+      nests: this.nests.map((n) => [Math.round(n.hp), n.alive ? 1 : 0]),
       nightPlan: this.nightPlan ? { ...this.nightPlan } : null,
       stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
@@ -89,6 +109,7 @@ export class Game {
         id: h.id, k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
         dead: !!h.dead, reviveT: +(h.reviveT || 0).toFixed(1),
         level: h.level, xp: Math.round(h.xp), cd: +h.abilCd.toFixed(1),
+        items: [...(h.items || [])],
       })),
       zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0]),
     };
@@ -101,8 +122,15 @@ export class Game {
     this.phaseT = snap.phaseT;
     if (snap.belling != null && snap.belling >= 0) { this.belling = true; this.bellT = snap.belling; }
     this.gold = snap.gold;
+    this.site = snap.site ?? -1;
+    if (this.site >= 0) this.plots = generatePlots(this.map, this.map.sites[this.site]);
+    this.relics = [...(snap.relics || [])];
+    this.relicMods = itemMods(this.relics);
+    (snap.nests || []).forEach(([hp, alive], i) => {
+      if (this.nests[i]) { this.nests[i].hp = hp; this.nests[i].alive = !!alive; }
+    });
     this.nightPlan = snap.nightPlan ? { ...snap.nightPlan } : null;
-    this.stats = { ...snap.stats };
+    this.stats = { nests: 0, heroDeaths: 0, bossKillT: null, ...snap.stats };
 
     for (const ps of snap.plots) {
       const p = this.plots.find((o) => o.id === ps.id);
@@ -125,11 +153,9 @@ export class Game {
       u.holdX = us.hx; u.holdZ = us.hz;
     }
     for (const hs of snap.heroes) {
-      const h = this._spawnHero(hs.k, hs.x, hs.z);
+      const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [] });
       if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
-      h.level = hs.level; h.xp = hs.xp;
-      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
       h.abilCd = hs.cd;
       if (hs.dead) {
         h.dead = true;
@@ -160,28 +186,59 @@ export class Game {
 
   // ---------- setup ----------
 
+  // The run opens un-founded: heroes ride a wild frontier dotted with marked
+  // city sites and hive nests. Claim a site to raise the city there.
   _setupStart() {
-    const hqPlot = this.plots.find((p) => p.kind === 'hq');
-    this._construct(hqPlot, true); // the Keep starts built
-    this.hq = this.buildings.find((b) => b.kind === 'hq');
+    this.phase = 'found';
     const c = this.map.size / 2;
-    this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2, c + 3.5));
+    this.heroSetups.forEach((e, i) => this._spawnHero(e.k, c - 1 + i * 2, c + 3.5, e.camp));
     this._scatterCreeps();
+    this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and press SPACE to found your city.', 'info');
+  }
+
+  foundCity(siteIdx, p = 0) {
+    if (this.phase !== 'found' || this.over) return;
+    const site = this.map.sites[siteIdx];
+    if (!site) return;
+    this.site = siteIdx;
+    this.plots = generatePlots(this.map, site);
+    const hqPlot = this.plots.find((pl) => pl.kind === 'hq');
+    this._construct(hqPlot, true); // the Keep rises with the founding
+    this.hq = this.buildings.find((b) => b.kind === 'hq');
+    this.heroes.forEach((h, i) => {
+      if (!h.dead) { h.x = this.hq.cx - 1 + i * 2; h.z = this.hq.cz + 3.5; }
+    });
+    this.phase = 'day';
+    this.phaseT = 0;
+    this.flowDirty = true;
     this._planNight();
-    this.msg('☀️ Dawn over the ruins. Collect coins, hold B at glowing foundations to build — night is coming.', 'info');
+    this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
+    const founder = this.heroes[p];
+    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! Collect coins, hold B at foundations — night is coming.`, 'info');
   }
 
   _scatterCreeps() {
-    const N = this.map.size, c = N / 2;
-    const count = Math.round(90 * this.diff.ambient);
+    const N = this.map.size;
+    const count = Math.round(110 * this.diff.ambient);
     let placed = 0, guard = 0;
     while (placed < count && guard++ < count * 30) {
       const x = 2 + this.rng() * (N - 4), z = 2 + this.rng() * (N - 4);
-      if (Math.hypot(x - c, z - c) < 30) continue;
+      if (this.map.sites.some((s) => Math.hypot(x - s.x, z - s.z) < 26)) continue;
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
       const type = this.rng() < 0.92 ? 'walker' : 'runner';
       this._spawnZombie(type, x, z, false);
       placed++;
+    }
+    // Every hive nest keeps a garrison — razing one is a fight, not a stroll.
+    for (const n of this.nests) {
+      const guards = 6 + Math.round(4 * this.diff.mult);
+      for (let i = 0; i < guards; i++) {
+        const a = this.rng() * Math.PI * 2, r = 2 + this.rng() * 4;
+        const x = n.x + Math.cos(a) * r, z = n.z + Math.sin(a) * r;
+        if (this.map.isWalkable(x | 0, z | 0)) {
+          this._spawnZombie(this.rng() < 0.85 ? 'walker' : 'runner', x, z, false);
+        }
+      }
     }
   }
 
@@ -297,14 +354,14 @@ export class Game {
         }
       } else {
         for (const b of this.buildings) {
-          if (b.plotId === plot.id) { b.def = def; b.maxHp = def.hp; b.hp = def.hp; }
+          if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def); b.hp = b.maxHp; }
         }
       }
     } else if (plot.tier === 1) {
       this._addBuilding(plot, plot.x, plot.z, def, false);
     } else {
       for (const b of this.buildings) {
-        if (b.plotId === plot.id) { b.def = def; b.maxHp = def.hp; b.hp = def.hp; }
+        if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def); b.hp = b.maxHp; }
       }
     }
 
@@ -315,13 +372,17 @@ export class Game {
     if (!free) this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
   }
 
+  // Structure HP through the civilization's relics (Masonry Codex et al).
+  _bhp(def) { return Math.round(def.hp * (1 + this.relicMods.buildingHp)); }
+
   _addBuilding(plot, x, z, def, gate, id = null, hp = null) {
     const size = plot.kind === 'wall' ? 1 : plot.size;
+    const maxHp = this._bhp(def);
     const b = {
       id: id || nextId++, plotId: plot.id, kind: plot.kind, key: plot.kind,
       def, x, z, size,
       cx: x + size / 2, cz: z + size / 2,
-      hp: hp != null ? hp : def.hp, maxHp: def.hp, alive: true, cooldown: 0, gate,
+      hp: hp != null ? hp : maxHp, maxHp, alive: true, cooldown: 0, gate,
     };
     this.buildings.push(b);
     for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
@@ -403,18 +464,20 @@ export class Game {
     // field means the hive sends more dead (+40% wave size per extra player).
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
     const w = waveForNight(this.night, this.diff.mult * this.level.mult * coopMult);
-    const edges = [];
-    let e = (this.rng() * 4) | 0;
-    for (let i = 0; i < w.edges; i++) {
-      edges.push(e);
-      e = (e + 1 + ((this.rng() * 2) | 0)) % 4;
+    // The wave marches from living hive nests (the enemy's bases). Fewer
+    // nests left standing = fewer directions to defend.
+    const alive = this.nests.filter((n) => n.alive);
+    const picks = [];
+    const pool = alive.map((n) => n.id);
+    for (let i = 0; i < Math.min(w.edges, pool.length); i++) {
+      picks.push(pool.splice((this.rng() * pool.length) | 0, 1)[0]);
     }
     const final = this.mode === 'campaign' && w.final;
     // Survival: a boss leads every 5th night, cycling the campaign roster
     // with ever-growing health.
     const bossNight = this.mode === 'survival' && this.night % 5 === 0;
-    this.nightPlan = { size: w.size, types: w.types, edges, final, boss: final || bossNight };
-    this.emit({ type: 'nightplan', edges });
+    this.nightPlan = { size: w.size, types: w.types, nests: picks, final, boss: final || bossNight };
+    this.emit({ type: 'nightplan', spots: picks.map((id) => [this.nests[id].x, this.nests[id].z]) });
   }
 
   // Which boss stalks this night (survival cycles the roster).
@@ -436,7 +499,14 @@ export class Game {
   }
 
   _updatePhase(dt) {
+    if (this.phase === 'found') return; // the clock starts when the city does
     if (this.phase === 'day') {
+      // Castle-defense alternate victory: raze every hive and the land is won.
+      if (this.mode === 'campaign' && this.site >= 0 && this.nests.length && this.nests.every((n) => !n.alive)) {
+        this.msg('🔥 Every hive lies in ashes. The source is cleansed!', 'info');
+        this._gameOver(true);
+        return;
+      }
       this.phaseT += dt; // day length is informational only
       if (this.belling) {
         this.bellT = (this.bellT ?? 3) - dt;
@@ -457,19 +527,26 @@ export class Game {
     }
   }
 
+  // Compass label for a nest as seen from the city.
+  _dirName(x, z) {
+    const cx = this.hq ? this.hq.cx : this.map.size / 2;
+    const cz = this.hq ? this.hq.cz : this.map.size / 2;
+    const a = Math.atan2(z - cz, x - cx);
+    const names = ['EAST', 'SOUTHEAST', 'SOUTH', 'SOUTHWEST', 'WEST', 'NORTHWEST', 'NORTH', 'NORTHEAST'];
+    return names[((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8];
+  }
+
   _startNight() {
     this.phase = 'night';
     this.phaseT = NIGHT_MAX;
     const plan = this.nightPlan;
-    this._spawnHorde(plan.size, plan.edges, plan.types);
-    if (plan.boss) this._spawnBoss(plan.edges[0]);
-    const N = this.map.size;
-    const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
-    for (const ed of plan.edges) this.emit({ type: 'ping', x: edgeMid[ed][0], z: edgeMid[ed][1] });
-    const dirs = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+    this._spawnHorde(plan.size, plan.nests || [], plan.types);
+    if (plan.boss) this._spawnBoss((plan.nests || [])[0]);
+    for (const id of plan.nests || []) this.emit({ type: 'ping', x: this.nests[id].x, z: this.nests[id].z });
+    const dirNames = [...new Set((plan.nests || []).map((id) => this._dirName(this.nests[id].x, this.nests[id].z)))];
     this.msg(plan.final
       ? `☠️ THE FINAL NIGHT. Everything they have, all at once. Survive this and the land is yours!`
-      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${plan.edges.map((e) => dirs[e]).join(' and ')}!${plan.boss ? ' Something enormous walks among them…' : ''}`, 'bad');
+      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${dirNames.length ? dirNames.join(' and ') : 'wilds'}!${plan.boss ? ' Something enormous walks among them…' : ''}`, 'bad');
     this.emit({ type: 'horde', final: !!plan.final });
     this.emit({ type: 'night' });
   }
@@ -492,7 +569,7 @@ export class Game {
 
   _dawnPayout() {
     for (const b of this.buildings) {
-      const inc = b.def.income;
+      const inc = b.def.income ? Math.round(b.def.income * (1 + this.relicMods.income)) : 0;
       if (!inc || !b.alive) continue;
       // Split income into a handful of coins fountaining around the building.
       const n = Math.min(6, Math.max(2, Math.round(inc / 3)));
@@ -557,12 +634,12 @@ export class Game {
 
   _updateCoins() {
     if (!this.coins.length) return;
-    const r2 = COIN_RADIUS * COIN_RADIUS;
     let collected = false;
     for (const cn of this.coins) {
       for (const h of this.heroes) {
         if (h.dead) continue;
-        if (dist2(h.x, h.z, cn.x, cn.z) <= r2) {
+        const r = COIN_RADIUS + h.mods.magnet;
+        if (dist2(h.x, h.z, cn.x, cn.z) <= r * r) {
           cn.gone = true;
           collected = true;
           this.gold += cn.v;
@@ -617,14 +694,20 @@ export class Game {
 
   // ---------- hero ----------
 
-  _spawnHero(key, x, z) {
+  // camp: the persistent campaign hero — { level, xp, items } (WC3-style).
+  _spawnHero(key, x, z, camp = null) {
     const d = HEROES[key];
+    const items = camp && camp.items ? [...camp.items] : [];
+    const mods = itemMods(items);
+    const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
+    const maxHp = d.hp + d.levelHp * (level - 1) + mods.hp;
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
-      hp: d.hp, maxHp: d.hp,
+      hp: maxHp, maxHp,
       mx: 0, mz: 0, sprint: false,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
-      level: 1, xp: 0, abilCd: 0,
+      level, xp: (camp && camp.xp) || 0, abilCd: 0,
+      items, mods,
       reviveT: 0, hasteT: 0, hasteMult: 1,
     };
     this.units.push(h);
@@ -651,11 +734,12 @@ export class Game {
       case 'rally': this.rally(c.g, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'bell': this.bell(c.p || 0); break;
+      case 'found': this.foundCity(c.s, c.p || 0); break;
     }
   }
 
   heroDmg(h) {
-    return h.def.dmg + h.def.levelDmg * (h.level - 1);
+    return (h.def.dmg + h.def.levelDmg * (h.level - 1)) * (1 + h.mods.dmg);
   }
 
   addXp(h, amount) {
@@ -664,7 +748,7 @@ export class Game {
     while (h.level < HERO_MAX_LEVEL && h.xp >= xpForLevel(h.level)) {
       h.xp -= xpForLevel(h.level);
       h.level++;
-      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
+      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1) + h.mods.hp;
       h.hp = h.maxHp; // full heal on level up
       this.emit({ type: 'levelup', x: h.x, z: h.z });
       const r = abilityRank(h.level);
@@ -680,7 +764,7 @@ export class Game {
     const ab = h.def.ability;
     if (h.abilCd > 0) { this.emit({ type: 'deny' }); return; }
     const r = abilityRank(h.level) - 1;
-    h.abilCd = ab.cd;
+    h.abilCd = ab.cd * (1 - h.mods.cdr);
 
     switch (ab.cast) {
       case 'aoeDmg': {
@@ -751,15 +835,15 @@ export class Game {
       if (h.reviveT <= 0) {
         h.dead = false;
         h.hp = h.maxHp;
-        h.x = this.hq.cx + 2.5;
-        h.z = this.hq.cz + 2.5;
+        h.x = (this.hq ? this.hq.cx : this.map.size / 2) + 2.5;
+        h.z = (this.hq ? this.hq.cz : this.map.size / 2) + 2.5;
         this.units.push(h);
         this.emit({ type: 'revive', x: h.x, z: h.z });
         this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
       }
       return;
     }
-    const regen = h.def.regen + 0.25 * (h.level - 1);
+    const regen = h.def.regen + 0.25 * (h.level - 1) + h.mods.regen;
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     if (h.hasteT > 0) h.hasteT -= dt;
 
@@ -783,7 +867,7 @@ export class Game {
     // as standing, so nuzzling a structure funds its upgrade.
     if (h.mx !== 0 || h.mz !== 0) {
       const len = Math.hypot(h.mx, h.mz) || 1;
-      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (h.sprint ? 1.5 : 1)
+      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed) * (h.sprint ? 1.5 : 1)
         * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
@@ -827,16 +911,16 @@ export class Game {
     return zb;
   }
 
-  _spawnBoss(edge) {
-    const N = this.map.size;
+  _spawnBoss(nestId) {
     const B = this.nightBossDef();
     this.bossDef = B;
-    let x = N / 2, z = N / 2;
-    if (edge === 0) z = 4; else if (edge === 1) x = N - 4; else if (edge === 2) z = N - 4; else x = 4;
+    const nest = nestId != null ? this.nests[nestId] : null;
+    let [x, z] = nest ? [nest.x, nest.z] : this._edgeSpawnPoint();
     for (let r = 0; r < 12; r++) {
       if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
       if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }
     }
+    this.bossSpawnT = this.time;
     const def = {
       hp: Math.round(B.hp * this.diff.mult), dmg: B.dmg, speed: B.speed, chase: B.chase,
       color: B.color, scale: B.scale, score: B.score,
@@ -895,8 +979,20 @@ export class Game {
     }
   }
 
-  _spawnHorde(size, edges, types) {
+  // A random spawn point at the map rim — survival's fallback once every
+  // nest is ash, and the escape hatch for marooned wave zombies.
+  _edgeSpawnPoint() {
     const N = this.map.size;
+    const edge = (this.rng() * 4) | 0;
+    const along = this.rng() * (N - 4) + 2;
+    const depth = this.rng() * 5;
+    if (edge === 0) return [along, 1 + depth];
+    if (edge === 1) return [N - 2 - depth, along];
+    if (edge === 2) return [along, N - 2 - depth];
+    return [1 + depth, along];
+  }
+
+  _spawnHorde(size, nestIds, types) {
     let spawned = 0, guard = 0;
     const pickType = () => {
       let roll = this.rng(), acc = 0;
@@ -904,14 +1000,15 @@ export class Game {
       return 'walker';
     };
     while (spawned < size && guard++ < size * 30) {
-      const edge = edges[(this.rng() * edges.length) | 0];
       let x, z;
-      const along = this.rng() * (N - 4) + 2;
-      const depth = this.rng() * 5;
-      if (edge === 0) { x = along; z = 1 + depth; }
-      else if (edge === 1) { x = N - 2 - depth; z = along; }
-      else if (edge === 2) { x = along; z = N - 2 - depth; }
-      else { x = 1 + depth; z = along; }
+      if (nestIds.length) {
+        // The horde boils out of its hives.
+        const n = this.nests[nestIds[(this.rng() * nestIds.length) | 0]];
+        const a = this.rng() * Math.PI * 2, r = 1.5 + this.rng() * 6;
+        x = n.x + Math.cos(a) * r; z = n.z + Math.sin(a) * r;
+      } else {
+        [x, z] = this._edgeSpawnPoint();
+      }
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
       // Only spawn where the city is actually reachable, so hordes always
       // arrive (and every night can always be cleared).
@@ -941,6 +1038,7 @@ export class Game {
       this.stats.kills++;
       if (zb.boss) {
         this.boss = null;
+        this.stats.bossKillT = Math.round(this.time - (this.bossSpawnT || 0));
         this.msg(`🏆 ${(zb.cfg || this.level.boss).name} IS SLAIN! Purge the stragglers!`, 'info');
         this.emit({ type: 'bossdown', x: zb.x, z: zb.z });
         for (let i = 0; i < 5; i++) {
@@ -992,6 +1090,7 @@ export class Game {
       u.dead = true;
       this.emit({ type: 'udeath', x: u.x, z: u.z });
       if (u.hero) {
+        this.stats.heroDeaths++;
         u.reviveT = 12 + 2.5 * u.level;
         this.emit({ type: 'herodown' });
         this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Keep in ${Math.round(u.reviveT)}s…`, 'bad');
@@ -1003,6 +1102,12 @@ export class Game {
     if (this.over) return;
     this.over = true;
     this.won = won;
+    // Side quests are judged at the end of a campaign run; rewards persist
+    // (the renderer grants them to the profile — WC3-style loot that stays).
+    const quests = this.mode === 'campaign' ? this.level.quests || [] : [];
+    this.questResults = quests.map((q) => ({
+      id: q.id, name: q.name, desc: q.desc, reward: q.reward, done: won && !!q.check(this),
+    }));
     this.emit({ type: won ? 'victory' : 'defeat' });
   }
 
@@ -1032,7 +1137,8 @@ export class Game {
       if (h.dead) continue;
       const aura = h.def.aura;
       if (!aura) continue;
-      const r2 = aura.radius * aura.radius;
+      const radius = aura.radius * (1 + h.mods.auraR);
+      const r2 = radius * radius;
       if (aura.dmgMult || aura.regen) {
         for (const u of this.units) {
           if (u.dead || u === h) continue;
@@ -1161,15 +1267,16 @@ export class Game {
         // across water)? Relocate the horde zombie to a valid spawn edge so
         // every night can always be finished.
         if (zb.wave && this.flow.distAt(zb.x | 0, zb.z | 0) === Infinity) {
+          const aliveNests = this.nests.filter((n) => n.alive);
           for (let tries = 0; tries < 60; tries++) {
-            const edge = (this.rng() * 4) | 0;
-            const along = this.rng() * (N - 4) + 2;
-            const depth = this.rng() * 5;
             let x, z;
-            if (edge === 0) { x = along; z = 1 + depth; }
-            else if (edge === 1) { x = N - 2 - depth; z = along; }
-            else if (edge === 2) { x = along; z = N - 2 - depth; }
-            else { x = 1 + depth; z = along; }
+            if (aliveNests.length) {
+              const n = aliveNests[(this.rng() * aliveNests.length) | 0];
+              const a = this.rng() * Math.PI * 2, r = 2 + this.rng() * 5;
+              x = n.x + Math.cos(a) * r; z = n.z + Math.sin(a) * r;
+            } else {
+              [x, z] = this._edgeSpawnPoint();
+            }
             if (this.map.isWalkable(x | 0, z | 0) && this.flow.distAt(x | 0, z | 0) < Infinity) {
               zb.x = x; zb.z = z;
               break;
@@ -1307,7 +1414,7 @@ export class Game {
 
       // Auto-attack — units fire even while moving. A weaving hero is a blade
       // between worlds: no gunfire until the threads release him.
-      if (u.hero && u.weaveT > 0) { u.target = null; continue; }
+      if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
         const r2 = u.def.range * u.def.range;
@@ -1318,14 +1425,27 @@ export class Game {
           if (d < bd) { bd = d; best = zb; }
         }
         u.target = best;
+        // No dead in range? The living turn their guns on the hive itself.
+        u.targetNest = null;
+        if (!best) {
+          const nr2 = (u.def.range + 1.5) ** 2;
+          let bn = null, bnd = nr2;
+          for (const n of this.nests) {
+            if (!n.alive) continue;
+            const d = dist2(u.x, u.z, n.x, n.z);
+            if (d < bnd) { bnd = d; bn = n; }
+          }
+          u.targetNest = bn;
+        }
       }
+      const rofMult = (u.hero && u.hasteT > 0 ? u.hasteMult : 1) * (u.hero ? 1 + u.mods.rof : 1);
+      const hitDmg = () => (u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg));
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
-          const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
-          u.cooldown = 1 / (u.def.rof * haste);
+          u.cooldown = 1 / (u.def.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-          const dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1);
+          const dmg = hitDmg();
           this.damageZombie(zb, dmg, u.x, u.z);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (u.def.splash) {
@@ -1341,7 +1461,38 @@ export class Game {
         } else {
           u.target = null;
         }
+      } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
+        const n = u.targetNest;
+        if (dist2(u.x, u.z, n.x, n.z) <= (u.def.range + 1.5) ** 2) {
+          u.cooldown = 1 / (u.def.rof * rofMult);
+          u.facing = Math.atan2(n.x - u.x, n.z - u.z);
+          this._damageNest(n, hitDmg());
+          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
+          this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
+          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+        } else {
+          u.targetNest = null;
+        }
       }
+    }
+  }
+
+  _damageNest(n, dmg) {
+    if (!n.alive) return;
+    n.hp -= dmg;
+    this.emit({ type: 'bhit', x: n.x, z: n.z });
+    if (n.hp <= 0) {
+      n.alive = false;
+      n.hp = 0;
+      this.stats.nests++;
+      // Razing a hive pays: a fountain of gold from the corpse-hoard.
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        this._spawnCoin(n.x + Math.cos(a) * 1.8, n.z + Math.sin(a) * 1.8, 5, n.x, n.z);
+      }
+      const left = this.nests.filter((o) => o.alive).length;
+      this.emit({ type: 'nestdown', x: n.x, z: n.z });
+      this.msg(`🔥 A hive nest is razed! ${left ? `${left} remain${left === 1 ? 's' : ''}.` : 'The land holds its breath…'}`, 'info');
     }
   }
 
@@ -1360,14 +1511,15 @@ export class Game {
       }
       if (best) {
         b.cooldown = 1 / b.def.rof;
+        const tdmg = b.def.dmg * (1 + this.relicMods.towerDmg);
         if (b.def.splash) {
           const s2 = b.def.splash * b.def.splash;
           for (const zb of this.zombies) {
-            if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, b.def.dmg, b.cx, b.cz);
+            if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, tdmg, b.cx, b.cz);
           }
           this.emit({ type: 'shot', kind: 'flame', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
         } else {
-          this.damageZombie(best, b.def.dmg, b.cx, b.cz);
+          this.damageZombie(best, tdmg, b.cx, b.cz);
           this.emit({ type: 'shot', kind: b.def.branch === 'ballista' ? 'ballista' : 'tower', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
         }
         b.lastTx = best.x; b.lastTz = best.z;

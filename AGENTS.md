@@ -29,6 +29,16 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `docs/hero-audio-pack.md` - Hero audio notes.
 - `docs/faction-audio-pack.md` - Faction and SFX audio notes.
 
+## Current Game Shape
+
+- Castle-defense frontier maps (160×160): 3 candidate city sites (found with
+  Space at a site marker), hive nests as enemy bases (waves spawn from them;
+  all razed = alternate campaign victory).
+- 3 side quests per campaign level (`LEVELS[].quests`), rewards are ITEMS
+  entries (hero gear or town relics) granted once via profile.questsDone.
+- WC3-style persistence: profile.campaignHeroes[key] = {level, xp, items};
+  profile.relics apply town-wide. Snapshot format is v3.
+
 ## Current Hero Design
 
 Each hero is auto-attack + one passive aura + one special (Space at night, Q anytime):

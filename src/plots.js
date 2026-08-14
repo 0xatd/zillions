@@ -7,9 +7,10 @@
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
 
-export function generatePlots(map) {
+export function generatePlots(map, anchor = null) {
   const N = map.size;
-  const c = N / 2;
+  const cx = anchor ? anchor.x : N / 2;
+  const cz = anchor ? anchor.z : N / 2;
   const rng = makeRNG(map.seed * 7 + 13);
   const plots = [];
   const taken = new Set(); // tile keys reserved by already-placed plots
@@ -21,7 +22,7 @@ export function generatePlots(map) {
   // is what guarantees a CLOSED wall and a tidy, symmetric town on any map.
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
-      if (Math.hypot(x + 0.5 - c, z + 0.5 - c) > WALL_R + 2.5) continue;
+      if (Math.hypot(x + 0.5 - cx, z + 0.5 - cz) > WALL_R + 2.5) continue;
       const t = map.tiles[z * N + x];
       if (t !== TILE.GOLDORE && t !== TILE.STONEORE) map.tiles[z * N + x] = TILE.GRASS;
     }
@@ -73,8 +74,8 @@ export function generatePlots(map) {
   };
 
   // --- The Keep, dead center (tier 0 here; the game constructs it at start) ---
-  add('hq', c - 2, c - 2, 4);
-  reserve(c - 4, c - 4, 8, 0); // keep the plaza clear around it
+  add('hq', cx - 2, cz - 2, 4);
+  reserve(cx - 4, cz - 4, 8, 0); // keep the plaza clear around it
 
   // --- Wall FIRST: a closed, 4-connected ring — every tile shares an edge
   // with the next, so the rendered rampart is one continuous wall with the
@@ -93,8 +94,8 @@ export function generatePlots(map) {
     };
     for (let s = 0; s < steps; s++) {
       const ang = A0 + (s / steps) * Math.PI * 2;
-      const x = Math.round(c + Math.cos(ang) * WALL_R);
-      const z = Math.round(c + Math.sin(ang) * WALL_R);
+      const x = Math.round(cx + Math.cos(ang) * WALL_R);
+      const z = Math.round(cz + Math.sin(ang) * WALL_R);
       if (last && x !== last[0] && z !== last[1]) put(x, last[1], ang); // 4-connect the corner
       put(x, z, ang);
       last = [x, z];
@@ -122,7 +123,7 @@ export function generatePlots(map) {
     }
     if (tiles.length < 6) continue;
     // Gate: the wall tile closest to the segment's compass point.
-    const gx = c + Math.cos(seg.gate) * WALL_R, gz = c + Math.sin(seg.gate) * WALL_R;
+    const gx = cx + Math.cos(seg.gate) * WALL_R, gz = cz + Math.sin(seg.gate) * WALL_R;
     let gate = tiles[0], gd = Infinity;
     for (const t of tiles) {
       const d = (t[0] - gx) ** 2 + (t[1] - gz) ** 2;
@@ -132,8 +133,8 @@ export function generatePlots(map) {
     const p = {
       id: nextId++, kind: 'wall', name: seg.name,
       x: tiles[0][0], z: tiles[0][1], size: 1,
-      cx: c + Math.cos(seg.gate) * WALL_R,
-      cz: c + Math.sin(seg.gate) * WALL_R,
+      cx: cx + Math.cos(seg.gate) * WALL_R,
+      cz: cz + Math.sin(seg.gate) * WALL_R,
       tiles, gate, tier: 0, paid: 0, branch: null,
     };
     for (const [x, z] of tiles) taken.add(z * N + x);
@@ -153,7 +154,7 @@ export function generatePlots(map) {
     }
   }
 
-  const ringSpot = (r, ang) => [c + Math.cos(ang) * r - 1, c + Math.sin(ang) * r - 1];
+  const ringSpot = (r, ang) => [cx + Math.cos(ang) * r - 1, cz + Math.sin(ang) * r - 1];
 
   // --- Gate towers: a pair flanking every gate, just inside the wall. THIS
   // is the chokepoint kit — whatever chews the gate stands in a crossfire.
@@ -196,7 +197,7 @@ export function generatePlots(map) {
   }
 
   // --- Gold mines on real ore veins (the risky money), with a guard tower ---
-  const clusters = oreClusters(map, c);
+  const clusters = oreClusters(map, cx, cz);
   for (const cl of clusters.slice(0, 3)) {
     const mine = add('mine', cl.x - 1, cl.z - 1, 2);
     if (mine) add('tower', mine.x + 3, mine.z, 2);
@@ -212,8 +213,8 @@ export function generatePlots(map) {
   return plots;
 }
 
-// Find clusters of gold-ore tiles, nearest-to-center first.
-function oreClusters(map, c) {
+// Find clusters of gold-ore tiles, nearest-to-the-city first.
+function oreClusters(map, cx, cz) {
   const N = map.size;
   const ore = [];
   for (let z = 0; z < N; z++) {
@@ -241,8 +242,8 @@ function oreClusters(map, c) {
     }
     const x = Math.round(members.reduce((s, m) => s + m[0], 0) / members.length);
     const z = Math.round(members.reduce((s, m) => s + m[1], 0) / members.length);
-    const d = Math.hypot(x - c, z - c);
-    if (d > 12 && d < 42) clusters.push({ x, z, d, n: members.length });
+    const d = Math.hypot(x - cx, z - cz);
+    if (d > 12 && d < 48) clusters.push({ x, z, d, n: members.length });
   }
   return clusters.sort((a, b) => a.d - b.d);
 }

@@ -5,10 +5,13 @@ import { makeRNG, makeNoise, clamp } from './utils.js';
 
 export class GameMap {
   // theme (optional): per-level generation thresholds + palette overrides.
-  constructor(seed, theme = null) {
+  // opts: { size, nests } — castle-defense frontier maps are bigger and carry
+  // hive-nest spots (enemy bases) plus 3 candidate city sites.
+  constructor(seed, theme = null, opts = {}) {
     this.seed = seed;
     this.theme = theme;
-    this.size = MAP_SIZE;
+    this.size = opts.size || MAP_SIZE;
+    this.nestCount = opts.nests || 3;
     this.tiles = new Uint8Array(this.size * this.size);
     this.rng = makeRNG(seed);
     this.generate();
@@ -35,14 +38,28 @@ export class GameMap {
     const moistNoise = makeNoise(this.rng);
     const cx = N / 2, cz = N / 2;
 
+    // Candidate city sites: the crossroads at the heart of the map, plus two
+    // frontier grounds off at seeded angles. You ride out and pick one.
+    this.sites = [{ x: cx, z: cz }];
+    for (let i = 0; i < 2; i++) {
+      const ang = this.rng() * Math.PI * 2;
+      const r = N * 0.2;
+      this.sites.push({
+        x: clamp(cx + Math.cos(ang) * r, 24, N - 24),
+        z: clamp(cz + Math.sin(ang) * r, 24, N - 24),
+      });
+    }
+
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
         const e = elevNoise(x * 0.045, z * 0.045, 4);
         const m = moistNoise(x * 0.06 + 100, z * 0.06 + 100, 3);
-        // Keep the middle of the map (start area) mild.
-        const dc = Math.hypot(x - cx, z - cz);
-        const centerFlat = clamp(1 - dc / 26, 0, 1);
-        const elev = e * (1 - centerFlat * 0.55) + 0.45 * centerFlat * 0.55;
+        // Keep the ground around every candidate site mild.
+        let siteFlat = 0;
+        for (const s of this.sites) {
+          siteFlat = Math.max(siteFlat, clamp(1 - Math.hypot(x - s.x, z - s.z) / 24, 0, 1));
+        }
+        const elev = e * (1 - siteFlat * 0.55) + 0.45 * siteFlat * 0.55;
 
         const th = this.theme || {};
         const waterLv = th.water ?? 0.33;
@@ -57,16 +74,45 @@ export class GameMap {
       }
     }
 
-    // Clear the exact start footprint.
+    // Clear the exact start footprint of every candidate site.
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        if (Math.hypot(x - cx, z - cz) < 9) this.tiles[this.idx(x, z)] = TILE.GRASS;
+        for (const s of this.sites) {
+          if (Math.hypot(x - s.x, z - s.z) < 9) { this.tiles[this.idx(x, z)] = TILE.GRASS; break; }
+        }
       }
     }
 
     // Sprinkle ore patches on grass, biased to mid-distance from center.
-    this._orePatches(TILE.GOLDORE, 7);
-    this._orePatches(TILE.STONEORE, 8);
+    this._orePatches(TILE.GOLDORE, 9);
+    this._orePatches(TILE.STONEORE, 10);
+
+    // Hive nests — the enemy's bases, ringing the frontier. Waves march from
+    // these at night; raze them all and the land is cleansed.
+    this.nestSpots = [];
+    const nestR = N * 0.36;
+    for (let i = 0; i < this.nestCount; i++) {
+      const ang = (i / this.nestCount) * Math.PI * 2 + this.rng() * 0.9;
+      let x = Math.round(cx + Math.cos(ang) * nestR), z = Math.round(cz + Math.sin(ang) * nestR);
+      x = clamp(x, 6, N - 6); z = clamp(z, 6, N - 6);
+      // Nudge to walkable ground.
+      outer: for (let r = 0; r < 14; r++) {
+        for (let dz = -r; dz <= r; dz++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+            if (this.isWalkable(x + dx, z + dz)) { x += dx; z += dz; break outer; }
+          }
+        }
+      }
+      // Stamp a blighted clearing so the nest reads from across the map.
+      for (let dz = -3; dz <= 3; dz++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          if (dx * dx + dz * dz > 11 || !this.inBounds(x + dx, z + dz)) continue;
+          this.tiles[this.idx(x + dx, z + dz)] = TILE.GRASS;
+        }
+      }
+      this.nestSpots.push([x, z]);
+    }
 
     // Precompute tile heights (corners get averaged later).
     this.heightOf = (t) => (t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0);
