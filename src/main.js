@@ -7,6 +7,7 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
+import { deleteState, getRemoteState, putState } from './backend.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -41,11 +42,18 @@ class App {
     this.lastWallTile = null;
 
     this.audio = new AudioSys();
+    this.profile = this._loadProfile();
+    this.settings = this._loadSettings();
     this.ui = new UI(document.getElementById('ui'), {
       onBuild: (k) => this.setBuildMode(k),
       onTrain: (k) => { this.audio.init(); this.issue({ t: 'train', k }); },
       onSpeed: (s) => this.setSpeed(s),
-      onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onMute: () => {
+        this.audio.setMuted(!this.audio.muted);
+        this.ui.setMuteUI(this.audio.muted);
+        this.settings.muted = this.audio.muted;
+        this._saveSettings();
+      },
       onStart: (d, hero) => {
         if (this.mpRole === 'guest') return; // host launches the match
         if (this.mpRole === 'host' && this.peers.length) {
@@ -105,8 +113,12 @@ class App {
     this.hashes = { local: new Map() };
     this.desynced = false;
 
-    // Profiles & saves (localStorage).
-    this.profile = this._loadProfile();
+    // Profiles & saves: localStorage first, mirrored to Vercel Blob when deployed.
+    if (this.settings.muted) {
+      this.audio.setMuted(true);
+      this.ui.setMuteUI(true);
+    }
+    this.remoteSaveAt = 0;
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
 
@@ -123,6 +135,7 @@ class App {
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
+    this._hydrateRemoteState();
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -183,7 +196,21 @@ class App {
   }
 
   _saveProfile() {
+    this.profile.updatedAt = Date.now();
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+    this._mirrorState('profile', 'current', this.profile);
+  }
+
+  _loadSettings() {
+    try {
+      return { muted: false, ...JSON.parse(localStorage.getItem('zillions_settings') || '{}') };
+    } catch { return { muted: false }; }
+  }
+
+  _saveSettings() {
+    this.settings.updatedAt = Date.now();
+    try { localStorage.setItem('zillions_settings', JSON.stringify(this.settings)); } catch { /* full/blocked */ }
+    this._mirrorState('settings', 'current', this.settings);
   }
 
   _loadSave() {
@@ -194,9 +221,14 @@ class App {
   _autosave(force = false) {
     if (!this.game || this.game.over || this.mpRole === 'guest') return;
     if (!force && this.paused) return;
+    const save = { when: Date.now(), snap: this.game.snapshot() };
     try {
-      localStorage.setItem('zillions_save', JSON.stringify({ when: Date.now(), snap: this.game.snapshot() }));
+      localStorage.setItem('zillions_save', JSON.stringify(save));
     } catch { /* storage full */ }
+    if (force || save.when - this.remoteSaveAt > 55000) {
+      this.remoteSaveAt = save.when;
+      this._mirrorState('save', 'latest', save);
+    }
   }
 
   _recordGameEnd(won) {
@@ -210,7 +242,52 @@ class App {
     p.bestDay = Math.max(p.bestDay, Math.min(this.game.day, FINAL_DAY));
     p.lastHero = this.ui.selectedHero;
     this._saveProfile();
+    this._mirrorState('game', `${Date.now()}`, {
+      endedAt: Date.now(),
+      won,
+      difficulty: this.game.diffKey,
+      level: this.game.levelId,
+      heroKeys: this.game.heroKeys,
+      day: Math.min(this.game.day, FINAL_DAY),
+      kills: this.game.stats.kills,
+      built: this.game.stats.built,
+      lost: this.game.stats.lost,
+      players: this.game.heroKeys.length,
+    });
+    deleteState('save', 'latest').catch(() => {});
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+  }
+
+  _mirrorState(kind, id, data) {
+    putState(kind, id, data).catch(() => {});
+  }
+
+  async _hydrateRemoteState() {
+    try {
+      const remote = await getRemoteState();
+      if (!remote?.ok || !remote.state) return;
+      const { profile, settings, save } = remote.state;
+      if (profile && (!this.profile.updatedAt || profile.updatedAt > this.profile.updatedAt)) {
+        this.profile = { ...this.profile, ...profile };
+        localStorage.setItem('zillions_profile', JSON.stringify(this.profile));
+        this.ui.setProfile(this.profile);
+        this.ui.setCampaign(this.profile.campaign || 0);
+        if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
+      }
+      if (settings && (!this.settings.updatedAt || settings.updatedAt > this.settings.updatedAt)) {
+        this.settings = { ...this.settings, ...settings };
+        localStorage.setItem('zillions_settings', JSON.stringify(this.settings));
+        this.audio.setMuted(!!this.settings.muted);
+        this.ui.setMuteUI(this.audio.muted);
+      }
+      const localSave = this._loadSave();
+      if (save?.snap && (!localSave?.when || save.when > localSave.when)) {
+        localStorage.setItem('zillions_save', JSON.stringify(save));
+        if (!this.game) this.ui.setContinue(save.snap);
+      }
+    } catch {
+      // Static/local play keeps using localStorage without backend noise.
+    }
   }
 
   continueGame() {

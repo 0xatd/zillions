@@ -144,7 +144,7 @@ export const ULT_REQ_LEVEL = 6;
 // Danny: Necrophos / Weaver / Riki.
 export const HEROES = {
   scott: {
-    key: 'scott', name: 'Captain Scott', icon: '⚔️', color: 0x8f1f1f, trim: 0xc9a44a,
+    key: 'scott', name: 'Captain Scott', icon: '⚔️', color: 0x8f1f1f, trim: 0xe8e4da,
     tagline: 'Close combat. A whirlwind of steel with fire in his fists.',
     hp: 440, dmg: 28, range: 1.8, rof: 1.1, speed: 4.2, noise: 4,
     levelHp: 44, levelDmg: 4, regen: 2.6, melee: true,
@@ -164,7 +164,7 @@ export const HEROES = {
     ],
   },
   alexander: {
-    key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
+    key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x2f6f3a, trim: 0xc9a44a,
     tagline: 'Mid range. Roots, teleports, and a rifle that never misses twice.',
     hp: 320, dmg: 24, range: 7, rof: 1.8, speed: 4.5, noise: 14,
     levelHp: 32, levelDmg: 3.5, regen: 2.0,
@@ -184,7 +184,7 @@ export const HEROES = {
     ],
   },
   danny: {
-    key: 'danny', name: 'Danny', icon: '🗡️', color: 0x36503a, trim: 0xa8b394,
+    key: 'danny', name: 'Danny', icon: '🗡️', color: 0x1f3a6e, trim: 0x111820,
     tagline: 'Long range. Now you see him. They never do.',
     hp: 270, dmg: 32, range: 13, rof: 1.1, speed: 4.5, noise: 12,
     levelHp: 25, levelDmg: 4.5, regen: 1.8,

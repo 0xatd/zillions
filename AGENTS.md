@@ -2,7 +2,7 @@
 
 ## Product
 
-Zillions is a static browser survival RTS.
+Zillions is a browser survival RTS.
 
 It should feel like They Are Billions mixed with Warcraft III hero mechanics, StarCraft command flow, and Warhammer-style grim space marines.
 
@@ -10,9 +10,9 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 
 ## Hard Constraints
 
-- Keep the game static. Do not add a backend.
-- Keep zero-install local play. A static file server must be enough.
-- Do not introduce a bundler, framework, package manager dependency, or build step unless Alex explicitly asks.
+- Keep zero-install local play. A static file server must be enough for the game.
+- Keep the backend optional. localStorage is the offline fallback, and the browser must not fail if `/api/state` is missing.
+- Do not introduce a bundler, framework, or build step unless Alex explicitly asks.
 - Do not remove the existing game loop, hero system, or Overseer behavior unless the task is specifically about replacing them.
 - Do not commit API keys, model prompts with secrets, or private source material.
 - Treat generated media as concept assets until wired into runtime code.
@@ -23,8 +23,11 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `assets.html` - Audio/asset browser for GitHub Pages.
 - `src/config.js` - Balance, heroes, buildings, units, zombies, waves.
 - `src/game.js` - Main simulation.
+- `src/main.js` - Bootstraps renderer, UI, game loop, profiles, saves, and Vercel backend mirroring.
+- `src/backend.js` - Browser client for optional cloud profile/settings/saves.
 - `src/ui.js` - DOM HUD and hero picker.
 - `src/audio.js` - Runtime synthesized audio.
+- `api/state.js` - Vercel Blob-backed JSON state API.
 - `assets/audio/manifest.json` - Audio pack index.
 - `docs/hero-audio-pack.md` - Hero audio notes.
 - `docs/faction-audio-pack.md` - Faction and SFX audio notes.
@@ -60,10 +63,12 @@ If you wire generated audio into the game:
 
 Before you call a change good:
 
+- Run `npm run check`.
 - Run `git diff --check`.
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
 - Open `/assets.html` and confirm manifests load.
+- If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.
 - Check desktop and mobile widths for obvious layout clipping.
 - Confirm no secret strings were committed.
 
