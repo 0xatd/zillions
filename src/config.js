@@ -159,7 +159,7 @@ export const HEROES = {
         cast: 'pulse', radius: 6, dmg: [40, 70, 105], heal: [50, 85, 130],
         desc: 'A burst of holy light — heals Scott and nearby troops, sears the dead around them.' },
       { key: 'sunstrike', name: 'Sun Strike', icon: '☀️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
-        cast: 'aoeDmg', radius: 8.5, dmg: [360], stun: [2.5],
+        cast: 'aoeDmg', radius: 8.5, dmg: [360], stun: [2.5], knock: 2.6,
         desc: 'ULTIMATE: calls down a column of pure solar fire onto everything around him.' },
     ],
   },

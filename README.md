@@ -60,10 +60,20 @@ Each kit honors the squad's favorite heroes from WC3/Dota/Diablo:
 | Space | Pause · 1×/2×/4× speed buttons in the top bar |
 | M / H / Esc | Mute / help / cancel |
 
+## Co-op multiplayer (2 players, no server)
+
+Click **🌐 Host co-op**, send the invite code to a friend, they click **🔗 Join co-op**, paste it, and send you back a reply code — connect, both pick heroes, the host picks a difficulty, and you're defending **one colony with two heroes**. Built on a WebRTC DataChannel (peer-to-peer, STUN only, zero infrastructure) running a **deterministic lockstep** simulation: only player commands cross the wire (~10 packets/sec), every zombie is simulated identically on both machines, and periodic state hashes detect desyncs. Both players should use the same browser family (e.g. both Chrome) — identical floating point is what keeps the worlds in perfect sync.
+
+## Art & physics
+
+- **CC0 3D assets** from [KayKit Dungeon Remastered](https://kaylousberg.com) (thanks Kay Lousberg!): stone rampart walls that auto-orient along your wall lines, torches, war banners, crates, barrels and a golden treasure chest for loot drops — with graceful procedural fallbacks if assets fail to load. See `assets/KAYKIT-LICENSE.txt`.
+- **Ballistic corpse physics**: killed zombies launch away from whatever killed them, tumble, bounce, and sink into the mud — ultimates like Sun Strike also *knock back* survivors, so a max-rank ult sends thirty bodies arcing through the air.
+
 ## Tech notes
 
 - **Three.js r160** (vendored in `vendor/`), custom flat-shaded terrain mesh with per-tile vertex colors.
 - Zombies are **instanced meshes** (thousands at 60 fps) driven by a multi-source **Dijkstra flow field**; units use A*.
 - Core **sound is synthesized** at runtime with WebAudio. Generated concept voice/music assets live in `assets/audio/` and are documented in `docs/hero-audio-pack.md`.
 - GPU particles (blood, dust, muzzle flashes, smoke), soft shadows, ACES tone mapping, day/night lighting.
-- Fixed-timestep simulation (30 Hz) decoupled from rendering, with 1×/2×/4× game speed.
+- Fixed-timestep simulation (30 Hz) decoupled from rendering, with 1×/2×/4× game speed (locked to 1× in co-op).
+- Deterministic seeded RNG throughout the sim — the property that makes lockstep co-op possible.

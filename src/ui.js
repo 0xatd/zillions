@@ -38,6 +38,7 @@ export class UI {
       </div>
 
       <div id="banner"></div>
+      <div id="waitind" class="hidden">⏳ Waiting for the other player…</div>
       <div id="messages"></div>
 
       <div id="heropanel" class="hidden"></div>
@@ -68,6 +69,12 @@ export class UI {
           </div>
           <div class="herorow" id="herorow"></div>
           <div class="diffrow" id="diffrow"></div>
+          <div class="mprow">
+            <button class="diffbtn" id="mp-host">🌐 Host co-op</button>
+            <button class="diffbtn" id="mp-join">🔗 Join co-op</button>
+            <span class="mphint">2-player co-op: two heroes, one colony. No server — trade invite codes.</span>
+          </div>
+          <div id="mp-panel" class="hidden"></div>
           <div class="controls">
             <span><b>F</b> select hero (×2 = center)</span><span><b>Q W E R</b> abilities</span>
             <span><b>T</b> select army</span><span><b>right-click</b> move</span><span><b>drag</b> select</span>
@@ -92,6 +99,7 @@ export class UI {
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
+        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
       card.onmousemove = (e) => this._moveTip(e);
@@ -162,6 +170,12 @@ export class UI {
       window.addEventListener('mousemove', mv);
       window.addEventListener('mouseup', up);
     });
+
+    this.root.querySelector('#mp-host').onclick = () => {
+      this.mpStatus('Creating invite code…');
+      this.cb.onHost();
+    };
+    this.root.querySelector('#mp-join').onclick = () => this.mpShowJoinInput();
 
     this.tooltip = this.root.querySelector('#tooltip');
     this.banner = this.root.querySelector('#banner');
@@ -254,8 +268,8 @@ export class UI {
       `<span class="tfx">${status}</span><br><span class="tdesc">${ab.desc}</span>${next}`;
   }
 
-  updateHero(game) {
-    const h = game.hero;
+  updateHero(game, p = 0) {
+    const h = game.heroes[p];
     if (!h || !this.abilBtns) return;
     const q = (id) => this.root.querySelector(id);
     q('#hp-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
@@ -274,7 +288,7 @@ export class UI {
       const onCd = !ab.passive && st.cd > 0 && st.rank > 0;
       cd.classList.toggle('hidden', !onCd);
       if (onCd) cd.textContent = Math.ceil(st.cd);
-      q(`#lr-${i}`).classList.toggle('hidden', !game.canLearn(i));
+      q(`#lr-${i}`).classList.toggle('hidden', !game.canLearn(i, p));
       this.abilBtns[i].classList.toggle('unlearned', st.rank === 0);
       this.abilBtns[i].classList.toggle('ready', st.rank > 0 && !ab.passive && st.cd <= 0 && !h.dead);
     });
@@ -323,6 +337,75 @@ export class UI {
   }
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
+
+  setWaiting(on) {
+    const el = this.root.querySelector('#waitind');
+    if (el) el.classList.toggle('hidden', !on);
+  }
+
+  // ---------- co-op lobby ----------
+
+  _mpPanel() {
+    const p = this.root.querySelector('#mp-panel');
+    p.classList.remove('hidden');
+    return p;
+  }
+
+  mpStatus(text) {
+    const p = this._mpPanel();
+    let st = p.querySelector('.mpstatus');
+    if (!st) { st = document.createElement('div'); st.className = 'mpstatus'; p.prepend(st); }
+    st.textContent = text;
+  }
+
+  mpShowHost(code) {
+    const p = this._mpPanel();
+    p.innerHTML = `
+      <div class="mpstatus">Send this invite code to your friend, then paste their reply below.</div>
+      <textarea class="mpcode" readonly id="mp-offer">${code}</textarea>
+      <button class="tbtn" id="mp-copy">📋 Copy invite</button>
+      <textarea class="mpcode" id="mp-reply" placeholder="Paste your friend's reply code here…"></textarea>
+      <button class="diffbtn primary" id="mp-accept">Connect</button>`;
+    p.querySelector('#mp-copy').onclick = () => {
+      p.querySelector('#mp-offer').select();
+      document.execCommand('copy');
+      navigator.clipboard && navigator.clipboard.writeText(code).catch(() => {});
+    };
+    p.querySelector('#mp-accept').onclick = () => this.cb.onHostAccept(p.querySelector('#mp-reply').value);
+  }
+
+  mpShowJoinInput() {
+    const p = this._mpPanel();
+    p.innerHTML = `
+      <div class="mpstatus">Paste the invite code from your friend.</div>
+      <textarea class="mpcode" id="mp-invite" placeholder="Paste invite code here…"></textarea>
+      <button class="diffbtn primary" id="mp-go">Join</button>`;
+    p.querySelector('#mp-go').onclick = () => this.cb.onJoin(p.querySelector('#mp-invite').value);
+  }
+
+  mpShowReply(code) {
+    const p = this._mpPanel();
+    p.innerHTML = `
+      <div class="mpstatus">Send this reply code back to the host. The game starts when they connect — pick your hero while you wait!</div>
+      <textarea class="mpcode" readonly id="mp-reply-out">${code}</textarea>
+      <button class="tbtn" id="mp-copy2">📋 Copy reply</button>`;
+    p.querySelector('#mp-copy2').onclick = () => {
+      p.querySelector('#mp-reply-out').select();
+      document.execCommand('copy');
+      navigator.clipboard && navigator.clipboard.writeText(code).catch(() => {});
+    };
+  }
+
+  mpConnected(isHost) {
+    const p = this._mpPanel();
+    p.innerHTML = `<div class="mpstatus ok">🟢 Connected! ${isHost
+      ? 'Pick your hero, then choose a difficulty to launch the game for both players.'
+      : 'Pick your hero — the host will start the game.'}</div>`;
+    if (!isHost) {
+      const diffrow = this.root.querySelector('#diffrow');
+      diffrow.classList.add('disabled');
+    }
+  }
 
   setAutoUI(on) { this.root.querySelector('#b-auto').classList.toggle('active', on); }
 

@@ -14,7 +14,8 @@ const IDLE = 0, WANDER = 1, AGGRO = 2;
 let nextId = 1;
 
 export class Game {
-  constructor(map, difficulty = 'normal', heroKey = 'alexander') {
+  // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander') {
     this.map = map;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.rng = makeRNG(999);
@@ -43,8 +44,9 @@ export class Game {
     this.eco = { energyProd: 0, energyUse: 0, workersUsed: 0, popCap: 0, gold: 0, wood: 0, stone: 0, food: 0 };
     this.starving = false;
 
-    this.heroKey = heroKey;
-    this.hero = null;
+    this.heroKeys = Array.isArray(heroKeys) ? heroKeys : [heroKeys];
+    this.heroes = [];
+    this.hero = null;            // heroes[0], kept for solo call sites
     this.pickups = [];
     this.fields = [];            // ability ground zones
     this.autoBuild = true;       // the Overseer runs the economy by default
@@ -60,7 +62,7 @@ export class Game {
     this.hq = this._placeRaw('hq', c - 2, c - 2);
     for (let i = 0; i < 3; i++) this._spawnUnit('ranger', c - 4 + i * 1.5, c + 3);
     this._spawnUnit('soldier', c + 3, c + 3);
-    this._spawnHero(this.heroKey, c, c + 4);
+    this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
     this._scatterInitialZombies();
     this.recalcEconomy();
     this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
@@ -255,16 +257,35 @@ export class Game {
       reviveT: 0,
     };
     this.units.push(h);
-    this.hero = h;
+    this.heroes.push(h);
+    if (!this.hero) this.hero = h;
     return h;
+  }
+
+  // Central command entry point — local UI and remote co-op players both go
+  // through here, so the sim stays deterministic under lockstep.
+  exec(c) {
+    switch (c.t) {
+      case 'place': this.place(c.k, c.x, c.z); break;
+      case 'quietPlace': if (this.canPlace(c.k, c.x, c.z).ok) this.place(c.k, c.x, c.z); break;
+      case 'demolish': { const b = this.buildings.find((o) => o.id === c.id); if (b) this.demolish(b); break; }
+      case 'train': this.trainUnit(c.k); break;
+      case 'move': {
+        const units = c.ids.map((id) => this.units.find((u) => u.id === id)).filter(Boolean);
+        if (units.length) this.orderMove(units, c.x, c.z);
+        break;
+      }
+      case 'cast': this.castAbility(c.i, c.x, c.z, c.p || 0); break;
+      case 'learn': this.learnAbility(c.i, c.p || 0); break;
+      case 'auto': this.autoBuild = !!c.on; break;
+    }
   }
 
   heroDmg(h) {
     return h.def.dmg + h.def.levelDmg * (h.level - 1) + (h.bonusDmg || 0);
   }
 
-  addXp(amount) {
-    const h = this.hero;
+  addXp(h, amount) {
     if (!h || h.dead || h.level >= HERO_MAX_LEVEL) return;
     h.xp += amount;
     while (h.level < HERO_MAX_LEVEL && h.xp >= xpForLevel(h.level)) {
@@ -279,8 +300,8 @@ export class Game {
     if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
   }
 
-  canLearn(i) {
-    const h = this.hero;
+  canLearn(i, p = 0) {
+    const h = this.heroes[p];
     if (!h || h.points <= 0) return false;
     const ab = h.def.abilities[i];
     const st = h.abil[i];
@@ -289,17 +310,17 @@ export class Game {
     return h.level >= rankReqLevel(st.rank + 1);
   }
 
-  learnAbility(i) {
-    if (!this.canLearn(i)) { this.emit({ type: 'deny' }); return; }
-    const h = this.hero;
+  learnAbility(i, p = 0) {
+    if (!this.canLearn(i, p)) { this.emit({ type: 'deny' }); return; }
+    const h = this.heroes[p];
     h.abil[i].rank++;
     h.points--;
     this.emit({ type: 'learn' });
     this.msg(`${h.def.abilities[i].icon} ${h.def.abilities[i].name} — rank ${h.abil[i].rank}`, 'info');
   }
 
-  castAbility(i, tx, tz) {
-    const h = this.hero;
+  castAbility(i, tx, tz, p = 0) {
+    const h = this.heroes[p];
     if (!h || h.dead) return;
     const ab = h.def.abilities[i];
     const st = h.abil[i];
@@ -334,7 +355,7 @@ export class Game {
       case 'pulse': {
         const r2 = ab.radius * ab.radius;
         for (const zb of this.zombies) {
-          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, ab.dmg[r]);
+          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, ab.dmg[r], h.x, h.z);
         }
         for (const u of this.units) {
           if (!u.dead && !u.turret && dist2(h.x, h.z, u.x, u.z) <= r2) u.hp = Math.min(u.maxHp, u.hp + ab.heal[r]);
@@ -409,7 +430,7 @@ export class Game {
         }
         if (best) {
           this.emit({ type: 'shot', kind: 'sniper', fx: h.x, fz: h.z, tx: best.x, tz: best.z, fy: 1.0 });
-          this.damageZombie(best, ab.dmg[r]);
+          this.damageZombie(best, ab.dmg[r], h.x, h.z);
         }
         break;
       }
@@ -431,10 +452,21 @@ export class Game {
         const r2 = ab.radius * ab.radius;
         for (const zb of this.zombies) {
           if (zb.dead) continue;
-          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
+          const d2v = dist2(h.x, h.z, zb.x, zb.z);
+          if (d2v <= r2) {
             if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
             if (ab.slow) { zb.slowT = ab.slowDur; zb.slowMul = ab.slow; }
-            this.damageZombie(zb, ab.dmg[r]);
+            // Ultimate shockwaves physically hurl survivors backward.
+            if (ab.knock) {
+              const d = Math.sqrt(d2v) || 1;
+              const k = ab.knock * (1 - (d / ab.radius) * 0.6);
+              const nx = zb.x + ((zb.x - h.x) / d) * k;
+              const nz = zb.z + ((zb.z - h.z) / d) * k;
+              if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
+                zb.x = nx; zb.z = nz;
+              }
+            }
+            this.damageZombie(zb, ab.dmg[r], h.x, h.z);
           }
         }
         break;
@@ -515,7 +547,10 @@ export class Game {
   }
 
   _updateHero(dt) {
-    const h = this.hero;
+    for (const h of this.heroes) this._updateHeroOne(h, dt);
+  }
+
+  _updateHeroOne(h, dt) {
     if (!h) return;
     for (const st of h.abil) if (st.cd > 0) st.cd -= dt;
     if (h.dead) {
@@ -715,11 +750,23 @@ export class Game {
     if (zb.hp <= 0) {
       zb.dead = true;
       this.stats.kills++;
-      this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute' });
-      // WC3-style shared XP for kills near the hero.
-      const h = this.hero;
-      if (h && !h.dead && dist2(h.x, h.z, zb.x, zb.z) < XP_RADIUS * XP_RADIUS) {
-        this.addXp(zb.def.score * 8);
+      // Launch vector for corpse physics: away from the damage source.
+      let ldx, ldz;
+      if (sx !== undefined) {
+        ldx = zb.x - sx; ldz = zb.z - sz;
+        const ld = Math.hypot(ldx, ldz) || 1;
+        ldx /= ld; ldz /= ld;
+      } else {
+        const a = this.rng() * Math.PI * 2;
+        ldx = Math.cos(a); ldz = Math.sin(a);
+      }
+      const force = dmg >= 150 ? 2.4 : dmg >= 60 ? 1.4 : 0.8;
+      this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute', dx: ldx, dz: ldz, force });
+      // WC3-style shared XP for kills near any hero (co-op: both can earn).
+      for (const h of this.heroes) {
+        if (!h.dead && dist2(h.x, h.z, zb.x, zb.z) < XP_RADIUS * XP_RADIUS) {
+          this.addXp(h, zb.def.score * 8);
+        }
       }
       // Creep-style loot drops.
       if (zb.type === 'brute') {

@@ -237,6 +237,7 @@ body::after {
 }
 .screen .panel {
   max-width: 560px; width: calc(100vw - 40px);
+  max-height: calc(100vh - 32px); overflow-y: auto;
   background: var(--panel); border: 1px solid var(--panel-border);
   border-radius: 18px; padding: 30px 34px;
   text-align: center;
@@ -275,4 +276,24 @@ body::after {
 /* On narrower screens, pin the build bar between the hero panel and minimap. */
 @media (max-width: 1650px) {
   #bottombar { left: 286px; right: 218px; transform: none; justify-content: center; }
+}
+
+/* ---------- co-op lobby ---------- */
+.mprow { display: flex; gap: 10px; align-items: center; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+.mphint { font-size: 11px; opacity: 0.6; max-width: 240px; text-align: left; }
+#mp-panel { margin-top: 4px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.mpstatus { font-size: 13px; color: #ffe2a3; }
+.mpstatus.ok { color: var(--good); }
+.mpcode {
+  width: 100%; height: 56px; resize: none;
+  background: rgba(0, 0, 0, 0.4); color: #9fd6ff;
+  border: 1px solid var(--panel-border); border-radius: 8px;
+  font-size: 10px; font-family: monospace; padding: 6px;
+}
+.diffrow.disabled { pointer-events: none; opacity: 0.45; }
+#waitind {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid rgba(255, 215, 94, 0.4);
+  border-radius: 10px; padding: 8px 16px; font-size: 14px;
+  z-index: 12; animation: pulse 1.2s infinite;
 }

@@ -5,6 +5,8 @@ import { GameMap } from './map.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
+import { loadAssets, assetClone, hasAsset } from './assets.js';
+import { NetSession } from './net.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -41,21 +43,34 @@ class App {
     this.audio = new AudioSys();
     this.ui = new UI(document.getElementById('ui'), {
       onBuild: (k) => this.setBuildMode(k),
-      onTrain: (k) => { this.audio.init(); this.game && this.game.trainUnit(k); },
+      onTrain: (k) => { this.audio.init(); this.issue({ t: 'train', k }); },
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
-      onStart: (d, hero) => this.startGame(d, hero),
+      onStart: (d, hero) => {
+        if (this.net && this.net.open) {
+          if (!this.net.isHost) return; // guest waits for host
+          const seed = (Math.random() * 1e9) | 0;
+          const heroes = [hero, this.remoteHero || 'scott'];
+          this.net.send({ t: 'start', seed, d, heroes });
+          this.startGame(d, null, { seed, heroes, myPlayer: 0 });
+        } else {
+          this.startGame(d, hero);
+        }
+      },
       onCast: (i) => this.tryCast(i),
-      onLearn: (i) => { if (this.game) this.game.learnAbility(i); },
+      onLearn: (i) => this.issue({ t: 'learn', i, p: this.myPlayer }),
       onAuto: () => {
         if (!this.game) return;
-        this.game.autoBuild = !this.game.autoBuild;
-        this.ui.setAutoUI(this.game.autoBuild);
-        this.game.msg(this.game.autoBuild ? '🤖 Overseer resumed — economy is handled.' : '🔧 Overseer paused — you\'re building manually now.', 'info');
+        this.issue({ t: 'auto', on: !this.game.autoBuild });
+        this.game.msg(!this.game.autoBuild ? '🤖 Overseer resumed — economy is handled.' : '🔧 Overseer paused — building manually now.', 'info');
       },
+      onHost: () => this.hostGame(),
+      onJoin: (code) => this.joinGame(code),
+      onHostAccept: (code) => this.net && this.net.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
+      onHeroPick: (k) => { if (this.net && this.net.open) this.net.send({ t: 'hero', k }); },
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
-      onDemolish: (b) => { this.game.demolish(b); this.selectedBuilding = null; this.ui.showSelection(null); },
+      onDemolish: (b) => { this.issue({ t: 'demolish', id: b.id }); this.selectedBuilding = null; this.ui.showSelection(null); },
       onHelp: () => { this.pause(); this.ui.showHelp(); },
     });
 
@@ -72,6 +87,19 @@ class App {
     this.rangeRing = this._makeRangeRing();
     this.scene.add(this.rangeRing);
 
+    // Co-op lockstep state.
+    this.myPlayer = 0;
+    this.net = null;
+    this.netMode = false;
+    this.remoteHero = null;
+    this.outbox = [];
+    this.simFrame = 0;
+    this.inbox = new Map();
+    this.localBundles = new Map();
+    this.hashes = { local: new Map(), remote: new Map() };
+    this.desynced = false;
+
+    this._setupCorpses();
     this.groanAcc = 0;
     this.deathSfxT = 0;
     this.bhitSfxT = 0;
@@ -86,18 +114,109 @@ class App {
 
   // ---------------- setup ----------------
 
-  startGame(difficulty, heroKey) {
+  async startGame(difficulty, heroKey, mp = null) {
     this.audio.init();
-    this.map = new GameMap((Math.random() * 1e9) | 0);
-    this.game = new Game(this.map, difficulty, heroKey);
+    if (!this.assetsLoaded) {
+      this.ui.showBanner('Loading…', '', 1500);
+      await loadAssets();
+      this.assetsLoaded = true;
+    }
+    const seed = mp ? mp.seed : (Math.random() * 1e9) | 0;
+    this.map = new GameMap(seed);
+    this.game = new Game(this.map, difficulty, mp ? mp.heroes : heroKey);
+    this.myPlayer = mp ? mp.myPlayer : 0;
+    this.netMode = !!mp;
+    if (this.netMode) {
+      this.simFrame = 0;
+      this.outbox = [];
+      this.inbox = new Map();
+      this.localBundles = new Map();
+      this.hashes = { local: new Map(), remote: new Map() };
+      this.speed = 1;
+    }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
-    this.ui.initHeroPanel(this.game.hero);
+    this.ui.initHeroPanel(this.game.heroes[this.myPlayer]);
     this.setSpeed(1);
-    this.ui.showBanner('Day 1 — fortify before nightfall', '', 3000);
+    this.ui.showBanner(mp ? 'Co-op colony founded — hold the line together!' : 'Day 1 — fortify before nightfall', '', 3000);
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
+  }
+
+  // ---------------- co-op networking ----------------
+
+  issue(cmd) {
+    if (!this.game) return;
+    if (this.netMode) this.outbox.push(cmd);
+    else this.game.exec(cmd);
+  }
+
+  _wireNet() {
+    this.net.onOpen = () => {
+      this.ui.mpConnected(this.net.isHost);
+      this.net.send({ t: 'hero', k: this.ui.selectedHero });
+    };
+    this.net.onMessage = (m) => this._onNet(m);
+    this.net.onClose = () => {
+      if (this.netMode && !this.game.over) {
+        this.pause();
+        this.ui.showBanner('⚠️ Connection to the other player was lost.', 'bad', 8000);
+      }
+    };
+  }
+
+  async hostGame() {
+    this.audio.init();
+    this.net = new NetSession();
+    this._wireNet();
+    try {
+      const code = await this.net.host();
+      this.ui.mpShowHost(code);
+    } catch (e) {
+      this.ui.mpStatus('❌ Could not create a session (WebRTC unavailable).');
+    }
+  }
+
+  async joinGame(code) {
+    this.audio.init();
+    this.net = new NetSession();
+    this._wireNet();
+    try {
+      const reply = await this.net.join(code);
+      this.ui.mpShowReply(reply);
+    } catch (e) {
+      this.ui.mpStatus('❌ Bad invite code.');
+    }
+  }
+
+  _onNet(m) {
+    if (m.t === 'c') this.inbox.set(m.w, m.c);
+    else if (m.t === 'h') { this.hashes.remote.set(m.w, m.h); this._checkHash(m.w); }
+    else if (m.t === 'hero') { this.remoteHero = m.k; this.ui.mpStatus(`Friend picked: ${m.k}. `); }
+    else if (m.t === 'start') this.startGame(m.d, null, { seed: m.seed, heroes: m.heroes, myPlayer: 1 });
+  }
+
+  _stateHash() {
+    const g = this.game;
+    let h = 7;
+    h = (h * 31 + Math.round(g.res.gold)) | 0;
+    h = (h * 31 + g.zombies.length) | 0;
+    h = (h * 31 + g.units.length) | 0;
+    h = (h * 31 + g.buildings.length) | 0;
+    h = (h * 31 + g.stats.kills) | 0;
+    for (const hr of g.heroes) {
+      h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
+    }
+    return h;
+  }
+
+  _checkHash(w) {
+    const a = this.hashes.local.get(w), b = this.hashes.remote.get(w);
+    if (a !== undefined && b !== undefined && a !== b && !this.desynced) {
+      this.desynced = true;
+      this.ui.showBanner('⚠️ Games desynced — both players should refresh and reconnect.', 'bad', 10000);
+    }
   }
 
   _setupLights() {
@@ -284,6 +403,66 @@ class App {
     }
   }
 
+  // ---------------- corpse physics ----------------
+  // Cheap ballistic ragdolls: killed zombies get launched away from the
+  // damage source, tumble through the air, bounce, and sink into the mud.
+
+  _setupCorpses() {
+    const MAXC = 300;
+    const geo = new THREE.BoxGeometry(0.36, 0.62, 0.24);
+    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), MAXC);
+    this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.corpseMesh.castShadow = true;
+    this.corpseMesh.frustumCulled = false;
+    this.corpseMesh.count = 0;
+    this.scene.add(this.corpseMesh);
+    this.corpses = [];
+  }
+
+  spawnCorpse(e) {
+    if (this.corpses.length >= 300) this.corpses.shift();
+    const f = e.force || 1;
+    const sp = 2.5 * f + Math.random() * 2;
+    this.corpses.push({
+      x: e.x, y: 0.5, z: e.z,
+      vx: (e.dx || 0) * sp + (Math.random() - 0.5), vy: 2.2 + 3.2 * f * Math.random(), vz: (e.dz || 0) * sp + (Math.random() - 0.5),
+      rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
+      wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
+      life: 6 + Math.random() * 3, scale: e.big ? 1.7 : 1,
+      color: e.big ? 0x4a3356 : 0x54702e,
+    });
+  }
+
+  _updateCorpses(dt) {
+    const d = this._zdummy, c = this._zcolor;
+    let i = 0;
+    for (const p of this.corpses) {
+      p.life -= dt;
+      if (p.life <= 0) continue;
+      if (p.y > 0.16 || Math.abs(p.vy) > 0.5) {
+        p.vy -= 22 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        p.rx += p.wx * dt; p.ry += p.wy * dt;
+        if (p.y < 0.16) { p.y = 0.16; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
+      } else {
+        p.rx = Math.PI / 2; // settled flat
+        if (p.life < 1.5) p.y = 0.16 - (1.5 - p.life) * 0.2; // sink away
+      }
+      d.position.set(p.x, p.y, p.z);
+      d.rotation.set(p.rx, p.ry, p.rz);
+      d.scale.setScalar(p.scale);
+      d.updateMatrix();
+      this.corpseMesh.setMatrixAt(i, d.matrix);
+      c.setHex(p.color);
+      this.corpseMesh.setColorAt(i, c);
+      i++;
+    }
+    this.corpses = this.corpses.filter((p) => p.life > 0);
+    this.corpseMesh.count = i;
+    this.corpseMesh.instanceMatrix.needsUpdate = true;
+    if (this.corpseMesh.instanceColor) this.corpseMesh.instanceColor.needsUpdate = true;
+  }
+
   // ---------------- health bars ----------------
 
   _setupBars() {
@@ -351,6 +530,12 @@ class App {
   _makeBuildingMesh(key) {
     const d = BUILDINGS[key];
     const g = new THREE.Group();
+
+    // Real 3D wall segments from the KayKit pack (CC0), when loaded.
+    if (key === 'wall' && hasAsset('wall')) {
+      const seg = assetClone(Math.random() < 0.3 ? 'wallCracked' : 'wall', 1.06);
+      if (seg) { g.add(seg); g.userData.wallSeg = seg; return g; }
+    }
     const M = (color) => new THREE.MeshLambertMaterial({ color });
     const box = (w, h, dep, color, x = 0, y = 0, z = 0) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), M(color));
@@ -464,6 +649,30 @@ class App {
         break;
       }
     }
+
+    // CC0 prop dressing (skipped gracefully when assets are unavailable).
+    const dress = (assetKey, fit, x, z, ry = 0) => {
+      const a = assetClone(assetKey, fit);
+      if (a) { a.position.set(x, 0, z); a.rotation.y = ry; g.add(a); }
+    };
+    if (key === 'hq') {
+      dress('banner', 0.85, -1.7, 0.6);
+      dress('banner', 0.85, 1.7, 0.6, Math.PI);
+      dress('crates', 1.1, -1.4, 1.5, 0.4);
+      dress('torch', 0.45, 1.5, 1.6);
+    } else if (key === 'barracks') {
+      dress('banner', 0.8, -1.2, 0.9);
+      dress('boxes', 1.0, 1.15, -0.95, 0.7);
+      dress('torch', 0.42, -1.2, -0.9);
+    } else if (key === 'sawmill') {
+      dress('barrel', 0.55, -0.9, 0.75);
+    } else if (key === 'tower') {
+      dress('torch', 0.4, 0.75, 0.75);
+    } else if (key === 'mine' || key === 'quarry') {
+      dress('crates', 0.9, 1.1, -1.1, 0.3);
+    } else if (key === 'mill') {
+      dress('barrel', 0.5, 0.85, 0.65);
+    }
     return g;
   }
 
@@ -475,6 +684,19 @@ class App {
       if (!this.buildingMeshes.has(b.id)) {
         const mesh = this._makeBuildingMesh(b.key);
         mesh.position.set(b.cx, 0, b.cz);
+        // Align wall segments with the wall line they belong to.
+        if (mesh.userData.wallSeg) {
+          const N = g.map.size;
+          const isWall = (x, z) => {
+            const id = g.occ[z * N + x];
+            if (!id) return false;
+            const nb = g.buildings.find((o) => o.id === id);
+            return nb && nb.key === 'wall';
+          };
+          const ew = isWall(b.x - 1, b.z) || isWall(b.x + 1, b.z);
+          const ns = isWall(b.x, b.z - 1) || isWall(b.x, b.z + 1);
+          mesh.userData.wallSeg.rotation.y = ns && !ew ? Math.PI / 2 : 0;
+        }
         this.scene.add(mesh);
         this.buildingMeshes.set(b.id, { mesh, b });
       }
@@ -612,10 +834,16 @@ class App {
       if (!this.pickupMeshes.has(p.id)) {
         const g = new THREE.Group();
         if (p.kind === 'gold') {
-          const chest = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.26),
-            new THREE.MeshLambertMaterial({ color: 0xc9a44a, emissive: 0xc9a44a, emissiveIntensity: 0.35 }));
-          chest.castShadow = true;
-          g.add(chest);
+          const model = assetClone('chest', 0.55);
+          if (model) {
+            model.position.y = -0.15;
+            g.add(model);
+          } else {
+            const chest = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.26),
+              new THREE.MeshLambertMaterial({ color: 0xc9a44a, emissive: 0xc9a44a, emissiveIntensity: 0.35 }));
+            chest.castShadow = true;
+            g.add(chest);
+          }
         } else {
           const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.3),
             new THREE.MeshLambertMaterial({ color: 0xe8e4da }));
@@ -661,7 +889,7 @@ class App {
           if (bd.hotkey === k) this.setBuildMode(bk);
         }
         for (const [uk, ud] of Object.entries(UNITS)) {
-          if (ud.hotkey.toLowerCase() === k) this.game.trainUnit(uk);
+          if (ud.hotkey.toLowerCase() === k) this.issue({ t: 'train', k: uk });
         }
       }
     });
@@ -679,7 +907,7 @@ class App {
       if (!this.game) return;
       this._updateMouse(e);
       if (e.button === 0 && this.targeting != null) {
-        this.game.castAbility(this.targeting, this.mouse.gx, this.mouse.gz);
+        this.issue({ t: 'cast', i: this.targeting, x: this.mouse.gx, z: this.mouse.gz, p: this.myPlayer });
         this.targeting = null;
         this.canvas.style.cursor = 'default';
         return;
@@ -699,7 +927,7 @@ class App {
         if (this.targeting != null) { this.targeting = null; this.canvas.style.cursor = 'default'; return; }
         if (this.buildMode) { this.setBuildMode(null); return; }
         if (this.selection.length) {
-          this.game.orderMove(this.selection, this.mouse.gx, this.mouse.gz);
+          this.issue({ t: 'move', ids: this.selection.map((u) => u.id), x: this.mouse.gx, z: this.mouse.gz });
           this.burst(this.mouse.gx, 0.1, this.mouse.gz, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
         }
       }
@@ -809,15 +1037,17 @@ class App {
     this.ui.showSelection(null);
   }
 
+  myHero() { return this.game ? this.game.heroes[this.myPlayer] : null; }
+
   _heroSelected() {
-    const h = this.game && this.game.hero;
+    const h = this.myHero();
     return !!(h && !h.dead && this.selection.includes(h));
   }
 
   // Cast ability i — teleport-style abilities enter click-targeting mode first.
   tryCast(i) {
     if (!this.game) return;
-    const h = this.game.hero;
+    const h = this.myHero();
     if (!h || h.dead) return;
     const ab = h.def.abilities[i];
     const st = h.abil[i];
@@ -828,7 +1058,7 @@ class App {
       this.game.msg('🌀 Teleport: click a destination (right-click to cancel).', 'info');
       return;
     }
-    this.game.castAbility(i);
+    this.issue({ t: 'cast', i, p: this.myPlayer });
   }
 
   // T selects the whole army (hero + troops + summons).
@@ -848,7 +1078,7 @@ class App {
 
   // F selects the hero; pressed again quickly, centers the camera on him.
   _selectHero() {
-    const h = this.game.hero;
+    const h = this.myHero();
     if (!h || h.dead) return;
     const now = performance.now();
     if (this._heroSelected() && now - (this._lastHeroSel || 0) < 450) {
@@ -895,14 +1125,20 @@ class App {
       if (this.lastWallTile === tileKey) return;
       this.lastWallTile = tileKey;
       if (!this.game.canPlace(key, x, z).ok) return;
+      this.issue({ t: 'quietPlace', k: key, x, z });
+      return;
     }
-    const placed = this.game.place(key, x, z);
-    if (placed && !d.drag && !this.keys.has('shift')) this.setBuildMode(null);
+    const chk = this.game.canPlace(key, x, z);
+    if (!chk.ok) { this.audio.deny(); this.game.msg(chk.why, 'warn'); return; }
+    this.issue({ t: 'quietPlace', k: key, x, z });
+    if (!d.drag && !this.keys.has('shift')) this.setBuildMode(null);
   }
 
   // setSpeed(0) toggles pause; 1/2/4 set speed and unpause.
+  // Co-op runs locked at 1x — the lockstep would stall otherwise.
   setSpeed(s) {
     if (s === 0) this.paused = !this.paused;
+    else if (this.netMode) { this.paused = false; }
     else { this.speed = s; this.paused = false; }
     this.ui.setSpeedUI(this.speed, this.paused);
   }
@@ -1040,6 +1276,7 @@ class App {
           break;
         }
         case 'zdeath':
+          this.spawnCorpse(e);
           this.burst(e.x, 0.4, e.z, { count: e.big ? 26 : 12, color: 0x8c1a1a, speed: e.big ? 3 : 2, life: 0.6, size: e.big ? 0.7 : 0.5, up: 2 });
           this.deathSfxT -= 1;
           if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
@@ -1186,14 +1423,51 @@ class App {
 
     if (this.game) {
       if (!this.paused && !this.game.over) {
-        this.acc += dt * this.speed;
-        let steps = 0;
-        while (this.acc >= SIM_DT && steps < 10) {
-          this.game.update(SIM_DT);
-          this.acc -= SIM_DT;
-          steps++;
+        if (this.netMode) {
+          // Deterministic lockstep: sim advances only when both players'
+          // command bundles for the current window have arrived.
+          const NET_STEP = 3;
+          this.acc += dt;
+          let steps = 0;
+          let stalled = false;
+          while (this.acc >= SIM_DT && steps < 10) {
+            if (this.simFrame % NET_STEP === 0) {
+              const w = this.simFrame / NET_STEP;
+              const local = this.localBundles.get(w) ?? (w < 2 ? [] : null);
+              const remote = this.inbox.get(w) ?? (w < 2 ? [] : null);
+              if (local === null || remote === null) { stalled = true; break; }
+              const hostC = this.net.isHost ? local : remote;
+              const guestC = this.net.isHost ? remote : local;
+              for (const c of hostC) this.game.exec(c);
+              for (const c of guestC) this.game.exec(c);
+              const nextW = w + 2;
+              this.localBundles.set(nextW, this.outbox);
+              this.net.send({ t: 'c', w: nextW, c: this.outbox });
+              this.outbox = [];
+              if (w > 0 && w % 30 === 0) {
+                const hsh = this._stateHash();
+                this.hashes.local.set(w, hsh);
+                this.net.send({ t: 'h', w, h: hsh });
+                this._checkHash(w);
+              }
+            }
+            this.game.update(SIM_DT);
+            this.simFrame++;
+            this.acc -= SIM_DT;
+            steps++;
+          }
+          if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
+          this.ui.setWaiting(stalled);
+        } else {
+          this.acc += dt * this.speed;
+          let steps = 0;
+          while (this.acc >= SIM_DT && steps < 10) {
+            this.game.update(SIM_DT);
+            this.acc -= SIM_DT;
+            steps++;
+          }
+          if (steps === 10) this.acc = 0;
         }
-        if (steps === 10) this.acc = 0;
       }
 
       this._consumeEvents();
@@ -1209,14 +1483,15 @@ class App {
       const aggro = this.game.aggroCount();
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
 
-      // Teleport channel: pulse at the destination.
-      const hh = this.game.hero;
-      if (hh && hh.channelT > 0 && hh.tpX != null) {
-        this.tpFxT = (this.tpFxT || 0) - dt;
-        if (this.tpFxT <= 0) {
-          this.tpFxT = 0.12;
-          this.burst(hh.tpX, 0.2, hh.tpZ, { count: 4, color: 0x7fd6ff, speed: 0.8, life: 0.5, size: 0.6, spread: 0.8, up: 2 });
-          this.burst(hh.x, 0.3, hh.z, { count: 2, color: 0x7fd6ff, speed: 0.5, life: 0.4, size: 0.5, spread: 0.4, up: 1.6 });
+      // Teleport channels: pulse at each channeling hero's destination.
+      this.tpFxT = (this.tpFxT || 0) - dt;
+      if (this.tpFxT <= 0) {
+        this.tpFxT = 0.12;
+        for (const hh of this.game.heroes) {
+          if (hh.channelT > 0 && hh.tpX != null) {
+            this.burst(hh.tpX, 0.2, hh.tpZ, { count: 4, color: 0x7fd6ff, speed: 0.8, life: 0.5, size: 0.6, spread: 0.8, up: 2 });
+            this.burst(hh.x, 0.3, hh.z, { count: 2, color: 0x7fd6ff, speed: 0.5, life: 0.4, size: 0.5, spread: 0.4, up: 1.6 });
+          }
         }
       }
 
@@ -1269,7 +1544,8 @@ class App {
       }
 
       this.ui.update(this.game, this.game.zombies.length);
-      this.ui.updateHero(this.game);
+      this.ui.updateHero(this.game, this.myPlayer);
+      this.ui.setAutoUI(this.game.autoBuild);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
 
       this.minimapT -= dt;
@@ -1281,6 +1557,7 @@ class App {
     }
 
     this._updateParticles(dt);
+    this._updateCorpses(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }
