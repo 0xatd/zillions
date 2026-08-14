@@ -6,7 +6,6 @@ import {
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
-import { Overseer } from './bot.js';
 import { generatePlots, plotComplete, plotCost, plotCostText, PLOT_PAY_RADIUS, PLOT_PAY_RATE } from './plots.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
@@ -18,18 +17,18 @@ const setNextId = (v) => { nextId = v; };
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'survival') {
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'survival-plots') {
     this.map = map;
     this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.levelId = snap ? snap.level : levelId;
-    this.mode = snap ? snap.mode || 'survival' : mode;
-    this.plotMode = this.mode === 'survival-plots';
+    this.mode = 'survival-plots';
+    this.plotMode = true;
     this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
     this.boss = null;
     this.rng = makeRNG(999);
 
-    this.res = { ...START_RESOURCES };
+    this.res = { ...START_RESOURCES, wood: 0, stone: 0 };
     this.plots = this.plotMode ? generatePlots(map) : [];
     this.activePlot = null;
     this.buildings = [];
@@ -60,8 +59,7 @@ export class Game {
     this.hero = null;            // heroes[0], kept for solo call sites
     this.pickups = [];
     this.fields = [];            // ability ground zones
-    this.autoBuild = !this.plotMode; // Plot Lab is manual by default.
-    this.bot = new Overseer(this);
+    this.autoBuild = false;
 
     if (snap) this._restore(snap);
     else this._setupStart();
@@ -117,7 +115,6 @@ export class Game {
     this.pendingWave = snap.pendingWave || null;
     this.ambientTimer = snap.ambientTimer;
     this.stats = { ...snap.stats };
-    this.bot.greeted = true;
     if (this.plotMode && Array.isArray(snap.plots)) {
       for (const ps of snap.plots) {
         const plot = this.plots.find((p) => p.id === ps.id);
@@ -205,11 +202,7 @@ export class Game {
     this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
     this._scatterInitialZombies();
     this.recalcEconomy();
-    if (this.plotMode) {
-      this.msg('Survival Plot Lab online: ride onto glowing foundations to fund the city plan.', 'info');
-    } else {
-      this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
-    }
+    this.msg('Survival online: ride onto glowing foundations to spend coins and raise the city.', 'info');
   }
 
   _scatterInitialZombies() {
@@ -459,6 +452,17 @@ export class Game {
       case 'move': {
         const units = c.ids.map((id) => this.units.find((u) => u.id === id)).filter(Boolean);
         if (units.length) this.orderMove(units, c.x, c.z);
+        break;
+      }
+      case 'heroDir': {
+        const h = this.heroes[c.p || 0];
+        if (!h) break;
+        const x = c.x || 0, z = c.z || 0;
+        const len = Math.hypot(x, z);
+        h.moveX = len ? x / len : 0;
+        h.moveZ = len ? z / len : 0;
+        h.sprint = !!c.s;
+        if (len) { h.path = null; h.pathI = 0; h.target = null; }
         break;
       }
       case 'stop': {
@@ -887,6 +891,25 @@ export class Game {
     if (units.length) this.emit({ type: 'move' });
   }
 
+  _moveUnitDirect(u, dx, dz, speed, dt) {
+    const step = speed * dt;
+    const tryMove = (mx, mz) => {
+      if (!mx && !mz) return false;
+      const nx = u.x + mx, nz = u.z + mz;
+      const tx = nx | 0, tz = nz | 0;
+      if (this.map.isWalkable(tx, tz) && this.occ[tz * this.map.size + tx] === 0) {
+        u.x = nx;
+        u.z = nz;
+        return true;
+      }
+      return false;
+    };
+    const moved = tryMove(dx * step, dz * step) ||
+      tryMove(dx * step, 0) ||
+      tryMove(0, dz * step);
+    if (moved) u.facing = Math.atan2(dx, dz);
+  }
+
   // ---------- zombies ----------
 
   _spawnZombie(type, x, z, aggro, wave = false) {
@@ -1101,7 +1124,6 @@ export class Game {
     this._updateWaves(prevTime);
     this._updateEconomy(dt);
     if (this.plotMode) this._updatePlotFunding(dt);
-    if (this.autoBuild && !this.plotMode) this.bot.update(dt);
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateUnits(dt);
@@ -1448,8 +1470,11 @@ export class Game {
         if (u.life <= 0) { u.dead = true; this.emit({ type: 'turretend', x: u.x, z: u.z }); continue; }
       }
 
-      // Movement along path.
-      if (u.path) {
+      // Thronefall-style hero steering. W/S/A/D maps directly to minimap north/south/west/east.
+      if (u.hero && (u.moveX || u.moveZ) && (u.channelT || 0) <= 0) {
+        const moveMult = (u.moveT > 0 ? u.moveMult : 1) * (u.sprint ? 1.45 : 1);
+        this._moveUnitDirect(u, u.moveX || 0, u.moveZ || 0, u.def.speed * moveMult, dt);
+      } else if (u.path) {
         const [wx, wz] = u.path[u.pathI];
         const dx = wx - u.x, dz = wz - u.z;
         const d = Math.hypot(dx, dz);

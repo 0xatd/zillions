@@ -30,9 +30,9 @@ export class UI {
       <div id="topbar">
         <div class="res" id="r-day" title="Day / time of day">☀️ <b>Day 1</b></div>
         <div class="res" id="r-wave" title="Time until the next horde">⏳ --:--</div>
-        <div class="res hidden" id="r-plot" title="Current Plot Lab foundation">🏗️ Plot Lab</div>
+        <div class="res hidden" id="r-plot" title="Current Survival foundation">🏗️ Survival</div>
         <div class="sep"></div>
-        <div class="res" id="r-gold" title="Gold — taxes from tents and gold mines">💰 0</div>
+        <div class="res" id="r-gold" title="Coins — spent by standing on foundations">🪙 0</div>
         <div class="res" id="r-wood" title="Wood — produced by sawmills">🪵 0</div>
         <div class="res" id="r-stone" title="Stone — produced by quarries">🪨 0</div>
         <div class="res" id="r-food" title="Food balance — farms produce, tents consume">🍞 0</div>
@@ -44,7 +44,6 @@ export class UI {
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn speed" data-s="4">4×</button>
-        <button class="tbtn active" id="b-auto" title="Overseer auto-build — the bot runs your economy. Click to build manually.">🤖</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
         <button class="tbtn" id="b-help" title="Help (H)">?</button>
       </div>
@@ -79,11 +78,11 @@ export class UI {
           <p class="tagline">The frontier belongs to the dead. Take it back. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
           <div class="howto">
             <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
-            <div><b>🤖 The Overseer</b> builds your economy and defenses for you — focus on the fight. (Toggle it off to build manually.)</div>
-            <div><b>🏗️ Plot Lab</b> uses Thronefall-style foundations. Ride onto a glowing plot during the day to fund and build it.</div>
+            <div><b>🕹️ You are the hero.</b> Use WASD to ride. The camera follows you.</div>
+            <div><b>🏗️ Build on foundations.</b> Ride onto a glowing plot during the day and coins stream into it.</div>
             <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
-            <div><b>💰 Spare gold?</b> Train troops at the barracks and command them like it's 2003.</div>
+            <div><b>🪙 One spend path.</b> No separate build menu. The city plan is the game.</div>
           </div>
           <div class="profilerow">
             <label>🪖 Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
@@ -92,21 +91,13 @@ export class UI {
           <div class="moderow" id="moderow">
             <button class="modecard sel" data-mode="survival" type="button">
               <b>Survival</b>
-              <small>Colony defense. Solo or co-op.</small>
-            </button>
-            <button class="modecard locked" data-mode="labyrinth" type="button">
-              <b>Labyrinth</b>
-              <small>Coming soon.</small>
+              <small>Thronefall-style city defense. Solo or co-op.</small>
             </button>
           </div>
-          <div class="survivalstyle" id="survivalstyle">
+          <div class="survivalstyle hidden" id="survivalstyle">
             <button class="stylecard sel" data-rules="survival-plots" type="button">
-              <b>Plot Lab</b>
-              <small>Planned city, coin-run pacing, day builds.</small>
-            </button>
-            <button class="stylecard" data-rules="survival" type="button">
-              <b>Classic RTS</b>
-              <small>Free-place buildings and Overseer economy.</small>
+              <b>Survival</b>
+              <small>Planned city, coins, day builds.</small>
             </button>
           </div>
           <div class="herorow" id="herorow"></div>
@@ -139,10 +130,10 @@ export class UI {
           </div>
           <div id="mp-panel" class="hidden"></div>
           <div class="controls">
-            <span><b>F</b> select hero (×2 = center)</span><span><b>Q W E R</b> abilities</span>
-            <span><b>T</b> select army</span><span><b>right-click</b> move</span><span><b>drag</b> select</span>
-            <span><b>WASD / edge / minimap</b> pan</span><span><b>wheel</b> zoom</span><span><b>Z / C</b> rotate</span>
-            <span><b>1-9</b> build (manual)</span><span><b>space</b> pause</span>
+            <span><b>WASD</b> ride hero</span><span><b>Shift</b> sprint</span>
+            <span><b>Left click foundation</b> ride/build</span><span><b>Q/E/R</b> abilities</span>
+            <span><b>T</b> select army</span><span><b>right-click</b> orders</span>
+            <span><b>wheel</b> zoom</span><span><b>space</b> pause</span>
           </div>
         </div>
       </div>`;
@@ -154,10 +145,7 @@ export class UI {
     for (const card of moderow.querySelectorAll('.modecard')) {
       card.onclick = () => {
         const mode = card.dataset.mode;
-        if (mode !== 'survival') {
-          this.setLobbyStatus('Labyrinth is not open yet.', false);
-          return;
-        }
+        if (mode !== 'survival') return;
         this.selectedMode = mode;
         for (const c of moderow.children) c.classList.toggle('sel', c === card);
         this.root.querySelector('#lobby-mode').textContent = 'Survival';
@@ -169,7 +157,7 @@ export class UI {
       card.onclick = () => {
         this.selectedRules = card.dataset.rules || 'survival-plots';
         for (const c of stylerow.children) c.classList.toggle('sel', c === card);
-        this.setLobbyStatus(`${this.selectedRules === 'survival-plots' ? 'Plot Lab' : 'Classic RTS'} selected.`, true);
+        this.setLobbyStatus('Survival selected.', true);
         if (this.cb.onRulesPick) this.cb.onRulesPick(this.selectedRules);
       };
     }
@@ -251,7 +239,8 @@ export class UI {
     for (const b of this.root.querySelectorAll('.speed')) b.onclick = () => this.cb.onSpeed(+b.dataset.s);
     this.root.querySelector('#b-mute').onclick = () => this.cb.onMute();
     this.root.querySelector('#b-help').onclick = () => this.cb.onHelp();
-    this.root.querySelector('#b-auto').onclick = () => this.cb.onAuto();
+    const autoBtn = this.root.querySelector('#b-auto');
+    if (autoBtn) autoBtn.onclick = () => this.cb.onAuto();
     this.pings = [];
 
     // Minimap clicks.
@@ -384,10 +373,11 @@ export class UI {
     this.abilBtns = [];
     d.abilities.forEach((ab, i) => {
       const b = document.createElement('button');
+      const hot = this.plotMode && ab.hotkey === 'W' ? 'tap' : ab.hotkey;
       b.className = 'abtn';
       b.innerHTML = `
         <span class="aicon">${ab.icon}</span>
-        <span class="ahot">${ab.hotkey}</span>
+        <span class="ahot">${hot}</span>
         <span class="apips" id="ap-${i}"></span>
         <span class="acd hidden" id="cd-${i}"></span>
         <span class="alearn hidden" id="lr-${i}">+</span>`;
@@ -533,8 +523,7 @@ export class UI {
     if (!snap) { row.innerHTML = ''; return; }
     const day = Math.floor(snap.time / DAY_LENGTH) + 1;
     const players = snap.heroKeys.length;
-    const mode = snap.mode === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
-    row.innerHTML = `<button class="diffbtn primary" id="b-continue">📂 Continue — ${mode}, Day ${day}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</button>`;
+    row.innerHTML = `<button class="diffbtn primary" id="b-continue">📂 Continue — Survival, Day ${day}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
@@ -550,6 +539,59 @@ export class UI {
     for (const btn of this.root.querySelectorAll('.cmdbtn[data-command]')) {
       btn.classList.toggle('active', btn.dataset.command === this.orderMode);
     }
+  }
+
+  setPlotMode(on) {
+    this.plotMode = !!on;
+    this.root.classList.toggle('plot-mode', this.plotMode);
+    if (this.plotMode) this.showPlotCommandBar(null, null);
+    else this._showDefaultCommandBar();
+  }
+
+  showPlotCommandBar(game, plot = null) {
+    if (!this.plotMode) return;
+    const menu = this.root.querySelector('#selectionmenu');
+    const roster = this.root.querySelector('#selection-roster');
+    const actions = this.root.querySelector('#selection-actions');
+    if (!menu || !roster || !actions) return;
+    menu.classList.remove('hidden');
+    this.root.querySelector('#buildmenu').classList.add('hidden');
+    this.root.querySelector('#unitmenu').classList.add('hidden');
+    const sig = plot
+      ? `plot:${plot.id}:${plot.built ? 1 : 0}:${Math.round(plotPaidTotal(plot) * 100)}:${plotCostText(plot)}`
+      : `plot:none:${game ? game.plots.filter((p) => !p.built).length : 0}`;
+    if (sig === this._plotSig) return;
+    this._plotSig = sig;
+    roster.innerHTML = '';
+    actions.innerHTML = '';
+
+    if (!plot || plot.built) {
+      roster.innerHTML = `
+        <div class="selection-title"><b>Build The City</b><small>Ride to a glowing foundation</small></div>
+        <div class="plot-card">
+          <span class="plot-icon">🏗️</span>
+          <div><b>Foundation Build</b><small>Left-click a plot. Stand there by day to spend coins.</small></div>
+        </div>`;
+      actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Center on hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
+      actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Rally fighters', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
+      return;
+    }
+
+    const info = plotInfo(plot.key);
+    const pct = plotPaidTotal(plot);
+    roster.innerHTML = `
+      <div class="selection-title"><b>${info.label}</b><small>${Math.round(pct * 100)}% funded</small></div>
+      <div class="plot-card active">
+        <span class="plot-icon">${info.icon}</span>
+        <div>
+          <b>${BUILDINGS[plot.key].name}</b>
+          <small>${plotCostText(plot)} · day-only construction</small>
+          <span class="mini-hp"><span style="width:${pct * 100}%"></span></span>
+        </div>
+      </div>`;
+    actions.appendChild(this._commandButton('ride', '🏇', 'Ride', 'Move hero here', () => this.cb.onPlotFocus && this.cb.onPlotFocus(plot.id)));
+    actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Center on hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
+    actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Rally fighters', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
   }
 
   // ---------- public lobby ----------
@@ -571,7 +613,7 @@ export class UI {
     const activeCount = lobby.activeCount ?? players.length;
     this.root.querySelector('#lobby-count').textContent = `${activeCount} active`;
     this.root.querySelector('#lobby-join').textContent = joined ? 'In lobby' : 'Join lobby';
-    this.root.querySelector('#lobby-mode').textContent = lobby.mode === 'labyrinth' ? 'Labyrinth' : 'Survival';
+    this.root.querySelector('#lobby-mode').textContent = 'Survival';
     this.setLobbyStatus(joined ? 'You are visible in the lobby.' : 'Join to appear here.', joined);
 
     const playerList = this.root.querySelector('#lobby-players');
@@ -589,7 +631,7 @@ export class UI {
         const name = document.createElement('span');
         name.textContent = `${hero.icon} ${player.name || 'Commander'}`;
         const status = document.createElement('small');
-        const rules = player.rules === 'survival-plots' ? 'Plot Lab' : player.rules === 'survival' ? 'Classic RTS' : '';
+        const rules = player.rules ? 'Survival' : '';
         status.textContent = player.status || rules || 'in-lobby';
         row.append(name, status);
         playerList.appendChild(row);
@@ -688,7 +730,12 @@ export class UI {
     if (!isHost) this.root.querySelector('#diffrow').classList.add('disabled');
   }
 
-  setAutoUI(on) { this.root.querySelector('#b-auto').classList.toggle('active', on); }
+  setAutoUI(on, plotMode = false) {
+    const autoBtn = this.root.querySelector('#b-auto');
+    if (!autoBtn) return;
+    autoBtn.classList.toggle('hidden', !!plotMode);
+    autoBtn.classList.toggle('active', !!on && !plotMode);
+  }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
@@ -769,6 +816,10 @@ export class UI {
   }
 
   _showDefaultCommandBar() {
+    if (this.plotMode) {
+      this.showPlotCommandBar(null, null);
+      return;
+    }
     this.root.querySelector('#selectionmenu').classList.add('hidden');
     this.root.querySelector('#buildmenu').classList.remove('hidden');
     this.root.querySelector('#unitmenu').classList.remove('hidden');
@@ -828,7 +879,8 @@ export class UI {
         const st = localHero.abil[i];
         const learnable = game.canLearn(i, this.localPlayer || 0);
         const usable = st.rank > 0 && st.cd <= 0 && !ab.passive && !localHero.dead;
-        const btn = this._commandButton(`ability-${i}`, ab.icon, ab.hotkey, learnable ? 'Learn' : ab.name, () => {
+        const label = game.plotMode && ab.hotkey === 'W' ? 'Tap' : ab.hotkey;
+        const btn = this._commandButton(`ability-${i}`, ab.icon, label, learnable ? 'Learn' : ab.name, () => {
           if (learnable && this.cb.onLearn) this.cb.onLearn(i);
           else if (this.cb.onCast) this.cb.onCast(i);
         });
@@ -914,7 +966,9 @@ export class UI {
     }
 
     const rate = (v) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
-    q('#r-gold').innerHTML = `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`;
+    q('#r-gold').innerHTML = game.plotMode
+      ? `🪙 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`
+      : `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`;
     q('#r-wood').innerHTML = `🪵 ${Math.floor(game.res.wood)} <small>${rate(e.wood)}</small>`;
     q('#r-stone').innerHTML = `🪨 ${Math.floor(game.res.stone)} <small>${rate(e.stone)}</small>`;
     q('#r-food').innerHTML = `🍞 <small>${rate(e.food)}</small>${game.starving ? ' ⚠️' : ''}`;
@@ -923,6 +977,9 @@ export class UI {
     q('#r-energy').innerHTML = `⚡ <small>${energyFree}/${e.energyProd}</small>`;
     q('#r-pop').innerHTML = `👷 ${e.workersUsed}/${e.popCap}`;
     q('#r-z').innerHTML = `🧟 ${zombieCount}`;
+    for (const id of ['#r-wood', '#r-stone', '#r-food', '#r-energy', '#r-pop']) {
+      q(id).classList.toggle('hidden', !!game.plotMode);
+    }
     const plotHud = q('#r-plot');
     if (plotHud) {
       plotHud.classList.toggle('hidden', !game.plotMode);
@@ -934,7 +991,7 @@ export class UI {
           plotHud.classList.add('active');
         } else {
           const left = game.plots.filter((p) => !p.built).length;
-          plotHud.innerHTML = `🏗️ Plot Lab <small>${left} foundations</small>`;
+          plotHud.innerHTML = `🏗️ Survival <small>${left} foundations</small>`;
           plotHud.classList.remove('active');
         }
       }

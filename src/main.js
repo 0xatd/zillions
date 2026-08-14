@@ -8,7 +8,7 @@ import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
 import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leaveLobby, putState, sendLobbyChat } from './backend.js';
-import { PLOT_PAY_RADIUS, plotInfo, plotPaidTotal } from './plots.js';
+import { PLOT_PAY_RADIUS, plotCostText, plotInfo, plotPaidTotal } from './plots.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -28,7 +28,7 @@ class App {
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camDist = 34;
-    this.camYaw = Math.PI * 0.25;
+    this.camYaw = 0;
     this.shake = 0;
 
     this.buildMode = null;
@@ -48,7 +48,7 @@ class App {
     this.profile = this._loadProfile();
     this.settings = this._loadSettings();
     this.lobbyMode = 'survival';
-    this.selectedRules = this.settings.rules === 'survival' ? 'survival' : 'survival-plots';
+    this.selectedRules = 'survival-plots';
     this.lobbyJoined = false;
     this.lobbyTimer = null;
     this.ui = new UI(document.getElementById('ui'), {
@@ -62,25 +62,24 @@ class App {
         this._saveSettings();
       },
       onStart: (d, hero, rules = this.selectedRules || 'survival-plots') => {
-        this.selectedRules = rules;
-        this.settings.rules = rules;
+        this.selectedRules = 'survival-plots';
+        this.settings.rules = 'survival-plots';
         this._saveSettings();
         if (this.mpRole === 'guest') return; // host launches the match
         if (this.mpRole === 'host' && this.peers.length) {
           const level = this.ui.selectedLevel || 1;
           const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode: rules }));
-          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode: rules });
+          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode: 'survival-plots' }));
+          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode: 'survival-plots' });
         } else {
-          this.startGame(d, hero, null, null, rules);
+          this.startGame(d, hero, null, null, 'survival-plots');
         }
       },
       onCast: (i) => this.tryCast(i),
       onLearn: (i) => this.issue({ t: 'learn', i, p: this.myPlayer }),
       onAuto: () => {
         if (!this.game) return;
-        this.issue({ t: 'auto', on: !this.game.autoBuild });
-        this.game.msg(!this.game.autoBuild ? '🤖 Overseer resumed — economy is handled.' : '🔧 Overseer paused — building manually now.', 'info');
+        this.game.msg('Build by riding onto glowing foundations. The city plan is the mode now.', 'info');
       },
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
@@ -92,22 +91,34 @@ class App {
         if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k });
         this._heartbeatLobby();
       },
-      onModePick: (mode) => { this.lobbyMode = mode; this.refreshPublicLobby(); },
+      onModePick: () => { this.lobbyMode = 'survival'; this.refreshPublicLobby(); },
       onRulesPick: (rules) => {
-        this.selectedRules = rules === 'survival' ? 'survival' : 'survival-plots';
+        this.selectedRules = 'survival-plots';
         this.settings.rules = this.selectedRules;
         this._saveSettings();
         this._heartbeatLobby();
       },
       onLobbyStart: (rules, hero) => {
-        this.startGame('normal', hero || this.ui.selectedHero || 'alexander', null, null, rules || this.selectedRules || 'survival-plots');
+        this.startGame('normal', hero || this.ui.selectedHero || 'alexander', null, null, 'survival-plots');
       },
       onLobbyHost: () => this.hostGame(),
       onLobbyJoin: () => this.joinPublicLobby(),
       onLobbyRefresh: () => this.refreshPublicLobby(),
       onLobbyChat: (text) => this.sendPublicLobbyChat(text),
       onRestart: () => location.reload(),
-      onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
+      onMinimap: (u, v) => {
+        const x = u * MAP_SIZE, z = v * MAP_SIZE;
+        if (this.game?.plotMode) {
+          const h = this.myHero();
+          if (h && !h.dead) this.issue({ t: 'move', ids: [h.id], x, z });
+          return;
+        }
+        this.focus.x = x; this.focus.z = z;
+      },
+      onPlotFocus: (id) => {
+        const plot = this.game?.plots?.find((p) => p.id === id);
+        if (plot) this._moveHeroToPlot(plot);
+      },
       onDemolish: (b) => { this.issue({ t: 'demolish', id: b.id }); this.selectedBuilding = null; this.ui.showSelection(null); },
       onSelectionCommand: (cmd) => this._selectionCommand(cmd),
       onSelectUnit: (id) => this._selectUnitById(id, true),
@@ -199,8 +210,7 @@ class App {
   async startGame(difficulty, heroKey, mp = null, snap = null, modeOverride = null) {
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const level = LEVELS[levelId - 1] || LEVELS[0];
-    const requestedMode = snap ? snap.mode || 'survival' : modeOverride || mp?.mode || this.selectedRules || 'survival-plots';
-    const mode = requestedMode === 'survival' ? 'survival' : 'survival-plots';
+    const mode = 'survival-plots';
     this.audio.init('game', levelId);
     this.audio.setScene('game', levelId);
     this._leaveLobby(false);
@@ -229,10 +239,11 @@ class App {
     this.scene.add(this.terrain);
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
+    this.ui.setPlotMode(this.game.plotMode);
     this.ui.initHeroPanel(this.game.heroes[this.myPlayer]);
     this.setSpeed(1);
-    const modeLabel = mode === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
-    this.ui.showBanner(`${modeLabel}: ${level.name} — ${level.boss.icon} ${level.boss.name} awaits on day ${FINAL_DAY}`, '', 4000);
+    this.ui.showPlotCommandBar(this.game, null);
+    this.ui.showBanner(`Survival: ${level.name} — ${level.boss.icon} ${level.boss.name} awaits on day ${FINAL_DAY}`, '', 4000);
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
   }
 
@@ -260,7 +271,8 @@ class App {
 
   _loadSettings() {
     try {
-      return { muted: false, rules: 'survival-plots', ...JSON.parse(localStorage.getItem('zillions_settings') || '{}') };
+      const saved = JSON.parse(localStorage.getItem('zillions_settings') || '{}');
+      return { muted: false, ...saved, rules: 'survival-plots' };
     } catch { return { muted: false, rules: 'survival-plots' }; }
   }
 
@@ -322,7 +334,7 @@ class App {
   }
 
   _lobbyProfile(status = 'in-lobby') {
-    const rules = this.selectedRules === 'survival-plots' ? 'Plot Lab' : 'Classic RTS';
+    const rules = 'Survival';
     const stats = this.profile.games
       ? `${this.profile.wins}W/${this.profile.games - this.profile.wins}L · best day ${this.profile.bestDay}`
       : 'first deployment';
@@ -330,7 +342,7 @@ class App {
       mode: this.lobbyMode || 'survival',
       name: this.profile.name || 'Commander',
       hero: this.ui.selectedHero || 'alexander',
-      rules: this.selectedRules || 'survival-plots',
+      rules: 'survival-plots',
       status: status === 'in-lobby' ? `${rules} · ${stats}` : status,
     };
   }
@@ -420,7 +432,7 @@ class App {
         localStorage.setItem('zillions_settings', JSON.stringify(this.settings));
         this.audio.setMuted(!!this.settings.muted);
         this.ui.setMuteUI(this.audio.muted);
-        this.selectedRules = this.settings.rules === 'survival' ? 'survival' : 'survival-plots';
+        this.selectedRules = 'survival-plots';
         this.ui.preselectRules(this.selectedRules);
       }
       const localSave = this._loadSave();
@@ -1060,6 +1072,34 @@ class App {
     }
   }
 
+  _makePlotLabel(icon, sub) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(12, 14, 18, 0.72)';
+    ctx.strokeStyle = 'rgba(255, 215, 94, 0.72)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(12, 8, 104, 76, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '34px "Segoe UI Emoji", system-ui, sans-serif';
+    ctx.fillStyle = '#fff4c8';
+    ctx.fillText(icon, 64, 34);
+    ctx.font = '700 18px system-ui, sans-serif';
+    ctx.fillStyle = '#ffd75e';
+    ctx.fillText(sub, 64, 66);
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    sprite.scale.set(3.7, 2.8, 1);
+    sprite.renderOrder = 7;
+    return sprite;
+  }
+
   _makePlotMesh(plot) {
     const info = plotInfo(plot.key);
     const group = new THREE.Group();
@@ -1081,8 +1121,10 @@ class App {
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }),
     );
     beacon.position.y = 0.78;
-    group.add(base, ring, beacon);
-    group.userData = { base, ring, beacon };
+    const label = this._makePlotLabel(info.icon, plotCostText(plot));
+    label.position.y = 1.9;
+    group.add(base, ring, beacon, label);
+    group.userData = { base, ring, beacon, label, labelKey: '' };
     group.renderOrder = 2;
     return group;
   }
@@ -1112,6 +1154,17 @@ class App {
       rec.mesh.userData.ring.material.opacity = (plot.id === activeId ? 0.9 : 0.42) + progress * 0.18;
       rec.mesh.userData.beacon.visible = plot.id === activeId || progress > 0.02;
       rec.mesh.userData.beacon.scale.y = 0.55 + progress * 1.4 + (plot.id === activeId ? Math.sin(t * 5) * 0.12 : 0);
+      const info = plotInfo(plot.key);
+      const labelKey = `${info.icon}:${plotCostText(plot)}`;
+      if (rec.mesh.userData.labelKey !== labelKey) {
+        rec.mesh.remove(rec.mesh.userData.label);
+        const label = this._makePlotLabel(info.icon, plotCostText(plot));
+        label.position.y = 1.9;
+        rec.mesh.add(label);
+        rec.mesh.userData.label = label;
+        rec.mesh.userData.labelKey = labelKey;
+      }
+      rec.mesh.userData.label.position.y = 1.9 + Math.sin(t * 2.3 + plot.id) * 0.08;
     }
     for (const [id, rec] of this.plotMeshes) {
       if (!seen.has(id)) {
@@ -1281,23 +1334,27 @@ class App {
     const cv = this.canvas;
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       const k = e.key.toLowerCase();
       this.keys.add(k);
       if (!this.game) return;
+      if (this.game.plotMode && ['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'shift'].includes(k)) return;
       if (k === ' ') { e.preventDefault(); this.setSpeed(0); }
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.pause(); this.ui.showHelp(); }
       else if (k === 'escape') { this.targeting = null; this.canvas.style.cursor = 'default'; this.setBuildMode(null); this._clearSelection(); }
       else if (k === 'f' || k === 'f1') { e.preventDefault(); this._selectHero(); }
       else if (k === 't') { this._selectArmy(); }
-      else if (this._heroSelected() && ['q', 'w', 'e', 'r'].includes(k)) {
+      else if (this._heroSelected() && ['q', 'e', 'r'].includes(k)) {
         this.tryCast(['q', 'w', 'e', 'r'].indexOf(k));
       } else {
-        for (const [bk, bd] of Object.entries(BUILDINGS)) {
-          if (bd.hotkey === k) this.setBuildMode(bk);
-        }
-        for (const [uk, ud] of Object.entries(UNITS)) {
-          if (ud.hotkey.toLowerCase() === k) this.issue({ t: 'train', k: uk });
+        if (!this.game.plotMode) {
+          for (const [bk, bd] of Object.entries(BUILDINGS)) {
+            if (bd.hotkey === k) this.setBuildMode(bk);
+          }
+          for (const [uk, ud] of Object.entries(UNITS)) {
+            if (ud.hotkey.toLowerCase() === k) this.issue({ t: 'train', k: uk });
+          }
         }
       }
     });
@@ -1426,6 +1483,7 @@ class App {
   _moveHeroToPlot(plot) {
     const hero = this.myHero();
     if (!hero || hero.dead) return;
+    this.focusedPlot = plot;
     this._clearSelection();
     hero.selected = true;
     this.selection = [hero];
@@ -1433,7 +1491,8 @@ class App {
     this.audio.bark(hero.key, 'move');
     this.issue({ t: 'move', ids: [hero.id], x: plot.cx, z: plot.cz });
     const info = plotInfo(plot.key);
-    this.game.msg(`${info.label}: move onto the foundation to fund it.`, 'info');
+    this.ui.showPlotCommandBar(this.game, plot);
+    this.game.msg(`${info.label}: ride onto the foundation to spend ${plotCostText(plot)}.`, 'info');
     this.burst(plot.cx, 0.1, plot.cz, { count: 10, color: info.color, speed: 1.2, life: 0.5, size: 0.35, up: 1.2 });
   }
 
@@ -1671,6 +1730,11 @@ class App {
 
   setBuildMode(key) {
     if (!this.game) return;
+    if (key && this.game.plotMode) {
+      this.audio.deny();
+      this.game.msg('Use the glowing foundations to build Survival city sites.', 'info');
+      return;
+    }
     if (key) this._resetOrderMode();
     this.buildMode = key;
     this.canvas.style.cursor = key ? 'crosshair' : 'default';
@@ -1735,7 +1799,54 @@ class App {
     this.camera.updateProjectionMatrix();
   }
 
+  _updateHeroInput() {
+    if (!this.game?.plotMode || this.game.over) return;
+    const active = document.activeElement;
+    const typing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+    const overlayOpen = !!document.querySelector('#overlay:not(.hidden)');
+    let x = 0, z = 0;
+    if (!typing && !overlayOpen && !this.paused) {
+      if (this.keys.has('w') || this.keys.has('arrowup')) z -= 1;
+      if (this.keys.has('s') || this.keys.has('arrowdown')) z += 1;
+      if (this.keys.has('a') || this.keys.has('arrowleft')) x -= 1;
+      if (this.keys.has('d') || this.keys.has('arrowright')) x += 1;
+      const len = Math.hypot(x, z);
+      if (len > 1) { x /= len; z /= len; }
+    }
+    const s = this.keys.has('shift') && !typing && !overlayOpen && !this.paused;
+    const last = this.lastHeroDir || { x: 0, z: 0, s: false };
+    if (Math.abs(x - last.x) > 0.001 || Math.abs(z - last.z) > 0.001 || s !== last.s) {
+      this.lastHeroDir = { x, z, s };
+      this.issue({ t: 'heroDir', p: this.myPlayer, x, z, s });
+    }
+  }
+
   _updateCamera(dt) {
+    if (this.game?.plotMode) {
+      this.camYaw = 0;
+      const h = this.myHero();
+      if (h && !h.dead) {
+        const lead = 3.8;
+        const tx = clamp(h.x + (h.moveX || 0) * lead, 4, MAP_SIZE - 4);
+        const tz = clamp(h.z + (h.moveZ || 0) * lead, 4, MAP_SIZE - 4);
+        const a = clamp(dt * 7, 0, 1);
+        this.focus.x = lerp(this.focus.x, tx, a);
+        this.focus.z = lerp(this.focus.z, tz, a);
+      }
+      const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
+      const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
+      let sx = 0, sz = 0;
+      if (this.shake > 0) {
+        this.shake -= dt;
+        const s = Math.min(this.shake, 0.4);
+        sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
+      }
+      this.camera.position.set(this.focus.x + sx, hy, this.focus.z + hx + sz);
+      this.camera.lookAt(this.focus.x + sx, 0, this.focus.z + sz);
+      this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
+      this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+      return;
+    }
     const panSpeed = this.camDist * 0.95 * dt;
     let px = 0, pz = 0;
     if (this.keys.has('w') || this.keys.has('arrowup')) pz -= 1;
@@ -1753,9 +1864,8 @@ class App {
     if (this.keys.has('z')) this.camYaw += dt * 1.6;
     if (this.keys.has('c')) this.camYaw -= dt * 1.6;
 
-    const cos = Math.cos(this.camYaw), sin = Math.sin(this.camYaw);
-    this.focus.x += (px * cos - pz * sin) * panSpeed;
-    this.focus.z += (px * sin + pz * cos) * panSpeed;
+    this.focus.x += px * panSpeed;
+    this.focus.z += pz * panSpeed;
     this.focus.x = clamp(this.focus.x, 4, MAP_SIZE - 4);
     this.focus.z = clamp(this.focus.z, 4, MAP_SIZE - 4);
 
@@ -2058,6 +2168,7 @@ class App {
     this._updateCamera(dt);
 
     if (this.game) {
+      this._updateHeroInput();
       if (!this.paused && !this.game.over) {
         if (this.netMode) {
           // Host-sequenced lockstep: the host merges every player's commands
@@ -2184,7 +2295,11 @@ class App {
       this.ui.update(this.game, this.game.zombies.length);
       this.ui.updateHero(this.game, this.myPlayer);
       this.ui.updateBoss(this.game);
-      this.ui.setAutoUI(this.game.autoBuild);
+      this.ui.setAutoUI(this.game.autoBuild, this.game.plotMode);
+      if (this.focusedPlot?.built) this.focusedPlot = null;
+      if (this.game.plotMode && !this.selection.length && !this.selectedBuilding) {
+        this.ui.showPlotCommandBar(this.game, this.focusedPlot || this.game.activePlot || null);
+      }
       if (this.selection.length) this.ui.showSelection(this.selection, this.game);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
 

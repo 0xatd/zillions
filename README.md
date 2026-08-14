@@ -1,12 +1,12 @@
 # ZILLIONS
 
-Zillions is a browser-based survival RTS.
+Zillions is a browser-based Thronefall-style survival defense game.
 
 It mixes:
 
-- They Are Billions colony survival.
-- Warcraft III hero control and ability leveling.
-- StarCraft-style army orders and base pressure.
+- Thronefall-style hero movement and pre-planned city plots.
+- They Are Billions-scale zombie pressure.
+- Warcraft III-style hero leveling and abilities.
 - Warhammer-style grim space-marine flavor.
 - Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
 
@@ -31,28 +31,24 @@ Then open:
 
 ## Current Game
 
-The dead cover the map. You found a colony, build an economy, train defenders, and survive 10 days.
+The dead cover the map. You ride as the hero, spend coins into pre-planned city foundations, and survive 10 days.
 
 Current modes:
 
-- **Survival Plot Lab**: the default active mode. It keeps the RTS combat, but the city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day to fund and build it.
-- **Classic Survival RTS**: the original free-build survival mode with the Overseer economy bot.
-- **Labyrinth**: planned second mode. It is visible in the menu but not playable yet.
+- **Survival**: the active mode. The city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day to spend coins and build it.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
 Core systems:
 
-- Pick **Plot Lab** or **Classic RTS** before a run. Plot Lab is the Thronefall-style ruleset. Classic keeps free-placement building.
-- Build hab-tents, hydro-farms, sawmills, quarries, gold mines, wind generators, walls, towers, and barracks.
-- In Plot Lab, foundations around the Command Center show where the city can grow. Stand on a foundation to spend resources into it. Completed foundations become real buildings.
+- Build only through foundations. Free-placement building is removed from the playable game.
+- Foundations around the Command Center show where the city can grow. Stand on a foundation to spend coins into it. Completed foundations become real buildings.
 - Train scouts, troopers, and snipers.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
 - Night matters. Zombies move faster and attack harder at night.
 - The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
-- The Overseer bot can run colony economy and defenses so the player can fight as the hero.
-- The bottom command bar changes with selection. Unit groups show unit cards and Move/Stop/Hero/Army commands. Barracks selection shows train commands. Buildings can be demolished from the command card.
+- The bottom command bar defaults to the current foundation/build action. Unit and building selections still expose the commands that matter.
 
 ## Hero Roster
 
@@ -78,18 +74,17 @@ Hero rules:
 
 | Input | Action |
 | --- | --- |
-| WASD / arrows / mouse at screen edge | Pan camera |
+| WASD / arrows | Ride the hero north / south / west / east on the map |
+| Shift | Sprint |
 | Mouse wheel | Zoom |
-| Z / C | Rotate camera |
 | F | Select hero |
 | Double-tap F | Center camera on hero |
-| Q / W / E / R | Cast selected hero ability |
+| Q / E / R | Cast selected hero ability hotkeys. W is movement now; click the W-slot ability if needed. |
 | Left click / drag | Select units |
 | Right click | Move squad or cancel build |
 | Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
-| Left click a Plot Lab foundation | Send your hero to fund that plot |
+| Left click a foundation | Send your hero to fund that plot |
 | T | Select whole army |
-| 1-9 | Manual build hotkeys |
 | U / I / O | Train scout / trooper / sniper |
 | Space | Pause |
 | M | Mute |
@@ -98,7 +93,7 @@ Hero rules:
 
 ## Co-op multiplayer (up to 3 players, no server)
 
-On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players, their selected hero, their preferred Survival ruleset, and basic profile stats. It also includes simple chat plus direct **Start solo** and **Host co-op** actions. GitHub Pages and local static servers still run without the lobby backend.
+On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players, their selected hero, Survival status, and basic profile stats. It also includes simple chat plus direct **Start solo** and **Host co-op** actions. GitHub Pages and local static servers still run without the lobby backend.
 
 Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
 
@@ -107,7 +102,7 @@ Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero
 ## Profiles & Saved Games
 
 - **Commander profile**: set your name on the menu; the game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
-- **Settings**: mute state and preferred Survival ruleset are persisted.
+- **Settings**: mute state is persisted.
 - **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 - **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
 
@@ -166,14 +161,13 @@ assets-page.css         Asset browser styles
 assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
-src/plots.js            Plot Lab foundation plan and funding helpers
+src/plots.js            Survival foundation plan and funding helpers
 src/config.js           Balance, heroes, buildings, units, waves
 src/audio.js            Runtime MP3 audio plus WebAudio fallback
 src/backend.js          Browser client for cloud state and lobby APIs
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
-src/bot.js              Overseer economy/defense bot
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
 src/utils.js            Shared helpers
@@ -209,8 +203,9 @@ When reviewing or changing gameplay, check:
 
 - The game still starts from a static file server.
 - The hero picker works.
-- Basic camera, selection, right-click move, and ability hotkeys work.
-- The Overseer can still be toggled.
+- WASD moves the hero straight up/down/left/right on the minimap.
+- A foundation can be clicked, funded with coins, and built.
+- Selection, right-click orders, and ability hotkeys work.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.
 

@@ -1,4 +1,4 @@
-// Deterministic Survival Plot Lab foundations.
+// Deterministic Survival foundations.
 // These are pre-planned city sites around the Command Center. The normal game
 // still owns buildings, resources, pathing, and combat. Plot mode only gives
 // players a Thronefall-style "stand here to fund this structure" layer.
@@ -18,7 +18,7 @@ const PLOT_KEYS = {
 };
 
 export const PLOT_PAY_RADIUS = 2.25;
-export const PLOT_PAY_RATE = { gold: 170, wood: 135, stone: 85 };
+export const PLOT_PAY_RATE = { gold: 210 };
 
 export function plotInfo(key) {
   return PLOT_KEYS[key] || { color: 0xffffff, icon: '?', label: 'Plot' };
@@ -26,10 +26,11 @@ export function plotInfo(key) {
 
 export function plotCost(key) {
   const cost = BUILDINGS[key]?.cost || {};
+  const coinCost = Math.max(0, Math.ceil((cost.gold || 0) + (cost.wood || 0) * 0.9 + (cost.stone || 0) * 1.35));
   return {
-    gold: cost.gold || 0,
-    wood: cost.wood || 0,
-    stone: cost.stone || 0,
+    gold: coinCost,
+    wood: 0,
+    stone: 0,
   };
 }
 
@@ -49,11 +50,8 @@ export function plotComplete(plot) {
 
 export function plotCostText(plot) {
   const cost = plotCost(plot.key);
-  const parts = [];
-  if (cost.gold) parts.push(`gold ${Math.max(0, Math.ceil(cost.gold - (plot.paid.gold || 0)))}`);
-  if (cost.wood) parts.push(`wood ${Math.max(0, Math.ceil(cost.wood - (plot.paid.wood || 0)))}`);
-  if (cost.stone) parts.push(`stone ${Math.max(0, Math.ceil(cost.stone - (plot.paid.stone || 0)))}`);
-  return parts.join(' / ') || 'ready';
+  const left = Math.max(0, Math.ceil(cost.gold - (plot.paid.gold || 0)));
+  return left ? `${left} coins` : 'ready';
 }
 
 export function generatePlots(map) {

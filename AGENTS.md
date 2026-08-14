@@ -2,18 +2,18 @@
 
 ## Product
 
-Zillions is a browser survival RTS.
+Zillions is a browser Thronefall-style survival defense game.
 
-It should feel like They Are Billions mixed with Warcraft III hero mechanics, StarCraft command flow, and Warhammer-style grim space marines.
+It should feel like Thronefall mixed with They Are Billions-scale zombie pressure and Warhammer-style grim space marines.
 
-The player builds a colony, survives zombie waves, controls a hero, and can let the Overseer bot handle economy/defense automation in Classic mode.
+The player rides a hero, funds fixed city foundations with coins, and survives zombie waves.
 
 ## Hard Constraints
 
 - Keep zero-install local play. A static file server must be enough for the game.
 - Keep the backend optional. localStorage is the offline fallback, and the browser must not fail if `/api/state` or `/api/lobby` is missing.
 - Do not introduce a bundler, framework, or build step unless Alex explicitly asks.
-- Do not remove the existing game loop, hero system, or Overseer behavior unless the task is specifically about replacing them.
+- Do not restore old RTS placement or automation surfaces unless Alex explicitly reverses the Thronefall-only direction.
 - Do not commit API keys, model prompts with secrets, or private source material.
 - Treat generated media as runtime assets only when `src/audio.js`, `src/ui.js`, or another runtime module references it. Do not expose repo review tools inside the game screen.
 
@@ -23,7 +23,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `assets.html` - Audio/asset browser for GitHub Pages.
 - `src/config.js` - Balance, heroes, buildings, units, zombies, waves.
 - `src/game.js` - Main simulation.
-- `src/plots.js` - Survival Plot Lab foundations and funding helpers.
+- `src/plots.js` - Survival foundation plan and funding helpers.
 - `src/main.js` - Bootstraps renderer, UI, game loop, profiles, saves, and Vercel backend mirroring.
 - `src/backend.js` - Browser client for optional cloud state and lobby APIs.
 - `src/ui.js` - DOM HUD and hero picker.
@@ -43,12 +43,10 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 ## Current Modes
 
 - Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
-- Survival has two rulesets:
-  - Plot Lab is the default. It is the Thronefall-style layer: pre-planned city plots around the Command Center, visible glowing foundations, and stand-near-to-fund construction.
-  - Classic RTS keeps free building placement and the Overseer economy/defense bot.
-- Labyrinth is a planned second mode. It can appear as locked or coming soon, but do not build gameplay for it unless Alex asks.
-- The Vercel online lobby is presence and chat. It shows active players, selected hero, preferred Survival ruleset, and profile-style status. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
-- The bottom bar is intentionally context-sensitive like Warcraft III / Dota 2. With no selection it shows build/train commands. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
+- Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, visible glowing foundations, hero movement, one coin spend path, and day-build/night-defend pressure.
+- Old RTS placement, economy automation, and extra mode cards are not part of the playable surface.
+- The Vercel online lobby is presence and chat. It shows active players, selected hero, Survival status, and profile-style stats. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
+- The bottom bar is intentionally context-sensitive. With no unit selected it shows the current foundation/build action. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
 
 ## Audio State
 
@@ -82,8 +80,8 @@ Before you call a change good:
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
 - Confirm the game screen does not show a repo-only asset browser link.
-- Start Plot Lab and confirm glowing foundations render, clicking one sends the hero there, and standing on it funds construction.
-- Start Classic RTS and confirm free build placement and the Overseer still work.
+- Start Survival and confirm glowing foundations render, clicking one sends the hero there, and standing on it funds construction.
+- Confirm W/A/S/D moves the hero straight north/west/south/east on the minimap.
 - Select a unit group and confirm the bottom command bar updates. Selection cards should focus units, and double-clicking a card should select that unit type.
 - Open `/assets.html` and confirm manifests load.
 - If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.
