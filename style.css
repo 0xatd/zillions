@@ -114,6 +114,7 @@ body::after {
 #bottombar {
   position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
   display: flex; gap: 14px; align-items: flex-end;
+  max-width: min(980px, calc(100vw - 32px));
   background: var(--panel);
   border: 1px solid var(--panel-border); border-bottom: none;
   border-radius: 14px 14px 0 0;
@@ -123,6 +124,78 @@ body::after {
 }
 #buildmenu, #unitmenu { display: flex; gap: 6px; }
 #unitmenu { border-left: 1px solid var(--panel-border); padding-left: 14px; }
+#selectionmenu {
+  display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, auto);
+  gap: 12px; align-items: stretch;
+  min-width: min(760px, calc(100vw - 64px));
+}
+.selection-title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-bottom: 6px; font-size: 12px;
+}
+.selection-title small { opacity: 0.58; font-size: 10.5px; }
+.selection-grid {
+  display: grid; grid-template-columns: repeat(6, 58px); gap: 5px;
+  max-height: 129px; overflow-y: auto; padding-right: 2px;
+}
+.selcard, .building-card, .cmdbtn {
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid var(--panel-border);
+  color: #e8e6df; border-radius: 8px;
+  font-family: inherit;
+}
+.selcard {
+  width: 58px; height: 62px; padding: 4px 3px;
+  display: grid; grid-template-rows: 19px 15px 12px 5px; align-items: center;
+  cursor: pointer; transition: background 0.12s, transform 0.08s, border-color 0.12s;
+}
+.selcard:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+.selcard.hero { border-color: rgba(255, 215, 94, 0.45); }
+.selicon { font-size: 18px; line-height: 1; }
+.selname {
+  font-size: 9.5px; line-height: 1.05; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.selmeta { font-size: 8.5px; opacity: 0.58; text-transform: uppercase; }
+.mini-hp {
+  display: block; width: 100%; height: 5px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.55); border-radius: 999px;
+}
+.mini-hp span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #d64545, #6fdc7f);
+  border-radius: inherit;
+}
+#selection-actions {
+  display: grid; grid-template-columns: repeat(4, 68px); grid-auto-rows: 62px;
+  gap: 6px; align-content: start; justify-content: end;
+}
+.cmdbtn {
+  width: 68px; min-height: 62px; padding: 5px 4px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  cursor: pointer; transition: background 0.12s, transform 0.08s, border-color 0.12s;
+}
+.cmdbtn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+.cmdbtn.active, .cmdbtn.ready { border-color: var(--gold); background: rgba(255, 215, 94, 0.16); }
+.cmdbtn.learnable { border-color: var(--good); background: rgba(89, 255, 156, 0.12); }
+.cmdbtn.disabled, .cmdbtn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.cmdbtn.poor { opacity: 0.42; }
+.cmdicon { font-size: 20px; line-height: 1; }
+.cmdbtn b { font-size: 10.5px; line-height: 1.1; }
+.cmdbtn small {
+  font-size: 8.5px; max-width: 58px; opacity: 0.62;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ability-actions { display: contents; }
+.building-card {
+  display: grid; grid-template-columns: 34px minmax(130px, 1fr); grid-template-rows: auto 6px;
+  gap: 4px 8px; align-items: center; min-width: 260px;
+  padding: 9px 10px;
+}
+.building-card .selicon { grid-row: 1 / 3; font-size: 25px; }
+.building-card b { font-size: 13px; }
+.building-card small { display: block; margin-top: 2px; font-size: 11px; opacity: 0.7; }
+.building-card .mini-hp { grid-column: 2; }
 
 .bbtn {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
@@ -424,4 +497,10 @@ body::after {
   .lobbyactions { justify-content: stretch; }
   .lobbyactions .tbtn, .lobbyform .tbtn { flex: 1; }
   .herorow, .levelrow { flex-wrap: wrap; }
+  #bottombar { left: 8px; right: 8px; transform: none; max-width: none; padding: 8px; }
+  #selectionmenu { grid-template-columns: 1fr; min-width: 0; width: 100%; }
+  .selection-grid { grid-template-columns: repeat(5, 1fr); max-height: 132px; }
+  .selcard { width: 100%; }
+  #selection-actions { grid-template-columns: repeat(4, 1fr); justify-content: stretch; }
+  .cmdbtn { width: 100%; }
 }

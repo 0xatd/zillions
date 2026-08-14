@@ -391,6 +391,18 @@ export class Game {
         if (units.length) this.orderMove(units, c.x, c.z);
         break;
       }
+      case 'stop': {
+        const units = c.ids.map((id) => this.units.find((u) => u.id === id)).filter(Boolean);
+        for (const u of units) {
+          u.path = null;
+          u.pathI = 0;
+          u.target = null;
+          u.holdX = u.x;
+          u.holdZ = u.z;
+          u.retargetT = 0;
+        }
+        break;
+      }
       case 'cast': this.castAbility(c.i, c.x, c.z, c.p || 0); break;
       case 'learn': this.learnAbility(c.i, c.p || 0); break;
       case 'auto': this.autoBuild = !!c.on; break;

@@ -31,6 +31,7 @@ class App {
     this.shake = 0;
 
     this.buildMode = null;
+    this.orderMode = null;
     this.selection = [];       // units
     this.selectedBuilding = null;
     this.speed = 1;
@@ -91,6 +92,10 @@ class App {
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
       onDemolish: (b) => { this.issue({ t: 'demolish', id: b.id }); this.selectedBuilding = null; this.ui.showSelection(null); },
+      onSelectionCommand: (cmd) => this._selectionCommand(cmd),
+      onSelectUnit: (id) => this._selectUnitById(id, true),
+      onToggleUnit: (id) => this._toggleUnitById(id),
+      onSelectUnitType: (key) => this._selectUnitsByKey(key),
       onHelp: () => { this.pause(); this.ui.showHelp(); },
       onContinue: () => this.continueGame(),
       onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); this._heartbeatLobby(); },
@@ -176,6 +181,7 @@ class App {
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId);
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
+    this.ui.setLocalPlayer(this.myPlayer);
     this.netMode = !!mp;
     if (this.netMode) {
       this.mpRole = mp.role;
@@ -1203,6 +1209,11 @@ class App {
         this.canvas.style.cursor = 'default';
         return;
       }
+      if (e.button === 0 && this.orderMode === 'move' && this.selection.length) {
+        this._issueMoveOrder(this.mouse.gx, this.mouse.gz);
+        this._resetOrderMode();
+        return;
+      }
       if (e.button === 0) {
         this.mouse.down = true;
         if (this.buildMode) {
@@ -1215,13 +1226,11 @@ class App {
         }
       } else if (e.button === 2) {
         this.mouse.rdown = true;
+        if (this.orderMode) { this._resetOrderMode(); return; }
         if (this.targeting != null) { this.targeting = null; this.canvas.style.cursor = 'default'; return; }
         if (this.buildMode) { this.setBuildMode(null); return; }
         if (this.selection.length) {
-          const mh = this.myHero();
-          if (mh && this.selection.includes(mh)) this.audio.bark(mh.key, 'move');
-          this.issue({ t: 'move', ids: this.selection.map((u) => u.id), x: this.mouse.gx, z: this.mouse.gz });
-          this.burst(this.mouse.gx, 0.1, this.mouse.gz, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
+          this._issueMoveOrder(this.mouse.gx, this.mouse.gz);
         }
       }
     });
@@ -1269,6 +1278,21 @@ class App {
     this.mouse.cy = undefined;
   }
 
+  _issueMoveOrder(x, z) {
+    const live = this.selection.filter((u) => !u.dead);
+    if (!live.length) return;
+    const mh = this.myHero();
+    if (mh && live.includes(mh)) this.audio.bark(mh.key, 'move');
+    this.issue({ t: 'move', ids: live.map((u) => u.id), x, z });
+    this.burst(x, 0.1, z, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
+  }
+
+  _resetOrderMode() {
+    this.orderMode = null;
+    if (!this.buildMode && this.targeting == null) this.canvas.style.cursor = 'default';
+    this.ui.setOrderMode(null);
+  }
+
   _updateDragRect(e) {
     const el = document.getElementById('dragrect');
     const x0 = Math.min(this.dragStart.x, e.clientX), y0 = Math.min(this.dragStart.y, e.clientY);
@@ -1297,6 +1321,59 @@ class App {
     }
     if (this.selection.length) this.audio.click();
     this.ui.showSelection(this.selection.length ? this.selection : null, this.game);
+  }
+
+  _selectUnitById(id, focus = false) {
+    if (!this.game) return;
+    const unit = this.game.units.find((u) => u.id === id && !u.dead);
+    if (!unit) return;
+    this._clearSelection();
+    unit.selected = true;
+    this.selection = [unit];
+    this.selectedBuilding = null;
+    if (focus) {
+      this.focus.x = unit.x;
+      this.focus.z = unit.z;
+    }
+    this.audio.click();
+    this.ui.showSelection(this.selection, this.game);
+  }
+
+  _toggleUnitById(id) {
+    if (!this.game) return;
+    const unit = this.game.units.find((u) => u.id === id && !u.dead);
+    if (!unit) return;
+    this.selectedBuilding = null;
+    if (this.selection.includes(unit)) {
+      if (this.selection.length === 1) {
+        this.focus.x = unit.x;
+        this.focus.z = unit.z;
+      } else {
+        unit.selected = false;
+        this.selection = this.selection.filter((u) => u !== unit);
+      }
+    } else {
+      unit.selected = true;
+      this.selection.push(unit);
+    }
+    this.audio.click();
+    this.ui.showSelection(this.selection.length ? this.selection : null, this.game);
+  }
+
+  _selectUnitsByKey(key) {
+    if (!this.game) return;
+    this._clearSelection();
+    for (const u of this.game.units) {
+      if (u.dead || u.turret || u.key !== key) continue;
+      u.selected = true;
+      this.selection.push(u);
+    }
+    if (this.selection.length) {
+      this.audio.click();
+      this.focus.x = this.selection[0].x;
+      this.focus.z = this.selection[0].z;
+      this.ui.showSelection(this.selection, this.game);
+    }
   }
 
   _clickSelect() {
@@ -1349,6 +1426,30 @@ class App {
   _heroSelected() {
     const h = this.myHero();
     return !!(h && !h.dead && this.selection.includes(h));
+  }
+
+  _selectionCommand(cmd) {
+    if (!this.game) return;
+    if (cmd === 'move') {
+      if (!this.selection.length) return;
+      this.orderMode = 'move';
+      this.setBuildMode(null);
+      this.canvas.style.cursor = 'crosshair';
+      this.ui.setOrderMode('move');
+      this.game.msg('Move: click a destination.', 'info');
+      return;
+    }
+    this._resetOrderMode();
+    if (cmd === 'stop') {
+      const live = this.selection.filter((u) => !u.dead);
+      if (!live.length) return;
+      this.issue({ t: 'stop', ids: live.map((u) => u.id) });
+      this.game.msg('Holding position.', 'info');
+    } else if (cmd === 'hero') {
+      this._selectHero();
+    } else if (cmd === 'army') {
+      this._selectArmy();
+    }
   }
 
   // Cast ability i — teleport-style abilities enter click-targeting mode first.
@@ -1406,6 +1507,7 @@ class App {
 
   setBuildMode(key) {
     if (!this.game) return;
+    if (key) this._resetOrderMode();
     this.buildMode = key;
     this.canvas.style.cursor = key ? 'crosshair' : 'default';
     this.ui.setActiveBuild(key);
@@ -1910,6 +2012,7 @@ class App {
       this.ui.updateHero(this.game, this.myPlayer);
       this.ui.updateBoss(this.game);
       this.ui.setAutoUI(this.game.autoBuild);
+      if (this.selection.length) this.ui.showSelection(this.selection, this.game);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
 
       this.autosaveT -= dt;

@@ -44,6 +44,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
 - Labyrinth is a planned second mode. It can appear as locked or coming soon, but do not build gameplay for it unless Alex asks.
 - The Vercel online lobby is presence and chat only. It helps players gather before Survival. The actual co-op simulation still uses WebRTC invite/reply codes.
+- The bottom bar is intentionally context-sensitive like Warcraft III / Dota 2. With no selection it shows build/train commands. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
 
 ## Audio State
 
@@ -74,6 +75,7 @@ Before you call a change good:
 - Run `git diff --check`.
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
+- Select a unit group and confirm the bottom command bar updates. Selection cards should focus units, and double-clicking a card should select that unit type.
 - Open `/assets.html` and confirm manifests load.
 - If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.
 - If lobby code changed, test `POST /api/lobby` join/chat and confirm stale/offline play does not break.

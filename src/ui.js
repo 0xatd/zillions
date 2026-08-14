@@ -51,6 +51,10 @@ export class UI {
       <div id="selpanel" class="hidden"></div>
 
       <div id="bottombar">
+        <div id="selectionmenu" class="hidden">
+          <div id="selection-roster"></div>
+          <div id="selection-actions"></div>
+        </div>
         <div id="buildmenu"></div>
         <div id="unitmenu"></div>
       </div>
@@ -483,6 +487,15 @@ export class UI {
     if (el) el.classList.toggle('hidden', !on);
   }
 
+  setLocalPlayer(p = 0) { this.localPlayer = p; }
+
+  setOrderMode(mode) {
+    this.orderMode = mode || null;
+    for (const btn of this.root.querySelectorAll('.cmdbtn[data-command]')) {
+      btn.classList.toggle('active', btn.dataset.command === this.orderMode);
+    }
+  }
+
   // ---------- public lobby ----------
 
   setLobbyStatus(text, ok = false) {
@@ -662,21 +675,24 @@ export class UI {
     if (!sel || (Array.isArray(sel) && sel.length === 0)) {
       this.selpanel.classList.add('hidden');
       this._selSig = null;
+      this._showDefaultCommandBar();
       return;
     }
     // Skip the DOM rebuild when nothing changed (a rebuild every frame would
     // destroy the demolish button mid-click).
     const sig = Array.isArray(sel)
-      ? 'u:' + sel.map((u) => u.id).join(',')
+      ? 'u:' + sel.map((u) => `${u.id}:${Math.ceil(u.hp)}:${u.level || 0}:${u.points || 0}:${u.abil ? u.abil.map((a) => `${a.rank}-${Math.ceil(a.cd)}`).join('.') : ''}`).join(',')
       : 'b:' + sel.id + ':' + Math.ceil(sel.hp);
     if (sig === this._selSig) return;
     this._selSig = sig;
     this.selpanel.classList.remove('hidden');
     if (Array.isArray(sel)) {
+      const live = sel.filter((u) => !u.dead);
       const byType = {};
-      for (const u of sel) byType[u.def.name] = (byType[u.def.name] || 0) + 1;
+      for (const u of live) byType[u.def.name] = (byType[u.def.name] || 0) + 1;
       const rows = Object.entries(byType).map(([n, c]) => `<span class="selunit">${c}× ${n}</span>`).join(' ');
-      this.selpanel.innerHTML = `<b>Squad (${sel.length})</b><div>${rows}</div><div class="tdesc">Right-click to move. Units fight while standing still.</div>`;
+      this.selpanel.innerHTML = `<b>Squad (${live.length})</b><div>${rows}</div><div class="tdesc">Right-click or use Move, then click the map.</div>`;
+      this._showUnitCommandBar(live, game);
     } else {
       const b = sel;
       const pct = Math.max(0, b.hp / b.maxHp);
@@ -690,7 +706,137 @@ export class UI {
         ${demolishable ? '<button class="tbtn demolish" id="b-demolish">🧨 Demolish (50% refund)</button>' : ''}`;
       const btn = this.selpanel.querySelector('#b-demolish');
       if (btn) btn.onclick = () => this.cb.onDemolish(b);
+      this._showBuildingCommandBar(b, game);
     }
+  }
+
+  _showDefaultCommandBar() {
+    this.root.querySelector('#selectionmenu').classList.add('hidden');
+    this.root.querySelector('#buildmenu').classList.remove('hidden');
+    this.root.querySelector('#unitmenu').classList.remove('hidden');
+  }
+
+  _showSelectionCommandBar() {
+    this.root.querySelector('#selectionmenu').classList.remove('hidden');
+    this.root.querySelector('#buildmenu').classList.add('hidden');
+    this.root.querySelector('#unitmenu').classList.add('hidden');
+  }
+
+  _showUnitCommandBar(units, game) {
+    this._showSelectionCommandBar();
+    const roster = this.root.querySelector('#selection-roster');
+    const actions = this.root.querySelector('#selection-actions');
+    roster.innerHTML = '';
+    actions.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = 'selection-title';
+    title.innerHTML = `<b>${units.length} selected</b><small>Click a card to focus. Double-click to select that type.</small>`;
+    roster.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'selection-grid';
+    for (const unit of units.slice(0, 18)) {
+      const card = document.createElement('button');
+      card.className = 'selcard' + (unit.hero ? ' hero' : '');
+      card.type = 'button';
+      card.dataset.unitId = unit.id;
+      card.title = 'Click to focus. Shift-click to toggle. Double-click to select this type.';
+      const pct = Math.max(0, unit.hp / unit.maxHp);
+      card.innerHTML = `
+        <span class="selicon">${unit.def.icon || '•'}</span>
+        <span class="selname">${unit.def.name}</span>
+        ${unit.hero ? `<span class="selmeta">Lv ${unit.level}</span>` : `<span class="selmeta">${unit.key}</span>`}
+        <span class="mini-hp"><span style="width:${pct * 100}%"></span></span>`;
+      card.onclick = (e) => {
+        if (e.shiftKey && this.cb.onToggleUnit) this.cb.onToggleUnit(unit.id);
+        else if (this.cb.onSelectUnit) this.cb.onSelectUnit(unit.id);
+      };
+      card.ondblclick = () => this.cb.onSelectUnitType && this.cb.onSelectUnitType(unit.key);
+      grid.appendChild(card);
+    }
+    roster.appendChild(grid);
+
+    actions.appendChild(this._commandButton('move', '↗', 'Move', 'Click a destination', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('move')));
+    actions.appendChild(this._commandButton('stop', '✋', 'Stop', 'Hold current ground', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('stop')));
+    actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Select your hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
+    actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Select all fighting units', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
+
+    const localHero = game?.heroes?.[this.localPlayer || 0];
+    if (localHero && units.includes(localHero)) {
+      const heroRow = document.createElement('div');
+      heroRow.className = 'ability-actions';
+      localHero.def.abilities.forEach((ab, i) => {
+        const st = localHero.abil[i];
+        const learnable = game.canLearn(i, this.localPlayer || 0);
+        const usable = st.rank > 0 && st.cd <= 0 && !ab.passive && !localHero.dead;
+        const btn = this._commandButton(`ability-${i}`, ab.icon, ab.hotkey, learnable ? 'Learn' : ab.name, () => {
+          if (learnable && this.cb.onLearn) this.cb.onLearn(i);
+          else if (this.cb.onCast) this.cb.onCast(i);
+        });
+        btn.classList.add('abilitycmd');
+        btn.classList.toggle('ready', usable);
+        btn.classList.toggle('learnable', learnable);
+        btn.classList.toggle('disabled', !learnable && (st.rank === 0 || ab.passive || st.cd > 0 || localHero.dead));
+        btn.title = learnable ? `Learn ${ab.name}` : ab.desc;
+        const sub = btn.querySelector('small');
+        if (learnable) sub.textContent = 'Learn';
+        else if (st.rank === 0) sub.textContent = 'Locked';
+        else if (ab.passive) sub.textContent = `Rank ${st.rank}`;
+        else if (st.cd > 0) sub.textContent = `${Math.ceil(st.cd)}s`;
+        else sub.textContent = ab.name;
+        heroRow.appendChild(btn);
+      });
+      actions.appendChild(heroRow);
+    }
+    this.setOrderMode(this.orderMode);
+  }
+
+  _showBuildingCommandBar(building, game) {
+    this._showSelectionCommandBar();
+    const roster = this.root.querySelector('#selection-roster');
+    const actions = this.root.querySelector('#selection-actions');
+    roster.innerHTML = '';
+    actions.innerHTML = '';
+
+    const pct = Math.max(0, building.hp / building.maxHp);
+    const card = document.createElement('div');
+    card.className = 'building-card';
+    card.innerHTML = `
+      <span class="selicon">${building.def.icon}</span>
+      <div><b>${building.def.name}</b><small>${Math.ceil(building.hp)} / ${building.maxHp} hp</small></div>
+      <span class="mini-hp"><span style="width:${pct * 100}%"></span></span>`;
+    roster.appendChild(card);
+
+    if (building.key === 'barracks') {
+      for (const [key, unit] of Object.entries(UNITS)) {
+        const poor = !game || game.res.gold < unit.cost;
+        const btn = this._commandButton(key, unit.icon, unit.name, `Gold ${unit.cost}`, () => this.cb.onTrain && this.cb.onTrain(key));
+        btn.classList.toggle('poor', poor);
+        actions.appendChild(btn);
+      }
+    }
+    if (building.key === 'hq') {
+      actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Select your hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
+      actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Select all fighting units', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
+    }
+    if (building.key === 'tower') {
+      actions.appendChild(this._commandButton('range', '🎯', 'Range', `${building.def.range} tiles`, null, true));
+    }
+    if (building.key !== 'hq') {
+      actions.appendChild(this._commandButton('demolish', '🧨', 'Demolish', '50% refund', () => this.cb.onDemolish && this.cb.onDemolish(building)));
+    }
+  }
+
+  _commandButton(command, icon, label, sublabel, onClick, disabled = false) {
+    const btn = document.createElement('button');
+    btn.className = 'cmdbtn';
+    btn.type = 'button';
+    btn.dataset.command = command;
+    btn.disabled = !!disabled;
+    btn.innerHTML = `<span class="cmdicon">${icon}</span><b>${label}</b><small>${sublabel || ''}</small>`;
+    if (onClick) btn.onclick = onClick;
+    return btn;
   }
 
   update(game, zombieCount) {

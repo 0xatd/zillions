@@ -49,6 +49,7 @@ Core systems:
 - Night matters. Zombies move faster and attack harder at night.
 - The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
 - The Overseer bot can run colony economy and defenses so the player can fight as the hero.
+- The bottom command bar changes with selection. Unit groups show unit cards and Move/Stop/Hero/Army commands. Barracks selection shows train commands. Buildings can be demolished from the command card.
 
 ## Hero Roster
 
@@ -82,6 +83,7 @@ Hero rules:
 | Q / W / E / R | Cast selected hero ability |
 | Left click / drag | Select units |
 | Right click | Move squad or cancel build |
+| Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
 | T | Select whole army |
 | 1-9 | Manual build hotkeys |
 | U / I / O | Train scout / trooper / sniper |
