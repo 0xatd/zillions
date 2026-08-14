@@ -7,7 +7,7 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
-import { deleteState, getRemoteState, putState } from './backend.js';
+import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leaveLobby, putState, sendLobbyChat } from './backend.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -44,6 +44,9 @@ class App {
     this.audio = new AudioSys();
     this.profile = this._loadProfile();
     this.settings = this._loadSettings();
+    this.lobbyMode = 'survival';
+    this.lobbyJoined = false;
+    this.lobbyTimer = null;
     this.ui = new UI(document.getElementById('ui'), {
       onBuild: (k) => this.setBuildMode(k),
       onTrain: (k) => { this.audio.init(); this.issue({ t: 'train', k }); },
@@ -76,13 +79,20 @@ class App {
       onJoin: (code) => this.joinGame(code),
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
-      onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k }); },
+      onHeroPick: (k) => {
+        if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k });
+        this._heartbeatLobby();
+      },
+      onModePick: (mode) => { this.lobbyMode = mode; this.refreshPublicLobby(); },
+      onLobbyJoin: () => this.joinPublicLobby(),
+      onLobbyRefresh: () => this.refreshPublicLobby(),
+      onLobbyChat: (text) => this.sendPublicLobbyChat(text),
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
       onDemolish: (b) => { this.issue({ t: 'demolish', id: b.id }); this.selectedBuilding = null; this.ui.showSelection(null); },
       onHelp: () => { this.pause(); this.ui.showHelp(); },
       onContinue: () => this.continueGame(),
-      onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); },
+      onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); this._heartbeatLobby(); },
     });
 
     this._setupLights();
@@ -120,7 +130,10 @@ class App {
     }
     this.remoteSaveAt = 0;
     this.autosaveT = 20;
-    window.addEventListener('beforeunload', () => this._autosave(true));
+    window.addEventListener('beforeunload', () => {
+      this._leaveLobby(false);
+      this._autosave(true);
+    });
 
     this._setupCorpses();
     this.groanAcc = 0;
@@ -136,6 +149,7 @@ class App {
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
     this._hydrateRemoteState();
+    this.refreshPublicLobby();
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -147,6 +161,7 @@ class App {
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
     this.audio.init();
+    this._leaveLobby(false);
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
       await loadAssets();
@@ -260,6 +275,83 @@ class App {
 
   _mirrorState(kind, id, data) {
     putState(kind, id, data).catch(() => {});
+  }
+
+  _lobbyProfile(status = 'in-lobby') {
+    return {
+      mode: this.lobbyMode || 'survival',
+      name: this.profile.name || 'Commander',
+      hero: this.ui.selectedHero || 'alexander',
+      status,
+    };
+  }
+
+  async refreshPublicLobby() {
+    try {
+      const result = await getLobby(this.lobbyMode || 'survival');
+      if (!result?.ok || !result.lobby) {
+        this.ui.setLobby(null, false);
+        return;
+      }
+      this.ui.setLobby(result.lobby, this.lobbyJoined);
+    } catch {
+      this.ui.setLobbyStatus('Lobby is unavailable right now.', false);
+    }
+  }
+
+  async joinPublicLobby() {
+    try {
+      const result = await joinLobby(this._lobbyProfile());
+      if (!result?.ok || !result.lobby) {
+        this.ui.setLobby(null, false);
+        return;
+      }
+      this.lobbyJoined = true;
+      this.ui.setLobby(result.lobby, true);
+      this._startLobbyTimer();
+    } catch {
+      this.ui.setLobbyStatus('Could not join the lobby.', false);
+    }
+  }
+
+  _startLobbyTimer() {
+    clearInterval(this.lobbyTimer);
+    this.lobbyTimer = setInterval(() => this._heartbeatLobby(), 15_000);
+  }
+
+  async _heartbeatLobby() {
+    if (!this.lobbyJoined) return;
+    try {
+      const result = await heartbeatLobby(this._lobbyProfile());
+      if (result?.ok && result.lobby) this.ui.setLobby(result.lobby, true);
+    } catch {
+      this.ui.setLobbyStatus('Lobby heartbeat failed. Refresh to rejoin.', false);
+    }
+  }
+
+  async sendPublicLobbyChat(text) {
+    if (!text.trim()) return;
+    if (!this.lobbyJoined) await this.joinPublicLobby();
+    if (!this.lobbyJoined) return;
+    try {
+      const result = await sendLobbyChat(text, this._lobbyProfile());
+      if (result?.ok && result.lobby) this.ui.setLobby(result.lobby, true);
+      else this.ui.setLobbyStatus('Could not send lobby chat.', false);
+    } catch {
+      this.ui.setLobbyStatus('Could not send lobby chat.', false);
+    }
+  }
+
+  _leaveLobby(updateUi = true) {
+    if (!this.lobbyJoined) return;
+    this.lobbyJoined = false;
+    clearInterval(this.lobbyTimer);
+    this.lobbyTimer = null;
+    leaveLobby(this.lobbyMode || 'survival')
+      .then((result) => {
+        if (updateUi && result?.ok && result.lobby) this.ui.setLobby(result.lobby, false);
+      })
+      .catch(() => {});
   }
 
   async _hydrateRemoteState() {

@@ -77,10 +77,37 @@ export class UI {
             <label>🪖 Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
             <span id="prof-stats"></span>
           </div>
+          <div class="moderow" id="moderow">
+            <button class="modecard sel" data-mode="survival" type="button">
+              <b>Survival</b>
+              <small>Colony defense. Solo or co-op.</small>
+            </button>
+            <button class="modecard locked" data-mode="labyrinth" type="button">
+              <b>Labyrinth</b>
+              <small>Coming soon.</small>
+            </button>
+          </div>
           <div class="herorow" id="herorow"></div>
           <div class="levelrow" id="levelrow"></div>
           <div id="continuerow"></div>
           <div class="diffrow" id="diffrow"></div>
+          <div id="public-lobby" class="lobbybox">
+            <div class="lobbytop">
+              <div><b>Online Lobby</b><small id="lobby-mode">Survival</small></div>
+              <span id="lobby-count">-- active</span>
+            </div>
+            <div class="lobbyactions">
+              <button class="tbtn" id="lobby-join" type="button">Join lobby</button>
+              <button class="tbtn" id="lobby-refresh" type="button">Refresh</button>
+            </div>
+            <div id="lobby-status" class="lobbystatus">Checking online lobby...</div>
+            <div id="lobby-players" class="lobbyplayers"></div>
+            <div id="lobby-chat" class="lobbychat"></div>
+            <form id="lobby-form" class="lobbyform">
+              <input id="lobby-chat-input" maxlength="220" autocomplete="off" placeholder="Lobby chat">
+              <button class="tbtn" type="submit">Send</button>
+            </form>
+          </div>
           <div class="mprow">
             <button class="diffbtn" id="mp-host">🌐 Host co-op</button>
             <button class="diffbtn" id="mp-join">🔗 Join co-op</button>
@@ -95,6 +122,23 @@ export class UI {
           </div>
         </div>
       </div>`;
+
+    // Mode picker.
+    this.selectedMode = 'survival';
+    const moderow = this.root.querySelector('#moderow');
+    for (const card of moderow.querySelectorAll('.modecard')) {
+      card.onclick = () => {
+        const mode = card.dataset.mode;
+        if (mode !== 'survival') {
+          this.setLobbyStatus('Labyrinth is not open yet.', false);
+          return;
+        }
+        this.selectedMode = mode;
+        for (const c of moderow.children) c.classList.toggle('sel', c === card);
+        this.root.querySelector('#lobby-mode').textContent = 'Survival';
+        if (this.cb.onModePick) this.cb.onModePick(mode);
+      };
+    }
 
     // Hero picker.
     this.selectedHero = 'alexander';
@@ -189,6 +233,16 @@ export class UI {
     });
 
     this.root.querySelector('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
+    this.root.querySelector('#lobby-join').onclick = () => this.cb.onLobbyJoin && this.cb.onLobbyJoin();
+    this.root.querySelector('#lobby-refresh').onclick = () => this.cb.onLobbyRefresh && this.cb.onLobbyRefresh();
+    this.root.querySelector('#lobby-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = this.root.querySelector('#lobby-chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+      if (this.cb.onLobbyChat) this.cb.onLobbyChat(text);
+      input.value = '';
+    });
     this.root.querySelector('#mp-host').onclick = () => {
       this.mpStatus('Creating invite code…');
       this.cb.onHost();
@@ -427,6 +481,72 @@ export class UI {
   setWaiting(on) {
     const el = this.root.querySelector('#waitind');
     if (el) el.classList.toggle('hidden', !on);
+  }
+
+  // ---------- public lobby ----------
+
+  setLobbyStatus(text, ok = false) {
+    const st = this.root.querySelector('#lobby-status');
+    if (!st) return;
+    st.textContent = text;
+    st.classList.toggle('ok', ok);
+  }
+
+  setLobby(lobby, joined = false) {
+    if (!lobby) {
+      this.setLobbyStatus('Open the Vercel build to use the online lobby.', false);
+      return;
+    }
+    const players = lobby.players || [];
+    const messages = lobby.messages || [];
+    const activeCount = lobby.activeCount ?? players.length;
+    this.root.querySelector('#lobby-count').textContent = `${activeCount} active`;
+    this.root.querySelector('#lobby-join').textContent = joined ? 'In lobby' : 'Join lobby';
+    this.root.querySelector('#lobby-mode').textContent = lobby.mode === 'labyrinth' ? 'Labyrinth' : 'Survival';
+    this.setLobbyStatus(joined ? 'You are visible in the lobby.' : 'Join to appear here.', joined);
+
+    const playerList = this.root.querySelector('#lobby-players');
+    playerList.innerHTML = '';
+    if (!players.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lobbyempty';
+      empty.textContent = 'No active players yet.';
+      playerList.appendChild(empty);
+    } else {
+      for (const player of players.slice(0, 8)) {
+        const hero = HEROES[player.hero] || HEROES.alexander;
+        const row = document.createElement('div');
+        row.className = 'lobbyplayer';
+        const name = document.createElement('span');
+        name.textContent = `${hero.icon} ${player.name || 'Commander'}`;
+        const status = document.createElement('small');
+        status.textContent = player.status || 'in-lobby';
+        row.append(name, status);
+        playerList.appendChild(row);
+      }
+    }
+
+    const chat = this.root.querySelector('#lobby-chat');
+    chat.innerHTML = '';
+    if (!messages.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lobbyempty';
+      empty.textContent = 'No lobby chat yet.';
+      chat.appendChild(empty);
+    } else {
+      for (const message of messages.slice(-12)) {
+        const hero = HEROES[message.hero] || HEROES.alexander;
+        const row = document.createElement('div');
+        row.className = 'lobbymsg';
+        const meta = document.createElement('b');
+        meta.textContent = `${hero.icon} ${message.name || 'Commander'}`;
+        const text = document.createElement('span');
+        text.textContent = message.text || '';
+        row.append(meta, text);
+        chat.appendChild(row);
+      }
+      requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+    }
   }
 
   // ---------- co-op lobby ----------

@@ -10,11 +10,12 @@ It mixes:
 - Warhammer-style grim space-marine flavor.
 - Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
 
-The repo is a Three.js browser game. It still runs from a static file server for local play. The Vercel deployment also includes a small `/api/state` backend for cloud profile, settings, save, and game-summary JSON.
+The repo is a Three.js browser game. It still runs from a static file server for local play. The Vercel deployment also includes small backend APIs for cloud profile, settings, saves, game-summary JSON, and the public lobby.
 
 ## Live Pages
 
 - Game: https://0xatd.github.io/zillions/
+- Backend build: https://zillions-iota.vercel.app/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
 
 If GitHub Pages is not live yet, serve the repo locally:
@@ -31,6 +32,11 @@ Then open:
 ## Current Game
 
 The dead cover the map. You found a colony, build an economy, train defenders, and survive 10 days.
+
+Current modes:
+
+- **Survival**: the active mode. Play solo, or gather players in the online lobby and start co-op.
+- **Labyrinth**: planned second mode. It is visible in the menu but not playable yet.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
@@ -86,6 +92,8 @@ Hero rules:
 
 ## Co-op multiplayer (up to 3 players, no server)
 
+On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players for Survival and includes simple chat. GitHub Pages and local static servers still run without the lobby backend.
+
 Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
 
 Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero infrastructure) running **host-sequenced deterministic lockstep**: the host merges everyone's commands into numbered windows and broadcasts them (~10 tiny packets/sec regardless of zombie count); every machine simulates the identical world, and periodic state hashes detect desyncs. All players should use the same browser family (e.g. all Chrome) — identical floating point keeps the worlds in perfect sync.
@@ -103,13 +111,17 @@ Backend endpoints:
 GET    /api/state?playerId=<id>
 POST   /api/state  { playerId, kind: "profile" | "settings" | "save" | "game", id?, data }
 DELETE /api/state?playerId=<id>&kind=save&id=latest
+
+GET    /api/lobby?mode=survival
+POST   /api/lobby  { action: "join" | "heartbeat" | "chat" | "leave", playerId, mode, name?, hero?, text? }
+DELETE /api/lobby?mode=survival&playerId=<id>
 ```
 
 ## Deploying
 
 GitHub Pages serves the static game and asset browser.
 
-Vercel serves the same game plus `/api/state`. The Vercel project needs a Blob store with `BLOB_READ_WRITE_TOKEN` configured. `vercel.json` adds cache headers for the 3D assets. Co-op still works on static hosts because networking is peer-to-peer from the players' browsers.
+Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel project needs a Blob store with `BLOB_READ_WRITE_TOKEN` configured. `vercel.json` adds cache headers for the 3D assets. Co-op still works on static hosts because networking is peer-to-peer from the players' browsers.
 
 ## Art And Physics
 
@@ -147,7 +159,7 @@ src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
 src/config.js           Balance, heroes, buildings, units, waves
 src/audio.js            Runtime WebAudio synth
-src/backend.js          Browser client for cloud profile/settings/saves
+src/backend.js          Browser client for cloud state and lobby APIs
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
@@ -157,6 +169,7 @@ src/net.js              Co-op WebRTC and lockstep networking
 src/utils.js            Shared helpers
 vendor/three.module.js  Vendored Three.js
 api/state.js            Vercel Blob-backed JSON state API
+api/lobby.js            Vercel Blob-backed lobby presence and chat API
 assets/heroes/          Generated hero portraits and cinematic clips
 assets/audio/           Generated audio assets and manifests
 docs/                   Asset notes and production docs

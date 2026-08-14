@@ -11,7 +11,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 ## Hard Constraints
 
 - Keep zero-install local play. A static file server must be enough for the game.
-- Keep the backend optional. localStorage is the offline fallback, and the browser must not fail if `/api/state` is missing.
+- Keep the backend optional. localStorage is the offline fallback, and the browser must not fail if `/api/state` or `/api/lobby` is missing.
 - Do not introduce a bundler, framework, or build step unless Alex explicitly asks.
 - Do not remove the existing game loop, hero system, or Overseer behavior unless the task is specifically about replacing them.
 - Do not commit API keys, model prompts with secrets, or private source material.
@@ -24,10 +24,11 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `src/config.js` - Balance, heroes, buildings, units, zombies, waves.
 - `src/game.js` - Main simulation.
 - `src/main.js` - Bootstraps renderer, UI, game loop, profiles, saves, and Vercel backend mirroring.
-- `src/backend.js` - Browser client for optional cloud profile/settings/saves.
+- `src/backend.js` - Browser client for optional cloud state and lobby APIs.
 - `src/ui.js` - DOM HUD and hero picker.
 - `src/audio.js` - Runtime synthesized audio.
 - `api/state.js` - Vercel Blob-backed JSON state API.
+- `api/lobby.js` - Vercel Blob-backed lobby presence and chat API.
 - `assets/audio/manifest.json` - Audio pack index.
 - `docs/hero-audio-pack.md` - Hero audio notes.
 - `docs/faction-audio-pack.md` - Faction and SFX audio notes.
@@ -37,6 +38,12 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - Captain Scott: close-range tank, red/white identity, Whirlwind, War Cry, Purifying Light, Sun Strike.
 - Alexander: green/gold map-control marksman, Entangling Roots, Teleportation, Marksman's Focus, Assassinate.
 - Danny: blue/black stealth sniper, Death Pulse, Beetle Swarm, Cloak & Dagger, Time Lapse.
+
+## Current Modes
+
+- Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
+- Labyrinth is a planned second mode. It can appear as locked or coming soon, but do not build gameplay for it unless Alex asks.
+- The Vercel online lobby is presence and chat only. It helps players gather before Survival. The actual co-op simulation still uses WebRTC invite/reply codes.
 
 ## Audio State
 
@@ -69,6 +76,7 @@ Before you call a change good:
 - Open `/` and confirm the game starts.
 - Open `/assets.html` and confirm manifests load.
 - If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.
+- If lobby code changed, test `POST /api/lobby` join/chat and confirm stale/offline play does not break.
 - Check desktop and mobile widths for obvious layout clipping.
 - Confirm no secret strings were committed.
 
