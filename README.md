@@ -60,9 +60,9 @@ hums around them, and Space at night fires the one special. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |
-| Captain Scott | Shotgun brawler — short range, huge slow blasts with spread | Heavy Gravity — nearby dead move 35% slower | Gravity Hammer — cataclysmic AoE melee slam, ~10× his auto |
-| Alexander | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
-| Danny | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health to Danny | The Weave — invisible and fast, walks through the horde cutting everything touched |
+| Scott English | Shotgun brawler — short range, huge slow blasts with spread | Heavy Gravity — nearby dead move 35% slower | Gravity Hammer — cataclysmic AoE melee slam, ~10× his auto |
+| Alexander Thomas | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
+| Danny Donovan | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health back to him | The Weave — invisible and fast, walks through the horde cutting everything touched |
 
 Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
 up automatically at levels 4 and 7. A fallen hero revives at the Keep.
@@ -98,6 +98,14 @@ namespaced `zillions_*`.
 **Manual invite codes** (lobby → "Manual invite codes"): the serverless
 fallback — trade invite/reply codes over any chat channel, no lobby backend
 needed.
+
+**Solo and co-op play the same game.** Same fixed-seed map and pre-planned
+city per level, one shared gold purse (anyone's coins, anyone's hold-B), one
+shared horde and boss. Each player brings their own hero with its own aura,
+special, XP and levels — auras stack, so a good comp covers slow + heal +
+drain. Waves grow +40% per extra player, any player may ring the bell, and
+the deterministic lockstep sim means every command (move, build, cast, rally)
+runs identically on every machine.
 
 ## Profiles & saved games
 

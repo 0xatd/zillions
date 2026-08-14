@@ -33,9 +33,9 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 
 Each hero is auto-attack + one passive aura + one special (Space at night, Q anytime):
 
-- Captain Scott: shotgun brawler (short range, heavy splash hits, slow rate). Aura: Heavy Gravity (slows nearby dead). Special: Gravity Hammer (massive AoE melee slam + brief stun).
-- Alexander: long-range marksman. Aura: Nanite Swarm (heals nearby troops/heroes). Special: Concussion Grenade (blast ahead + knockback, hero hops backward).
-- Danny: long-range stealth sniper. Aura: Nutrient Siphon (drains nearby dead, leeches to Danny). Special: The Weave (invisible + fast, passes through the horde, damages everything brushed).
+- Scott English: shotgun brawler (short range, heavy splash hits, slow rate). Aura: Heavy Gravity (slows nearby dead). Special: Gravity Hammer (massive AoE melee slam + brief stun).
+- Alexander Thomas: long-range marksman. Aura: Nanite Swarm (heals nearby troops/heroes). Special: Concussion Grenade (blast ahead + knockback, hero hops backward).
+- Danny Donovan: long-range stealth sniper. Aura: Nutrient Siphon (drains nearby dead, leeches back to him). Special: The Weave (invisible + fast, passes through the horde, damages everything brushed).
 
 ## Audio State
 

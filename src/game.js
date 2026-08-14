@@ -399,7 +399,10 @@ export class Game {
   // ---------- day / night cycle ----------
 
   _planNight() {
-    const w = waveForNight(this.night, this.diff.mult * this.level.mult);
+    // Co-op: the same city, the same shared purse — but more heroes on the
+    // field means the hive sends more dead (+40% wave size per extra player).
+    const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
+    const w = waveForNight(this.night, this.diff.mult * this.level.mult * coopMult);
     const edges = [];
     let e = (this.rng() * 4) | 0;
     for (let i = 0; i < w.edges; i++) {

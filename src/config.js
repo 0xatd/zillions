@@ -178,7 +178,7 @@ export const abilityRank = (lvl) => (lvl >= 7 ? 3 : lvl >= 4 ? 2 : 1);
 
 export const HEROES = {
   scott: {
-    key: 'scott', name: 'Captain Scott', icon: '💥', color: 0x8f1f1f, trim: 0xc9a44a,
+    key: 'scott', name: 'Scott English', icon: '💥', color: 0x8f1f1f, trim: 0xc9a44a,
     tagline: 'Short range. Every trigger-pull is a verdict.',
     hp: 480, dmg: 62, range: 4.5, rof: 0.55, speed: 4.3, noise: 8,
     levelHp: 46, levelDmg: 8, regen: 3.0, shotgun: true, splash: 1.7,
@@ -193,7 +193,7 @@ export const HEROES = {
     },
   },
   alexander: {
-    key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
+    key: 'alexander', name: 'Alexander Thomas', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
     tagline: 'Long range. The horizon is his firing line.',
     hp: 350, dmg: 32, range: 11, rof: 1.2, speed: 4.5, noise: 16,
     levelHp: 34, levelDmg: 4.5, regen: 2.2,
@@ -209,7 +209,7 @@ export const HEROES = {
     },
   },
   danny: {
-    key: 'danny', name: 'Danny', icon: '🗡️', color: 0x36503a, trim: 0xa8b394,
+    key: 'danny', name: 'Danny Donovan', icon: '🗡️', color: 0x36503a, trim: 0xa8b394,
     tagline: 'Long range. Now you see him. They never do.',
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
     levelHp: 27, levelDmg: 5, regen: 2.0,
