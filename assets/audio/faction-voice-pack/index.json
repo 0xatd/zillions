@@ -1,0 +1,489 @@
+{
+  "name": "Zillions faction voice pack",
+  "created": "2026-08-13",
+  "status": "generated-assets",
+  "model": "tts-elevenlabs-turbo-v2-5",
+  "lineCount": 80,
+  "notes": [
+    "Generic faction/unit barks for a Zillions x Warcraft x StarCraft x Warhammer style RTS.",
+    "Voices are distinct generic ElevenLabs voices generated through Venice.",
+    "No API keys or source secrets are stored in this repository."
+  ],
+  "factions": {
+    "army": {
+      "displayName": "Fortress Army",
+      "voice": "Brian",
+      "direction": "Grim space-marine infantry: clipped, disciplined, Warhammer/StarCraft command radio energy.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Squad ready.",
+            "file": "army/selection/army_selection_01_squad_ready.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Fortress command online.",
+            "file": "army/selection/army_selection_02_fortress_command_online.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "Point us at the breach.",
+            "file": "army/selection/army_selection_03_point_us_at_the_breach.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Armor sealed. Faith loaded.",
+            "file": "army/selection/army_selection_04_armor_sealed_faith_loaded.mp3",
+            "bytes": 31809
+          }
+        ],
+        "move": [
+          {
+            "line": "Advancing.",
+            "file": "army/move/army_move_01_advancing.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "Form on me.",
+            "file": "army/move/army_move_02_form_on_me.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Crossing open ground.",
+            "file": "army/move/army_move_03_crossing_open_ground.mp3",
+            "bytes": 25122
+          },
+          {
+            "line": "Hold the line as we move.",
+            "file": "army/move/army_move_04_hold_the_line_as_we_move.mp3",
+            "bytes": 24286
+          }
+        ],
+        "attack": [
+          {
+            "line": "Open fire.",
+            "file": "army/attack/army_attack_01_open_fire.mp3",
+            "bytes": 17181
+          },
+          {
+            "line": "Contact front.",
+            "file": "army/attack/army_attack_02_contact_front.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Burn the breach.",
+            "file": "army/attack/army_attack_03_burn_the_breach.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "No mercy for the swarm.",
+            "file": "army/attack/army_attack_04_no_mercy_for_the_swarm.mp3",
+            "bytes": 26794
+          }
+        ],
+        "alert": [
+          {
+            "line": "Man down.",
+            "file": "army/alert/army_alert_01_man_down.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "They broke the line.",
+            "file": "army/alert/army_alert_02_they_broke_the_line.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Ammo low.",
+            "file": "army/alert/army_alert_03_ammo_low.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "Fallback is not an order.",
+            "file": "army/alert/army_alert_04_fallback_is_not_an_order.mp3",
+            "bytes": 30974
+          }
+        ]
+      }
+    },
+    "robots": {
+      "displayName": "Iron Choir Robots",
+      "voice": "Bill",
+      "direction": "Cold machine auxiliaries: clipped, dry, synthetic, obedient but unsettling.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Unit awake.",
+            "file": "robots/selection/robots_selection_01_unit_awake.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "Protocol armed.",
+            "file": "robots/selection/robots_selection_02_protocol_armed.mp3",
+            "bytes": 25122
+          },
+          {
+            "line": "Awaiting directive.",
+            "file": "robots/selection/robots_selection_03_awaiting_directive.mp3",
+            "bytes": 25122
+          },
+          {
+            "line": "Iron Choir listening.",
+            "file": "robots/selection/robots_selection_04_iron_choir_listening.mp3",
+            "bytes": 30974
+          }
+        ],
+        "move": [
+          {
+            "line": "Path accepted.",
+            "file": "robots/move/robots_move_01_path_accepted.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "Servo march.",
+            "file": "robots/move/robots_move_02_servo_march.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Grid coordinate locked.",
+            "file": "robots/move/robots_move_03_grid_coordinate_locked.mp3",
+            "bytes": 29720
+          },
+          {
+            "line": "Obstacle irrelevant.",
+            "file": "robots/move/robots_move_04_obstacle_irrelevant.mp3",
+            "bytes": 28048
+          }
+        ],
+        "attack": [
+          {
+            "line": "Target classified.",
+            "file": "robots/attack/robots_attack_01_target_classified.mp3",
+            "bytes": 24286
+          },
+          {
+            "line": "Sterilizing target.",
+            "file": "robots/attack/robots_attack_02_sterilizing_target.mp3",
+            "bytes": 28884
+          },
+          {
+            "line": "Heat sink engaged.",
+            "file": "robots/attack/robots_attack_03_heat_sink_engaged.mp3",
+            "bytes": 28884
+          },
+          {
+            "line": "Organic error detected.",
+            "file": "robots/attack/robots_attack_04_organic_error_detected.mp3",
+            "bytes": 29720
+          }
+        ],
+        "alert": [
+          {
+            "line": "Core breach.",
+            "file": "robots/alert/robots_alert_01_core_breach.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Shield failure.",
+            "file": "robots/alert/robots_alert_02_shield_failure.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Directive corrupted.",
+            "file": "robots/alert/robots_alert_03_directive_corrupted.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "Unit loss acceptable.",
+            "file": "robots/alert/robots_alert_04_unit_loss_acceptable.mp3",
+            "bytes": 28884
+          }
+        ]
+      }
+    },
+    "townsfolk": {
+      "displayName": "Frontier Townsfolk",
+      "voice": "Matilda",
+      "direction": "Human colony workers: tired, practical, brave because there is no other option.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Need something built?",
+            "file": "townsfolk/selection/townsfolk_selection_01_need_something_built.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "The walls will not raise themselves.",
+            "file": "townsfolk/selection/townsfolk_selection_02_the_walls_will_not_raise_themselves.mp3",
+            "bytes": 32645
+          },
+          {
+            "line": "I was hoping for farm duty.",
+            "file": "townsfolk/selection/townsfolk_selection_03_i_was_hoping_for_farm_duty.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "Tell me it is not outside the gate.",
+            "file": "townsfolk/selection/townsfolk_selection_04_tell_me_it_is_not_outside_the_gate.mp3",
+            "bytes": 33899
+          }
+        ],
+        "move": [
+          {
+            "line": "Hauling wood.",
+            "file": "townsfolk/move/townsfolk_move_01_hauling_wood.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "On my way.",
+            "file": "townsfolk/move/townsfolk_move_02_on_my_way.mp3",
+            "bytes": 15509
+          },
+          {
+            "line": "Mind the mud.",
+            "file": "townsfolk/move/townsfolk_move_03_mind_the_mud.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "Taking the long safe road.",
+            "file": "townsfolk/move/townsfolk_move_04_taking_the_long_safe_road.mp3",
+            "bytes": 28048
+          }
+        ],
+        "attack": [
+          {
+            "line": "Stay back.",
+            "file": "townsfolk/attack/townsfolk_attack_01_stay_back.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "I have a shovel and a problem.",
+            "file": "townsfolk/attack/townsfolk_attack_02_i_have_a_shovel_and_a_problem.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "For the colony.",
+            "file": "townsfolk/attack/townsfolk_attack_03_for_the_colony.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Get away from my house.",
+            "file": "townsfolk/attack/townsfolk_attack_04_get_away_from_my_house.mp3",
+            "bytes": 24286
+          }
+        ],
+        "alert": [
+          {
+            "line": "They are at the door.",
+            "file": "townsfolk/alert/townsfolk_alert_01_they_are_at_the_door.mp3",
+            "bytes": 21360
+          },
+          {
+            "line": "The mill is burning.",
+            "file": "townsfolk/alert/townsfolk_alert_02_the_mill_is_burning.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "We need soldiers now.",
+            "file": "townsfolk/alert/townsfolk_alert_03_we_need_soldiers_now.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "I heard something in the trees.",
+            "file": "townsfolk/alert/townsfolk_alert_04_i_heard_something_in_the_trees.mp3",
+            "bytes": 25122
+          }
+        ]
+      }
+    },
+    "aliens": {
+      "displayName": "Void Brood Aliens",
+      "voice": "River",
+      "direction": "Alien brood/hivemind: elegant, hungry, ancient, insectile without becoming a parody.",
+      "categories": {
+        "selection": [
+          {
+            "line": "The hive listens.",
+            "file": "aliens/selection/aliens_selection_01_the_hive_listens.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "We taste warm worlds.",
+            "file": "aliens/selection/aliens_selection_02_we_taste_warm_worlds.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "The dark has teeth.",
+            "file": "aliens/selection/aliens_selection_03_the_dark_has_teeth.mp3",
+            "bytes": 21360
+          },
+          {
+            "line": "Speak and be consumed.",
+            "file": "aliens/selection/aliens_selection_04_speak_and_be_consumed.mp3",
+            "bytes": 23032
+          }
+        ],
+        "move": [
+          {
+            "line": "Slip between stars.",
+            "file": "aliens/move/aliens_move_01_slip_between_stars.mp3",
+            "bytes": 23032
+          },
+          {
+            "line": "Under the soil.",
+            "file": "aliens/move/aliens_move_02_under_the_soil.mp3",
+            "bytes": 17599
+          },
+          {
+            "line": "Through the weak wall.",
+            "file": "aliens/move/aliens_move_03_through_the_weak_wall.mp3",
+            "bytes": 21360
+          },
+          {
+            "line": "The brood flows.",
+            "file": "aliens/move/aliens_move_04_the_brood_flows.mp3",
+            "bytes": 23032
+          }
+        ],
+        "attack": [
+          {
+            "line": "Open the shell.",
+            "file": "aliens/attack/aliens_attack_01_open_the_shell.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "Feed the little mouths.",
+            "file": "aliens/attack/aliens_attack_02_feed_the_little_mouths.mp3",
+            "bytes": 23868
+          },
+          {
+            "line": "Crack their towers.",
+            "file": "aliens/attack/aliens_attack_03_crack_their_towers.mp3",
+            "bytes": 20107
+          },
+          {
+            "line": "Their fear is signal.",
+            "file": "aliens/attack/aliens_attack_04_their_fear_is_signal.mp3",
+            "bytes": 27212
+          }
+        ],
+        "alert": [
+          {
+            "line": "The brood recoils.",
+            "file": "aliens/alert/aliens_alert_01_the_brood_recoils.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Nest wound detected.",
+            "file": "aliens/alert/aliens_alert_02_nest_wound_detected.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "The bright guns bite.",
+            "file": "aliens/alert/aliens_alert_03_the_bright_guns_bite.mp3",
+            "bytes": 24286
+          },
+          {
+            "line": "Adapt or perish.",
+            "file": "aliens/alert/aliens_alert_04_adapt_or_perish.mp3",
+            "bytes": 28884
+          }
+        ]
+      }
+    },
+    "zombies": {
+      "displayName": "Ash Dead Zombies",
+      "voice": "Callum",
+      "direction": "Plague dead: low, broken, hungry, half-words and almost-human menace.",
+      "categories": {
+        "selection": [
+          {
+            "line": "Hungry.",
+            "file": "zombies/selection/zombies_selection_01_hungry.mp3",
+            "bytes": 16345
+          },
+          {
+            "line": "Still walking.",
+            "file": "zombies/selection/zombies_selection_02_still_walking.mp3",
+            "bytes": 21360
+          },
+          {
+            "line": "Warm light.",
+            "file": "zombies/selection/zombies_selection_03_warm_light.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "We remember teeth.",
+            "file": "zombies/selection/zombies_selection_04_we_remember_teeth.mp3",
+            "bytes": 24286
+          }
+        ],
+        "move": [
+          {
+            "line": "Toward the noise.",
+            "file": "zombies/move/zombies_move_01_toward_the_noise.mp3",
+            "bytes": 23032
+          },
+          {
+            "line": "Under the wall.",
+            "file": "zombies/move/zombies_move_02_under_the_wall.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "Smell the living.",
+            "file": "zombies/move/zombies_move_03_smell_the_living.mp3",
+            "bytes": 23032
+          },
+          {
+            "line": "Slow feet. Many mouths.",
+            "file": "zombies/move/zombies_move_04_slow_feet_many_mouths.mp3",
+            "bytes": 32645
+          }
+        ],
+        "attack": [
+          {
+            "line": "Break the door.",
+            "file": "zombies/attack/zombies_attack_01_break_the_door.mp3",
+            "bytes": 20525
+          },
+          {
+            "line": "Eat the light.",
+            "file": "zombies/attack/zombies_attack_02_eat_the_light.mp3",
+            "bytes": 22196
+          },
+          {
+            "line": "Pull them down.",
+            "file": "zombies/attack/zombies_attack_03_pull_them_down.mp3",
+            "bytes": 18435
+          },
+          {
+            "line": "More for the dead.",
+            "file": "zombies/attack/zombies_attack_04_more_for_the_dead.mp3",
+            "bytes": 20525
+          }
+        ],
+        "alert": [
+          {
+            "line": "Fire hurts.",
+            "file": "zombies/alert/zombies_alert_01_fire_hurts.mp3",
+            "bytes": 19271
+          },
+          {
+            "line": "Big one falls.",
+            "file": "zombies/alert/zombies_alert_02_big_one_falls.mp3",
+            "bytes": 25958
+          },
+          {
+            "line": "The herd calls.",
+            "file": "zombies/alert/zombies_alert_03_the_herd_calls.mp3",
+            "bytes": 26794
+          },
+          {
+            "line": "Midnight feeds us.",
+            "file": "zombies/alert/zombies_alert_04_midnight_feeds_us.mp3",
+            "bytes": 23032
+          }
+        ]
+      }
+    }
+  }
+}

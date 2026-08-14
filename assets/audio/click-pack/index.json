@@ -3,6 +3,7 @@
   "created": "2026-08-13",
   "status": "generated-assets",
   "model": "tts-elevenlabs-turbo-v2-5",
+  "lineCount": 60,
   "notes": [
     "One MP3 per short click bark.",
     "Voices are distinct generic ElevenLabs voices generated through Venice.",

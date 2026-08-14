@@ -1,79 +1,203 @@
-# 🧟 ZILLIONS
+# ZILLIONS
 
-A polished, browser-based zombie survival RTS — *They Are Billions*-style colony defense fused with *Warcraft III*-style hero mechanics, wrapped in a grimdark space-marine aesthetic. Built with [Three.js](https://threejs.org/), no build step, no dependencies to install.
+Zillions is a browser-based survival RTS.
 
-![genre](https://img.shields.io/badge/genre-survival%20RTS-red) ![tech](https://img.shields.io/badge/tech-three.js-blue) ![deps](https://img.shields.io/badge/npm%20install-not%20needed-brightgreen)
+It mixes:
 
-## Play
+- They Are Billions colony survival.
+- Warcraft III hero control and ability leveling.
+- StarCraft-style army orders and base pressure.
+- Warhammer-style grim space-marine flavor.
+- Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
 
-Any static file server works (ES modules need HTTP):
+The repo is a static Three.js game. There is no build step and no package install is required.
+
+## Live Pages
+
+- Game: https://0xatd.github.io/zillions/
+- Asset browser: https://0xatd.github.io/zillions/assets.html
+
+If GitHub Pages is not live yet, serve the repo locally:
 
 ```bash
-# from the repo root — pick one:
 python3 -m http.server 8000
-npx serve .
 ```
 
-Then open **http://localhost:8000**.
+Then open:
 
-## The game
+- `http://localhost:8000/`
+- `http://localhost:8000/assets.html`
 
-The dead cover the earth. Found a colony on a procedurally generated map, grow its economy, and survive **10 days** — hordes strike on days 2, 4, 6 and 8, and a massive final wave hits from all directions on day 10.
+## Current Game
 
-- 🏗️ **Build** hab-tents (gold + colonists), hydro-farms (food), sawmills, quarries, gold mines, wind generators (energy), palisade walls, sentry towers and a barracks.
-- ⚔️ **Train** scouts (quiet), troopers (loud) and snipers (very loud) — gunfire **attracts** the dead.
-- ☣️ **Infection**: every hab-tent that falls to zombies spawns its residents into the horde.
-- 🌙 **Day/night cycle**: zombies are faster and bolder at night.
-- 🗺️ Hordes use flow-field pathfinding — they'll chew through walls or pour around them, whichever is faster.
+The dead cover the map. You found a colony, build an economy, train defenders, and survive 10 days.
 
-## Heroes (Warcraft III-style)
+Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
-Pick one of three space marines at the start. Your hero earns **XP from kills within 14 tiles**, levels **1–10** (full heal on level-up), and gains a **skill point per level** to spend on four abilities — ranks unlock at hero levels 1/3/5, the ultimate at **level 6**. If your hero falls, he revives at Fortress Command. Brutes drop **loot crates** (gold or medkits) worth scooping up.
+Core systems:
 
-Each kit honors the squad's favorite heroes from WC3/Dota/Diablo:
+- Build hab-tents, hydro-farms, sawmills, quarries, gold mines, wind generators, walls, towers, and barracks.
+- Train scouts, troopers, and snipers.
+- Noise matters. Gunfire attracts nearby zombies.
+- Infection matters. Destroyed hab-tents spawn their residents into the horde.
+- Night matters. Zombies move faster and attack harder at night.
+- The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
+- The Overseer bot can run colony economy and defenses so the player can fight as the hero.
 
-| Hero | Range | Q | W | E | R (ultimate) |
-|---|---|---|---|---|---|
-| ⚔️ Captain Scott | close (melee tank) | Whirlwind (spin while moving) | War Cry (ally dmg) | Purifying Light (heal + burn) | Sun Strike |
-| 🌿 Alexander | mid | Entangling Roots (AoE root) | Teleportation (channel, then TP anywhere) | Marksman's Focus (passive: mini-stuns + permanent dmg per kill) | Assassinate (deletes the biggest zombie) |
-| 🗡️ Danny | far (sniper) | Death Pulse (dmg + ally heal) | Beetle Swarm (latching DoT) | Cloak & Dagger (passive: fade invisible, huge backstab shot) | Time Lapse (5s rewind) |
+## Hero Roster
 
-## Built for old WC3 / Dota players
+Each hero is a space marine with Warcraft III / Dota-style abilities.
 
-- **You are the hero.** The 🤖 **Overseer** bot runs the colony's economy and defenses — generators, farms, hab-tents, mines, tower rings, walls — so you fight instead of spreadsheet. Toggle it off any time to build manually (it always leaves you a gold reserve for troops).
-- **The controls you remember:** `F` selects your hero (double-tap centers), `Q/W/E/R` casts, `T` selects your whole army, right-click moves, drag selects. Units fire while moving, Dota-style.
-- Minimap **pings** on horde spawns and "colony under attack" warnings; day/night announcements; buildings slowly self-repair when zombies leave them alone.
+| Hero | Style | Q | W | E | R |
+| --- | --- | --- | --- | --- | --- |
+| Captain Scott | Close-range tank | Whirlwind | War Cry | Purifying Light | Sun Strike |
+| Alexander | Mid-range map-control marksman | Entangling Roots | Teleportation | Marksman's Focus | Assassinate |
+| Danny | Long-range stealth sniper | Death Pulse | Beetle Swarm | Cloak & Dagger | Time Lapse |
+
+Hero rules:
+
+- Heroes earn XP from kills within 14 tiles.
+- Heroes level from 1 to 10.
+- Each level gives one skill point.
+- Normal ability ranks unlock at hero levels 1, 3, and 5.
+- Ultimates unlock at hero level 6.
+- A hero revives at Fortress Command after death.
+- Brutes can drop loot crates.
 
 ## Controls
 
 | Input | Action |
-|---|---|
+| --- | --- |
 | WASD / arrows / screen edge | Pan camera |
 | Mouse wheel | Zoom |
 | Z / C | Rotate camera |
-| F | Select hero (press twice to center camera on him) |
-| Q / W / E / R | Cast hero abilities (while hero is selected) |
-| Left click / drag | Select units (drag walls to build lines) |
-| Right click | Move squad / cancel build |
-| 1–9 | Build menu hotkeys |
+| F | Select hero |
+| Double-tap F | Center camera on hero |
+| Q / W / E / R | Cast selected hero ability |
+| Left click / drag | Select units |
+| Right click | Move squad or cancel build |
+| T | Select whole army |
+| 1-9 | Manual build hotkeys |
 | U / I / O | Train scout / trooper / sniper |
-| Space | Pause · 1×/2×/4× speed buttons in the top bar |
-| M / H / Esc | Mute / help / cancel |
+| Space | Pause |
+| M | Mute |
+| H | Help |
+| Esc | Cancel |
 
-## Co-op multiplayer (2 players, no server)
+## Co-op Multiplayer
 
-Click **🌐 Host co-op**, send the invite code to a friend, they click **🔗 Join co-op**, paste it, and send you back a reply code — connect, both pick heroes, the host picks a difficulty, and you're defending **one colony with two heroes**. Built on a WebRTC DataChannel (peer-to-peer, STUN only, zero infrastructure) running a **deterministic lockstep** simulation: only player commands cross the wire (~10 packets/sec), every zombie is simulated identically on both machines, and periodic state hashes detect desyncs. Both players should use the same browser family (e.g. both Chrome) — identical floating point is what keeps the worlds in perfect sync.
+The game supports 2-player co-op with no server.
 
-## Art & physics
+Flow:
 
-- **CC0 3D assets** from [KayKit Dungeon Remastered](https://kaylousberg.com) (thanks Kay Lousberg!): stone rampart walls that auto-orient along your wall lines, torches, war banners, crates, barrels and a golden treasure chest for loot drops — with graceful procedural fallbacks if assets fail to load. See `assets/KAYKIT-LICENSE.txt`.
-- **Ballistic corpse physics**: killed zombies launch away from whatever killed them, tumble, bounce, and sink into the mud — ultimates like Sun Strike also *knock back* survivors, so a max-rank ult sends thirty bodies arcing through the air.
+1. Click **Host co-op**.
+2. Send the invite code to a friend.
+3. They click **Join co-op**.
+4. They paste the invite code and send back a reply code.
+5. Both players pick heroes.
+6. The host picks a difficulty.
+7. Both players defend one colony with two heroes.
 
-## Tech notes
+Co-op uses a WebRTC DataChannel with STUN only. It runs a deterministic lockstep simulation. Only player commands cross the wire, at about 10 packets per second. Each machine simulates the same zombies, economy, and combat. Periodic state hashes detect desyncs.
 
-- **Three.js r160** (vendored in `vendor/`), custom flat-shaded terrain mesh with per-tile vertex colors.
-- Zombies are **instanced meshes** (thousands at 60 fps) driven by a multi-source **Dijkstra flow field**; units use A*.
-- Core **sound is synthesized** at runtime with WebAudio. Generated concept voice/music assets live in `assets/audio/` and are documented in `docs/hero-audio-pack.md`.
-- GPU particles (blood, dust, muzzle flashes, smoke), soft shadows, ACES tone mapping, day/night lighting.
-- Fixed-timestep simulation (30 Hz) decoupled from rendering, with 1×/2×/4× game speed (locked to 1× in co-op).
-- Deterministic seeded RNG throughout the sim — the property that makes lockstep co-op possible.
+Use the same browser family on both machines, such as Chrome with Chrome. Identical floating point behavior helps keep the worlds in sync.
+
+## Art And Physics
+
+- CC0 3D assets come from [KayKit Dungeon Remastered](https://kaylousberg.com): stone rampart walls, torches, war banners, crates, barrels, and a golden treasure chest. See `assets/KAYKIT-LICENSE.txt`.
+- The game has procedural fallbacks if model assets fail to load.
+- Zombies use ballistic corpse physics. Killed zombies launch away from the hit, tumble, bounce, and sink into the mud.
+- Big hits can knock back survivors. Sun Strike can send many bodies into the air at max rank.
+
+## Audio Assets
+
+Runtime audio is still synthesized through WebAudio. Generated concept assets are stored in `assets/audio/` and can be reviewed in the asset browser.
+
+Current saved packs:
+
+- `assets/audio/music/` - hero-select loop and map soundtrack loops.
+- `assets/audio/voices/` - first-pass hero voice samples.
+- `assets/audio/click-pack/` - 60 generated hero click barks.
+- `assets/audio/faction-voice-pack/` - 80 generated faction barks for army, robots, townsfolk, aliens, and zombies.
+- `assets/audio/sfx-pack/` - 29 generated sound effects for UI, weapons, creatures, robots, and town/colony events.
+
+Useful docs:
+
+- `docs/hero-audio-pack.md`
+- `docs/faction-audio-pack.md`
+
+## Repo Map
+
+```text
+index.html              Game entry point
+assets.html             Audio and asset browser
+style.css               Game HUD and menu styles
+assets-page.css         Asset browser styles
+assets-page.js          Asset browser renderer
+src/main.js             Bootstraps renderer, UI, and game loop
+src/game.js             Main simulation and rules
+src/config.js           Balance, heroes, buildings, units, waves
+src/audio.js            Runtime WebAudio synth
+src/ui.js               DOM HUD, panels, picker, minimap
+src/map.js              Procedural map
+src/flowfield.js        Horde pathfinding
+src/bot.js              Overseer economy/defense bot
+src/assets.js           GLB and hero media loader
+src/net.js              Co-op WebRTC and lockstep networking
+src/utils.js            Shared helpers
+vendor/three.module.js  Vendored Three.js
+assets/heroes/          Generated hero portraits and cinematic clips
+assets/audio/           Generated audio assets and manifests
+docs/                   Asset notes and production docs
+AGENTS.md               Agent handoff and review instructions
+```
+
+## Tech Notes
+
+- Three.js r160 is vendored in `vendor/`.
+- The terrain is a custom flat-shaded mesh with per-tile vertex colors.
+- Zombies are instanced meshes. This keeps large hordes fast.
+- Zombies use a multi-source Dijkstra flow field. Player units use A*.
+- The game uses GPU particles for blood, dust, muzzle flashes, and smoke.
+- Lighting uses soft shadows, ACES tone mapping, and a day/night cycle.
+- The simulation runs at a fixed 30 Hz step. Rendering is separate.
+- Game speed supports 1x, 2x, and 4x in solo mode. Co-op locks to 1x.
+- Seeded RNG is used throughout the simulation. This supports lockstep co-op.
+- Generated music, voice, and SFX files are concept assets. Runtime integration is partial and should stay explicit in code and docs.
+
+## Agent Handoff
+
+Read `AGENTS.md` before changing the repo.
+
+High-level rule: keep this a working static game. Do not add a build pipeline, server, framework, or package dependency unless the task truly needs it.
+
+When reviewing or changing gameplay, check:
+
+- The game still starts from a static file server.
+- The hero picker works.
+- Basic camera, selection, right-click move, and ability hotkeys work.
+- The Overseer can still be toggled.
+- Audio changes do not break mute or browser autoplay behavior.
+- Large assets are intentional and documented.
+
+## Validation
+
+Basic static validation:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open the game and asset browser in a real browser.
+
+Useful checks:
+
+```bash
+git diff --check
+jq empty assets/audio/manifest.json
+jq empty assets/audio/click-pack/index.json
+jq empty assets/audio/faction-voice-pack/index.json
+jq empty assets/audio/sfx-pack/index.json
+```
+
+There is no automated test suite yet.

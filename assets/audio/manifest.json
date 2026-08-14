@@ -18,6 +18,31 @@
     ],
     "file": "click-pack/index.json"
   },
+  "factionVoicePack": {
+    "status": "generated",
+    "lineCount": 80,
+    "factions": [
+      "army",
+      "robots",
+      "townsfolk",
+      "aliens",
+      "zombies"
+    ],
+    "file": "faction-voice-pack/index.json"
+  },
+  "soundEffectsPack": {
+    "status": "generated",
+    "soundCount": 29,
+    "groups": [
+      "ui",
+      "weapons",
+      "aliens",
+      "zombies",
+      "robots",
+      "town"
+    ],
+    "file": "sfx-pack/index.json"
+  },
   "voices": [
     {
       "hero": "alex",

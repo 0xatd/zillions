@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zillions Asset Browser</title>
+  <link rel="stylesheet" href="assets-page.css">
+</head>
+<body>
+  <header class="top">
+    <nav>
+      <a href="./">Play</a>
+      <a href="https://github.com/0xatd/zillions">GitHub</a>
+    </nav>
+    <div>
+      <p class="eyebrow">Zillions</p>
+      <h1>Asset Browser</h1>
+      <p class="lede">Review generated voices, barks, sound effects, and map music.</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" id="summary" aria-live="polite">
+      <div>
+        <span class="metric" id="metric-packs">--</span>
+        <span class="label">packs</span>
+      </div>
+      <div>
+        <span class="metric" id="metric-audio">--</span>
+        <span class="label">audio files</span>
+      </div>
+      <div>
+        <span class="metric" id="metric-lines">--</span>
+        <span class="label">voice lines</span>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="Asset filters">
+      <label for="search">Filter</label>
+      <input id="search" type="search" placeholder="hero, faction, line, file, sound...">
+    </section>
+
+    <div id="status" class="status">Loading manifests...</div>
+    <div id="content" class="content"></div>
+  </main>
+
+  <script type="module" src="assets-page.js"></script>
+</body>
+</html>
