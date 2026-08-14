@@ -5,6 +5,7 @@ import { GameMap } from './map.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
+import { AuthClient } from './auth.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
 import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leaveLobby, putState, sendLobbyChat } from './backend.js';
@@ -47,6 +48,7 @@ class App {
     this.lastWallTile = null;
 
     this.audio = new AudioSys();
+    this.auth = new AuthClient();
     this.profile = this._loadProfile();
     this.settings = this._loadSettings();
     this.lobbyMode = 'survival';
@@ -89,7 +91,10 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => {
         this.audio.init(this.game ? 'game' : 'menu', this.game?.levelId || this.ui.selectedLevel || 1);
-        if (!this.game) this.audio.voiceSample(k);
+        if (!this.game) {
+          this.audio.click();
+          this.audio.bark(k, 'selection');
+        }
         if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k });
         this._heartbeatLobby();
       },
@@ -108,6 +113,8 @@ class App {
       onLobbyRefresh: () => this.refreshPublicLobby(),
       onLobbyChat: (text) => this.sendPublicLobbyChat(text),
       onRestart: () => location.reload(),
+      onSignIn: () => this.signInWithGoogle(),
+      onSignOut: () => this.signOut(),
       onMinimap: (u, v) => {
         const x = u * MAP_SIZE, z = v * MAP_SIZE;
         if (this.game?.plotMode) {
@@ -184,11 +191,12 @@ class App {
 
     // Surface profile + resumable save on the menu.
     this.ui.setProfile(this.profile);
+    this.ui.setAccount({ checking: true });
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
-    this._hydrateRemoteState();
+    this._hydrateRemoteState().finally(() => this._initAuth());
     this.refreshPublicLobby();
 
     window.addEventListener('resize', () => this.resize());
@@ -271,6 +279,7 @@ class App {
     this.profile.updatedAt = Date.now();
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
     this._mirrorState('profile', 'current', this.profile);
+    this._queueAuthProfileSync();
   }
 
   _loadSettings() {
@@ -302,6 +311,7 @@ class App {
       this.remoteSaveAt = save.when;
       this._mirrorState('save', 'latest', save);
     }
+    this._queueAuthSaveSync(save);
   }
 
   _recordGameEnd(won) {
@@ -315,10 +325,11 @@ class App {
     p.bestDay = Math.max(p.bestDay, Math.min(this.game.day, FINAL_DAY));
     p.lastHero = this.ui.selectedHero;
     this._saveProfile();
-    this._mirrorState('game', `${Date.now()}`, {
+    const summary = {
       endedAt: Date.now(),
       won,
       mode: this.game.mode,
+      rules: this.game.mode,
       difficulty: this.game.diffKey,
       level: this.game.levelId,
       heroKeys: this.game.heroKeys,
@@ -328,13 +339,156 @@ class App {
       lost: this.game.stats.lost,
       plots: this.game.stats.plots || 0,
       players: this.game.heroKeys.length,
-    });
+    };
+    this._mirrorState('game', `${Date.now()}`, summary);
+    this._recordAuthMatch(summary);
     deleteState('save', 'latest').catch(() => {});
+    this._clearAuthSave();
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
   }
 
   _mirrorState(kind, id, data) {
     putState(kind, id, data).catch(() => {});
+  }
+
+  _profileScore(p = {}) {
+    return (p.games || 0) * 100000
+      + (p.wins || 0) * 5000
+      + (p.bestDay || 0) * 1000
+      + (p.kills || 0)
+      + (p.campaign || 0) * 250;
+  }
+
+  async _initAuth() {
+    try {
+      const status = await this.auth.init();
+      if (status.enabled) {
+        this.auth.onAuthChange((nextStatus) => {
+          if (nextStatus.signedIn) this._syncSignedInProfile().catch(() => {});
+          else this.ui.setAccount({
+            enabled: true,
+            signedIn: false,
+            error: nextStatus.error || '',
+          });
+        });
+      }
+
+      if (!status.enabled) {
+        this.ui.setAccount({
+          enabled: false,
+          signedIn: false,
+          error: status.error || '',
+        });
+        return;
+      }
+
+      if (status.signedIn) await this._syncSignedInProfile();
+      else this.ui.setAccount({
+        enabled: true,
+        signedIn: false,
+        name: status.name,
+        email: status.email,
+      });
+    } catch (err) {
+      this.ui.setAccount({
+        enabled: true,
+        signedIn: false,
+        error: err?.message || 'Cloud profile sign-in is unavailable.',
+      });
+    }
+  }
+
+  async _syncSignedInProfile() {
+    if (!this.auth.isSignedIn()) return;
+    const bundle = await this.auth.loadProfileBundle();
+    const cloudProfile = this.auth.profileFromBundle(bundle);
+    const localScore = this._profileScore(this.profile);
+    const cloudScore = this._profileScore(cloudProfile || {});
+    const localWins = localScore > cloudScore
+      || (localScore === cloudScore && (this.profile.updatedAt || 0) >= (cloudProfile?.updatedAt || 0));
+
+    if (localWins) {
+      await this.auth.syncLocalProfile(this.profile);
+    } else if (cloudProfile) {
+      this.profile = {
+        ...this.profile,
+        ...cloudProfile,
+        campaign: Math.max(this.profile.campaign || 0, cloudProfile.campaign || 0),
+        cloudUserId: this.auth.user?.id,
+      };
+      try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+      this.ui.setProfile(this.profile);
+      this.ui.setCampaign(this.profile.campaign || 0);
+      if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
+    }
+
+    const cloudSave = await this.auth.loadLatestSave();
+    const localSave = this._loadSave();
+    if (cloudSave?.snap && (!localSave?.when || cloudSave.when > localSave.when)) {
+      try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* full/blocked */ }
+      if (!this.game) this.ui.setContinue(cloudSave.snap);
+    } else if (localSave?.snap) {
+      await this.auth.syncLatestSave(localSave);
+    }
+
+    this.ui.setAccount(this.auth.status());
+  }
+
+  async signInWithGoogle() {
+    this.ui.setAccount({ enabled: true, signedIn: false, checking: true });
+    try {
+      await this.auth.signInWithGoogle();
+    } catch (err) {
+      this.ui.setAccount({
+        enabled: true,
+        signedIn: false,
+        error: err?.message || 'Could not start Google sign-in.',
+      });
+    }
+  }
+
+  async signOut() {
+    this.ui.setAccount({ ...this.auth.status(), busy: true });
+    try {
+      await this.auth.signOut();
+      this.ui.setAccount({ enabled: true, signedIn: false });
+    } catch (err) {
+      this.ui.setAccount({
+        enabled: true,
+        signedIn: true,
+        error: err?.message || 'Could not sign out.',
+      });
+    }
+  }
+
+  _queueAuthProfileSync() {
+    if (!this.auth?.isSignedIn()) return;
+    clearTimeout(this.authProfileTimer);
+    this.authProfileTimer = setTimeout(() => {
+      this.auth.syncLocalProfile(this.profile)
+        .then(() => this.ui.setAccount(this.auth.status()))
+        .catch((err) => this.ui.setAccount({ ...this.auth.status(), error: err?.message || 'Cloud profile sync failed.' }));
+    }, 700);
+  }
+
+  _queueAuthSaveSync(save) {
+    if (!this.auth?.isSignedIn() || !save?.snap) return;
+    this.pendingAuthSave = save;
+    clearTimeout(this.authSaveTimer);
+    this.authSaveTimer = setTimeout(() => {
+      this.auth.syncLatestSave(this.pendingAuthSave)
+        .catch((err) => this.ui.setAccount({ ...this.auth.status(), error: err?.message || 'Cloud save sync failed.' }));
+    }, 900);
+  }
+
+  _recordAuthMatch(summary) {
+    if (!this.auth?.isSignedIn()) return;
+    this.auth.recordMatch(summary).catch(() => {});
+  }
+
+  _clearAuthSave() {
+    if (!this.auth?.isSignedIn()) return;
+    this.auth.clearLatestSave().catch(() => {});
   }
 
   _lobbyProfile(status = 'in-lobby') {

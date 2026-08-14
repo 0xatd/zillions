@@ -91,6 +91,16 @@ export class UI {
               <label>Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
               <span id="prof-stats"></span>
             </div>
+            <div class="accountbox" id="accountbox">
+              <div>
+                <b id="account-title">Checking profile</b>
+                <small id="account-detail">Loading account state...</small>
+              </div>
+              <div class="account-actions">
+                <button class="tbtn" id="account-signin" type="button">Sign in with Google</button>
+                <button class="tbtn hidden" id="account-signout" type="button">Sign out</button>
+              </div>
+            </div>
             <nav class="shellnav" aria-label="Main menu">
               <button class="shellnav-btn active" data-view="play" type="button">Play</button>
               <button class="shellnav-btn" data-view="multiplayer" type="button">Multiplayer</button>
@@ -110,10 +120,6 @@ export class UI {
                   <span class="eyebrow">Survival</span>
                   <h2>Build by day. Ride out by night.</h2>
                   <p>The dead are already moving. Pick a commander, raise the planned city, and survive the final horde.</p>
-                </div>
-                <div class="play-actions">
-                  <button class="diffbtn primary js-start-survival" id="quick-start" type="button">Start Survival<small>normal run</small></button>
-                  <button class="diffbtn" id="quick-multiplayer" type="button">Multiplayer<small>lobby and co-op</small></button>
                 </div>
               </div>
               <div class="menu-section">
@@ -197,22 +203,22 @@ export class UI {
               <div class="section-head wide">
                 <div>
                   <span class="eyebrow">Commander</span>
-                  <h2>Your local profile now, account profile next.</h2>
+                  <h2>Profile, cloud saves, and match history.</h2>
                 </div>
-                <small>Stats mirror to the backend on Vercel. Supabase accounts are staged for the next pass.</small>
+                <small id="profile-account-note">Checking account state...</small>
               </div>
               <div class="profilecards">
                 <div class="profilecard">
-                  <b>Profile</b>
-                  <p>Name, favorite hero, wins, kills, and best day persist locally and mirror to the backend.</p>
+                  <b>Account</b>
+                  <p id="profile-account-copy">Local profile is active until Google sign-in completes.</p>
                 </div>
                 <div class="profilecard">
-                  <b>Save Slots</b>
-                  <p>Continue uses the latest local save. Cloud save mirroring is already active on Vercel.</p>
+                  <b>Cloud Save</b>
+                  <p>Latest Survival save syncs to Supabase after sign-in. Local save still works offline.</p>
                 </div>
                 <div class="profilecard">
-                  <b>Full Backend</b>
-                  <p>Next: Supabase sign-in, room records, match history, and public leaderboards.</p>
+                  <b>Match History</b>
+                  <p>Finished runs write private match records for stats and future leaderboards.</p>
                 </div>
               </div>
             </section>
@@ -249,8 +255,8 @@ export class UI {
     for (const b of this.root.querySelectorAll('.shellnav-btn')) {
       b.onclick = () => this._setMenuView(b.dataset.view || 'play');
     }
-    const quickMulti = this.root.querySelector('#quick-multiplayer');
-    if (quickMulti) quickMulti.onclick = () => this._setMenuView('multiplayer');
+    this.root.querySelector('#account-signin').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    this.root.querySelector('#account-signout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
 
     // Mode picker.
     this.selectedMode = 'survival';
@@ -614,6 +620,52 @@ export class UI {
       st.textContent = p.games
         ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: day ${p.bestDay}`
         : 'first deployment';
+    }
+  }
+
+  setAccount(state = {}) {
+    const title = this.root.querySelector('#account-title');
+    const detail = this.root.querySelector('#account-detail');
+    const signin = this.root.querySelector('#account-signin');
+    const signout = this.root.querySelector('#account-signout');
+    const note = this.root.querySelector('#profile-account-note');
+    const copy = this.root.querySelector('#profile-account-copy');
+    if (!title || !detail || !signin || !signout) return;
+
+    const checking = !!state.checking;
+    const signedIn = !!state.signedIn;
+    const enabled = !!state.enabled;
+    const error = state.error || '';
+    let heading = 'Local profile';
+    let body = 'Name, stats, and saves are stored on this browser.';
+
+    if (checking) {
+      heading = 'Checking profile';
+      body = 'Looking for a Google-backed Zillions profile.';
+    } else if (error) {
+      heading = signedIn ? 'Google profile' : 'Profile sign-in';
+      body = error;
+    } else if (signedIn) {
+      heading = 'Google profile';
+      body = `${state.name || state.email || 'Signed in'} · cloud profile active.`;
+    } else if (enabled) {
+      heading = 'Local profile';
+      body = 'Sign in with Google to keep your name, stats, and saves across browsers.';
+    }
+
+    title.textContent = heading;
+    detail.textContent = body;
+    signin.classList.toggle('hidden', checking || signedIn || !enabled);
+    signout.classList.toggle('hidden', !signedIn);
+    signin.disabled = checking || !!state.busy;
+    signout.disabled = !!state.busy;
+    if (note) note.textContent = body;
+    if (copy) {
+      copy.textContent = signedIn
+        ? 'Google sign-in is active. Name, selected hero, stats, cloud save, and match history sync to Supabase.'
+        : enabled
+          ? 'Google sign-in is available. Until you connect, the profile stays local to this browser.'
+          : 'Local/offline profile is active. Static builds and local servers keep working without Supabase.';
     }
   }
 

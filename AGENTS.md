@@ -52,7 +52,7 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 - Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, small foundation markers, hero movement, hold-Space building, construction previews/timers on inspected plots, one coin spend path, and day-build/night-defend pressure.
 - Old RTS placement, economy automation, and extra mode cards are not part of the playable surface.
 - The Vercel online lobby is presence and chat. It shows active players, selected hero, Survival status, and profile-style stats. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
-- Supabase project `skqggyvkblqtyggtcxbc` is reserved for the next backend layer: Auth, profiles, stats, saves, match history, rooms, ready state, hero picks, and room chat. Do not point Zillions at Soshi or another product's Supabase project.
+- Supabase project `skqggyvkblqtyggtcxbc` owns the account backend: Auth, Google sign-in, profiles, stats, cloud saves, and match history. Rooms, ready state, hero picks, and room chat are still next. Do not point Zillions at Soshi or another product's Supabase project.
 - The bottom bar is intentionally context-sensitive. With no unit selected it shows the current foundation/build action. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
 
 ## Audio State
@@ -62,7 +62,7 @@ Runtime audio uses generated MP3 assets first and keeps procedural WebAudio fall
 Current wiring:
 
 - Hero-select and map music play from `assets/audio/music/` after a user gesture.
-- Hero picker voice samples play from `assets/audio/voices/`.
+- Hero picker clicks use the short `assets/audio/click-pack/` selection bark. The longer `assets/audio/voices/` files are review/future-cinematic assets, not default picker spam.
 - Hero click barks play from `assets/audio/click-pack/`.
 - Army, townsfolk, and zombie barks play from current gameplay events. Robot and alien barks are ready in the manifest for future factions.
 - SFX play from `assets/audio/sfx-pack/` for UI, combat, colony, horde, hero, and zombie events.

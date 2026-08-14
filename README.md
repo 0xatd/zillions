@@ -10,7 +10,7 @@ It mixes:
 - Warhammer-style grim space-marine flavor.
 - Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
 
-The repo is a Three.js browser game. It still runs from a static file server for local play. The Vercel deployment also includes small backend APIs for cloud profile, settings, saves, game-summary JSON, and the public lobby.
+The repo is a Three.js browser game. It still runs from a static file server for local play. The Vercel deployment also includes small backend APIs for cloud profile, settings, saves, game-summary JSON, the public lobby, and optional Supabase Google sign-in.
 
 ## Live Pages
 
@@ -43,7 +43,7 @@ The main menu uses a game-shell layout:
 
 - **Play** is the first screen for new players. It keeps solo Survival, hero pick, campaign, continue, and difficulty in one clear path.
 - **Multiplayer** is the StarCraft-style hub. It shows the public lobby, chat, active players, co-op host, join code, and future mode slots.
-- **Profile** and **Settings** hold player/backend notes and controls so the first screen does not become a debug launcher.
+- **Profile** and **Settings** hold account state, player stats, backend notes, and controls so the first screen does not become a debug launcher.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
@@ -110,11 +110,12 @@ Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero
 
 ## Profiles & Saved Games
 
-- **Commander profile**: set your name on the menu; the game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
+- **Commander profile**: set your name on the menu or sign in with Google on the Vercel build. The game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
 - **Settings**: mute state is persisted.
 - **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 - **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
-- **Full backend target**: Supabase project `skqggyvkblqtyggtcxbc` is reserved for real accounts, player profiles, stats, save slots, match history, public/private rooms, ready states, hero picks, and room chat. The schema source is `supabase/schema.sql`. See `docs/backend-and-marketplace.md`.
+- **Google account profile**: on `zillions.taborlin.co`, `/api/auth-config` exposes the public Supabase URL and anon key. The browser then uses Supabase Auth with Google sign-in. Signed-in players sync name, selected hero, stats, latest save, and private match history to Supabase project `skqggyvkblqtyggtcxbc`.
+- **Full lobby backend target**: Supabase room records, ready states, hero picks, and room chat are next. The schema source is `supabase/schema.sql`. See `docs/backend-and-marketplace.md`.
 
 Backend endpoints:
 
@@ -126,6 +127,8 @@ DELETE /api/state?playerId=<id>&kind=save&id=latest
 GET    /api/lobby?mode=survival
 POST   /api/lobby  { action: "join" | "heartbeat" | "chat" | "leave", playerId, mode, name?, hero?, rules?, text? }
 DELETE /api/lobby?mode=survival&playerId=<id>
+
+GET    /api/auth-config  Public Supabase URL and anon key for browser sign-in
 ```
 
 ## Deploying
@@ -138,7 +141,7 @@ Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel proje
 
 The asset browser is a repo review page. The game screen does not link to it.
 
-Supabase is the planned account/lobby backend. It should not replace local static play until the browser app can gracefully handle signed-out and offline states.
+Supabase is the account/lobby backend. It is optional at runtime: local static play still works without it, and signed-out players keep using localStorage.
 
 ## Art And Physics
 
@@ -154,8 +157,8 @@ Runtime audio uses the generated MP3 packs first. WebAudio remains as a fallback
 Current runtime wiring:
 
 - `assets/audio/music/` - hero-select music and map soundtrack loops.
-- `assets/audio/voices/` - hero picker voice samples.
-- `assets/audio/click-pack/` - hero selection, move, attack, and repeated-click barks.
+- `assets/audio/voices/` - longer hero voice samples for review and future cinematic use.
+- `assets/audio/click-pack/` - hero card selection, move, attack, and repeated-click barks.
 - `assets/audio/faction-voice-pack/` - army, townsfolk, and zombie barks play from current gameplay events. Robot and alien barks are ready for those factions when they enter gameplay.
 - `assets/audio/sfx-pack/` - UI clicks, denies, weapons, construction, horde alarms, zombie impacts, ability sounds, level-up, revive, and colony alerts.
 - `assets/heroes/videos/` - hero cinematic clips shown in the hero picker.

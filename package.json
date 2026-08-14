@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check api/state.js && node --check api/lobby.js && for f in src/*.js assets-page.js; do node --check \"$f\"; done"
+    "check": "for f in api/*.js src/*.js assets-page.js; do node --check \"$f\"; done"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0"
