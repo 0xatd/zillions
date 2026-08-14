@@ -36,6 +36,7 @@ export class UI {
       </div>
 
       <div id="banner"></div>
+      <div id="invitetoast" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Waiting for the other player…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
@@ -70,9 +71,10 @@ export class UI {
           <h1 class="gametitle">🧟 ZILLIONS</h1>
           <p class="gamesub">Raise a city by day. Hold it by night. Survive ${FINAL_NIGHT} nights.</p>
           <div class="menustack">
-            <button class="menubtn primary" id="m-play">⚔️ &nbsp;Play</button>
+            <button class="menubtn primary" id="m-play">⚔️ &nbsp;Campaign</button>
             <div id="m-continuerow"></div>
-            <button class="menubtn" id="m-coop">🌐 &nbsp;Co-op <small>up to 3 players</small></button>
+            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless nights</small></button>
+            <button class="menubtn" id="m-online">🌐 &nbsp;Online Lobby <small>games · chat · friends</small></button>
             <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
           </div>
           <div class="profilerow">
@@ -94,6 +96,48 @@ export class UI {
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
           <button class="startbtn" id="s-start">▶ &nbsp;START — SURVIVE ${FINAL_NIGHT} NIGHTS</button>
+        </div>
+
+        <div id="screen-lobby" class="setup lobby hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="l-back">← Back</button>
+            <h2>🌐 The Lobby</h2>
+            <span class="lobbyme" id="l-me"></span>
+            <span class="lobbyonline" id="l-online">…</span>
+          </div>
+          <div class="lobbygrid">
+            <div class="lobbychat">
+              <div class="lobbychatlog" id="l-chatlog"></div>
+              <div class="lobbychatrow">
+                <input id="l-chatinput" maxlength="400" placeholder="Say something to every commander alive…">
+                <button class="tbtn" id="l-chatsend">Send</button>
+              </div>
+            </div>
+            <div class="lobbymain">
+              <div class="lobbytabs">
+                <button class="ltab sel" data-tab="games">⚔️ Games</button>
+                <button class="ltab" data-tab="lore">📜 Lore</button>
+                <button class="ltab" data-tab="tips">💡 Tips</button>
+              </div>
+              <div id="l-tab-games" class="ltabpane">
+                <div class="lobbycreate">
+                  <button class="diffbtn sel" id="l-create-pub">🌐 Create public game</button>
+                  <button class="diffbtn" id="l-create-priv">🔒 Create private game</button>
+                  <span class="joincode"><input id="l-joincode" maxlength="6" placeholder="CODE"><button class="tbtn" id="l-joinbtn">Join</button></span>
+                </div>
+                <div id="l-games" class="lobbygames"></div>
+                <div class="mphint">Public games appear here for everyone. Private games are joined by code or friend invite. <a href="#" id="l-manual">Manual invite codes</a> (no internet lobby needed).</div>
+              </div>
+              <div id="l-tab-lore" class="ltabpane hidden"></div>
+              <div id="l-tab-tips" class="ltabpane hidden"></div>
+            </div>
+            <div class="lobbyfriends">
+              <div class="steplabel">Friends</div>
+              <div class="friendcode">Your code: <b id="l-mycode">…</b></div>
+              <div class="lobbychatrow"><input id="l-friendcode" maxlength="6" placeholder="Friend's code"><button class="tbtn" id="l-friendadd">Add</button></div>
+              <div id="l-friends" class="friendlist"></div>
+            </div>
+          </div>
         </div>
 
         <div id="screen-help" class="setup hidden">
@@ -127,10 +171,34 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
-    q('#m-play').onclick = () => { this._mpMode = false; this.showSetup(); };
-    q('#m-coop').onclick = () => { this._mpMode = true; this.showSetup(true); };
+    q('#m-play').onclick = () => this.showSetup({ mode: 'campaign' });
+    q('#m-survival').onclick = () => this.showSetup({ mode: 'survival' });
+    q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
-    q('#s-back').onclick = () => this._showScreen('main');
+    q('#s-back').onclick = () => this._showScreen(this._fromLobby ? 'lobby' : 'main');
+    q('#l-back').onclick = () => this._showScreen('main');
+
+    // ----- lobby -----
+    for (const t of this.root.querySelectorAll('.ltab')) {
+      t.onclick = () => {
+        for (const o of this.root.querySelectorAll('.ltab')) o.classList.toggle('sel', o === t);
+        for (const pane of ['games', 'lore', 'tips']) {
+          this.root.querySelector('#l-tab-' + pane).classList.toggle('hidden', pane !== t.dataset.tab);
+        }
+      };
+    }
+    const chatSend = () => {
+      const inp = q('#l-chatinput');
+      if (inp.value.trim() && this.cb.onChatSend) this.cb.onChatSend(inp.value);
+      inp.value = '';
+    };
+    q('#l-chatsend').onclick = chatSend;
+    q('#l-chatinput').addEventListener('keydown', (e) => { if (e.key === 'Enter') chatSend(); });
+    q('#l-create-pub').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('public');
+    q('#l-create-priv').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('private');
+    q('#l-joinbtn').onclick = () => this.cb.onJoinCode && this.cb.onJoinCode(q('#l-joincode').value);
+    q('#l-friendadd').onclick = () => this.cb.onAddFriend && this.cb.onAddFriend(q('#l-friendcode').value);
+    q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
       else this._showScreen('main');
@@ -195,19 +263,45 @@ export class UI {
     this.banner = q('#banner');
   }
 
+  _lobbyWasOpen() {
+    const l = this.root.querySelector('#screen-lobby');
+    return l && !l.classList.contains('hidden');
+  }
+
+  onlineStatus(text) {
+    const el = this.root.querySelector('#online-status');
+    if (el) el.innerHTML = text;
+  }
+
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['main', 'setup', 'help', 'pause']) {
+    for (const id of ['main', 'setup', 'help', 'pause', 'lobby']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
 
-  showSetup(coop = false) {
+  showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
+    this._fromLobby = !!online || this._lobbyWasOpen();
+    this.selectedMode = mode;
     this._showScreen('setup');
-    this.root.querySelector('#s-title').textContent = coop ? 'Co-op — one city, one hero each' : 'Choose your battle';
+    const title = online
+      ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
+      : coop ? 'Co-op — one city, one hero each'
+      : mode === 'survival' ? '💀 Survival — how many nights can you last?'
+      : 'Choose your battle';
+    this.root.querySelector('#s-title').textContent = title;
+    this._buildLevelRow(this._campaignCleared || 0, mode === 'survival');
+    this.root.querySelector('#s-start').textContent = mode === 'survival'
+      ? '▶  START — SURVIVE AS LONG AS YOU CAN'
+      : `▶  START — SURVIVE ${FINAL_NIGHT} NIGHTS`;
     const mp = this.root.querySelector('#mp-panel');
-    mp.classList.toggle('hidden', !coop);
+    mp.classList.toggle('hidden', !coop && !online);
+    if (online) {
+      mp.dataset.init = '1';
+      mp.innerHTML = `<div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> or invite friends from the lobby.</span></div><div id="mp-sub"></div>`;
+      return;
+    }
     if (coop && !mp.dataset.init) {
       mp.dataset.init = '1';
       mp.innerHTML = `
@@ -222,12 +316,13 @@ export class UI {
     }
   }
 
-  _buildLevelRow(cleared) {
+  _buildLevelRow(cleared, allUnlocked = false) {
+    this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
     row.innerHTML = '';
-    this.selectedLevel = Math.min(cleared + 1, LEVELS.length);
+    this.selectedLevel = allUnlocked ? 1 : Math.min(cleared + 1, LEVELS.length);
     for (const lv of LEVELS) {
-      const locked = lv.id > cleared + 1;
+      const locked = allUnlocked ? false : lv.id > cleared + 1;
       const done = lv.id <= cleared;
       const card = document.createElement('button');
       card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '') + (locked ? ' locked' : '');
@@ -294,10 +389,10 @@ export class UI {
     let waveLeft = 0;
     for (const zb of game.zombies) if (zb.wave) waveLeft++;
     q('#r-day').innerHTML = game.isNight
-      ? `${phase} <b>Night ${Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
+      ? `${phase} <b>Night ${game.mode === 'survival' ? game.night : Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
       : game.belling
         ? `${phase} <b>Night ${game.night} falls…</b>`
-        : `${phase} <b>Day ${game.night}</b> / ${FINAL_NIGHT}`;
+        : `${phase} <b>Day ${game.night}</b>${game.mode === 'survival' ? '' : ' / ' + FINAL_NIGHT}`;
     q('#r-day').classList.toggle('danger', game.isNight || game.belling);
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
@@ -372,7 +467,8 @@ export class UI {
     const zb = game.boss;
     if (!zb || zb.dead) { bar.classList.add('hidden'); return; }
     bar.classList.remove('hidden');
-    this.root.querySelector('#boss-name').textContent = `${game.level.boss.icon} ${game.level.boss.name}${zb.enraged ? ' — ENRAGED' : ''}`;
+    const B = zb.cfg || game.level.boss;
+    this.root.querySelector('#boss-name').textContent = `${B.icon} ${B.name}${zb.enraged ? ' — ENRAGED' : ''}`;
     this.root.querySelector('#boss-fill').style.width = `${Math.max(0, (zb.hp / zb.maxHp) * 100)}%`;
   }
 
@@ -529,15 +625,18 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
-  showEnd(won, stats, night, levelId) {
+  showEnd(won, stats, night, levelId, mode = 'campaign', best = 0) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     const lv = LEVELS[(levelId || 1) - 1];
+    const survival = mode === 'survival';
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
-        <h1>${won ? '🏆 VICTORY' : '💀 THE CITY HAS FALLEN'}</h1>
-        <p class="tagline">${won
+        <h1>${survival ? `💀 NIGHT ${night}` : won ? '🏆 VICTORY' : '💀 THE CITY HAS FALLEN'}</h1>
+        <p class="tagline">${survival
+          ? `The dead are endless — but you held ${lv.name} for ${night - 1} night${night === 2 ? '' : 's'}.${night - 1 >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
+          : won
           ? `${lv.name} is cleansed. The final horde lies rotting at your walls.`
           : `The dead took the Keep on night ${night}.`}</p>
         <div class="howto stats">
@@ -545,12 +644,108 @@ export class UI {
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
           <div>🏗️ Structures raised: <b>${stats.built}</b></div>
           <div>🔥 Structures lost: <b>${stats.lost}</b></div>
-          <div>🌙 Nights survived: <b>${Math.min(night, FINAL_NIGHT)}</b></div>
+          <div>🌙 Nights survived: <b>${survival ? night - 1 : Math.min(night, FINAL_NIGHT)}</b></div>
         </div>
-        ${won && lv.id < LEVELS.length ? `<p class="tagline">🔓 Unlocked: <b>${LEVELS[lv.id].name}</b></p>` : ''}
+        ${!survival && won && lv.id < LEVELS.length ? `<p class="tagline">🔓 Unlocked: <b>${LEVELS[lv.id].name}</b></p>` : ''}
         <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+  }
+
+  // ---------- online lobby rendering ----------
+
+  lobbySetMe(me) {
+    this.root.querySelector('#l-me').textContent = `🪖 ${me.name}`;
+    this.root.querySelector('#l-mycode').textContent = me.code;
+  }
+
+  lobbyStatus(text) {
+    this.root.querySelector('#l-online').textContent = text;
+  }
+
+  lobbyOnline(n) {
+    this.root.querySelector('#l-online').textContent = `🟢 ${n} online`;
+  }
+
+  lobbyChatFill(msgs) {
+    const log = this.root.querySelector('#l-chatlog');
+    log.innerHTML = '';
+    for (const m of msgs) this.lobbyChatAdd(m);
+  }
+
+  lobbyChatAdd(m) {
+    const log = this.root.querySelector('#l-chatlog');
+    if (!log) return;
+    const div = document.createElement('div');
+    div.className = 'chatmsg';
+    const when = new Date(m.created_at);
+    div.innerHTML = `<span class="chatwho"></span> <span class="chattext"></span><span class="chatwhen">${when.getHours()}:${String(when.getMinutes()).padStart(2, '0')}</span>`;
+    div.querySelector('.chatwho').textContent = m.name;
+    div.querySelector('.chattext').textContent = m.text;
+    log.appendChild(div);
+    while (log.children.length > 60) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  lobbyGames(games, onJoin) {
+    const box = this.root.querySelector('#l-games');
+    if (!box) return;
+    if (!games.length) {
+      box.innerHTML = '<div class="mphint">No public wars right now — start one and the world will see it here.</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const g of games) {
+      const row = document.createElement('div');
+      row.className = 'gamerow';
+      const lv = LEVELS[(g.level || 1) - 1];
+      row.innerHTML = `
+        <span class="gname"></span>
+        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/3</span>
+        <button class="tbtn gjoin">Join</button>`;
+      row.querySelector('.gname').textContent = `${g.host_name}'s war`;
+      row.querySelector('.gjoin').onclick = () => onJoin(g);
+      box.appendChild(row);
+    }
+  }
+
+  lobbyFriends(friends, online, canInvite, onInvite) {
+    const box = this.root.querySelector('#l-friends');
+    if (!box) return;
+    if (!friends.length) {
+      box.innerHTML = '<div class="mphint">Trade commander codes with your squad to add each other.</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const f of friends) {
+      const isOn = online.has(f.id);
+      const row = document.createElement('div');
+      row.className = 'friendrow';
+      row.innerHTML = `<span class="fdot ${isOn ? 'on' : ''}"></span><span class="fname"></span><span class="fcode">${f.code}</span>` +
+        (canInvite && isOn ? '<button class="tbtn finvite">Invite</button>' : '');
+      row.querySelector('.fname').textContent = f.name;
+      const btn = row.querySelector('.finvite');
+      if (btn) btn.onclick = () => onInvite(f);
+      box.appendChild(row);
+    }
+  }
+
+  fillLore(lore, tips) {
+    const lorePane = this.root.querySelector('#l-tab-lore');
+    lorePane.innerHTML = lore.map(([t, body]) => `<div class="loreentry"><b>${t}</b><p>${body}</p></div>`).join('');
+    const tipsPane = this.root.querySelector('#l-tab-tips');
+    tipsPane.innerHTML = '<div class="howto">' + tips.map((t) => `<div>${t}</div>`).join('') + '</div>';
+  }
+
+  showInviteToast(inv, onAccept) {
+    const el = this.root.querySelector('#invitetoast');
+    el.classList.remove('hidden');
+    el.innerHTML = `<b></b> invites you to their ${inv.mode === 'survival' ? 'Survival' : 'Campaign'} war! <button class="tbtn" id="inv-yes">⚔️ Join</button> <button class="tbtn" id="inv-no">✕</button>`;
+    el.querySelector('b').textContent = inv.fromName;
+    el.querySelector('#inv-yes').onclick = () => { el.classList.add('hidden'); onAccept(); };
+    el.querySelector('#inv-no').onclick = () => el.classList.add('hidden');
+    clearTimeout(this._invT);
+    this._invT = setTimeout(() => el.classList.add('hidden'), 30000);
   }
 
   drawMinimap(game, camFocus, viewSize) {

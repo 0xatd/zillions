@@ -9,6 +9,7 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
+import { OnlineLobby, LORE, TIPS } from './online.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -41,11 +42,13 @@ class App {
     this.ui = new UI(document.getElementById('ui'), {
       onStart: (d, hero) => {
         if (this.mpRole === 'guest') return; // host launches the match
-        if (this.mpRole === 'host' && this.peers.length) {
+        const mode = this.ui.selectedMode || 'campaign';
+        if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
           const level = this.ui.selectedLevel || 1;
           const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level }));
-          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level });
+          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
+          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode });
+          if (this.lobby && this.lobby.game) this.lobby.touchGame({ status: 'playing' });
         } else {
           this.startGame(d, hero);
         }
@@ -67,7 +70,21 @@ class App {
       onResume: () => this.closePauseMenu(),
       onMinimap: () => {}, // camera is locked to the hero
       onContinue: () => this.continueGame(),
-      onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); },
+      onName: (name) => {
+        this.profile.name = name.slice(0, 24);
+        this._saveProfile();
+        if (this.lobby && this.lobby.connected) this.lobby.setName(this.profile.name);
+      },
+      onLobbyOpen: () => this._openLobby(),
+      onChatSend: (text) => this.lobby && this.lobby.sendChat(text),
+      onCreateGame: (visibility) => this.createOnlineGame(visibility),
+      onJoinCode: (code) => this.joinByCode(code),
+      onAddFriend: async (code) => {
+        if (!this.lobby) return;
+        const r = await this.lobby.addFriend(code);
+        this.ui.showBanner(r.ok ? `🤝 ${r.name} added!` : `❌ ${r.why}`, r.ok ? '' : 'bad', 3000);
+        this._renderFriends();
+      },
       onLevelPick: (id) => this.showMenuBackdrop(id),
     });
 
@@ -149,11 +166,12 @@ class App {
     }
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
+    const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = LEVELS[levelId - 1] || LEVELS[0];
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId);
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
@@ -172,7 +190,9 @@ class App {
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer);
     this.setSpeed(1);
-    this.ui.showBanner(`${level.name} — survive ${FINAL_NIGHT} nights. ${level.boss.icon} ${level.boss.name} comes on the last.`, '', 4500);
+    this.ui.showBanner(mode === 'survival'
+      ? `${level.name} — SURVIVAL. The nights never stop. A boss walks every fifth. How long can you last?`
+      : `${level.name} — survive ${FINAL_NIGHT} nights. ${level.boss.icon} ${level.boss.name} comes on the last.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games) this._startTutorial();
@@ -252,15 +272,19 @@ class App {
   _recordGameEnd(won) {
     const p = this.profile;
     p.games++;
-    if (won) {
+    if (won && this.game.mode !== 'survival') {
       p.wins++;
       p.campaign = Math.max(p.campaign || 0, this.game.levelId);
+    }
+    if (this.game.mode === 'survival') {
+      p.bestSurvival = Math.max(p.bestSurvival || 0, this.game.night - 1);
     }
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, Math.min(this.game.night, FINAL_NIGHT));
     p.lastHero = this.ui.selectedHero;
     this._saveProfile();
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+    if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
   continueGame() {
@@ -355,7 +379,7 @@ class App {
     else if (m.t === 'w') this.inbox.set(m.w, m.c);
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level });
+      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
     }
     else if (m.t === 'desync' && !this.desynced) {
       this.desynced = true;
@@ -379,6 +403,151 @@ class App {
   }
 
   // ---------------- scene setup ----------------
+
+  // ---------------- online lobby ----------------
+
+  async _openLobby() {
+    if (this.lobby) {
+      if (this.lobby.connected) this.lobby.refreshGames();
+      return this.lobby;
+    }
+    this.lobby = new OnlineLobby({
+      onChat: (m) => this.ui.lobbyChatAdd(m),
+      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row)),
+      onOnline: (map) => { this.ui.lobbyOnline(map.size); this._renderFriends(); },
+      onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
+      onKnock: (sig) => this._onKnock(sig),
+      onSignal: (sig) => this._onSignal(sig),
+    });
+    this.ui.fillLore(LORE, TIPS);
+    this.ui.lobbyStatus('Connecting…');
+    try {
+      const me = await this.lobby.connect(this.profile.name || 'Commander');
+      this.ui.lobbySetMe(me);
+      this.ui.lobbyChatFill(await this.lobby.loadChat());
+      this.lobby.refreshGames();
+      await this.lobby.loadFriends();
+      this._renderFriends();
+    } catch (e) {
+      this.ui.lobbyStatus('❌ offline');
+      this.ui.showBanner('❌ Lobby unreachable — solo and manual invite codes still work.', 'bad', 6000);
+    }
+    return this.lobby;
+  }
+
+  _renderFriends() {
+    if (!this.lobby || !this.lobby.me) return;
+    const canInvite = !!(this.lobby.game && this.mpRole === 'host');
+    this.ui.lobbyFriends(this.lobby.friends, this.lobby.online, canInvite, (f) => {
+      this.lobby.inviteFriend(f.id);
+      this.ui.showBanner(`📨 Invite sent to ${f.name}.`, '', 2500);
+    });
+  }
+
+  async createOnlineGame(visibility) {
+    const lobby = await this._openLobby();
+    if (!lobby || !lobby.connected || lobby.game) return;
+    this.audio.init();
+    this.mpRole = 'host';
+    this.onlineMode = true;
+    this.onlinePending = new Map();
+    try {
+      const game = await lobby.createGame({ visibility, level: this.ui.selectedLevel || 1, mode: this.ui.selectedMode || 'campaign' });
+      this.ui.showSetup({ online: game, mode: game.mode });
+      this._renderFriends();
+    } catch (e) {
+      this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
+      this.mpRole = null;
+      this.onlineMode = false;
+    }
+  }
+
+  // Host side of the automatic handshake: a guest knocked — offer them a
+  // WebRTC session through the signaling channel.
+  async _onKnock(sig) {
+    if (this.peers.length >= 2 || this.netMode || !this.onlinePending) return;
+    if (this.onlinePending.has(sig.from)) return;
+    const peer = new NetSession();
+    const idx = this.peers.length;
+    peer.onOpen = () => {
+      this.peers.push(peer);
+      this.guestHeroes.push(null);
+      this.guestCmdQueues.push([]);
+      this.onlinePending.delete(sig.from);
+      peer.send({ t: 'lobby', n: this.peers.length + 1 });
+      this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
+      if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
+      this._renderFriends();
+    };
+    peer.onMessage = (m) => this._onHostMsg(idx, m);
+    peer.onClose = () => {
+      if (this.netMode && this.game && !this.game.over) {
+        this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on alone.`, 'warn');
+      }
+    };
+    this.onlinePending.set(sig.from, peer);
+    try {
+      const code = await peer.host();
+      this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
+    } catch (e) {
+      this.onlinePending.delete(sig.from);
+    }
+  }
+
+  // Guest side: the host's offer arrived — answer it.
+  async _onSignal(sig) {
+    if (sig.t === 'offer' && this.mpRole === 'guest') {
+      this.net = new NetSession();
+      this.net.onOpen = () => {
+        this.net.send({ t: 'hero', k: this.ui.selectedHero });
+        this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
+      };
+      this.net.onMessage = (m) => this._onGuestMsg(m);
+      this.net.onClose = () => {
+        if (this.netMode && this.game && !this.game.over) {
+          this.pause();
+          this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
+        }
+      };
+      try {
+        const reply = await this.net.join(sig.sdp);
+        this.lobby.signal({ t: 'answer', to: sig.from, sdp: reply });
+      } catch (e) {
+        this.ui.onlineStatus('❌ Handshake failed — refresh and try again.');
+      }
+    } else if (sig.t === 'answer' && this.mpRole === 'host' && this.onlinePending) {
+      const peer = this.onlinePending.get(sig.from);
+      if (peer) peer.acceptReply(sig.sdp).catch(() => {});
+    }
+  }
+
+  async joinOnlineGame(row) {
+    const lobby = await this._openLobby();
+    if (!lobby || !lobby.connected || this.netMode) return;
+    this.audio.init();
+    this.mpRole = 'guest';
+    this.onlineMode = true;
+    this.ui.showSetup({ online: row, mode: row.mode });
+    this.ui.onlineStatus('🔗 Knocking on the host\'s gate…');
+    this.ui.root.querySelector('#s-start').classList.add('disabled');
+    await lobby.joinGame(row);
+  }
+
+  async joinByCode(code) {
+    if (!code || !code.trim()) return;
+    const lobby = await this._openLobby();
+    if (!lobby || !lobby.connected) return;
+    const row = await lobby.findByCode(code);
+    if (row) this.joinOnlineGame(row);
+    else this.ui.showBanner('❌ No open war with that code.', 'bad', 4000);
+  }
+
+  async acceptInvite(inv) {
+    const lobby = await this._openLobby();
+    const row = await lobby.findByCode(inv.joinCode);
+    if (row) this.joinOnlineGame(row);
+    else this.ui.showBanner('❌ That war has already ended.', 'bad', 4000);
+  }
 
   _setupLights() {
     // Grimdark mood: low amber sun through ashen haze.
@@ -1615,15 +1784,15 @@ class App {
         case 'victory':
           this.audio.victory();
           this.pause();
+          this.ui.showEnd(true, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0);
           this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.night, g.levelId);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
+          this.ui.showEnd(false, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0);
           this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.night, g.levelId);
           break;
       }
     }

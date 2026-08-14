@@ -20,11 +20,12 @@ const setNextId = (v) => { nextId = v; };
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1) {
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'campaign') {
     this.map = map;
     this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.levelId = snap ? snap.level : levelId;
+    this.mode = snap ? snap.mode || 'campaign' : mode;
     this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
     this.boss = null;
     this.rng = makeRNG(999);
@@ -67,7 +68,7 @@ export class Game {
 
   snapshot() {
     return {
-      v: 2, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId,
+      v: 2, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       time: +this.time.toFixed(3), night: this.night, phase: this.phase, phaseT: +this.phaseT.toFixed(3),
       belling: this.belling ? +this.bellT.toFixed(3) : -1,
       gold: +this.gold.toFixed(3),
@@ -394,8 +395,19 @@ export class Game {
       edges.push(e);
       e = (e + 1 + ((this.rng() * 2) | 0)) % 4;
     }
-    this.nightPlan = { size: w.size, types: w.types, edges, final: w.final };
+    const final = this.mode === 'campaign' && w.final;
+    // Survival: a boss leads every 5th night, cycling the campaign roster
+    // with ever-growing health.
+    const bossNight = this.mode === 'survival' && this.night % 5 === 0;
+    this.nightPlan = { size: w.size, types: w.types, edges, final, boss: final || bossNight };
     this.emit({ type: 'nightplan', edges });
+  }
+
+  // Which boss stalks this night (survival cycles the roster).
+  nightBossDef() {
+    if (this.mode === 'campaign') return this.level.boss;
+    const base = LEVELS[Math.max(0, (((this.night / 5) | 0) - 1) % LEVELS.length)].boss;
+    return { ...base, hp: Math.round(base.hp * (0.8 + this.night * 0.06)) };
   }
 
   // Thronefall-exact: the day is untimed — night begins only when someone
@@ -436,21 +448,22 @@ export class Game {
     this.phaseT = NIGHT_MAX;
     const plan = this.nightPlan;
     this._spawnHorde(plan.size, plan.edges, plan.types);
-    if (plan.final) this._spawnBoss(plan.edges[0]);
+    if (plan.boss) this._spawnBoss(plan.edges[0]);
     const N = this.map.size;
     const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
     for (const ed of plan.edges) this.emit({ type: 'ping', x: edgeMid[ed][0], z: edgeMid[ed][1] });
     const dirs = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
     this.msg(plan.final
       ? `☠️ THE FINAL NIGHT. Everything they have, all at once. Survive this and the land is yours!`
-      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${plan.edges.map((e) => dirs[e]).join(' and ')}!`, 'bad');
+      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${plan.edges.map((e) => dirs[e]).join(' and ')}!${plan.boss ? ' Something enormous walks among them…' : ''}`, 'bad');
     this.emit({ type: 'horde', final: !!plan.final });
     this.emit({ type: 'night' });
   }
 
   _startDay() {
-    // Straggling wave zombies (safety timeout) keep fighting, but the sun rises.
-    for (const zb of this.zombies) if (zb.wave) zb.wave = false;
+    // Straggling wave zombies (safety timeout) keep fighting, but the sun
+    // rises. Bosses stay "wave" — a night is never clear while one stands.
+    for (const zb of this.zombies) if (zb.wave && !zb.boss) zb.wave = false;
     this.night++;
     this.phase = 'day';
     this.phaseT = 0;
@@ -771,7 +784,8 @@ export class Game {
 
   _spawnBoss(edge) {
     const N = this.map.size;
-    const B = this.level.boss;
+    const B = this.nightBossDef();
+    this.bossDef = B;
     let x = N / 2, z = N / 2;
     if (edge === 0) z = 4; else if (edge === 1) x = N - 4; else if (edge === 2) z = N - 4; else x = 4;
     for (let r = 0; r < 12; r++) {
@@ -787,7 +801,7 @@ export class Game {
       hp: def.hp, maxHp: def.hp,
       state: AGGRO, dirX: 0, dirZ: 0, timer: 0,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
-      wave: true, hitFlash: 0, boss: true,
+      wave: true, hitFlash: 0, boss: true, cfg: B,
       armor: B.armor || 0, spawnT: B.spawn ? B.spawn.every : 0, roarT: B.roar ? B.roar.every : 0,
     };
     this.zombies.push(zb);
@@ -798,7 +812,7 @@ export class Game {
   }
 
   _updateBoss(zb, dt) {
-    const B = this.level.boss;
+    const B = zb.cfg || this.level.boss;
     // Bosses shrug off most crowd control.
     if (zb.stunT > 0.8) zb.stunT = 0.8;
     if (zb.slowT > 0 && zb.slowMul < 0.75) zb.slowMul = 0.75;
@@ -868,10 +882,11 @@ export class Game {
     if (zb.hp <= 0) return;
     if (zb.armor) dmg *= 1 - zb.armor;
     zb.hp -= dmg;
-    if (zb.boss && this.level.boss.enrage && !zb.enraged && zb.hp < zb.maxHp * this.level.boss.enrage) {
+    const bcfg = zb.cfg;
+    if (zb.boss && bcfg && bcfg.enrage && !zb.enraged && zb.hp < zb.maxHp * bcfg.enrage) {
       zb.enraged = true;
       zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
-      this.msg(`${this.level.boss.icon} ${this.level.boss.name} ENRAGES!`, 'bad');
+      this.msg(`${bcfg.icon} ${bcfg.name} ENRAGES!`, 'bad');
       this.emit({ type: 'enrage', x: zb.x, z: zb.z });
     }
     zb.hitFlash = 0.15;
@@ -881,7 +896,7 @@ export class Game {
       this.stats.kills++;
       if (zb.boss) {
         this.boss = null;
-        this.msg(`🏆 ${this.level.boss.name} IS SLAIN! Purge the stragglers!`, 'info');
+        this.msg(`🏆 ${(zb.cfg || this.level.boss).name} IS SLAIN! Purge the stragglers!`, 'info');
         this.emit({ type: 'bossdown', x: zb.x, z: zb.z });
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2;

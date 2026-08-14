@@ -1,14 +1,15 @@
 # ZILLIONS
 
-Zillions is a browser-based survival RTS.
+Zillions is a browser-based zombie survival game in the spirit of **Thronefall**:
+you are the hero, riding through a pre-designed city that you bring to life with
+gold — by day you build and collect, by night you fight the horde.
 
-It mixes:
-
-- They Are Billions colony survival.
-- Warcraft III hero control and ability leveling.
-- StarCraft-style army orders and base pressure.
-- Warhammer-style grim space-marine flavor.
-- Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
+- Thronefall-style build-by-standing economy with one resource: gold.
+- A wave every night; you decide when night falls by ringing the bell.
+- Direct hero control (WASD) with auto-attack and one signature ability each.
+- Grimdark space-marine heroes, procedural hordes, flow-field pathfinding.
+- Campaign (5 maps, 5 bosses) and endless Survival mode.
+- Online lobby with public/private games, global chat, lore, and friends.
 
 The repo is a static Three.js game. There is no build step and no package install is required.
 
@@ -28,67 +29,69 @@ Then open:
 - `http://localhost:8000/`
 - `http://localhost:8000/assets.html`
 
-## Current Game
+## How It Plays
 
-The dead cover the map. You found a colony, build an economy, train defenders, and survive 10 days.
+Every map generates the same designed city around the Keep: a plaza ring of
+house plots, farm and mill lanes, gold mines out on the ore veins, a ring of
+tower plots, and a walled rampart with gates at the compass points.
 
-Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
-
-Core systems:
-
-- Build hab-tents, hydro-farms, sawmills, quarries, gold mines, wind generators, walls, towers, and barracks.
-- Train scouts, troopers, and snipers.
-- Noise matters. Gunfire attracts nearby zombies.
-- Infection matters. Destroyed hab-tents spawn their residents into the horde.
-- Night matters. Zombies move faster and attack harder at night.
-- The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
-- The Overseer bot can run colony economy and defenses so the player can fight as the hero.
+- **Days are untimed.** Collect the coins your buildings paid out at dawn,
+  stand on glowing foundations to fund them (partial payments persist), linger
+  at a built structure's pay plate to upgrade it. Top-tier towers make you
+  choose a doctrine: ballista (single-target sniper) or flame (splash).
+- **Ring the bell** (Space) when ready — night falls, and a horde marches from
+  the red beacons that were visible all day. Night ends when the wave dies.
+- **Ruins rebuild free at dawn** — losing a building costs you its function for
+  the night and its dawn payout, not the building itself.
+- **Camps field troops** that respawn each dawn. Press 1/2/3 to rally the
+  army / militia / ranged to follow you, press again to hold position.
+- **Campaign**: survive 10 nights; a unique boss leads the final horde on each
+  of the 5 maps. **Survival**: endless nights, a boss every fifth, growing
+  forever — your record is the number of nights you lasted.
 
 ## Hero Roster
 
-Each hero is a space marine with Warcraft III / Dota-style abilities.
+Heroes auto-attack on their own — you steer, position, and fire the special.
 
-| Hero | Style | Q | W | E | R |
-| --- | --- | --- | --- | --- | --- |
-| Captain Scott | Close-range tank | Whirlwind | War Cry | Purifying Light | Sun Strike |
-| Alexander | Mid-range map-control marksman | Entangling Roots | Teleportation | Marksman's Focus | Assassinate |
-| Danny | Long-range stealth sniper | Death Pulse | Beetle Swarm | Cloak & Dagger | Time Lapse |
+| Hero | Style | Special (Space/Q) |
+| --- | --- | --- |
+| Captain Scott | Melee whirlwind of steel | Whirlwind — spin-to-win while moving |
+| Alexander | Mid-range marksman | Entangling Roots — AoE root + damage |
+| Danny | Long-range sniper | Shadow Veil — vanish, then a massive backstab shot |
 
-Hero rules:
-
-- Heroes earn XP from kills within 14 tiles.
-- Heroes level from 1 to 10.
-- Each level gives one skill point.
-- Normal ability ranks unlock at hero levels 1, 3, and 5.
-- Ultimates unlock at hero level 6.
-- A hero revives at Fortress Command after death.
-- Brutes can drop loot crates.
+Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
+up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| WASD / arrows / screen edge | Pan camera |
+| WASD / arrows | Move your hero (camera follows) |
+| Shift | Sprint |
+| Space | Day: ring the bell · Night: cast your special |
+| Q | Cast your special |
+| 1 / 2 / 3 | Rally army / militia / ranged (toggle follow ↔ hold) |
 | Mouse wheel | Zoom |
 | Z / C | Rotate camera |
-| F | Select hero |
-| Double-tap F | Center camera on hero |
-| Q / W / E / R | Cast selected hero ability |
-| Left click / drag | Select units |
-| Right click | Move squad or cancel build |
-| T | Select whole army |
-| 1-9 | Manual build hotkeys |
-| U / I / O | Train scout / trooper / sniper |
-| Space | Pause |
+| P | Pause (solo) |
+| Esc | Menu |
 | M | Mute |
-| H | Help |
-| Esc | Cancel |
 
-## Co-op multiplayer (up to 3 players, no server)
+## Playing together
 
-Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
+**Online lobby** (main menu → Online Lobby): a global chat where commanders
+hang out, read the lore, and see every public war currently open. Create a
+public or private game (private games are joined by 6-letter code), add
+friends by trading commander codes, see who's online, and invite friends
+straight into your game. Matchmaking signaling runs over Supabase Realtime;
+the actual gameplay is peer-to-peer WebRTC lockstep (up to 3 players, one
+hero each). The Supabase publishable key in `src/online.js` is a client-side
+key by design (row-level security is enabled); the lobby tables are
+namespaced `zillions_*`.
 
-Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero infrastructure) running **host-sequenced deterministic lockstep**: the host merges everyone's commands into numbered windows and broadcasts them (~10 tiny packets/sec regardless of zombie count); every machine simulates the identical world, and periodic state hashes detect desyncs. All players should use the same browser family (e.g. all Chrome) — identical floating point keeps the worlds in perfect sync.
+**Manual invite codes** (lobby → "Manual invite codes"): the serverless
+fallback — trade invite/reply codes over any chat channel, no lobby backend
+needed.
 
 ## Profiles & saved games
 
