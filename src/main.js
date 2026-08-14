@@ -180,6 +180,7 @@ class App {
     this.bhitSfxT = 0;
     this.smokeT = 0;
     this.minimapT = 0;
+    this.transientFx = [];
 
     // Surface profile + resumable save on the menu.
     this.ui.setProfile(this.profile);
@@ -710,6 +711,84 @@ class App {
     this.points.geometry.attributes.size.needsUpdate = true;
   }
 
+  _spawnShotBeam(x1, y1, z1, x2, y2, z2, color = 0xffe08a, radius = 0.025, life = 0.14) {
+    if (!Number.isFinite(x1) || !Number.isFinite(z1) || !Number.isFinite(x2) || !Number.isFinite(z2)) return;
+    const start = new THREE.Vector3(x1, y1 || 0.75, z1);
+    const end = new THREE.Vector3(x2, y2 || 0.55, z2);
+    const dir = end.clone().sub(start);
+    const len = dir.length();
+    if (len < 0.05) return;
+    const geo = new THREE.CylinderGeometry(radius, radius * 0.55, len, 6);
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(start).add(end).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    mesh.renderOrder = 8;
+    this.scene.add(mesh);
+    this.transientFx.push({ mesh, life, age: 0, baseOpacity: mat.opacity, kind: 'beam' });
+  }
+
+  _spawnHitRing(x, z, color = 0xffd27a, radius = 0.72, life = 0.22) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    const geo = new THREE.RingGeometry(0.18, 0.28, 32);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.12, z);
+    mesh.renderOrder = 8;
+    this.scene.add(mesh);
+    this.transientFx.push({ mesh, life, age: 0, baseOpacity: mat.opacity, kind: 'ring', radius });
+  }
+
+  _updateTransientFx(dt) {
+    for (let i = this.transientFx.length - 1; i >= 0; i--) {
+      const fx = this.transientFx[i];
+      fx.age += dt;
+      const k = clamp(fx.age / fx.life, 0, 1);
+      fx.mesh.material.opacity = fx.baseOpacity * (1 - k);
+      if (fx.kind === 'ring') {
+        const s = lerp(0.45, fx.radius, k);
+        fx.mesh.scale.setScalar(s);
+      } else {
+        fx.mesh.scale.x = lerp(1.15, 0.55, k);
+        fx.mesh.scale.z = lerp(1.15, 0.55, k);
+      }
+      if (k >= 1) {
+        this.scene.remove(fx.mesh);
+        fx.mesh.geometry.dispose();
+        fx.mesh.material.dispose();
+        this.transientFx.splice(i, 1);
+      }
+    }
+  }
+
+  _kickUnitAt(x, z, kind = 'shot') {
+    let best = null;
+    let bestD = kind === 'melee' ? 1.4 : 0.85;
+    for (const rec of this.unitMeshes.values()) {
+      const u = rec.u;
+      if (!u || u.dead) continue;
+      const d = Math.hypot(u.x - x, u.z - z);
+      if (d < bestD) {
+        bestD = d;
+        best = rec;
+      }
+    }
+    if (best) best.recoilT = kind === 'melee' ? 0.22 : 0.16;
+  }
+
   // ---------------- zombies (instanced) ----------------
 
   _setupZombieMeshes() {
@@ -1168,6 +1247,45 @@ class App {
     return sprite;
   }
 
+  _makePlotMarker(plot) {
+    const info = plotInfo(plot.key);
+    const group = new THREE.Group();
+    const color = info.color;
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.42, 0.09, 24),
+      new THREE.MeshBasicMaterial({ color: 0x101418, transparent: true, opacity: 0.86, depthWrite: false }),
+    );
+    plate.position.y = 0.13;
+    const rimGeo = new THREE.RingGeometry(0.34, 0.44, 28);
+    rimGeo.rotateX(-Math.PI / 2);
+    const rim = new THREE.Mesh(
+      rimGeo,
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.72, depthWrite: false }),
+    );
+    rim.position.y = 0.19;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 96;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 96, 96);
+    ctx.fillStyle = 'rgba(255, 244, 200, 0.96)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '800 56px system-ui, sans-serif';
+    ctx.fillText(info.icon, 48, 49);
+    const tex = new THREE.CanvasTexture(canvas);
+    const icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    icon.position.y = 0.58;
+    icon.scale.set(0.7, 0.7, 1);
+    icon.renderOrder = 6;
+
+    group.add(plate, rim, icon);
+    group.userData = { plate, rim, icon };
+    group.renderOrder = 5;
+    return group;
+  }
+
   _makePlotMesh(plot) {
     const info = plotInfo(plot.key);
     const group = new THREE.Group();
@@ -1192,10 +1310,9 @@ class App {
     const preview = this._makeBuildingPreviewMesh(plot.key);
     preview.position.y = -0.35;
     preview.scale.setScalar(0.82);
-    const label = this._makePlotLabel(plot, false);
-    label.position.y = 1.9;
-    group.add(base, preview, ring, beacon, label);
-    group.userData = { base, preview, ring, beacon, label, labelKey: '' };
+    const marker = this._makePlotMarker(plot);
+    group.add(base, preview, ring, beacon, marker);
+    group.userData = { base, preview, ring, beacon, marker, label: null, labelKey: '' };
     group.renderOrder = 2;
     return group;
   }
@@ -1220,26 +1337,45 @@ class App {
         this.plotMeshes.set(plot.id, rec);
       }
       const progress = plotPaidTotal(plot);
+      const active = plot.id === activeId;
+      const hovered = plot.id === hoverId;
+      const focused = this.focusedPlot?.id === plot.id;
+      const detailed = active || hovered || focused;
       rec.mesh.position.set(plot.cx, 0, plot.cz);
-      rec.mesh.userData.base.material.opacity = 0.16 + progress * 0.22;
-      rec.mesh.userData.ring.material.opacity = (plot.id === activeId ? 0.9 : 0.42) + progress * 0.18;
-      const ghostOpacity = 0.1 + progress * 0.62 + (plot.id === activeId || plot.id === hoverId ? 0.08 : 0);
+      rec.mesh.userData.base.material.opacity = 0.04 + progress * 0.16 + (detailed ? 0.08 : 0);
+      rec.mesh.userData.ring.material.opacity = (active ? 0.74 : hovered ? 0.52 : 0.1) + progress * 0.2;
+      const ghostOpacity = 0.025 + progress * 0.58 + (detailed ? 0.14 : 0);
       this._setGhostOpacity(rec.mesh.userData.preview, Math.min(0.82, ghostOpacity));
       rec.mesh.userData.preview.position.y = lerp(-0.42, 0, progress);
       rec.mesh.userData.preview.scale.setScalar(lerp(0.82, 1, progress));
-      rec.mesh.userData.beacon.visible = plot.id === activeId || progress > 0.02;
-      rec.mesh.userData.beacon.scale.y = 0.55 + progress * 1.4 + (plot.id === activeId ? Math.sin(t * 5) * 0.12 : 0);
-      const detailed = plot.id === activeId || plot.id === hoverId || this.focusedPlot?.id === plot.id;
-      const labelKey = `${plot.key}:${detailed ? 1 : 0}:${Math.round(progress * 100)}:${plotCostText(plot)}:${plotTimerText(plot)}`;
+      rec.mesh.userData.beacon.visible = active || progress > 0.04;
+      rec.mesh.userData.beacon.material.opacity = active ? 0.72 : 0.36;
+      rec.mesh.userData.beacon.scale.y = 0.42 + progress * 1.2 + (active ? Math.sin(t * 5) * 0.12 : 0);
+      const marker = rec.mesh.userData.marker;
+      const pulse = detailed ? 1 + Math.sin(t * 4.2 + plot.id) * 0.08 : 1 + Math.sin(t * 2.2 + plot.id) * 0.025;
+      marker.scale.setScalar(pulse);
+      marker.position.y = 0.02 + (detailed ? 0.03 : 0);
+      marker.userData.rim.material.opacity = (detailed ? 0.92 : 0.46) + progress * 0.18;
+      marker.userData.icon.material.opacity = detailed ? 1 : 0.8;
+
+      if (!detailed) {
+        if (rec.mesh.userData.label) {
+          rec.mesh.remove(rec.mesh.userData.label);
+          rec.mesh.userData.label = null;
+          rec.mesh.userData.labelKey = '';
+        }
+        continue;
+      }
+      const labelKey = `${plot.key}:${Math.round(progress * 100)}:${plotCostText(plot)}:${plotTimerText(plot)}`;
       if (rec.mesh.userData.labelKey !== labelKey) {
-        rec.mesh.remove(rec.mesh.userData.label);
-        const label = this._makePlotLabel(plot, detailed);
+        if (rec.mesh.userData.label) rec.mesh.remove(rec.mesh.userData.label);
+        const label = this._makePlotLabel(plot, true);
         label.position.y = 1.9;
         rec.mesh.add(label);
         rec.mesh.userData.label = label;
         rec.mesh.userData.labelKey = labelKey;
       }
-      rec.mesh.userData.label.position.y = (detailed ? 2.75 : 2.05) + Math.sin(t * 2.3 + plot.id) * 0.08;
+      rec.mesh.userData.label.position.y = 2.65 + Math.sin(t * 2.3 + plot.id) * 0.06;
     }
     for (const [id, rec] of this.plotMeshes) {
       if (!seen.has(id)) {
@@ -1274,36 +1410,70 @@ class App {
       const armR = add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.06), M(0x4a3a28)), 0.24, 0.45, 0);
       armR.rotation.z = -0.5;
     } else if (u.hero) {
-      // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
+      // Thronefall-inspired rider: compact silhouette, readable cape, clear weapon.
       const d = u.def;
       const armor = M(d.color), trim = M(d.trim);
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.26), M(0x26282c)), 0, 0.2, 0);          // legs
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.36), armor), 0, 0.62, 0);                 // torso
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.05), trim), 0, 0.68, 0.19);               // chest plate
-      add(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), -0.34, 0.86, 0);               // pauldron L
-      add(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), 0.34, 0.86, 0);                // pauldron R
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 0.22), M(0x3a3d42)), 0, 1.0, 0);           // helm
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), M(0x35ff70, 0.9)), 0, 1.0, 0.12);   // visor glow
-      add(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x2e3033)), 0, 0.72, -0.26);       // backpack
-      add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26); // vent L
-      add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);  // vent R
+      const mount = M(0x2e2a24);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.34, 0.92), mount), 0, 0.38, 0);                 // mount body
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.34), mount), 0, 0.48, 0.58);              // head
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.48, 0.1), M(0x201d18)), -0.2, 0.16, 0.26);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.48, 0.1), M(0x201d18)), 0.2, 0.16, 0.26);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.48, 0.1), M(0x201d18)), -0.2, 0.16, -0.3);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.48, 0.1), M(0x201d18)), 0.2, 0.16, -0.3);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.42), trim), 0, 0.6, -0.02);               // saddle
+      add(new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.56, 6), armor), 0, 0.98, 0);                  // rider body
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), M(0xffd6aa)), 0, 1.32, 0.03);         // head
+      const crown = add(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.12, 6), trim), 0, 1.48, 0.03);
+      crown.rotation.y = Math.PI / 6;
+      const cape = add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.08), armor), 0, 0.92, -0.25);
+      cape.rotation.x = -0.28;
+      const weapon = new THREE.Group();
+      weapon.position.set(d.melee ? 0.34 : 0.27, 0.95, 0.34);
+      weapon.rotation.x = d.melee ? 0.45 : 0.08;
+      const weaponMat = M(0x1e1f21);
       if (d.melee) {
-        const blade = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.16), trim), 0.42, 0.6, 0.22);
-        blade.rotation.x = 0.5;
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.82, 0.13), trim);
+        blade.position.set(0.05, 0.04, 0.02);
+        blade.rotation.x = 0.62;
+        weapon.add(blade);
       } else if (u.key === 'alexander') {
-        // Twin guns for the run-and-gunner.
-        add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), 0.3, 0.64, 0.24);
-        add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), -0.3, 0.64, 0.24);
+        const left = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.54), weaponMat);
+        const right = left.clone();
+        left.position.set(-0.12, 0, 0.08);
+        right.position.set(0.12, 0, 0.08);
+        weapon.add(left, right);
       } else {
-        add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // long rifle
+        const bow = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.025, 6, 18, Math.PI), trim);
+        bow.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+        bow.position.set(0, 0.02, 0.06);
+        const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.62), weaponMat);
+        bolt.position.set(0, 0, 0.12);
+        weapon.add(bow, bolt);
       }
-      // Faint always-on hero halo.
-      const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
-      haloGeo.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.5, depthWrite: false }));
-      halo.position.y = 0.03;
-      g.add(halo);
-      g.scale.setScalar(1.18);
+      g.add(weapon);
+      g.userData.weapon = weapon;
+      if (d.melee) {
+        const arm = add(new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.08), trim), 0.26, 0.96, 0.22);
+        arm.rotation.z = -0.35;
+      }
+      const auraGeo = new THREE.RingGeometry(0.66, 0.92, 48);
+      auraGeo.rotateX(-Math.PI / 2);
+      const aura = new THREE.Mesh(
+        auraGeo,
+        new THREE.MeshBasicMaterial({ color: d.trim, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      aura.position.y = 0.025;
+      const pulseGeo = new THREE.RingGeometry(0.98, 1.08, 48);
+      pulseGeo.rotateX(-Math.PI / 2);
+      const pulse = new THREE.Mesh(
+        pulseGeo,
+        new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      pulse.position.y = 0.03;
+      g.add(aura, pulse);
+      g.userData.heroAura = aura;
+      g.userData.heroAuraPulse = pulse;
+      g.scale.setScalar(1.08);
     } else {
       // Guardsman-style trooper.
       const d = u.def;
@@ -1323,21 +1493,48 @@ class App {
     return g;
   }
 
-  _syncUnits() {
+  _syncUnits(dt = 0.016) {
     const g = this.game;
     const seen = new Set();
+    const t = this.clock.elapsedTime;
     for (const u of g.units) {
       seen.add(u.id);
       let rec = this.unitMeshes.get(u.id);
       if (!rec) {
         const mesh = this._makeUnitMesh(u);
         this.scene.add(mesh);
-        rec = { mesh, u };
+        rec = { mesh, u, step: 0, recoilT: 0, lastX: u.x, lastZ: u.z };
         this.unitMeshes.set(u.id, rec);
       }
-      rec.mesh.position.set(u.x, 0, u.z);
+      const moved = Math.hypot(u.x - rec.lastX, u.z - rec.lastZ) > 0.01;
+      rec.step += dt * (moved ? 9 : 2.2);
+      rec.recoilT = Math.max(0, (rec.recoilT || 0) - dt);
+      const bob = u.hero
+        ? moved ? Math.sin(rec.step) * 0.055 : Math.sin(t * 2 + u.id) * 0.018
+        : 0;
+      rec.mesh.position.set(u.x, bob, u.z);
       rec.mesh.rotation.y = u.hero && u.whirlT > 0 ? this.clock.elapsedTime * 18 : u.facing;
+      rec.mesh.rotation.z = u.hero && moved ? Math.sin(rec.step * 0.5) * 0.035 : 0;
       rec.mesh.userData.ring.visible = u.selected;
+      if (u.hero) {
+        const aura = rec.mesh.userData.heroAura;
+        const pulse = rec.mesh.userData.heroAuraPulse;
+        if (aura && pulse) {
+          const sel = u.selected ? 1 : 0;
+          aura.scale.setScalar(1 + Math.sin(t * 3 + u.id) * 0.035 + sel * 0.08);
+          aura.material.opacity = (u.stealth ? 0.14 : 0.3) + sel * 0.14;
+          pulse.scale.setScalar(1.08 + Math.sin(t * 2.1 + u.id) * 0.09 + sel * 0.08);
+          pulse.material.opacity = (u.stealth ? 0.06 : 0.13) + sel * 0.1;
+        }
+        const weapon = rec.mesh.userData.weapon;
+        if (weapon) {
+          const k = clamp(rec.recoilT / 0.16, 0, 1);
+          weapon.position.z = 0.34 - k * 0.18;
+          weapon.rotation.x = (u.def?.melee ? 0.45 : 0.08) - k * (u.def?.melee ? 0.34 : 0.18);
+        }
+      }
+      rec.lastX = u.x;
+      rec.lastZ = u.z;
       // Cloaked heroes fade to a ghost.
       if (u.hero) {
         const wantOp = u.stealth ? 0.3 : 1;
@@ -2065,6 +2262,8 @@ class App {
         case 'shot': {
           if (e.kind === 'ricochet') {
             // Silent bounce tracer: sparks along the line, no gunshot.
+            this._spawnShotBeam(e.fx, e.fy || 0.65, e.fz, e.tx, 0.55, e.tz, 0xffca6e, 0.018, 0.1);
+            this._spawnHitRing(e.tx, e.tz, 0xffca6e, 0.45, 0.14);
             const steps = 4;
             for (let i = 0; i <= steps; i++) {
               const t2 = i / steps;
@@ -2077,11 +2276,16 @@ class App {
           if (e.kind === 'melee') {
             // Chainblade hit: metal spark arc at the victim, no tracer.
             this.audio.melee();
+            this._kickUnitAt(e.fx, e.fz, 'melee');
+            this._spawnHitRing(e.tx, e.tz, 0xffd27a, 0.78, 0.22);
             this.burst(e.tx, 0.7, e.tz, { count: 8, color: 0xffd27a, speed: 2.4, life: 0.25, size: 0.4, up: 1.4 });
             this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind);
+          this._kickUnitAt(e.fx, e.fz, 'shot');
+          this._spawnShotBeam(e.fx, e.fy || 0.75, e.fz, e.tx, 0.58, e.tz, e.kind === 'hero' ? 0xfff2b0 : 0xffe08a);
+          this._spawnHitRing(e.tx, e.tz, 0xff6a4a, 0.6, 0.18);
           this.burst(e.fx, e.fy || 0.7, e.fz, { count: 3, color: 0xffe08a, speed: 0.8, life: 0.12, size: 0.5, spread: 0.1, up: 0.3 });
           this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
           // tracer: a few sparks along the line
@@ -2100,6 +2304,7 @@ class App {
           if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
           break;
         case 'bite':
+          this._spawnHitRing(e.x, e.z, 0xb32020, 0.42, 0.16);
           this.burst(e.x, 0.7, e.z, { count: 4, color: 0xb32020, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
           break;
         case 'udeath':
@@ -2332,8 +2537,9 @@ class App {
       this._consumeEvents();
       this._syncPlots();
       this._syncBuildings();
-      this._syncUnits();
+      this._syncUnits(dt);
       this._syncPickups();
+      this._updateTransientFx(dt);
       this._updateZombieMeshes(t);
       this._updateBars();
       this._updateGhost();

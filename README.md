@@ -42,7 +42,7 @@ Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day
 Core systems:
 
 - Build only through foundations. Free-placement building is removed from the playable game.
-- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Each foundation shows the planned building, its timer, and what it gives you. The final model fades in as construction progresses.
+- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Inactive foundations stay clean with a small marker and building silhouette. Hover, focus, or build a foundation to see its name, timer, and payoff. The final model fades in as construction progresses.
 - Train scouts, troopers, and snipers.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
@@ -52,7 +52,7 @@ Core systems:
 
 ## Hero Roster
 
-Each hero is a space marine with Warcraft III / Dota-style abilities.
+Each hero is a low-poly rider with Warcraft III / Dota-style abilities, a subtle aura, and clean attack feedback.
 
 | Hero | Style | Q | W | E | R |
 | --- | --- | --- | --- | --- | --- |
