@@ -82,6 +82,8 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => {
+        this.audio.init(this.game ? 'game' : 'menu', this.game?.levelId || this.ui.selectedLevel || 1);
+        if (!this.game) this.audio.voiceSample(k);
         if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k });
         this._heartbeatLobby();
       },
@@ -100,6 +102,8 @@ class App {
       onContinue: () => this.continueGame(),
       onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); this._heartbeatLobby(); },
     });
+    this.audio.setScene('menu', this.ui.selectedLevel || 1);
+    this._setupAudioUnlock();
 
     this._setupLights();
     this._setupPicking();
@@ -165,16 +169,27 @@ class App {
 
   // ---------------- setup ----------------
 
+  _setupAudioUnlock() {
+    const unlock = () => {
+      this.audio.init(this.game ? 'game' : 'menu', this.game?.levelId || this.ui.selectedLevel || 1);
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+  }
+
   async startGame(difficulty, heroKey, mp = null, snap = null) {
-    this.audio.init();
+    const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
+    const level = LEVELS[levelId - 1] || LEVELS[0];
+    this.audio.init('game', levelId);
+    this.audio.setScene('game', levelId);
     this._leaveLobby(false);
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
       await loadAssets();
       this.assetsLoaded = true;
     }
-    const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
-    const level = LEVELS[levelId - 1] || LEVELS[0];
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
@@ -1283,8 +1298,14 @@ class App {
     if (!live.length) return;
     const mh = this.myHero();
     if (mh && live.includes(mh)) this.audio.bark(mh.key, 'move');
+    else if (live.some((u) => !u.hero)) this.audio.faction('army', 'move');
     this.issue({ t: 'move', ids: live.map((u) => u.id), x, z });
     this.burst(x, 0.1, z, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
+  }
+
+  _selectionBark(units, category = 'selection') {
+    if (!units || !units.length) return;
+    if (units.some((u) => !u.hero)) this.audio.faction('army', category);
   }
 
   _resetOrderMode() {
@@ -1319,7 +1340,10 @@ class App {
         this.selection.push(u);
       }
     }
-    if (this.selection.length) this.audio.click();
+    if (this.selection.length) {
+      this.audio.click();
+      this._selectionBark(this.selection, 'selection');
+    }
     this.ui.showSelection(this.selection.length ? this.selection : null, this.game);
   }
 
@@ -1336,6 +1360,7 @@ class App {
       this.focus.z = unit.z;
     }
     this.audio.click();
+    if (!unit.hero) this.audio.faction('army', 'selection');
     this.ui.showSelection(this.selection, this.game);
   }
 
@@ -1357,6 +1382,7 @@ class App {
       this.selection.push(unit);
     }
     this.audio.click();
+    this._selectionBark(this.selection, 'selection');
     this.ui.showSelection(this.selection.length ? this.selection : null, this.game);
   }
 
@@ -1370,6 +1396,7 @@ class App {
     }
     if (this.selection.length) {
       this.audio.click();
+      this._selectionBark(this.selection, 'selection');
       this.focus.x = this.selection[0].x;
       this.focus.z = this.selection[0].z;
       this.ui.showSelection(this.selection, this.game);
@@ -1394,6 +1421,8 @@ class App {
         else this._heroClicks = 1;
         this._lastHeroSel = now;
         this.audio.bark(best.key, this._heroClicks >= 3 ? 'repeated' : 'selection');
+      } else {
+        this.audio.faction('army', 'selection');
       }
       this.audio.click();
       this.ui.showSelection(this.selection, g);
@@ -1481,6 +1510,7 @@ class App {
     }
     if (this.selection.length) {
       this.audio.click();
+      this._selectionBark(this.selection, 'selection');
       this.ui.showSelection(this.selection, this.game);
     }
   }
@@ -1736,6 +1766,7 @@ class App {
           break;
         case 'bdestroyed':
           this.audio.demolish();
+          this.audio.faction('townsfolk', 'alert');
           this.burst(e.x, 0.5, e.z, { count: 30, color: 0x7c6a4a, speed: 3, life: 0.8, size: 0.7, up: 2.6 });
           this.shake = Math.max(this.shake, 0.3);
           break;
@@ -1745,6 +1776,7 @@ class App {
           break;
         case 'horde':
           this.audio.alarm();
+          this.audio.faction('zombies', 'attack');
           this.shake = Math.max(this.shake, e.final ? 1.2 : 0.6);
           break;
         case 'train': this.audio.train(); break;
@@ -1783,6 +1815,7 @@ class App {
           break;
         case 'underattack':
           this.audio.underattack();
+          this.audio.faction('townsfolk', 'alert');
           break;
         case 'night':
           this.audio.night();

@@ -15,7 +15,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - Do not introduce a bundler, framework, or build step unless Alex explicitly asks.
 - Do not remove the existing game loop, hero system, or Overseer behavior unless the task is specifically about replacing them.
 - Do not commit API keys, model prompts with secrets, or private source material.
-- Treat generated media as concept assets until wired into runtime code.
+- Treat generated media as runtime assets only when `src/audio.js`, `src/ui.js`, or another runtime module references it. Do not expose repo review tools inside the game screen.
 
 ## Where To Look
 
@@ -26,7 +26,7 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 - `src/main.js` - Bootstraps renderer, UI, game loop, profiles, saves, and Vercel backend mirroring.
 - `src/backend.js` - Browser client for optional cloud state and lobby APIs.
 - `src/ui.js` - DOM HUD and hero picker.
-- `src/audio.js` - Runtime synthesized audio.
+- `src/audio.js` - Runtime generated MP3 audio plus WebAudio fallback.
 - `api/state.js` - Vercel Blob-backed JSON state API.
 - `api/lobby.js` - Vercel Blob-backed lobby presence and chat API.
 - `assets/audio/manifest.json` - Audio pack index.
@@ -48,17 +48,18 @@ The player builds a colony, survives zombie waves, controls a hero, and can let 
 
 ## Audio State
 
-Runtime audio is still procedural WebAudio. Generated MP3 packs are saved for review and later integration.
+Runtime audio uses generated MP3 assets first and keeps procedural WebAudio fallback for offline or blocked playback.
 
-Saved packs:
+Current wiring:
 
-- Hero samples.
-- Hero click barks.
-- Faction voices.
-- SFX.
-- Hero-select and map music.
+- Hero-select and map music play from `assets/audio/music/` after a user gesture.
+- Hero picker voice samples play from `assets/audio/voices/`.
+- Hero click barks play from `assets/audio/click-pack/`.
+- Army, townsfolk, and zombie barks play from current gameplay events. Robot and alien barks are ready in the manifest for future factions.
+- SFX play from `assets/audio/sfx-pack/` for UI, combat, colony, horde, hero, and zombie events.
+- Hero cinematics play in the hero picker from `assets/heroes/videos/`.
 
-If you wire generated audio into the game:
+When you change generated audio:
 
 - Keep WebAudio fallback.
 - Start playback only after user gesture.
@@ -66,6 +67,7 @@ If you wire generated audio into the game:
 - Add per-category cooldowns.
 - Do not overlap repeated click barks aggressively.
 - Keep hero voices louder than faction ambience.
+- Keep `/assets.html` available for repo review, but do not add an in-game button for it.
 
 ## Review Checklist
 
@@ -75,6 +77,7 @@ Before you call a change good:
 - Run `git diff --check`.
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
+- Confirm the game screen does not show a repo-only asset browser link.
 - Select a unit group and confirm the bottom command bar updates. Selection cards should focus units, and double-clicking a card should select that unit type.
 - Open `/assets.html` and confirm manifests load.
 - If backend code changed, deploy or run with Vercel and test a `POST /api/state` insert.

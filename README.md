@@ -125,6 +125,8 @@ GitHub Pages serves the static game and asset browser.
 
 Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel project needs a Blob store with `BLOB_READ_WRITE_TOKEN` configured. `vercel.json` adds cache headers for the 3D assets. Co-op still works on static hosts because networking is peer-to-peer from the players' browsers.
 
+The asset browser is a repo review page. The game screen does not link to it.
+
 ## Art And Physics
 
 - CC0 3D assets come from [KayKit Dungeon Remastered](https://kaylousberg.com): stone rampart walls, torches, war banners, crates, barrels, and a golden treasure chest. See `assets/KAYKIT-LICENSE.txt`.
@@ -134,15 +136,16 @@ Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel proje
 
 ## Audio Assets
 
-Runtime audio is still synthesized through WebAudio. Generated concept assets are stored in `assets/audio/` and can be reviewed in the asset browser.
+Runtime audio uses the generated MP3 packs first. WebAudio remains as a fallback if a browser blocks or misses an asset. Generated assets are stored in `assets/audio/` and can be reviewed in the asset browser.
 
-Current saved packs:
+Current runtime wiring:
 
-- `assets/audio/music/` - hero-select loop and map soundtrack loops.
-- `assets/audio/voices/` - first-pass hero voice samples.
-- `assets/audio/click-pack/` - 60 generated hero click barks.
-- `assets/audio/faction-voice-pack/` - 80 generated faction barks for army, robots, townsfolk, aliens, and zombies.
-- `assets/audio/sfx-pack/` - 29 generated sound effects for UI, weapons, creatures, robots, and town/colony events.
+- `assets/audio/music/` - hero-select music and map soundtrack loops.
+- `assets/audio/voices/` - hero picker voice samples.
+- `assets/audio/click-pack/` - hero selection, move, attack, and repeated-click barks.
+- `assets/audio/faction-voice-pack/` - army, townsfolk, and zombie barks play from current gameplay events. Robot and alien barks are ready for those factions when they enter gameplay.
+- `assets/audio/sfx-pack/` - UI clicks, denies, weapons, construction, horde alarms, zombie impacts, ability sounds, level-up, revive, and colony alerts.
+- `assets/heroes/videos/` - hero cinematic clips shown in the hero picker.
 
 Useful docs:
 
@@ -160,7 +163,7 @@ assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
 src/config.js           Balance, heroes, buildings, units, waves
-src/audio.js            Runtime WebAudio synth
+src/audio.js            Runtime MP3 audio plus WebAudio fallback
 src/backend.js          Browser client for cloud state and lobby APIs
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
@@ -189,7 +192,7 @@ AGENTS.md               Agent handoff and review instructions
 - The simulation runs at a fixed 30 Hz step. Rendering is separate.
 - Game speed supports 1x, 2x, and 4x in solo mode. Co-op locks to 1x.
 - Seeded RNG is used throughout the simulation. This supports lockstep co-op.
-- Generated music, voice, and SFX files are concept assets. Runtime integration is partial and should stay explicit in code and docs.
+- Generated music, voice, SFX, and hero cinematic files are runtime assets. Keep WebAudio fallback and direct asset-browser review paths.
 
 ## Agent Handoff
 

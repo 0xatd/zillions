@@ -4,6 +4,11 @@ const PORTRAITS = {
   scott: 'assets/heroes/images/scott_barbarian.png',
   danny: 'assets/heroes/images/danny_assassin.png',
 };
+const CINEMATICS = {
+  alexander: 'assets/heroes/videos/alexander_cinematic.mp4',
+  scott: 'assets/heroes/videos/scott_cinematic.mp4',
+  danny: 'assets/heroes/videos/danny_cinematic.mp4',
+};
 import {
   BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
@@ -152,7 +157,7 @@ export class UI {
       card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
       card.dataset.key = key;
       card.innerHTML = `
-        <img class="hface" src="${PORTRAITS[key]}" onerror="this.remove()" alt="">
+        <video class="hcinematic" muted loop playsinline preload="metadata" poster="${PORTRAITS[key]}" src="${CINEMATICS[key]}"></video>
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
@@ -160,6 +165,7 @@ export class UI {
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
+        this._syncHeroCinematics();
         if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
@@ -167,6 +173,7 @@ export class UI {
       card.onmouseleave = () => this._hideTip();
       herorow.appendChild(card);
     }
+    this._syncHeroCinematics();
 
     // Campaign level picker.
     this.selectedLevel = 1;
@@ -470,6 +477,20 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._syncHeroCinematics();
+  }
+
+  _syncHeroCinematics() {
+    for (const card of this.root.querySelectorAll('.herocard')) {
+      const video = card.querySelector('video');
+      if (!video) continue;
+      if (card.dataset.key === this.selectedHero) {
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+        try { video.currentTime = 0; } catch { /* metadata may not be loaded yet */ }
+      }
+    }
   }
 
   setContinue(snap) {
