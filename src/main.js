@@ -47,12 +47,12 @@ class App {
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
       onStart: (d, hero) => {
-        if (this.net && this.net.open) {
-          if (!this.net.isHost) return; // guest waits for host
+        if (this.mpRole === 'guest') return; // host launches the match
+        if (this.mpRole === 'host' && this.peers.length) {
           const seed = (Math.random() * 1e9) | 0;
-          const heroes = [hero, this.remoteHero || 'scott'];
-          this.net.send({ t: 'start', seed, d, heroes });
-          this.startGame(d, null, { seed, heroes, myPlayer: 0 });
+          const heroes = [hero, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+          this.peers.forEach((p, i) => p.send({ t: 'start', seed, d, heroes, you: i + 1 }));
+          this.startGame(d, null, { seed, heroes, myPlayer: 0, role: 'host' });
         } else {
           this.startGame(d, hero);
         }
@@ -66,12 +66,15 @@ class App {
       },
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
-      onHostAccept: (code) => this.net && this.net.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
-      onHeroPick: (k) => { if (this.net && this.net.open) this.net.send({ t: 'hero', k }); },
+      onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
+      onAddPeer: () => this._newInvite(),
+      onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k }); },
       onRestart: () => location.reload(),
       onMinimap: (u, v) => { this.focus.x = u * MAP_SIZE; this.focus.z = v * MAP_SIZE; },
       onDemolish: (b) => { this.issue({ t: 'demolish', id: b.id }); this.selectedBuilding = null; this.ui.showSelection(null); },
       onHelp: () => { this.pause(); this.ui.showHelp(); },
+      onContinue: () => this.continueGame(),
+      onName: (name) => { this.profile.name = name.slice(0, 24); this._saveProfile(); },
     });
 
     this._setupLights();
@@ -87,17 +90,25 @@ class App {
     this.rangeRing = this._makeRangeRing();
     this.scene.add(this.rangeRing);
 
-    // Co-op lockstep state.
+    // Co-op lockstep state (up to 3 players, host-sequenced star topology).
     this.myPlayer = 0;
-    this.net = null;
+    this.mpRole = null;          // null | 'host' | 'guest'
+    this.net = null;             // guest's connection to the host
+    this.peers = [];             // host's connections to guests
+    this.pendingPeer = null;     // host: invite awaiting a reply
+    this.guestHeroes = [];       // host: hero picks per guest
+    this.guestCmdQueues = [];    // host: commands received per guest
     this.netMode = false;
-    this.remoteHero = null;
     this.outbox = [];
     this.simFrame = 0;
     this.inbox = new Map();
-    this.localBundles = new Map();
-    this.hashes = { local: new Map(), remote: new Map() };
+    this.hashes = { local: new Map() };
     this.desynced = false;
+
+    // Profiles & saves (localStorage).
+    this.profile = this._loadProfile();
+    this.autosaveT = 20;
+    window.addEventListener('beforeunload', () => this._autosave(true));
 
     this._setupCorpses();
     this.groanAcc = 0;
@@ -105,6 +116,12 @@ class App {
     this.bhitSfxT = 0;
     this.smokeT = 0;
     this.minimapT = 0;
+
+    // Surface profile + resumable save on the menu.
+    this.ui.setProfile(this.profile);
+    if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
+    const save = this._loadSave();
+    if (save) this.ui.setContinue(save.snap);
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -114,24 +131,26 @@ class App {
 
   // ---------------- setup ----------------
 
-  async startGame(difficulty, heroKey, mp = null) {
+  async startGame(difficulty, heroKey, mp = null, snap = null) {
     this.audio.init();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
       await loadAssets();
       this.assetsLoaded = true;
     }
-    const seed = mp ? mp.seed : (Math.random() * 1e9) | 0;
+    const seed = snap ? snap.seed : mp ? mp.seed : (Math.random() * 1e9) | 0;
     this.map = new GameMap(seed);
-    this.game = new Game(this.map, difficulty, mp ? mp.heroes : heroKey);
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
+    this.game = new Game(this.map, difficulty, heroKeys, snap);
+    if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
     if (this.netMode) {
+      this.mpRole = mp.role;
       this.simFrame = 0;
       this.outbox = [];
       this.inbox = new Map();
-      this.localBundles = new Map();
-      this.hashes = { local: new Map(), remote: new Map() };
+      this.hashes = { local: new Map() };
       this.speed = 1;
     }
     this.terrain = this.map.buildTerrain();
@@ -152,36 +171,125 @@ class App {
     else this.game.exec(cmd);
   }
 
-  _wireNet() {
-    this.net.onOpen = () => {
-      this.ui.mpConnected(this.net.isHost);
-      this.net.send({ t: 'hero', k: this.ui.selectedHero });
-    };
-    this.net.onMessage = (m) => this._onNet(m);
-    this.net.onClose = () => {
-      if (this.netMode && !this.game.over) {
-        this.pause();
-        this.ui.showBanner('⚠️ Connection to the other player was lost.', 'bad', 8000);
-      }
-    };
+  // ----- profiles & saves -----
+
+  _loadProfile() {
+    try {
+      return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, ...JSON.parse(localStorage.getItem('zillions_profile') || '{}') };
+    } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null }; }
   }
+
+  _saveProfile() {
+    try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+  }
+
+  _loadSave() {
+    try { return JSON.parse(localStorage.getItem('zillions_save') || 'null'); } catch { return null; }
+  }
+
+  // Guests never autosave — the host owns the co-op save.
+  _autosave(force = false) {
+    if (!this.game || this.game.over || this.mpRole === 'guest') return;
+    if (!force && this.paused) return;
+    try {
+      localStorage.setItem('zillions_save', JSON.stringify({ when: Date.now(), snap: this.game.snapshot() }));
+    } catch { /* storage full */ }
+  }
+
+  _recordGameEnd(won) {
+    const p = this.profile;
+    p.games++;
+    if (won) p.wins++;
+    p.kills += this.game.stats.kills;
+    p.bestDay = Math.max(p.bestDay, Math.min(this.game.day, FINAL_DAY));
+    p.lastHero = this.ui.selectedHero;
+    this._saveProfile();
+    try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+  }
+
+  continueGame() {
+    const save = this._loadSave();
+    if (!save) return;
+    if (this.mpRole === 'host' && this.peers.length) {
+      if (save.snap.heroKeys.length !== this.peers.length + 1) {
+        this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
+        return;
+      }
+      this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1 }));
+      this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
+    } else if (!this.mpRole) {
+      this.startGame(save.snap.diff, null, null, save.snap);
+    }
+  }
+
+  // ----- host side -----
 
   async hostGame() {
     this.audio.init();
-    this.net = new NetSession();
-    this._wireNet();
+    this.mpRole = 'host';
+    await this._newInvite();
+  }
+
+  // Each joining player gets their own invite/reply exchange.
+  async _newInvite() {
+    const peer = new NetSession();
+    this.pendingPeer = peer;
+    const idx = this.peers.length; // becomes player idx+1
+    peer.onOpen = () => {
+      this.peers.push(peer);
+      this.guestHeroes.push(null);
+      this.guestCmdQueues.push([]);
+      this.pendingPeer = null;
+      peer.send({ t: 'lobby', n: this.peers.length + 1 });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 2);
+    };
+    peer.onMessage = (m) => this._onHostMsg(idx, m);
+    peer.onClose = () => {
+      if (this.netMode && this.game && !this.game.over) {
+        this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on alone.`, 'warn');
+      }
+    };
     try {
-      const code = await this.net.host();
-      this.ui.mpShowHost(code);
+      const code = await peer.host();
+      this.ui.mpShowHost(code, this.peers.length);
     } catch (e) {
       this.ui.mpStatus('❌ Could not create a session (WebRTC unavailable).');
     }
   }
 
+  _onHostMsg(idx, m) {
+    if (m.t === 'hero') { this.guestHeroes[idx] = m.k; this.ui.mpLobby(this.peers.length, this.peers.length < 2); }
+    else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
+    else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
+  }
+
+  _broadcast(msg) {
+    for (const p of this.peers) p.send(msg);
+  }
+
+  _checkGuestHash(w, h, idx) {
+    const mine = this.hashes.local.get(w);
+    if (mine !== undefined && mine !== h && !this.desynced) {
+      this.desynced = true;
+      this._broadcast({ t: 'desync' });
+      this.ui.showBanner('⚠️ Games desynced — everyone should refresh and reconnect.', 'bad', 10000);
+    }
+  }
+
+  // ----- guest side -----
+
   async joinGame(code) {
     this.audio.init();
+    this.mpRole = 'guest';
     this.net = new NetSession();
-    this._wireNet();
+    this.net.onOpen = () => this.net.send({ t: 'hero', k: this.ui.selectedHero });
+    this.net.onMessage = (m) => this._onGuestMsg(m);
+    this.net.onClose = () => {
+      if (this.netMode && this.game && !this.game.over) {
+        this.pause();
+        this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
+      }
+    };
     try {
       const reply = await this.net.join(code);
       this.ui.mpShowReply(reply);
@@ -190,11 +298,26 @@ class App {
     }
   }
 
-  _onNet(m) {
-    if (m.t === 'c') this.inbox.set(m.w, m.c);
-    else if (m.t === 'h') { this.hashes.remote.set(m.w, m.h); this._checkHash(m.w); }
-    else if (m.t === 'hero') { this.remoteHero = m.k; this.ui.mpStatus(`Friend picked: ${m.k}. `); }
-    else if (m.t === 'start') this.startGame(m.d, null, { seed: m.seed, heroes: m.heroes, myPlayer: 1 });
+  _onGuestMsg(m) {
+    if (m.t === 'lobby') this.ui.mpConnected(false, m.n);
+    else if (m.t === 'w') this.inbox.set(m.w, m.c);
+    else if (m.t === 'start') {
+      if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
+      else this.startGame(m.d, null, { seed: m.seed, heroes: m.heroes, myPlayer: m.you, role: 'guest' });
+    }
+    else if (m.t === 'desync' && !this.desynced) {
+      this.desynced = true;
+      this.ui.showBanner('⚠️ Games desynced — everyone should refresh and reconnect.', 'bad', 10000);
+    }
+  }
+
+  // ----- shared -----
+
+  issue(cmd) {
+    if (!this.game) return;
+    if (!this.netMode) { this.game.exec(cmd); return; }
+    if (this.mpRole === 'host') this.outbox.push(cmd);
+    else this.net.send({ t: 'cmd', c: cmd });
   }
 
   _stateHash() {
@@ -209,14 +332,6 @@ class App {
       h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     }
     return h;
-  }
-
-  _checkHash(w) {
-    const a = this.hashes.local.get(w), b = this.hashes.remote.get(w);
-    if (a !== undefined && b !== undefined && a !== b && !this.desynced) {
-      this.desynced = true;
-      this.ui.showBanner('⚠️ Games desynced — both players should refresh and reconnect.', 'bad', 10000);
-    }
   }
 
   _setupLights() {
@@ -1417,12 +1532,14 @@ class App {
         case 'victory':
           this.audio.victory();
           this.pause();
+          this._recordGameEnd(true);
           this.ui.showEnd(true, g.stats, g.day);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
+          this._recordGameEnd(false);
           this.ui.showEnd(false, g.stats, g.day);
           break;
       }
@@ -1438,8 +1555,9 @@ class App {
     if (this.game) {
       if (!this.paused && !this.game.over) {
         if (this.netMode) {
-          // Deterministic lockstep: sim advances only when both players'
-          // command bundles for the current window have arrived.
+          // Host-sequenced lockstep: the host merges every player's commands
+          // into numbered windows and broadcasts them; guests advance only
+          // as windows arrive, so all sims stay in step.
           const NET_STEP = 3;
           this.acc += dt;
           let steps = 0;
@@ -1447,22 +1565,22 @@ class App {
           while (this.acc >= SIM_DT && steps < 10) {
             if (this.simFrame % NET_STEP === 0) {
               const w = this.simFrame / NET_STEP;
-              const local = this.localBundles.get(w) ?? (w < 2 ? [] : null);
-              const remote = this.inbox.get(w) ?? (w < 2 ? [] : null);
-              if (local === null || remote === null) { stalled = true; break; }
-              const hostC = this.net.isHost ? local : remote;
-              const guestC = this.net.isHost ? remote : local;
-              for (const c of hostC) this.game.exec(c);
-              for (const c of guestC) this.game.exec(c);
-              const nextW = w + 2;
-              this.localBundles.set(nextW, this.outbox);
-              this.net.send({ t: 'c', w: nextW, c: this.outbox });
-              this.outbox = [];
+              let bundle;
+              if (this.mpRole === 'host') {
+                bundle = [...this.outbox];
+                this.outbox = [];
+                for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
+                this._broadcast({ t: 'w', w, c: bundle });
+              } else {
+                bundle = this.inbox.get(w);
+                if (!bundle) { stalled = true; break; }
+                this.inbox.delete(w);
+              }
+              for (const c of bundle) this.game.exec(c);
               if (w > 0 && w % 30 === 0) {
                 const hsh = this._stateHash();
-                this.hashes.local.set(w, hsh);
-                this.net.send({ t: 'h', w, h: hsh });
-                this._checkHash(w);
+                if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
+                else this.net.send({ t: 'h', w, h: hsh });
               }
             }
             this.game.update(SIM_DT);
@@ -1561,6 +1679,12 @@ class App {
       this.ui.updateHero(this.game, this.myPlayer);
       this.ui.setAutoUI(this.game.autoBuild);
       if (this.selectedBuilding) this.ui.showSelection(this.selectedBuilding, this.game);
+
+      this.autosaveT -= dt;
+      if (this.autosaveT <= 0) {
+        this.autosaveT = 20;
+        this._autosave();
+      }
 
       this.minimapT -= dt;
       if (this.minimapT <= 0) {

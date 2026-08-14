@@ -5,6 +5,7 @@ import { makeRNG, makeNoise, clamp } from './utils.js';
 
 export class GameMap {
   constructor(seed) {
+    this.seed = seed;
     this.size = MAP_SIZE;
     this.tiles = new Uint8Array(this.size * this.size);
     this.rng = makeRNG(seed);

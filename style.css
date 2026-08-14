@@ -324,3 +324,16 @@ body::after {
   width: 46px; height: 46px; object-fit: cover; object-position: top;
   border-radius: 9px; border: 1px solid rgba(201, 164, 74, 0.5); display: block;
 }
+
+/* profile + continue */
+.profilerow {
+  display: flex; gap: 12px; align-items: center; justify-content: center;
+  margin-bottom: 12px; font-size: 13px; flex-wrap: wrap;
+}
+.profilerow input {
+  background: rgba(0, 0, 0, 0.35); color: var(--gold);
+  border: 1px solid var(--panel-border); border-radius: 7px;
+  padding: 4px 8px; font-size: 13px; width: 150px; font-family: inherit;
+}
+#prof-stats { opacity: 0.75; font-size: 12px; }
+#continuerow { display: flex; justify-content: center; margin-bottom: 10px; }

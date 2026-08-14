@@ -12,11 +12,14 @@ import { clamp, dist2, makeRNG } from './utils.js';
 const IDLE = 0, WANDER = 1, AGGRO = 2;
 
 let nextId = 1;
+const getNextId = () => nextId;
+const setNextId = (v) => { nextId = v; };
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander') {
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null) {
     this.map = map;
+    this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.rng = makeRNG(999);
 
@@ -52,7 +55,107 @@ export class Game {
     this.autoBuild = true;       // the Overseer runs the economy by default
     this.bot = new Overseer(this);
 
-    this._setupStart();
+    if (snap) this._restore(snap);
+    else this._setupStart();
+  }
+
+  // ---------- save / restore ----------
+  // A snapshot is plain JSON: enough state to resume a run identically on
+  // every machine (co-op peers all load the same snapshot). Transient AI
+  // timers reset on load — identically for everyone, so lockstep holds.
+
+  snapshot() {
+    const unit = (u) => ({
+      id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
+      hp: +u.hp.toFixed(2), maxHp: u.maxHp,
+      turret: !!u.turret, summon: !!u.summon, life: u.life,
+      facing: +(u.facing || 0).toFixed(3),
+      def: (u.turret || u.summon) ? { ...u.def } : undefined,
+    });
+    return {
+      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys,
+      time: this.time, res: { gold: +this.res.gold.toFixed(3), wood: +this.res.wood.toFixed(3), stone: +this.res.stone.toFixed(3) },
+      autoBuild: this.autoBuild, finalSpawned: this.finalSpawned,
+      wavesDone: [...this.wavesDone], pendingWave: this.pendingWave || null,
+      ambientTimer: this.ambientTimer, stats: { ...this.stats },
+      rng: this.rng.getState(), nextId: getNextId(),
+      buildings: this.buildings.map((b) => ({ id: b.id, k: b.key, x: b.x, z: b.z, hp: +b.hp.toFixed(1) })),
+      units: this.units.filter((u) => !u.hero).map(unit),
+      heroes: this.heroes.map((h) => ({
+        k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
+        dead: !!h.dead, reviveT: +(h.reviveT || 0).toFixed(1),
+        level: h.level, xp: Math.round(h.xp), points: h.points,
+        abil: h.abil.map((a) => ({ r: a.rank, cd: +a.cd.toFixed(1) })),
+        bonusDmg: +(h.bonusDmg || 0).toFixed(1),
+      })),
+      zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0]),
+      pickups: this.pickups.map((p) => ({ ...p })),
+    };
+  }
+
+  _restore(snap) {
+    this.time = snap.time;
+    this.res = { ...snap.res };
+    this.autoBuild = snap.autoBuild;
+    this.finalSpawned = snap.finalSpawned;
+    this.wavesDone = new Set(snap.wavesDone);
+    this.pendingWave = snap.pendingWave || null;
+    this.ambientTimer = snap.ambientTimer;
+    this.stats = { ...snap.stats };
+    this.bot.greeted = true;
+
+    for (const b of snap.buildings) {
+      const d = BUILDINGS[b.k];
+      const nb = {
+        id: b.id, key: b.k, def: d, x: b.x, z: b.z, size: d.size,
+        cx: b.x + d.size / 2, cz: b.z + d.size / 2,
+        hp: b.hp, maxHp: d.hp, alive: true, cooldown: 0,
+      };
+      this.buildings.push(nb);
+      for (let dz = 0; dz < d.size; dz++) for (let dx = 0; dx < d.size; dx++) {
+        this.occ[(b.z + dz) * this.map.size + (b.x + dx)] = b.id;
+      }
+      if (b.k === 'hq') this.hq = nb;
+    }
+
+    for (const u of snap.units) {
+      const def = u.def || UNITS[u.k];
+      this.units.push({
+        id: u.id, key: u.k, def, x: u.x, z: u.z, hp: u.hp, maxHp: u.maxHp,
+        turret: u.turret || undefined, summon: u.summon || undefined, life: u.life,
+        path: null, pathI: 0, cooldown: 0, target: null, selected: false,
+        facing: u.facing, retargetT: 0,
+      });
+    }
+
+    for (const hs of snap.heroes) {
+      const h = this._spawnHero(hs.k, hs.x, hs.z);
+      h.hp = hs.hp;
+      h.level = hs.level; h.xp = hs.xp; h.points = hs.points;
+      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
+      h.abil = hs.abil.map((a) => ({ rank: a.r, cd: a.cd }));
+      h.bonusDmg = hs.bonusDmg;
+      if (hs.dead) {
+        h.dead = true;
+        h.reviveT = hs.reviveT;
+        this.units = this.units.filter((u) => u !== h);
+      }
+    }
+
+    // Zombies re-roll their idle timers from the restored RNG — identical on
+    // every peer since they all restore the same stream position afterwards.
+    for (const [type, x, z, hp, state, wave] of snap.zombies) {
+      const zb = this._spawnZombie(type, x, z, state === 2, !!wave);
+      if (zb) { zb.hp = hp; zb.state = state; }
+    }
+    this.pickups = (snap.pickups || []).map((p) => ({ ...p }));
+
+    this.rng.setState(snap.rng);
+    setNextId(snap.nextId);
+    this.recalcEconomy();
+    this.flowDirty = true;
+    this._wasNight = this.isNight;
+    this.msg('📂 Colony restored — the fight continues.', 'info');
   }
 
   // ---------- setup ----------

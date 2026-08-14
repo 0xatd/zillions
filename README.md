@@ -84,23 +84,20 @@ Hero rules:
 | H | Help |
 | Esc | Cancel |
 
-## Co-op Multiplayer
+## Co-op multiplayer (up to 3 players, no server)
 
-The game supports 2-player co-op with no server.
+Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
 
-Flow:
+Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero infrastructure) running **host-sequenced deterministic lockstep**: the host merges everyone's commands into numbered windows and broadcasts them (~10 tiny packets/sec regardless of zombie count); every machine simulates the identical world, and periodic state hashes detect desyncs. All players should use the same browser family (e.g. all Chrome) — identical floating point keeps the worlds in perfect sync.
 
-1. Click **Host co-op**.
-2. Send the invite code to a friend.
-3. They click **Join co-op**.
-4. They paste the invite code and send back a reply code.
-5. Both players pick heroes.
-6. The host picks a difficulty.
-7. Both players defend one colony with two heroes.
+## Profiles & saved games
 
-Co-op uses a WebRTC DataChannel with STUN only. It runs a deterministic lockstep simulation. Only player commands cross the wire, at about 10 packets per second. Each machine simulates the same zombies, economy, and combat. Periodic state hashes detect desyncs.
+- **Commander profile** (localStorage): set your name on the menu; the game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
+- **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 
-Use the same browser family on both machines, such as Chrome with Chrome. Identical floating point behavior helps keep the worlds in sync.
+## Deploying (Vercel)
+
+It's a pure static site — import the repo into Vercel (framework preset: *Other*, no build command) and it deploys as-is; `vercel.json` adds cache headers for the 3D assets. Co-op works on any static host since networking is peer-to-peer from the players' browsers.
 
 ## Art And Physics
 
