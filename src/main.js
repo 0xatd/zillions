@@ -1440,6 +1440,47 @@ class App {
     return group;
   }
 
+  _makeSurveyBeacon(plot) {
+    const info = plotInfo(plot.key);
+    const group = new THREE.Group();
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.12, 0.62, 6),
+      new THREE.MeshLambertMaterial({ color: 0x4f565b }),
+    );
+    stem.position.y = 0.31;
+    stem.castShadow = true;
+
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.18, 0),
+      new THREE.MeshLambertMaterial({
+        color: info.color,
+        emissive: info.color,
+        emissiveIntensity: 0.65,
+        transparent: true,
+        opacity: 0.92,
+      }),
+    );
+    gem.position.y = 0.88;
+
+    const haloGeo = new THREE.RingGeometry(0.32, 0.42, 28);
+    haloGeo.rotateX(-Math.PI / 2);
+    const halo = new THREE.Mesh(
+      haloGeo,
+      new THREE.MeshBasicMaterial({
+        color: info.color,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    halo.position.y = 0.05;
+    group.add(stem, gem, halo);
+    group.userData = { stem, gem, halo };
+    group.renderOrder = 5;
+    return group;
+  }
+
   _makePlotMesh(plot) {
     const info = plotInfo(plot.key);
     const group = new THREE.Group();
@@ -1456,11 +1497,7 @@ class App {
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false }),
     );
     ring.position.y = 0.08;
-    const beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.035, 0.035, 1.5, 8),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }),
-    );
-    beacon.position.y = 0.78;
+    const beacon = this._makeSurveyBeacon(plot);
     const preview = this._makeBuildingPreviewMesh(plot.key);
     preview.position.y = -0.35;
     preview.scale.setScalar(0.82);
@@ -1496,16 +1533,24 @@ class App {
       const focused = this.focusedPlot?.id === plot.id;
       const detailed = active || hovered || focused;
       rec.mesh.position.set(plot.cx, 0, plot.cz);
-      rec.mesh.userData.base.material.opacity = 0.04 + progress * 0.16 + (detailed ? 0.08 : 0);
-      rec.mesh.userData.ring.material.opacity = (active ? 0.74 : hovered ? 0.52 : 0.1) + progress * 0.2;
+      rec.mesh.userData.base.material.opacity = detailed || progress > 0.02 ? 0.035 + progress * 0.17 + (detailed ? 0.08 : 0) : 0;
+      rec.mesh.userData.ring.material.opacity = detailed || progress > 0.02 ? (active ? 0.74 : hovered ? 0.52 : 0.18) + progress * 0.2 : 0;
       const ghostOpacity = 0.025 + progress * 0.58 + (detailed ? 0.14 : 0);
+      rec.mesh.userData.preview.visible = detailed || progress > 0.02;
       this._setGhostOpacity(rec.mesh.userData.preview, Math.min(0.82, ghostOpacity));
       rec.mesh.userData.preview.position.y = lerp(-0.42, 0, progress);
       rec.mesh.userData.preview.scale.setScalar(lerp(0.82, 1, progress));
-      rec.mesh.userData.beacon.visible = active || progress > 0.04;
-      rec.mesh.userData.beacon.material.opacity = active ? 0.72 : 0.36;
-      rec.mesh.userData.beacon.scale.y = 0.42 + progress * 1.2 + (active ? Math.sin(t * 5) * 0.12 : 0);
+      const beacon = rec.mesh.userData.beacon;
+      const gem = beacon.userData.gem;
+      const halo = beacon.userData.halo;
+      gem.rotation.y = t * 2.1 + plot.id;
+      gem.position.y = 0.88 + Math.sin(t * 2.4 + plot.id) * (detailed ? 0.08 : 0.04);
+      gem.material.opacity = detailed ? 1 : 0.82;
+      gem.material.emissiveIntensity = detailed ? 0.92 : 0.48;
+      halo.material.opacity = detailed ? 0.58 : 0.22 + Math.sin(t * 2 + plot.id) * 0.04;
+      beacon.scale.setScalar(detailed ? 1.08 : 0.92);
       const marker = rec.mesh.userData.marker;
+      marker.visible = detailed || progress > 0.08;
       const pulse = detailed ? 1 + Math.sin(t * 4.2 + plot.id) * 0.08 : 1 + Math.sin(t * 2.2 + plot.id) * 0.025;
       marker.scale.setScalar(pulse);
       marker.position.y = 0.02 + (detailed ? 0.03 : 0);
