@@ -1,45 +1,38 @@
-// DOM HUD: resource bar, build menu, minimap, selection panel, banners, menus.
+// DOM HUD & menus. Menu flow: WC3-style main menu (buttons over the live 3D
+// battlefield) → SC2-style setup screen (level / hero / difficulty / START).
+// In-game: Thronefall HUD — gold, day timer, one big contextual action button.
 const PORTRAITS = {
   alexander: 'assets/heroes/images/alexander_portrait.png',
   scott: 'assets/heroes/images/scott_barbarian.png',
   danny: 'assets/heroes/images/danny_assassin.png',
 };
 import {
-  BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
-  HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
+  PLOT_KINDS, DIFFICULTY, FINAL_NIGHT, LEVELS,
+  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
 
 export class UI {
   constructor(root, cb) {
     this.root = root;
-    this.cb = cb;           // {onBuild,onTrain,onSpeed,onMute,onStart,onRestart,onMinimap,onDemolish,onHelp}
-    this.activeBuild = null;
+    this.cb = cb;
     this.msgSeen = 0;
+    this.pauseOpen = false;
     this._buildDOM();
   }
 
   _buildDOM() {
     this.root.innerHTML = `
-      <div id="topbar">
-        <div class="res" id="r-day" title="Day / time of day">☀️ <b>Day 1</b></div>
-        <div class="res" id="r-wave" title="Time until the next horde">⏳ --:--</div>
+      <div id="topbar" class="hidden">
+        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by standing on foundations">🪙 <b>0</b></div>
+        <div class="res" id="r-day" title="Day and time until nightfall">☀️ <b>Day 1</b></div>
+        <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
         <div class="sep"></div>
-        <div class="res" id="r-gold" title="Gold — taxes from tents and gold mines">💰 0</div>
-        <div class="res" id="r-wood" title="Wood — produced by sawmills">🪵 0</div>
-        <div class="res" id="r-stone" title="Stone — produced by quarries">🪨 0</div>
-        <div class="res" id="r-food" title="Food balance — farms produce, tents consume">🍞 0</div>
-        <div class="res" id="r-energy" title="Energy — windmills produce, buildings consume">⚡ 0</div>
-        <div class="res" id="r-pop" title="Colonists — workers used / housing capacity">👷 0/0</div>
-        <div class="res" id="r-z" title="Zombies on the map">🧟 0</div>
-        <div class="sep"></div>
-        <button class="tbtn" id="b-pause" title="Pause (Space)">⏸</button>
+        <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
-        <button class="tbtn speed" data-s="4">4×</button>
-        <button class="tbtn active" id="b-auto" title="Overseer auto-build — the bot runs your economy. Click to build manually.">🤖</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
-        <button class="tbtn" id="b-help" title="Help (H)">?</button>
+        <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
       </div>
 
       <div id="banner"></div>
@@ -47,12 +40,22 @@ export class UI {
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
 
-      <div id="heropanel" class="hidden"></div>
-      <div id="selpanel" class="hidden"></div>
-
-      <div id="bottombar">
-        <div id="buildmenu"></div>
-        <div id="unitmenu"></div>
+      <div id="actionbar" class="hidden">
+        <div class="rallyhints">
+          <span><b>1</b> rally all</span><span><b>2</b> militia</span><span><b>3</b> ranged</span>
+        </div>
+        <div class="actionmain">
+          <div id="heroplate">
+            <span class="hpportrait" id="a-face"></span>
+            <div class="hpinfo">
+              <b id="a-name"></b> <span class="hplvl" id="a-lvl">Lv 1</span>
+              <div class="hpbar herohp"><div class="hpfill" id="a-hp"></div></div>
+              <div class="hpbar heroxp"><div class="xpfill" id="a-xp"></div></div>
+            </div>
+          </div>
+          <button id="bigaction" class="bigaction"></button>
+        </div>
+        <div id="branchpanel" class="hidden"></div>
       </div>
 
       <div id="minimap-wrap">
@@ -63,42 +66,85 @@ export class UI {
       <div id="tooltip" class="hidden"></div>
 
       <div id="overlay" class="screen">
-        <div class="panel">
-          <h1>🧟 ZILLIONS</h1>
-          <p class="tagline">The frontier belongs to the dead. Take it back. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
-          <div class="howto">
-            <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
-            <div><b>🤖 The Overseer</b> builds your economy and defenses for you — focus on the fight. (Toggle it off to build manually.)</div>
-            <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
-            <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
-            <div><b>💰 Spare gold?</b> Train troops at the barracks and command them like it's 2003.</div>
+        <div id="screen-main" class="mainmenu">
+          <h1 class="gametitle">🧟 ZILLIONS</h1>
+          <p class="gamesub">Raise a city by day. Hold it by night. Survive ${FINAL_NIGHT} nights.</p>
+          <div class="menustack">
+            <button class="menubtn primary" id="m-play">⚔️ &nbsp;Play</button>
+            <div id="m-continuerow"></div>
+            <button class="menubtn" id="m-coop">🌐 &nbsp;Co-op <small>up to 3 players</small></button>
+            <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
           </div>
           <div class="profilerow">
-            <label>🪖 Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
+            <label>🪖 <input id="prof-name" maxlength="24" placeholder="your name"></label>
             <span id="prof-stats"></span>
           </div>
-          <div class="herorow" id="herorow"></div>
+        </div>
+
+        <div id="screen-setup" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="s-back">← Back</button>
+            <h2 id="s-title">Choose your battle</h2>
+          </div>
+          <div class="steplabel">1 · Battlefield</div>
           <div class="levelrow" id="levelrow"></div>
-          <div id="continuerow"></div>
-          <div class="diffrow" id="diffrow"></div>
-          <div class="mprow">
-            <button class="diffbtn" id="mp-host">🌐 Host co-op</button>
-            <button class="diffbtn" id="mp-join">🔗 Join co-op</button>
-            <span class="mphint">Up to 3 players — one colony, one hero each. No server, just trade invite codes.</span>
-          </div>
+          <div class="steplabel">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE</small></div>
+          <div class="herorow" id="herorow"></div>
+          <div class="steplabel">3 · Difficulty</div>
+          <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
-          <div class="controls">
-            <span><b>F</b> select hero (×2 = center)</span><span><b>Q W E R</b> abilities</span>
-            <span><b>T</b> select army</span><span><b>right-click</b> move</span><span><b>drag</b> select</span>
-            <span><b>WASD / edge / minimap</b> pan</span><span><b>wheel</b> zoom</span><span><b>Z / C</b> rotate</span>
-            <span><b>1-9</b> build (manual)</span><span><b>space</b> pause</span>
+          <button class="startbtn" id="s-start">▶ &nbsp;START — SURVIVE ${FINAL_NIGHT} NIGHTS</button>
+        </div>
+
+        <div id="screen-help" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="h-back">← Back</button>
+            <h2>How to play</h2>
           </div>
+          <div class="howto">
+            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to sprint. You auto-attack anything in range — just ride.</div>
+            <div><b>🪙 One resource: gold.</b> Your buildings pay coins every dawn. Ride through coins to collect them.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Stand on a glowing foundation and your gold streams into it. Stay to upgrade. Top-tier towers let you choose a doctrine.</div>
+            <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
+            <div><b>🔔 Ready early?</b> Press SPACE by day to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
+            <div><b>🚩 Your troops fight alone,</b> but press 1 to rally the army to you — press 1 again and they hold position. 2 = militia, 3 = ranged.</div>
+            <div><b>👑 Level up</b> from nearby kills. Your special grows stronger at levels 4 and 7.</div>
+            <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
+          </div>
+        </div>
+
+        <div id="screen-pause" class="mainmenu hidden">
+          <h1 class="gametitle small">⚔️ PAUSED</h1>
+          <div class="menustack">
+            <button class="menubtn primary" id="p-resume">▶ &nbsp;Resume</button>
+            <button class="menubtn" id="p-help">📜 &nbsp;How to play</button>
+            <button class="menubtn" id="p-restart">🔄 &nbsp;Restart level</button>
+            <button class="menubtn" id="p-quit">🚪 &nbsp;Quit to menu</button>
+          </div>
+          <div id="p-note" class="gamesub"></div>
         </div>
       </div>`;
 
-    // Hero picker.
+    // ----- main menu -----
+    const q = (s) => this.root.querySelector(s);
+    q('#m-play').onclick = () => { this._mpMode = false; this.showSetup(); };
+    q('#m-coop').onclick = () => { this._mpMode = true; this.showSetup(true); };
+    q('#m-help').onclick = () => this._showScreen('help');
+    q('#s-back').onclick = () => this._showScreen('main');
+    q('#h-back').onclick = () => {
+      if (this.pauseOpen) this._showScreen('pause');
+      else this._showScreen('main');
+    };
+
+    // ----- pause menu -----
+    q('#p-resume').onclick = () => this.cb.onResume();
+    q('#p-help').onclick = () => this._showScreen('help');
+    q('#p-restart').onclick = () => this.cb.onRestart();
+    q('#p-quit').onclick = () => this.cb.onQuit();
+
+    // ----- setup: hero cards -----
     this.selectedHero = 'alexander';
-    const herorow = this.root.querySelector('#herorow');
+    const herorow = q('#herorow');
     for (const [key, h] of Object.entries(HEROES)) {
       const card = document.createElement('button');
       card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
@@ -108,7 +154,7 @@ export class UI {
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
-        <span class="habils">${h.abilities.map((a) => a.icon).join(' ')}</span>`;
+        <span class="habils">${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
@@ -120,84 +166,60 @@ export class UI {
       herorow.appendChild(card);
     }
 
-    // Campaign level picker.
+    // ----- setup: levels & difficulty -----
     this.selectedLevel = 1;
     this._buildLevelRow(0);
-
-    // Difficulty buttons.
-    const diffrow = this.root.querySelector('#diffrow');
+    this.selectedDiff = 'normal';
+    const seg = q('#diffseg');
     for (const [key, d] of Object.entries(DIFFICULTY)) {
       const b = document.createElement('button');
-      b.className = 'diffbtn' + (key === 'normal' ? ' primary' : '');
+      b.className = 'diffbtn' + (key === this.selectedDiff ? ' sel' : '');
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
-      b.onclick = () => this.cb.onStart(key, this.selectedHero);
-      diffrow.appendChild(b);
+      b.onclick = () => {
+        this.selectedDiff = key;
+        for (const c of seg.children) c.classList.toggle('sel', c === b);
+      };
+      seg.appendChild(b);
     }
+    q('#s-start').onclick = () => this.cb.onStart(this.selectedDiff, this.selectedHero);
 
-    // Build menu.
-    const bm = this.root.querySelector('#buildmenu');
-    this.buildBtns = {};
-    for (const key of BUILD_ORDER) {
-      const d = BUILDINGS[key];
-      const b = document.createElement('button');
-      b.className = 'bbtn';
-      b.dataset.key = key;
-      b.innerHTML = `<span class="icon">${d.icon}</span><span class="bname">${d.name}</span><span class="hot">${d.hotkey}</span>`;
-      b.onclick = () => this.cb.onBuild(key);
-      b.onmouseenter = (e) => this._showTip(e, this._buildTip(d));
-      b.onmousemove = (e) => this._moveTip(e);
-      b.onmouseleave = () => this._hideTip();
-      bm.appendChild(b);
-      this.buildBtns[key] = b;
-    }
-
-    // Unit menu.
-    const um = this.root.querySelector('#unitmenu');
-    this.unitBtns = {};
-    for (const [key, d] of Object.entries(UNITS)) {
-      const b = document.createElement('button');
-      b.className = 'bbtn unit';
-      b.innerHTML = `<span class="icon">${d.icon}</span><span class="bname">${d.name}</span><span class="cost">💰${d.cost}</span><span class="hot">${d.hotkey}</span>`;
-      b.onclick = () => this.cb.onTrain(key);
-      b.onmouseenter = (e) => this._showTip(e, this._unitTip(d));
-      b.onmousemove = (e) => this._moveTip(e);
-      b.onmouseleave = () => this._hideTip();
-      um.appendChild(b);
-      this.unitBtns[key] = b;
-    }
-
-    // Toolbar.
-    this.root.querySelector('#b-pause').onclick = () => this.cb.onSpeed(0);
+    // ----- toolbar -----
+    q('#b-pause').onclick = () => this.cb.onSpeed(0);
     for (const b of this.root.querySelectorAll('.speed')) b.onclick = () => this.cb.onSpeed(+b.dataset.s);
-    this.root.querySelector('#b-mute').onclick = () => this.cb.onMute();
-    this.root.querySelector('#b-help').onclick = () => this.cb.onHelp();
-    this.root.querySelector('#b-auto').onclick = () => this.cb.onAuto();
+    q('#b-mute').onclick = () => this.cb.onMute();
+    q('#b-menu').onclick = () => this.cb.onPause();
     this.pings = [];
 
-    // Minimap clicks.
-    const mmWrap = this.root.querySelector('#minimap-wrap');
-    const mmClick = (e) => {
-      const r = mmWrap.getBoundingClientRect();
-      this.cb.onMinimap((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
-    };
-    mmWrap.addEventListener('mousedown', (e) => {
-      mmClick(e);
-      const mv = (ev) => mmClick(ev);
-      const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
-      window.addEventListener('mousemove', mv);
-      window.addEventListener('mouseup', up);
-    });
+    q('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
+    this.tooltip = q('#tooltip');
+    this.banner = q('#banner');
+  }
 
-    this.root.querySelector('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
-    this.root.querySelector('#mp-host').onclick = () => {
-      this.mpStatus('Creating invite code…');
-      this.cb.onHost();
-    };
-    this.root.querySelector('#mp-join').onclick = () => this.mpShowJoinInput();
+  _showScreen(name) {
+    const ov = this.root.querySelector('#overlay');
+    ov.classList.remove('hidden');
+    for (const id of ['main', 'setup', 'help', 'pause']) {
+      this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
+    }
+  }
 
-    this.tooltip = this.root.querySelector('#tooltip');
-    this.banner = this.root.querySelector('#banner');
-    this.selpanel = this.root.querySelector('#selpanel');
+  showSetup(coop = false) {
+    this._showScreen('setup');
+    this.root.querySelector('#s-title').textContent = coop ? 'Co-op — one city, one hero each' : 'Choose your battle';
+    const mp = this.root.querySelector('#mp-panel');
+    mp.classList.toggle('hidden', !coop);
+    if (coop && !mp.dataset.init) {
+      mp.dataset.init = '1';
+      mp.innerHTML = `
+        <div class="mprow">
+          <button class="diffbtn" id="mp-host">🌐 Host — create invite</button>
+          <button class="diffbtn" id="mp-join">🔗 Join — paste invite</button>
+          <span class="mphint">No servers: trade invite codes over any chat. The host picks the level and presses START.</span>
+        </div>
+        <div id="mp-sub"></div>`;
+      mp.querySelector('#mp-host').onclick = () => { this.mpStatus('Creating invite code…'); this.cb.onHost(); };
+      mp.querySelector('#mp-join').onclick = () => this.mpShowJoinInput();
+    }
   }
 
   _buildLevelRow(cleared) {
@@ -220,6 +242,7 @@ export class UI {
         card.onclick = () => {
           this.selectedLevel = lv.id;
           for (const c of row.children) c.classList.toggle('sel', c === card);
+          if (this.cb.onLevelPick) this.cb.onLevelPick(lv.id);
         };
         card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`);
         card.onmousemove = (e) => this._moveTip(e);
@@ -231,6 +254,119 @@ export class UI {
 
   setCampaign(cleared) { this._buildLevelRow(cleared || 0); }
 
+  _heroTip(h) {
+    const a = h.ability;
+    return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
+      `<span class="tfx">${a.icon} <b>${a.name}</b> — SPACE/Q, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
+      `<br><span class="tdesc">Ranks up automatically at hero levels 4 and 7.</span>`;
+  }
+
+  // ---------- in-game HUD ----------
+
+  initHUD(game, p) {
+    this.root.querySelector('#topbar').classList.remove('hidden');
+    this.root.querySelector('#actionbar').classList.remove('hidden');
+    const h = game.heroes[p];
+    const d = h.def;
+    const face = this.root.querySelector('#a-face');
+    face.innerHTML = PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
+    this.root.querySelector('#a-name').textContent = d.name;
+    const big = this.root.querySelector('#bigaction');
+    big.onclick = () => {
+      if (this._bigMode === 'bell') this.cb.onBell();
+      else this.cb.onCast();
+    };
+    big.onmouseenter = (e) => {
+      const hh = this._game ? this._game.heroes[this._p] : null;
+      if (hh) this._showTip(e, this._heroTip(hh.def));
+    };
+    big.onmousemove = (e) => this._moveTip(e);
+    big.onmouseleave = () => this._hideTip();
+    this._game = game;
+    this._p = p;
+  }
+
+  update(game, p = 0) {
+    const q = (id) => this.root.querySelector(id);
+    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
+
+    const phase = game.isNight ? '🌙' : game.belling ? '🌇' : '☀️';
+    let waveLeft = 0;
+    for (const zb of game.zombies) if (zb.wave) waveLeft++;
+    q('#r-day').innerHTML = game.isNight
+      ? `${phase} <b>Night ${Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
+      : game.belling
+        ? `${phase} <b>Night ${game.night} falls…</b>`
+        : `${phase} <b>Day ${game.night}</b> / ${FINAL_NIGHT}`;
+    q('#r-day').classList.toggle('danger', game.isNight || game.belling);
+    q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
+
+    // Hero plate.
+    const h = game.heroes[p];
+    if (h) {
+      q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
+      q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+      const need = xpForLevel(h.level);
+      q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
+
+      // The one big contextual button: bell by day, special by night.
+      const big = q('#bigaction');
+      const ab = h.def.ability;
+      if (game.phase === 'day' && !game.belling) {
+        this._bigMode = 'bell';
+        big.className = 'bigaction bell';
+        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE</small></span>`;
+        big.disabled = false;
+      } else {
+        this._bigMode = 'cast';
+        const cd = Math.max(0, h.abilCd);
+        const rank = abilityRank(h.level);
+        big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · SPACE</small></span>` +
+          (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
+        big.disabled = h.dead;
+      }
+    }
+
+    // Messages feed.
+    const feed = q('#messages');
+    while (this.msgSeen < game.messages.length) {
+      const m = game.messages[this.msgSeen++];
+      const div = document.createElement('div');
+      div.className = 'msg ' + m.kind;
+      div.textContent = m.text;
+      feed.appendChild(div);
+      while (feed.children.length > 5) feed.removeChild(feed.firstChild);
+      setTimeout(() => { div.classList.add('fade'); }, 6000);
+      setTimeout(() => { div.remove(); }, 7000);
+      if (m.kind === 'bad') this.showBanner(m.text, 'bad');
+    }
+  }
+
+  // Branch doctrine picker, shown while standing at a branch-ready plot.
+  showBranch(info) {
+    const panel = this.root.querySelector('#branchpanel');
+    if (!info) {
+      if (!panel.classList.contains('hidden')) panel.classList.add('hidden');
+      this._branchId = null;
+      return;
+    }
+    if (this._branchId === info.plot.id) return;
+    this._branchId = info.plot.id;
+    panel.classList.remove('hidden');
+    panel.innerHTML = `<div class="branchtitle">Choose a doctrine for this tower:</div>`;
+    const row = document.createElement('div');
+    row.className = 'branchrow';
+    for (const [key, opt] of Object.entries(info.options)) {
+      const b = document.createElement('button');
+      b.className = 'branchbtn';
+      b.innerHTML = `<span class="bicon">${opt.icon}</span><b>${opt.name}</b><small>${opt.blurb}</small><span class="tcost">🪙${opt.cost}</span>`;
+      b.onclick = () => this.cb.onBranch(info.plot.id, key);
+      row.appendChild(b);
+    }
+    panel.appendChild(row);
+  }
+
   updateBoss(game) {
     const bar = this.root.querySelector('#bossbar');
     const zb = game.boss;
@@ -240,123 +376,7 @@ export class UI {
     this.root.querySelector('#boss-fill').style.width = `${Math.max(0, (zb.hp / zb.maxHp) * 100)}%`;
   }
 
-  _costStr(cost) {
-    const parts = [];
-    if (cost.gold) parts.push(`💰${cost.gold}`);
-    if (cost.wood) parts.push(`🪵${cost.wood}`);
-    if (cost.stone) parts.push(`🪨${cost.stone}`);
-    return parts.join(' ') || 'free';
-  }
-
-  _buildTip(d) {
-    const rows = [];
-    rows.push(`<b>${d.icon} ${d.name}</b>`);
-    rows.push(`<span class="tcost">${this._costStr(d.cost)}</span>`);
-    const fx = [];
-    if (d.pop) fx.push(`+${d.pop} 👷`);
-    if (d.workers) fx.push(`-${d.workers} 👷`);
-    if (d.energy) fx.push(`${d.energy > 0 ? '+' : ''}${d.energy} ⚡`);
-    if (d.gold) fx.push(`+${d.gold} 💰/s`);
-    if (d.wood) fx.push(`+${d.wood} 🪵/s`);
-    if (d.stone) fx.push(`+${d.stone} 🪨/s`);
-    if (d.food) fx.push(`${d.food > 0 ? '+' : ''}${d.food} 🍞`);
-    if (d.range) fx.push(`⚔️${d.dmg} rng ${d.range}`);
-    if (fx.length) rows.push(`<span class="tfx">${fx.join('  ')}</span>`);
-    rows.push(`<span class="tdesc">${d.desc}</span>`);
-    return rows.join('<br>');
-  }
-
-  _heroTip(h) {
-    const rows = h.abilities.map((a) =>
-      `<span class="tfx">${a.icon} <b>${a.name}</b>${a.ult ? ' (ULT)' : a.passive ? ' (passive)' : ''}</span><br><span class="tdesc">${a.desc}</span>`);
-    return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` + rows.join('<br>');
-  }
-
-  // Build the hero panel once game (and hero) exist.
-  initHeroPanel(hero) {
-    const hp = this.root.querySelector('#heropanel');
-    hp.classList.remove('hidden');
-    const d = hero.def;
-    hp.innerHTML = `
-      <div class="hprow">
-        <span class="hpportrait">${PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon}</span>
-        <div class="hpinfo">
-          <b>${d.name}</b> <span class="hplvl" id="hp-lvl">Lv 1</span>
-          <div class="hpbar herohp"><div class="hpfill" id="hp-hp"></div></div>
-          <div class="hpbar heroxp"><div class="xpfill" id="hp-xp"></div></div>
-        </div>
-      </div>
-      <div class="hpabils" id="hp-abils"></div>
-      <div class="hppoints hidden" id="hp-points"></div>`;
-    const row = hp.querySelector('#hp-abils');
-    this.abilBtns = [];
-    d.abilities.forEach((ab, i) => {
-      const b = document.createElement('button');
-      b.className = 'abtn';
-      b.innerHTML = `
-        <span class="aicon">${ab.icon}</span>
-        <span class="ahot">${ab.hotkey}</span>
-        <span class="apips" id="ap-${i}"></span>
-        <span class="acd hidden" id="cd-${i}"></span>
-        <span class="alearn hidden" id="lr-${i}">+</span>`;
-      b.onclick = (e) => {
-        if (!b.querySelector('.alearn').classList.contains('hidden') && (e.target.classList.contains('alearn') || hero.abil[i].rank === 0)) {
-          this.cb.onLearn(i);
-        } else {
-          this.cb.onCast(i);
-        }
-      };
-      b.onmouseenter = (e) => this._showTip(e, this._abilTip(hero, i));
-      b.onmousemove = (e) => this._moveTip(e);
-      b.onmouseleave = () => this._hideTip();
-      row.appendChild(b);
-      this.abilBtns.push(b);
-    });
-  }
-
-  _abilTip(hero, i) {
-    const ab = hero.def.abilities[i];
-    const st = hero.abil[i];
-    const req = ab.ult ? `hero level ${ULT_REQ_LEVEL}` : `hero level ${rankReqLevel(st.rank + 1)}`;
-    const status = ab.passive
-      ? (st.rank > 0 ? `PASSIVE — rank ${st.rank}/${ab.maxRank}` : 'PASSIVE — not learned')
-      : st.rank > 0 ? `Rank ${st.rank}/${ab.maxRank} · ${ab.cd}s cooldown` : 'Not learned';
-    const next = st.rank < ab.maxRank ? `<br><span class="tdesc">Next rank: ${req}, costs 1 skill point.</span>` : '';
-    return `<b>${ab.icon} ${ab.name}</b>${ab.ult ? ' <span class="tcost">ULTIMATE</span>' : ''}<br>` +
-      `<span class="tfx">${status}</span><br><span class="tdesc">${ab.desc}</span>${next}`;
-  }
-
-  updateHero(game, p = 0) {
-    const h = game.heroes[p];
-    if (!h || !this.abilBtns) return;
-    const q = (id) => this.root.querySelector(id);
-    q('#hp-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
-    q('#hp-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
-    const need = xpForLevel(h.level);
-    q('#hp-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
-    const pts = q('#hp-points');
-    pts.classList.toggle('hidden', h.points <= 0);
-    if (h.points > 0) pts.textContent = `⭐ ${h.points} skill point${h.points > 1 ? 's' : ''} — click + to learn`;
-
-    h.def.abilities.forEach((ab, i) => {
-      const st = h.abil[i];
-      const pips = q(`#ap-${i}`);
-      pips.textContent = '●'.repeat(st.rank) + '○'.repeat(ab.maxRank - st.rank);
-      const cd = q(`#cd-${i}`);
-      const onCd = !ab.passive && st.cd > 0 && st.rank > 0;
-      cd.classList.toggle('hidden', !onCd);
-      if (onCd) cd.textContent = Math.ceil(st.cd);
-      q(`#lr-${i}`).classList.toggle('hidden', !game.canLearn(i, p));
-      this.abilBtns[i].classList.toggle('unlearned', st.rank === 0);
-      this.abilBtns[i].classList.toggle('ready', st.rank > 0 && !ab.passive && st.cd <= 0 && !h.dead);
-    });
-  }
-
-  _unitTip(d) {
-    return `<b>${d.icon} ${d.name}</b><br><span class="tcost">💰${d.cost}</span><br>` +
-      `<span class="tfx">⚔️${d.dmg} dmg · rng ${d.range} · ${d.hp} hp · noise ${d.noise === 6 ? 'low' : d.noise < 20 ? 'high' : 'extreme'}</span><br>` +
-      `<span class="tdesc">${d.desc}</span>`;
-  }
+  // ---------- tooltips / banners / small UI ----------
 
   _showTip(e, html) {
     this.tooltip.innerHTML = html;
@@ -373,11 +393,6 @@ export class UI {
     t.style.top = 'auto';
   }
   _hideTip() { this.tooltip.classList.add('hidden'); }
-
-  setActiveBuild(key) {
-    this.activeBuild = key;
-    for (const [k, b] of Object.entries(this.buildBtns)) b.classList.toggle('active', k === key);
-  }
 
   showBanner(text, cls = '', dur = 3500) {
     this.banner.textContent = text;
@@ -402,7 +417,7 @@ export class UI {
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games
-        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: day ${p.bestDay}`
+        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: night ${p.bestDay}`
         : 'first deployment';
     }
   }
@@ -415,12 +430,11 @@ export class UI {
   }
 
   setContinue(snap) {
-    const row = this.root.querySelector('#continuerow');
+    const row = this.root.querySelector('#m-continuerow');
     if (!row) return;
     if (!snap) { row.innerHTML = ''; return; }
-    const day = Math.floor(snap.time / DAY_LENGTH) + 1;
     const players = snap.heroKeys.length;
-    row.innerHTML = `<button class="diffbtn primary" id="b-continue">📂 Continue — Day ${day}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</button>`;
+    row.innerHTML = `<button class="menubtn" id="b-continue">📂 &nbsp;Continue <small>night ${snap.night}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</small></button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
@@ -432,8 +446,7 @@ export class UI {
   // ---------- co-op lobby ----------
 
   _mpPanel() {
-    const p = this.root.querySelector('#mp-panel');
-    p.classList.remove('hidden');
+    const p = this.root.querySelector('#mp-sub');
     return p;
   }
 
@@ -451,7 +464,7 @@ export class UI {
       <textarea class="mpcode" readonly id="mp-offer">${code}</textarea>
       <button class="tbtn" id="mp-copy">📋 Copy invite</button>
       <textarea class="mpcode" id="mp-reply" placeholder="Paste their reply code here…"></textarea>
-      <button class="diffbtn primary" id="mp-accept">Connect player ${existingPeers + 2}</button>`;
+      <button class="diffbtn sel" id="mp-accept">Connect player ${existingPeers + 2}</button>`;
     p.querySelector('#mp-copy').onclick = () => {
       p.querySelector('#mp-offer').select();
       document.execCommand('copy');
@@ -460,11 +473,10 @@ export class UI {
     p.querySelector('#mp-accept').onclick = () => this.cb.onHostAccept(p.querySelector('#mp-reply').value);
   }
 
-  // Host lobby once at least one guest is in.
   mpLobby(peerCount, canAddMore) {
     const p = this._mpPanel();
     p.innerHTML = `
-      <div class="mpstatus ok">🟢 ${peerCount + 1} player${peerCount ? 's' : ''} connected. Pick your hero, then choose a difficulty to launch for everyone.</div>
+      <div class="mpstatus ok">🟢 ${peerCount + 1} players connected. Pick hero & level, then press START to launch for everyone.</div>
       ${canAddMore ? '<button class="diffbtn" id="mp-add">➕ Invite a third player</button>' : ''}`;
     const add = p.querySelector('#mp-add');
     if (add) add.onclick = () => this.cb.onAddPeer();
@@ -475,7 +487,7 @@ export class UI {
     p.innerHTML = `
       <div class="mpstatus">Paste the invite code from the host.</div>
       <textarea class="mpcode" id="mp-invite" placeholder="Paste invite code here…"></textarea>
-      <button class="diffbtn primary" id="mp-go">Join</button>`;
+      <button class="diffbtn sel" id="mp-go">Join</button>`;
     p.querySelector('#mp-go').onclick = () => this.cb.onJoin(p.querySelector('#mp-invite').value);
   }
 
@@ -495,135 +507,50 @@ export class UI {
   mpConnected(isHost, playerNum = 2) {
     const p = this._mpPanel();
     p.innerHTML = `<div class="mpstatus ok">🟢 Connected — you are player ${playerNum}. Pick your hero; the host starts the game.</div>`;
-    if (!isHost) this.root.querySelector('#diffrow').classList.add('disabled');
+    if (!isHost) this.root.querySelector('#s-start').classList.add('disabled');
   }
-
-  setAutoUI(on) { this.root.querySelector('#b-auto').classList.toggle('active', on); }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
-  hideStart() { this.root.querySelector('#overlay').classList.add('hidden'); }
-
-  showHelp() {
-    const ov = this.root.querySelector('#overlay');
-    ov.classList.remove('hidden');
-    ov.querySelector('.diffrow').style.display = 'none';
-    const panel = ov.querySelector('.panel');
-    if (!panel.querySelector('.resume')) {
-      const b = document.createElement('button');
-      b.className = 'diffbtn primary resume';
-      b.textContent = 'Resume';
-      b.onclick = () => ov.classList.add('hidden');
-      panel.appendChild(b);
-    }
+  hideStart() {
+    this.root.querySelector('#overlay').classList.add('hidden');
+    this.pauseOpen = false;
   }
 
-  showEnd(won, stats, day) {
+  showPause(netMode, help = false) {
+    this.pauseOpen = true;
+    this._showScreen(help ? 'help' : 'pause');
+    const note = this.root.querySelector('#p-note');
+    note.textContent = netMode ? '⚠️ Co-op keeps running while this menu is open.' : '';
+  }
+
+  hidePause() {
+    this.pauseOpen = false;
+    this.root.querySelector('#overlay').classList.add('hidden');
+  }
+
+  showEnd(won, stats, night, levelId) {
+    this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
+    const lv = LEVELS[(levelId || 1) - 1];
     ov.innerHTML = `
-      <div class="panel ${won ? 'win' : 'lose'}">
-        <h1>${won ? '🏆 VICTORY' : '💀 THE COLONY HAS FALLEN'}</h1>
+      <div class="panel endpanel ${won ? 'win' : 'lose'}">
+        <h1>${won ? '🏆 VICTORY' : '💀 THE CITY HAS FALLEN'}</h1>
         <p class="tagline">${won
-          ? 'The final horde lies rotting at your walls. The land is yours.'
-          : `The dead overran your Command Center on day ${day}.`}</p>
+          ? `${lv.name} is cleansed. The final horde lies rotting at your walls.`
+          : `The dead took the Keep on night ${night}.`}</p>
         <div class="howto stats">
-          <div>🧟 Zombies slain: <b>${stats.kills}</b></div>
-          <div>🏗️ Buildings raised: <b>${stats.built}</b></div>
-          <div>🔥 Buildings lost: <b>${stats.lost}</b></div>
-          <div>☀️ Days survived: <b>${Math.min(day, FINAL_DAY)}</b></div>
+          <div>🧟 Slain: <b>${stats.kills}</b></div>
+          <div>🪙 Coins collected: <b>${stats.coins}</b></div>
+          <div>🏗️ Structures raised: <b>${stats.built}</b></div>
+          <div>🔥 Structures lost: <b>${stats.lost}</b></div>
+          <div>🌙 Nights survived: <b>${Math.min(night, FINAL_NIGHT)}</b></div>
         </div>
-        <button class="diffbtn primary" id="b-restart">Play again</button>
+        ${won && lv.id < LEVELS.length ? `<p class="tagline">🔓 Unlocked: <b>${LEVELS[lv.id].name}</b></p>` : ''}
+        <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
-  }
-
-  showSelection(sel, game) {
-    if (!sel || (Array.isArray(sel) && sel.length === 0)) {
-      this.selpanel.classList.add('hidden');
-      this._selSig = null;
-      return;
-    }
-    // Skip the DOM rebuild when nothing changed (a rebuild every frame would
-    // destroy the demolish button mid-click).
-    const sig = Array.isArray(sel)
-      ? 'u:' + sel.map((u) => u.id).join(',')
-      : 'b:' + sel.id + ':' + Math.ceil(sel.hp);
-    if (sig === this._selSig) return;
-    this._selSig = sig;
-    this.selpanel.classList.remove('hidden');
-    if (Array.isArray(sel)) {
-      const byType = {};
-      for (const u of sel) byType[u.def.name] = (byType[u.def.name] || 0) + 1;
-      const rows = Object.entries(byType).map(([n, c]) => `<span class="selunit">${c}× ${n}</span>`).join(' ');
-      this.selpanel.innerHTML = `<b>Squad (${sel.length})</b><div>${rows}</div><div class="tdesc">Right-click to move. Units fight while standing still.</div>`;
-    } else {
-      const b = sel;
-      const pct = Math.max(0, b.hp / b.maxHp);
-      let extra = '';
-      if (b.key === 'tower') extra = `<div class="tfx">⚔️ ${b.def.dmg} dmg · range ${b.def.range}</div>`;
-      const demolishable = b.key !== 'hq';
-      this.selpanel.innerHTML = `
-        <b>${b.def.icon} ${b.def.name}</b>
-        <div class="hpbar"><div class="hpfill" style="width:${pct * 100}%"></div></div>
-        <div class="tfx">${Math.ceil(b.hp)} / ${b.maxHp} hp</div>${extra}
-        ${demolishable ? '<button class="tbtn demolish" id="b-demolish">🧨 Demolish (50% refund)</button>' : ''}`;
-      const btn = this.selpanel.querySelector('#b-demolish');
-      if (btn) btn.onclick = () => this.cb.onDemolish(b);
-    }
-  }
-
-  update(game, zombieCount) {
-    const q = (id) => this.root.querySelector(id);
-    const e = game.eco;
-    const phase = game.isNight ? '🌙' : game.dayFrac > 0.55 ? '🌇' : '☀️';
-    q('#r-day').innerHTML = `${phase} <b>Day ${Math.min(game.day, FINAL_DAY)}</b>`;
-
-    const nw = game.nextWave();
-    if (nw) {
-      const left = nw.at - game.time;
-      q('#r-wave').innerHTML = `${nw.final ? '☠️' : '⏳'} ${formatTime(left)}`;
-      q('#r-wave').classList.toggle('danger', left < 30);
-    } else {
-      q('#r-wave').innerHTML = '☠️ FINAL WAVE';
-      q('#r-wave').classList.add('danger');
-    }
-
-    const rate = (v) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
-    q('#r-gold').innerHTML = `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`;
-    q('#r-wood').innerHTML = `🪵 ${Math.floor(game.res.wood)} <small>${rate(e.wood)}</small>`;
-    q('#r-stone').innerHTML = `🪨 ${Math.floor(game.res.stone)} <small>${rate(e.stone)}</small>`;
-    q('#r-food').innerHTML = `🍞 <small>${rate(e.food)}</small>${game.starving ? ' ⚠️' : ''}`;
-    q('#r-food').classList.toggle('danger', game.starving);
-    const energyFree = e.energyProd - e.energyUse;
-    q('#r-energy').innerHTML = `⚡ <small>${energyFree}/${e.energyProd}</small>`;
-    q('#r-pop').innerHTML = `👷 ${e.workersUsed}/${e.popCap}`;
-    q('#r-z').innerHTML = `🧟 ${zombieCount}`;
-
-    // Gray out unaffordable build buttons.
-    for (const key of BUILD_ORDER) {
-      const d = BUILDINGS[key];
-      const ok = game.res.gold >= d.cost.gold && game.res.wood >= d.cost.wood && game.res.stone >= (d.cost.stone || 0);
-      this.buildBtns[key].classList.toggle('poor', !ok);
-    }
-    const hasBarracks = game.buildings.some((b) => b.key === 'barracks' && b.alive);
-    for (const [key, btn] of Object.entries(this.unitBtns)) {
-      btn.classList.toggle('poor', !hasBarracks || game.res.gold < UNITS[key].cost);
-    }
-
-    // Messages feed.
-    const feed = q('#messages');
-    while (this.msgSeen < game.messages.length) {
-      const m = game.messages[this.msgSeen++];
-      const div = document.createElement('div');
-      div.className = 'msg ' + m.kind;
-      div.textContent = m.text;
-      feed.appendChild(div);
-      while (feed.children.length > 5) feed.removeChild(feed.firstChild);
-      setTimeout(() => { div.classList.add('fade'); }, 6000);
-      setTimeout(() => { div.remove(); }, 7000);
-      if (m.kind === 'bad') this.showBanner(m.text, 'bad');
-    }
   }
 
   drawMinimap(game, camFocus, viewSize) {
@@ -633,14 +560,21 @@ export class UI {
     const ctx = top.getContext('2d');
     ctx.clearRect(0, 0, N, N);
 
-    ctx.fillStyle = '#e8e2ce';
+    // Plots: ghost outlines; built plots solid.
+    for (const p of game.plots) {
+      if (p.kind === 'wall') continue;
+      ctx.fillStyle = p.tier > 0 ? '#efeadb' : 'rgba(255,235,170,0.35)';
+      ctx.fillRect(p.x, p.z, p.size, p.size);
+    }
     for (const b of game.buildings) {
-      ctx.fillStyle = b.key === 'hq' ? '#ffd75e' : b.key === 'wall' ? '#c9b48a' : '#efeadb';
+      ctx.fillStyle = b.kind === 'hq' ? '#ffd75e' : b.kind === 'wall' ? '#c9b48a' : '#efeadb';
       ctx.fillRect(b.x, b.z, b.size, b.size);
     }
+    ctx.fillStyle = '#ffd75e';
+    for (const cn of game.coins) ctx.fillRect(cn.x - 0.6, cn.z - 0.6, 1.2, 1.2);
     ctx.fillStyle = '#43d17c';
     for (const u of game.units) {
-      if (u.hero) { ctx.fillStyle = '#ffd75e'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }
+      if (u.hero) { ctx.fillStyle = '#7fd6ff'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }
       else ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
     }
     ctx.fillStyle = '#e6493a';
@@ -652,7 +586,20 @@ export class UI {
       ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
     }
 
-    // WC3-style pings: expanding red circles.
+    // Next-wave beacons during the day.
+    if (!game.isNight && game.nightPlan) {
+      const mid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
+      const ph = (performance.now() / 700) % 1;
+      for (const e of game.nightPlan.edges) {
+        ctx.strokeStyle = `rgba(255,60,50,${0.9 - ph * 0.7})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mid[e][0], mid[e][1], 3 + ph * 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Pings: expanding red circles.
     for (const p of this.pings) {
       p.t -= 0.15;
       const phase = 1 - ((p.t * 2) % 1);

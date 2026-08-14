@@ -1,11 +1,17 @@
-// Game balance & static definitions.
+// Game balance & static definitions — Thronefall-style build-by-plots economy.
 
 export const MAP_SIZE = 120;
-export const DAY_LENGTH = 75;          // seconds per day at 1x speed
-export const FINAL_DAY = 10;           // final horde arrives at the start of this day
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
-export const UNIT_CAP = 40;
+export const UNIT_CAP = 60;
+
+export const DAY_TIME = 65;            // seconds of daylight (build & collect)
+export const NIGHT_MAX = 150;          // safety: a night never lasts longer than this
+export const FINAL_NIGHT = 10;         // survive this many nights to win
+export const COIN_CAP = 360;           // max coin entities on the ground
+export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
+export const PAY_RADIUS = 1.1;         // stand this close to a pay plate to fund it
+export const PAY_RATE = 15;            // gold per second streamed into a plot
 
 export const TILE = {
   GRASS: 0, FOREST: 1, WATER: 2, MOUNTAIN: 3, SAND: 4, GOLDORE: 5, STONEORE: 6,
@@ -22,95 +28,122 @@ export const TILE_INFO = {
   [TILE.STONEORE]: { walk: true,  build: true,  color: 0x5e6a72 },
 };
 
-// Buildings. Rates are per second at 1x. `workers` are consumed, `pop` adds capacity.
-export const BUILDINGS = {
-  tent: {
-    key: 'tent', name: 'Hab-Tent', icon: '⛺', hotkey: '1', size: 2,
-    cost: { gold: 100, wood: 40, stone: 0 }, workers: 0, pop: 4,
-    energy: -1, gold: 1.6, food: -1, hp: 260,
-    desc: 'Houses 4 colonists. Colonists pay taxes in gold, but eat food. If zombies destroy it, the residents join the horde…',
+// ---------- Plots: the city is pre-designed; you buy it to life ----------
+// Every plot kind has tiers. Building/upgrading = standing next to the plot
+// while your gold streams into it. `income` pays out as coins at dawn.
+
+export const PLOT_KINDS = {
+  hq: {
+    name: 'The Keep', icon: '🏰',
+    tiers: [
+      { name: 'The Keep', cost: 0, hp: 4200, income: 10 },
+      { name: 'Stone Keep', cost: 70, hp: 6500, income: 18 },
+      { name: 'High Keep', cost: 150, hp: 9000, income: 30 },
+    ],
+    desc: 'The heart of the city. If it falls, all is lost. Upgrades add income and armor.',
+  },
+  house: {
+    name: 'House', icon: '🏠',
+    tiers: [
+      { name: 'Cottage', cost: 10, hp: 300, income: 6 },
+      { name: 'House', cost: 22, hp: 420, income: 12 },
+      { name: 'Manor', cost: 45, hp: 560, income: 22 },
+    ],
+    desc: 'Home to taxpaying settlers. Pays coins every dawn.',
   },
   farm: {
-    key: 'farm', name: 'Hydro-Farm', icon: '🌾', hotkey: '2', size: 3,
-    cost: { gold: 160, wood: 60, stone: 0 }, workers: 3, pop: 0,
-    energy: -1, food: 6, hp: 320,
-    desc: 'Produces +6 food. Must be built on open grassland.',
-    needs: 'grass',
-  },
-  sawmill: {
-    key: 'sawmill', name: 'Sawmill', icon: '🪵', hotkey: '3', size: 2,
-    cost: { gold: 140, wood: 0, stone: 0 }, workers: 3, pop: 0,
-    energy: -1, wood: 1.5, hp: 320,
-    desc: 'Produces +1.5 wood/s. Must be placed near a forest.',
-    needs: 'forest',
-  },
-  quarry: {
-    key: 'quarry', name: 'Quarry', icon: '⛏️', hotkey: '4', size: 3,
-    cost: { gold: 200, wood: 80, stone: 0 }, workers: 4, pop: 0,
-    energy: -2, stone: 1.0, hp: 420,
-    desc: 'Produces +1 stone/s. Must be placed on a stone deposit (pale blue crystals).',
-    needs: 'stoneore',
-  },
-  mine: {
-    key: 'mine', name: 'Gold Mine', icon: '💰', hotkey: '5', size: 3,
-    cost: { gold: 260, wood: 100, stone: 0 }, workers: 4, pop: 0,
-    energy: -2, gold: 4.5, hp: 420,
-    desc: 'Produces +4.5 gold/s. Must be placed on a gold deposit (yellow crystals).',
-    needs: 'goldore',
+    name: 'Farm', icon: '🌾',
+    tiers: [
+      { name: 'Field', cost: 6, hp: 240, income: 4 },
+      { name: 'Farm', cost: 14, hp: 320, income: 8 },
+    ],
+    desc: 'Cheap early coins from the soil.',
   },
   mill: {
-    key: 'mill', name: 'Wind Generator', icon: '🌀', hotkey: '6', size: 2,
-    cost: { gold: 120, wood: 80, stone: 0 }, workers: 1, pop: 0,
-    energy: 8, hp: 280,
-    desc: 'Generates +8 energy to power your other buildings.',
+    name: 'Mill', icon: '🌀',
+    tiers: [
+      { name: 'Windmill', cost: 18, hp: 380, income: 9 },
+      { name: 'Great Mill', cost: 36, hp: 500, income: 18 },
+    ],
+    desc: 'Grinds a steady stream of coins.',
+  },
+  mine: {
+    name: 'Gold Mine', icon: '⛏️',
+    tiers: [
+      { name: 'Gold Mine', cost: 28, hp: 480, income: 14 },
+      { name: 'Deep Mine', cost: 55, hp: 640, income: 26 },
+    ],
+    desc: 'Rich veins, far from safety. The best coins are the hardest to hold.',
   },
   tower: {
-    key: 'tower', name: 'Sentry Tower', icon: '🏹', hotkey: '7', size: 2,
-    cost: { gold: 200, wood: 70, stone: 50 }, workers: 1, pop: 0,
-    energy: -1, hp: 650,
-    range: 11, dmg: 16, rof: 1.7,
-    desc: 'Automated defense. Shoots zombies within range. Loud — attracts stragglers.',
+    name: 'Tower', icon: '🏹',
+    tiers: [
+      { name: 'Watchtower', cost: 18, hp: 560, dmg: 14, rof: 1.5, range: 10 },
+      { name: 'Guard Tower', cost: 36, hp: 720, dmg: 26, rof: 1.6, range: 11 },
+      {
+        branch: true, // walk up and choose a doctrine before paying
+        options: {
+          ballista: { name: 'Ballista Tower', icon: '🎯', cost: 60, hp: 850, dmg: 72, rof: 0.7, range: 15,
+            blurb: 'Slow, huge single hits at extreme range. Boss killer.' },
+          flame: { name: 'Flame Tower', icon: '🔥', cost: 60, hp: 850, dmg: 13, rof: 1.7, range: 8.5, splash: 2.4,
+            blurb: 'Fast burning splash. Melts packed hordes up close.' },
+        },
+      },
+    ],
+    desc: 'Automated defense. At the top tier, choose ballista or flame.',
   },
   wall: {
-    key: 'wall', name: 'Palisade Wall', icon: '🧱', hotkey: '8', size: 1,
-    cost: { gold: 12, wood: 8, stone: 0 }, workers: 0, pop: 0,
-    energy: 0, hp: 420, drag: true,
-    desc: 'Cheap wooden palisade. Zombies must chew through it — buy time for your towers. Drag to build lines.',
+    name: 'Wall', icon: '🧱',
+    perTile: true, // cost scales with segment length
+    tiers: [
+      { name: 'Palisade', cost: 1.4, hp: 380 },
+      { name: 'Stone Wall', cost: 2.6, hp: 820 },
+    ],
+    desc: 'A rampart with a gate your troops can pass. The dead must chew through.',
   },
-  barracks: {
-    key: 'barracks', name: 'Barracks', icon: '⚔️', hotkey: '9', size: 3,
-    cost: { gold: 300, wood: 120, stone: 60 }, workers: 4, pop: 0,
-    energy: -2, hp: 650,
-    desc: 'Trains Scouts, Troopers and Snipers to defend the colony.',
+  camp_militia: {
+    name: 'Militia Camp', icon: '⚔️',
+    unit: 'soldier',
+    tiers: [
+      { name: 'Militia Camp', cost: 22, hp: 460, count: 3 },
+      { name: 'War Camp', cost: 42, hp: 600, count: 5 },
+    ],
+    desc: 'Sturdy troopers. The fallen are replaced free at every dawn.',
   },
-  hq: {
-    key: 'hq', name: 'Fortress Command', icon: '🏛️', size: 4,
-    cost: { gold: 0, wood: 0, stone: 0 }, workers: 0, pop: 10,
-    energy: 14, gold: 2, food: 2, hp: 4500,
-    desc: 'The heart of the colony. If it falls, all is lost.',
+  camp_ranger: {
+    name: 'Ranger Camp', icon: '🏹',
+    unit: 'ranger',
+    tiers: [
+      { name: 'Ranger Camp', cost: 16, hp: 420, count: 3 },
+      { name: 'Ranger Lodge', cost: 32, hp: 540, count: 5 },
+    ],
+    desc: 'Fast, quiet scouts. Great early screen for your walls.',
+  },
+  camp_sniper: {
+    name: 'Sniper Nest', icon: '🎯',
+    unit: 'sniper',
+    tiers: [
+      { name: 'Sniper Nest', cost: 38, hp: 420, count: 2 },
+      { name: 'Marksman Hall', cost: 66, hp: 540, count: 3 },
+    ],
+    desc: 'Massive damage at extreme range — every shot echoes.',
   },
 };
 
-export const BUILD_ORDER = ['tent', 'farm', 'sawmill', 'quarry', 'mine', 'mill', 'tower', 'wall', 'barracks'];
+export const START_GOLD = 14;
 
 export const UNITS = {
   ranger: {
-    key: 'ranger', name: 'Scout', icon: '🏹', hotkey: 'U',
-    cost: 90, hp: 70, dmg: 7, range: 7, rof: 1.4, speed: 4.6,
-    noise: 6, color: 0x4a6e3a,
-    desc: 'Fast and quiet. Bow shots barely attract zombies. Great for clearing the map early.',
+    key: 'ranger', name: 'Ranger', icon: '🏹',
+    hp: 70, dmg: 7, range: 7, rof: 1.4, speed: 4.6, noise: 6, color: 0x4a6e3a,
   },
   soldier: {
-    key: 'soldier', name: 'Trooper', icon: '🔫', hotkey: 'I',
-    cost: 170, hp: 130, dmg: 16, range: 8, rof: 2.2, speed: 3.4,
-    noise: 16, color: 0x3a566e,
-    desc: 'Solid damage and armor, but gunfire is LOUD and wakes nearby zombies.',
+    key: 'soldier', name: 'Trooper', icon: '🔫',
+    hp: 140, dmg: 16, range: 8, rof: 2.2, speed: 3.4, noise: 16, color: 0x3a566e,
   },
   sniper: {
-    key: 'sniper', name: 'Sniper', icon: '🎯', hotkey: 'O',
-    cost: 300, hp: 90, dmg: 65, range: 14, rof: 0.55, speed: 3.0,
-    noise: 24, color: 0x5c4a72,
-    desc: 'Massive damage at extreme range. Every shot echoes across the map.',
+    key: 'sniper', name: 'Sniper', icon: '🎯',
+    hp: 90, dmg: 65, range: 14, rof: 0.55, speed: 3.0, noise: 24, color: 0x5c4a72,
   },
 };
 
@@ -121,93 +154,63 @@ export const ZOMBIES = {
   brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0x6e4a82, scale: 1.75, score: 8 },
 };
 
-// Horde waves: day → config. Sizes get multiplied by difficulty.
-export const WAVES = [
-  { day: 2,  size: 26,  types: { walker: 1 } },
-  { day: 4,  size: 60,  types: { walker: 0.9, runner: 0.1 } },
-  { day: 6,  size: 120, types: { walker: 0.8, runner: 0.18, brute: 0.02 } },
-  { day: 8,  size: 190, types: { walker: 0.72, runner: 0.24, brute: 0.04 } },
-  { day: FINAL_DAY, size: 380, types: { walker: 0.66, runner: 0.27, brute: 0.07 }, final: true },
-];
+// A wave EVERY night, Thronefall-style, growing to a final-night crescendo.
+export function waveForNight(night, mult) {
+  const size = Math.min(520, Math.round(8 * Math.pow(1.42, night - 1) * mult));
+  const brute = night >= 5 ? Math.min(0.07, 0.015 * (night - 4)) : 0;
+  const runner = night >= 3 ? Math.min(0.28, 0.07 * (night - 2)) : 0;
+  const types = { walker: 1 - brute - runner, runner, brute };
+  const edges = night >= 9 ? 3 : night >= 5 ? 2 : 1;
+  return { size, types, edges, final: night === FINAL_NIGHT };
+}
 
-// ---------- WC3-style heroes ----------
+// ---------- Heroes: auto-attack + ONE signature ability ----------
+// Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
 export const HERO_MAX_LEVEL = 10;
 export const XP_RADIUS = 14;                       // hero earns XP for kills nearby
-export const xpForLevel = (lvl) => 90 + 80 * (lvl - 1);   // XP to go from lvl -> lvl+1
-export const rankReqLevel = (rank) => [1, 3, 5][rank - 1] || 99; // ability rank -> hero level needed
-export const ULT_REQ_LEVEL = 6;
+export const xpForLevel = (lvl) => 80 + 70 * (lvl - 1);   // XP to go from lvl -> lvl+1
+export const abilityRank = (lvl) => (lvl >= 7 ? 3 : lvl >= 4 ? 2 : 1);
 
-// Three space marines with kits honoring the squad's favorite heroes.
-// Scott: Diablo's Barbarian (+ a taste of Lina/Invoker/Omniknight).
-// Alexander: Nature's Prophet / Sniper / Pudge.
-// Danny: Necrophos / Weaver / Riki.
 export const HEROES = {
   scott: {
     key: 'scott', name: 'Captain Scott', icon: '⚔️', color: 0x8f1f1f, trim: 0xc9a44a,
-    tagline: 'Close combat. A whirlwind of steel with fire in his fists.',
-    hp: 440, dmg: 28, range: 1.8, rof: 1.1, speed: 4.2, noise: 4,
-    levelHp: 44, levelDmg: 4, regen: 2.6, melee: true,
-    abilities: [
-      { key: 'whirlwind', name: 'Whirlwind', icon: '🌪️', hotkey: 'Q', maxRank: 3, cd: 14,
-        cast: 'whirlwind', radius: 2.5, dur: [3, 4, 5], dps: [45, 70, 100],
-        desc: 'Scott spins into a cyclone of steel — grinds everything around him while he keeps moving.' },
-      { key: 'warcry', name: 'War Cry', icon: '📣', hotkey: 'W', maxRank: 3, cd: 16,
-        cast: 'buff', radius: 9, mult: [1.35, 1.55, 1.8], dur: 7,
-        desc: 'A barbarian bellow — nearby troops deal bonus damage for 7s.' },
-      { key: 'holy', name: 'Purifying Light', icon: '✨', hotkey: 'E', maxRank: 3, cd: 15,
-        cast: 'pulse', radius: 6, dmg: [40, 70, 105], heal: [50, 85, 130],
-        desc: 'A burst of holy light — heals Scott and nearby troops, sears the dead around them.' },
-      { key: 'sunstrike', name: 'Sun Strike', icon: '☀️', hotkey: 'R', ult: true, maxRank: 1, cd: 80,
-        cast: 'aoeDmg', radius: 8.5, dmg: [360], stun: [2.5], knock: 2.6,
-        desc: 'ULTIMATE: calls down a column of pure solar fire onto everything around him.' },
-    ],
+    tagline: 'Close combat. A whirlwind of steel.',
+    hp: 480, dmg: 30, range: 1.8, rof: 1.1, speed: 4.3, noise: 4,
+    levelHp: 46, levelDmg: 4.5, regen: 3.0, melee: true,
+    ability: {
+      key: 'whirlwind', name: 'Whirlwind', icon: '🌪️', cd: 11,
+      cast: 'whirlwind', radius: 2.6, dur: [3, 4, 5], dps: [50, 80, 115],
+      desc: 'Scott spins into a cyclone of steel — grinds everything around him while he keeps moving.',
+    },
   },
   alexander: {
     key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
-    tagline: 'Mid range. Roots, teleports, and a rifle that never misses twice.',
-    hp: 320, dmg: 24, range: 7, rof: 1.8, speed: 4.5, noise: 14,
-    levelHp: 32, levelDmg: 3.5, regen: 2.0,
-    abilities: [
-      { key: 'roots', name: 'Entangling Roots', icon: '🌿', hotkey: 'Q', maxRank: 3, cd: 12,
-        cast: 'aoeDmg', radius: 5.5, dmg: [15, 25, 35], stun: [2.2, 2.8, 3.4],
-        desc: 'Roots erupt from the soil — every zombie around Alexander is held fast while you line up shots.' },
-      { key: 'teleport', name: 'Teleportation', icon: '🌀', hotkey: 'W', maxRank: 3, cd: [50, 40, 30],
-        cast: 'teleport', channel: 2,
-        desc: 'Channels for 2s, then teleports ANYWHERE on the map. Defend every front at once. Higher ranks recharge faster.' },
-      { key: 'focus', name: 'Marksman’s Focus', icon: '🎯', hotkey: 'E', maxRank: 3, passive: true,
-        stunChance: [0.18, 0.24, 0.3], stunDur: 0.5, heap: [0.3, 0.5, 0.7], heapCap: [40, 70, 100],
-        desc: 'PASSIVE: shots have a chance to mini-stun. Every kill permanently sharpens his aim — bonus damage that never fades (up to a cap).' },
-      { key: 'assassinate', name: 'Assassinate', icon: '🎯', hotkey: 'R', ult: true, maxRank: 1, cd: 60,
-        cast: 'assassinate', radius: 20, dmg: [600],
-        desc: 'ULTIMATE: takes aim… and deletes the biggest zombie in a huge radius.' },
-    ],
+    tagline: 'Mid range. The ground itself fights for him.',
+    hp: 350, dmg: 26, range: 7, rof: 1.8, speed: 4.5, noise: 14,
+    levelHp: 34, levelDmg: 3.5, regen: 2.2,
+    ability: {
+      key: 'roots', name: 'Entangling Roots', icon: '🌿', cd: 10,
+      cast: 'aoeDmg', radius: 6, dmg: [25, 45, 70], stun: [2.2, 2.8, 3.4],
+      desc: 'Roots erupt around Alexander — every zombie nearby is held fast while he lines up shots.',
+    },
   },
   danny: {
     key: 'danny', name: 'Danny', icon: '🗡️', color: 0x36503a, trim: 0xa8b394,
     tagline: 'Long range. Now you see him. They never do.',
-    hp: 270, dmg: 32, range: 13, rof: 1.1, speed: 4.5, noise: 12,
-    levelHp: 25, levelDmg: 4.5, regen: 1.8,
-    abilities: [
-      { key: 'deathpulse', name: 'Death Pulse', icon: '💀', hotkey: 'Q', maxRank: 3, cd: 9,
-        cast: 'pulse', radius: 5.5, dmg: [45, 75, 110], heal: [35, 60, 90],
-        desc: 'A wave of necrotic energy — damages the dead around Danny and mends his allies.' },
-      { key: 'swarm', name: 'Beetle Swarm', icon: '🐞', hotkey: 'W', maxRank: 3, cd: 15,
-        cast: 'swarm', radius: 11, count: [4, 6, 8], dps: 10, dur: 6, slow: 0.85,
-        desc: 'Releases a swarm of flesh-eating beetles that latch onto nearby zombies and gnaw them down.' },
-      { key: 'cloak', name: 'Cloak & Dagger', icon: '🗡️', hotkey: 'E', maxRank: 3, passive: true,
-        fade: [5, 3.5, 2], backstab: [2.2, 2.6, 3.0],
-        desc: 'PASSIVE: stop firing for a few seconds and Danny vanishes — zombies cannot see him. His next shot from the shadows deals massive bonus damage.' },
-      { key: 'timelapse', name: 'Time Lapse', icon: '⏪', hotkey: 'R', ult: true, maxRank: 1, cd: 60,
-        cast: 'timelapse', back: 5,
-        desc: 'ULTIMATE: rewinds Danny 5 seconds — back to where he stood, with the health he had.' },
-    ],
+    hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
+    levelHp: 27, levelDmg: 5, regen: 2.0,
+    ability: {
+      key: 'veil', name: 'Shadow Veil', icon: '🌫️', cd: 12,
+      cast: 'veil', dur: [3.5, 4.5, 6], backstab: [2.4, 3.0, 3.6], haste: 1.3,
+      desc: 'Danny vanishes — the dead cannot see him. His next shot from the shadows hits like a falling star.',
+    },
   },
 };
 
-// Loot drops (WC3 creep-style): brutes always drop, walkers/runners rarely.
+// Coin drops from kills (Thronefall-style loot).
 export const DROPS = {
-  bruteGold: 90, smallGold: 30, smallChance: 0.04, healAmount: 100, life: 40,
+  smallChance: 0.05, bruteCoins: 4, bossCoins: 20,
 };
 
 // ---------- Campaign: 5 levels, 5 maps, 5 bosses ----------
@@ -234,12 +237,12 @@ export const LEVELS = [
   },
   {
     id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3,
-    blurb: 'Ash plains under a burnt sky. Wood is scarce; the dead are not.',
+    blurb: 'Ash plains under a burnt sky. Nothing grows here but the horde.',
     theme: { water: 0.28, mountain: 0.66, forest: 0.66,
       palette: { grass: 0x6a5f4a, forest: 0x4a4434, water: 0x2e3440, mountain: 0x4e4a44, sand: 0x8a7a60 } },
     boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
       color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },
-      desc: 'Its scream overloads sentry towers, silencing them for seconds at a time.' },
+      desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
   },
   {
     id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6,
@@ -267,5 +270,3 @@ export const DIFFICULTY = {
   normal: { label: 'Normal', mult: 1.0, ambient: 1.0 },
   brutal: { label: 'Brutal', mult: 1.7, ambient: 1.5 },
 };
-
-export const START_RESOURCES = { gold: 650, wood: 320, stone: 120 };

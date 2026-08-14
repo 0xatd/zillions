@@ -253,6 +253,38 @@ export class AudioSys {
 
   hitBuilding() { this._noise(0.09, { freq: 260, q: 1.4, gain: 0.08, type: 'lowpass' }); }
 
+  // Rising coin dings — pitch climbs with each rapid pickup, Thronefall-style.
+  coin() {
+    const t = performance.now();
+    if (t - (this._coinT || 0) > 900) this._coinN = 0;
+    this._coinT = t;
+    const n = Math.min(this._coinN++, 12);
+    const f = 780 * Math.pow(1.059, n);
+    this._tone(0.09, { freq: f, type: 'triangle', gain: 0.09, slide: 120 });
+    this._tone(0.12, { freq: f * 1.5, type: 'sine', gain: 0.05, slide: 90 });
+  }
+
+  payTick() {
+    const t = performance.now();
+    if (t - (this._payT || 0) < 90) return;
+    this._payT = t;
+    this._tone(0.05, { freq: 1200 + Math.random() * 300, type: 'triangle', gain: 0.045, slide: -200 });
+  }
+
+  bell() {
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        this._tone(1.4, { freq: 340, type: 'triangle', gain: 0.16, attack: 0.005 });
+        this._tone(1.4, { freq: 508, type: 'sine', gain: 0.08, attack: 0.005 });
+        this._tone(1.0, { freq: 226, type: 'sine', gain: 0.07, attack: 0.005 });
+      }, i * 900);
+    }
+  }
+
+  dawn() {
+    [392, 494, 587, 784].forEach((f, i) => setTimeout(() => this._tone(0.45, { freq: f, type: 'triangle', gain: 0.09 }), i * 130));
+  }
+
   click() { this._tone(0.05, { freq: 700, type: 'triangle', gain: 0.06, slide: 150 }); }
   deny() { this._tone(0.14, { freq: 220, type: 'square', gain: 0.06, slide: -80 }); }
   train() { this._tone(0.09, { freq: 520, type: 'triangle', gain: 0.09, slide: 260 }); this._tone(0.12, { freq: 780, type: 'triangle', gain: 0.07, slide: 200 }); }

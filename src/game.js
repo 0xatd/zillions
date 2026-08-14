@@ -1,17 +1,20 @@
-// Core simulation: economy, buildings, zombies, units, hordes, win/lose.
-// Pure logic — rendering/audio consume `game.events` each frame.
+// Core simulation — Thronefall-style: a pre-designed city of plots you bring
+// to life with coins, a wave every night, direct hero control, rally-to-me
+// troops. Pure logic — rendering/audio consume `game.events` each frame.
 import {
-  BUILDINGS, UNITS, ZOMBIES, WAVES, TILE, DAY_LENGTH, FINAL_DAY,
-  START_RESOURCES, ZOMBIE_CAP, UNIT_CAP, DIFFICULTY, LEVELS,
-  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
+  PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
+  NIGHT_MAX, FINAL_NIGHT, waveForNight,
+  START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
+  ZOMBIE_CAP, UNIT_CAP, DROPS,
+  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
 } from './config.js';
-import { FlowField, findPath } from './flowfield.js';
-import { Overseer } from './bot.js';
-import { clamp, dist2, makeRNG } from './utils.js';
+import { FlowField } from './flowfield.js';
+import { generatePlots } from './plots.js';
+import { dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
 
-let nextId = 1;
+let nextId = 1000;
 const getNextId = () => nextId;
 const setNextId = (v) => { nextId = v; };
 
@@ -26,127 +29,113 @@ export class Game {
     this.boss = null;
     this.rng = makeRNG(999);
 
-    this.res = { ...START_RESOURCES };
+    this.gold = START_GOLD;
+    this.coins = [];             // physical coins on the ground
+    this.plots = generatePlots(map);
     this.buildings = [];
     this.units = [];
     this.zombies = [];
-    this.occ = new Int32Array(map.size * map.size); // building id + 1
+    this.occ = new Int32Array(map.size * map.size); // building id per tile
+    this.gateIds = new Set();    // building ids friendlies may pass through
     this.flow = new FlowField(map);
     this.flowDirty = true;
     this.flowTimer = 0;
 
-    this.time = 0;               // total sim seconds
+    this.time = 0;
+    this.night = 1;              // current day/night number (1..FINAL_NIGHT)
+    this.phase = 'day';
+    this.phaseT = 0;             // day: counts up (untimed); night: counts down
+    this.belling = false;
+    this.nightPlan = null;
     this.over = false;
     this.won = false;
-    this.finalSpawned = false;
-    this.wavesDone = new Set();
-    this.ambientTimer = 20;
 
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
 
-    this.stats = { kills: 0, built: 0, lost: 0 };
-
-    this.eco = { energyProd: 0, energyUse: 0, workersUsed: 0, popCap: 0, gold: 0, wood: 0, stone: 0, food: 0 };
-    this.starving = false;
+    this.stats = { kills: 0, built: 0, lost: 0, coins: 0 };
 
     this.heroKeys = Array.isArray(heroKeys) ? heroKeys : [heroKeys];
     this.heroes = [];
     this.hero = null;            // heroes[0], kept for solo call sites
-    this.pickups = [];
-    this.fields = [];            // ability ground zones
-    this.autoBuild = true;       // the Overseer runs the economy by default
-    this.bot = new Overseer(this);
 
     if (snap) this._restore(snap);
     else this._setupStart();
   }
 
-  // ---------- save / restore ----------
-  // A snapshot is plain JSON: enough state to resume a run identically on
-  // every machine (co-op peers all load the same snapshot). Transient AI
-  // timers reset on load — identically for everyone, so lockstep holds.
+  // ---------- save / restore (v2: plot economy) ----------
 
   snapshot() {
-    const unit = (u) => ({
-      id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
-      hp: +u.hp.toFixed(2), maxHp: u.maxHp,
-      turret: !!u.turret, summon: !!u.summon, life: u.life,
-      facing: +(u.facing || 0).toFixed(3),
-      def: (u.turret || u.summon) ? { ...u.def } : undefined,
-    });
     return {
-      v: 1, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId,
-      time: this.time, res: { gold: +this.res.gold.toFixed(3), wood: +this.res.wood.toFixed(3), stone: +this.res.stone.toFixed(3) },
-      autoBuild: this.autoBuild, finalSpawned: this.finalSpawned,
-      wavesDone: [...this.wavesDone], pendingWave: this.pendingWave || null,
-      ambientTimer: this.ambientTimer, stats: { ...this.stats },
+      v: 2, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId,
+      time: +this.time.toFixed(3), night: this.night, phase: this.phase, phaseT: +this.phaseT.toFixed(3),
+      belling: this.belling ? +this.bellT.toFixed(3) : -1,
+      gold: +this.gold.toFixed(3),
+      nightPlan: this.nightPlan ? { ...this.nightPlan } : null,
+      stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
-      buildings: this.buildings.map((b) => ({ id: b.id, k: b.key, x: b.x, z: b.z, hp: +b.hp.toFixed(1) })),
-      units: this.units.filter((u) => !u.hero).map(unit),
+      plots: this.plots.map((p) => ({ id: p.id, tier: p.tier, paid: +p.paid.toFixed(3), branch: p.branch })),
+      buildings: this.buildings.map((b) => ({
+        id: b.id, p: b.plotId, x: b.x, z: b.z, hp: +b.hp.toFixed(1), g: b.gate ? 1 : 0,
+      })),
+      coins: this.coins.map((cn) => [+cn.x.toFixed(2), +cn.z.toFixed(2), cn.v]),
+      units: this.units.filter((u) => !u.hero).map((u) => ({
+        id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
+        hp: +u.hp.toFixed(2), camp: u.camp || 0, follow: u.follow == null ? -1 : u.follow,
+        hx: +(u.holdX || u.x).toFixed(2), hz: +(u.holdZ || u.z).toFixed(2),
+      })),
       heroes: this.heroes.map((h) => ({
-        k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
+        id: h.id, k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
         dead: !!h.dead, reviveT: +(h.reviveT || 0).toFixed(1),
-        level: h.level, xp: Math.round(h.xp), points: h.points,
-        abil: h.abil.map((a) => ({ r: a.rank, cd: +a.cd.toFixed(1) })),
-        bonusDmg: +(h.bonusDmg || 0).toFixed(1),
+        level: h.level, xp: Math.round(h.xp), cd: +h.abilCd.toFixed(1),
       })),
       zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0]),
-      pickups: this.pickups.map((p) => ({ ...p })),
     };
   }
 
   _restore(snap) {
     this.time = snap.time;
-    this.res = { ...snap.res };
-    this.autoBuild = snap.autoBuild;
-    this.finalSpawned = snap.finalSpawned;
-    this.wavesDone = new Set(snap.wavesDone);
-    this.pendingWave = snap.pendingWave || null;
-    this.ambientTimer = snap.ambientTimer;
+    this.night = snap.night;
+    this.phase = snap.phase;
+    this.phaseT = snap.phaseT;
+    if (snap.belling != null && snap.belling >= 0) { this.belling = true; this.bellT = snap.belling; }
+    this.gold = snap.gold;
+    this.nightPlan = snap.nightPlan ? { ...snap.nightPlan } : null;
     this.stats = { ...snap.stats };
-    this.bot.greeted = true;
 
-    for (const b of snap.buildings) {
-      const d = BUILDINGS[b.k];
-      const nb = {
-        id: b.id, key: b.k, def: d, x: b.x, z: b.z, size: d.size,
-        cx: b.x + d.size / 2, cz: b.z + d.size / 2,
-        hp: b.hp, maxHp: d.hp, alive: true, cooldown: 0,
-      };
-      this.buildings.push(nb);
-      for (let dz = 0; dz < d.size; dz++) for (let dx = 0; dx < d.size; dx++) {
-        this.occ[(b.z + dz) * this.map.size + (b.x + dx)] = b.id;
-      }
-      if (b.k === 'hq') this.hq = nb;
+    for (const ps of snap.plots) {
+      const p = this.plots.find((o) => o.id === ps.id);
+      if (p) { p.tier = ps.tier; p.paid = ps.paid; p.branch = ps.branch; }
     }
-
-    for (const u of snap.units) {
-      const def = u.def || UNITS[u.k];
-      this.units.push({
-        id: u.id, key: u.k, def, x: u.x, z: u.z, hp: u.hp, maxHp: u.maxHp,
-        turret: u.turret || undefined, summon: u.summon || undefined, life: u.life,
-        path: null, pathI: 0, cooldown: 0, target: null, selected: false,
-        facing: u.facing, retargetT: 0,
-      });
+    for (const bs of snap.buildings) {
+      const plot = this.plots.find((o) => o.id === bs.p);
+      if (!plot) continue;
+      const def = this.tierDef(plot, plot.tier);
+      this._addBuilding(plot, bs.x, bs.z, def, !!bs.g, bs.id, bs.hp);
     }
+    this.hq = this.buildings.find((b) => b.kind === 'hq');
+    this.coins = snap.coins.map(([x, z, v]) => ({ id: nextId++, x, z, v }));
 
+    for (const us of snap.units) {
+      const u = this._spawnUnit(us.k, us.x, us.z, us.camp || null);
+      u.id = us.id; // keep saved ids so they can't collide with future spawns
+      u.hp = us.hp;
+      u.follow = us.follow < 0 ? null : us.follow;
+      u.holdX = us.hx; u.holdZ = us.hz;
+    }
     for (const hs of snap.heroes) {
       const h = this._spawnHero(hs.k, hs.x, hs.z);
+      if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
-      h.level = hs.level; h.xp = hs.xp; h.points = hs.points;
+      h.level = hs.level; h.xp = hs.xp;
       h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
-      h.abil = hs.abil.map((a) => ({ rank: a.r, cd: a.cd }));
-      h.bonusDmg = hs.bonusDmg;
+      h.abilCd = hs.cd;
       if (hs.dead) {
         h.dead = true;
         h.reviveT = hs.reviveT;
         this.units = this.units.filter((u) => u !== h);
       }
     }
-
-    // Zombies re-roll their idle timers from the restored RNG — identical on
-    // every peer since they all restore the same stream position afterwards.
     for (const [type, x, z, hp, state, wave, boss, enraged] of snap.zombies) {
       if (boss) {
         this._spawnBoss(0);
@@ -161,36 +150,33 @@ export class Game {
       const zb = this._spawnZombie(type, x, z, state === 2, !!wave);
       if (zb) { zb.hp = hp; zb.state = state; }
     }
-    this.pickups = (snap.pickups || []).map((p) => ({ ...p }));
 
     this.rng.setState(snap.rng);
     setNextId(snap.nextId);
-    this.recalcEconomy();
     this.flowDirty = true;
-    this._wasNight = this.isNight;
-    this.msg('📂 Colony restored — the fight continues.', 'info');
+    this.msg('📂 The city stands as you left it — the fight continues.', 'info');
   }
 
   // ---------- setup ----------
 
   _setupStart() {
-    const c = (this.map.size / 2) | 0;
-    this.hq = this._placeRaw('hq', c - 2, c - 2);
-    for (let i = 0; i < 3; i++) this._spawnUnit('ranger', c - 4 + i * 1.5, c + 3);
-    this._spawnUnit('soldier', c + 3, c + 3);
-    this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
-    this._scatterInitialZombies();
-    this.recalcEconomy();
-    this.msg('Colony founded on cursed ground. Raise hab-tents, farms and generators — the dead are coming.', 'info');
+    const hqPlot = this.plots.find((p) => p.kind === 'hq');
+    this._construct(hqPlot, true); // the Keep starts built
+    this.hq = this.buildings.find((b) => b.kind === 'hq');
+    const c = this.map.size / 2;
+    this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2, c + 3.5));
+    this._scatterCreeps();
+    this._planNight();
+    this.msg('☀️ Dawn over the ruins. Collect coins, stand on glowing foundations to build — night is coming.', 'info');
   }
 
-  _scatterInitialZombies() {
+  _scatterCreeps() {
     const N = this.map.size, c = N / 2;
-    const count = Math.round(150 * this.diff.ambient);
+    const count = Math.round(90 * this.diff.ambient);
     let placed = 0, guard = 0;
     while (placed < count && guard++ < count * 30) {
       const x = 2 + this.rng() * (N - 4), z = 2 + this.rng() * (N - 4);
-      if (Math.hypot(x - c, z - c) < 20) continue;
+      if (Math.hypot(x - c, z - c) < 30) continue;
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
       const type = this.rng() < 0.92 ? 'walker' : 'runner';
       this._spawnZombie(type, x, z, false);
@@ -203,106 +189,179 @@ export class Game {
   msg(text, kind = 'info') { this.messages.push({ text, kind, t: this.time }); }
   emit(e) { this.events.push(e); }
 
-  get day() { return Math.floor(this.time / DAY_LENGTH) + 1; }
-  get dayFrac() { return (this.time % DAY_LENGTH) / DAY_LENGTH; }
-  get isNight() { return this.dayFrac > 0.72; }
+  get day() { return this.night; }
+  get isNight() { return this.phase === 'night'; }
 
-  nextWave() {
-    for (const w of WAVES) {
-      if (!this.wavesDone.has(w.day)) return { ...w, at: (w.day - 1) * DAY_LENGTH };
+  // ---------- plots & construction ----------
+
+  // Definition of a plot's tier (1-based). Handles wall per-tile cost & branches.
+  tierDef(plot, tier) {
+    const kind = PLOT_KINDS[plot.kind];
+    const t = kind.tiers[tier - 1];
+    if (!t) return null;
+    if (t.branch) {
+      const opt = t.options[plot.branch];
+      return opt ? { ...opt, branch: plot.branch } : null;
     }
-    return null;
+    if (kind.perTile) {
+      return { ...t, cost: Math.ceil(t.cost * plot.tiles.length) };
+    }
+    return t;
   }
 
-  // ---------- economy ----------
-
-  recalcEconomy() {
-    const e = { energyProd: 0, energyUse: 0, workersUsed: 0, popCap: 0, gold: 0, wood: 0, stone: 0, food: 0 };
-    for (const b of this.buildings) {
-      if (!b.alive) continue;
-      const d = b.def;
-      if (d.energy > 0) e.energyProd += d.energy; else e.energyUse += -d.energy;
-      e.workersUsed += d.workers || 0;
-      e.popCap += d.pop || 0;
-      e.gold += d.gold || 0;
-      e.wood += d.wood || 0;
-      e.stone += d.stone || 0;
-      e.food += d.food || 0;
-    }
-    this.eco = e;
+  // What the next purchase on this plot is, or null when maxed / awaiting a branch pick.
+  nextTier(plot) {
+    const kind = PLOT_KINDS[plot.kind];
+    const idx = plot.tier + 1;
+    if (idx > kind.tiers.length) return null;
+    const t = kind.tiers[idx - 1];
+    if (t && t.branch && !plot.branch) return { branch: true, options: t.options };
+    const def = this.tierDef(plot, idx);
+    return def ? { def, cost: def.cost } : null;
   }
 
-  canPlace(key, x, z) {
-    const d = BUILDINGS[key];
-    const s = d.size;
-    if (x < 0 || z < 0 || x + s > this.map.size || z + s > this.map.size) return { ok: false, why: 'Out of bounds' };
-    for (let dz = 0; dz < s; dz++) {
-      for (let dx = 0; dx < s; dx++) {
-        if (!this.map.isBuildable(x + dx, z + dz)) return { ok: false, why: 'Blocked terrain' };
-        if (this.occ[(z + dz) * this.map.size + (x + dx)] > 0) return { ok: false, why: 'Occupied' };
+  // Where you stand to fund a plot. Foundations: stand on them. Built
+  // structures: a discrete pay plate at their foot (Thronefall's buy plates),
+  // so sweeping dawn coins never dribbles gold into upgrades by accident.
+  payPoint(plot) {
+    if (plot.kind === 'wall') return [plot.gate[0] + 0.5, plot.gate[1] + 0.5];
+    if (plot.tier === 0) return [plot.cx, plot.cz];
+    if (!plot._plate) {
+      const s = plot.size;
+      const cands = [
+        [plot.cx, plot.z + s + 0.9], [plot.cx, plot.z - 0.9],
+        [plot.x + s + 0.9, plot.cz], [plot.x - 0.9, plot.cz],
+      ];
+      plot._plate = cands.find(([x, z]) => this.map.isWalkable(x | 0, z | 0)) || cands[0];
+    }
+    return plot._plate;
+  }
+
+  // Thronefall funding: get close to a foundation and your gold streams in.
+  // Each hero funds only the nearest pending plot; partial payments persist,
+  // so brushing past a plot never wastes anything.
+  _updatePlots(dt) {
+    if (this.over) return;
+    if (this.phase !== 'day') return; // no building at night — fight!
+    for (const h of this.heroes) {
+      if (h.dead) continue;
+      let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null;
+      for (const plot of this.plots) {
+        const nt = this.nextTier(plot);
+        if (!nt || nt.branch) continue;
+        const [px, pz] = this.payPoint(plot);
+        const d = dist2(h.x, h.z, px, pz);
+        if (d <= bd) { bd = d; best = plot; bestNt = nt; }
+      }
+      // Dwell gate: linger ~half a second before coins start streaming, so
+      // riding across a plate never buys anything.
+      if (!best) { h._payId = null; h._payT = 0; continue; }
+      if (h._payId !== best.id) { h._payId = best.id; h._payT = 0; }
+      h._payT += dt;
+      if (h._payT < 0.45) continue;
+      const need = bestNt.cost - best.paid;
+      const pay = Math.min(PAY_RATE * dt, this.gold, need);
+      if (pay <= 0) continue;
+      this.gold -= pay;
+      best.paid += pay;
+      best.payFx = 0.3; // renderer hint
+      if (best.paid >= bestNt.cost - 1e-6) {
+        best.paid = 0;
+        this._construct(best);
       }
     }
-    if (d.needs === 'grass') {
-      for (let dz = 0; dz < s; dz++) for (let dx = 0; dx < s; dx++) {
-        if (this.map.tileAt(x + dx, z + dz) !== TILE.GRASS) return { ok: false, why: 'Needs open grassland' };
-      }
-    } else if (d.needs === 'forest') {
-      const cx = x + (s >> 1), cz = z + (s >> 1);
-      if (this.map.countNearby(cx, cz, 4, TILE.FOREST) < 4) return { ok: false, why: 'Must be near a forest' };
-    } else if (d.needs === 'goldore' || d.needs === 'stoneore') {
-      const want = d.needs === 'goldore' ? TILE.GOLDORE : TILE.STONEORE;
-      let found = false;
-      for (let dz = 0; dz < s; dz++) for (let dx = 0; dx < s; dx++) {
-        if (this.map.tileAt(x + dx, z + dz) === want) found = true;
-      }
-      if (!found) return { ok: false, why: d.needs === 'goldore' ? 'Must cover a gold deposit' : 'Must cover a stone deposit' };
-    }
-    if (this.res.gold < d.cost.gold || this.res.wood < d.cost.wood || this.res.stone < (d.cost.stone || 0)) {
-      return { ok: false, why: 'Not enough resources' };
-    }
-    if ((d.workers || 0) > 0 && this.eco.workersUsed + d.workers > this.eco.popCap) {
-      return { ok: false, why: 'Not enough colonists — build hab-tents' };
-    }
-    if (d.energy < 0 && this.eco.energyProd - this.eco.energyUse + d.energy < 0) {
-      return { ok: false, why: 'Not enough energy — build generators' };
-    }
-    return { ok: true };
   }
 
-  place(key, x, z) {
-    const chk = this.canPlace(key, x, z);
-    if (!chk.ok) { this.emit({ type: 'deny' }); this.msg(chk.why, 'warn'); return null; }
-    const d = BUILDINGS[key];
-    this.res.gold -= d.cost.gold; this.res.wood -= d.cost.wood; this.res.stone -= d.cost.stone || 0;
-    const b = this._placeRaw(key, x, z);
-    this.stats.built++;
-    this.emit({ type: 'build', key, x: x + d.size / 2, z: z + d.size / 2 });
-    return b;
+  _construct(plot, free = false) {
+    plot.tier++;
+    const def = this.tierDef(plot, plot.tier);
+    if (!free) this.stats.built++;
+
+    if (plot.kind === 'wall') {
+      // One building per rampart tile; the gate tile lets friendlies through.
+      if (plot.tier === 1) {
+        for (const [x, z] of plot.tiles) {
+          this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
+        }
+      } else {
+        for (const b of this.buildings) {
+          if (b.plotId === plot.id) { b.def = def; b.maxHp = def.hp; b.hp = def.hp; }
+        }
+      }
+    } else if (plot.tier === 1) {
+      this._addBuilding(plot, plot.x, plot.z, def, false);
+    } else {
+      for (const b of this.buildings) {
+        if (b.plotId === plot.id) { b.def = def; b.maxHp = def.hp; b.hp = def.hp; }
+      }
+    }
+
+    // Camps field a squad immediately (and refill at dawn).
+    if (PLOT_KINDS[plot.kind].unit) this._refillCamp(plot);
+
+    this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
+    if (!free) this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
   }
 
-  _placeRaw(key, x, z) {
-    const d = BUILDINGS[key];
+  _addBuilding(plot, x, z, def, gate, id = null, hp = null) {
+    const size = plot.kind === 'wall' ? 1 : plot.size;
     const b = {
-      id: nextId++, key, def: d, x, z, size: d.size,
-      cx: x + d.size / 2, cz: z + d.size / 2,
-      hp: d.hp, maxHp: d.hp, alive: true, cooldown: 0,
+      id: id || nextId++, plotId: plot.id, kind: plot.kind, key: plot.kind,
+      def, x, z, size,
+      cx: x + size / 2, cz: z + size / 2,
+      hp: hp != null ? hp : def.hp, maxHp: def.hp, alive: true, cooldown: 0, gate,
     };
     this.buildings.push(b);
-    for (let dz = 0; dz < d.size; dz++) for (let dx = 0; dx < d.size; dx++) {
+    for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
       this.occ[(z + dz) * this.map.size + (x + dx)] = b.id;
     }
+    if (gate) this.gateIds.add(b.id);
+    // Eject anyone standing on the fresh foundation — you pay standing ON the
+    // plot, so the new walls must not entomb you.
+    for (const u of this.units) {
+      const ux = u.x | 0, uz = u.z | 0;
+      if (ux >= x && ux < x + size && uz >= z && uz < z + size) this._ejectActor(u, b);
+    }
     this.flowDirty = true;
-    this.recalcEconomy();
     return b;
   }
 
-  demolish(b) {
-    if (!b.alive || b.key === 'hq') return;
-    this._destroyBuilding(b, false);
-    this.res.gold += Math.floor(b.def.cost.gold * 0.5);
-    this.res.wood += Math.floor(b.def.cost.wood * 0.5);
-    this.res.stone += Math.floor((b.def.cost.stone || 0) * 0.5);
-    this.emit({ type: 'demolish', x: b.cx, z: b.cz });
+  _ejectActor(u, b) {
+    const N = this.map.size;
+    for (let r = 1; r < 8; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = (b.x + (b.size >> 1)) + dx, nz = (b.z + (b.size >> 1)) + dz;
+          if (nx < 1 || nz < 1 || nx >= N - 1 || nz >= N - 1) continue;
+          if (this.map.isWalkable(nx, nz) && this.occ[nz * N + nx] === 0) {
+            u.x = nx + 0.5; u.z = nz + 0.5;
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  _refillCamp(plot) {
+    const kindDef = PLOT_KINDS[plot.kind];
+    const def = this.tierDef(plot, plot.tier);
+    if (!def) return;
+    const have = this.units.filter((u) => u.camp === plot.id && !u.dead).length;
+    for (let i = have; i < def.count && this.units.length < UNIT_CAP; i++) {
+      const a = (i / def.count) * Math.PI * 2;
+      this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
+    }
+  }
+
+  chooseBranch(plotId, branch, p = 0) {
+    const plot = this.plots.find((o) => o.id === plotId);
+    if (!plot) return;
+    const nt = this.nextTier(plot);
+    if (!nt || !nt.branch || !nt.options[branch]) return;
+    plot.branch = branch;
+    this.emit({ type: 'branch', x: plot.cx, z: plot.cz });
+    this.msg(`${nt.options[branch].icon} Doctrine chosen: ${nt.options[branch].name}. Stand close to fund it.`, 'info');
   }
 
   _destroyBuilding(b, byZombie) {
@@ -312,50 +371,221 @@ export class Game {
       const i = (b.z + dz) * this.map.size + (b.x + dx);
       if (this.occ[i] === b.id) this.occ[i] = 0;
     }
+    this.gateIds.delete(b.id);
     this.buildings = this.buildings.filter((o) => o !== b);
     this.flowDirty = true;
-    this.recalcEconomy();
     if (byZombie) {
       this.stats.lost++;
       this.emit({ type: 'bdestroyed', x: b.cx, z: b.cz });
-      if (b.key === 'tent') {
-        // Infection! The residents rise.
-        for (let i = 0; i < b.def.pop; i++) {
-          this._spawnZombie('walker', b.cx + (this.rng() - 0.5) * 2, b.cz + (this.rng() - 0.5) * 2, true);
-        }
-        this.emit({ type: 'infection', x: b.cx, z: b.cz });
-        this.msg('A hab-tent has fallen — its residents have joined the horde!', 'bad');
-      } else if (b.key === 'hq') {
-        this._gameOver(false);
-      } else {
-        this.msg(`${b.def.name} destroyed!`, 'bad');
+      if (b.kind === 'hq') { this._gameOver(false); return; }
+      // Thronefall-style: ruins rebuild free at dawn — the real price is a
+      // night without that tower/income/camp.
+      this.msg(b.kind === 'wall' ? '🧱 The wall is breached!' : `${PLOT_KINDS[b.kind].icon} ${b.def.name} destroyed! It will be rebuilt at dawn.`, 'bad');
+    }
+  }
+
+  // ---------- day / night cycle ----------
+
+  _planNight() {
+    const w = waveForNight(this.night, this.diff.mult * this.level.mult);
+    const edges = [];
+    let e = (this.rng() * 4) | 0;
+    for (let i = 0; i < w.edges; i++) {
+      edges.push(e);
+      e = (e + 1 + ((this.rng() * 2) | 0)) % 4;
+    }
+    this.nightPlan = { size: w.size, types: w.types, edges, final: w.final };
+    this.emit({ type: 'nightplan', edges });
+  }
+
+  // Thronefall-exact: the day is untimed — night begins only when someone
+  // rings the bell (then a short dusk countdown).
+  bell(p = 0) {
+    if (this.phase !== 'day' || this.over || this.belling) return;
+    this.belling = true;
+    this.phaseT = 3;
+    const h = this.heroes[p];
+    this.msg(`🔔 ${h ? h.def.name : 'The city'} rings the bell — night falls!`, 'warn');
+    this.emit({ type: 'bell' });
+  }
+
+  _updatePhase(dt) {
+    if (this.phase === 'day') {
+      this.phaseT += dt; // day length is informational only
+      if (this.belling) {
+        this.bellT = (this.bellT ?? 3) - dt;
+        if (this.bellT <= 0) { this.belling = false; this.bellT = null; this._startNight(); }
+      }
+    } else {
+      this.phaseT -= dt;
+      // Night ends when the wave is destroyed (or the safety timer runs out).
+      let waveLeft = 0;
+      for (const zb of this.zombies) if (zb.wave && !zb.dead) waveLeft++;
+      if (waveLeft === 0) {
+        if (this.nightPlan && this.nightPlan.final) { this._gameOver(true); return; }
+        this._startDay();
+      } else if (this.phaseT <= 0 && !(this.nightPlan && this.nightPlan.final)) {
+        // Safety valve — but the final night only ends in victory or defeat.
+        this._startDay();
       }
     }
   }
 
-  // ---------- units ----------
-
-  trainUnit(key) {
-    const d = UNITS[key];
-    const barracks = this.buildings.find((b) => b.key === 'barracks' && b.alive);
-    if (!barracks) { this.msg('Build a Barracks first.', 'warn'); this.emit({ type: 'deny' }); return null; }
-    if (this.units.length >= UNIT_CAP) { this.msg('Unit limit reached.', 'warn'); this.emit({ type: 'deny' }); return null; }
-    if (this.res.gold < d.cost) { this.msg('Not enough gold.', 'warn'); this.emit({ type: 'deny' }); return null; }
-    this.res.gold -= d.cost;
-    const u = this._spawnUnit(key, barracks.cx + 2 + this.rng(), barracks.cz + 2 + this.rng());
-    this.emit({ type: 'train' });
-    return u;
+  _startNight() {
+    this.phase = 'night';
+    this.phaseT = NIGHT_MAX;
+    const plan = this.nightPlan;
+    this._spawnHorde(plan.size, plan.edges, plan.types);
+    if (plan.final) this._spawnBoss(plan.edges[0]);
+    const N = this.map.size;
+    const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
+    for (const ed of plan.edges) this.emit({ type: 'ping', x: edgeMid[ed][0], z: edgeMid[ed][1] });
+    const dirs = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+    this.msg(plan.final
+      ? `☠️ THE FINAL NIGHT. Everything they have, all at once. Survive this and the land is yours!`
+      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${plan.edges.map((e) => dirs[e]).join(' and ')}!`, 'bad');
+    this.emit({ type: 'horde', final: !!plan.final });
+    this.emit({ type: 'night' });
   }
 
-  _spawnUnit(key, x, z) {
+  _startDay() {
+    // Straggling wave zombies (safety timeout) keep fighting, but the sun rises.
+    for (const zb of this.zombies) if (zb.wave) zb.wave = false;
+    this.night++;
+    this.phase = 'day';
+    this.phaseT = 0;
+    this.belling = false;
+    this.bellT = null;
+    this._dawnPayout();
+    this._repairCity();
+    this._planNight();
+    this.msg(`☀️ Dawn of day ${this.night}. The city pays its taxes — go collect!`, 'info');
+    this.emit({ type: 'dawn' });
+  }
+
+  _dawnPayout() {
+    for (const b of this.buildings) {
+      const inc = b.def.income;
+      if (!inc || !b.alive) continue;
+      // Split income into a handful of coins fountaining around the building.
+      const n = Math.min(6, Math.max(2, Math.round(inc / 3)));
+      const each = Math.floor(inc / n);
+      let rem = inc - each * n;
+      const plot = this.plots.find((p) => p.id === b.plotId);
+      const plate = plot ? this.payPoint(plot) : null;
+      for (let i = 0; i < n; i++) {
+        const a = this.rng() * Math.PI * 2;
+        const r = 1.4 + this.rng() * 1.8;
+        let x = b.cx + Math.cos(a) * r, z = b.cz + Math.sin(a) * r;
+        // Keep coins off the pay plate so sweeping them never funds upgrades
+        // by accident.
+        if (plate && dist2(x, z, plate[0], plate[1]) < 4) { x = 2 * b.cx - x; z = 2 * b.cz - z; }
+        if (!this.map.isWalkable(x | 0, z | 0)) { x = b.cx; z = b.cz + b.size / 2 + 0.8; }
+        this._spawnCoin(x, z, each + (rem-- > 0 ? 1 : 0), b.cx, b.cz);
+      }
+    }
+  }
+
+  _repairCity() {
+    for (const b of this.buildings) if (b.alive) b.hp = b.maxHp;
+    // Ruined structures (and breached wall tiles) rise again with the sun.
+    for (const plot of this.plots) {
+      if (plot.tier === 0) continue;
+      const def = this.tierDef(plot, plot.tier);
+      if (plot.kind === 'wall') {
+        for (const [x, z] of plot.tiles) {
+          if (this.occ[z * this.map.size + x] === 0) {
+            this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
+            this.emit({ type: 'build', kind: 'wall', plotId: plot.id, tier: plot.tier, x: x + 0.5, z: z + 0.5, quiet: true });
+          }
+        }
+      } else if (!this.buildings.some((b) => b.plotId === plot.id)) {
+        this._addBuilding(plot, plot.x, plot.z, def, false);
+        this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz, quiet: true });
+      }
+    }
+    // Camps refill their fallen.
+    for (const plot of this.plots) {
+      if (PLOT_KINDS[plot.kind].unit && plot.tier > 0) this._refillCamp(plot);
+    }
+  }
+
+  // ---------- coins ----------
+
+  _spawnCoin(x, z, v, fx, fz) {
+    if (v <= 0) return;
+    if (this.coins.length >= COIN_CAP) {
+      // Merge into the nearest coin instead of flooding the ground.
+      let best = null, bd = Infinity;
+      for (const cn of this.coins) {
+        const d = dist2(cn.x, cn.z, x, z);
+        if (d < bd) { bd = d; best = cn; }
+      }
+      if (best) best.v += v;
+      return;
+    }
+    this.coins.push({ id: nextId++, x, z, v });
+    this.emit({ type: 'coinspawn', x, z, fx, fz, v });
+  }
+
+  _updateCoins() {
+    if (!this.coins.length) return;
+    const r2 = COIN_RADIUS * COIN_RADIUS;
+    let collected = false;
+    for (const cn of this.coins) {
+      for (const h of this.heroes) {
+        if (h.dead) continue;
+        if (dist2(h.x, h.z, cn.x, cn.z) <= r2) {
+          cn.gone = true;
+          collected = true;
+          this.gold += cn.v;
+          this.stats.coins += cn.v;
+          this.emit({ type: 'coin', x: cn.x, z: cn.z, hx: h.x, hz: h.z, v: cn.v });
+          break;
+        }
+      }
+    }
+    if (collected) this.coins = this.coins.filter((cn) => !cn.gone);
+  }
+
+  // ---------- units ----------
+
+  _spawnUnit(key, x, z, camp = null) {
     const d = UNITS[key];
     const u = {
       id: nextId++, key, def: d, x, z, hp: d.hp, maxHp: d.hp,
-      path: null, pathI: 0, cooldown: 0, target: null, selected: false,
+      camp, follow: null, path: null, pathI: 0, cooldown: 0, target: null,
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
     };
     this.units.push(u);
     return u;
+  }
+
+  // Thronefall-style rally: press once → the group follows you; again → they
+  // hold where they stand.
+  rally(group, p = 0) {
+    const inGroup = (u) => {
+      if (u.hero) return false;
+      if (group === 'all') return true;
+      if (group === 'melee') return u.key === 'soldier';
+      return u.key === 'ranger' || u.key === 'sniper';
+    };
+    const members = this.units.filter((u) => !u.dead && inGroup(u));
+    if (!members.length) { this.emit({ type: 'deny' }); return; }
+    const allMine = members.every((u) => u.follow === p);
+    for (const u of members) {
+      if (allMine) {
+        u.follow = null;
+        u.holdX = u.x; u.holdZ = u.z;
+        u.path = null;
+      } else {
+        u.follow = p;
+        u.path = null;
+      }
+    }
+    const label = group === 'all' ? 'The army' : group === 'melee' ? 'The militia' : 'The rangers';
+    this.msg(allMine ? `🛑 ${label} holds position.` : `🚩 ${label} rallies to ${this.heroes[p].def.name}!`, 'info');
+    this.emit({ type: allMine ? 'hold' : 'rally', x: this.heroes[p].x, z: this.heroes[p].z });
   }
 
   // ---------- hero ----------
@@ -365,12 +595,10 @@ export class Game {
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
-      path: null, pathI: 0, cooldown: 0, target: null, selected: false,
-      facing: 0, retargetT: 0,
-      level: 1, xp: 0, points: 1,
-      abil: d.abilities.map(() => ({ rank: 0, cd: 0 })),
-      buffT: 0, buffMult: 1, hasteT: 0, hasteMult: 1,
-      reviveT: 0,
+      mx: 0, mz: 0, sprint: false,
+      cooldown: 0, target: null, facing: 0, retargetT: 0,
+      level: 1, xp: 0, abilCd: 0,
+      reviveT: 0, hasteT: 0, hasteMult: 1,
     };
     this.units.push(h);
     this.heroes.push(h);
@@ -378,27 +606,24 @@ export class Game {
     return h;
   }
 
-  // Central command entry point — local UI and remote co-op players both go
+  // Central command entry point — local input and remote co-op players both go
   // through here, so the sim stays deterministic under lockstep.
   exec(c) {
     switch (c.t) {
-      case 'place': this.place(c.k, c.x, c.z); break;
-      case 'quietPlace': if (this.canPlace(c.k, c.x, c.z).ok) this.place(c.k, c.x, c.z); break;
-      case 'demolish': { const b = this.buildings.find((o) => o.id === c.id); if (b) this.demolish(b); break; }
-      case 'train': this.trainUnit(c.k); break;
-      case 'move': {
-        const units = c.ids.map((id) => this.units.find((u) => u.id === id)).filter(Boolean);
-        if (units.length) this.orderMove(units, c.x, c.z);
+      case 'hdir': { // hero movement input: direction + sprint flag
+        const h = this.heroes[c.p || 0];
+        if (h) { h.mx = c.x; h.mz = c.z; h.sprint = !!c.s; }
         break;
       }
-      case 'cast': this.castAbility(c.i, c.x, c.z, c.p || 0); break;
-      case 'learn': this.learnAbility(c.i, c.p || 0); break;
-      case 'auto': this.autoBuild = !!c.on; break;
+      case 'cast': this.castAbility(c.p || 0); break;
+      case 'rally': this.rally(c.g, c.p || 0); break;
+      case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
+      case 'bell': this.bell(c.p || 0); break;
     }
   }
 
   heroDmg(h) {
-    return h.def.dmg + h.def.levelDmg * (h.level - 1) + (h.bonusDmg || 0);
+    return h.def.dmg + h.def.levelDmg * (h.level - 1);
   }
 
   addXp(h, amount) {
@@ -407,258 +632,51 @@ export class Game {
     while (h.level < HERO_MAX_LEVEL && h.xp >= xpForLevel(h.level)) {
       h.xp -= xpForLevel(h.level);
       h.level++;
-      h.points++;
       h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1);
-      h.hp = h.maxHp; // WC3-style full heal on level up
+      h.hp = h.maxHp; // full heal on level up
       this.emit({ type: 'levelup', x: h.x, z: h.z });
-      this.msg(`⭐ ${h.def.name} reached level ${h.level}!`, 'info');
+      const r = abilityRank(h.level);
+      const wasR = abilityRank(h.level - 1);
+      this.msg(`⭐ ${h.def.name} reached level ${h.level}!${r > wasR ? ` ${h.def.ability.icon} ${h.def.ability.name} rank ${r}!` : ''}`, 'info');
     }
     if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
   }
 
-  canLearn(i, p = 0) {
-    const h = this.heroes[p];
-    if (!h || h.points <= 0) return false;
-    const ab = h.def.abilities[i];
-    const st = h.abil[i];
-    if (st.rank >= ab.maxRank) return false;
-    if (ab.ult) return h.level >= ULT_REQ_LEVEL;
-    return h.level >= rankReqLevel(st.rank + 1);
-  }
-
-  learnAbility(i, p = 0) {
-    if (!this.canLearn(i, p)) { this.emit({ type: 'deny' }); return; }
-    const h = this.heroes[p];
-    h.abil[i].rank++;
-    h.points--;
-    this.emit({ type: 'learn' });
-    this.msg(`${h.def.abilities[i].icon} ${h.def.abilities[i].name} — rank ${h.abil[i].rank}`, 'info');
-  }
-
-  castAbility(i, tx, tz, p = 0) {
+  castAbility(p = 0) {
     const h = this.heroes[p];
     if (!h || h.dead) return;
-    const ab = h.def.abilities[i];
-    const st = h.abil[i];
-    if (ab.passive) return;
-    if (st.rank === 0 || st.cd > 0 || h.channelT > 0) { this.emit({ type: 'deny' }); return; }
-    const r = st.rank - 1;
-
-    // Targeted casts fizzle without a target — don't burn the cooldown.
-    if (ab.cast === 'hook' || ab.cast === 'assassinate' || ab.cast === 'swarm') {
-      const rr = (ab.range || ab.radius) ** 2;
-      if (!this.zombies.some((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= rr)) {
-        this.msg('No target in range.', 'warn');
-        this.emit({ type: 'deny' });
-        return;
-      }
-    }
-    st.cd = Array.isArray(ab.cd) ? ab.cd[r] : ab.cd;
+    const ab = h.def.ability;
+    if (h.abilCd > 0) { this.emit({ type: 'deny' }); return; }
+    const r = abilityRank(h.level) - 1;
+    h.abilCd = ab.cd;
 
     switch (ab.cast) {
-      case 'teleport':
-        if (tx == null) { st.cd = 0; return; }
-        h.channelT = ab.channel;
-        h.tpX = tx; h.tpZ = tz;
-        h.path = null; h.target = null;
-        this.msg('Channeling teleport…', 'info');
-        break;
       case 'whirlwind':
         h.whirlT = ab.dur[r];
         h.whirlDps = ab.dps[r];
         h.whirlR = ab.radius;
         break;
-      case 'pulse': {
-        const r2 = ab.radius * ab.radius;
-        for (const zb of this.zombies) {
-          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, ab.dmg[r], h.x, h.z);
-        }
-        for (const u of this.units) {
-          if (!u.dead && !u.turret && dist2(h.x, h.z, u.x, u.z) <= r2) u.hp = Math.min(u.maxHp, u.hp + ab.heal[r]);
-        }
-        break;
-      }
-      case 'hook': {
-        const rr = ab.range * ab.range;
-        let best = null, bd = rr;
-        for (const zb of this.zombies) {
-          if (zb.dead) continue;
-          const d = dist2(h.x, h.z, zb.x, zb.z);
-          if (d < bd && d > 2) { bd = d; best = zb; }
-        }
-        if (best) {
-          this.emit({ type: 'hook', fx: h.x, fz: h.z, tx: best.x, tz: best.z });
-          const dx = best.x - h.x, dz = best.z - h.z;
-          const d = Math.hypot(dx, dz) || 1;
-          const nx = h.x + (dx / d) * 1.2, nz = h.z + (dz / d) * 1.2;
-          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
-            best.x = nx; best.z = nz;
-          }
-          best.stunT = Math.max(best.stunT || 0, ab.stun);
-          this.damageZombie(best, ab.dmg[r]);
-        }
-        break;
-      }
-      case 'zone':
-        this.fields.push({
-          x: h.x, z: h.z, r: ab.radius,
-          t: Array.isArray(ab.dur) ? ab.dur[r] : ab.dur,
-          dps: ab.dps ? ab.dps[r] : 0,
-          slow: ab.slow || 1, blind: !!ab.blind, fx: ab.fx,
-        });
-        break;
-      case 'summon': {
-        for (let i = 0; i < ab.count[r]; i++) {
-          const a = (i / ab.count[r]) * Math.PI * 2;
-          this.units.push({
-            id: nextId++, key: 'treant', summon: true,
-            def: { name: 'Treant', dmg: ab.dmg, range: 1.3, rof: 1.1, speed: ab.speed, noise: 0, color: 0x3a5c2e },
-            x: h.x + Math.cos(a) * 1.5, z: h.z + Math.sin(a) * 1.5,
-            hp: ab.hp, maxHp: ab.hp, life: ab.life,
-            path: null, pathI: 0, cooldown: 0, target: null, selected: false,
-            facing: 0, retargetT: 0,
-          });
-        }
-        this.emit({ type: 'treants', x: h.x, z: h.z });
-        break;
-      }
-      case 'swarm': {
-        const rr = ab.radius * ab.radius;
-        const targets = this.zombies
-          .filter((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= rr)
-          .sort((a, b) => dist2(h.x, h.z, a.x, a.z) - dist2(h.x, h.z, b.x, b.z))
-          .slice(0, ab.count[r]);
-        for (const zb of targets) {
-          zb.dotT = ab.dur;
-          zb.dotDps = ab.dps;
-          zb.slowT = ab.dur;
-          zb.slowMul = ab.slow;
-          this.emit({ type: 'shot', kind: 'ricochet', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
-        }
-        break;
-      }
-      case 'assassinate': {
-        const rr = ab.radius * ab.radius;
-        let best = null, bhp = -1;
-        for (const zb of this.zombies) {
-          if (zb.dead) continue;
-          if (dist2(h.x, h.z, zb.x, zb.z) <= rr && zb.hp > bhp) { bhp = zb.hp; best = zb; }
-        }
-        if (best) {
-          this.emit({ type: 'shot', kind: 'sniper', fx: h.x, fz: h.z, tx: best.x, tz: best.z, fy: 1.0 });
-          this.damageZombie(best, ab.dmg[r], h.x, h.z);
-        }
-        break;
-      }
-      case 'timelapse': {
-        const hist = h.hist && h.hist.length ? h.hist[0] : null;
-        if (hist) {
-          const [hx, hz, hhp] = hist;
-          if (this.map.isWalkable(hx | 0, hz | 0) && this.occ[(hz | 0) * this.map.size + (hx | 0)] === 0) {
-            h.x = hx; h.z = hz;
-          }
-          h.hp = Math.min(h.maxHp, Math.max(h.hp, hhp));
-          h.path = null; h.target = null;
-          h.hist.length = 0;
-          this.emit({ type: 'revive', x: h.x, z: h.z });
-        }
-        break;
-      }
       case 'aoeDmg': {
         const r2 = ab.radius * ab.radius;
         for (const zb of this.zombies) {
           if (zb.dead) continue;
-          const d2v = dist2(h.x, h.z, zb.x, zb.z);
-          if (d2v <= r2) {
+          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
             if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
-            if (ab.slow) { zb.slowT = ab.slowDur; zb.slowMul = ab.slow; }
-            // Ultimate shockwaves physically hurl survivors backward.
-            if (ab.knock) {
-              const d = Math.sqrt(d2v) || 1;
-              const k = ab.knock * (1 - (d / ab.radius) * 0.6);
-              const nx = zb.x + ((zb.x - h.x) / d) * k;
-              const nz = zb.z + ((zb.z - h.z) / d) * k;
-              if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
-                zb.x = nx; zb.z = nz;
-              }
-            }
             this.damageZombie(zb, ab.dmg[r], h.x, h.z);
           }
         }
         break;
       }
-      case 'volley': {
-        const r2 = ab.radius * ab.radius;
-        const targets = this.zombies
-          .filter((zb) => !zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2)
-          .sort((a, b) => dist2(h.x, h.z, a.x, a.z) - dist2(h.x, h.z, b.x, b.z))
-          .slice(0, ab.count[r]);
-        for (const zb of targets) {
-          this.emit({ type: 'shot', kind: 'ranger', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
-          this.damageZombie(zb, ab.dmg[r]);
-        }
-        break;
-      }
-      case 'buff': {
-        const r2 = ab.radius * ab.radius;
-        for (const u of this.units) {
-          if (u.dead || u.turret) continue;
-          if (dist2(h.x, h.z, u.x, u.z) <= r2) { u.buffT = ab.dur; u.buffMult = ab.mult[r]; }
-        }
-        break;
-      }
-      case 'haste':
+      case 'veil':
+        h.stealth = true;
+        h.veilT = ab.dur[r];
+        h.veilBackstab = ab.backstab[r];
         h.hasteT = ab.dur[r];
-        h.hasteMult = ab.mult[r];
+        h.hasteMult = ab.haste;
+        this.emit({ type: 'stealth', x: h.x, z: h.z });
         break;
-      case 'surge':
-        h.hasteT = ab.dur[r];
-        h.hasteMult = ab.mult[r];
-        h.moveT = ab.dur[r];
-        h.moveMult = ab.move;
-        break;
-      case 'barrage': {
-        const r2 = ab.radius * ab.radius;
-        let tracers = 0;
-        for (const zb of this.zombies) {
-          if (zb.dead) continue;
-          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
-            if (tracers++ < 24) this.emit({ type: 'shot', kind: 'ricochet', fx: h.x, fz: h.z, tx: zb.x, tz: zb.z, fy: 0.9 });
-            this.damageZombie(zb, ab.dmg[r]);
-          }
-        }
-        break;
-      }
-      case 'towerBuff': {
-        const r2 = ab.radius * ab.radius;
-        for (const b of this.buildings) {
-          if (!b.alive || b.key !== 'tower') continue;
-          if (dist2(h.x, h.z, b.cx, b.cz) <= r2) { b.rofBuffT = ab.dur; b.rofBuffMult = ab.mult[r]; }
-        }
-        break;
-      }
-      case 'repair': {
-        const r2 = ab.radius * ab.radius;
-        for (const b of this.buildings) {
-          if (!b.alive) continue;
-          if (dist2(h.x, h.z, b.cx, b.cz) <= r2) b.hp = Math.min(b.maxHp, b.hp + ab.amount[r]);
-        }
-        break;
-      }
-      case 'turret': {
-        const t = {
-          id: nextId++, key: 'turret', turret: true, hero: false,
-          def: { name: 'Auto-Turret', dmg: ab.dmg, range: ab.range, rof: ab.rof, speed: 0, noise: 8, color: 0x58b7c9 },
-          x: h.x + 0.8, z: h.z, hp: ab.hp, maxHp: ab.hp,
-          path: null, pathI: 0, cooldown: 0, target: null, selected: false,
-          facing: 0, retargetT: 0, life: ab.life,
-        };
-        this.units.push(t);
-        this.emit({ type: 'turret', x: t.x, z: t.z });
-        break;
-      }
     }
-    this.wakeZombies(h.x, h.z, 10);
+    this.wakeZombies(h.x, h.z, 8);
     this.emit({ type: 'cast', x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
   }
 
@@ -667,8 +685,7 @@ export class Game {
   }
 
   _updateHeroOne(h, dt) {
-    if (!h) return;
-    for (const st of h.abil) if (st.cd > 0) st.cd -= dt;
+    if (h.abilCd > 0) h.abilCd -= dt;
     if (h.dead) {
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
@@ -676,63 +693,33 @@ export class Game {
         h.hp = h.maxHp;
         h.x = this.hq.cx + 2.5;
         h.z = this.hq.cz + 2.5;
-        h.path = null; h.target = null;
         this.units.push(h);
         this.emit({ type: 'revive', x: h.x, z: h.z });
         this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
       }
       return;
     }
-    // Regen.
     const regen = h.def.regen + 0.25 * (h.level - 1);
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     if (h.hasteT > 0) h.hasteT -= dt;
-    if (h.moveT > 0) h.moveT -= dt;
-
-    // Teleport channel.
-    if (h.channelT > 0) {
-      h.channelT -= dt;
-      if (h.channelT <= 0 && h.tpX != null) {
-        let placed = false;
-        outer: for (let ring = 0; ring < 6 && !placed; ring++) {
-          for (let dz = -ring; dz <= ring; dz++) {
-            for (let dx = -ring; dx <= ring; dx++) {
-              if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
-              const nx = (h.tpX | 0) + dx, nz = (h.tpZ | 0) + dz;
-              if (this.map.isWalkable(nx, nz) && this.occ[nz * this.map.size + nx] === 0) {
-                h.x = nx + 0.5; h.z = nz + 0.5;
-                placed = true;
-                break outer;
-              }
-            }
-          }
-        }
-        h.tpX = null;
-        this.emit({ type: 'revive', x: h.x, z: h.z });
-      }
+    if (h.veilT > 0) {
+      h.veilT -= dt;
+      if (h.veilT <= 0 && h.stealth) h.stealth = false;
     }
 
-    // Cloak & Dagger: fade to invisibility after a few quiet seconds.
-    const ci = h.def.abilities.findIndex((a) => a.key === 'cloak');
-    if (ci >= 0 && h.abil[ci].rank > 0) {
-      h.sinceAtk = (h.sinceAtk || 0) + dt;
-      const fade = h.def.abilities[ci].fade[h.abil[ci].rank - 1];
-      if (!h.stealth && h.sinceAtk >= fade) {
-        h.stealth = true;
-        this.emit({ type: 'stealth', x: h.x, z: h.z });
-      }
+    // Direct WASD movement (Thronefall-style): slide along blockers, pass
+    // gates. `moving` tracks ACTUAL movement — pressing into a building counts
+    // as standing, so nuzzling a structure funds its upgrade.
+    if (h.mx !== 0 || h.mz !== 0) {
+      const len = Math.hypot(h.mx, h.mz) || 1;
+      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (h.sprint ? 1.5 : 1);
+      h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
+      h.facing = Math.atan2(h.mx, h.mz);
+    } else {
+      h.moving = false;
     }
 
-    // Position/HP history for Time Lapse (~5s window, sampled 4x/s).
-    h.histT = (h.histT || 0) - dt;
-    if (h.histT <= 0) {
-      h.histT = 0.25;
-      if (!h.hist) h.hist = [];
-      h.hist.push([h.x, h.z, h.hp]);
-      if (h.hist.length > 20) h.hist.shift();
-    }
-
-    // Whirlwind channel: grind everything nearby while it lasts.
+    // Whirlwind: grind everything nearby while it lasts.
     if (h.whirlT > 0) {
       h.whirlT -= dt;
       h.whirlTick = (h.whirlTick || 0) - dt;
@@ -745,64 +732,24 @@ export class Game {
         this.emit({ type: 'whirl', x: h.x, z: h.z, r: h.whirlR });
       }
     }
-    // Toxin Arrows-style passives are applied at attack time in _updateUnits.
   }
 
-  _updateFields(dt) {
-    if (!this.fields.length) return;
-    for (const f of this.fields) {
-      f.t -= dt;
-      const r2 = f.r * f.r;
-      for (const zb of this.zombies) {
-        if (zb.dead) continue;
-        if (dist2(zb.x, zb.z, f.x, f.z) > r2) continue;
-        if (f.dps) this.damageZombie(zb, f.dps * dt);
-        if (f.slow < 1) {
-          zb.slowT = Math.max(zb.slowT || 0, 0.2);
-          zb.slowMul = f.slow;
-        }
-        if (f.blind) zb.blindT = 0.25;
-      }
-    }
-    this.fields = this.fields.filter((f) => f.t > 0);
-  }
-
-  _updatePickups(dt) {
-    for (const p of this.pickups) {
-      p.t -= dt;
-      if (p.t <= 0) { p.gone = true; continue; }
-      for (const u of this.units) {
-        if (u.dead || u.turret) continue;
-        if (dist2(u.x, u.z, p.x, p.z) < 1.1) {
-          p.gone = true;
-          if (p.kind === 'gold') {
-            this.res.gold += p.amount;
-            this.msg(`💰 Scavenged ${p.amount} gold!`, 'info');
-          } else {
-            u.hp = Math.min(u.maxHp, u.hp + DROPS.healAmount);
-            this.msg('❤️ Medkit recovered!', 'info');
-          }
-          this.emit({ type: 'pickup', x: p.x, z: p.z, kind: p.kind });
-          break;
-        }
-      }
-    }
-    if (this.pickups.some((p) => p.gone)) this.pickups = this.pickups.filter((p) => !p.gone);
-  }
-
-  orderMove(units, tx, tz) {
-    // Fan destinations out a bit so groups don't stack on one point.
-    let i = 0;
-    for (const u of units) {
-      if (u.turret || u.summon || u.dead) continue;
-      const ang = (i / Math.max(1, units.length)) * Math.PI * 2;
-      const r = i === 0 ? 0 : 0.9 + 0.55 * Math.floor((i - 1) / 6);
-      const dx = tx + Math.cos(ang) * r, dz = tz + Math.sin(ang) * r;
-      const p = findPath(this.map, this.occ, u.x, u.z, dx, dz);
-      if (p) { u.path = p; u.pathI = 0; u.target = null; }
-      i++;
-    }
-    if (units.length) this.emit({ type: 'move' });
+  // Shared friendly movement: walkable check + axis slide, gates passable.
+  _moveActor(a, dx, dz, speed, dt) {
+    const step = speed * dt;
+    // If somehow inside a building footprint, any walkable step out is legal.
+    const trapped = this.occ[(a.z | 0) * this.map.size + (a.x | 0)] > 0;
+    const pass = (x, z) => {
+      if (!this.map.isWalkable(x | 0, z | 0)) return false;
+      if (trapped) return true;
+      const id = this.occ[(z | 0) * this.map.size + (x | 0)];
+      return id === 0 || this.gateIds.has(id);
+    };
+    const nx = a.x + dx * step, nz = a.z + dz * step;
+    if (pass(nx, nz)) { a.x = nx; a.z = nz; return true; }
+    if (pass(nx, a.z)) { a.x = nx; return true; }
+    if (pass(a.x, nz)) { a.z = nz; return true; }
+    return false;
   }
 
   // ---------- zombies ----------
@@ -812,7 +759,7 @@ export class Game {
     const d = ZOMBIES[type];
     const zb = {
       id: nextId++, type, def: d, x, z,
-      hp: d.hp * (wave ? 1 : 1), maxHp: d.hp,
+      hp: d.hp, maxHp: d.hp,
       state: aggro ? AGGRO : IDLE,
       dirX: 0, dirZ: 0, timer: this.rng() * 4,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
@@ -827,7 +774,6 @@ export class Game {
     const B = this.level.boss;
     let x = N / 2, z = N / 2;
     if (edge === 0) z = 4; else if (edge === 1) x = N - 4; else if (edge === 2) z = N - 4; else x = 4;
-    // Nudge to walkable ground.
     for (let r = 0; r < 12; r++) {
       if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
       if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }
@@ -874,10 +820,10 @@ export class Game {
         const r2 = B.roar.radius * B.roar.radius;
         let hit = 0;
         for (const b of this.buildings) {
-          if (b.alive && b.key === 'tower' && dist2(zb.x, zb.z, b.cx, b.cz) <= r2) { b.stunT = B.roar.dur; hit++; }
+          if (b.alive && b.kind === 'tower' && dist2(zb.x, zb.z, b.cx, b.cz) <= r2) { b.stunT = B.roar.dur; hit++; }
         }
         this.emit({ type: 'roarwave', x: zb.x, z: zb.z, r: B.roar.radius });
-        if (hit) this.msg(`${B.icon} The shriek overloads ${hit} sentry tower${hit > 1 ? 's' : ''}!`, 'warn');
+        if (hit) this.msg(`${B.icon} The shriek overloads ${hit} tower${hit > 1 ? 's' : ''}!`, 'warn');
       }
     }
   }
@@ -908,8 +854,8 @@ export class Game {
       else if (edge === 2) { x = along; z = N - 2 - depth; }
       else { x = 1 + depth; z = along; }
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
-      // Only spawn where the colony is actually reachable, so hordes always
-      // arrive (and the final wave can always be cleared).
+      // Only spawn where the city is actually reachable, so hordes always
+      // arrive (and every night can always be cleared).
       if (this.flow.distAt(x | 0, z | 0) === Infinity && guard < size * 25) continue;
       if (this._spawnZombie(pickType(), x, z, true, true)) spawned++;
     }
@@ -937,6 +883,10 @@ export class Game {
         this.boss = null;
         this.msg(`🏆 ${this.level.boss.name} IS SLAIN! Purge the stragglers!`, 'info');
         this.emit({ type: 'bossdown', x: zb.x, z: zb.z });
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          this._spawnCoin(zb.x + Math.cos(a) * 1.4, zb.z + Math.sin(a) * 1.4, Math.ceil(DROPS.bossCoins / 5), zb.x, zb.z);
+        }
       }
       // Launch vector for corpse physics: away from the damage source.
       let ldx, ldz;
@@ -950,19 +900,15 @@ export class Game {
       }
       const force = dmg >= 150 ? 2.4 : dmg >= 60 ? 1.4 : 0.8;
       this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute', dx: ldx, dz: ldz, force });
-      // WC3-style shared XP for kills near any hero (co-op: both can earn).
+      // Shared XP for kills near any hero.
       for (const h of this.heroes) {
         if (!h.dead && dist2(h.x, h.z, zb.x, zb.z) < XP_RADIUS * XP_RADIUS) {
           this.addXp(h, zb.def.score * 8);
         }
       }
-      // Creep-style loot drops.
-      if (zb.type === 'brute') {
-        const kind = this.rng() < 0.6 ? 'gold' : 'heal';
-        this.pickups.push({ id: nextId++, x: zb.x, z: zb.z, kind, amount: DROPS.bruteGold, t: DROPS.life });
-      } else if (this.rng() < DROPS.smallChance) {
-        this.pickups.push({ id: nextId++, x: zb.x, z: zb.z, kind: 'gold', amount: DROPS.smallGold, t: DROPS.life });
-      }
+      // Thronefall-style coin drops.
+      if (zb.type === 'brute') this._spawnCoin(zb.x, zb.z, DROPS.bruteCoins, zb.x, zb.z);
+      else if (this.rng() < DROPS.smallChance) this._spawnCoin(zb.x, zb.z, 1, zb.x, zb.z);
     }
   }
 
@@ -971,10 +917,9 @@ export class Game {
     b.hp -= dmg;
     b.hitT = this.time;
     this.emit({ type: 'bhit', x: b.cx, z: b.cz });
-    // WC3-style "under attack" warning, throttled.
     if (this.time - (this._uaT || -99) > 20) {
       this._uaT = this.time;
-      this.msg('⚔️ Your colony is under attack!', 'warn');
+      this.msg('⚔️ The city is under attack!', 'warn');
       this.emit({ type: 'ping', x: b.cx, z: b.cz });
       this.emit({ type: 'underattack' });
     }
@@ -987,11 +932,9 @@ export class Game {
       u.dead = true;
       this.emit({ type: 'udeath', x: u.x, z: u.z });
       if (u.hero) {
-        u.reviveT = 18 + 4 * u.level;
+        u.reviveT = 12 + 2.5 * u.level;
         this.emit({ type: 'herodown' });
-        this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Command Center in ${Math.round(u.reviveT)}s…`, 'bad');
-      } else if (!u.turret) {
-        this.msg(`A ${u.def.name} has been devoured!`, 'bad');
+        this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Keep in ${Math.round(u.reviveT)}s…`, 'bad');
       }
     }
   }
@@ -1007,98 +950,17 @@ export class Game {
 
   update(dt) {
     if (this.over) return;
-    const prevTime = this.time;
     this.time += dt;
-
-    // Day/night announcements.
-    const night = this.isNight;
-    if (night && !this._wasNight) { this.msg('🌙 Night falls — the dead grow bold…', 'warn'); this.emit({ type: 'night' }); }
-    else if (!night && this._wasNight) this.msg('☀️ Dawn breaks. You survived the night.', 'info');
-    this._wasNight = night;
-
-    this._updateWaves(prevTime);
-    this._updateEconomy(dt);
-    if (this.autoBuild) this.bot.update(dt);
+    this._updatePhase(dt);
+    if (this.over) return;
+    this._updatePlots(dt);
+    this._updateCoins();
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
     this._updateHero(dt);
-    this._updateFields(dt);
-    this._updatePickups(dt);
     this._cleanup();
-    this._checkEnd();
-  }
-
-  _updateWaves(prevTime) {
-    // Second pulse of the final horde.
-    if (this.pendingWave && this.time >= this.pendingWave.at) {
-      const p = this.pendingWave;
-      this.pendingWave = null;
-      this._spawnHorde(p.size, p.edges, p.types);
-      const N = this.map.size;
-      const mid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
-      for (const ed of p.edges) this.emit({ type: 'ping', x: mid[ed][0], z: mid[ed][1] });
-      this.msg('☠️ The second pulse of the horde crashes in!', 'bad');
-      this.emit({ type: 'horde', final: true });
-    }
-    for (const w of WAVES) {
-      const at = (w.day - 1) * DAY_LENGTH;
-      if (prevTime < at && this.time >= at && !this.wavesDone.has(w.day)) {
-        this.wavesDone.add(w.day);
-        let size = Math.round(w.size * this.diff.mult * this.level.mult);
-        let edges;
-        if (w.final) {
-          // Two fronts, two pulses — an epic but defensible finale.
-          const e1 = (this.rng() * 4) | 0;
-          const e2 = (e1 + 1 + ((this.rng() * 3) | 0)) % 4;
-          edges = [e1, e2];
-          const pulse2 = Math.round(size * 0.4);
-          size -= pulse2;
-          this.pendingWave = { at: this.time + 45, size: pulse2, edges, types: w.types };
-        } else {
-          edges = [(this.rng() * 4) | 0];
-        }
-        this._spawnHorde(size, edges, w.types);
-        if (w.final) this._spawnBoss(edges[0]);
-        // WC3-style minimap pings at the spawn edges.
-        const N = this.map.size;
-        const edgeMid = [[N / 2, 3], [N - 3, N / 2], [N / 2, N - 3], [3, N / 2]];
-        for (const ed of edges) this.emit({ type: 'ping', x: edgeMid[ed][0], z: edgeMid[ed][1] });
-        const dirName = w.final ? 'ALL DIRECTIONS' : ['the NORTH', 'the EAST', 'the SOUTH', 'the WEST'][edges[0]];
-        this.msg(w.final
-          ? `☠️ THE FINAL HORDE HAS ARRIVED FROM ${dirName}! Survive this and the land is yours!`
-          : `⚠️ A horde of ${size} approaches from ${dirName}!`, 'bad');
-        this.emit({ type: 'horde', final: !!w.final });
-        if (w.final) this.finalSpawned = true;
-      }
-    }
-    // Ambient night stragglers.
-    this.ambientTimer -= 1 / 30;
-    if (this.ambientTimer <= 0) {
-      this.ambientTimer = 22 + this.rng() * 15;
-      if (this.isNight && !this.finalSpawned) {
-        const n = Math.round((2 + this.rng() * 4) * this.diff.ambient);
-        this._spawnHorde(n, [(this.rng() * 4) | 0], { walker: 0.9, runner: 0.1 });
-      }
-    }
-  }
-
-  _updateEconomy(dt) {
-    const e = this.eco;
-    this.starving = e.food < 0;
-    // Starving slows the economy rather than freezing it — less punishing micro.
-    const goldRate = this.starving ? e.gold * 0.4 : e.gold;
-    this.res.gold = Math.max(0, this.res.gold + goldRate * dt);
-    this.res.wood += e.wood * dt;
-    this.res.stone += e.stone * dt;
-
-    // Buildings slowly mend themselves once zombies leave them alone.
-    for (const b of this.buildings) {
-      if (b.alive && b.hp < b.maxHp && this.time - (b.hitT || 0) > 12) {
-        b.hp = Math.min(b.maxHp, b.hp + (2 + b.maxHp * 0.004) * dt);
-      }
-    }
   }
 
   _updateFlow(dt) {
@@ -1106,7 +968,7 @@ export class Game {
     if (this.flowDirty || this.flowTimer <= 0) {
       const sources = [];
       for (const b of this.buildings) {
-        if (!b.alive || b.key === 'wall') continue;
+        if (!b.alive || b.kind === 'wall') continue;
         for (let dz = 0; dz < b.size; dz++) for (let dx = 0; dx < b.size; dx++) {
           sources.push((b.z + dz) * this.map.size + (b.x + dx));
         }
@@ -1119,7 +981,7 @@ export class Game {
 
   _updateZombies(dt) {
     const N = this.map.size;
-    const nightMul = this.isNight ? 1.25 : 1;
+    const nightMul = this.isNight ? 1.2 : 1;
 
     // Cheap separation: shove apart zombies sharing a tile.
     if (!this._sepMap) this._sepMap = new Map();
@@ -1158,16 +1020,7 @@ export class Game {
 
       if (zb.boss) this._updateBoss(zb, dt);
 
-      // Hero ability debuffs.
-      if (zb.dotT > 0) { zb.dotT -= dt; this.damageZombie(zb, zb.dotDps * dt); if (zb.dead) continue; }
       if (zb.stunT > 0) { zb.stunT -= dt; continue; }
-      if (zb.blindT > 0) {
-        // Blinded: shuffle harmlessly, no targets, no attacks.
-        zb.blindT -= dt;
-        const a = zb.phase + this.time * 0.7;
-        this._moveZombie(zb, Math.cos(a), Math.sin(a), zb.def.speed * 0.35, dt, false);
-        continue;
-      }
       let speedMul = nightMul;
       if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
       zb.speedMul = speedMul;
@@ -1180,14 +1033,15 @@ export class Game {
           zb.dirX = Math.cos(a); zb.dirZ = Math.sin(a);
           zb.timer = 2 + this.rng() * 4;
         }
-        // Wake if the colony is close (flow distance is a free proximity metric).
-        if (this.flow.distAt(zb.x | 0, zb.z | 0) < 11) zb.state = AGGRO;
+        // Wake only when the city practically touches them — days are for
+        // building; creeps are optional XP out in the wild.
+        if (this.flow.distAt(zb.x | 0, zb.z | 0) < 5) zb.state = AGGRO;
         continue;
       }
 
       if (zb.state === WANDER) {
         if (zb.timer <= 0) { zb.burst = false; zb.state = zb.wave ? AGGRO : IDLE; zb.timer = 3 + this.rng() * 6; continue; }
-        if (!zb.burst && this.flow.distAt(zb.x | 0, zb.z | 0) < 11) { zb.state = AGGRO; continue; }
+        if (!zb.burst && this.flow.distAt(zb.x | 0, zb.z | 0) < 5) { zb.state = AGGRO; continue; }
         this._moveZombie(zb, zb.dirX, zb.dirZ, zb.def.speed * 0.6 * zb.speedMul, dt, false);
         continue;
       }
@@ -1200,11 +1054,10 @@ export class Game {
         zb.progressT = 0;
         const moved = dist2(zb.x, zb.z, zb.px || 0, zb.pz || 0);
         zb.px = zb.x; zb.pz = zb.z;
-        // Marooned on ground the colony can't be reached from (e.g. shoved
+        // Marooned on ground the city can't be reached from (e.g. shoved
         // across water)? Relocate the horde zombie to a valid spawn edge so
-        // the final wave can always be finished.
+        // every night can always be finished.
         if (zb.wave && this.flow.distAt(zb.x | 0, zb.z | 0) === Infinity) {
-          const N = this.map.size;
           for (let tries = 0; tries < 60; tries++) {
             const edge = (this.rng() * 4) | 0;
             const along = this.rng() * (N - 4) + 2;
@@ -1232,7 +1085,7 @@ export class Game {
       }
 
       // AGGRO
-      // 1) Chase a nearby living unit if close. Stealthed heroes are invisible.
+      // 1) Chase a nearby living unit if close. Veiled heroes are invisible.
       if (zb.targetU && (zb.targetU.dead || zb.targetU.stealth || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
       zb.retarget = (zb.retarget || 0) - dt;
       if (!zb.targetU && zb.retarget <= 0) {
@@ -1258,12 +1111,12 @@ export class Game {
         continue;
       }
 
-      // 2) Follow the flow field toward the colony.
+      // 2) Follow the flow field toward the city.
       const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
       if (dir) {
         this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
       } else if (this.hq && this.hq.alive) {
-        // Off the flow field (local dead spot) — shamble straight at the HQ
+        // Off the flow field (local dead spot) — shamble straight at the Keep
         // until the field picks us up again. Horde zombies never give up.
         const dx = this.hq.cx - zb.x, dz = this.hq.cz - zb.z;
         const d = Math.hypot(dx, dz) || 1;
@@ -1288,7 +1141,7 @@ export class Game {
     const tx = nx | 0, tz = nz | 0;
     const occId = this.occ[tz * this.map.size + tx];
     if (occId > 0 && canAttack) {
-      // Chew on whatever is in the way.
+      // Chew on whatever is in the way (gates included).
       if (zb.atkT <= 0) {
         zb.atkT = 0.85;
         const b = this.buildings.find((o) => o.id === occId);
@@ -1315,36 +1168,41 @@ export class Game {
 
   _updateUnits(dt) {
     for (const u of this.units) {
-      if (u.dead) continue;
-      u.cooldown -= dt;
-      u.retargetT -= dt;
-      if (u.buffT > 0) u.buffT -= dt;
-      if (u.turret || u.summon) {
-        u.life -= dt;
-        if (u.life <= 0) { u.dead = true; this.emit({ type: 'turretend', x: u.x, z: u.z }); continue; }
+      if (u.dead || u.hero) { if (u.hero) { u.cooldown -= dt; u.retargetT -= dt; } } else {
+        u.cooldown -= dt;
+        u.retargetT -= dt;
       }
+      if (u.dead) continue;
 
-      // Movement along path.
-      if (u.path) {
-        const [wx, wz] = u.path[u.pathI];
-        const dx = wx - u.x, dz = wz - u.z;
-        const d = Math.hypot(dx, dz);
-        if (d < 0.15) {
-          u.pathI++;
-          if (u.pathI >= u.path.length) { u.path = null; u.holdX = u.x; u.holdZ = u.z; }
+      if (!u.hero) {
+        if (u.follow != null) {
+          // Rally: shadow the hero, loosely fanned out by id.
+          const h = this.heroes[u.follow];
+          if (h && !h.dead) {
+            const a = (u.id % 8) / 8 * Math.PI * 2;
+            const tx = h.x + Math.cos(a) * 1.8, tz = h.z + Math.sin(a) * 1.8;
+            const dx = tx - u.x, dz = tz - u.z;
+            const d = Math.hypot(dx, dz);
+            if (d > 1.2) {
+              const sprint = d > 7 ? 1.4 : 1;
+              this._moveActor(u, dx / d, dz / d, u.def.speed * sprint, dt);
+              u.facing = Math.atan2(dx, dz);
+              u.moving = true;
+            } else u.moving = false;
+          }
         } else {
-          const moveMult = u.hero && u.moveT > 0 ? u.moveMult : 1;
-          const sp = u.def.speed * moveMult * dt;
-          u.x += (dx / d) * Math.min(sp, d);
-          u.z += (dz / d) * Math.min(sp, d);
-          u.facing = Math.atan2(dx, dz);
+          // Hold: drift back to the hold point if shoved away.
+          const dx = u.holdX - u.x, dz = u.holdZ - u.z;
+          const d = Math.hypot(dx, dz);
+          if (d > 1.4) {
+            this._moveActor(u, dx / d, dz / d, u.def.speed * 0.8, dt);
+            u.facing = Math.atan2(dx, dz);
+            u.moving = true;
+          } else u.moving = false;
         }
       }
 
-      // Heroes can't act while channeling a teleport.
-      if (u.hero && u.channelT > 0) continue;
-
-      // Auto-attack — Dota-style, units fire even while moving.
+      // Auto-attack — units fire even while moving.
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
         const r2 = u.def.range * u.def.range;
@@ -1356,19 +1214,6 @@ export class Game {
         }
         u.target = best;
       }
-      // Summons chase their prey instead of waiting for it.
-      if (u.summon && !u.path && u.target && !u.target.dead) {
-        const dx = u.target.x - u.x, dz = u.target.z - u.z;
-        const d = Math.hypot(dx, dz);
-        if (d > u.def.range * 0.9) {
-          const nx = u.x + (dx / d) * u.def.speed * dt;
-          const nz = u.z + (dz / d) * u.def.speed * dt;
-          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
-            u.x = nx; u.z = nz;
-          }
-          u.facing = Math.atan2(dx, dz);
-        }
-      }
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
@@ -1376,27 +1221,15 @@ export class Game {
           u.cooldown = 1 / (u.def.rof * haste);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           let dmg = u.hero ? this.heroDmg(u) : u.def.dmg;
-          if (u.buffT > 0) dmg *= u.buffMult;
-          // Cloak & Dagger: the shot that breaks stealth hits like a truck.
+          // Shadow Veil: the shot that breaks it hits like a falling star.
           if (u.hero && u.stealth) {
-            const ci = u.def.abilities.findIndex((a) => a.key === 'cloak');
-            if (ci >= 0 && u.abil[ci].rank > 0) dmg *= u.def.abilities[ci].backstab[u.abil[ci].rank - 1];
+            dmg *= u.veilBackstab || 2;
             u.stealth = false;
+            u.veilT = 0;
             this.emit({ type: 'backstab', x: zb.x, z: zb.z });
           }
-          u.sinceAtk = 0;
           this.damageZombie(zb, dmg, u.x, u.z);
-          // Marksman's Focus: chance to mini-stun; kills permanently add damage.
-          if (u.hero) {
-            const fi = u.def.abilities.findIndex((a) => a.key === 'focus');
-            if (fi >= 0 && u.abil[fi].rank > 0) {
-              const ab = u.def.abilities[fi];
-              const rk = u.abil[fi].rank - 1;
-              if (!zb.dead && this.rng() < ab.stunChance[rk]) zb.stunT = Math.max(zb.stunT || 0, ab.stunDur);
-              if (zb.dead) u.bonusDmg = Math.min(ab.heapCap[rk], (u.bonusDmg || 0) + ab.heap[rk]);
-            }
-          }
-          const kind = u.summon ? 'melee' : u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
+          const kind = u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         } else {
@@ -1408,9 +1241,8 @@ export class Game {
 
   _updateTowers(dt) {
     for (const b of this.buildings) {
-      if (!b.alive || b.key !== 'tower') continue;
+      if (!b.alive || b.kind !== 'tower' || !b.def.dmg) continue;
       b.cooldown -= dt;
-      if (b.rofBuffT > 0) b.rofBuffT -= dt;
       if (b.stunT > 0) { b.stunT -= dt; continue; }
       if (b.cooldown > 0) continue;
       const r2 = b.def.range * b.def.range;
@@ -1421,10 +1253,18 @@ export class Game {
         if (d < bd) { bd = d; best = zb; }
       }
       if (best) {
-        const haste = b.rofBuffT > 0 ? b.rofBuffMult : 1;
-        b.cooldown = 1 / (b.def.rof * haste);
-        this.damageZombie(best, b.def.dmg, b.cx, b.cz);
-        this.emit({ type: 'shot', kind: 'tower', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
+        b.cooldown = 1 / b.def.rof;
+        if (b.def.splash) {
+          const s2 = b.def.splash * b.def.splash;
+          for (const zb of this.zombies) {
+            if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, b.def.dmg, b.cx, b.cz);
+          }
+          this.emit({ type: 'shot', kind: 'flame', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
+        } else {
+          this.damageZombie(best, b.def.dmg, b.cx, b.cz);
+          this.emit({ type: 'shot', kind: b.def.branch === 'ballista' ? 'ballista' : 'tower', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
+        }
+        b.lastTx = best.x; b.lastTz = best.z;
         this.wakeZombies(b.cx, b.cz, 9);
       }
     }
@@ -1433,15 +1273,6 @@ export class Game {
   _cleanup() {
     if (this.zombies.some((z) => z.dead)) this.zombies = this.zombies.filter((z) => !z.dead);
     if (this.units.some((u) => u.dead)) this.units = this.units.filter((u) => !u.dead);
-  }
-
-  _checkEnd() {
-    if (this.over) return;
-    if (this.finalSpawned && !this.pendingWave) {
-      let waveLeft = 0;
-      for (const zb of this.zombies) if (zb.wave) waveLeft++;
-      if (waveLeft === 0) this._gameOver(true);
-    }
   }
 
   aggroCount() {
