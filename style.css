@@ -205,6 +205,12 @@ body::after {
 .plot-icon { font-size: 27px; text-align: center; }
 .plot-card b { font-size: 13px; }
 .plot-card small { display: block; margin-top: 2px; font-size: 11px; opacity: 0.72; }
+.plot-card .plot-effect {
+  color: #ffe8a0;
+  opacity: 0.88;
+  white-space: normal;
+  line-height: 1.25;
+}
 .plot-card .mini-hp { margin-top: 6px; height: 6px; }
 
 .bbtn {
@@ -522,10 +528,24 @@ body::after {
   .lobbyactions { justify-content: stretch; }
   .lobbyactions .tbtn, .lobbyform .tbtn { flex: 1; }
   .herorow, .levelrow { flex-wrap: wrap; }
-  #bottombar { left: 8px; right: 8px; transform: none; max-width: none; padding: 8px; }
+  #heropanel {
+    left: 8px; bottom: 8px;
+    width: min(248px, calc(100vw - 160px));
+    padding: 8px 10px;
+  }
+  #minimap-wrap {
+    right: 8px; bottom: 8px;
+    width: 136px; height: 136px;
+  }
+  #bottombar {
+    left: 8px; right: 8px; bottom: 152px;
+    transform: none; max-width: none; padding: 8px;
+    max-height: 36vh; overflow-y: auto;
+  }
   #selectionmenu { grid-template-columns: 1fr; min-width: 0; width: 100%; }
   .selection-grid { grid-template-columns: repeat(5, 1fr); max-height: 132px; }
   .selcard { width: 100%; }
   #selection-actions { grid-template-columns: repeat(4, 1fr); justify-content: stretch; }
   .cmdbtn { width: 100%; }
+  .plot-card { min-width: 0; }
 }

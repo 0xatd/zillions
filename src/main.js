@@ -8,7 +8,9 @@ import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, hasAsset } from './assets.js';
 import { NetSession } from './net.js';
 import { deleteState, getRemoteState, getLobby, heartbeatLobby, joinLobby, leaveLobby, putState, sendLobbyChat } from './backend.js';
-import { PLOT_PAY_RADIUS, plotCostText, plotInfo, plotPaidTotal } from './plots.js';
+import {
+  PLOT_PAY_RADIUS, plotCostText, plotEffectText, plotInfo, plotPaidTotal, plotTimerText,
+} from './plots.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -1036,6 +1038,35 @@ class App {
     return g;
   }
 
+  _makeBuildingPreviewMesh(key) {
+    const ghost = this._makeBuildingMesh(key);
+    ghost.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = false;
+      child.receiveShadow = false;
+      if (child.material) {
+        child.material = Array.isArray(child.material)
+          ? child.material.map((mat) => mat.clone())
+          : child.material.clone();
+      }
+    });
+    this._setGhostOpacity(ghost, 0.12);
+    return ghost;
+  }
+
+  _setGhostOpacity(root, opacity) {
+    root.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of mats) {
+        mat.transparent = true;
+        mat.opacity = opacity;
+        mat.depthWrite = false;
+        if ('emissiveIntensity' in mat) mat.emissiveIntensity = Math.max(mat.emissiveIntensity || 0, opacity * 0.18);
+      }
+    });
+  }
+
   _syncBuildings() {
     const g = this.game;
     const seen = new Set();
@@ -1073,30 +1104,66 @@ class App {
     }
   }
 
-  _makePlotLabel(icon, sub) {
+  _makePlotLabel(plot, detailed = false) {
+    const d = BUILDINGS[plot.key];
+    const info = plotInfo(plot.key);
+    const pct = Math.round(plotPaidTotal(plot) * 100);
+    const timer = plotTimerText(plot);
+    const effect = plotEffectText(plot.key);
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 96;
+    canvas.width = detailed ? 384 : 256;
+    canvas.height = detailed ? 176 : 128;
     const ctx = canvas.getContext('2d');
+    const wrap = (text, maxWidth, maxLines) => {
+      const words = text.split(/\s+/).filter(Boolean);
+      const lines = [];
+      let line = '';
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (ctx.measureText(next).width <= maxWidth || !line) line = next;
+        else {
+          lines.push(line);
+          line = word;
+          if (lines.length >= maxLines) break;
+        }
+      }
+      if (line && lines.length < maxLines) lines.push(line);
+      return lines;
+    };
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'rgba(12, 14, 18, 0.72)';
     ctx.strokeStyle = 'rgba(255, 215, 94, 0.72)';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.roundRect(12, 8, 104, 76, 14);
+    ctx.roundRect(12, 8, canvas.width - 24, canvas.height - 18, 14);
     ctx.fill();
     ctx.stroke();
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '34px "Segoe UI Emoji", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.font = `${detailed ? 42 : 34}px "Segoe UI Emoji", system-ui, sans-serif`;
     ctx.fillStyle = '#fff4c8';
-    ctx.fillText(icon, 64, 34);
-    ctx.font = '700 18px system-ui, sans-serif';
+    ctx.fillText(info.icon, detailed ? 52 : 42, detailed ? 48 : 42);
+    ctx.textAlign = 'left';
+    ctx.font = `800 ${detailed ? 24 : 19}px system-ui, sans-serif`;
     ctx.fillStyle = '#ffd75e';
-    ctx.fillText(sub, 64, 66);
+    ctx.fillText(d.name, detailed ? 88 : 78, detailed ? 34 : 33);
+    ctx.font = `700 ${detailed ? 17 : 15}px system-ui, sans-serif`;
+    ctx.fillStyle = '#fff4c8';
+    ctx.fillText(`${pct}% built · ${timer}`, detailed ? 88 : 78, detailed ? 62 : 60);
+    if (detailed) {
+      ctx.font = '600 15px system-ui, sans-serif';
+      ctx.fillStyle = '#dfe6dc';
+      const lines = wrap(effect, 260, 3);
+      for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], 28, 98 + i * 21);
+    } else {
+      ctx.font = '600 13px system-ui, sans-serif';
+      ctx.fillStyle = '#dfe6dc';
+      const lines = wrap(effect, 158, 1);
+      if (lines[0]) ctx.fillText(lines[0], 78, 88);
+    }
     const tex = new THREE.CanvasTexture(canvas);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-    sprite.scale.set(3.7, 2.8, 1);
+    sprite.scale.set(detailed ? 5.8 : 4.4, detailed ? 2.7 : 2.15, 1);
     sprite.renderOrder = 7;
     return sprite;
   }
@@ -1122,10 +1189,13 @@ class App {
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }),
     );
     beacon.position.y = 0.78;
-    const label = this._makePlotLabel(info.icon, plotCostText(plot));
+    const preview = this._makeBuildingPreviewMesh(plot.key);
+    preview.position.y = -0.35;
+    preview.scale.setScalar(0.82);
+    const label = this._makePlotLabel(plot, false);
     label.position.y = 1.9;
-    group.add(base, ring, beacon, label);
-    group.userData = { base, ring, beacon, label, labelKey: '' };
+    group.add(base, preview, ring, beacon, label);
+    group.userData = { base, preview, ring, beacon, label, labelKey: '' };
     group.renderOrder = 2;
     return group;
   }
@@ -1138,6 +1208,7 @@ class App {
     }
     const seen = new Set();
     const activeId = this.game.activePlot?.id || null;
+    const hoverId = this.mouse?.cx !== undefined ? this._plotUnderMouse()?.id || null : null;
     const t = this.clock.elapsedTime;
     for (const plot of this.game.plots) {
       if (plot.built) continue;
@@ -1150,22 +1221,25 @@ class App {
       }
       const progress = plotPaidTotal(plot);
       rec.mesh.position.set(plot.cx, 0, plot.cz);
-      rec.mesh.rotation.y = t * 0.18;
       rec.mesh.userData.base.material.opacity = 0.16 + progress * 0.22;
       rec.mesh.userData.ring.material.opacity = (plot.id === activeId ? 0.9 : 0.42) + progress * 0.18;
+      const ghostOpacity = 0.1 + progress * 0.62 + (plot.id === activeId || plot.id === hoverId ? 0.08 : 0);
+      this._setGhostOpacity(rec.mesh.userData.preview, Math.min(0.82, ghostOpacity));
+      rec.mesh.userData.preview.position.y = lerp(-0.42, 0, progress);
+      rec.mesh.userData.preview.scale.setScalar(lerp(0.82, 1, progress));
       rec.mesh.userData.beacon.visible = plot.id === activeId || progress > 0.02;
       rec.mesh.userData.beacon.scale.y = 0.55 + progress * 1.4 + (plot.id === activeId ? Math.sin(t * 5) * 0.12 : 0);
-      const info = plotInfo(plot.key);
-      const labelKey = `${info.icon}:${plotCostText(plot)}`;
+      const detailed = plot.id === activeId || plot.id === hoverId || this.focusedPlot?.id === plot.id;
+      const labelKey = `${plot.key}:${detailed ? 1 : 0}:${Math.round(progress * 100)}:${plotCostText(plot)}:${plotTimerText(plot)}`;
       if (rec.mesh.userData.labelKey !== labelKey) {
         rec.mesh.remove(rec.mesh.userData.label);
-        const label = this._makePlotLabel(info.icon, plotCostText(plot));
+        const label = this._makePlotLabel(plot, detailed);
         label.position.y = 1.9;
         rec.mesh.add(label);
         rec.mesh.userData.label = label;
         rec.mesh.userData.labelKey = labelKey;
       }
-      rec.mesh.userData.label.position.y = 1.9 + Math.sin(t * 2.3 + plot.id) * 0.08;
+      rec.mesh.userData.label.position.y = (detailed ? 2.75 : 2.05) + Math.sin(t * 2.3 + plot.id) * 0.08;
     }
     for (const [id, rec] of this.plotMeshes) {
       if (!seen.has(id)) {
@@ -1528,7 +1602,7 @@ class App {
     this._moveHeroToPoint(plot.cx, plot.cz, plot);
     const info = plotInfo(plot.key);
     this.ui.showPlotCommandBar(this.game, plot);
-    this.game.msg(`${info.label}: ride onto the foundation, then hold Space to build for ${plotCostText(plot)}.`, 'info');
+    this.game.msg(`${BUILDINGS[plot.key].name}: ${plotEffectText(plot.key)} Ride onto it, then hold Space for ${plotTimerText(plot)}.`, 'info');
     this.burst(plot.cx, 0.1, plot.cz, { count: 10, color: info.color, speed: 1.2, life: 0.5, size: 0.35, up: 1.2 });
   }
 

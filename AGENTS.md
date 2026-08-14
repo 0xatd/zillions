@@ -43,7 +43,7 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 ## Current Modes
 
 - Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
-- Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, visible glowing foundations, hero movement, hold-Space building, one coin spend path, and day-build/night-defend pressure.
+- Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, visible glowing foundations, hero movement, hold-Space building, construction previews/timers, one coin spend path, and day-build/night-defend pressure.
 - Old RTS placement, economy automation, and extra mode cards are not part of the playable surface.
 - The Vercel online lobby is presence and chat. It shows active players, selected hero, Survival status, and profile-style stats. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
 - The bottom bar is intentionally context-sensitive. With no unit selected it shows the current foundation/build action. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
@@ -80,7 +80,7 @@ Before you call a change good:
 - Serve with `python3 -m http.server 8000`.
 - Open `/` and confirm the game starts.
 - Confirm the game screen does not show a repo-only asset browser link.
-- Start Survival and confirm glowing foundations render, clicking one sends the hero there, standing alone does not spend coins, and holding Space on it funds construction.
+- Start Survival and confirm glowing foundations render, clicking one sends the hero there, standing alone does not spend coins, and holding Space on it funds construction while the ghost building becomes more visible and the timer/details update.
 - Confirm W/A/S/D moves the hero straight north/west/south/east on the minimap.
 - Select a unit group and confirm the bottom command bar updates. Selection cards should focus units, and double-clicking a card should select that unit type.
 - Open `/assets.html` and confirm manifests load.

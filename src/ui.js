@@ -13,14 +13,12 @@ import {
   BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
 } from './config.js';
-import { PLOT_PAY_RATE, plotCost, plotCostText, plotInfo, plotPaidTotal } from './plots.js';
+import { plotCostText, plotEffectText, plotInfo, plotPaidTotal, plotTimerText } from './plots.js';
 import { formatTime } from './utils.js';
 
 function plotHoldText(plot) {
-  const cost = plotCost(plot.key);
-  const left = Math.max(0, cost.gold - (plot.paid.gold || 0));
-  if (left <= 0) return 'ready';
-  return `hold Space ~${Math.max(1, Math.ceil(left / (PLOT_PAY_RATE.gold || 210)))}s`;
+  const timer = plotTimerText(plot);
+  return timer === 'ready' ? 'ready' : `hold Space ${timer}`;
 }
 
 export class UI {
@@ -587,13 +585,16 @@ export class UI {
 
     const info = plotInfo(plot.key);
     const pct = plotPaidTotal(plot);
+    const effect = plotEffectText(plot.key);
+    const timer = plotTimerText(plot);
     roster.innerHTML = `
-      <div class="selection-title"><b>${info.label}</b><small>${Math.round(pct * 100)}% funded</small></div>
+      <div class="selection-title"><b>${BUILDINGS[plot.key].name}</b><small>${Math.round(pct * 100)}% built · ${timer}</small></div>
       <div class="plot-card active">
         <span class="plot-icon">${info.icon}</span>
         <div>
           <b>${BUILDINGS[plot.key].name}</b>
           <small>${plotCostText(plot)} · ${plotHoldText(plot)} · day-only</small>
+          <small class="plot-effect">${effect}</small>
           <span class="mini-hp"><span style="width:${pct * 100}%"></span></span>
         </div>
       </div>`;
@@ -994,8 +995,7 @@ export class UI {
       if (game.plotMode) {
         const active = game.activePlot;
         if (active) {
-          const info = plotInfo(active.key);
-          plotHud.innerHTML = `🏗️ ${info.label} <small>${Math.round(plotPaidTotal(active) * 100)}% · ${plotHoldText(active)} · ${plotCostText(active)}</small>`;
+          plotHud.innerHTML = `🏗️ ${BUILDINGS[active.key].name} <small>${Math.round(plotPaidTotal(active) * 100)}% · ${plotTimerText(active)} · ${plotCostText(active)}</small>`;
           plotHud.classList.add('active');
         } else {
           const left = game.plots.filter((p) => !p.built).length;

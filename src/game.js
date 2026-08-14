@@ -6,7 +6,9 @@ import {
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
 import { FlowField, findPath } from './flowfield.js';
-import { generatePlots, plotComplete, plotCost, plotCostText, PLOT_PAY_RADIUS, PLOT_PAY_RATE } from './plots.js';
+import {
+  generatePlots, plotComplete, plotCost, plotCostText, plotEffectText, PLOT_PAY_RADIUS, PLOT_PAY_RATE,
+} from './plots.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
@@ -1253,7 +1255,7 @@ export class Game {
       this.activePlot = best;
       if (this._activePlotId !== best.id) {
         this._activePlotId = best.id;
-        this.msg(`${BUILDINGS[best.key].name} foundation ready. Hold Space to build: ${plotCostText(best)}.`, 'info');
+        this.msg(`${BUILDINGS[best.key].name}: ${plotEffectText(best.key)} Hold Space to build: ${plotCostText(best)}.`, 'info');
       }
       if (this.isNight) {
         if (h.buildHold && this.time - (this._plotNightMsgT || -99) > 1.5) {

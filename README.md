@@ -42,7 +42,7 @@ Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day
 Core systems:
 
 - Build only through foundations. Free-placement building is removed from the playable game.
-- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Completed foundations become real buildings.
+- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Each foundation shows the planned building, its timer, and what it gives you. The final model fades in as construction progresses.
 - Train scouts, troopers, and snipers.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
@@ -83,7 +83,7 @@ Hero rules:
 | Left click / drag | Select units |
 | Right click | Move squad or cancel build |
 | Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
-| Left click a foundation | Send your hero to that plot |
+| Left click a foundation | Send your hero to that plot and preview the building |
 | Space | Hold to build while standing on a foundation |
 | T | Select whole army |
 | U / I / O | Train scout / trooper / sniper |

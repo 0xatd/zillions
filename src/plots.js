@@ -2,7 +2,7 @@
 // These are pre-planned city sites around the Command Center. The normal game
 // still owns buildings, resources, pathing, and combat. Plot mode only gives
 // players a Thronefall-style "stand here, then hold build" layer.
-import { BUILDINGS, TILE } from './config.js';
+import { BUILDINGS, TILE, UNITS } from './config.js';
 import { makeRNG } from './utils.js';
 
 const PLOT_KEYS = {
@@ -39,6 +39,42 @@ export function plotPaidTotal(plot) {
   const need = cost.gold + cost.wood + cost.stone;
   if (!need) return 1;
   return Math.min(1, ((plot.paid.gold || 0) + (plot.paid.wood || 0) + (plot.paid.stone || 0)) / need);
+}
+
+export function plotBuildSecondsLeft(plot) {
+  if (!plot) return 0;
+  const cost = plotCost(plot.key);
+  let seconds = 0;
+  for (const res of ['gold', 'wood', 'stone']) {
+    const left = Math.max(0, (cost[res] || 0) - (plot.paid?.[res] || 0));
+    if (!left) continue;
+    seconds += left / Math.max(1, PLOT_PAY_RATE[res] || PLOT_PAY_RATE.gold || 1);
+  }
+  return seconds;
+}
+
+export function plotTimerText(plot) {
+  const secs = plotBuildSecondsLeft(plot);
+  return secs > 0 ? `${Math.ceil(secs)}s` : 'ready';
+}
+
+export function plotEffectText(key) {
+  const d = BUILDINGS[key];
+  if (!d) return '';
+  if (key === 'tower') return `Range ${d.range} tower. Auto-shoots zombies.`;
+  if (key === 'barracks') return `Trains ${Object.values(UNITS).map((u) => u.name).join(', ')} squads.`;
+  if (key === 'wall') return `${d.hp} HP wall. Blocks and slows the horde.`;
+
+  const parts = [];
+  if (d.pop > 0) parts.push(`+${d.pop} colonists`);
+  if (d.gold > 0) parts.push(`+${d.gold}/s coins`);
+  if (d.wood > 0) parts.push(`+${d.wood}/s wood`);
+  if (d.stone > 0) parts.push(`+${d.stone}/s stone`);
+  if (d.food > 0) parts.push(`+${d.food} food`);
+  if (d.energy > 0) parts.push(`+${d.energy} energy`);
+  if (d.energy < 0) parts.push(`uses ${Math.abs(d.energy)} energy`);
+  if (d.workers > 0) parts.push(`needs ${d.workers} workers`);
+  return parts.length ? `${parts.join('. ')}.` : d.desc;
 }
 
 export function plotComplete(plot) {
