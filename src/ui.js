@@ -13,8 +13,15 @@ import {
   BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH, LEVELS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
 } from './config.js';
-import { plotCostText, plotInfo, plotPaidTotal } from './plots.js';
+import { PLOT_PAY_RATE, plotCost, plotCostText, plotInfo, plotPaidTotal } from './plots.js';
 import { formatTime } from './utils.js';
+
+function plotHoldText(plot) {
+  const cost = plotCost(plot.key);
+  const left = Math.max(0, cost.gold - (plot.paid.gold || 0));
+  if (left <= 0) return 'ready';
+  return `hold Space ~${Math.max(1, Math.ceil(left / (PLOT_PAY_RATE.gold || 210)))}s`;
+}
 
 export class UI {
   constructor(root, cb) {
@@ -32,7 +39,7 @@ export class UI {
         <div class="res" id="r-wave" title="Time until the next horde">⏳ --:--</div>
         <div class="res hidden" id="r-plot" title="Current Survival foundation">🏗️ Survival</div>
         <div class="sep"></div>
-        <div class="res" id="r-gold" title="Coins — spent by standing on foundations">🪙 0</div>
+        <div class="res" id="r-gold" title="Coins — hold Space on a foundation to spend">🪙 0</div>
         <div class="res" id="r-wood" title="Wood — produced by sawmills">🪵 0</div>
         <div class="res" id="r-stone" title="Stone — produced by quarries">🪨 0</div>
         <div class="res" id="r-food" title="Food balance — farms produce, tents consume">🍞 0</div>
@@ -40,7 +47,7 @@ export class UI {
         <div class="res" id="r-pop" title="Colonists — workers used / housing capacity">👷 0/0</div>
         <div class="res" id="r-z" title="Zombies on the map">🧟 0</div>
         <div class="sep"></div>
-        <button class="tbtn" id="b-pause" title="Pause (Space)">⏸</button>
+        <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn speed" data-s="4">4×</button>
@@ -79,7 +86,7 @@ export class UI {
           <div class="howto">
             <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
             <div><b>🕹️ You are the hero.</b> Use WASD to ride. The camera follows you.</div>
-            <div><b>🏗️ Build on foundations.</b> Ride onto a glowing plot during the day and coins stream into it.</div>
+            <div><b>🏗️ Build on foundations.</b> Ride onto a glowing plot during the day, then hold Space to spend coins into it.</div>
             <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
             <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
             <div><b>🪙 One spend path.</b> No separate build menu. The city plan is the game.</div>
@@ -131,9 +138,10 @@ export class UI {
           <div id="mp-panel" class="hidden"></div>
           <div class="controls">
             <span><b>WASD</b> ride hero</span><span><b>Shift</b> sprint</span>
-            <span><b>Left click foundation</b> ride/build</span><span><b>Q/E/R</b> abilities</span>
+            <span><b>Left click foundation</b> ride there</span><span><b>Space</b> hold build</span>
+            <span><b>Q/E/R</b> abilities</span>
             <span><b>T</b> select army</span><span><b>right-click</b> orders</span>
-            <span><b>wheel</b> zoom</span><span><b>space</b> pause</span>
+            <span><b>wheel</b> zoom</span><span><b>P</b> pause</span>
           </div>
         </div>
       </div>`;
@@ -570,7 +578,7 @@ export class UI {
         <div class="selection-title"><b>Build The City</b><small>Ride to a glowing foundation</small></div>
         <div class="plot-card">
           <span class="plot-icon">🏗️</span>
-          <div><b>Foundation Build</b><small>Left-click a plot. Stand there by day to spend coins.</small></div>
+          <div><b>Foundation Build</b><small>Left-click a plot. Stand there and hold Space to spend coins.</small></div>
         </div>`;
       actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Center on hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
       actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Rally fighters', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
@@ -585,7 +593,7 @@ export class UI {
         <span class="plot-icon">${info.icon}</span>
         <div>
           <b>${BUILDINGS[plot.key].name}</b>
-          <small>${plotCostText(plot)} · day-only construction</small>
+          <small>${plotCostText(plot)} · ${plotHoldText(plot)} · day-only</small>
           <span class="mini-hp"><span style="width:${pct * 100}%"></span></span>
         </div>
       </div>`;
@@ -987,7 +995,7 @@ export class UI {
         const active = game.activePlot;
         if (active) {
           const info = plotInfo(active.key);
-          plotHud.innerHTML = `🏗️ ${info.label} <small>${Math.round(plotPaidTotal(active) * 100)}% · ${plotCostText(active)}</small>`;
+          plotHud.innerHTML = `🏗️ ${info.label} <small>${Math.round(plotPaidTotal(active) * 100)}% · ${plotHoldText(active)} · ${plotCostText(active)}</small>`;
           plotHud.classList.add('active');
         } else {
           const left = game.plots.filter((p) => !p.built).length;

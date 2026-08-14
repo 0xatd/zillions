@@ -202,7 +202,7 @@ export class Game {
     this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
     this._scatterInitialZombies();
     this.recalcEconomy();
-    this.msg('Survival online: ride onto glowing foundations to spend coins and raise the city.', 'info');
+    this.msg('Survival online: ride onto glowing foundations, then hold Space to spend coins and raise the city.', 'info');
   }
 
   _scatterInitialZombies() {
@@ -432,7 +432,7 @@ export class Game {
       level: 1, xp: 0, points: 1,
       abil: d.abilities.map(() => ({ rank: 0, cd: 0 })),
       buffT: 0, buffMult: 1, hasteT: 0, hasteMult: 1,
-      reviveT: 0,
+      reviveT: 0, buildHold: false, buildHoldT: 0,
     };
     this.units.push(h);
     this.heroes.push(h);
@@ -462,7 +462,20 @@ export class Game {
         h.moveX = len ? x / len : 0;
         h.moveZ = len ? z / len : 0;
         h.sprint = !!c.s;
-        if (len) { h.path = null; h.pathI = 0; h.target = null; }
+        if (len) {
+          h.path = null;
+          h.pathI = 0;
+          h.target = null;
+          h.moveOrderX = null;
+          h.moveOrderZ = null;
+        }
+        break;
+      }
+      case 'heroBuild': {
+        const h = this.heroes[c.p || 0];
+        if (!h) break;
+        h.buildHold = !!c.on;
+        if (!h.buildHold) h.buildHoldT = 0;
         break;
       }
       case 'stop': {
@@ -471,6 +484,8 @@ export class Game {
           u.path = null;
           u.pathI = 0;
           u.target = null;
+          u.moveOrderX = null;
+          u.moveOrderZ = null;
           u.holdX = u.x;
           u.holdZ = u.z;
           u.retargetT = 0;
@@ -884,8 +899,21 @@ export class Game {
       const ang = (i / Math.max(1, units.length)) * Math.PI * 2;
       const r = i === 0 ? 0 : 0.9 + 0.55 * Math.floor((i - 1) / 6);
       const dx = tx + Math.cos(ang) * r, dz = tz + Math.sin(ang) * r;
+      if (u.path && Number.isFinite(u.moveOrderX) && Number.isFinite(u.moveOrderZ) &&
+        Math.hypot(u.moveOrderX - dx, u.moveOrderZ - dz) < 0.35) {
+        i++;
+        continue;
+      }
       const p = findPath(this.map, this.occ, u.x, u.z, dx, dz);
-      if (p) { u.path = p; u.pathI = 0; u.target = null; }
+      if (p) {
+        let pathI = 0;
+        while (pathI < p.length - 1 && Math.hypot(p[pathI][0] - u.x, p[pathI][1] - u.z) < 0.45) pathI++;
+        u.path = p;
+        u.pathI = pathI;
+        u.target = null;
+        u.moveOrderX = dx;
+        u.moveOrderZ = dz;
+      }
       i++;
     }
     if (units.length) this.emit({ type: 'move' });
@@ -1208,7 +1236,6 @@ export class Game {
 
   _updatePlotFunding(dt) {
     this.activePlot = null;
-    if (this.isNight) return;
     for (const h of this.heroes) {
       if (!h || h.dead) continue;
       let best = null;
@@ -1219,11 +1246,25 @@ export class Game {
         const d = dist2(h.x, h.z, plot.cx, plot.cz);
         if (d < bd) { bd = d; best = plot; }
       }
-      if (!best) continue;
+      if (!best) {
+        h.buildHoldT = 0;
+        continue;
+      }
       this.activePlot = best;
       if (this._activePlotId !== best.id) {
         this._activePlotId = best.id;
-        this.msg(`Funding ${BUILDINGS[best.key].name}: ${plotCostText(best)} remaining.`, 'info');
+        this.msg(`${BUILDINGS[best.key].name} foundation ready. Hold Space to build: ${plotCostText(best)}.`, 'info');
+      }
+      if (this.isNight) {
+        if (h.buildHold && this.time - (this._plotNightMsgT || -99) > 1.5) {
+          this._plotNightMsgT = this.time;
+          this.msg('Build during the day. Defend through the night.', 'warn');
+        }
+        continue;
+      }
+      if (!h.buildHold) {
+        h.buildHoldT = 0;
+        continue;
       }
       const cost = plotCost(best.key);
       let paid = false;
@@ -1237,10 +1278,14 @@ export class Game {
         paid = true;
       }
       if (paid) {
+        h.buildHoldT = (h.buildHoldT || 0) + dt;
         if ((best.payFx || 0) <= 0) {
           best.payFx = 0.35;
           this.emit({ type: 'plotpay', x: best.cx, z: best.cz, key: best.key });
         }
+      } else if (this.time - (this._plotNoCoinMsgT || -99) > 1.5) {
+        this._plotNoCoinMsgT = this.time;
+        this.msg('Need more coins before this foundation can keep building.', 'warn');
       }
       if (plotComplete(best)) this._constructPlot(best);
     }
@@ -1480,7 +1525,13 @@ export class Game {
         const d = Math.hypot(dx, dz);
         if (d < 0.15) {
           u.pathI++;
-          if (u.pathI >= u.path.length) { u.path = null; u.holdX = u.x; u.holdZ = u.z; }
+          if (u.pathI >= u.path.length) {
+            u.path = null;
+            u.moveOrderX = null;
+            u.moveOrderZ = null;
+            u.holdX = u.x;
+            u.holdZ = u.z;
+          }
         } else {
           const moveMult = u.hero && u.moveT > 0 ? u.moveMult : 1;
           const sp = u.def.speed * moveMult * dt;

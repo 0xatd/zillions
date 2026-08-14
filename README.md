@@ -31,18 +31,18 @@ Then open:
 
 ## Current Game
 
-The dead cover the map. You ride as the hero, spend coins into pre-planned city foundations, and survive 10 days.
+The dead cover the map. You ride as the hero, hold Space on pre-planned city foundations to spend coins, and survive 10 days.
 
 Current modes:
 
-- **Survival**: the active mode. The city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day to spend coins and build it.
+- **Survival**: the active mode. The city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day, then hold Space to spend coins and build it.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 
 Core systems:
 
 - Build only through foundations. Free-placement building is removed from the playable game.
-- Foundations around the Command Center show where the city can grow. Stand on a foundation to spend coins into it. Completed foundations become real buildings.
+- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Completed foundations become real buildings.
 - Train scouts, troopers, and snipers.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
@@ -83,10 +83,11 @@ Hero rules:
 | Left click / drag | Select units |
 | Right click | Move squad or cancel build |
 | Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
-| Left click a foundation | Send your hero to fund that plot |
+| Left click a foundation | Send your hero to that plot |
+| Space | Hold to build while standing on a foundation |
 | T | Select whole army |
 | U / I / O | Train scout / trooper / sniper |
-| Space | Pause |
+| P | Pause |
 | M | Mute |
 | H | Help |
 | Esc | Cancel |
@@ -204,7 +205,7 @@ When reviewing or changing gameplay, check:
 - The game still starts from a static file server.
 - The hero picker works.
 - WASD moves the hero straight up/down/left/right on the minimap.
-- A foundation can be clicked, funded with coins, and built.
+- A foundation can be clicked, reached by the hero, funded by holding Space, and built.
 - Selection, right-click orders, and ability hotkeys work.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.

@@ -109,8 +109,7 @@ class App {
       onMinimap: (u, v) => {
         const x = u * MAP_SIZE, z = v * MAP_SIZE;
         if (this.game?.plotMode) {
-          const h = this.myHero();
-          if (h && !h.dead) this.issue({ t: 'move', ids: [h.id], x, z });
+          this._moveHeroToPoint(x, z);
           return;
         }
         this.focus.x = x; this.focus.z = z;
@@ -223,6 +222,8 @@ class App {
     this.map = new GameMap(seed, level.theme);
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : heroKey;
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    this.buildHoldOn = false;
+    this.lastHeroDir = { x: 0, z: 0, s: false };
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.ui.setLocalPlayer(this.myPlayer);
@@ -1338,8 +1339,13 @@ class App {
       const k = e.key.toLowerCase();
       this.keys.add(k);
       if (!this.game) return;
+      if (this.game.plotMode && k === ' ') {
+        e.preventDefault();
+        this._setBuildHold(true);
+        return;
+      }
       if (this.game.plotMode && ['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'shift'].includes(k)) return;
-      if (k === ' ') { e.preventDefault(); this.setSpeed(0); }
+      if (k === 'p') { e.preventDefault(); this.setSpeed(0); }
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.pause(); this.ui.showHelp(); }
       else if (k === 'escape') { this.targeting = null; this.canvas.style.cursor = 'default'; this.setBuildMode(null); this._clearSelection(); }
@@ -1358,7 +1364,11 @@ class App {
         }
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      this.keys.delete(k);
+      if (k === ' ') this._setBuildHold(false);
+    });
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -1415,7 +1425,17 @@ class App {
       if (this.wallDrag && this.mouse.down) this._tryPlace(true);
       if (this.dragStart) this._updateDragRect(e);
     });
-    window.addEventListener('blur', () => this._clearMousePosition());
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this._setBuildHold(false);
+      this._clearMousePosition();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.keys.clear();
+        this._setBuildHold(false);
+      }
+    });
     document.addEventListener('mouseleave', () => this._clearMousePosition());
 
     window.addEventListener('pointerup', (e) => {
@@ -1426,7 +1446,7 @@ class App {
         if (this.dragStart) {
           const dx = Math.abs(e.clientX - this.dragStart.x), dy = Math.abs(e.clientY - this.dragStart.y);
           if (dx > 6 || dy > 6) this._selectInRect(this.dragStart, { x: e.clientX, y: e.clientY });
-          else this._clickSelect();
+          else if (!this._clickSelect() && this.game?.plotMode) this._moveHeroToPoint(this.mouse.gx, this.mouse.gz);
           this.dragStart = null;
           document.getElementById('dragrect').style.display = 'none';
         }
@@ -1466,6 +1486,28 @@ class App {
     this.burst(x, 0.1, z, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
   }
 
+  _setBuildHold(on) {
+    if (!this.game?.plotMode) return;
+    const next = !!on;
+    if (this.buildHoldOn === next) return;
+    this.buildHoldOn = next;
+    this.issue({ t: 'heroBuild', p: this.myPlayer, on: next });
+  }
+
+  _moveHeroToPoint(x, z, focusedPlot = null) {
+    const hero = this.myHero();
+    if (!hero || hero.dead) return;
+    this.focusedPlot = focusedPlot;
+    this._clearSelection();
+    const now = performance.now();
+    if (now - (this._lastHeroMoveBark || 0) > 650) {
+      this._lastHeroMoveBark = now;
+      this.audio.bark(hero.key, 'move');
+    }
+    this.issue({ t: 'move', ids: [hero.id], x, z });
+    this.burst(x, 0.1, z, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
+  }
+
   _plotUnderMouse() {
     if (!this.game?.plotMode) return null;
     let best = null;
@@ -1483,16 +1525,10 @@ class App {
   _moveHeroToPlot(plot) {
     const hero = this.myHero();
     if (!hero || hero.dead) return;
-    this.focusedPlot = plot;
-    this._clearSelection();
-    hero.selected = true;
-    this.selection = [hero];
-    this.ui.showSelection(this.selection, this.game);
-    this.audio.bark(hero.key, 'move');
-    this.issue({ t: 'move', ids: [hero.id], x: plot.cx, z: plot.cz });
+    this._moveHeroToPoint(plot.cx, plot.cz, plot);
     const info = plotInfo(plot.key);
     this.ui.showPlotCommandBar(this.game, plot);
-    this.game.msg(`${info.label}: ride onto the foundation to spend ${plotCostText(plot)}.`, 'info');
+    this.game.msg(`${info.label}: ride onto the foundation, then hold Space to build for ${plotCostText(plot)}.`, 'info');
     this.burst(plot.cx, 0.1, plot.cz, { count: 10, color: info.color, speed: 1.2, life: 0.5, size: 0.35, up: 1.2 });
   }
 
@@ -1619,7 +1655,7 @@ class App {
       }
       this.audio.click();
       this.ui.showSelection(this.selection, g);
-      return;
+      return true;
     }
     // Building under click?
     const tx = this.mouse.gx | 0, tz = this.mouse.gz | 0;
@@ -1630,10 +1666,11 @@ class App {
         this.selectedBuilding = b;
         this.audio.click();
         this.ui.showSelection(b, g);
-        return;
+        return true;
       }
     }
     this.ui.showSelection(null);
+    return false;
   }
 
   _clearSelection() {

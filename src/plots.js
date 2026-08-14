@@ -1,7 +1,7 @@
 // Deterministic Survival foundations.
 // These are pre-planned city sites around the Command Center. The normal game
 // still owns buildings, resources, pathing, and combat. Plot mode only gives
-// players a Thronefall-style "stand here to fund this structure" layer.
+// players a Thronefall-style "stand here, then hold build" layer.
 import { BUILDINGS, TILE } from './config.js';
 import { makeRNG } from './utils.js';
 
