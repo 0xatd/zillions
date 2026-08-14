@@ -1,4 +1,9 @@
 // DOM HUD: resource bar, build menu, minimap, selection panel, banners, menus.
+const PORTRAITS = {
+  alexander: 'assets/heroes/images/alexander_portrait.png',
+  scott: 'assets/heroes/images/scott_barbarian.png',
+  danny: 'assets/heroes/images/danny_assassin.png',
+};
 import {
   BUILDINGS, BUILD_ORDER, UNITS, DIFFICULTY, FINAL_DAY, DAY_LENGTH,
   HEROES, HERO_MAX_LEVEL, xpForLevel, rankReqLevel, ULT_REQ_LEVEL,
@@ -92,6 +97,7 @@ export class UI {
       card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
       card.dataset.key = key;
       card.innerHTML = `
+        <img class="hface" src="${PORTRAITS[key]}" onerror="this.remove()" alt="">
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
@@ -221,7 +227,7 @@ export class UI {
     const d = hero.def;
     hp.innerHTML = `
       <div class="hprow">
-        <span class="hpportrait">${d.icon}</span>
+        <span class="hpportrait">${PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon}</span>
         <div class="hpinfo">
           <b>${d.name}</b> <span class="hplvl" id="hp-lvl">Lv 1</span>
           <div class="hpbar herohp"><div class="hpfill" id="hp-hp"></div></div>

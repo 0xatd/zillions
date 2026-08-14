@@ -1,7 +1,16 @@
 // Procedural WebAudio: no sound assets, everything synthesized.
 
+const BARK_HERO = { alexander: 'alex', scott: 'scott', danny: 'danny' };
+
 export class AudioSys {
   constructor() {
+    this.barkIndex = null;
+    this.lastBarkT = 0;
+    this.barkEl = null;
+    fetch('assets/audio/click-pack/index.json')
+      .then((r) => r.json())
+      .then((d) => { this.barkIndex = d; })
+      .catch(() => {});
     this.ctx = null;
     this.muted = false;
     this.master = null;
@@ -9,6 +18,25 @@ export class AudioSys {
     this.noiseBuf = null;
     this.lastGroan = 0;
     this.musicTimer = null;
+  }
+
+  // WC3-style hero click barks (pre-generated MP3s; silently no-ops if absent).
+  bark(heroKey, category) {
+    if (this.muted || !this.barkIndex) return;
+    const now = performance.now();
+    if (now - this.lastBarkT < 1400) return;
+    const hero = this.barkIndex.heroes[BARK_HERO[heroKey]];
+    if (!hero) return;
+    const items = hero.categories[category];
+    if (!items || !items.length) return;
+    const pick = items[(Math.random() * items.length) | 0];
+    this.lastBarkT = now;
+    try {
+      if (this.barkEl) this.barkEl.pause();
+      this.barkEl = new Audio('assets/audio/click-pack/' + pick.file);
+      this.barkEl.volume = 0.75;
+      this.barkEl.play().catch(() => {});
+    } catch { /* no-op */ }
   }
 
   init() {

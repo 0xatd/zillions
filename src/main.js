@@ -927,6 +927,8 @@ class App {
         if (this.targeting != null) { this.targeting = null; this.canvas.style.cursor = 'default'; return; }
         if (this.buildMode) { this.setBuildMode(null); return; }
         if (this.selection.length) {
+          const mh = this.myHero();
+          if (mh && this.selection.includes(mh)) this.audio.bark(mh.key, 'move');
           this.issue({ t: 'move', ids: this.selection.map((u) => u.id), x: this.mouse.gx, z: this.mouse.gz });
           this.burst(this.mouse.gx, 0.1, this.mouse.gz, { count: 6, color: 0x59ff9c, speed: 1.2, life: 0.4, size: 0.35, up: 0.8 });
         }
@@ -1011,6 +1013,13 @@ class App {
     if (best) {
       best.selected = true;
       this.selection.push(best);
+      if (best.hero) {
+        const now = performance.now();
+        if (now - (this._lastHeroSel || 0) < 4000) this._heroClicks = (this._heroClicks || 0) + 1;
+        else this._heroClicks = 1;
+        this._lastHeroSel = now;
+        this.audio.bark(best.key, this._heroClicks >= 3 ? 'repeated' : 'selection');
+      }
       this.audio.click();
       this.ui.showSelection(this.selection, g);
       return;
@@ -1058,6 +1067,7 @@ class App {
       this.game.msg('🌀 Teleport: click a destination (right-click to cancel).', 'info');
       return;
     }
+    if (Math.random() < 0.4) this.audio.bark(h.key, 'attack');
     this.issue({ t: 'cast', i, p: this.myPlayer });
   }
 
@@ -1084,6 +1094,10 @@ class App {
     if (this._heroSelected() && now - (this._lastHeroSel || 0) < 450) {
       this.focus.x = h.x; this.focus.z = h.z;
     }
+    // WC3-style barks — spam-click your hero and he gets annoyed.
+    if (now - (this._lastHeroSel || 0) < 4000) this._heroClicks = (this._heroClicks || 0) + 1;
+    else this._heroClicks = 1;
+    this.audio.bark(h.key, this._heroClicks >= 3 ? 'repeated' : 'selection');
     this._lastHeroSel = now;
     this._clearSelection();
     h.selected = true;
