@@ -97,7 +97,7 @@ export class UI {
                 <small id="account-detail">Loading account state...</small>
               </div>
               <div class="account-actions">
-                <button class="tbtn" id="account-signin" type="button">Sign in with Google</button>
+                <button class="tbtn" id="account-signin" type="button">Connect profile</button>
                 <button class="tbtn hidden" id="account-signout" type="button">Sign out</button>
               </div>
             </div>
@@ -208,9 +208,10 @@ export class UI {
                 <small id="profile-account-note">Checking account state...</small>
               </div>
               <div class="profilecards">
-                <div class="profilecard">
+                <div class="profilecard profilecard-account">
                   <b>Account</b>
                   <p id="profile-account-copy">Local profile is active until Google sign-in completes.</p>
+                  <button class="diffbtn primary" id="profile-connect" type="button">Connect profile</button>
                 </div>
                 <div class="profilecard">
                   <b>Cloud Save</b>
@@ -250,13 +251,40 @@ export class UI {
         </div>
       </div>`;
 
+    this.root.insertAdjacentHTML('beforeend', `
+      <div id="auth-modal" class="auth-modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <div class="auth-card">
+          <button class="auth-close" id="auth-close" type="button" aria-label="Close account panel">×</button>
+          <div class="auth-brand">
+            <span class="brandmark">Z</span>
+            <b>ZILLIONS</b>
+          </div>
+          <h2 id="auth-title">Log in or sign up</h2>
+          <p class="auth-copy">Use a Zillions profile for your commander name, saves, stats, and multiplayer rooms.</p>
+          <button class="auth-primary" id="auth-google" type="button">
+            <span class="auth-provider">G</span>
+            <span>Continue with Google</span>
+          </button>
+          <div class="auth-divider"><span>OR</span></div>
+          <button class="auth-secondary" id="auth-guest" type="button">Continue as guest</button>
+          <p class="auth-status" id="auth-status">Guest play stays on this browser. Google syncs your profile across devices.</p>
+        </div>
+      </div>`);
+
     // Menu shell.
     this._setMenuView('play');
     for (const b of this.root.querySelectorAll('.shellnav-btn')) {
       b.onclick = () => this._setMenuView(b.dataset.view || 'play');
     }
-    this.root.querySelector('#account-signin').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    this.root.querySelector('#account-signin').onclick = () => this._openAuthModal();
     this.root.querySelector('#account-signout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
+    this.root.querySelector('#profile-connect').onclick = () => this._openAuthModal();
+    this.root.querySelector('#auth-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    this.root.querySelector('#auth-guest').onclick = () => this._closeAuthModal();
+    this.root.querySelector('#auth-close').onclick = () => this._closeAuthModal();
+    this.root.querySelector('#auth-modal').addEventListener('click', (e) => {
+      if (e.target?.id === 'auth-modal') this._closeAuthModal();
+    });
 
     // Mode picker.
     this.selectedMode = 'survival';
@@ -612,6 +640,17 @@ export class UI {
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
 
+  _openAuthModal() {
+    const modal = this.root.querySelector('#auth-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    this.root.querySelector('#auth-google')?.focus({ preventScroll: true });
+  }
+
+  _closeAuthModal() {
+    this.root.querySelector('#auth-modal')?.classList.add('hidden');
+  }
+
   setProfile(p) {
     const nameEl = this.root.querySelector('#prof-name');
     if (nameEl) nameEl.value = p.name || '';
@@ -630,6 +669,11 @@ export class UI {
     const signout = this.root.querySelector('#account-signout');
     const note = this.root.querySelector('#profile-account-note');
     const copy = this.root.querySelector('#profile-account-copy');
+    const profileConnect = this.root.querySelector('#profile-connect');
+    const authGoogle = this.root.querySelector('#auth-google');
+    const authGuest = this.root.querySelector('#auth-guest');
+    const authStatus = this.root.querySelector('#auth-status');
+    const accountBox = this.root.querySelector('#accountbox');
     if (!title || !detail || !signin || !signout) return;
 
     const checking = !!state.checking;
@@ -655,18 +699,47 @@ export class UI {
 
     title.textContent = heading;
     detail.textContent = body;
-    signin.classList.toggle('hidden', checking || signedIn || !enabled);
+    signin.textContent = checking ? 'Checking...' : 'Connect profile';
+    signin.classList.toggle('hidden', signedIn || !enabled);
     signout.classList.toggle('hidden', !signedIn);
     signin.disabled = checking || !!state.busy;
     signout.disabled = !!state.busy;
+    accountBox?.classList.toggle('signed-in', signedIn);
+    accountBox?.classList.toggle('error', !!error);
     if (note) note.textContent = body;
     if (copy) {
       copy.textContent = signedIn
-        ? 'Google sign-in is active. Name, selected hero, stats, cloud save, and match history sync to Supabase.'
+        ? 'Connected. Your commander name, hero, stats, save, and match history sync across devices.'
         : enabled
-          ? 'Google sign-in is available. Until you connect, the profile stays local to this browser.'
+          ? 'Play as a guest or connect a profile before you enter multiplayer rooms.'
           : 'Local/offline profile is active. Static builds and local servers keep working without Supabase.';
     }
+    if (profileConnect) {
+      profileConnect.classList.toggle('hidden', signedIn || !enabled);
+      profileConnect.disabled = checking || !!state.busy;
+      profileConnect.textContent = checking ? 'Checking...' : 'Connect profile';
+    }
+    if (authGoogle) {
+      authGoogle.disabled = checking || !enabled || signedIn || !!state.busy;
+      authGoogle.querySelector('span:last-child').textContent = checking
+        ? 'Opening profile...'
+        : signedIn
+          ? 'Profile connected'
+          : 'Continue with Google';
+    }
+    if (authGuest) authGuest.disabled = !!state.busy;
+    if (authStatus) {
+      authStatus.textContent = signedIn
+        ? `${state.name || state.email || 'Commander'} is connected. Cloud sync is active.`
+        : error
+          ? error
+          : enabled
+            ? 'Guest play stays on this browser. Google syncs your profile across devices.'
+            : 'Cloud profile sign-in is unavailable on this build.';
+      authStatus.classList.toggle('bad', !!error && !signedIn);
+      authStatus.classList.toggle('ok', signedIn);
+    }
+    if (signedIn) this._closeAuthModal();
   }
 
   preselectHero(key) {
