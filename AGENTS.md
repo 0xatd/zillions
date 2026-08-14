@@ -4,6 +4,10 @@
 
 Zillions is a browser Thronefall-style survival defense game.
 
+Production player URL: `https://zillions.taborlin.co`.
+`https://zillions-iota.vercel.app` is the Vercel fallback. GitHub Pages is a
+static fallback and asset-review surface.
+
 It should feel like Thronefall mixed with They Are Billions-scale zombie pressure and Warhammer-style grim space marines.
 
 The player rides a hero, holds Space on fixed city foundations to spend coins, and survives zombie waves.
@@ -30,6 +34,8 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 - `src/audio.js` - Runtime generated MP3 audio plus WebAudio fallback.
 - `api/state.js` - Vercel Blob-backed JSON state API.
 - `api/lobby.js` - Vercel Blob-backed lobby presence and chat API.
+- `supabase/schema.sql` - planned full backend schema for accounts, profiles, saves, match history, rooms, and chat.
+- `docs/backend-and-marketplace.md` - backend rollout and marketplace sequencing notes.
 - `assets/audio/manifest.json` - Audio pack index.
 - `docs/hero-audio-pack.md` - Hero audio notes.
 - `docs/faction-audio-pack.md` - Faction and SFX audio notes.
@@ -46,6 +52,7 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 - Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, small foundation markers, hero movement, hold-Space building, construction previews/timers on inspected plots, one coin spend path, and day-build/night-defend pressure.
 - Old RTS placement, economy automation, and extra mode cards are not part of the playable surface.
 - The Vercel online lobby is presence and chat. It shows active players, selected hero, Survival status, and profile-style stats. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
+- Supabase project `skqggyvkblqtyggtcxbc` is reserved for the next backend layer: Auth, profiles, stats, saves, match history, rooms, ready state, hero picks, and room chat. Do not point Zillions at Soshi or another product's Supabase project.
 - The bottom bar is intentionally context-sensitive. With no unit selected it shows the current foundation/build action. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
 
 ## Audio State

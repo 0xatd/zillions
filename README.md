@@ -14,8 +14,9 @@ The repo is a Three.js browser game. It still runs from a static file server for
 
 ## Live Pages
 
-- Game: https://0xatd.github.io/zillions/
-- Backend build: https://zillions-iota.vercel.app/
+- Canonical game: https://zillions.taborlin.co/
+- Vercel fallback: https://zillions-iota.vercel.app/
+- Static fallback: https://0xatd.github.io/zillions/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
 
 If GitHub Pages is not live yet, serve the repo locally:
@@ -106,6 +107,7 @@ Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero
 - **Settings**: mute state is persisted.
 - **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 - **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
+- **Full backend target**: Supabase project `skqggyvkblqtyggtcxbc` is reserved for real accounts, player profiles, stats, save slots, match history, public/private rooms, ready states, hero picks, and room chat. The schema source is `supabase/schema.sql`. See `docs/backend-and-marketplace.md`.
 
 Backend endpoints:
 
@@ -121,11 +123,15 @@ DELETE /api/lobby?mode=survival&playerId=<id>
 
 ## Deploying
 
+`https://zillions.taborlin.co` is the production player URL. It points to the Vercel `zillions` project. `zillions-iota.vercel.app` is a fallback/preview URL, and GitHub Pages is a static fallback plus asset-review surface.
+
 GitHub Pages serves the static game and asset browser.
 
 Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel project needs a Blob store with `BLOB_READ_WRITE_TOKEN` configured. `vercel.json` adds cache headers for the 3D assets. Co-op still works on static hosts because networking is peer-to-peer from the players' browsers.
 
 The asset browser is a repo review page. The game screen does not link to it.
+
+Supabase is the planned account/lobby backend. It should not replace local static play until the browser app can gracefully handle signed-out and offline states.
 
 ## Art And Physics
 
