@@ -34,6 +34,7 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 - `src/audio.js` - Runtime generated MP3 audio plus WebAudio fallback.
 - `api/state.js` - Vercel Blob-backed JSON state API.
 - `api/lobby.js` - Vercel Blob-backed lobby presence and chat API.
+- `docs/backend.md` - public backend handoff. Read this before changing auth, profiles, saves, lobbies, rooms, Supabase, or Vercel API routes.
 - `supabase/schema.sql` - planned full backend schema for accounts, profiles, saves, match history, rooms, and chat.
 - `docs/backend-and-marketplace.md` - backend rollout and marketplace sequencing notes.
 - `assets/audio/manifest.json` - Audio pack index.

@@ -115,6 +115,7 @@ Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero
 - **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
 - **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
 - **Google account profile**: on `zillions.taborlin.co`, `/api/auth-config` exposes the public Supabase URL and anon key. The browser then uses Supabase Auth with Google sign-in. Signed-in players sync name, selected hero, stats, latest save, and private match history to Supabase project `skqggyvkblqtyggtcxbc`.
+- **Backend handoff**: see `docs/backend.md` for the public backend architecture, data model, runtime flows, and agent rules. Do not put private env values or credentials in repo docs.
 - **Full lobby backend target**: Supabase room records, ready states, hero picks, and room chat are next. The schema source is `supabase/schema.sql`. See `docs/backend-and-marketplace.md`.
 
 Backend endpoints:
@@ -194,6 +195,7 @@ api/lobby.js            Vercel Blob-backed lobby presence and chat API
 assets/heroes/          Generated hero portraits and cinematic clips
 assets/audio/           Generated audio assets and manifests
 docs/                   Asset notes and production docs
+docs/backend.md         Public backend handoff for future agents
 AGENTS.md               Agent handoff and review instructions
 ```
 
@@ -215,6 +217,8 @@ AGENTS.md               Agent handoff and review instructions
 Read `AGENTS.md` before changing the repo.
 
 High-level rule: keep this a working browser game. Local play must keep working from a static file server. Backend code should stay optional and gracefully fall back to localStorage.
+
+Read `docs/backend.md` before changing auth, profiles, saves, lobbies, rooms, Supabase, or Vercel API routes.
 
 When reviewing or changing gameplay, check:
 
