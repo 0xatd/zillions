@@ -106,6 +106,9 @@ export class AudioSys {
     } else if (kind === 'sniper') {
       this._noise(0.25, { freq: 700, q: 0.8, gain: 0.30, sweep: -500 });
       this._tone(0.18, { freq: 160, type: 'square', gain: 0.10, slide: -110 });
+    } else if (kind === 'shotgun') {
+      this._noise(0.3, { freq: 420, q: 0.7, gain: 0.34, sweep: -300 });
+      this._tone(0.2, { freq: 110, type: 'square', gain: 0.12, slide: -70 });
     } else if (kind === 'tower') {
       this._noise(0.12, { freq: 500, q: 1.5, gain: 0.16, sweep: -300 });
       this._tone(0.1, { freq: 220, type: 'sawtooth', gain: 0.07, slide: -140 });

@@ -680,11 +680,6 @@ export class Game {
     h.abilCd = ab.cd;
 
     switch (ab.cast) {
-      case 'whirlwind':
-        h.whirlT = ab.dur[r];
-        h.whirlDps = ab.dps[r];
-        h.whirlR = ab.radius;
-        break;
       case 'aoeDmg': {
         const r2 = ab.radius * ab.radius;
         for (const zb of this.zombies) {
@@ -696,12 +691,45 @@ export class Game {
         }
         break;
       }
-      case 'veil':
+      case 'grenade': {
+        // Concussion grenade ahead + a small hop back (Sniper's scepter trick).
+        const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
+        const ox = h.x, oz = h.z;
+        const bx = h.x + dirX * (ab.range || 4), bz = h.z + dirZ * (ab.range || 4);
+        const r2 = ab.radius * ab.radius;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          const d2v = dist2(bx, bz, zb.x, zb.z);
+          if (d2v > r2) continue;
+          const d = Math.sqrt(d2v) || 1;
+          // Fling away from the blast (bosses are too heavy to throw).
+          if (!zb.boss) {
+            const push = ab.knock[r] * (1 - d / (ab.radius + 0.001)) + 0.6;
+            const nx = zb.x + ((zb.x - bx) / d) * push, nz = zb.z + ((zb.z - bz) / d) * push;
+            if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
+              zb.x = nx; zb.z = nz;
+            }
+          }
+          zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
+          this.damageZombie(zb, ab.dmg[r], bx, bz);
+        }
+        for (let step = ab.hop || 3; step > 0.4; step -= 0.4) {
+          const nx = ox - dirX * step, nz = oz - dirZ * step;
+          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
+            h.x = nx; h.z = nz;
+            break;
+          }
+        }
+        this.emit({ type: 'grenade', fx: ox, fz: oz, tx: bx, tz: bz, r: ab.radius });
+        break;
+      }
+      case 'weave':
+        // Shukuchi-style: invisible and fast, passing through the horde —
+        // damage lands on everything Danny brushes (see _updateHeroOne).
         h.stealth = true;
-        h.veilT = ab.dur[r];
-        h.veilBackstab = ab.backstab[r];
-        h.hasteT = ab.dur[r];
-        h.hasteMult = ab.haste;
+        h.weaveT = ab.dur[r];
+        h.weaveDmg = ab.dmg[r];
+        h.weaveKey = (h.weaveKey || 0) + 1;
         this.emit({ type: 'stealth', x: h.x, z: h.z });
         break;
     }
@@ -731,9 +759,20 @@ export class Game {
     const regen = h.def.regen + 0.25 * (h.level - 1);
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     if (h.hasteT > 0) h.hasteT -= dt;
-    if (h.veilT > 0) {
-      h.veilT -= dt;
-      if (h.veilT <= 0 && h.stealth) h.stealth = false;
+
+    // The Weave: while it lasts, cut everything brushed against (once per cast).
+    if (h.weaveT > 0) {
+      h.weaveT -= dt;
+      const tag = h.id + ':' + h.weaveKey;
+      for (const zb of this.zombies) {
+        if (zb.dead || zb._weaveTag === tag) continue;
+        if (dist2(h.x, h.z, zb.x, zb.z) <= 1.8) {
+          zb._weaveTag = tag;
+          this.damageZombie(zb, h.weaveDmg, h.x, h.z);
+          this.emit({ type: 'weavehit', x: zb.x, z: zb.z });
+        }
+      }
+      if (h.weaveT <= 0 && h.stealth) h.stealth = false;
     }
 
     // Direct WASD movement (Thronefall-style): slide along blockers, pass
@@ -741,25 +780,12 @@ export class Game {
     // as standing, so nuzzling a structure funds its upgrade.
     if (h.mx !== 0 || h.mz !== 0) {
       const len = Math.hypot(h.mx, h.mz) || 1;
-      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (h.sprint ? 1.5 : 1);
+      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (h.sprint ? 1.5 : 1)
+        * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
     } else {
       h.moving = false;
-    }
-
-    // Whirlwind: grind everything nearby while it lasts.
-    if (h.whirlT > 0) {
-      h.whirlT -= dt;
-      h.whirlTick = (h.whirlTick || 0) - dt;
-      if (h.whirlTick <= 0) {
-        h.whirlTick = 0.3;
-        const r2 = h.whirlR * h.whirlR;
-        for (const zb of this.zombies) {
-          if (!zb.dead && dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, h.whirlDps * 0.3);
-        }
-        this.emit({ type: 'whirl', x: h.x, z: h.z, r: h.whirlR });
-      }
     }
   }
 
@@ -1012,16 +1038,26 @@ export class Game {
           if (aura.regen) u.hp = Math.min(u.maxHp, u.hp + aura.regen * dt);
         }
       }
-      if (aura.slow) {
+      if (aura.slow || aura.drain) {
         h._auraT = (h._auraT || 0) - dt;
         if (h._auraT <= 0) {
-          h._auraT = 0.3;
+          const tick = 0.3;
+          h._auraT = tick;
+          let drained = 0;
           for (const zb of this.zombies) {
             if (zb.dead) continue;
             if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
-            zb.slowT = Math.max(zb.slowT || 0, 0.5);
-            zb.slowMul = aura.slow;
+            if (aura.slow) {
+              zb.slowT = Math.max(zb.slowT || 0, 0.5);
+              zb.slowMul = aura.slow;
+            }
+            if (aura.drain) {
+              const bite = Math.min(zb.hp, aura.drain * tick);
+              this.damageZombie(zb, aura.drain * tick);
+              drained += bite;
+            }
           }
+          if (drained > 0 && aura.leech) h.hp = Math.min(h.maxHp, h.hp + drained * aura.leech);
         }
       }
     }
@@ -1266,7 +1302,9 @@ export class Game {
         }
       }
 
-      // Auto-attack — units fire even while moving.
+      // Auto-attack — units fire even while moving. A weaving hero is a blade
+      // between worlds: no gunfire until the threads release him.
+      if (u.hero && u.weaveT > 0) { u.target = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
         const r2 = u.def.range * u.def.range;
@@ -1284,16 +1322,17 @@ export class Game {
           const haste = u.hero && u.hasteT > 0 ? u.hasteMult : 1;
           u.cooldown = 1 / (u.def.rof * haste);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-          let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1);
-          // Shadow Veil: the shot that breaks it hits like a falling star.
-          if (u.hero && u.stealth) {
-            dmg *= u.veilBackstab || 2;
-            u.stealth = false;
-            u.veilT = 0;
-            this.emit({ type: 'backstab', x: zb.x, z: zb.z });
-          }
+          const dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1);
           this.damageZombie(zb, dmg, u.x, u.z);
-          const kind = u.hero ? (u.def.melee ? 'melee' : 'hero') : u.key;
+          // Shotgun spread: the blast mauls everything packed around the target.
+          if (u.def.splash) {
+            const s2 = u.def.splash * u.def.splash;
+            for (const zb2 of this.zombies) {
+              if (zb2 === zb || zb2.dead) continue;
+              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z);
+            }
+          }
+          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         } else {

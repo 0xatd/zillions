@@ -178,33 +178,34 @@ export const abilityRank = (lvl) => (lvl >= 7 ? 3 : lvl >= 4 ? 2 : 1);
 
 export const HEROES = {
   scott: {
-    key: 'scott', name: 'Captain Scott', icon: '⚔️', color: 0x8f1f1f, trim: 0xc9a44a,
-    tagline: 'Close combat. A whirlwind of steel.',
-    hp: 480, dmg: 30, range: 1.8, rof: 1.1, speed: 4.3, noise: 4,
-    levelHp: 46, levelDmg: 4.5, regen: 3.0, melee: true,
+    key: 'scott', name: 'Captain Scott', icon: '💥', color: 0x8f1f1f, trim: 0xc9a44a,
+    tagline: 'Short range. Every trigger-pull is a verdict.',
+    hp: 480, dmg: 62, range: 4.5, rof: 0.55, speed: 4.3, noise: 8,
+    levelHp: 46, levelDmg: 8, regen: 3.0, shotgun: true, splash: 1.7,
     aura: {
-      key: 'courage', name: 'Warbanner', icon: '🚩', radius: 5.5, dmgMult: 1.35, color: 0xd8a03c,
-      desc: 'Troops fighting beside Scott hit 35% harder.',
+      key: 'gravity', name: 'Heavy Gravity', icon: '🪐', radius: 5.5, slow: 0.65, color: 0x7a9cf0,
+      desc: 'Space itself thickens around Scott — the dead crawl 35% slower in his field.',
     },
     ability: {
-      key: 'whirlwind', name: 'Whirlwind', icon: '🌪️', cd: 11,
-      cast: 'whirlwind', radius: 2.6, dur: [3, 4, 5], dps: [50, 80, 115],
-      desc: 'Scott spins into a cyclone of steel — grinds everything around him while he keeps moving.',
+      key: 'hammer', name: 'Gravity Hammer', icon: '🔨', cd: 13,
+      cast: 'aoeDmg', radius: 3.6, dmg: [350, 550, 800], stun: [0.8, 1.0, 1.3],
+      desc: 'Scott swings the gravity maul in a full circle — one cataclysmic blow, ten times the shotgun, everything close is paste.',
     },
   },
   alexander: {
     key: 'alexander', name: 'Alexander', icon: '🌿', color: 0x1f3a6e, trim: 0xc9a44a,
-    tagline: 'Mid range. The ground itself fights for him.',
-    hp: 350, dmg: 26, range: 7, rof: 1.8, speed: 4.5, noise: 14,
-    levelHp: 34, levelDmg: 3.5, regen: 2.2,
+    tagline: 'Long range. The horizon is his firing line.',
+    hp: 350, dmg: 32, range: 11, rof: 1.2, speed: 4.5, noise: 16,
+    levelHp: 34, levelDmg: 4.5, regen: 2.2,
     aura: {
-      key: 'lifebloom', name: 'Lifebloom', icon: '💚', radius: 5.5, regen: 6, color: 0x59c86a,
-      desc: 'Troops and allied heroes near Alexander knit their wounds (+6 hp/s).',
+      key: 'nanites', name: 'Nanite Swarm', icon: '🧬', radius: 5.5, regen: 6, color: 0x59c8b8,
+      desc: 'A cloud of repair nanites knits the wounds of nearby troops and heroes (+6 hp/s).',
     },
     ability: {
-      key: 'roots', name: 'Entangling Roots', icon: '🌿', cd: 10,
-      cast: 'aoeDmg', radius: 6, dmg: [25, 45, 70], stun: [2.2, 2.8, 3.4],
-      desc: 'Roots erupt around Alexander — every zombie nearby is held fast while he lines up shots.',
+      key: 'grenade', name: 'Concussion Grenade', icon: '💣', cd: 11,
+      cast: 'grenade', radius: 4, range: 4.5, hop: 3,
+      dmg: [60, 100, 150], knock: [2.0, 2.6, 3.2], stun: [0.6, 0.7, 0.8],
+      desc: 'Alexander lobs a concussion charge ahead and kicks himself backward — the blast flings the dead away and buys back the range he loves.',
     },
   },
   danny: {
@@ -213,13 +214,13 @@ export const HEROES = {
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
     levelHp: 27, levelDmg: 5, regen: 2.0,
     aura: {
-      key: 'dread', name: 'Dread', icon: '🕸️', radius: 5.5, slow: 0.72, color: 0x9c8ad8,
-      desc: 'The dead falter near Danny — 28% slower inside his shadow.',
+      key: 'siphon', name: 'Nutrient Siphon', icon: '💀', radius: 5.5, drain: 5, leech: 0.5, color: 0x7fd85e,
+      desc: 'A necrotic field wicks the juices out of the dead near Danny (5 hp/s) and feeds them back to him.',
     },
     ability: {
-      key: 'veil', name: 'Shadow Veil', icon: '🌫️', cd: 12,
-      cast: 'veil', dur: [3.5, 4.5, 6], backstab: [2.4, 3.0, 3.6], haste: 1.3,
-      desc: 'Danny vanishes — the dead cannot see him. His next shot from the shadows hits like a falling star.',
+      key: 'weave', name: 'The Weave', icon: '🕸️', cd: 12,
+      cast: 'weave', dur: [3, 4, 5], dmg: [50, 85, 130], speed: 1.6,
+      desc: 'Danny slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
     },
   },
 };

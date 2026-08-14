@@ -60,9 +60,9 @@ hums around them, and Space at night fires the one special. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |
-| Captain Scott | Melee whirlwind of steel | Warbanner — nearby troops +35% damage | Whirlwind — spin-to-win while moving |
-| Alexander | Mid-range marksman | Lifebloom — heals nearby troops & heroes | Entangling Roots — AoE root + damage |
-| Danny | Long-range sniper | Dread — nearby dead move 28% slower | Shadow Veil — vanish, then a massive backstab shot |
+| Captain Scott | Shotgun brawler — short range, huge slow blasts with spread | Heavy Gravity — nearby dead move 35% slower | Gravity Hammer — cataclysmic AoE melee slam, ~10× his auto |
+| Alexander | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
+| Danny | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health to Danny | The Weave — invisible and fast, walks through the horde cutting everything touched |
 
 Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
 up automatically at levels 4 and 7. A fallen hero revives at the Keep.

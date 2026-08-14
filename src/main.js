@@ -1380,12 +1380,16 @@ class App {
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x2e3033)), 0, 0.72, -0.26);       // backpack
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26);
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);
-      if (d.melee) {
-        const blade = addB(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.16), trim), 0.42, 0.6, 0.22);
-        blade.rotation.x = 0.5;
+      if (u.key === 'scott') {
+        // Stubby double-barrel shotgun + the gravity hammer slung on his back.
+        addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x1e1f21)), 0.26, 0.62, 0.24);
+        addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x2b2d31)), 0.26, 0.72, 0.24);
+        const haft = addB(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), M(0x3a3228)), -0.28, 0.8, -0.34);
+        haft.rotation.z = 0.5;
+        const head = addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.2), trim), -0.5, 1.05, -0.34);
+        head.rotation.z = 0.5;
       } else if (u.key === 'alexander') {
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), 0.3, 0.64, 0.24);
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.6), M(0x1e1f21)), -0.3, 0.64, 0.24);
+        addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26);   // long marksman rifle
       } else {
         addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // long rifle
       }
@@ -1430,7 +1434,7 @@ class App {
         this.unitMeshes.set(u.id, rec);
       }
       rec.mesh.position.set(u.x, 0, u.z);
-      rec.mesh.rotation.y = u.hero && u.whirlT > 0 ? t * 18 : u.facing;
+      rec.mesh.rotation.y = u.facing;
       // Walk bob + a forward lean while moving — cheap but lively.
       const body = rec.mesh.userData.body;
       if (body) {
@@ -1697,6 +1701,21 @@ class App {
             this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
             break;
           }
+          if (e.kind === 'shotgun') {
+            // Point-blank thunder: wide muzzle blast + a fan of pellet streaks.
+            this.audio.shoot('shotgun');
+            this.burst(e.fx, e.fy || 0.9, e.fz, { count: 8, color: 0xffe08a, speed: 1.6, life: 0.12, size: 0.6, spread: 0.25, up: 0.4 });
+            const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
+            for (let p = 0; p < 6; p++) {
+              const a = ang + (p - 2.5) * 0.13;
+              const d = 0.8 + Math.random() * 0.5;
+              this.burst(lerp(e.fx, e.fx + Math.sin(a) * 5, d * 0.2 + 0.3), 0.7, lerp(e.fz, e.fz + Math.cos(a) * 5, d * 0.2 + 0.3),
+                { count: 1, color: 0xfff2b0, speed: 0.2, life: 0.1, size: 0.35, spread: 0.05, up: 0 });
+            }
+            this.burst(e.tx, 0.6, e.tz, { count: 8, color: 0x9c1f1f, speed: 2.2, life: 0.4, size: 0.5, up: 1.5 });
+            this.shake = Math.max(this.shake, 0.08);
+            break;
+          }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
             this.stream(e.fx, e.fy || 2.6, e.fz, e.tx, 0.5, e.tz, { count: 6, color: 0xff8a3c, size: 0.55, life: 0.3 });
@@ -1789,8 +1808,8 @@ class App {
           break;
         case 'deny': this.audio.deny(); break;
         case 'cast': {
-          this.audio.cast(e.key === 'veil' ? 'smoke' : e.key);
-          const CAST_COLORS = { roots: 0x5fae4a, whirlwind: 0xd8d2c2, veil: 0x8a8f96 };
+          this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike' }[e.key] || e.key);
+          const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
           const R = e.radius;
           const n = Math.min(40, Math.round(R * 6));
@@ -1800,13 +1819,21 @@ class App {
               { count: 1, color: col, speed: 0.5, life: 0.45, size: 0.55, spread: 0.15, up: 1.4 });
           }
           this.burst(e.x, 0.4, e.z, { count: 14, color: col, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
-          this.shake = Math.max(this.shake, 0.18);
+          this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : 0.18);
           break;
         }
-        case 'backstab':
-          this.audio.backstab();
-          this.burst(e.x, 0.7, e.z, { count: 16, color: 0x9c6ede, speed: 2.4, life: 0.45, size: 0.55, up: 1.8 });
+        case 'weavehit':
+          this.burst(e.x, 0.7, e.z, { count: 8, color: 0x7fd85e, speed: 2.0, life: 0.35, size: 0.5, up: 1.5 });
+          this.burst(e.x, 0.6, e.z, { count: 4, color: 0x9c1f1f, speed: 1.4, life: 0.3, size: 0.4, up: 1.2 });
           break;
+        case 'grenade': {
+          // Lobbed concussion grenade: arc trail, then a dirty knockback blast.
+          this.stream(e.fx, 1.0, e.fz, e.tx, 0.3, e.tz, { count: 8, color: 0xd8b45e, size: 0.4, life: 0.3 });
+          this.burst(e.tx, 0.4, e.tz, { count: 26, color: 0xffb84d, speed: 3.2, life: 0.5, size: 0.65, up: 2.2, spread: 0.8 });
+          this.burst(e.tx, 0.4, e.tz, { count: 16, color: 0x6a6153, speed: 2.4, life: 0.7, size: 0.7, up: 2.6, spread: 1.2 });
+          this.shake = Math.max(this.shake, 0.3);
+          break;
+        }
         case 'stealth':
           this.audio.stealthOn();
           this.burst(e.x, 0.5, e.z, { count: 12, color: 0x8a8f96, speed: 0.8, life: 0.8, size: 0.8, up: 0.8 });
@@ -1857,15 +1884,6 @@ class App {
         case 'revive':
           this.audio.revive();
           this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
-          break;
-        case 'whirl':
-          this.whirlSfxT = (this.whirlSfxT || 0) - 1;
-          if (this.whirlSfxT <= 0) { this.audio.melee(); this.whirlSfxT = 2; }
-          for (let i = 0; i < 6; i++) {
-            const a = Math.random() * Math.PI * 2;
-            this.burst(e.x + Math.cos(a) * e.r * 0.8, 0.5, e.z + Math.sin(a) * e.r * 0.8,
-              { count: 1, color: 0xd8d2c2, speed: 1.5, life: 0.3, size: 0.4, spread: 0.1, up: 1 });
-          }
           break;
         case 'victory':
           this.audio.victory();
