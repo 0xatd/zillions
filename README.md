@@ -37,6 +37,13 @@ The dead cover the map. You ride as the hero, hold Space on pre-planned city fou
 Current modes:
 
 - **Survival**: the active mode. The city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day, then hold Space to spend coins and build it.
+- **Labyrinth**: reserved as a future mode. It is listed in the multiplayer shell as locked, but it is not playable yet.
+
+The main menu uses a game-shell layout:
+
+- **Play** is the first screen for new players. It keeps solo Survival, hero pick, campaign, continue, and difficulty in one clear path.
+- **Multiplayer** is the StarCraft-style hub. It shows the public lobby, chat, active players, co-op host, join code, and future mode slots.
+- **Profile** and **Settings** hold player/backend notes and controls so the first screen does not become a debug launcher.
 
 Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
 

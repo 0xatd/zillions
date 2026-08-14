@@ -78,77 +78,185 @@ export class UI {
       <div id="tooltip" class="hidden"></div>
 
       <div id="overlay" class="screen">
-        <div class="panel">
-          <h1>🧟 ZILLIONS</h1>
-          <p class="tagline">The frontier belongs to the dead. Take it back. Build. Fortify. Survive <b>${FINAL_DAY} days</b>.</p>
-          <div class="howto">
-            <div><b>⭐ You are the hero.</b> Earn XP from nearby kills, learn abilities (Q/W/E/R), unleash an ultimate at level 6.</div>
-            <div><b>🕹️ You are the hero.</b> Use WASD to ride. The camera follows you.</div>
-            <div><b>🏗️ Build on foundations.</b> Ride onto a glowing plot during the day, then hold Space to spend coins into it.</div>
-            <div><b>🤫 Beware:</b> gunfire attracts the dead… and every hab-tent that falls joins the horde.</div>
-            <div><b>☠️ Hordes</b> strike on days 2, 4, 6, 8 — and a massive final wave on day ${FINAL_DAY}.</div>
-            <div><b>🪙 One spend path.</b> No separate build menu. The city plan is the game.</div>
-          </div>
-          <div class="profilerow">
-            <label>🪖 Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
-            <span id="prof-stats"></span>
-          </div>
-          <div class="moderow" id="moderow">
-            <button class="modecard sel" data-mode="survival" type="button">
-              <b>Survival</b>
-              <small>Thronefall-style city defense. Solo or co-op.</small>
-            </button>
-          </div>
-          <div class="survivalstyle hidden" id="survivalstyle">
+        <div class="panel shell-panel">
+          <aside class="shell-side">
+            <div class="brandblock">
+              <span class="brandmark">Z</span>
+              <div>
+                <h1>ZILLIONS</h1>
+                <p>Hold the frontier for ${FINAL_DAY} days.</p>
+              </div>
+            </div>
+            <div class="profilerow">
+              <label>Commander <input id="prof-name" maxlength="24" placeholder="your name"></label>
+              <span id="prof-stats"></span>
+            </div>
+            <nav class="shellnav" aria-label="Main menu">
+              <button class="shellnav-btn active" data-view="play" type="button">Play</button>
+              <button class="shellnav-btn" data-view="multiplayer" type="button">Multiplayer</button>
+              <button class="shellnav-btn" data-view="profile" type="button">Profile</button>
+              <button class="shellnav-btn" data-view="settings" type="button">Settings</button>
+            </nav>
+            <div class="shell-online">
+              <span>Online</span>
+              <b id="lobby-count">-- active</b>
+            </div>
+          </aside>
+
+          <main class="shell-main">
+            <section class="menu-view active" id="menu-view-play" data-view="play">
+              <div class="playhero">
+                <div class="playcopy">
+                  <span class="eyebrow">Survival</span>
+                  <h2>Build by day. Ride out by night.</h2>
+                  <p>The dead are already moving. Pick a commander, raise the planned city, and survive the final horde.</p>
+                </div>
+                <div class="play-actions">
+                  <button class="diffbtn primary js-start-survival" id="quick-start" type="button">Start Survival<small>normal run</small></button>
+                  <button class="diffbtn" id="quick-multiplayer" type="button">Multiplayer<small>lobby and co-op</small></button>
+                </div>
+              </div>
+              <div class="menu-section">
+                <div class="section-head">
+                  <b>Choose Hero</b>
+                  <small>Warcraft-style abilities, Thronefall-style movement.</small>
+                </div>
+                <div class="herorow" id="herorow"></div>
+              </div>
+              <div class="setup-grid">
+                <div class="menu-section">
+                  <div class="section-head">
+                    <b>Campaign</b>
+                    <small>Clear maps to unlock the next fight.</small>
+                  </div>
+                  <div class="levelrow" id="levelrow"></div>
+                </div>
+                <div class="menu-section run-setup">
+                  <div class="section-head">
+                    <b>Run Setup</b>
+                    <small>No account required.</small>
+                  </div>
+                  <div id="continuerow"></div>
+                  <div class="diffrow" id="diffrow"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="menu-view" id="menu-view-multiplayer" data-view="multiplayer">
+              <div class="section-head wide">
+                <div>
+                  <span class="eyebrow">Multiplayer Hub</span>
+                  <h2>Lobby, chat, then launch co-op.</h2>
+                </div>
+                <small>Presence and chat are server-backed. The current match still uses WebRTC invite codes.</small>
+              </div>
+              <div class="multiplayer-grid">
+                <div id="public-lobby" class="lobbybox">
+                  <div class="lobbytop">
+                    <div><b>Public Lobby</b><small id="lobby-mode">Survival</small></div>
+                  </div>
+                  <div class="lobbyactions">
+                    <button class="tbtn" id="lobby-join" type="button">Join lobby</button>
+                    <button class="tbtn" id="lobby-refresh" type="button">Refresh</button>
+                  </div>
+                  <div id="lobby-status" class="lobbystatus">Checking online lobby...</div>
+                  <div id="lobby-players" class="lobbyplayers"></div>
+                  <div id="lobby-chat" class="lobbychat"></div>
+                  <form id="lobby-form" class="lobbyform">
+                    <input id="lobby-chat-input" maxlength="220" autocomplete="off" placeholder="Lobby chat">
+                    <button class="tbtn" type="submit">Send</button>
+                  </form>
+                </div>
+                <div class="roomhub">
+                  <div class="roomcard active">
+                    <b>Survival Co-op</b>
+                    <small>Up to 3 heroes defend one colony.</small>
+                    <div class="roomactions">
+                      <button class="diffbtn primary" id="lobby-host" type="button">Host co-op</button>
+                      <button class="diffbtn" id="mp-join" type="button">Join code</button>
+                    </div>
+                  </div>
+                  <div class="roomcard">
+                    <b>Practice Run</b>
+                    <small>Start solo from the multiplayer hub.</small>
+                    <button class="diffbtn js-start-survival" id="lobby-start" type="button">Start solo</button>
+                  </div>
+                  <div class="roomcard locked">
+                    <b>Labyrinth</b>
+                    <small>Future mode. Not built yet.</small>
+                  </div>
+                  <div class="mprow hidden">
+                    <button class="diffbtn" id="mp-host" type="button">Host co-op</button>
+                  </div>
+                  <div id="mp-panel" class="hidden"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="menu-view" id="menu-view-profile" data-view="profile">
+              <div class="section-head wide">
+                <div>
+                  <span class="eyebrow">Commander</span>
+                  <h2>Your local profile now, account profile next.</h2>
+                </div>
+                <small>Stats mirror to the backend on Vercel. Supabase accounts are staged for the next pass.</small>
+              </div>
+              <div class="profilecards">
+                <div class="profilecard">
+                  <b>Profile</b>
+                  <p>Name, favorite hero, wins, kills, and best day persist locally and mirror to the backend.</p>
+                </div>
+                <div class="profilecard">
+                  <b>Save Slots</b>
+                  <p>Continue uses the latest local save. Cloud save mirroring is already active on Vercel.</p>
+                </div>
+                <div class="profilecard">
+                  <b>Full Backend</b>
+                  <p>Next: Supabase sign-in, room records, match history, and public leaderboards.</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="menu-view" id="menu-view-settings" data-view="settings">
+              <div class="section-head wide">
+                <div>
+                  <span class="eyebrow">Settings</span>
+                  <h2>Controls and game options.</h2>
+                </div>
+                <button class="diffbtn js-start-survival" type="button">Start Survival</button>
+              </div>
+              <div class="controls">
+                <span><b>WASD</b> ride hero</span><span><b>Shift</b> sprint</span>
+                <span><b>Left click foundation</b> ride there</span><span><b>Space</b> hold build</span>
+                <span><b>Q/E/R</b> abilities</span>
+                <span><b>T</b> select army</span><span><b>right-click</b> orders</span>
+                <span><b>wheel</b> zoom</span><span><b>P</b> pause</span>
+              </div>
+            </section>
+
+            <div class="survivalstyle hidden" id="survivalstyle">
             <button class="stylecard sel" data-rules="survival-plots" type="button">
               <b>Survival</b>
               <small>Planned city, coins, day builds.</small>
             </button>
-          </div>
-          <div class="herorow" id="herorow"></div>
-          <div class="levelrow" id="levelrow"></div>
-          <div id="continuerow"></div>
-          <div class="diffrow" id="diffrow"></div>
-          <div id="public-lobby" class="lobbybox">
-            <div class="lobbytop">
-              <div><b>Online Lobby</b><small id="lobby-mode">Survival</small></div>
-              <span id="lobby-count">-- active</span>
             </div>
-            <div class="lobbyactions">
-              <button class="tbtn" id="lobby-start" type="button">Start solo</button>
-              <button class="tbtn" id="lobby-host" type="button">Host co-op</button>
-              <button class="tbtn" id="lobby-join" type="button">Join lobby</button>
-              <button class="tbtn" id="lobby-refresh" type="button">Refresh</button>
-            </div>
-            <div id="lobby-status" class="lobbystatus">Checking online lobby...</div>
-            <div id="lobby-players" class="lobbyplayers"></div>
-            <div id="lobby-chat" class="lobbychat"></div>
-            <form id="lobby-form" class="lobbyform">
-              <input id="lobby-chat-input" maxlength="220" autocomplete="off" placeholder="Lobby chat">
-              <button class="tbtn" type="submit">Send</button>
-            </form>
-          </div>
-          <div class="mprow">
-            <button class="diffbtn" id="mp-host">🌐 Host co-op</button>
-            <button class="diffbtn" id="mp-join">🔗 Join co-op</button>
-            <span class="mphint">Up to 3 players — one colony, one hero each. No server, just trade invite codes.</span>
-          </div>
-          <div id="mp-panel" class="hidden"></div>
-          <div class="controls">
-            <span><b>WASD</b> ride hero</span><span><b>Shift</b> sprint</span>
-            <span><b>Left click foundation</b> ride there</span><span><b>Space</b> hold build</span>
-            <span><b>Q/E/R</b> abilities</span>
-            <span><b>T</b> select army</span><span><b>right-click</b> orders</span>
-            <span><b>wheel</b> zoom</span><span><b>P</b> pause</span>
-          </div>
+          </main>
         </div>
       </div>`;
+
+    // Menu shell.
+    this._setMenuView('play');
+    for (const b of this.root.querySelectorAll('.shellnav-btn')) {
+      b.onclick = () => this._setMenuView(b.dataset.view || 'play');
+    }
+    const quickMulti = this.root.querySelector('#quick-multiplayer');
+    if (quickMulti) quickMulti.onclick = () => this._setMenuView('multiplayer');
 
     // Mode picker.
     this.selectedMode = 'survival';
     this.selectedRules = 'survival-plots';
     const moderow = this.root.querySelector('#moderow');
-    for (const card of moderow.querySelectorAll('.modecard')) {
+    for (const card of moderow ? moderow.querySelectorAll('.modecard') : []) {
       card.onclick = () => {
         const mode = card.dataset.mode;
         if (mode !== 'survival') return;
@@ -264,6 +372,9 @@ export class UI {
     });
 
     this.root.querySelector('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
+    for (const b of this.root.querySelectorAll('.js-start-survival')) {
+      b.onclick = () => this.cb.onLobbyStart && this.cb.onLobbyStart(this.selectedRules, this.selectedHero);
+    }
     this.root.querySelector('#lobby-start').onclick = () => this.cb.onLobbyStart && this.cb.onLobbyStart(this.selectedRules, this.selectedHero);
     this.root.querySelector('#lobby-host').onclick = () => this.cb.onLobbyHost && this.cb.onLobbyHost();
     this.root.querySelector('#lobby-join').onclick = () => this.cb.onLobbyJoin && this.cb.onLobbyJoin();
@@ -285,6 +396,17 @@ export class UI {
     this.tooltip = this.root.querySelector('#tooltip');
     this.banner = this.root.querySelector('#banner');
     this.selpanel = this.root.querySelector('#selpanel');
+  }
+
+  _setMenuView(view) {
+    const key = view || 'play';
+    for (const section of this.root.querySelectorAll('.menu-view')) {
+      section.classList.toggle('active', section.dataset.view === key);
+    }
+    for (const b of this.root.querySelectorAll('.shellnav-btn')) {
+      b.classList.toggle('active', b.dataset.view === key);
+    }
+    if (key === 'multiplayer' && this.cb.onLobbyRefresh) this.cb.onLobbyRefresh();
   }
 
   _buildLevelRow(cleared) {
@@ -753,7 +875,7 @@ export class UI {
   showHelp() {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    ov.querySelector('.diffrow').style.display = 'none';
+    this._setMenuView('settings');
     const panel = ov.querySelector('.panel');
     if (!panel.querySelector('.resume')) {
       const b = document.createElement('button');
