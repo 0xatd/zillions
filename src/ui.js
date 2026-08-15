@@ -996,7 +996,10 @@ export class UI {
     const nodePulse = (performance.now() / 500) % 1;
     for (const n of game.nodes || []) {
       if (n.offMap) continue;
-      const col = n.owner === 'player' ? '#59ff9c' : n.owner === 'hive' ? '#ff5a4a' : '#d8c07a';
+      // Unsurveyed ground shows that it EXISTS but not who holds it — you can
+      // read a map, you cannot read it from across the planet.
+      const col = !n.seen ? '#6f7b86'
+        : n.owner === 'player' ? '#59ff9c' : n.owner === 'hive' ? '#ff5a4a' : '#d8c07a';
       ctx.fillStyle = col;
       ctx.fillRect(n.x - 1.6, n.z - 1.6, 3.2, 3.2);
       if (n.cap > 0.05) {

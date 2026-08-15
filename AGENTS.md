@@ -34,6 +34,13 @@ The gameplay base is continuous siege on a lane graph:
   around them, and can be razed.
 - Lane nodes are captured by uncontested presence, pay income, and carry
   Forward Camp plots that only unlock on ground the player holds.
+- Node placement is READ FROM TERRAIN (`GameMap._findNodeFeatures`) — ore
+  fields, fords, clearings, barrows, quarries — never from a ring. Do not put
+  them back on a ring; identical skeletons across maps kill the mystery.
+- A node's KIND and its OWNER are separate facts. Kind is terrain and is always
+  true. Ownership is claimed at setup (`Game._claimNodes`, hive takes the far
+  ground) and is hidden behind `node.seen` until a friendly unit gets within
+  `SIEGE.scoutRadius`. Never reveal ownership the player has not scouted.
 - Campaign win: raze every hive, then kill the champion that leads the final
   counterattack. Loss: the Keep falls.
 - No individual squad micro. Squads are autonomous, but the player sets the

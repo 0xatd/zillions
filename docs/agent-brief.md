@@ -29,8 +29,23 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   nodes, hives, and the city. Squads route node-to-node. A third of the army
   (`_isHolder`, by unit id) takes and holds nodes; the rest march on hives.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
-  `SIEGE.nodeIncome`, and carry an `outpost` plot that is locked until the node
-  is player-owned.
+  `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
+  until the node is player-owned.
+- Node placement comes from terrain analysis (`GameMap._findNodeFeatures`):
+  a summed-area openness field finds fords and clearings, tile clustering finds
+  ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
+  against per-kind quotas so every map has a mix. Pure function of the tiles —
+  no RNG, because lockstep peers must agree.
+- Kind vs owner is the design rule: `node.kind`/`node.def` (NODE_KINDS) is
+  terrain and always true; `node.owner` is claimed at setup by `_claimNodes`
+  (hive takes the ground furthest from the city, ~`SIEGE.hiveClaim` of it, some
+  neutral ground is `empty`) and stays hidden until `node.seen` is set by
+  `_updateScouting`. Garrison size follows the claim, not the kind.
+- Hive-held nodes are forward staging: ~40% of a hive's muster appears there
+  instead of at the nest. This moves pressure without adding volume, so taking
+  that ground is worth doing for position. Note the feedback loop — the hive
+  also captures undefended neutral nodes, which grows its staging. Watch for
+  runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
 - Nothing auto-repairs. `plotAction()` returns `build | branch | repair |

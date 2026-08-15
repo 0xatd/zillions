@@ -27,7 +27,40 @@ export const SIEGE = {
   laneMaxDist: 46,        // longest lane the graph will connect
   laneNeighbors: 3,       // lanes out of each node
   raiderShare: 0.35,      // fraction of hive output that raids nodes, not the Keep
+  hiveClaim: 0.42,        // share of the map's nodes the hive already holds
+  scoutRadius: 17,        // survey a node by getting this close to it
 };
+
+// ---------- Nodes: the ground is terrain, the owner is a separate question ----------
+// A node's KIND is a fact about the map — an ore field is an ore field, and you
+// can read it off the land. Who holds it is a different fact, and you do not
+// know it until you go and look. Kinds differ in what they pay and in what a
+// Forward Camp built on them becomes, so which ground you take is a real choice.
+
+export const NODE_KINDS = {
+  ore: {
+    name: 'Ore Field', icon: '⛏️', income: 2.0,
+    blurb: 'Rich ground. Pays double while you hold it.',
+  },
+  quarry: {
+    name: 'Quarry', icon: '🪨', income: 1.0, outpostHp: 0.5,
+    blurb: 'Stone at hand — a Forward Camp here is half again as tough.',
+  },
+  ford: {
+    name: 'Ford', icon: '🌉', income: 0.8, outpostHp: 0.35, garrison: 1.5,
+    blurb: 'A pinch in the land. Whoever holds it holds the road — and it is always guarded.',
+  },
+  clearing: {
+    name: 'Clearing', icon: '🌾', income: 1.0, outpostCount: 1,
+    blurb: 'Room to muster — a Forward Camp here fields an extra trooper.',
+  },
+  barrow: {
+    name: 'Barrow', icon: '⚰️', income: 0.9, firstClaim: { gold: 50, xp: 280 },
+    blurb: 'Old graves under the crags. Something is buried here.',
+  },
+};
+
+export const NODE_UNKNOWN = { name: 'Unsurveyed', icon: '❔', income: 1.0, blurb: 'Nobody has been close enough to see what is there.' };
 
 // The clock. Threat rises with time, with every hive left standing, and with
 // your own aggression — so the player can always see what they did to earn it.

@@ -2215,7 +2215,7 @@ class App {
         const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshLambertMaterial({ color: 0xd8c07a }));
         flag.position.set(node.x + 0.75, 3.8, node.z);
         gr.add(flag);
-        const label = this._makeLabelSprite('🚩', String(node.name || '').toUpperCase());
+        const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
@@ -2226,7 +2226,9 @@ class App {
     }
     for (const gr of this.nodeMarkers) {
       const node = gr.userData.node;
-      const col = node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
+      // Grey until surveyed: the banner is there, but whose banner is not known.
+      const col = !node.seen ? 0x76828d
+        : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
       gr.userData.ring.material.color.setHex(col);
       gr.userData.flag.material.color.setHex(col);
       const contested = node.cap > 0.05;
@@ -2566,6 +2568,14 @@ class App {
           this.audio.alarm();
           this.shake = Math.max(this.shake, 0.7);
           this.ui.showBanner(`☠️ THREAT ${e.level}`, 'Every hive musters at once', 2600);
+          break;
+        case 'nodeseen':
+          this.audio.click();
+          this.ui.addPing(e.x, e.z);
+          break;
+        case 'loot':
+          this.audio.build();
+          this.burst(e.x, 0.7, e.z, { count: 30, color: 0xd8b45e, speed: 2.6, life: 1.0, size: 0.6, up: 2.4 });
           break;
         case 'nodetaken':
           this.audio.build();

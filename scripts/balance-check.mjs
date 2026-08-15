@@ -3,7 +3,7 @@ import { Game } from '../src/game.js';
 import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
-  LEVELS, PAY_RADIUS, PLOT_KINDS, SIEGE, START_GOLD, THREAT, TILE, UNITS,
+  LEVELS, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, START_GOLD, THREAT, TILE, UNITS,
   hiveInterval, hiveSquad,
 } from '../src/config.js';
 
@@ -40,7 +40,9 @@ function fakeMap(level) {
     sites: [{ x: size / 2, z: size / 2 }],
     tiles,
     nestSpots: ring(level.nests || 3, size * 0.36, 0.3),
-    nodeSpots: ring(8, size * 0.24, 0.1).map(([x, z], i) => ({ x, z, name: `Node ${i + 1}` })),
+    nodeSpots: ring(8, size * 0.24, 0.1).map(([x, z], i) => ({
+      x, z, name: `Node ${i + 1}`, kind: ['ore', 'ford', 'barrow', 'clearing', 'quarry'][i % 5],
+    })),
     isBuildable: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
     isWalkable: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
   };
@@ -132,6 +134,49 @@ function assertSiegeLoop(level) {
     assert.ok(game.laneGraph.adj[node.gi].length > 0, `${level.name}: ${node.name} has no lane`);
   }
   assert.ok(game.activeNodes().length > 0, `${level.name} left no reachable lane nodes`);
+
+  // Ground is terrain; ownership is a separate fact you have to go and learn.
+  for (const node of game.activeNodes()) {
+    assert.ok(NODE_KINDS[node.kind], `${level.name}: ${node.name} has no terrain kind`);
+    assert.ok(node.def === NODE_KINDS[node.kind], `${level.name}: ${node.name} kind and def disagree`);
+  }
+  const claimed = game.activeNodes().filter((n) => n.owner === 'hive').length;
+  assert.ok(claimed > 0, `${level.name}: the hive claimed no ground at all`);
+  assert.ok(claimed < game.activeNodes().length,
+    `${level.name}: the hive claimed everything — nothing is left neutral`);
+  assert.ok(game.activeNodes().every((n) => !n.seen),
+    `${level.name}: nodes start surveyed, so there is nothing to scout`);
+
+  // Getting close surveys it — and only it.
+  const far = game.activeNodes().find((n) => n.owner === 'hive');
+  const hero0 = game.heroes[0];
+  hero0.x = far.x; hero0.z = far.z;
+  game._updateScouting();
+  assert.ok(far.seen, `${level.name}: standing on a node did not survey it`);
+  assert.ok(game.activeNodes().some((n) => !n.seen),
+    `${level.name}: surveying one node revealed the whole map`);
+
+  // Kind changes what the ground is worth and what you can build on it.
+  assert.ok(NODE_KINDS.ore.income > NODE_KINDS.ford.income, 'an ore field must out-earn a ford');
+  const oreNode = game.activeNodes().find((n) => n.kind === 'ore');
+  const quarryNode = game.activeNodes().find((n) => n.kind === 'quarry');
+  if (oreNode && quarryNode) {
+    const orePlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === oreNode.id);
+    const quarryPlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === quarryNode.id);
+    if (orePlot && quarryPlot) {
+      assert.ok(game.tierDef(quarryPlot, 1).hp > game.tierDef(orePlot, 1).hp,
+        `${level.name}: a Forward Camp on a quarry is not tougher than one on open ore`);
+    }
+  }
+  const clearingNode = game.activeNodes().find((n) => n.kind === 'clearing');
+  if (clearingNode && oreNode) {
+    const cPlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === clearingNode.id);
+    const oPlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === oreNode.id);
+    if (cPlot && oPlot) {
+      assert.ok(game.tierDef(cPlot, 1).count > game.tierDef(oPlot, 1).count,
+        `${level.name}: a Forward Camp on a clearing does not muster more`);
+    }
+  }
 
   // A camp is a faucet: it musters on build, and again on its timer.
   const camp = game.plots.find((p) => p.kind === 'camp_ranger');

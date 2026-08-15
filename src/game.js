@@ -10,7 +10,7 @@
 // Pure logic — rendering/audio consume `game.events` each frame.
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
-  SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, hiveInterval, hiveSquad,
+  SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
@@ -67,9 +67,13 @@ export class Game {
     });
 
     // Lane nodes: the ground worth holding.
+    // A node's KIND comes from the terrain and never changes. Its OWNER is a
+    // separate fact, decided below, and the player does not learn it until they
+    // have been close enough to survey the place.
     this.nodes = (map.nodeSpots || []).map((s, i) => ({
       id: i, x: s.x + 0.5, z: s.z + 0.5, name: s.name || `Node ${i + 1}`,
-      owner: 'neutral', cap: 0, capOwner: null, gi: i,
+      kind: s.kind || 'clearing', def: NODE_KINDS[s.kind] || NODE_KINDS.clearing,
+      owner: 'neutral', cap: 0, capOwner: null, gi: i, seen: false, looted: false,
     }));
     this.laneGraph = null;
     this.cityGi = -1;
@@ -126,7 +130,7 @@ export class Game {
       stance: this.stance,
       relics: [...this.relics],
       nests: this.nests.map((n) => [Math.round(n.hp), n.alive ? 1 : 0, +n.musterT.toFixed(2)]),
-      nodes: this.nodes.map((n) => [n.owner, +n.cap.toFixed(2), n.capOwner || '']),
+      nodes: this.nodes.map((n) => [n.owner, +n.cap.toFixed(2), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
       stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
       plots: this.plots.map((p) => ({
@@ -165,6 +169,7 @@ export class Game {
     this.stance = snap.stance || 'defend';
     if (this.site >= 0) {
       this.plots = generatePlots(this.map, this.map.sites[this.site]);
+      this._claimed = true; // ownership comes from the save, not a fresh roll
       this._buildLaneSystems(this.map.sites[this.site]);
     }
     this.relics = [...(snap.relics || [])];
@@ -176,12 +181,15 @@ export class Game {
         if (musterT != null) this.nests[i].musterT = musterT;
       }
     });
-    (snap.nodes || []).forEach(([owner, cap, capOwner], i) => {
-      if (this.nodes[i]) {
-        this.nodes[i].owner = owner || 'neutral';
-        this.nodes[i].cap = cap || 0;
-        this.nodes[i].capOwner = capOwner || null;
-      }
+    (snap.nodes || []).forEach(([owner, cap, capOwner, seen, empty, looted], i) => {
+      const n = this.nodes[i];
+      if (!n) return;
+      n.owner = owner || 'neutral';
+      n.cap = cap || 0;
+      n.capOwner = capOwner || null;
+      n.seen = !!seen;
+      n.empty = !!empty;
+      n.looted = !!looted;
     });
     this.stats = { nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0, ...snap.stats };
 
@@ -302,6 +310,8 @@ export class Game {
       nest.hp = 0;
     }
 
+    if (!this._claimed) { this._claimed = true; this._claimNodes(); }
+
     for (const node of this.nodes) {
       if (node.offMap) continue;
       if (this.plots.some((pl) => pl.kind === 'outpost' && pl.nodeId === node.id)) continue;
@@ -338,6 +348,46 @@ export class Game {
     return null;
   }
 
+  // The hive got here first. It holds some of the good ground already — but
+  // which ground is not something you can read off the terrain, so you have to
+  // go and look. Seeded, so both lockstep peers claim identically.
+  _claimNodes() {
+    const pool = this.nodes.filter((n) => !n.offMap);
+    if (!pool.length) return;
+    // Deterministic shuffle, then claim from the far end of the map inward:
+    // the hive's grip is strongest where you are not.
+    const cx = this.hq ? this.hq.cx : this.map.size / 2;
+    const cz = this.hq ? this.hq.cz : this.map.size / 2;
+    const ranked = pool
+      .map((n) => [dist2(n.x, n.z, cx, cz) * (0.75 + this.rng() * 0.5), n])
+      .sort((a, b) => b[0] - a[0]);
+    const want = Math.round(pool.length * SIEGE.hiveClaim);
+    for (let i = 0; i < ranked.length; i++) {
+      const node = ranked[i][1];
+      if (i < want) node.owner = 'hive';
+      // Some neutral ground is simply empty — a gift, if you find it first.
+      else node.empty = this.rng() < 0.3;
+    }
+  }
+
+  // Survey: get close enough and you learn who holds it and what it is.
+  _updateScouting() {
+    const r2 = SIEGE.scoutRadius * SIEGE.scoutRadius;
+    for (const node of this.nodes) {
+      if (node.seen || node.offMap) continue;
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (dist2(u.x, u.z, node.x, node.z) > r2) continue;
+        node.seen = true;
+        const holder = node.owner === 'hive' ? 'The hive holds it.'
+          : node.empty ? 'Nobody is on it.' : 'It is guarded.';
+        this.msg(`${node.def.icon} Surveyed ${node.name} — ${node.def.name}. ${holder}`, 'info');
+        this.emit({ type: 'nodeseen', x: node.x, z: node.z, id: node.id });
+        break;
+      }
+    }
+  }
+
   _scatterCreeps() {
     const N = this.map.size;
     const count = Math.round(110 * this.diff.ambient);
@@ -361,14 +411,18 @@ export class Game {
         }
       }
     }
-    // Neutral lane nodes are guarded too — ground is never free.
+    // Ground is guarded in proportion to who claims it: hive-held nodes are a
+    // real fight, neutral ones a skirmish, and the empty ones are free.
     for (const node of this.nodes) {
-      if (node.offMap) continue;
-      const guards = 3 + Math.round(2 * this.diff.mult);
+      if (node.offMap || node.empty) continue;
+      const base = node.owner === 'hive' ? 7 : 3;
+      const guards = Math.round((base + 2 * this.diff.mult) * (node.def.garrison || 1));
       for (let i = 0; i < guards; i++) {
         const a = this.rng() * Math.PI * 2, r = 1.5 + this.rng() * 3.5;
         const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
-        if (this.map.isWalkable(x | 0, z | 0)) this._spawnZombie('walker', x, z, false);
+        if (this.map.isWalkable(x | 0, z | 0)) {
+          this._spawnZombie(node.owner === 'hive' && this.rng() < 0.25 ? 'runner' : 'walker', x, z, false);
+        }
       }
     }
   }
@@ -392,6 +446,19 @@ export class Game {
     const kind = PLOT_KINDS[plot.kind];
     const t = kind.tiers[tier - 1];
     if (!t) return null;
+    // A Forward Camp is shaped by the ground under it: stone makes it tough,
+    // open ground lets it muster more.
+    if (plot.kind === 'outpost') {
+      const node = this.nodes[plot.nodeId];
+      const nd = node && node.def;
+      if (nd) {
+        return {
+          ...t,
+          hp: Math.round(t.hp * (1 + (nd.outpostHp || 0))),
+          count: t.count + (nd.outpostCount || 0),
+        };
+      }
+    }
     if (t.branch) {
       const opt = t.options[plot.branch];
       if (!opt) return null;
@@ -755,6 +822,7 @@ export class Game {
     if (this.threatLevel > before) this._surge();
 
     this._updateIncome(dt);
+    this._updateScouting();
     this._updateHives(dt);
     this._updateNodeBlight(dt);
     this._updateNodes(dt);
@@ -787,7 +855,9 @@ export class Game {
     let rate = 0;
     for (const b of this.buildings) if (b.alive && b.def.income) rate += b.def.income;
     rate *= this.economy.income * (1 + this.relicMods.income);
-    rate += SIEGE.nodeIncome * this.heldNodes();
+    for (const n of this.nodes) {
+      if (!n.offMap && n.owner === 'player') rate += SIEGE.nodeIncome * (n.def.income || 1);
+    }
     rate /= SIEGE.incomePeriod;
     this.incomeRate = rate;
     this._incomeAcc += rate * dt;
@@ -832,8 +902,31 @@ export class Game {
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
     const share = 3 / Math.max(3, this.nests.length);
     const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure * coopMult * mult * share);
-    const spawned = this._spawnHorde(w.size, [nest.id], w.types);
+    // Ground the hive holds is where part of its muster ACTUALLY appears. This
+    // moves pressure closer to you without adding any more of it — so taking a
+    // hive-held node is worth doing for position, not just for income.
+    const staging = this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
+    let fromNest = w.size;
+    let spawned = 0;
+    if (staging.length) {
+      const forward = Math.floor(w.size * 0.4);
+      fromNest -= forward;
+      for (let i = 0; i < forward; i++) {
+        const node = staging[(this.rng() * staging.length) | 0];
+        const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 4;
+        const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
+        if (!this.map.isWalkable(x | 0, z | 0)) continue;
+        if (this._spawnZombie(this._pickHiveType(w.types), x, z, true, true)) spawned++;
+      }
+    }
+    spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
     if (spawned) this.emit({ type: 'hivemuster', x: nest.x, z: nest.z, n: spawned });
+  }
+
+  _pickHiveType(types) {
+    let roll = this.rng(), acc = 0;
+    for (const [t, p] of Object.entries(types)) { acc += p; if (roll <= acc) return t; }
+    return 'walker';
   }
 
   // The final counterattack, once no hive is left to march from.
@@ -892,7 +985,18 @@ export class Game {
     node.capOwner = null;
     if (owner === 'player') {
       this.stats.nodes++;
+      node.seen = true;
       this.threat = Math.min(THREAT.max, this.threat + THREAT.perCapture);
+      // Some ground has something under it. Once only.
+      const prize = node.def.firstClaim;
+      if (prize && !node.looted) {
+        node.looted = true;
+        this.gold += prize.gold;
+        this.stats.coins += prize.gold;
+        for (const h of this.heroes) if (!h.dead) this.addXp(h, prize.xp);
+        this.msg(`${node.def.icon} You break open ${node.name}: ${prize.gold} gold and old knowledge.`, 'info');
+        this.emit({ type: 'loot', x: node.x, z: node.z });
+      }
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2;
         this._spawnCoin(node.x + Math.cos(a) * 1.6, node.z + Math.sin(a) * 1.6, Math.ceil(DROPS.nodeCoins / 4), node.x, node.z);

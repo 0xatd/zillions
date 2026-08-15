@@ -112,6 +112,17 @@ of tower plots. Chokepoints, by design.
   flips to you. Held nodes pay income, and you can raise a **Forward Camp** on
   one so squads muster at the front instead of walking there. Lose the node and
   you lose what you built on it.
+- **The ground is terrain; the owner is a separate question.** Nodes are read
+  out of the map itself — ore fields, fords pinched between water and crags,
+  sheltered clearings, barrow shelves — so no two planets share a skeleton. What
+  each one *is* you can read off the land. **Who holds it you cannot.** The hive
+  already holds some of the best ground, some is merely guarded, and some is
+  empty; a node stays *unsurveyed* on the map until one of your people gets
+  close enough to look. An ore field being over there does not mean a hive is.
+- **Ground has character.** An Ore Field pays double. A Quarry makes the Forward
+  Camp built on it half again as tough. A Clearing lets it muster an extra
+  trooper. A Ford is always well guarded, because whoever holds the pinch holds
+  the road. A Barrow has something buried under it, once.
 - **Campaign**: raze every hive on each of the 5 maps, then break the
   counterattack its unique champion leads. **Survival**: endless siege, a boss
   every fifth Threat level — your record is the Threat you drove it to.
