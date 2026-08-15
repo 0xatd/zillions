@@ -9,16 +9,20 @@ gold — by day you build and collect, by night you fight the horde.
 - Direct hero control (WASD) with auto-attack and one signature ability each.
 - Grimdark space-marine heroes, procedural hordes, flow-field pathfinding.
 - Campaign (5 maps, 5 bosses) and endless Survival mode.
-- Online lobby with public/private games, global chat, lore, and friends.
+- Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
 
-The repo is a static Three.js game. There is no build step and no package install is required.
+The production game runs on Vercel at `https://zillions.taborlin.co`.
+Static local play remains as a development fallback, but production identity is
+Google/Supabase account-based.
 
-## Live Pages
+## Live URLs
 
-- Game: https://0xatd.github.io/zillions/
+- Production game: https://zillions.taborlin.co
+- Vercel fallback: https://zillions-iota.vercel.app
+- Static fallback: https://0xatd.github.io/zillions/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
 
-If GitHub Pages is not live yet, serve the repo locally:
+Serve the repo locally for static development:
 
 ```bash
 python3 -m http.server 8000
@@ -111,17 +115,20 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 | Esc | Menu |
 | M | Mute |
 
-## Playing together
+## Playing Together
 
-**Online lobby** (main menu → Online Lobby): a global chat where commanders
-hang out, read the lore, and see every public war currently open. Create a
-public or private game (private games are joined by 6-letter code), add
-friends by trading commander codes, see who's online, and invite friends
-straight into your game. Matchmaking signaling runs over Supabase Realtime;
-the actual gameplay is peer-to-peer WebRTC lockstep (up to 3 players, one
-hero each). The Supabase publishable key in `src/online.js` is a client-side
-key by design (row-level security is enabled); the lobby tables are
-namespaced `zillions_*`.
+Production play is account-gated. A player signs in with Google before the game
+shell opens. The display name, stats, cloud save, match history, and rooms are
+owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
+
+**Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
+presence, global lobby chat, and real public rooms. Public/private room records
+come from Supabase `rooms` and `room_players`. Empty room lists show an empty
+state. Do not seed fake games or fake players.
+
+The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
+hero each). The backend stores identity, rooms, saves, stats, and results. It
+does not run the combat simulation yet.
 
 **Manual invite codes** (lobby → "Manual invite codes"): the serverless
 fallback — trade invite/reply codes over any chat channel, no lobby backend
@@ -135,14 +142,28 @@ drain. Waves grow +40% per extra player, any player may ring the bell, and
 the deterministic lockstep sim means every command (move, build, cast, rally)
 runs identically on every machine.
 
-## Profiles & saved games
+## Profiles And Saved Games
 
-- **Commander profile** (localStorage): set your name on the menu; the game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
-- **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
+- **Zillions account**: Google/Supabase identity is the production profile. The
+  player name is account-derived unless a real profile settings flow exists.
+- **Stats**: games, wins, kills, best day, favorite hero, and match history sync
+  to Supabase.
+- **Cloud save**: the latest solo/host save syncs to Supabase `save_slots`.
+- **Static fallback**: localStorage remains for local development and offline
+  smoke tests. Do not present it as a production profile.
+- **Autosave**: every run autosaves every 20 seconds and on tab close.
 
-## Deploying (Vercel)
+## Deploying
 
-It's a pure static site — import the repo into Vercel (framework preset: *Other*, no build command) and it deploys as-is; `vercel.json` adds cache headers for the 3D assets. Co-op works on any static host since networking is peer-to-peer from the players' browsers.
+Vercel is the production host. It serves the static game and same-origin API
+routes:
+
+- `api/auth-config.js`
+- `api/state.js`
+- `api/lobby.js`
+
+Run `npm run check` before pushing. Vercel needs Supabase anon config and Blob
+credentials in project env. Do not put env values in the repo.
 
 ## Art And Physics
 
@@ -153,7 +174,9 @@ It's a pure static site — import the repo into Vercel (framework preset: *Othe
 
 ## Audio Assets
 
-Runtime audio is still synthesized through WebAudio. Generated concept assets are stored in `assets/audio/` and can be reviewed in the asset browser.
+Runtime audio is mostly procedural WebAudio. Hero click barks use generated MP3s
+from `assets/audio/click-pack/`. Other generated assets are stored in
+`assets/audio/` and can be reviewed in the asset browser.
 
 Current saved packs:
 
@@ -183,14 +206,19 @@ src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
-src/bot.js              Overseer economy/defense bot
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
+src/online.js           Supabase room adapter + Vercel lobby presence/chat
+src/auth.js             Supabase auth/profile/save/stat sync
+src/backend.js          Vercel API helpers
+api/                    Vercel backend routes
+supabase/schema.sql     Zillions Supabase schema and RLS
 src/utils.js            Shared helpers
 vendor/three.module.js  Vendored Three.js
 assets/heroes/          Generated hero portraits and cinematic clips
 assets/audio/           Generated audio assets and manifests
-docs/                   Asset notes and production docs
+docs/product-contract.md Product source of truth for agents
+docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
 ```
 
@@ -205,20 +233,23 @@ AGENTS.md               Agent handoff and review instructions
 - The simulation runs at a fixed 30 Hz step. Rendering is separate.
 - Game speed supports 1x, 2x, and 4x in solo mode. Co-op locks to 1x.
 - Seeded RNG is used throughout the simulation. This supports lockstep co-op.
-- Generated music, voice, and SFX files are concept assets. Runtime integration is partial and should stay explicit in code and docs.
+- Generated music, voice, and SFX runtime integration is partial and should stay
+  explicit in code and docs.
 
 ## Agent Handoff
 
 Read `AGENTS.md` before changing the repo.
 
-High-level rule: keep this a working static game. Do not add a build pipeline, server, framework, or package dependency unless the task truly needs it.
+High-level rule: keep Claude PR gameplay as the source direction, and keep the
+production backend/account files intact unless Alex explicitly replaces them.
 
 When reviewing or changing gameplay, check:
 
-- The game still starts from a static file server.
+- Production is account-gated on Vercel.
+- Static local development still works as fallback.
 - The hero picker works.
-- Basic camera, selection, right-click move, and ability hotkeys work.
-- The Overseer can still be toggled.
+- City founding, plot build, bell, and first night wave work.
+- Lobby shows real rooms or a clean empty state.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.
 
@@ -235,11 +266,10 @@ Then open the game and asset browser in a real browser.
 Useful checks:
 
 ```bash
+npm run check
 git diff --check
 jq empty assets/audio/manifest.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
 ```
-
-There is no automated test suite yet.

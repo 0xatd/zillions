@@ -1,18 +1,66 @@
-// Online lobby: player identity, friends, public game list, global chat and
-// automatic WebRTC signaling — built on Supabase (Postgres + Realtime).
-// The anon key is a publishable client key (RLS is on); no secrets live here.
-import { createClient } from '../vendor/supabase.js';
+// Online lobby: Zillions production account + room model.
+// Supabase config is loaded from /api/auth-config. The global lobby chat and
+// presence use the existing Vercel Blob route until room chat is fully moved.
+import {
+  getLobby,
+  heartbeatLobby,
+  joinLobby,
+  sendLobbyChat,
+} from './backend.js';
 
-const SUPABASE_URL = 'https://qgvpfkncgpqtxxozatax.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_PBjvMyJzhJMO4XhZHABmaw_VmA7BQDg';
-
-const FRESH_MS = 2 * 60 * 1000; // games with no heartbeat for 2min are stale
+const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
+const FRESH_MS = 2 * 60 * 1000;
 
 function randomCode(n = 6) {
   const abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let s = '';
   for (let i = 0; i < n; i++) s += abc[(Math.random() * abc.length) | 0];
   return s;
+}
+
+async function loadSupabaseClient() {
+  const response = await fetch('/api/auth-config', {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('account backend unavailable');
+  const config = await response.json();
+  if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) {
+    throw new Error('account backend not configured');
+  }
+  const { createClient } = await import(SUPABASE_JS);
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      storageKey: 'zillions.supabase.auth',
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+    },
+  });
+}
+
+function roomToGame(row) {
+  const players = row.room_players || [];
+  const metadata = row.metadata || {};
+  return {
+    id: row.id,
+    name: row.name,
+    host_id: row.host_user_id,
+    host_name: metadata.hostName || players.find((p) => p.user_id === row.host_user_id)?.display_name || 'Commander',
+    visibility: row.visibility,
+    join_code: row.code,
+    level: metadata.level || 1,
+    mode: metadata.mode || 'campaign',
+    rules: row.rules,
+    metadata,
+    difficulty: row.difficulty || 'normal',
+    players: Math.max(1, players.length || Number(metadata.players || 1)),
+    max_players: row.max_players || 3,
+    status: row.status,
+    updated_at: row.updated_at || row.last_seen_at,
+    _players: players,
+  };
 }
 
 export class OnlineLobby {
@@ -29,43 +77,33 @@ export class OnlineLobby {
 
   async connect(name) {
     if (this.sb) return this.me;
-    this.sb = createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { params: { eventsPerSecond: 5 } } });
-    // Device identity: a uuid minted once and kept in localStorage.
-    let stored = null;
-    try { stored = JSON.parse(localStorage.getItem('zillions_online') || 'null'); } catch { /* ignore */ }
-    if (!stored || !stored.id) {
-      stored = { id: crypto.randomUUID(), code: randomCode() };
-      try { localStorage.setItem('zillions_online', JSON.stringify(stored)); } catch { /* ignore */ }
-    }
-    this.me = { id: stored.id, code: stored.code, name: name || 'Commander' };
-    const { error } = await this.sb.from('zillions_players').upsert({
-      id: this.me.id, code: this.me.code, name: this.me.name, last_seen: new Date().toISOString(),
-    });
-    if (error) throw new Error('lobby unreachable: ' + error.message);
+    this.sb = await loadSupabaseClient();
+    const { data: sessionData, error: sessionError } = await this.sb.auth.getSession();
+    if (sessionError) throw sessionError;
+    const user = sessionData?.session?.user;
+    if (!user) throw new Error('sign in required');
+    const { data: profile, error: profileError } = await this.sb
+      .from('profiles')
+      .select('id,handle,display_name,selected_hero')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (profileError) throw profileError;
+    this.me = {
+      id: user.id,
+      code: (profile?.handle || user.id.slice(0, 6)).toUpperCase().slice(0, 12),
+      name: profile?.display_name || name || user.email?.split('@')[0] || 'Commander',
+      hero: profile?.selected_hero || 'alexander',
+    };
+    await this.sb.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', user.id);
     this.connected = true;
+    await this._refreshPresence(true);
+    this._presenceBeat = setInterval(() => this._refreshPresence(false), 15 * 1000);
 
-    // Global chat + game list live updates.
-    this.sb.channel('zl-feed')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zillions_chat' },
-        (p) => this.cb.onChat && this.cb.onChat(p.new))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'zillions_games' },
-        () => this.refreshGames())
+    this.sb.channel('zl-rooms-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => this.refreshGames())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, () => this.refreshGames())
       .subscribe();
 
-    // Lobby presence: who's online.
-    this.presence = this.sb.channel('zl-lobby', { config: { presence: { key: this.me.id } } });
-    this.presence
-      .on('presence', { event: 'sync' }, () => {
-        this.online.clear();
-        const state = this.presence.presenceState();
-        for (const [id, metas] of Object.entries(state)) this.online.set(id, metas[0]?.name || '?');
-        if (this.cb.onOnline) this.cb.onOnline(this.online);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') await this.presence.track({ name: this.me.name });
-      });
-
-    // My personal channel: friend invites arrive here.
     this.sb.channel('zl-user-' + this.me.id)
       .on('broadcast', { event: 'invite' }, (m) => this.cb.onInvite && this.cb.onInvite(m.payload))
       .subscribe();
@@ -74,70 +112,151 @@ export class OnlineLobby {
   }
 
   async setName(name) {
+    // Display names are account data, not an always-editable lobby field.
     if (!this.me) return;
-    this.me.name = name;
-    await this.sb.from('zillions_players').update({ name }).eq('id', this.me.id);
-    if (this.presence) await this.presence.track({ name });
+    this.me.name = this.me.name || name || 'Commander';
+    await this._refreshPresence(true);
   }
 
   // ---------- chat ----------
 
+  async _refreshPresence(join = false) {
+    if (!this.me) return null;
+    const payload = {
+      mode: 'survival',
+      name: this.me.name,
+      hero: this.me.hero,
+      rules: 'claude-thronefall-campaign',
+      status: this.game ? `room ${this.game.join_code}` : 'lobby',
+    };
+    const state = join ? await joinLobby(payload) : await heartbeatLobby(payload);
+    const lobby = state?.lobby || (await getLobby('survival'))?.lobby;
+    if (!lobby) return null;
+    this.online.clear();
+    for (const p of lobby.players || []) this.online.set(p.playerId, p.name);
+    if (this.cb.onOnline) this.cb.onOnline(this.online);
+    if (this.cb.onChat) {
+      const seen = this._seenChat || new Set();
+      for (const m of lobby.messages || []) {
+        const id = m.id || `${m.playerId}-${m.createdAt}-${m.text}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        this.cb.onChat({
+          name: m.name,
+          text: m.text,
+          created_at: m.createdAt,
+        });
+      }
+      this._seenChat = seen;
+    }
+    return lobby;
+  }
+
   async loadChat() {
-    const { data } = await this.sb.from('zillions_chat')
-      .select('name,text,created_at').order('created_at', { ascending: false }).limit(40);
-    return (data || []).reverse();
+    const lobby = (await getLobby('survival'))?.lobby;
+    return (lobby?.messages || []).map((m) => ({
+      name: m.name,
+      text: m.text,
+      created_at: m.createdAt,
+    }));
   }
 
   async sendChat(text) {
     text = String(text).slice(0, 400).trim();
     if (!text) return;
-    await this.sb.from('zillions_chat').insert({ player_id: this.me.id, name: this.me.name, text });
+    await sendLobbyChat(text, {
+      mode: 'survival',
+      name: this.me.name,
+      hero: this.me.hero,
+      rules: 'claude-thronefall-campaign',
+      status: this.game ? `room ${this.game.join_code}` : 'lobby',
+    });
+    await this._refreshPresence(false);
   }
 
   // ---------- games ----------
 
   async refreshGames() {
     const since = new Date(Date.now() - FRESH_MS).toISOString();
-    const { data } = await this.sb.from('zillions_games')
-      .select('*').eq('visibility', 'public').eq('status', 'open')
-      .gt('updated_at', since).order('created_at', { ascending: false }).limit(20);
-    if (this.cb.onGames) this.cb.onGames(data || []);
-    return data || [];
+    const { data, error } = await this.sb.from('rooms')
+      .select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)')
+      .eq('visibility', 'public')
+      .eq('status', 'open')
+      .gt('last_seen_at', since)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    const games = (data || []).map(roomToGame);
+    if (this.cb.onGames) this.cb.onGames(games);
+    return games;
   }
 
   async createGame({ visibility = 'public', level = 1, mode = 'campaign' } = {}) {
-    const join_code = randomCode();
-    const { data, error } = await this.sb.from('zillions_games').insert({
-      name: `${this.me.name}'s war`, host_id: this.me.id, host_name: this.me.name,
-      visibility, join_code, level, mode,
-    }).select().single();
+    const metadata = { level, mode, hostName: this.me.name, players: 1 };
+    const { data, error } = await this.sb.from('rooms').insert({
+      name: `${this.me.name}'s frontier`,
+      host_user_id: this.me.id,
+      visibility,
+      rules: 'claude-thronefall-campaign',
+      difficulty: 'normal',
+      metadata,
+      last_seen_at: new Date().toISOString(),
+    }).select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at').single();
     if (error) throw new Error(error.message);
-    this.game = data;
+    const { error: seatError } = await this.sb.from('room_players').upsert({
+      room_id: data.id,
+      user_id: this.me.id,
+      seat: 1,
+      display_name: this.me.name,
+      hero: this.me.hero,
+      ready: false,
+      connection_state: 'online',
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: 'room_id,user_id' });
+    if (seatError) throw new Error(seatError.message);
+    this.game = roomToGame({ ...data, room_players: [{ user_id: this.me.id, display_name: this.me.name, hero: this.me.hero }] });
     this._joinGameChannel(data.id, true);
     // Heartbeat so the listing stays fresh; stops when the page dies.
     this._beat = setInterval(() => this.touchGame({}), 45 * 1000);
     window.addEventListener('beforeunload', () => this.endGame());
-    return data;
+    await this.refreshGames();
+    return this.game;
   }
 
   async touchGame(fields) {
     if (!this.game) return;
-    await this.sb.from('zillions_games')
-      .update({ ...fields, updated_at: new Date().toISOString() })
+    const status = fields.status === 'playing' ? 'in_game' : fields.status;
+    const metadata = { ...(this.game.metadata || {}), players: fields.players || this.game.players || 1 };
+    await this.sb.from('rooms')
+      .update({
+        ...(status ? { status } : {}),
+        metadata,
+        last_seen_at: new Date().toISOString(),
+      })
       .eq('id', this.game.id);
+    await heartbeatLobby({
+      mode: 'survival',
+      name: this.me.name,
+      hero: this.me.hero,
+      rules: 'claude-thronefall-campaign',
+      status: `room ${this.game.join_code}`,
+    });
   }
 
   async endGame() {
     if (!this.game) return;
     clearInterval(this._beat);
-    try { await this.sb.from('zillions_games').update({ status: 'ended' }).eq('id', this.game.id); } catch { /* closing */ }
+    try { await this.sb.from('rooms').update({ status: 'finished' }).eq('id', this.game.id); } catch { /* closing */ }
     this.game = null;
   }
 
   async findByCode(code) {
-    const { data } = await this.sb.from('zillions_games')
-      .select('*').eq('join_code', String(code).trim().toUpperCase()).eq('status', 'open').limit(1);
-    return data && data[0];
+    const { data } = await this.sb.from('rooms')
+      .select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)')
+      .eq('code', String(code).trim().toUpperCase())
+      .eq('status', 'open')
+      .limit(1);
+    return data?.[0] ? roomToGame(data[0]) : null;
   }
 
   // Join a game's signaling channel. Signals are {t, to, from, ...} — every
@@ -160,6 +279,20 @@ export class OnlineLobby {
 
   async joinGame(game) {
     this.game = game;
+    const used = new Set((game._players || []).map((p) => Number(p.seat || 0)));
+    let seat = 2;
+    while (used.has(seat) && seat <= 3) seat++;
+    const { error } = await this.sb.from('room_players').upsert({
+      room_id: game.id,
+      user_id: this.me.id,
+      seat: Math.min(seat, 3),
+      display_name: this.me.name,
+      hero: this.me.hero,
+      ready: false,
+      connection_state: 'online',
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: 'room_id,user_id' });
+    if (error) throw new Error(error.message);
     this._joinGameChannel(game.id, false);
     // Give the websocket a beat to subscribe before knocking.
     await new Promise((r) => setTimeout(r, 800));
@@ -169,23 +302,11 @@ export class OnlineLobby {
   // ---------- friends ----------
 
   async addFriend(code) {
-    code = String(code).trim().toUpperCase();
-    const { data } = await this.sb.from('zillions_players').select('id,name,code').eq('code', code).limit(1);
-    const f = data && data[0];
-    if (!f) return { ok: false, why: 'No commander with that code.' };
-    if (f.id === this.me.id) return { ok: false, why: 'That is your own code.' };
-    await this.sb.from('zillions_friends').upsert({ player_id: this.me.id, friend_id: f.id });
-    // Friendship is mutual — write the reverse row too so they see you.
-    await this.sb.from('zillions_friends').upsert({ player_id: f.id, friend_id: this.me.id });
-    await this.loadFriends();
-    return { ok: true, name: f.name };
+    return { ok: false, why: 'Friends are not enabled on the Zillions account schema yet.' };
   }
 
   async loadFriends() {
-    const { data } = await this.sb.from('zillions_friends')
-      .select('friend_id, zillions_players!zillions_friends_friend_id_fkey(id,name,code)')
-      .eq('player_id', this.me.id);
-    this.friends = (data || []).map((r) => r.zillions_players).filter(Boolean);
+    this.friends = [];
     return this.friends;
   }
 

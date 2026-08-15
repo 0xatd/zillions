@@ -11,6 +11,7 @@ import { AudioSys } from './audio.js';
 import { loadAssets, assetClone } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS } from './online.js';
+import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 
 const ZMAX = 1700;
@@ -76,11 +77,9 @@ class App {
       onResume: () => this.closePauseMenu(),
       onMinimap: () => {}, // camera is locked to the hero
       onContinue: () => this.continueGame(),
-      onName: (name) => {
-        this.profile.name = name.slice(0, 24);
-        this._saveProfile();
-        if (this.lobby && this.lobby.connected) this.lobby.setName(this.profile.name);
-      },
+      onSignIn: () => this._signIn(),
+      onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
+      onName: () => {},
       onLobbyOpen: () => this._openLobby(),
       onChatSend: (text) => this.lobby && this.lobby.sendChat(text),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
@@ -122,7 +121,10 @@ class App {
     this.hashes = { local: new Map() };
     this.desynced = false;
 
-    // Profiles & saves (localStorage).
+    // Profiles & saves. Production identity comes from Supabase; localStorage is only
+    // a development/offline mirror.
+    this.auth = new AuthClient();
+    this.authStatus = { ready: false, enabled: false, signedIn: false };
     this.profile = this._loadProfile();
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
@@ -134,10 +136,12 @@ class App {
     this.minimapT = 0;
 
     this.ui.setProfile(this.profile);
+    this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
+    this._initAuth();
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -360,6 +364,55 @@ class App {
     this._tut = { steps, i: 0 };
   }
 
+  async _initAuth() {
+    try {
+      const status = await this.auth.init();
+      await this._applyAuth(status);
+      this.auth.onAuthChange((next) => {
+        this._applyAuth(next).catch((err) => {
+          console.warn('auth sync failed', err);
+          this.ui.setAccount({ ...this.auth.status(), error: 'Profile sync failed. Try again.' });
+        });
+      });
+    } catch (err) {
+      console.warn('auth init failed', err);
+      this.authStatus = { ready: true, enabled: false, signedIn: false, error: err.message || 'Cloud sign-in failed.' };
+      this.ui.setAccount(this.authStatus);
+    }
+  }
+
+  async _applyAuth(status) {
+    this.authStatus = status;
+    if (status.signedIn) {
+      await this.auth.ensureProfile(this.profile);
+      const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
+      if (cloud) {
+        this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
+        this._saveProfile();
+        this.ui.setProfile(this.profile);
+        this.ui.setCampaign(this.profile.campaign || 0);
+        if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
+      }
+      const cloudSave = await this.auth.loadLatestSave();
+      if (cloudSave?.snap) {
+        try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
+        this.ui.setContinue(cloudSave.snap);
+      }
+    } else if (status.enabled) {
+      this.lobby = null;
+    }
+    this.ui.setAccount(status);
+  }
+
+  async _signIn() {
+    try {
+      this.audio.init();
+      await this.auth.signInWithGoogle();
+    } catch (err) {
+      this.ui.setAccount({ ...this.auth.status(), error: err.message || 'Google sign-in failed.' });
+    }
+  }
+
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
@@ -391,6 +444,9 @@ class App {
 
   _saveProfile() {
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+    if (this.auth?.isSignedIn()) {
+      this.auth.syncLocalProfile(this.profile).catch((err) => console.warn('profile sync failed', err));
+    }
   }
 
   _loadSave() {
@@ -405,7 +461,9 @@ class App {
     if (!this.game || this.game.over || this.mpRole === 'guest') return;
     if (!force && this.paused) return;
     try {
-      localStorage.setItem('zillions_save', JSON.stringify({ when: Date.now(), snap: this.game.snapshot() }));
+      const save = { when: Date.now(), snap: this.game.snapshot() };
+      localStorage.setItem('zillions_save', JSON.stringify(save));
+      if (this.auth?.isSignedIn()) this.auth.syncLatestSave(save).catch((err) => console.warn('save sync failed', err));
     } catch { /* storage full */ }
   }
 
@@ -462,6 +520,19 @@ class App {
     }
     this._saveProfile();
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+    if (this.auth?.isSignedIn()) {
+      this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
+      this.auth.recordMatch({
+        mode: this.game.mode || 'campaign',
+        rules: 'claude-thronefall-campaign',
+        hero: h?.key || this.ui.selectedHero,
+        won,
+        day: Math.min(this.game.night, FINAL_NIGHT),
+        kills: this.game.stats.kills,
+        built: this.game.stats.built || 0,
+        level: this.game.levelId,
+      }).catch((err) => console.warn('match history sync failed', err));
+    }
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
@@ -1235,11 +1306,11 @@ class App {
     // Ghost preview: a translucent night-blue silhouette of the building that
     // WILL rise here — you see what you're paying for (Thronefall's trick).
     if (plot.kind !== 'wall' && plot.kind !== 'hq') {
-      const fake = {
+      const preview = {
         kind: plot.kind, branch: null, plotTier: 1, gate: false,
         size: plot.size, x: plot.x, z: plot.z, cx: plot.cx, cz: plot.cz, id: 0,
       };
-      const ghost = this._makeBuildingMesh(fake);
+      const ghost = this._makeBuildingMesh(preview);
       if (!this._ghostMat) {
         // Unlit night-blue: reads as a shadow of the future, never as stone.
         this._ghostMat = new THREE.MeshBasicMaterial({ color: 0x1c2438, transparent: true, opacity: 0.45, depthWrite: false });

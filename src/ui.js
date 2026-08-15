@@ -69,6 +69,16 @@ export class UI {
       <div id="tooltip" class="hidden"></div>
 
       <div id="overlay" class="screen">
+        <div id="screen-account" class="accountscreen">
+          <h1 class="gametitle">🧟 ZILLIONS</h1>
+          <p class="gamesub">Sign in to enter the frontier.</p>
+          <div class="accountcard">
+            <div class="accountstatus" id="account-status">Checking account…</div>
+            <button class="menubtn primary" id="a-google">Continue with Google</button>
+            <button class="menubtn hidden" id="a-offline">Continue in offline dev mode</button>
+          </div>
+        </div>
+
         <div id="screen-main" class="mainmenu">
           <h1 class="gametitle">🧟 ZILLIONS</h1>
           <p class="gamesub">Raise a city by day. Hold it by night. Survive ${FINAL_NIGHT} nights.</p>
@@ -80,7 +90,7 @@ export class UI {
             <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
           </div>
           <div class="profilerow">
-            <label>🪖 <input id="prof-name" maxlength="24" placeholder="your name"></label>
+            <span id="prof-name-display">Signed in</span>
             <span id="prof-stats"></span>
           </div>
         </div>
@@ -173,6 +183,8 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
+    q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    q('#a-offline').onclick = () => this.cb.onOfflineContinue && this.cb.onOfflineContinue();
     q('#m-play').onclick = () => this.showSetup({ mode: 'campaign' });
     q('#m-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
@@ -260,7 +272,6 @@ export class UI {
     q('#b-menu').onclick = () => this.cb.onPause();
     this.pings = [];
 
-    q('#prof-name').addEventListener('change', (e) => this.cb.onName(e.target.value));
     this.tooltip = q('#tooltip');
     this.banner = q('#banner');
   }
@@ -278,7 +289,7 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['main', 'setup', 'help', 'pause', 'lobby']) {
+    for (const id of ['account', 'main', 'setup', 'help', 'pause', 'lobby']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -555,9 +566,33 @@ export class UI {
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
 
+  setAccount(state = {}) {
+    const status = this.root.querySelector('#account-status');
+    const google = this.root.querySelector('#a-google');
+    const offline = this.root.querySelector('#a-offline');
+    if (status) {
+      if (!state.ready) status.textContent = 'Checking account…';
+      else if (state.signedIn) status.textContent = `Signed in as ${state.name || 'Commander'}.`;
+      else if (!state.enabled) status.textContent = 'Cloud sign-in is not available in this build.';
+      else status.textContent = state.error || 'Use your Zillions account to play.';
+    }
+    const offlineAllowed = !state.enabled && state.reason === 'static';
+    if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
+    if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
+    if (state.ready && (state.signedIn || offlineAllowed)) {
+      if (!this._accountAccepted) {
+        this._accountAccepted = true;
+        this._showScreen('main');
+      }
+      return;
+    }
+    this._accountAccepted = false;
+    this._showScreen('account');
+  }
+
   setProfile(p) {
-    const nameEl = this.root.querySelector('#prof-name');
-    if (nameEl) nameEl.value = p.name || '';
+    const nameEl = this.root.querySelector('#prof-name-display');
+    if (nameEl) nameEl.textContent = `🪖 ${p.name || 'Commander'}`;
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games

@@ -1,94 +1,127 @@
 # AGENTS.md - Zillions Agent Handoff
 
-## Product
+Read this first. Then read:
 
-Zillions is a static browser survival RTS.
+- `docs/product-contract.md`
+- `docs/backend.md`
+- `README.md`
 
-It should feel like They Are Billions mixed with Warcraft III hero mechanics, StarCraft command flow, and Warhammer-style grim space marines.
+## Product Target
 
-The player builds a colony, survives zombie waves, controls a hero, and can let the Overseer bot handle economy/defense automation.
+Zillions is a sci-fi Thronefall-style conquest defense game.
 
-## Hard Constraints
+The current gameplay source is the Claude Thronefall PR direction:
 
-- Keep the game static. Do not add a backend.
-- Keep zero-install local play. A static file server must be enough.
-- Do not introduce a bundler, framework, package manager dependency, or build step unless Alex explicitly asks.
-- Do not remove the existing game loop, hero system, or Overseer behavior unless the task is specifically about replacing them.
-- Do not commit API keys, model prompts with secrets, or private source material.
-- Treat generated media as concept assets until wired into runtime code.
+- Frontier maps with multiple city sites.
+- Found a city at a flagged site.
+- Closed ramparts and gate chokepoints.
+- Pre-planned plots.
+- Hold the interact key to stream coins into plots.
+- Untimed day planning.
+- Ring the bell to start night.
+- Hordes attack from visible hive nests.
+- Hive nests can be razed.
+- Camps raise troops automatically.
+- No squad micro. Only army stance.
+- Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
-## Where To Look
+Do not turn this back into a generic RTS launcher.
 
-- `index.html` - Game entry point.
-- `assets.html` - Audio/asset browser for GitHub Pages.
-- `src/config.js` - Balance, heroes, buildings, units, zombies, waves.
-- `src/game.js` - Main simulation.
-- `src/ui.js` - DOM HUD and hero picker.
-- `src/audio.js` - Runtime synthesized audio.
-- `assets/audio/manifest.json` - Audio pack index.
-- `docs/hero-audio-pack.md` - Hero audio notes.
-- `docs/faction-audio-pack.md` - Faction and SFX audio notes.
+## Production Rules
 
-## Current Game Shape
+- Production is account-first.
+- Do not show `local profile` in player UI.
+- Do not show fake rooms, fake players, fake stats, or seeded production data.
+- Do not let the player freely edit display name from the main menu.
+- Display name comes from the authenticated account unless a real profile
+  settings flow exists.
+- Empty room lists must show a clean empty state.
+- Keep `https://zillions.taborlin.co` as the canonical player URL.
 
-- Castle-defense frontier maps (160×160): 3 candidate city sites (found with
-  Space at a site marker), hive nests as enemy bases (waves spawn from them;
-  all razed = alternate campaign victory).
-- 3 side quests per campaign level (`LEVELS[].quests`), rewards are ITEMS
-  entries (hero gear or town relics) granted once via profile.questsDone.
-- WC3-style persistence: profile.campaignHeroes[key] = {level, xp, items};
-  profile.relics apply town-wide. Snapshot format is v3.
+## Backend Rules
 
-## Current Hero Design
+Zillions backend belongs to Zillions:
 
-Each hero is auto-attack + one passive aura + one special (Space at night, Q anytime):
+- Supabase project ref: `skqggyvkblqtyggtcxbc`
+- Vercel project: `zillions`
+- Schema source: `supabase/schema.sql`
+- Backend docs: `docs/backend.md`
 
-- Scott English: shotgun brawler (short range, heavy splash hits, slow rate). Aura: Heavy Gravity (slows nearby dead). Special: Gravity Hammer (massive AoE melee slam + brief stun).
-- Alexander Thomas: long-range marksman. Aura: Nanite Swarm (heals nearby troops/heroes). Special: Concussion Grenade (blast ahead + knockback, hero hops backward).
-- Danny Donovan: long-range stealth sniper. Aura: Nutrient Siphon (drains nearby dead, leeches back to him). Special: The Weave (invisible + fast, passes through the horde, damages everything brushed).
+Do not point Zillions at Soshi, Weather.fun, or any other product backend.
+Do not commit secrets, service-role keys, env values, or raw credentials.
 
-## Audio State
+Preserve these files unless a task explicitly replaces the backend:
 
-Runtime audio is still procedural WebAudio. Generated MP3 packs are saved for review and later integration.
+- `package.json`
+- `package-lock.json`
+- `api/auth-config.js`
+- `api/state.js`
+- `api/lobby.js`
+- `src/auth.js`
+- `src/backend.js`
+- `supabase/schema.sql`
+- `docs/backend.md`
 
-Saved packs:
+## Current Runtime Shape
 
-- Hero samples.
-- Hero click barks.
-- Faction voices.
-- SFX.
-- Hero-select and map music.
+- Production loads through Vercel.
+- Google/Supabase account sign-in gates the production game shell.
+- Supabase stores profiles, stats, cloud saves, match history, rooms, room
+  players, and room chat.
+- Vercel Blob remains a temporary compatibility layer for state mirror,
+  presence, and global lobby chat.
+- WebRTC carries match traffic. The backend is not server-authoritative yet.
+- Static local play can remain for development fallback, but it is not the
+  production identity model.
 
-If you wire generated audio into the game:
+## Larger Lobby Direction
 
-- Keep WebAudio fallback.
-- Start playback only after user gesture.
-- Respect mute state.
-- Add per-category cooldowns.
-- Do not overlap repeated click barks aggressively.
-- Keep hero voices louder than faction ambience.
+The lobby target is a conquest layer:
 
-## Review Checklist
+- Worlds are live rooms or games.
+- Players can see other signed-in players moving around.
+- Regions show territory: safe, contested, Xeno-held, player-held.
+- Xeno factions control nests, energy fields, planets, or zones.
+- Room state is real: seats, ready state, hero picks, chat, start, results.
+
+Do not implement fake conquest data as if it is live.
+
+## Key Files
+
+- `src/config.js` - balance, heroes, plot kinds, items, waves, levels.
+- `src/plots.js` - city sites, ramparts, gates, plots.
+- `src/game.js` - simulation and Thronefall mechanics.
+- `src/main.js` - renderer, input, account gate, save sync, co-op.
+- `src/ui.js` - HUD, menus, lobby UI.
+- `src/online.js` - account-backed room/lobby adapter.
+- `src/auth.js` - Supabase auth and profile/save/stat sync.
+- `src/backend.js` - Vercel API helpers.
+- `api/` - Vercel server routes.
+- `docs/product-contract.md` - product source of truth.
+- `docs/backend.md` - backend source of truth.
+
+## Validation
 
 Before you call a change good:
 
-- Run `git diff --check`.
-- Serve with `python3 -m http.server 8000`.
-- Open `/` and confirm the game starts.
-- Open `/assets.html` and confirm manifests load.
-- Check desktop and mobile widths for obvious layout clipping.
-- Confirm no secret strings were committed.
-
-Use:
-
 ```bash
-rg -n 'source credential|api key|private key' .
+npm run check
+git diff --check
 jq empty assets/audio/manifest.json
+jq empty assets/audio/click-pack/index.json
+jq empty assets/audio/faction-voice-pack/index.json
+jq empty assets/audio/sfx-pack/index.json
+rg -n 'source credential|api key|private key|sb_publishable_|qgvpfkncgpqtxxozatax' .
 ```
 
-## Style
+Also smoke test:
 
-- Use plain JavaScript modules.
-- Keep functions small enough to inspect.
-- Prefer local constants and config objects over hidden behavior.
-- Document new systems in README or `docs/` when they affect future agent work.
+- Production account gate.
+- Start campaign.
+- Found a city at a site.
+- Hold Space/B to build a plot.
+- Ring the bell.
+- First night wave.
+- Lobby empty state or real rooms only.
+- `/assets.html` still works as a repo review page, but no in-game link points to
+  it.

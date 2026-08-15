@@ -1,0 +1,12 @@
+{
+  "name": "zillions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "for f in api/*.js src/*.js assets-page.js; do node --check \"$f\"; done"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
+  }
+}
