@@ -910,7 +910,7 @@ export class UI {
     const messages = lobby.messages || [];
     const activeCount = lobby.activeCount ?? players.length;
     this.root.querySelector('#lobby-count').textContent = `${activeCount} active`;
-    this.root.querySelector('#lobby-join').innerHTML = joined ? 'In Lobby<small>visible online</small>' : 'Join Lobby<small>enter selected room</small>';
+    this.root.querySelector('#lobby-join').innerHTML = joined ? 'In Lobby <small>visible online</small>' : 'Join Lobby <small>enter selected room</small>';
     this.root.querySelector('#lobby-mode').textContent = 'Survival';
     this.setLobbyStatus(
       unavailable ? 'Open the Vercel build to use live lobbies. Static builds still support invite codes.' : joined ? 'You are visible in the lobby.' : 'Join to appear here.',
