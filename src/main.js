@@ -969,6 +969,14 @@ class App {
     }
   }
 
+  _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      this.burst(x + Math.cos(a) * radius, 0.18, z + Math.sin(a) * radius,
+        { count: 1, color, speed: 0.45, life, size, spread: 0.02, up: 0.2 });
+    }
+  }
+
   _updateParticles(dt) {
     let n = this.pcount;
     for (let i = 0; i < n; i++) {
@@ -1389,7 +1397,7 @@ class App {
       for (const plot of g.plots) {
         const nt = g.nextTier(plot);
         if (!nt || nt.branch) continue;
-        const [px, pz] = g.payPoint(plot);
+        const [px, pz] = g.payPoint(plot, mh);
         const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
         if (d < bd) { bd = d; pipPlotId = plot.id; }
       }
@@ -1418,11 +1426,19 @@ class App {
         continue;
       }
 
+      const activePayPoint = mh && !mh.dead ? g.payPoint(plot, mh) : ud.payPoint;
       const heroNear = mh && !mh.dead &&
-        (mh.x - ud.payPoint[0]) ** 2 + (mh.z - ud.payPoint[1]) ** 2 < 100;
+        (mh.x - activePayPoint[0]) ** 2 + (mh.z - activePayPoint[1]) ** 2 < 100;
       // Minimal at distance: only the beacon marks a plot. Icon, ghost and
       // pips appear when this is the plot you'd actually fund.
       const active = plot.id === pipPlotId || (nt.branch && heroNear);
+      if (active && activePayPoint) {
+        ud.ring.position.set(activePayPoint[0], 0.05, activePayPoint[1]);
+        ud.prog.position.set(activePayPoint[0], 0.07, activePayPoint[1]);
+      } else if (ud.payPoint) {
+        ud.ring.position.set(ud.payPoint[0], 0.05, ud.payPoint[1]);
+        ud.prog.position.set(ud.payPoint[0], 0.07, ud.payPoint[1]);
+      }
       if (ud.ghost) ud.ghost.visible = !built && plot.id === pipPlotId;
       if (ud.beacon.visible) {
         const gem = ud.beacon.userData.gem;
@@ -1881,10 +1897,10 @@ class App {
           body.rotation.x = 0;
           body.rotation.z = 0;
         }
-        body.position.y += attackPulse * (u.hero ? 0.05 : 0.02);
-        body.position.z = attackPulse * (attackKind === 'melee' ? 0.22 : 0.08);
-        body.rotation.x += attackPulse * (attackKind === 'melee' ? -0.55 : -0.16);
-        body.rotation.z += attackPulse * (u.hero ? (u.key === 'danny' ? -0.16 : 0.12) : 0.06);
+        body.position.y += attackPulse * (u.hero ? 0.08 : 0.03);
+        body.position.z = attackPulse * (attackKind === 'melee' ? 0.34 : 0.13);
+        body.rotation.x += attackPulse * (attackKind === 'melee' ? -0.75 : -0.24);
+        body.rotation.z += attackPulse * (u.hero ? (u.key === 'danny' ? -0.24 : 0.18) : 0.08);
       }
       if (weaponParts.length && attackPulse > 0) {
         for (const part of weaponParts) {
@@ -1892,13 +1908,13 @@ class App {
           const rr = part.userData.restRot;
           if (!rp || !rr) continue;
           if (attackKind === 'melee') {
-            part.position.z = rp.z + 0.18 * attackPulse;
-            part.rotation.x = rr.x - 0.85 * attackPulse;
-            part.rotation.y = rr.y + 0.22 * attackPulse;
+            part.position.z = rp.z + 0.32 * attackPulse;
+            part.rotation.x = rr.x - 1.15 * attackPulse;
+            part.rotation.y = rr.y + 0.32 * attackPulse;
           } else {
-            part.position.z = rp.z - 0.16 * attackPulse;
-            part.position.y = rp.y + 0.03 * attackPulse;
-            part.rotation.x = rr.x - 0.12 * attackPulse;
+            part.position.z = rp.z - 0.28 * attackPulse;
+            part.position.y = rp.y + 0.06 * attackPulse;
+            part.rotation.x = rr.x - 0.2 * attackPulse;
           }
         }
       }
@@ -2112,8 +2128,10 @@ class App {
       this.focus.x += (tx - this.focus.x) * k;
       this.focus.z += (tz - this.focus.z) * k;
     }
-    this.focus.x = clamp(this.focus.x, 4, MAP_SIZE - 4);
-    this.focus.z = clamp(this.focus.z, 4, MAP_SIZE - 4);
+    const mapSize = this.map?.size || MAP_SIZE;
+    const edgePad = 1.2;
+    this.focus.x = clamp(this.focus.x, edgePad, mapSize - edgePad);
+    this.focus.z = clamp(this.focus.z, edgePad, mapSize - edgePad);
 
     const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
@@ -2180,40 +2198,45 @@ class App {
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
             this.audio.melee();
-            this.burst(e.tx, 0.7, e.tz, { count: 8, color: 0xffd27a, speed: 2.4, life: 0.25, size: 0.4, up: 1.4 });
-            this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
+            this._impactRing(e.tx, e.tz, { color: 0xffd27a, count: 18, radius: 1.25, life: 0.26, size: 0.42 });
+            this.burst(e.tx, 0.7, e.tz, { count: 14, color: 0xffd27a, speed: 2.9, life: 0.3, size: 0.5, up: 1.6 });
+            this.burst(e.tx, 0.6, e.tz, { count: 9, color: 0x9c1f1f, speed: 1.9, life: 0.4, size: 0.48, up: 1.3 });
+            this.shake = Math.max(this.shake, 0.12);
             break;
           }
           if (e.kind === 'shotgun') {
             // Point-blank thunder: wide muzzle blast + a fan of pellet streaks.
             this.audio.shoot('shotgun');
-            this.burst(e.fx, e.fy || 0.9, e.fz, { count: 8, color: 0xffe08a, speed: 1.6, life: 0.12, size: 0.6, spread: 0.25, up: 0.4 });
+            this.burst(e.fx, e.fy || 0.9, e.fz, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
             const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
-            for (let p = 0; p < 6; p++) {
-              const a = ang + (p - 2.5) * 0.13;
+            for (let p = 0; p < 9; p++) {
+              const a = ang + (p - 4) * 0.13;
               const d = 0.8 + Math.random() * 0.5;
-              this.burst(lerp(e.fx, e.fx + Math.sin(a) * 5, d * 0.2 + 0.3), 0.7, lerp(e.fz, e.fz + Math.cos(a) * 5, d * 0.2 + 0.3),
-                { count: 1, color: 0xfff2b0, speed: 0.2, life: 0.1, size: 0.35, spread: 0.05, up: 0 });
+              this.burst(lerp(e.fx, e.fx + Math.sin(a) * 6.5, d * 0.18 + 0.35), 0.7, lerp(e.fz, e.fz + Math.cos(a) * 6.5, d * 0.18 + 0.35),
+                { count: 1, color: 0xfff2b0, speed: 0.2, life: 0.14, size: 0.44, spread: 0.05, up: 0 });
             }
-            this.burst(e.tx, 0.6, e.tz, { count: 8, color: 0x9c1f1f, speed: 2.2, life: 0.4, size: 0.5, up: 1.5 });
-            this.shake = Math.max(this.shake, 0.08);
+            this._impactRing(e.tx, e.tz, { color: 0xfff2b0, count: 16, radius: 1.15, life: 0.22, size: 0.4 });
+            this.burst(e.tx, 0.6, e.tz, { count: 12, color: 0x9c1f1f, speed: 2.4, life: 0.45, size: 0.58, up: 1.6 });
+            this.shake = Math.max(this.shake, 0.14);
             break;
           }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
-            this.stream(e.fx, e.fy || 2.6, e.fz, e.tx, 0.5, e.tz, { count: 6, color: 0xff8a3c, size: 0.55, life: 0.3 });
-            this.burst(e.tx, 0.5, e.tz, { count: 10, color: 0xff7a2e, speed: 2.2, life: 0.4, size: 0.6, up: 1.6, spread: 1.8 });
+            this.stream(e.fx, e.fy || 2.6, e.fz, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
+            this._impactRing(e.tx, e.tz, { color: 0xff8a3c, count: 18, radius: 1.3, life: 0.25, size: 0.44 });
+            this.burst(e.tx, 0.5, e.tz, { count: 16, color: 0xff7a2e, speed: 2.5, life: 0.45, size: 0.68, up: 1.8, spread: 1.9 });
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' ? 'sniper' : e.kind);
-          this.burst(e.fx, e.fy || 0.7, e.fz, { count: 3, color: 0xffe08a, speed: 0.8, life: 0.12, size: 0.5, spread: 0.1, up: 0.3 });
-          this.burst(e.tx, 0.6, e.tz, { count: 5, color: 0x9c1f1f, speed: 1.6, life: 0.35, size: 0.4, up: 1.2 });
-          const steps = 5;
+          this.burst(e.fx, e.fy || 0.7, e.fz, { count: 6, color: 0xffe08a, speed: 1.0, life: 0.16, size: 0.58, spread: 0.12, up: 0.35 });
+          this._impactRing(e.tx, e.tz, { color: e.kind === 'ballista' ? 0xfff2b0 : 0xffd75e, count: 14, radius: e.kind === 'ballista' ? 1.35 : 0.95, life: 0.22, size: 0.38 });
+          this.burst(e.tx, 0.6, e.tz, { count: 8, color: 0x9c1f1f, speed: 1.9, life: 0.38, size: 0.48, up: 1.35 });
+          const steps = 8;
           for (let i = 1; i < steps; i++) {
             const t = i / steps;
             this.burst(lerp(e.fx, e.tx, t), lerp(e.fy || 0.7, 0.6, t), lerp(e.fz, e.tz, t),
-              { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.1, size: 0.32, spread: 0.02, up: 0 });
+              { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.14, size: 0.38, spread: 0.02, up: 0 });
           }
           if (e.kind === 'tower' || e.kind === 'ballista') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
           break;
@@ -2416,7 +2439,7 @@ class App {
     if (!e.fromId) return;
     const rec = this.unitMeshes.get(e.fromId);
     if (!rec) return;
-    const dur = e.kind === 'melee' ? 0.34 : e.kind === 'shotgun' ? 0.24 : e.heroKey ? 0.2 : 0.16;
+    const dur = e.kind === 'melee' ? 0.44 : e.kind === 'shotgun' ? 0.34 : e.heroKey ? 0.3 : 0.22;
     rec.attack = { t: dur, dur, kind: e.kind || 'shot' };
   }
 
@@ -2571,7 +2594,7 @@ class App {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch) continue;
-          const [px, pz] = this.game.payPoint(plot);
+          const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
         }
       }

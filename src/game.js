@@ -10,7 +10,7 @@ import {
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
-import { dist2, makeRNG } from './utils.js';
+import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
 
@@ -290,11 +290,17 @@ export class Game {
     return def ? { def, cost: def.cost } : null;
   }
 
-  // Where you stand to fund a plot. Foundations: stand on them. Built
-  // structures: a discrete pay plate at their foot (Thronefall's buy plates),
-  // so sweeping dawn coins never dribbles gold into upgrades by accident.
-  payPoint(plot) {
+  // Where you stand to fund a plot. With a hero, measure reach against the
+  // whole footprint so upgrades work from every side and corner. Without a
+  // hero, keep the old visual plate for rings and dawn coin spacing.
+  payPoint(plot, h = null) {
     if (plot.kind === 'wall') return [plot.gate[0] + 0.5, plot.gate[1] + 0.5];
+    if (h) {
+      return [
+        clamp(h.x, plot.x, plot.x + plot.size),
+        clamp(h.z, plot.z, plot.z + plot.size),
+      ];
+    }
     if (plot.tier === 0) return [plot.cx, plot.cz];
     if (!plot._plate) {
       const s = plot.size;
@@ -310,15 +316,15 @@ export class Game {
   // The hero's nearest fundable plot — what holding the build key would pay
   // into. Shared by the sim and by the HUD prompt.
   buildTargetFor(h) {
-    let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null;
+    let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null, bestPoint = null;
     for (const plot of this.plots) {
       const nt = this.nextTier(plot);
       if (!nt || nt.branch) continue;
-      const [px, pz] = this.payPoint(plot);
+      const [px, pz] = this.payPoint(plot, h);
       const d = dist2(h.x, h.z, px, pz);
-      if (d <= bd) { bd = d; best = plot; bestNt = nt; }
+      if (d <= bd) { bd = d; best = plot; bestNt = nt; bestPoint = [px, pz]; }
     }
-    return best ? { plot: best, nt: bestNt } : null;
+    return best ? { plot: best, nt: bestNt, payPoint: bestPoint } : null;
   }
 
   // Thronefall building: walk to a foundation and HOLD the build key — coins
@@ -339,7 +345,7 @@ export class Game {
       plot.paid += pay;
       plot.payFx = 0.3; // renderer hint
       // Emit one arc-coin per whole gold piece — the Thronefall purse animation.
-      const [px, pz] = this.payPoint(plot);
+      const [px, pz] = target.payPoint || this.payPoint(plot, h);
       h._coinAcc = (h._coinAcc || 0) + pay;
       if (h._coinAcc >= 1) {
         const n = Math.floor(h._coinAcc);
