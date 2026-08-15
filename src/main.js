@@ -2202,6 +2202,7 @@ class App {
     if (!this.nodeMarkers) {
       this.nodeMarkers = [];
       for (const node of g.nodes) {
+        if (node.offMap) continue;
         const gr = new THREE.Group();
         const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
         ringGeo.rotateX(-Math.PI / 2);

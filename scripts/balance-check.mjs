@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { generatePlots } from '../src/plots.js';
+import { reachableFrom } from '../src/lanes.js';
 import {
   LEVELS, PAY_RADIUS, PLOT_KINDS, SIEGE, START_GOLD, THREAT, TILE, UNITS,
   hiveInterval, hiveSquad,
@@ -114,10 +115,23 @@ function assertSiegeLoop(level) {
   assert.ok(game.plotLocked(game.plots.find((p) => p.kind === 'outpost')),
     `${level.name} lets a Forward Camp be funded on ground the player does not hold`);
 
-  // Every node must be reachable from the city, or the army can never push.
+  // The lane graph MUST be one connected piece from the city's point of view.
+  // Nearest-neighbour linking alone fragments into concentric shells, and a
+  // hive stranded in its own component can never be razed — which silently
+  // makes the map unwinnable, since razing every hive is the win condition.
+  const reach = reachableFrom(game.laneGraph, game.cityGi);
+  for (const nest of game.nests) {
+    assert.ok(reach.has(nest.gi),
+      `${level.name}: a hive nest is unreachable from the city — the map cannot be won`);
+    assert.ok(game.laneGraph.adj[nest.gi].length > 0, `${level.name}: a hive nest has no approach lane`);
+  }
   for (const node of game.nodes) {
+    assert.ok(node.offMap === reach.has(node.gi) === false || node.offMap !== reach.has(node.gi),
+      `${level.name}: ${node.name} offMap flag disagrees with reachability`);
+    if (node.offMap) continue;
     assert.ok(game.laneGraph.adj[node.gi].length > 0, `${level.name}: ${node.name} has no lane`);
   }
+  assert.ok(game.activeNodes().length > 0, `${level.name} left no reachable lane nodes`);
 
   // A camp is a faucet: it musters on build, and again on its timer.
   const camp = game.plots.find((p) => p.kind === 'camp_ranger');

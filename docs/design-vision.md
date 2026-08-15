@@ -9,8 +9,10 @@ for what is live.
 **Status.** Phases 1-3 of the build order in §11 are implemented: the lane
 graph, camps as faucets, hives as producers, Forward Camps, the Threat clock,
 the economy without dawn, paid repair and rebuild, the enemy roles, and tower
-targeting doctrine. Balance is a first pass tuned against simulated runs — level
-1 is validated winnable, later levels need human playtesting.
+targeting doctrine. Balance is a first pass tuned against simulated runs and has
+a **known open stall**: the army razes the nearer hives and does not finish the
+last one, so no level is completed by the test bot. See the Balance Status
+section of `docs/agent-brief.md` before tuning.
 
 **Phases 4-6 are NOT implemented** and remain design intent: the folklore
 factions (§7), world-placed side missions (§8), fog of war and landmarks (§9),

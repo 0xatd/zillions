@@ -41,17 +41,37 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Campaign win: raze every hive, then kill the champion of the final
   counterattack. Loss: the Keep falls.
 
-## Balance Status
+## Balance Status — OPEN ISSUE, read before tuning
 
-Balance is a first pass tuned against **simulated** runs, not human play:
+Balance was tuned against **simulated** runs, not human play, and there is a
+known unresolved stall.
 
-- Level 1 is validated winnable in roughly 13 minutes via the intended scaling
-  chain: hold nodes -> Forward Camps -> bigger army -> siege more hives.
+What works:
+
+- The scaling chain works: hold nodes -> Forward Camps -> bigger army. The test
+  bot reliably reaches the unit cap and holds 6-10 nodes.
 - Pure turtling and pure blitzing both lose, which is the intended shape.
-- Levels 3-5 were not beaten by the test bot. The bot never switches stance,
-  never picks tower doctrines, and steers the hero badly — and the hero is the
-  designed swing factor. These levels need human playtesting before anyone
-  calls them tuned or "too hard".
+- Two of three hives on level 1 are razed reliably.
+
+What does not:
+
+- **No campaign level is completed by the test bot.** The army razes the
+  nearer hives and then stalls before finishing the last one, on every level.
+- An earlier build DID complete level 1 in ~13 minutes. That was a false pass:
+  the lane graph was fragmented, `_routeTo` failed for most targets, and units
+  fell through to steering straight at the objective. Fixing the graph made
+  routing real, and real routing exposed the stall. Do not "fix" this by
+  reverting the connectivity work.
+- Suspected cause: squads in transit disperse to chase (`seek` is
+  `max(range + 2, 10)` while pushing), so a column bound for the far hive is
+  perpetually engaged in open ground and never masses on the objective.
+  Two attempted fixes made it worse and were reverted: making the route outrank
+  the chase (squads then walked past everything and razed nothing), and
+  narrowing `seek` in transit (same). The fix likely needs squads to *mass*
+  rather than to ignore combat — a rally-then-commit behaviour, or a per-hive
+  assignment quota, rather than a per-unit distance rule.
+- The hero is the designed swing factor and the bot steers it badly, so human
+  play may already close this gap. That is untested. Do not assume it does.
 
 ## Not Implemented
 

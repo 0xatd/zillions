@@ -439,7 +439,8 @@ export class UI {
         ? '☠️ <b>Final counterattack</b>'
         : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
-    q('#r-front').innerHTML = `🚩 <b>${held}</b>/${game.nodes.length} · 🔥 <b>${nests}</b>`;
+    const total = game.activeNodes ? game.activeNodes().length : game.nodes.length;
+    q('#r-front').innerHTML = `🚩 <b>${held}</b>/${total} · 🔥 <b>${nests}</b>`;
     q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
 
     // Active army stance chip.
@@ -994,6 +995,7 @@ export class UI {
     // nodes pulse — this is the front line, read at a glance.
     const nodePulse = (performance.now() / 500) % 1;
     for (const n of game.nodes || []) {
+      if (n.offMap) continue;
       const col = n.owner === 'player' ? '#59ff9c' : n.owner === 'hive' ? '#ff5a4a' : '#d8c07a';
       ctx.fillStyle = col;
       ctx.fillRect(n.x - 1.6, n.z - 1.6, 3.2, 3.2);

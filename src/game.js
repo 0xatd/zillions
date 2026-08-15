@@ -18,7 +18,7 @@ import {
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
-import { buildLaneGraph, nodeRoute, routeWaypoints } from './lanes.js';
+import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
@@ -27,6 +27,7 @@ const CAMP_STANDING = 5;          // a camp sustains count x this many living tr
 const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
 const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
 const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guard first
+const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
 
 let nextId = 1000;
 const getNextId = () => nextId;
@@ -288,7 +289,21 @@ export class Game {
     this.cityGi = this.nodes.length + this.nests.length;
     this.laneGraph = buildLaneGraph(this.map, points, SIEGE);
 
+    // Anything the city cannot walk to is marooned — an island, a lake-locked
+    // shelf. Leaving it on the map would be content the player can see and
+    // never reach, and a marooned HIVE would make the map unwinnable, because
+    // the win condition is razing every one of them.
+    const reach = reachableFrom(this.laneGraph, this.cityGi);
+    for (const node of this.nodes) node.offMap = !reach.has(node.gi);
+    for (const nest of this.nests) {
+      if (reach.has(nest.gi)) continue;
+      nest.offMap = true;
+      nest.alive = false;   // unreachable, so it can never muster or be razed
+      nest.hp = 0;
+    }
+
     for (const node of this.nodes) {
+      if (node.offMap) continue;
       if (this.plots.some((pl) => pl.kind === 'outpost' && pl.nodeId === node.id)) continue;
       const spot = this._outpostSpot(node);
       if (!spot) continue;
@@ -348,6 +363,7 @@ export class Game {
     }
     // Neutral lane nodes are guarded too — ground is never free.
     for (const node of this.nodes) {
+      if (node.offMap) continue;
       const guards = 3 + Math.round(2 * this.diff.mult);
       for (let i = 0; i < guards; i++) {
         const a = this.rng() * Math.PI * 2, r = 1.5 + this.rng() * 3.5;
@@ -363,7 +379,10 @@ export class Game {
   emit(e) { this.events.push(e); }
 
   get isNight() { return false; } // kept so old call sites read false, not undefined
-  heldNodes() { return this.nodes.filter((n) => n.owner === 'player').length; }
+  // Marooned nodes are excluded everywhere: they are not capturable, not
+  // counted, and not drawn.
+  activeNodes() { return this.nodes.filter((n) => !n.offMap); }
+  heldNodes() { return this.nodes.filter((n) => !n.offMap && n.owner === 'player').length; }
   liveNests() { return this.nests.filter((n) => n.alive).length; }
 
   // ---------- plots & construction ----------
@@ -834,6 +853,7 @@ export class Game {
     const r2 = SIEGE.captureRadius * SIEGE.captureRadius;
 
     for (const node of this.nodes) {
+      if (node.offMap) continue;
       let friendly = 0, hostile = 0;
       for (const u of this.units) {
         if (u.dead) continue;
@@ -899,6 +919,7 @@ export class Game {
     if (!this.laneGraph) return -1;
     let best = -1, bd = Infinity;
     for (const n of this.nodes) {
+      if (n.offMap) continue;
       const d = dist2(x, z, n.x, n.z);
       if (d < bd) { bd = d; best = n.gi; }
     }
@@ -919,6 +940,14 @@ export class Game {
   // Walk `actor` onto the lanes and out to `gi`. Returns false if unreachable.
   _routeTo(actor, gi) {
     if (!this.laneGraph || gi < 0) return false;
+    // Close enough to see it? Go straight there. Lanes exist to cross terrain,
+    // and forcing a short hop back out through a lane node is how squads used
+    // to circle an objective they were already standing next to.
+    const [gx, gz] = this._giPoint(gi);
+    if (dist2(actor.x, actor.z, gx, gz) < DIRECT_APPROACH_R * DIRECT_APPROACH_R) {
+      actor.route = null;
+      return true;
+    }
     const from = this._nearestGi(actor.x, actor.z);
     if (from < 0) return false;
     const route = nodeRoute(this.laneGraph, from, gi);
@@ -929,6 +958,7 @@ export class Game {
     actor.route = pts;
     actor.routeI = 0;
     actor.routeStuck = 0;
+    actor.routeBest = Infinity;
     return pts.length > 0;
   }
 
@@ -938,22 +968,34 @@ export class Game {
     const [wx, wz] = actor.route[actor.routeI];
     const dx = wx - actor.x, dz = wz - actor.z;
     const d = Math.hypot(dx, dz);
-    if (d < 2.0) {
+    if (d < 2.4) {
       actor.routeI++;
       actor.routeStuck = 0;
+      actor.routeBest = Infinity;
       if (actor.routeI >= actor.route.length) { actor.route = null; return false; }
       return true;
     }
-    const moved = zombie
-      ? (this._moveZombie(actor, dx / d, dz / d, speed, dt, true), true)
-      : this._moveActor(actor, dx / d, dz / d, speed, dt);
-    // Wedged against terrain? Skip the waypoint rather than grind forever.
-    actor.routeStuck = (actor.routeStuck || 0) + (moved ? 0 : dt);
-    if (actor.routeStuck > 2.5) {
+    // Progress watchdog. "Did it move at all" is the wrong question — a squad
+    // grinding along a shoreline moves every tick and gets nowhere. Watch the
+    // distance to the waypoint instead, and when that stops falling, throw the
+    // route away so a fresh one is flooded from where the squad actually is.
+    // Skipping ahead to the NEXT waypoint (the old behaviour) only aims it at
+    // something further past the same obstacle.
+    if (d < (actor.routeBest ?? Infinity) - 0.25) {
+      actor.routeBest = d;
       actor.routeStuck = 0;
-      actor.routeI++;
-      if (actor.routeI >= actor.route.length) { actor.route = null; return false; }
+    } else {
+      actor.routeStuck = (actor.routeStuck || 0) + dt;
+      if (actor.routeStuck > 2.5) {
+        actor.routeStuck = 0;
+        actor.routeBest = Infinity;
+        actor.route = null;
+        actor.repathT = 0;
+        return false;
+      }
     }
+    if (zombie) this._moveZombie(actor, dx / d, dz / d, speed, dt, true);
+    else this._moveActor(actor, dx / d, dz / d, speed, dt);
     actor.facing = Math.atan2(dx, dz);
     return true;
   }
@@ -972,7 +1014,7 @@ export class Game {
 
   _pickPushTarget(u) {
     const openNodes = () => this.nodes
-      .filter((n) => n.owner !== 'player')
+      .filter((n) => !n.offMap && n.owner !== 'player')
       .map((n) => [dist2(u.x, u.z, n.x, n.z), n.gi]);
     const liveNests = () => this.nests
       .filter((n) => n.alive)
@@ -1483,7 +1525,7 @@ export class Game {
       return 'walker';
     };
     // Raiders peel off to hit the ground you hold; the rest march on the Keep.
-    const playerNodes = this.nodes.filter((n) => n.owner === 'player');
+    const playerNodes = this.nodes.filter((n) => !n.offMap && n.owner === 'player');
     while (spawned < size && guard++ < size * 30) {
       let x, z;
       if (nestIds.length) {
@@ -2032,9 +2074,7 @@ export class Game {
         // only engages what wanders into range.
         const hunting = !u.hero && this.stance === 'attack';
         const range = u.hero ? this.heroRange(u) : u.def.range;
-        // A pushing squad only stops for what is actually on top of it. Cast a
-        // wider net than that and the army bogs down in the open field forever
-        // instead of ever reaching the hive.
+        // A pushing squad only stops for what is actually on top of it.
         const seek = hunting ? Math.max(range + 2, 10) : range;
         let best = null, bd = seek * seek;
         for (const zb of this.zombies) {

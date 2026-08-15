@@ -71,9 +71,11 @@ function extractPath(map, field, tx, tz) {
   return back;
 }
 
-// Keep every `step`-th waypoint plus both ends. Squads steer waypoint to
-// waypoint, so a coarse path is both cheaper and smoother than a dense one.
-function downsample(path, step = 5) {
+// Keep every `step`-th waypoint plus both ends. Squads steer STRAIGHT from one
+// waypoint to the next, so the step has to stay small enough that the straight
+// line between two waypoints is itself walkable — otherwise a squad aims at a
+// point on the far side of a headland and grinds against the coast forever.
+function downsample(path, step = 3) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
   for (let i = step; i < path.length - 1; i += step) out.push(path[i]);
@@ -96,32 +98,94 @@ export function buildLaneGraph(map, points, opts = {}) {
   const tiles = points.map((p) => [Math.max(0, Math.min(map.size - 1, p.x | 0)), Math.max(0, Math.min(map.size - 1, p.z | 0))]);
   const fields = tiles.map(([x, z]) => floodFrom(map, x, z));
 
+  const walk = (i, j) => fields[i][tiles[j][1] * map.size + tiles[j][0]];
+
+  const link = (i, j, d) => {
+    const key = `${i}:${j}`;
+    if (lanes.has(key)) return true;
+    const path = downsample(extractPath(map, fields[i], tiles[j][0], tiles[j][1]));
+    if (!path || path.length < 2) return false;
+    lanes.set(key, path);
+    lanes.set(`${j}:${i}`, [...path].reverse());
+    cost.set(key, d);
+    cost.set(`${j}:${i}`, d);
+    if (!adj[i].includes(j)) adj[i].push(j);
+    if (!adj[j].includes(i)) adj[j].push(i);
+    return true;
+  };
+
+  // Pass 1 — nearest neighbours by WALKED distance, not by how it looks on a map.
   for (let i = 0; i < n; i++) {
-    const field = fields[i];
-    // Rank every other node by how far it actually is to WALK, not fly.
     const ranked = [];
     for (let j = 0; j < n; j++) {
       if (j === i) continue;
-      const d = field[tiles[j][1] * map.size + tiles[j][0]];
+      const d = walk(i, j);
       if (d === Infinity || d > maxDist) continue;
       ranked.push([d, j]);
     }
     ranked.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
-    for (const [d, j] of ranked.slice(0, neighbors)) {
-      const key = `${i}:${j}`;
-      if (lanes.has(key)) continue;
-      const path = downsample(extractPath(map, field, tiles[j][0], tiles[j][1]));
-      if (!path || path.length < 2) continue;
-      lanes.set(key, path);
-      lanes.set(`${j}:${i}`, [...path].reverse());
-      cost.set(key, d);
-      cost.set(`${j}:${i}`, d);
-      if (!adj[i].includes(j)) adj[i].push(j);
-      if (!adj[j].includes(i)) adj[j].push(i);
-    }
+    for (const [d, j] of ranked.slice(0, neighbors)) link(i, j, d);
   }
+
+  // Pass 2 — stitch the components together.
+  //
+  // Nearest-neighbour linking alone fragments badly on this map: the node spots
+  // sit on concentric rings, so the inner ring links only to itself and the
+  // outer ring only to itself, and the two shells never join. A hive stranded
+  // in its own component can never be routed to, and therefore never razed,
+  // which makes the map unwinnable. So: repeatedly join the two closest points
+  // that are in different components until one component remains, ignoring the
+  // distance cap — connectivity matters more than lane length.
+  const comp = new Int32Array(n);
+  const recolour = () => {
+    comp.fill(-1);
+    let c = 0;
+    for (let i = 0; i < n; i++) {
+      if (comp[i] >= 0) continue;
+      const q = [i];
+      comp[i] = c;
+      while (q.length) {
+        const a = q.pop();
+        for (const b of adj[a]) if (comp[b] < 0) { comp[b] = c; q.push(b); }
+      }
+      c++;
+    }
+    return c;
+  };
+
+  let groups = recolour();
+  for (let guard = 0; groups > 1 && guard < n; guard++) {
+    let bi = -1, bj = -1, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i === j || comp[i] === comp[j]) continue;
+        const d = walk(i, j);
+        if (d < bd) { bd = d; bi = i; bj = j; }
+      }
+    }
+    // Nothing left that can be walked between: the remainder is genuinely
+    // marooned (an island, a lake-locked shelf). Callers drop those points.
+    if (bi < 0 || !link(bi, bj, bd)) break;
+    groups = recolour();
+  }
+
   for (const list of adj) list.sort((a, b) => a - b);
-  return { adj, lanes, cost, size: n };
+  return { adj, lanes, cost, size: n, components: groups, comp };
+}
+
+// Which points share a component with `root`. Anything outside it can never be
+// walked to, so it must not be left on the map as content the player can see
+// but never reach.
+export function reachableFrom(graph, root) {
+  const seen = new Set();
+  if (root == null || root < 0 || root >= graph.size) return seen;
+  const q = [root];
+  seen.add(root);
+  while (q.length) {
+    const a = q.pop();
+    for (const b of graph.adj[a]) if (!seen.has(b)) { seen.add(b); q.push(b); }
+  }
+  return seen;
 }
 
 // Dijkstra over the node graph. Returns the node ids from `from` to `to`
