@@ -6,6 +6,9 @@
   --gold: #ffd75e;
   --danger: #ff5d52;
   --good: #59ff9c;
+  --command-height: 190px;
+  --command-gap: 12px;
+  --minimap-size: 190px;
 }
 
 html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; }
@@ -87,35 +90,60 @@ body::after {
 @keyframes slidein { from { transform: translateX(-16px); opacity: 0; } }
 @keyframes pulse { 50% { opacity: 0.55; } }
 
-/* ---------- action bar (bottom center) ---------- */
+/* ---------- command bar ---------- */
 #actionbar {
-  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-  display: flex; flex-direction: column; gap: 6px; align-items: center;
+  position: absolute;
+  left: calc(var(--command-gap) * 2 + var(--minimap-size));
+  right: var(--command-gap);
+  bottom: var(--command-gap);
+  height: var(--command-height);
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  background: rgba(12, 16, 22, 0.9);
+  border: 1px solid rgba(201, 164, 74, 0.42);
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
   z-index: 10;
 }
+.commandtop {
+  display: grid;
+  grid-template-columns: minmax(300px, 450px) minmax(260px, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
 .rallyhints {
-  display: flex; gap: 8px; font-size: 12px;
-  background: rgba(18, 22, 28, 0.78); border: 1px solid rgba(201, 164, 74, 0.28);
-  border-radius: 8px; padding: 4px 6px;
+  display: flex; gap: 6px; align-items: center; justify-content: center;
+  min-width: 0; font-size: 12px;
+  background: rgba(18, 22, 28, 0.5); border: 1px solid rgba(201, 164, 74, 0.28);
+  border-radius: 7px; padding: 3px 5px;
 }
 .rallyhints b { color: var(--gold); }
 .armystatus {
-  min-width: 260px; text-align: center;
-  padding: 4px 10px; border-radius: 8px;
+  min-width: 0; text-align: center;
+  display: flex; align-items: center; justify-content: center;
+  padding: 4px 10px; border-radius: 7px;
   color: #dfe8dd; font-size: 12px;
-  background: rgba(10, 14, 20, 0.58);
+  background: rgba(10, 14, 20, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.32);
+  box-shadow: none;
 }
 .armystatus b { color: #ffd75e; }
 .actionmain {
-  display: flex; gap: 12px; align-items: stretch;
-  background: var(--panel);
-  border: 1px solid rgba(201, 164, 74, 0.4);
-  border-radius: 14px; padding: 10px 12px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  display: grid;
+  grid-template-columns: 220px 208px minmax(280px, 1fr) 210px;
+  gap: 8px;
+  align-items: stretch;
+  min-height: 0;
 }
-#heroplate { display: flex; gap: 10px; align-items: center; min-width: 220px; }
+#heroplate {
+  display: flex; gap: 10px; align-items: center; min-width: 0;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
 .hpportrait { font-size: 34px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6)); }
 .hpportrait img {
   width: 52px; height: 52px; object-fit: cover; object-position: top;
@@ -129,7 +157,7 @@ body::after {
 .hpbar.heroxp { height: 5px; margin: 3px 0 0; }
 .xpfill { height: 100%; background: linear-gradient(90deg, #7f5ce8, #c9a44a); border-radius: 4px; }
 .herostats {
-  width: 208px;
+  min-width: 0;
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
   align-content: center;
 }
@@ -153,8 +181,8 @@ body::after {
 .bigaction {
   position: relative;
   display: flex; gap: 10px; align-items: center; justify-content: center;
-  min-width: 210px; padding: 8px 18px;
-  border-radius: 12px; cursor: pointer;
+  min-width: 0; padding: 8px 12px;
+  border-radius: 8px; cursor: pointer;
   font-family: inherit; color: #e8e6df; font-size: 15px; font-weight: 700;
   border: 1px solid var(--panel-border);
   background: rgba(255, 255, 255, 0.06);
@@ -174,49 +202,66 @@ body::after {
 }
 
 /* army stance chips */
-#stancebar .stance { cursor: pointer; padding: 5px 10px; border-radius: 7px; border: 1px solid transparent; transition: all 0.12s; }
+#stancebar .stance {
+  cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
+  transition: all 0.12s; white-space: nowrap;
+}
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
 #stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
 
 /* hero level-up picker */
 #upgradepanel {
-  width: min(760px, calc(100vw - 26px));
-  background: rgba(12, 16, 22, 0.92);
-  border: 1px solid rgba(159, 214, 255, 0.42);
-  border-radius: 12px; padding: 9px 10px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 24px rgba(159, 214, 255, 0.12);
+  min-width: 0; height: 100%; overflow: hidden;
+  background: rgba(12, 16, 22, 0.48);
+  border: 1px solid rgba(159, 214, 255, 0.28);
+  border-radius: 8px; padding: 6px 7px;
+  box-shadow: none;
 }
-.uphead { text-align: center; font-size: 12px; color: #d8ecff; margin-bottom: 7px; }
+.actionmain:has(#upgradepanel.hidden) {
+  grid-template-columns: 220px 208px minmax(240px, 1fr);
+}
+.actionmain:has(#upgradepanel.hidden) .bigaction { grid-column: 3; }
+.uphead { text-align: center; font-size: 11px; color: #d8ecff; margin-bottom: 5px; }
 .uphead b { color: #ffd75e; }
-.uprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.uprow {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+  height: calc(100% - 21px);
+}
 .upbtn {
-  display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto auto;
+  display: grid; grid-template-columns: 24px 1fr; grid-template-rows: auto minmax(0, 1fr) auto;
   column-gap: 6px; align-items: center;
-  min-height: 86px; padding: 8px;
+  min-height: 0; padding: 6px;
   background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px; color: #e8e6df; cursor: pointer; font-family: inherit;
+  border-radius: 7px; color: #e8e6df; cursor: pointer; font-family: inherit;
   text-align: left; transition: all 0.12s;
 }
 .upbtn:hover:not(:disabled) { transform: translateY(-2px); border-color: rgba(159, 214, 255, 0.6); background: rgba(159, 214, 255, 0.14); }
 .upbtn:disabled { opacity: 0.45; cursor: not-allowed; }
-.upicon { grid-row: 1 / 4; font-size: 24px; text-align: center; }
-.upbtn b { font-size: 12px; color: #ffe9a8; line-height: 1.15; }
-.upbtn small { font-size: 10px; opacity: 0.68; line-height: 1.25; margin-top: 2px; }
-.uppips { font-size: 11px; color: #9fd6ff; letter-spacing: 1px; margin-top: 4px; }
+.upicon { grid-row: 1 / 4; font-size: 22px; text-align: center; }
+.upbtn b { font-size: 11px; color: #ffe9a8; line-height: 1.12; }
+.upbtn small {
+  min-height: 0; overflow: hidden;
+  font-size: 9.5px; opacity: 0.68; line-height: 1.18; margin-top: 2px;
+}
+.uppips { font-size: 10.5px; color: #9fd6ff; letter-spacing: 1px; margin-top: 3px; }
 
 @media (max-width: 900px), (max-height: 650px) {
-  #actionbar { width: calc(100vw - 18px); bottom: 8px; }
-  .actionmain {
-    width: 100%;
-    flex-wrap: wrap;
-    justify-content: center;
-    padding: 8px;
+  :root { --command-height: 132px; --command-gap: 8px; --minimap-size: 132px; }
+  #actionbar { padding: 7px; grid-template-rows: 28px minmax(0, 1fr); gap: 6px; }
+  .commandtop { grid-template-columns: 1fr; }
+  .armystatus { display: none; }
+  .actionmain,
+  .actionmain:has(#upgradepanel.hidden) {
+    grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(150px, 0.8fr);
+    gap: 6px;
   }
-  #heroplate { min-width: 190px; flex: 1 1 210px; }
-  .herostats { width: auto; flex: 1 1 205px; }
-  .bigaction { min-width: 0; flex: 1 1 210px; }
+  #upgradepanel { display: none !important; }
+  .actionmain .bigaction,
+  .actionmain:has(#upgradepanel.hidden) .bigaction { grid-column: 3; }
+  .herostats { display: none; }
   .uprow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #minimap-wrap { width: 132px; height: 132px; right: 8px; top: 54px; bottom: auto; }
+  .bigaction .bicon { font-size: 22px; }
+  .bigaction .btext small { font-size: 9px; letter-spacing: 0.4px; }
 }
 
 /* soft vignette over the battlefield (cel-look framing) */
@@ -246,6 +291,7 @@ body::after {
 
 /* hold-B build prompt */
 #buildhint {
+  position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px);
   background: var(--panel); border: 1px solid rgba(255, 215, 94, 0.5);
   border-radius: 10px; padding: 7px 14px;
   font-size: 13px; color: #ffe9a8; text-align: center;
@@ -260,6 +306,7 @@ body::after {
 
 /* branch doctrine picker */
 #branchpanel {
+  position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px);
   background: var(--panel); border: 1px solid rgba(185, 143, 220, 0.5);
   border-radius: 12px; padding: 10px 12px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
@@ -280,9 +327,9 @@ body::after {
 
 /* ---------- minimap ---------- */
 #minimap-wrap {
-  position: absolute; right: 12px; bottom: 12px;
-  width: 190px; height: 190px;
-  border: 2px solid var(--panel-border); border-radius: 10px;
+  position: absolute; left: var(--command-gap); bottom: var(--command-gap);
+  width: var(--minimap-size); height: var(--minimap-size);
+  border: 2px solid rgba(201, 164, 74, 0.42); border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
   z-index: 10;
@@ -604,7 +651,10 @@ body::after {
 .roomchat { margin-top: 10px; max-height: 190px; }
 .roomchatlog { min-height: 86px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
 .gamechat {
-  position: absolute; left: 14px; bottom: 164px; z-index: 45; width: min(340px, calc(100vw - 28px));
+  position: absolute;
+  left: calc(var(--command-gap) * 2 + var(--minimap-size));
+  bottom: calc(var(--command-height) + var(--command-gap) * 2);
+  z-index: 45; width: min(340px, calc(100vw - 28px));
   pointer-events: none;
 }
 .gamechatlog {
@@ -636,5 +686,5 @@ body::after {
   .lobbygrid { grid-template-columns: 1fr; max-height: none; }
   .lobbychat { min-height: 180px; }
   .lobbyfriends { min-height: 140px; }
-  .gamechat { bottom: 132px; }
+  .gamechat { bottom: calc(var(--command-height) + var(--command-gap) * 2); }
 }

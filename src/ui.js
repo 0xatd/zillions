@@ -50,10 +50,12 @@ export class UI {
       </div>
 
       <div id="actionbar" class="hidden">
-        <div class="rallyhints" id="stancebar">
-          <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Hunt enemies and push hives"><b>3</b> ⚔️ Hunt hives</span>
+        <div class="commandtop">
+          <div class="rallyhints" id="stancebar">
+            <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Hunt enemies and push hives"><b>3</b> ⚔️ Hunt hives</span>
+          </div>
+          <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
-        <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         <div class="actionmain">
           <div id="heroplate">
             <span class="hpportrait" id="a-face"></span>
@@ -65,14 +67,14 @@ export class UI {
             </div>
           </div>
           <div id="herostats" class="herostats"></div>
+          <div id="upgradepanel" class="hidden"></div>
           <button id="bigaction" class="bigaction"></button>
         </div>
-        <div id="upgradepanel" class="hidden"></div>
         <div id="branchpanel" class="hidden"></div>
         <div id="buildhint" class="hidden"></div>
       </div>
 
-      <div id="minimap-wrap">
+      <div id="minimap-wrap" class="hidden">
         <canvas id="minimap-base"></canvas>
         <canvas id="minimap-top"></canvas>
       </div>
@@ -462,6 +464,7 @@ export class UI {
     this.msgSeen = 0;
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
+    this.root.querySelector('#minimap-wrap').classList.remove('hidden');
     for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
       chip.onclick = () => this.cb.onStance && this.cb.onStance(chip.dataset.st);
     }
