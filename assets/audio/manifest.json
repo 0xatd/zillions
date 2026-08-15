@@ -1,9 +1,9 @@
 {
   "name": "Zillions hero voice and map soundtrack pack",
   "created": "2026-08-13",
-  "status": "runtime-integrated",
+  "status": "concept-assets",
   "notes": [
-    "Generated music, hero barks, faction barks, and SFX are wired into runtime playback with WebAudio fallback.",
+    "Generated samples are saved for iteration and are not wired into the runtime yet.",
     "Voice samples use distinct generic ElevenLabs voices through Venice audio generation.",
     "No API keys, prompts with secrets, or source credentials are stored in this repo."
   ],

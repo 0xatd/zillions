@@ -1,25 +1,28 @@
 # ZILLIONS
 
-Zillions is a browser-based Thronefall-style survival defense game.
+Zillions is a browser-based zombie survival game in the spirit of **Thronefall**:
+you are the hero, riding through a pre-designed city that you bring to life with
+gold — by day you build and collect, by night you fight the horde.
 
-It mixes:
+- Thronefall-style build-by-standing economy with one resource: gold.
+- A wave every night; you decide when night falls by ringing the bell.
+- Direct hero control (WASD) with auto-attack and one signature ability each.
+- Grimdark space-marine heroes, procedural hordes, flow-field pathfinding.
+- Campaign (5 maps, 5 bosses) and endless Survival mode.
+- Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
 
-- Thronefall-style hero movement and pre-planned city plots.
-- They Are Billions-scale zombie pressure.
-- Warcraft III-style hero leveling and abilities.
-- Warhammer-style grim space-marine flavor.
-- Procedural zombie hordes, flow-field pathfinding, and loud weapons that attract enemies.
+The production game runs on Vercel at `https://zillions.taborlin.co`.
+Static local play remains as a development fallback, but production identity is
+Google/Supabase account-based.
 
-The repo is a Three.js browser game. It still runs from a static file server for local play. The Vercel deployment also includes small backend APIs for cloud profile, settings, saves, game-summary JSON, the public lobby, and optional Supabase Google sign-in.
+## Live URLs
 
-## Live Pages
-
-- Canonical game: https://zillions.taborlin.co/
-- Vercel fallback: https://zillions-iota.vercel.app/
+- Production game: https://zillions.taborlin.co
+- Vercel fallback: https://zillions-iota.vercel.app
 - Static fallback: https://0xatd.github.io/zillions/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
 
-If GitHub Pages is not live yet, serve the repo locally:
+Serve the repo locally for static development:
 
 ```bash
 python3 -m http.server 8000
@@ -30,115 +33,137 @@ Then open:
 - `http://localhost:8000/`
 - `http://localhost:8000/assets.html`
 
-## Current Game
+## How It Plays
 
-The dead cover the map. You ride as the hero, hold Space on pre-planned city foundations to spend coins, and survive 10 days.
+Each map is a big castle-defense frontier (WC3 *Castle Defense* DNA): hive
+nests — the enemy's bases — ring the wilds, and three flagged **city sites**
+offer different ground to defend. You start un-founded: ride the frontier,
+pick your site, press Space, and the city plan appears there — the ground
+inside the rampart is levelled clean, dirt lanes run from each gate to the
+plaza, a ring of house plots surrounds the Keep, farm and mill lanes sit
+behind them, gold mines wait on the ore veins, and a fully **closed** rampart
+circles it all. The only ways in are the four gates, each flanked by a pair
+of tower plots. Chokepoints, by design.
 
-Current modes:
+- **Days are untimed.** Collect the coins your buildings paid out at dawn,
+  then walk to a glowing foundation and **hold Space** — coins arc out of
+  your purse one by one into the coin slots above the plot while a ghost
+  shows the building to come (partial payments persist). Hold Space beside
+  a built structure to upgrade it. Top-tier towers make you
+  choose a doctrine: ballista (single-target sniper) or flame (splash).
+- **Ring the bell** (Space) when ready — night falls, and the horde marches
+  out of its hive nests (red-beaconed all day). Night ends when the wave dies.
+- **Raze the hives.** Nests are guarded but destroyable — attack one by day
+  and it never spawns again. Raze every nest on a campaign map and the land
+  is won outright, boss or no boss.
+- **Barriers are bought whole.** Each rampart segment is ONE purchase at its
+  gate — pay once and the entire stretch rises, never piece by piece.
+  Upgrade the same way: Razorwire Fence → Plasteel Barricade → then choose
+  its final form: **Shock Fence** (electrified, zaps and slows whatever
+  chews it) or **Bastion Wall** (double armor).
+- **Ruins rebuild free at dawn** — losing a building costs you its function for
+  the night and its dawn payout, not the building itself.
+- **Camps field troops** that respawn each dawn and fight entirely on their
+  own, creep-style — you never micro them, you only set the army's stance:
+  **1 Defend** holds the city, **2 Guard** escorts your hero, **3 Attack**
+  sends them out to hunt the dead and push the hive nests.
+- **Campaign**: survive 10 nights (or raze every hive); a unique boss leads
+  the final horde on each of the 5 maps. **Survival**: endless nights, a boss
+  every fifth — your record is the number of nights you lasted.
 
-- **Survival**: the active mode. The city starts with pre-planned foundations. Ride your hero onto a glowing plot during the day, then hold Space to spend coins and build it.
-- **Labyrinth**: reserved as a future mode. It is listed in the multiplayer shell as locked, but it is not playable yet.
+## Side Quests, Items & Campaign Persistence (WC3-style)
 
-The main menu uses a game-shell layout:
+Every campaign map carries **3 side quests** (pause menu shows live progress).
+Completing one on a victorious run permanently grants its reward: **hero
+gear** (passive items — damage, HP, speed, cooldown, aura radius, coin
+magnet…) or a **town relic** that empowers every city your civilization
+founds (income, structure HP, troop & tower damage). Each campaign boss also
+drops a signature item on first kill.
 
-- **Play** is the first screen for new players. It keeps solo Survival, hero pick, campaign, continue, and difficulty in one clear path.
-- **Multiplayer** is the StarCraft-style hub. It uses an Open Lobbies table, selected-room preview, player slots, lobby chat, co-op host, and join-code flow.
-- **Profile** and **Settings** hold account state, player stats, backend notes, and controls so the first screen does not become a debug launcher.
-
-Each day has a build phase and a dusk raid. A final wave attacks from all sides on night 10.
-
-Core systems:
-
-- Build only through foundations. Free-placement building is removed from the playable game.
-- Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Inactive foundations stay clean with a small marker and building silhouette. Hover, focus, or build a foundation to see its name, timer, and payoff. The final model fades in as construction progresses.
-- Barracks raise scouts, troopers, and snipers automatically. They replenish missing fighters at dawn.
-- Noise matters. Gunfire attracts nearby zombies.
-- Infection matters. Destroyed hab-tents spawn their residents into the horde.
-- Night matters. Zombies move faster and attack harder at night.
-- The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
-- The bottom command bar stays focused on Survival: ride, build, dawn income, and inspected foundations. It does not expose RTS squad micro in Survival.
+Heroes persist across the whole campaign like a WC3 campaign hero: levels,
+XP and every item carry from map to map (shown on their hero card, saved in
+your profile). In co-op, each player brings their own persistent hero, and
+everyone's relics pool for the shared city.
 
 ## Hero Roster
 
-Each hero is a low-poly rider with Warcraft III / Dota-style abilities, a subtle aura, and clean attack feedback.
+The kit is Thronefall-simple: heroes auto-attack on their own, a passive aura
+hums around them, and Space at night fires the one special. You steer.
 
-| Hero | Style | Q | W | E | R |
-| --- | --- | --- | --- | --- | --- |
-| Captain Scott | Close-range tank | Whirlwind | War Cry | Purifying Light | Sun Strike |
-| Alexander | Mid-range map-control marksman | Entangling Roots | Teleportation | Marksman's Focus | Assassinate |
-| Danny | Long-range stealth sniper | Death Pulse | Beetle Swarm | Cloak & Dagger | Time Lapse |
+| Hero | Style | Aura (passive) | Special (Space/Q) |
+| --- | --- | --- | --- |
+| Scott English | Shotgun brawler — short range, huge slow blasts with spread | Heavy Gravity — nearby dead move 35% slower | Gravity Hammer — cataclysmic AoE melee slam, ~10× his auto |
+| Alexander Thomas | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
+| Danny Donovan | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health back to him | The Weave — invisible and fast, walks through the horde cutting everything touched |
 
-Hero rules:
-
-- Heroes earn XP from kills within 14 tiles.
-- Heroes level from 1 to 10.
-- Each level gives one skill point.
-- Normal ability ranks unlock at hero levels 1, 3, and 5.
-- Ultimates unlock at hero level 6.
-- A hero revives at Fortress Command after death.
-- Brutes can drop loot crates.
+Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
+up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| WASD / arrows | Ride the hero north / south / west / east on the map |
-| Shift | Sprint |
+| WASD / arrows | Move your hero (camera follows) |
+| Shift | Gallop (full health only, like Thronefall) |
+| Space | THE interact key: found the city at a site · HOLD at a foundation to build · ring the bell at the Keep · cast your special at night |
+| B (hold) | Build / upgrade (alias for holding Space) |
+| Q | Cast your special |
+| 1 / 2 / 3 | Army stance: Defend (hold city) / Guard (escort you) / Attack (hunt & push hives) |
 | Mouse wheel | Zoom |
-| F | Center camera on hero |
-| Q / E / R | Cast selected hero ability hotkeys. W is movement now; click the W-slot ability if needed. |
-| Left click a foundation | Send your hero to that plot and preview the building |
-| Left click ground | Ride the hero there |
-| Right click | Ride the hero there or cancel targeting |
-| Space | Hold to build while standing on a foundation |
-| P | Pause |
+| Z / C | Rotate camera |
+| P | Pause (solo) |
+| Esc | Menu |
 | M | Mute |
-| H | Help |
-| Esc | Cancel |
 
-## Co-op multiplayer (up to 3 players, no server)
+## Playing Together
 
-On the Vercel build, players can use the **Open Lobbies** browser before a match. The current backend exposes a single Survival staging room from live lobby presence: room table, selected-room detail, player slots, chat, **Start solo**, **Host co-op**, and **Join code** actions. GitHub Pages and local static servers still run without the lobby backend.
+Production play is account-gated. A player signs in with Google before the game
+shell opens. The display name, stats, cloud save, match history, and rooms are
+owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
-Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
+**Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
+presence, global lobby chat, and real public rooms. Public/private room records
+come from Supabase `rooms` and `room_players`. Empty room lists show an empty
+state. Do not seed fake games or fake players.
 
-Built on WebRTC DataChannels (peer-to-peer star around the host, STUN only, zero infrastructure) running **host-sequenced deterministic lockstep**: the host merges everyone's commands into numbered windows and broadcasts them (~10 tiny packets/sec regardless of zombie count); every machine simulates the identical world, and periodic state hashes detect desyncs. All players should use the same browser family (e.g. all Chrome) — identical floating point keeps the worlds in perfect sync.
+The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
+hero each). The backend stores identity, rooms, saves, stats, and results. It
+does not run the combat simulation yet.
 
-## Profiles & Saved Games
+**Manual invite codes** (lobby → "Manual invite codes"): the serverless
+fallback — trade invite/reply codes over any chat channel, no lobby backend
+needed.
 
-- **Commander profile**: set your name on the menu or sign in with Google on the Vercel build. The game tracks lifetime wins/losses, total kills, best day reached, and remembers your favorite hero.
-- **Settings**: mute state is persisted.
-- **Autosave**: every run autosaves every 20 seconds (and on tab close). A **📂 Continue** button appears on the menu — works for solo runs *and* co-op: the host resumes the save with the same number of friends in the lobby, and the full snapshot is streamed to every player so everyone continues from the identical moment.
-- **Backend mirror**: localStorage remains the offline source of truth. On Vercel, the browser mirrors `profile`, `settings`, latest `save`, and `game` summaries to `/api/state`, backed by Vercel Blob.
-- **Google account profile**: on `zillions.taborlin.co`, `/api/auth-config` exposes the public Supabase URL and anon key. The browser then uses Supabase Auth with Google sign-in. Signed-in players sync name, selected hero, stats, latest save, and private match history to Supabase project `skqggyvkblqtyggtcxbc`.
-- **Backend handoff**: see `docs/backend.md` for the public backend architecture, data model, runtime flows, and agent rules. Do not put private env values or credentials in repo docs.
-- **Full lobby backend target**: Supabase room records, ready states, hero picks, and room chat are next. The schema source is `supabase/schema.sql`. See `docs/backend-and-marketplace.md`.
+**Solo and co-op play the same game.** Same fixed-seed map and pre-planned
+city per level, one shared gold purse (anyone's coins, anyone's hold-B), one
+shared horde and boss. Each player brings their own hero with its own aura,
+special, XP and levels — auras stack, so a good comp covers slow + heal +
+drain. Waves grow +40% per extra player, any player may ring the bell, and
+the deterministic lockstep sim means every command (move, build, cast, rally)
+runs identically on every machine.
 
-Backend endpoints:
+## Profiles And Saved Games
 
-```text
-GET    /api/state?playerId=<id>
-POST   /api/state  { playerId, kind: "profile" | "settings" | "save" | "game", id?, data }
-DELETE /api/state?playerId=<id>&kind=save&id=latest
-
-GET    /api/lobby?mode=survival
-POST   /api/lobby  { action: "join" | "heartbeat" | "chat" | "leave", playerId, mode, name?, hero?, rules?, text? }
-DELETE /api/lobby?mode=survival&playerId=<id>
-
-GET    /api/auth-config  Public Supabase URL and anon key for browser sign-in
-```
+- **Zillions account**: Google/Supabase identity is the production profile. The
+  player name is account-derived unless a real profile settings flow exists.
+- **Stats**: games, wins, kills, best day, favorite hero, and match history sync
+  to Supabase.
+- **Cloud save**: the latest solo/host save syncs to Supabase `save_slots`.
+- **Static fallback**: localStorage remains for local development and offline
+  smoke tests. Do not present it as a production profile.
+- **Autosave**: every run autosaves every 20 seconds and on tab close.
 
 ## Deploying
 
-`https://zillions.taborlin.co` is the production player URL. It points to the Vercel `zillions` project. `zillions-iota.vercel.app` is a fallback/preview URL, and GitHub Pages is a static fallback plus asset-review surface.
+Vercel is the production host. It serves the static game and same-origin API
+routes:
 
-GitHub Pages serves the static game and asset browser.
+- `api/auth-config.js`
+- `api/state.js`
+- `api/lobby.js`
 
-Vercel serves the same game plus `/api/state` and `/api/lobby`. The Vercel project needs a Blob store with `BLOB_READ_WRITE_TOKEN` configured. `vercel.json` adds cache headers for the 3D assets. Co-op still works on static hosts because networking is peer-to-peer from the players' browsers.
-
-The asset browser is a repo review page. The game screen does not link to it.
-
-Supabase is the account/lobby backend. It is optional at runtime: local static play still works without it, and signed-out players keep using localStorage.
+Run `npm run check` before pushing. Vercel needs Supabase anon config and Blob
+credentials in project env. Do not put env values in the repo.
 
 ## Art And Physics
 
@@ -149,16 +174,17 @@ Supabase is the account/lobby backend. It is optional at runtime: local static p
 
 ## Audio Assets
 
-Runtime audio uses the generated MP3 packs first. WebAudio remains as a fallback if a browser blocks or misses an asset. Generated assets are stored in `assets/audio/` and can be reviewed in the asset browser.
+Runtime audio is mostly procedural WebAudio. Hero click barks use generated MP3s
+from `assets/audio/click-pack/`. Other generated assets are stored in
+`assets/audio/` and can be reviewed in the asset browser.
 
-Current runtime wiring:
+Current saved packs:
 
-- `assets/audio/music/` - hero-select music and map soundtrack loops.
-- `assets/audio/voices/` - longer hero voice samples for review and future cinematic use.
-- `assets/audio/click-pack/` - hero card selection, move, attack, and repeated-click barks.
-- `assets/audio/faction-voice-pack/` - army, townsfolk, and zombie barks play from current gameplay events. Robot and alien barks are ready for those factions when they enter gameplay.
-- `assets/audio/sfx-pack/` - UI clicks, denies, weapons, construction, horde alarms, zombie impacts, ability sounds, level-up, revive, and colony alerts.
-- `assets/heroes/videos/` - hero cinematic clips shown in the hero picker.
+- `assets/audio/music/` - hero-select loop and map soundtrack loops.
+- `assets/audio/voices/` - first-pass hero voice samples.
+- `assets/audio/click-pack/` - 60 generated hero click barks.
+- `assets/audio/faction-voice-pack/` - 80 generated faction barks for army, robots, townsfolk, aliens, and zombies.
+- `assets/audio/sfx-pack/` - 29 generated sound effects for UI, weapons, creatures, robots, and town/colony events.
 
 Useful docs:
 
@@ -175,23 +201,24 @@ assets-page.css         Asset browser styles
 assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
-src/plots.js            Survival foundation plan and funding helpers
 src/config.js           Balance, heroes, buildings, units, waves
-src/audio.js            Runtime MP3 audio plus WebAudio fallback
-src/backend.js          Browser client for cloud state and lobby APIs
+src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
+src/online.js           Supabase room adapter + Vercel lobby presence/chat
+src/auth.js             Supabase auth/profile/save/stat sync
+src/backend.js          Vercel API helpers
+api/                    Vercel backend routes
+supabase/schema.sql     Zillions Supabase schema and RLS
 src/utils.js            Shared helpers
 vendor/three.module.js  Vendored Three.js
-api/state.js            Vercel Blob-backed JSON state API
-api/lobby.js            Vercel Blob-backed lobby presence and chat API
 assets/heroes/          Generated hero portraits and cinematic clips
 assets/audio/           Generated audio assets and manifests
-docs/                   Asset notes and production docs
-docs/backend.md         Public backend handoff for future agents
+docs/product-contract.md Product source of truth for agents
+docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
 ```
 
@@ -206,23 +233,23 @@ AGENTS.md               Agent handoff and review instructions
 - The simulation runs at a fixed 30 Hz step. Rendering is separate.
 - Game speed supports 1x, 2x, and 4x in solo mode. Co-op locks to 1x.
 - Seeded RNG is used throughout the simulation. This supports lockstep co-op.
-- Generated music, voice, SFX, and hero cinematic files are runtime assets. Keep WebAudio fallback and direct asset-browser review paths.
+- Generated music, voice, and SFX runtime integration is partial and should stay
+  explicit in code and docs.
 
 ## Agent Handoff
 
 Read `AGENTS.md` before changing the repo.
 
-High-level rule: keep this a working browser game. Local play must keep working from a static file server. Backend code should stay optional and gracefully fall back to localStorage.
-
-Read `docs/backend.md` before changing auth, profiles, saves, lobbies, rooms, Supabase, or Vercel API routes.
+High-level rule: keep Claude PR gameplay as the source direction, and keep the
+production backend/account files intact unless Alex explicitly replaces them.
 
 When reviewing or changing gameplay, check:
 
-- The game still starts from a static file server.
+- Production is account-gated on Vercel.
+- Static local development still works as fallback.
 - The hero picker works.
-- WASD moves the hero straight up/down/left/right on the minimap.
-- A foundation can be clicked, reached by the hero, funded by holding Space, and built.
-- Selection, right-click orders, and ability hotkeys work.
+- City founding, plot build, bell, and first night wave work.
+- Lobby shows real rooms or a clean empty state.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.
 
@@ -246,5 +273,3 @@ jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
 ```
-
-There is no automated test suite yet.

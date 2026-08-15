@@ -8,7 +8,7 @@
   "notes": [
     "Short sound effects for UI, weapons, aliens, zombies, robots, and town/colony actions.",
     "28 effects were generated through Venice; mine_collapse uses a local synthetic fallback because the final Venice retrieve failed after generation.",
-    "These assets are wired into runtime playback where the current game has matching UI, combat, colony, horde, or hero events.",
+    "These are concept assets and are not wired into runtime playback yet.",
     "No API keys or source secrets are stored in this repository."
   ],
   "sounds": [

@@ -1,151 +1,58 @@
-// Deterministic Survival foundations.
-// These are pre-planned city sites around the Command Center. The normal game
-// still owns buildings, resources, pathing, and combat. Plot mode only gives
-// players a Thronefall-style "stand here, then hold build" layer.
-import { BUILDINGS, TILE, UNITS } from './config.js';
+// The pre-designed city: every map gets a fixed, aesthetic layout of build
+// plots arranged around the Keep — plaza houses, farm lanes, mills, mines on
+// the ore, gate-flanking towers, and a fully CLOSED rampart with gates at the
+// compass points. The city footprint is levelled to clean ground first, so the
+// wall always connects and the layout reads Thronefall-simple on every map.
+// Deterministic from the map alone, so every peer generates the same city.
+import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
 
-const PLOT_KEYS = {
-  tent: { color: 0xf0d68a, icon: 'H', label: 'Hab plot' },
-  farm: { color: 0x72d66b, icon: 'F', label: 'Farm plot' },
-  sawmill: { color: 0x9a6a3a, icon: 'S', label: 'Sawmill plot' },
-  quarry: { color: 0x9fb4c0, icon: 'Q', label: 'Quarry plot' },
-  mine: { color: 0xf2c94c, icon: 'M', label: 'Mine plot' },
-  mill: { color: 0xb7c7ff, icon: 'E', label: 'Generator plot' },
-  tower: { color: 0xff8b6e, icon: 'T', label: 'Tower plot' },
-  barracks: { color: 0xe4e8ef, icon: 'B', label: 'Barracks plot' },
-  wall: { color: 0xb7a184, icon: 'W', label: 'Wall plot' },
-};
-
-export const PLOT_PAY_RADIUS = 2.25;
-export const PLOT_PAY_RATE = { gold: 210 };
-
-export function plotInfo(key) {
-  return PLOT_KEYS[key] || { color: 0xffffff, icon: '?', label: 'Plot' };
-}
-
-export function plotCost(key) {
-  const cost = BUILDINGS[key]?.cost || {};
-  const coinCost = Math.max(0, Math.ceil((cost.gold || 0) + (cost.wood || 0) * 0.9 + (cost.stone || 0) * 1.35));
-  return {
-    gold: coinCost,
-    wood: 0,
-    stone: 0,
-  };
-}
-
-export function plotPaidTotal(plot) {
-  const cost = plotCost(plot.key);
-  const need = cost.gold + cost.wood + cost.stone;
-  if (!need) return 1;
-  return Math.min(1, ((plot.paid.gold || 0) + (plot.paid.wood || 0) + (plot.paid.stone || 0)) / need);
-}
-
-export function plotBuildSecondsLeft(plot) {
-  if (!plot) return 0;
-  const cost = plotCost(plot.key);
-  let seconds = 0;
-  for (const res of ['gold', 'wood', 'stone']) {
-    const left = Math.max(0, (cost[res] || 0) - (plot.paid?.[res] || 0));
-    if (!left) continue;
-    seconds += left / Math.max(1, PLOT_PAY_RATE[res] || PLOT_PAY_RATE.gold || 1);
-  }
-  return seconds;
-}
-
-export function plotTimerText(plot) {
-  const secs = plotBuildSecondsLeft(plot);
-  return secs > 0 ? `${Math.ceil(secs)}s` : 'ready';
-}
-
-export function plotEffectText(key) {
-  const d = BUILDINGS[key];
-  if (!d) return '';
-  if (key === 'tent') return '+4 citizens. Pays dawn coins. Falls into zombies if overrun.';
-  if (key === 'farm') return 'Farmstead income. Adds a larger dawn coin payout.';
-  if (key === 'sawmill') return 'Sawmill income. Adds dawn coins and frontier growth.';
-  if (key === 'quarry') return 'Quarry income. Adds a heavy dawn coin payout.';
-  if (key === 'mine') return 'Gold mine. Adds the largest dawn coin payout.';
-  if (key === 'mill') return 'Generator mill. Supports the city and adds dawn coins.';
-  if (key === 'tower') return `Range ${d.range} tower. Auto-shoots zombies.`;
-  if (key === 'barracks') return `Raises and replenishes ${Object.values(UNITS).map((u) => u.name).join(', ')} squads at dawn.`;
-  if (key === 'wall') return `${d.hp} HP wall. Blocks and slows the horde.`;
-
-  const parts = [];
-  if (d.pop > 0) parts.push(`+${d.pop} colonists`);
-  if (d.gold > 0) parts.push(`+${d.gold}/s coins`);
-  if (d.wood > 0) parts.push(`+${d.wood}/s wood`);
-  if (d.stone > 0) parts.push(`+${d.stone}/s stone`);
-  if (d.food > 0) parts.push(`+${d.food} food`);
-  if (d.energy > 0) parts.push(`+${d.energy} energy`);
-  if (d.energy < 0) parts.push(`uses ${Math.abs(d.energy)} energy`);
-  if (d.workers > 0) parts.push(`needs ${d.workers} workers`);
-  return parts.length ? `${parts.join('. ')}.` : d.desc;
-}
-
-export function plotComplete(plot) {
-  const cost = plotCost(plot.key);
-  return (plot.paid.gold || 0) >= cost.gold &&
-    (plot.paid.wood || 0) >= cost.wood &&
-    (plot.paid.stone || 0) >= cost.stone;
-}
-
-export function plotCostText(plot) {
-  const cost = plotCost(plot.key);
-  const left = Math.max(0, Math.ceil(cost.gold - (plot.paid.gold || 0)));
-  return left ? `${left} coins` : 'ready';
-}
-
-export function generatePlots(map) {
+export function generatePlots(map, anchor = null) {
   const N = map.size;
-  const c = N / 2;
-  const rng = makeRNG(map.seed * 17 + 404);
+  const cx = anchor ? anchor.x : N / 2;
+  const cz = anchor ? anchor.z : N / 2;
+  const rng = makeRNG(map.seed * 7 + 13);
   const plots = [];
-  const taken = new Set();
+  const taken = new Set(); // tile keys reserved by already-placed plots
+
+  const WALL_R = CITY_WALL_R;
+
+  // --- Found the city: level everything inside the rampart to clean ground.
+  // Ore veins survive (money), everything else becomes buildable grass. This
+  // is what guarantees a CLOSED wall and a tidy, symmetric town on any map.
+  for (let z = 0; z < N; z++) {
+    for (let x = 0; x < N; x++) {
+      if (Math.hypot(x + 0.5 - cx, z + 0.5 - cz) > WALL_R + 2.5) continue;
+      const t = map.tiles[z * N + x];
+      if (t !== TILE.GOLDORE && t !== TILE.STONEORE) map.tiles[z * N + x] = TILE.GRASS;
+    }
+  }
 
   const reserve = (x, z, size, pad = 1) => {
     for (let dz = -pad; dz < size + pad; dz++) {
       for (let dx = -pad; dx < size + pad; dx++) taken.add((z + dz) * N + (x + dx));
     }
   };
-  const free = (x, z, size, key) => {
-    if (x < 2 || z < 2 || x + size > N - 2 || z + size > N - 2) return false;
+  const free = (x, z, size) => {
     for (let dz = 0; dz < size; dz++) {
       for (let dx = 0; dx < size; dx++) {
-        const tx = x + dx, tz = z + dz;
-        if (!map.isBuildable(tx, tz)) return false;
-        if (taken.has(tz * N + tx)) return false;
+        if (!map.isBuildable(x + dx, z + dz)) return false;
+        if (taken.has((z + dz) * N + (x + dx))) return false;
       }
-    }
-    if (key === 'farm') {
-      for (let dz = 0; dz < size; dz++) {
-        for (let dx = 0; dx < size; dx++) if (map.tileAt(x + dx, z + dz) !== TILE.GRASS) return false;
-      }
-    }
-    if (key === 'sawmill') {
-      const cx = x + (size >> 1), cz = z + (size >> 1);
-      if (map.countNearby(cx, cz, 4, TILE.FOREST) < 4) return false;
-    }
-    if (key === 'mine' || key === 'quarry') {
-      const want = key === 'mine' ? TILE.GOLDORE : TILE.STONEORE;
-      let found = false;
-      for (let dz = 0; dz < size; dz++) {
-        for (let dx = 0; dx < size; dx++) if (map.tileAt(x + dx, z + dz) === want) found = true;
-      }
-      if (!found) return false;
     }
     return true;
   };
-  const findSpot = (x, z, key, maxR = 8) => {
-    const size = BUILDINGS[key].size;
-    x = Math.round(x);
-    z = Math.round(z);
+
+  // Spiral out from (x,z) to the nearest clear spot for a size×size plot.
+  const findSpot = (x, z, size, maxR = 6) => {
+    x |= 0; z |= 0;
     for (let r = 0; r <= maxR; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
           const nx = x + dx, nz = z + dz;
-          if (free(nx, nz, size, key)) return [nx, nz];
+          if (nx < 2 || nz < 2 || nx + size > N - 2 || nz + size > N - 2) continue;
+          if (free(nx, nz, size)) return [nx, nz];
         }
       }
     }
@@ -153,95 +60,175 @@ export function generatePlots(map) {
   };
 
   let nextId = 1;
-  const add = (key, x, z, extra = {}) => {
-    const size = BUILDINGS[key].size;
-    const spot = findSpot(x, z, key);
+  const add = (kind, x, z, size, extra = {}) => {
+    const spot = findSpot(x, z, size);
     if (!spot) return null;
-    const plot = {
-      id: nextId++,
-      key,
-      x: spot[0],
-      z: spot[1],
-      size,
-      cx: spot[0] + size / 2,
-      cz: spot[1] + size / 2,
-      built: false,
-      paid: { gold: 0, wood: 0, stone: 0 },
-      ...extra,
+    const p = {
+      id: nextId++, kind, x: spot[0], z: spot[1], size,
+      cx: spot[0] + size / 2, cz: spot[1] + size / 2,
+      tier: 0, paid: 0, branch: null, ...extra,
     };
-    reserve(plot.x, plot.z, size);
-    plots.push(plot);
-    return plot;
+    reserve(spot[0], spot[1], size);
+    plots.push(p);
+    return p;
   };
 
-  // Reserve the already-built Command Center and its plaza.
-  reserve(c - 5, c - 5, 10, 0);
+  // --- The Keep, dead center (tier 0 here; the game constructs it at start) ---
+  add('hq', cx - 2, cz - 2, 4);
+  reserve(cx - 4, cz - 4, 8, 0); // keep the plaza clear around it
 
-  const ring = (r, ang, off = 0) => [
-    c + Math.cos(ang + off) * r,
-    c + Math.sin(ang + off) * r,
+  // --- Wall FIRST: a closed, 4-connected ring — every tile shares an edge
+  // with the next, so the rendered rampart is one continuous wall with the
+  // only ways in being the 4 gates. Corner steps get a filler tile.
+  const ringTiles = [];
+  {
+    const seen = new Set();
+    const steps = 1440;
+    let last = null;
+    const A0 = -Math.PI * 0.75; // start on the NW diagonal (segment boundary)
+    const put = (x, z, ang) => {
+      const k = z * N + x;
+      if (seen.has(k)) return;
+      seen.add(k);
+      ringTiles.push({ x, z, ang });
+    };
+    for (let s = 0; s < steps; s++) {
+      const ang = A0 + (s / steps) * Math.PI * 2;
+      const x = Math.round(cx + Math.cos(ang) * WALL_R);
+      const z = Math.round(cz + Math.sin(ang) * WALL_R);
+      if (last && x !== last[0] && z !== last[1]) put(x, last[1], ang); // 4-connect the corner
+      put(x, z, ang);
+      last = [x, z];
+    }
+    // Close the loop: if the ring's tail meets its head diagonally, bridge it.
+    const first = ringTiles[0];
+    if (last && first && first.x !== last[0] && first.z !== last[1]) put(first.x, last[1], A0);
+  }
+
+  // Split the ring into 4 named segments at the diagonals; gate at each
+  // segment's compass point.
+  const norm = (a) => { while (a < -Math.PI * 0.75) a += Math.PI * 2; while (a >= Math.PI * 1.25) a -= Math.PI * 2; return a; };
+  const segDefs = [
+    { name: 'North Wall', a0: -Math.PI * 0.75, a1: -Math.PI * 0.25, gate: -Math.PI / 2 },
+    { name: 'East Wall', a0: -Math.PI * 0.25, a1: Math.PI * 0.25, gate: 0 },
+    { name: 'South Wall', a0: Math.PI * 0.25, a1: Math.PI * 0.75, gate: Math.PI / 2 },
+    { name: 'West Wall', a0: Math.PI * 0.75, a1: Math.PI * 1.25, gate: Math.PI },
   ];
-
-  // Close economy ring.
-  for (let i = 0; i < 8; i++) {
-    const [x, z] = ring(7.2, (i / 8) * Math.PI * 2, Math.PI / 8);
-    add('tent', x, z);
+  const gates = [];
+  for (const seg of segDefs) {
+    const tiles = [];
+    for (const t of ringTiles) {
+      const a = norm(t.ang);
+      if (a >= seg.a0 && a < seg.a1) tiles.push([t.x, t.z]);
+    }
+    if (tiles.length < 6) continue;
+    // Gate: the wall tile closest to the segment's compass point.
+    const gx = cx + Math.cos(seg.gate) * WALL_R, gz = cz + Math.sin(seg.gate) * WALL_R;
+    let gate = tiles[0], gd = Infinity;
+    for (const t of tiles) {
+      const d = (t[0] - gx) ** 2 + (t[1] - gz) ** 2;
+      if (d < gd) { gd = d; gate = t; }
+    }
+    gates.push({ gate, ang: seg.gate });
+    const p = {
+      id: nextId++, kind: 'wall', name: seg.name,
+      x: tiles[0][0], z: tiles[0][1], size: 1,
+      cx: cx + Math.cos(seg.gate) * WALL_R,
+      cz: cz + Math.sin(seg.gate) * WALL_R,
+      tiles, gate, tier: 0, paid: 0, branch: null,
+    };
+    for (const [x, z] of tiles) taken.add(z * N + x);
+    plots.push(p);
   }
+
+  // --- Roads: a dirt lane from each gate straight to the plaza. Purely for
+  // readability — the city looks designed before a single coin is spent.
+  for (const { gate, ang } of gates) {
+    const dx = -Math.cos(ang), dz = -Math.sin(ang); // inward
+    for (let d = 1; d <= WALL_R - 5.4; d += 0.5) {
+      const x = Math.round(gate[0] + dx * d), z = Math.round(gate[1] + dz * d);
+      const k = z * N + x;
+      if (taken.has(k)) continue;
+      if (map.tiles[k] === TILE.GRASS) map.tiles[k] = TILE.PATH;
+      taken.add(k); // keep plots off the lanes
+    }
+  }
+
+  const ringSpot = (r, ang) => [cx + Math.cos(ang) * r - 1, cz + Math.sin(ang) * r - 1];
+
+  // --- Gate towers: a pair flanking every gate, just inside the wall. THIS
+  // is the chokepoint kit — whatever chews the gate stands in a crossfire.
+  for (const { ang } of gates) {
+    for (const side of [-1, 1]) {
+      const [x, z] = ringSpot(WALL_R - 2.6, ang + side * 0.22);
+      add('tower', x, z, 2);
+    }
+  }
+
+  // --- Plaza ring: houses close to the Keep, angled like a real square
+  // (offset from the compass roads so the lanes stay open) ---
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const [x, z] = ringSpot(6.8, ang);
+    add('house', x, z, 2);
+  }
+
+  // --- Second ring: farms on the diagonals, mills north & south, camps south ---
   for (let i = 0; i < 4; i++) {
-    const [x, z] = ring(12.0, (i / 4) * Math.PI * 2, Math.PI / 4);
-    add('farm', x, z);
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const [x, z] = ringSpot(10.4, ang);
+    add('farm', x, z, 2);
   }
-  add('mill', ...ring(10.8, -Math.PI / 2));
-  add('mill', ...ring(10.8, Math.PI / 2));
-  add('barracks', ...ring(9.6, Math.PI / 2));
-  add('sawmill', ...ring(14.0, Math.PI));
+  add('mill', ...ringSpot(10.4, -Math.PI / 2 + 0.4), 2);
+  add('mill', ...ringSpot(10.4, Math.PI / 2 - 0.4), 2);
 
-  // Defense ring.
-  for (let i = 0; i < 8; i++) {
-    const [x, z] = ring(15.2, (i / 8) * Math.PI * 2);
-    add('tower', x, z);
-  }
+  const campKinds = ['camp_militia', 'camp_ranger', 'camp_sniper'];
+  campKinds.forEach((kind, i) => {
+    const ang = Math.PI / 2 + (i - 1) * 0.6 + 0.3; // fan just south of the Keep, off the road
+    const [x, z] = ringSpot(8.6, ang);
+    add(kind, x, z, 2);
+  });
 
-  // Wall foundations as short buildable arcs, with gaps for gates.
-  const wallR = 18.0;
-  const gateAngles = new Set([0, 6, 12, 18]);
-  for (let i = 0; i < 24; i++) {
-    if (gateAngles.has(i)) continue;
-    const [x, z] = ring(wallR, (i / 24) * Math.PI * 2);
-    add('wall', x, z, { wallRing: true });
+  // --- Mid towers on the diagonals: the ring between houses and wall ---
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const [x, z] = ringSpot(13.0, ang);
+    add('tower', x, z, 2);
   }
 
-  // Resource-risk plots on real deposits, nearest first.
-  for (const cluster of oreClusters(map, TILE.GOLDORE, c).slice(0, 2)) {
-    const mine = add('mine', cluster.x - 1, cluster.z - 1);
-    if (mine) add('tower', mine.x + 4, mine.z);
-  }
-  for (const cluster of oreClusters(map, TILE.STONEORE, c).slice(0, 2)) {
-    add('quarry', cluster.x - 1, cluster.z - 1);
+  // --- Gold mines on real ore veins (the risky money), with a guard tower ---
+  const clusters = oreClusters(map, cx, cz);
+  for (const cl of clusters.slice(0, 3)) {
+    const mine = add('mine', cl.x - 1, cl.z - 1, 2);
+    if (mine) add('tower', mine.x + 3, mine.z, 2);
   }
 
-  // A couple of greedy far farms outside the wall.
+  // --- A couple of far farms for greedy players (outside the wall) ---
   for (let i = 0; i < 2; i++) {
-    const [x, z] = ring(23 + rng() * 4, rng() * Math.PI * 2);
-    add('farm', x, z);
+    const ang = rng() * Math.PI * 2;
+    const [x, z] = ringSpot(19 + rng() * 3, ang);
+    add('farm', x, z, 2);
   }
 
   return plots;
 }
 
-function oreClusters(map, tile, c) {
+// Find clusters of gold-ore tiles, nearest-to-the-city first.
+function oreClusters(map, cx, cz) {
   const N = map.size;
   const ore = [];
   for (let z = 0; z < N; z++) {
-    for (let x = 0; x < N; x++) if (map.tiles[z * N + x] === tile) ore.push([x, z]);
+    for (let x = 0; x < N; x++) {
+      if (map.tiles[z * N + x] === TILE.GOLDORE) ore.push([x, z]);
+    }
   }
   const clusters = [];
   const used = new Set();
   for (let i = 0; i < ore.length; i++) {
     if (used.has(i)) continue;
     const stack = [i];
-    const members = [];
     used.add(i);
+    const members = [];
     while (stack.length) {
       const j = stack.pop();
       members.push(ore[j]);
@@ -255,8 +242,8 @@ function oreClusters(map, tile, c) {
     }
     const x = Math.round(members.reduce((s, m) => s + m[0], 0) / members.length);
     const z = Math.round(members.reduce((s, m) => s + m[1], 0) / members.length);
-    const d = Math.hypot(x - c, z - c);
-    if (d > 13 && d < 46) clusters.push({ x, z, d, n: members.length });
+    const d = Math.hypot(x - cx, z - cz);
+    if (d > 12 && d < 48) clusters.push({ x, z, d, n: members.length });
   }
-  return clusters.sort((a, b) => a.d - b.d || b.n - a.n);
+  return clusters.sort((a, b) => a.d - b.d);
 }

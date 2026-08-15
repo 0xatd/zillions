@@ -147,7 +147,7 @@ export class AuthClient {
   async ensureProfile(localProfile = {}) {
     if (!this.client || !this.user) return null;
     const user = this.user;
-    const displayName = safeName(localProfile.name, userDisplayName(user));
+    const displayName = userDisplayName(user);
     const selectedHero = localProfile.lastHero || 'alexander';
     const { error: profileError } = await this.client.from('profiles').upsert({
       id: user.id,
@@ -192,7 +192,7 @@ export class AuthClient {
     await this.ensureProfile(localProfile);
     const [{ error: profileError }, { error: statsError }] = await Promise.all([
       this.client.from('profiles').update({
-        display_name: safeName(localProfile.name, userDisplayName(this.user)),
+        display_name: userDisplayName(this.user),
         selected_hero: hero,
         last_seen_at: isoNow(),
       }).eq('id', this.user.id),

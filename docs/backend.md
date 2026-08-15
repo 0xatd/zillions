@@ -13,10 +13,9 @@ this file.
 - Legacy/cloud mirror: Vercel Blob through same-origin Vercel API routes
 - Match networking: browser WebRTC DataChannels, host-sequenced lockstep
 
-The game must remain static-first. A simple static file server must still run
-the game for local/offline play. Backend features are progressive enhancement.
-If `/api/*` routes or Supabase are unavailable, the browser should fall back to
-localStorage and keep solo play working.
+Production is account-first. On `zillions.taborlin.co`, the game shell is gated
+by Google/Supabase sign-in. Static local play can remain for development and
+offline smoke tests, but it must not be presented as a production profile.
 
 ## Backend Boundaries
 
@@ -41,8 +40,8 @@ Supabase owns the real account backend:
 - Lifetime stats.
 - Cloud save slots.
 - Private match history.
-- Planned StarCraft-style room records, room players, ready state, hero picks,
-  and room chat.
+- Public/private room records, room players, ready state, hero picks, and room
+  chat.
 
 The schema source of truth is `supabase/schema.sql`. It enables RLS and defines
 all account, save, match, and room tables. Do not point Zillions at Soshi,
@@ -50,15 +49,16 @@ Weather.fun, or any other product's Supabase project.
 
 ### localStorage
 
-localStorage remains the offline source of truth:
+localStorage remains the development/offline fallback:
 
 - Random browser `playerId`.
 - Guest commander profile.
 - Settings.
 - Latest solo/host save.
 
-When backend support is available, the browser mirrors local state to Vercel
-Blob and syncs signed-in account state to Supabase.
+When backend support is available, the browser syncs signed-in account state to
+Supabase. Vercel Blob is still used for compatibility state, presence, and
+global lobby chat while room chat matures.
 
 ### WebRTC
 
@@ -126,12 +126,12 @@ RLS policy intent:
 
 ## Runtime Flows
 
-### Guest Play
+### Static Development Play
 
 1. Browser creates or loads `zillions_player_id` in localStorage.
-2. Player can start Survival without sign-in.
+2. Static builds can run without Supabase for local development.
 3. Profile, settings, and latest save stay local.
-4. On Vercel, guest state is mirrored through `/api/state`.
+4. This is not the production identity model.
 
 ### Google Profile
 
@@ -146,30 +146,28 @@ RLS policy intent:
 
 ### Multiplayer Today
 
-1. The Multiplayer tab joins the Vercel Blob public lobby.
-2. Players can see active players and lobby chat.
-3. Host co-op still uses WebRTC invite/reply codes.
-4. The match simulation is peer-to-peer and host-sequenced.
+1. Signed-in players join the Zillions lobby.
+2. Vercel Blob provides short-lived presence and global lobby chat.
+3. Supabase `rooms` and `room_players` provide real public/private room rows.
+4. Host co-op still uses WebRTC signaling and lockstep for the match.
+5. The match simulation is peer-to-peer and host-sequenced.
 
 ### Multiplayer Target
 
-The next backend step is to move the Multiplayer hub from the Vercel Blob
-presence lobby to Supabase rooms:
+The next backend step is to make the Multiplayer hub feel like a conquest map:
 
-1. Public/private room list.
-2. Create/join room.
-3. Player slots.
-4. Ready state.
-5. Hero picks.
-6. Room chat.
-7. Host starts WebRTC match.
-8. Match result writes to Supabase stats/history.
+1. Worlds are live rooms or games.
+2. Players can see signed-in players moving around.
+3. Regions show safe, contested, Xeno-held, and player-held territory.
+4. Rooms show seats, ready state, hero picks, and chat.
+5. Host starts WebRTC match.
+6. Match result writes to Supabase stats/history.
 
 ## Agent Rules
 
 - Keep `zillions.taborlin.co` as the canonical production URL.
-- Keep static/local play working.
-- Keep backend failure non-fatal.
+- Keep static/local development fallback working.
+- Keep production account-gated.
 - Never commit env values, service-role keys, Blob tokens, Google client
   secrets, private keys, or raw credentials.
 - Do not copy backend config from other Taborlin products.
@@ -183,8 +181,8 @@ presence lobby to Supabase rooms:
 
 ## Known Limits
 
-- Supabase rooms exist in schema but are not the active room-browser runtime yet.
-- Vercel Blob public lobby is temporary and not a true StarCraft room system.
+- Room browser data is real Supabase data, but the room UI is still early.
+- Vercel Blob global lobby chat is temporary and not the final room chat system.
 - Server-authoritative multiplayer is not implemented.
 - There is no anti-cheat.
 - Cross-device identity depends on Google sign-in. Guest identity is per
