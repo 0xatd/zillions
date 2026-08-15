@@ -44,8 +44,9 @@ export class UI {
 
       <div id="actionbar" class="hidden">
         <div class="rallyhints" id="stancebar">
-          <span class="stance" data-st="defend"><b>1</b> 🛡️ defend</span><span class="stance" data-st="guard"><b>2</b> 🚩 guard</span><span class="stance" data-st="attack"><b>3</b> ⚔️ attack</span>
+          <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Hunt enemies and push hives"><b>3</b> ⚔️ Hunt hives</span>
         </div>
+        <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         <div class="actionmain">
           <div id="heroplate">
             <span class="hpportrait" id="a-face"></span>
@@ -173,7 +174,7 @@ export class UI {
             <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> — coins fly from your purse until it rises (a ghost shows what will be built). Same to upgrade. Top-tier towers let you choose a doctrine.</div>
             <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
             <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
-            <div><b>⚔️ Your army fights on its own</b> — you only set its stance: <b>1</b> DEFEND (hold the city), <b>2</b> GUARD (escort you), <b>3</b> ATTACK (march out, hunt the dead, push the hives).</div>
+            <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Your special grows stronger at levels 4 and 7.</div>
             <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
           </div>
@@ -438,6 +439,15 @@ export class UI {
         chip.classList.toggle('sel', chip.dataset.st === game.stance);
       }
     }
+    const army = game.units.filter((u) => !u.hero && !u.dead).length;
+    const stanceText = {
+      defend: 'holding the city line',
+      guard: 'following your hero',
+      attack: 'hunting enemies and hives',
+    }[game.stance] || 'awaiting orders';
+    q('#army-status').innerHTML = army
+      ? `<b>${army}</b> squad unit${army === 1 ? '' : 's'} · ${stanceText}`
+      : 'Build militia, ranger, or sniper camps to raise squads.';
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
     // Hero plate.

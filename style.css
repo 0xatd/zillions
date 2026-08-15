@@ -94,10 +94,20 @@ body::after {
   z-index: 10;
 }
 .rallyhints {
-  display: flex; gap: 14px; font-size: 11px; opacity: 0.72;
-  background: rgba(18, 22, 28, 0.6); border-radius: 8px; padding: 3px 12px;
+  display: flex; gap: 8px; font-size: 12px;
+  background: rgba(18, 22, 28, 0.78); border: 1px solid rgba(201, 164, 74, 0.28);
+  border-radius: 8px; padding: 4px 6px;
 }
 .rallyhints b { color: var(--gold); }
+.armystatus {
+  min-width: 260px; text-align: center;
+  padding: 4px 10px; border-radius: 8px;
+  color: #dfe8dd; font-size: 12px;
+  background: rgba(10, 14, 20, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.32);
+}
+.armystatus b { color: #ffd75e; }
 .actionmain {
   display: flex; gap: 12px; align-items: stretch;
   background: var(--panel);
@@ -143,7 +153,7 @@ body::after {
 }
 
 /* army stance chips */
-#stancebar .stance { cursor: pointer; padding: 3px 8px; border-radius: 7px; border: 1px solid transparent; transition: all 0.12s; }
+#stancebar .stance { cursor: pointer; padding: 5px 10px; border-radius: 7px; border: 1px solid transparent; transition: all 0.12s; }
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
 #stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
 
@@ -184,6 +194,7 @@ body::after {
   background: rgba(255, 215, 94, 0.18); border: 1px solid rgba(255, 215, 94, 0.6);
   border-radius: 5px; font-family: inherit; font-weight: 800; color: #ffd75e;
 }
+.buildrole { margin-top: 3px; color: #dfe8dd; font-size: 12px; }
 
 /* branch doctrine picker */
 #branchpanel {

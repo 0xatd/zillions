@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, FINAL_NIGHT, LEVELS, PAY_RADIUS,
-  ITEMS, BOSS_DROPS,
+  ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
 import { Game } from './game.js';
@@ -42,6 +42,8 @@ class App {
     this.lastDir = { x: 0, z: 0, s: false };
     this.lastPay = false;       // build key (B) held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
+    this.projectiles = [];      // visible bullets/bolts/globs, slower than damage
+    this.zombieAttacks = new Map();
     this.payTickT = 0;
 
     this.audio = new AudioSys();
@@ -188,6 +190,9 @@ class App {
     this._wallTiles = null; // wall adjacency cache is per-map
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
+    for (const p of this.projectiles) this._destroyProjectile(p);
+    this.projectiles = [];
+    this.zombieAttacks.clear();
     this.lastPay = false;
     this._endExtras = null;
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
@@ -365,7 +370,7 @@ class App {
       [14, '💰 Walk to a glowing foundation and HOLD SPACE — your coins build it. Coins appear at dawn — ride through them!'],
       [24, '🌙 The horde marches every night from the hive nests. Raze a nest by day and it never spawns again!'],
       [36, '🔔 Ready early? Ride to the KEEP and press SPACE to ring the bell and start the night.'],
-      [48, '⚔️ Your army fights by itself — set its stance: 1 defend the city, 2 guard you, 3 attack!'],
+      [48, '⚔️ Squads are autonomous — press 1 to defend, 2 to follow you, 3 to hunt hives.'],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -969,6 +974,101 @@ class App {
     }
   }
 
+  _projectileSpec(kind) {
+    const specs = {
+      hero: { color: 0x9fd6ff, trail: 0xe6f7ff, speed: 18, size: 0.24, tail: 0.14, arc: 0.25 },
+      soldier: { color: 0xfff2b0, trail: 0xffd75e, speed: 20, size: 0.2, tail: 0.12, arc: 0.12 },
+      ranger: { color: 0x9dff8a, trail: 0xd8ffd0, speed: 17, size: 0.2, tail: 0.14, arc: 0.35 },
+      sniper: { color: 0xd9b7ff, trail: 0xffffff, speed: 25, size: 0.18, tail: 0.18, arc: 0.18 },
+      tower: { color: 0xffd75e, trail: 0xfff2b0, speed: 18, size: 0.24, tail: 0.16, arc: 0.32 },
+      ballista: { color: 0xffffff, trail: 0xffd75e, speed: 16, size: 0.34, tail: 0.22, arc: 0.55 },
+      flame: { color: 0xff7a2e, trail: 0xffd75e, speed: 11, size: 0.3, tail: 0.16, arc: 0.12 },
+      shotgun: { color: 0xfff2b0, trail: 0xffd75e, speed: 18, size: 0.18, tail: 0.1, arc: 0.08 },
+      grenade: { color: 0xffb84d, trail: 0xd8b45e, speed: 10, size: 0.34, tail: 0.18, arc: 2.2 },
+    };
+    return specs[kind] || specs.soldier;
+  }
+
+  _spawnProjectile(e, extra = {}) {
+    if (this.projectiles.length >= 120) this._destroyProjectile(this.projectiles.shift());
+    if (!this._projCoreGeo) {
+      this._projCoreGeo = new THREE.SphereGeometry(1, 12, 8);
+      this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
+      this._projUp = new THREE.Vector3(0, 1, 0);
+    }
+    const kind = extra.kind || e.kind || 'soldier';
+    const spec = { ...this._projectileSpec(kind), ...extra };
+    const fx = extra.fx ?? e.fx, fz = extra.fz ?? e.fz;
+    const tx = extra.tx ?? e.tx, tz = extra.tz ?? e.tz;
+    const from = new THREE.Vector3(fx, extra.fy ?? e.fy ?? 0.75, fz);
+    const to = new THREE.Vector3(tx, extra.ty ?? 0.62, tz);
+    const dist = Math.hypot(to.x - from.x, to.z - from.z);
+    const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
+    const core = new THREE.Mesh(
+      this._projCoreGeo,
+      new THREE.MeshBasicMaterial({ color: spec.color, transparent: true, opacity: 1, depthWrite: false }),
+    );
+    core.scale.setScalar(spec.size);
+    const trail = new THREE.Mesh(
+      this._projTrailGeo,
+      new THREE.MeshBasicMaterial({ color: spec.trail, transparent: true, opacity: 0.64, depthWrite: false }),
+    );
+    trail.scale.set(spec.size * 0.26, 1, spec.size * 0.26);
+    core.renderOrder = 30;
+    trail.renderOrder = 29;
+    this.scene.add(trail, core);
+    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec });
+  }
+
+  _destroyProjectile(p) {
+    if (!p) return;
+    this.scene.remove(p.core, p.trail);
+    if (p.core.material) p.core.material.dispose();
+    if (p.trail.material) p.trail.material.dispose();
+  }
+
+  _projectilePos(p, q, out) {
+    const s = clamp(q, 0, 1);
+    out.set(
+      lerp(p.from.x, p.to.x, s),
+      lerp(p.from.y, p.to.y, s) + Math.sin(s * Math.PI) * p.spec.arc,
+      lerp(p.from.z, p.to.z, s),
+    );
+    return out;
+  }
+
+  _updateProjectiles(dt) {
+    if (!this.projectiles.length) return;
+    const head = new THREE.Vector3();
+    const tail = new THREE.Vector3();
+    const mid = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      p.t += dt;
+      const q = Math.min(1, p.t / p.dur);
+      this._projectilePos(p, q, head);
+      this._projectilePos(p, q - p.spec.tail, tail);
+      p.core.position.copy(head);
+      const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.12;
+      p.core.scale.setScalar(p.spec.size * pulse);
+      mid.copy(head).add(tail).multiplyScalar(0.5);
+      dir.copy(head).sub(tail);
+      const len = Math.max(0.04, dir.length());
+      p.trail.position.copy(mid);
+      p.trail.scale.set(p.spec.size * 0.24, len, p.spec.size * 0.24);
+      p.trail.quaternion.setFromUnitVectors(this._projUp, dir.normalize());
+      const fade = q > 0.82 ? (1 - q) / 0.18 : 1;
+      p.core.material.opacity = Math.max(0, fade);
+      p.trail.material.opacity = Math.max(0, 0.64 * fade);
+      if (q >= 1) {
+        this.burst(p.to.x, p.to.y, p.to.z, { count: 3, color: p.spec.color, speed: 0.9, life: 0.18, size: p.spec.size * 1.6, spread: 0.08, up: 0.7 });
+        this._destroyProjectile(p);
+        this.projectiles.splice(i, 1);
+      }
+    }
+  }
+
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
@@ -1038,7 +1138,7 @@ class App {
     this._zcolor = new THREE.Color();
   }
 
-  _updateZombieMeshes(t) {
+  _updateZombieMeshes(t, dt = 0) {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const d = this._zdummy, c = this._zcolor;
@@ -1049,15 +1149,26 @@ class App {
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
       const s = zb.def.scale;
-      d.position.set(zb.x, bob, zb.z);
-      d.rotation.set(zb.state === 2 ? 0.22 : 0.05, yaw, Math.sin(t * 5 + zb.phase) * 0.06);
-      d.scale.set(s * pulse, s * (2 - pulse), s * pulse);
+      let lunge = 0;
+      const attack = this.zombieAttacks.get(zb.id);
+      if (attack) {
+        attack.t -= dt;
+        if (attack.t <= 0) this.zombieAttacks.delete(zb.id);
+        else lunge = Math.sin((1 - attack.t / attack.dur) * Math.PI) * 0.42;
+      }
+      const ax = attack ? attack.tx - zb.x : Math.sin(yaw);
+      const az = attack ? attack.tz - zb.z : Math.cos(yaw);
+      const ad = Math.hypot(ax, az) || 1;
+      d.position.set(zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge);
+      d.rotation.set((zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06);
+      d.scale.set(s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25));
       d.updateMatrix();
       this.zBody.setMatrixAt(i, d.matrix);
       this.zHead.setMatrixAt(i, d.matrix);
       this.zArm.setMatrixAt(i, d.matrix);
       this.zEyes.setMatrixAt(i, d.matrix);
-      if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
+      if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
+      else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
       else c.setHex(zb.def.color);
       this.zBody.setColorAt(i, c);
       this.zArm.setColorAt(i, c);
@@ -1263,6 +1374,27 @@ class App {
     return sp;
   }
 
+  _plotRole(plot, nt, compact = false) {
+    if (!nt || nt.branch) return compact ? 'choose' : 'Choose its final upgrade.';
+    const def = nt.def;
+    const kind = PLOT_KINDS[plot.kind];
+    if (kind.unit) {
+      const u = UNITS[kind.unit];
+      const count = def.count || 0;
+      return compact
+        ? `${count} ${u.icon}`
+        : `${count} ${u.name}${count === 1 ? '' : 's'} join the army. Refilled at dawn.`;
+    }
+    if (def.income) return compact ? `+${Math.round(def.income)} coin` : `Pays ${Math.round(def.income)} coins every dawn.`;
+    if (def.dmg) {
+      const splash = def.splash ? ' splash' : '';
+      return compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`;
+    }
+    if (def.zap) return compact ? 'zap wall' : `Damages and slows enemies that chew it.`;
+    if (plot.kind === 'wall') return compact ? `${def.hp} HP` : `${def.hp} HP barrier. Blocks and buys time.`;
+    return compact ? `${def.hp} HP` : `${def.hp} HP structure.`;
+  }
+
   _makePipSprite() {
     const cnv = document.createElement('canvas');
     cnv.width = 256; cnv.height = 96;
@@ -1445,7 +1577,7 @@ class App {
         gem.rotation.y = t * 2;
         gem.position.y = 0.95 + Math.sin(t * 2.4 + plot.id) * 0.08;
       }
-      const wantSub = nt.branch ? 'choose!' : '';
+      const wantSub = nt.branch ? 'choose!' : this._plotRole(plot, nt, true);
       const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
@@ -2212,6 +2344,12 @@ class App {
             for (let p = 0; p < 9; p++) {
               const a = ang + (p - 4) * 0.13;
               const d = 0.8 + Math.random() * 0.5;
+              this._spawnProjectile(e, {
+                kind: 'shotgun',
+                tx: e.fx + Math.sin(a) * (4.6 + d * 1.2),
+                tz: e.fz + Math.cos(a) * (4.6 + d * 1.2),
+                dur: 0.26 + Math.random() * 0.05,
+              });
               this.burst(lerp(e.fx, e.fx + Math.sin(a) * 6.5, d * 0.18 + 0.35), 0.7, lerp(e.fz, e.fz + Math.cos(a) * 6.5, d * 0.18 + 0.35),
                 { count: 1, color: 0xfff2b0, speed: 0.2, life: 0.14, size: 0.44, spread: 0.05, up: 0 });
             }
@@ -2222,6 +2360,7 @@ class App {
           }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
+            this._spawnProjectile(e, { kind: 'flame', ty: 0.45 });
             this.stream(e.fx, e.fy || 2.6, e.fz, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
             this._impactRing(e.tx, e.tz, { color: 0xff8a3c, count: 18, radius: 1.3, life: 0.25, size: 0.44 });
             this.burst(e.tx, 0.5, e.tz, { count: 16, color: 0xff7a2e, speed: 2.5, life: 0.45, size: 0.68, up: 1.8, spread: 1.9 });
@@ -2229,6 +2368,7 @@ class App {
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' ? 'sniper' : e.kind);
+          this._spawnProjectile(e, { ty: e.kind === 'ballista' ? 0.8 : 0.62 });
           this.burst(e.fx, e.fy || 0.7, e.fz, { count: 6, color: 0xffe08a, speed: 1.0, life: 0.16, size: 0.58, spread: 0.12, up: 0.35 });
           this._impactRing(e.tx, e.tz, { color: e.kind === 'ballista' ? 0xfff2b0 : 0xffd75e, count: 14, radius: e.kind === 'ballista' ? 1.35 : 0.95, life: 0.22, size: 0.38 });
           this.burst(e.tx, 0.6, e.tz, { count: 8, color: 0x9c1f1f, speed: 1.9, life: 0.38, size: 0.48, up: 1.35 });
@@ -2248,6 +2388,8 @@ class App {
           if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
           break;
         case 'bite':
+          if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
+          if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this.burst(e.x, 0.7, e.z, { count: 4, color: 0xb32020, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
           break;
         case 'udeath':
@@ -2319,6 +2461,8 @@ class App {
         case 'bhit':
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
+          if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
+          if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.75, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this.burst(e.x, 0.6, e.z, { count: 2, color: 0x565349, speed: 1.4, life: 0.3, size: 0.35, up: 1.2 });
           break;
         case 'bdestroyed':
@@ -2359,6 +2503,7 @@ class App {
           break;
         case 'grenade': {
           // Lobbed concussion grenade: arc trail, then a dirty knockback blast.
+          this._spawnProjectile(e, { kind: 'grenade', fy: 1.0, ty: 0.45, dur: 0.52 });
           this.stream(e.fx, 1.0, e.fz, e.tx, 0.3, e.tz, { count: 8, color: 0xd8b45e, size: 0.4, life: 0.3 });
           this.burst(e.tx, 0.4, e.tz, { count: 26, color: 0xffb84d, speed: 3.2, life: 0.5, size: 0.65, up: 2.2, spread: 0.8 });
           this.burst(e.tx, 0.4, e.tz, { count: 16, color: 0x6a6153, speed: 2.4, life: 0.7, size: 0.7, up: 2.6, spread: 1.2 });
@@ -2539,7 +2684,7 @@ class App {
         m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
       this._updateCoins(t);
-      this._updateZombieMeshes(t);
+      this._updateZombieMeshes(t, dt);
       this._updateBars();
       this._updateDayNight(dt);
       this._updateTutorial(dt);
@@ -2607,9 +2752,10 @@ class App {
         if (target) {
           const { plot, nt } = target;
           const cost = Math.max(1, Math.ceil(nt.cost - plot.paid));
+          const role = this._plotRole(plot, nt);
           hint = mh.payHold
             ? (this.game.gold < 1 ? '🪙 Purse empty — collect coins at dawn!' : `🪙 ${cost} to go…`)
-            : `Hold <kbd>SPACE</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)`;
+            : `<div>Hold <kbd>SPACE</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
         }
       }
       this.ui.showBuildHint(hint);
@@ -2634,6 +2780,7 @@ class App {
     this._updateParticles(dt);
     this._updateCorpses(dt);
     this._updatePayCoins(dt);
+    this._updateProjectiles(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }

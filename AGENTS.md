@@ -26,7 +26,8 @@ The current gameplay source is the Thronefall-style city-defense direction:
 - Hordes attack from visible hive nests.
 - Hive nests can be razed.
 - Camps raise troops automatically.
-- No squad micro. Only army stance.
+- No individual squad micro. Squads are autonomous, but the player sets the
+  global stance: Defend city, Follow hero, or Hunt hives.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn this back into a generic RTS launcher.

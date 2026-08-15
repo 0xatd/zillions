@@ -27,7 +27,9 @@ Use the Thronefall-style city-defense direction as the gameplay base:
 - Hordes attack from visible hive nests.
 - Hive nests can be razed by day.
 - Camps raise troops automatically.
-- No army micro. The player sets only army stance.
+- No individual army micro. Squads are autonomous, but the player sets the
+  global army stance: defend city, guard hero, or attack outward toward enemies
+  and hive nests.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn Survival back into a generic RTS or a debug launcher.

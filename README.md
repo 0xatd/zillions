@@ -93,10 +93,10 @@ of tower plots. Chokepoints, by design.
   chews it) or **Bastion Wall** (double armor).
 - **Ruins rebuild free at dawn** — losing a building costs you its function for
   the night and its dawn payout, not the building itself.
-- **Camps field troops** that respawn each dawn and fight entirely on their
-  own, creep-style — you never micro them, you only set the army's stance:
-  **1 Defend** holds the city, **2 Guard** escorts your hero, **3 Attack**
-  sends them out to hunt the dead and push the hive nests.
+- **Camps field troops** that respawn each dawn. Army control is blended:
+  squads fight on their own, but you set the plan. **1 Defend** holds the city,
+  **2 Follow** escorts your hero, and **3 Hunt** sends them outward to kill
+  enemies and push hive nests.
 - **Campaign**: survive 10 nights (or raze every hive); a unique boss leads
   the final horde on each of the 5 maps. **Survival**: endless nights, a boss
   every fifth — your record is the number of nights you lasted.
@@ -139,7 +139,7 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 | Space | THE interact key: found the city at a site · HOLD at a foundation to build · ring the bell at the Keep · cast your special at night |
 | B (hold) | Build / upgrade (alias for holding Space) |
 | Q | Cast your special |
-| 1 / 2 / 3 | Army stance: Defend (hold city) / Guard (escort you) / Attack (hunt & push hives) |
+| 1 / 2 / 3 | Army stance: Defend city / Follow hero / Hunt enemies and hives |
 | Mouse wheel | Zoom |
 | P | Pause (solo) |
 | Esc | Menu |

@@ -384,10 +384,18 @@ export class Game {
     }
 
     // Camps field a squad immediately (and refill at dawn).
-    if (PLOT_KINDS[plot.kind].unit) this._refillCamp(plot);
+    const unitKey = PLOT_KINDS[plot.kind].unit;
+    if (unitKey) this._refillCamp(plot);
 
     this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
-    if (!free) this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
+    if (!free) {
+      if (unitKey) {
+        const unit = UNITS[unitKey];
+        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} joined. 1 holds, 2 escorts, 3 hunts hives.`, 'info');
+      } else {
+        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
+      }
+    }
   }
 
   // Structure HP through the civilization's relics (Masonry Codex et al).
@@ -1078,11 +1086,11 @@ export class Game {
     }
   }
 
-  _damageBuilding(b, dmg) {
+  _damageBuilding(b, dmg, source = null) {
     if (!b.alive) return;
     b.hp -= dmg;
     b.hitT = this.time;
-    this.emit({ type: 'bhit', x: b.cx, z: b.cz });
+    this.emit({ type: 'bhit', x: b.cx, z: b.cz, fromId: source?.id, fx: source?.x, fz: source?.z });
     if (this.time - (this._uaT || -99) > 20) {
       this._uaT = this.time;
       this.msg('⚔️ The city is under attack!', 'warn');
@@ -1322,7 +1330,11 @@ export class Game {
         const dx = u.x - zb.x, dz = u.z - zb.z;
         const d = Math.hypot(dx, dz);
         if (d < 0.75) {
-          if (zb.atkT <= 0) { zb.atkT = 0.8; this._damageUnit(u, zb.def.dmg); this.emit({ type: 'bite', x: u.x, z: u.z }); }
+          if (zb.atkT <= 0) {
+            zb.atkT = 0.8;
+            this._damageUnit(u, zb.def.dmg);
+            this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z });
+          }
         } else {
           this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
         }
@@ -1364,7 +1376,7 @@ export class Game {
         zb.atkT = 0.85;
         const b = this.buildings.find((o) => o.id === occId);
         if (b) {
-          this._damageBuilding(b, zb.def.dmg);
+          this._damageBuilding(b, zb.def.dmg, zb);
           // Shock fence: every bite bites back.
           if (b.def.zap) {
             this.damageZombie(zb, b.def.zap, b.cx, b.cz);

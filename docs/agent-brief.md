@@ -55,7 +55,9 @@ docs together.
 - Camera yaw stays fixed during gameplay.
 - Hold Space/B to build or upgrade.
 - Upgrades must work from all sides of a building footprint.
-- Army control is stance-only: Defend, Guard, Attack. No squad micro.
+- Army control is blended: squads fight automatically, but the player sets the
+  global stance. `Defend` holds the city line, `Guard` follows the hero, and
+  `Attack` hunts enemies and pushes hive nests. Do not add individual unit micro.
 - Campaign economy must be balanced against collectible gold.
 
 ## Key Files
