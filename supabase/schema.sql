@@ -34,8 +34,13 @@ add column if not exists username_set boolean not null default false;
 update public.profiles
 set handle = 'player_' || substr(replace(id::text, '-', ''), 1, 12),
     display_name = 'player_' || substr(replace(id::text, '-', ''), 1, 12)
-where username_set = false;
+where username_set = false
+  and (
+    handle is distinct from 'player_' || substr(replace(id::text, '-', ''), 1, 12)
+    or display_name is distinct from 'player_' || substr(replace(id::text, '-', ''), 1, 12)
+  );
 
+drop trigger if exists profiles_touch_updated_at on public.profiles;
 create trigger profiles_touch_updated_at
 before update on public.profiles
 for each row
@@ -54,6 +59,7 @@ create table if not exists public.player_stats (
   updated_at timestamptz not null default now()
 );
 
+drop trigger if exists player_stats_touch_updated_at on public.player_stats;
 create trigger player_stats_touch_updated_at
 before update on public.player_stats
 for each row
@@ -73,6 +79,7 @@ create table if not exists public.save_slots (
   check (length(slot_key) between 1 and 48)
 );
 
+drop trigger if exists save_slots_touch_updated_at on public.save_slots;
 create trigger save_slots_touch_updated_at
 before update on public.save_slots
 for each row
@@ -115,6 +122,7 @@ create table if not exists public.rooms (
 create index if not exists rooms_status_visibility_idx
 on public.rooms (status, visibility, updated_at desc);
 
+drop trigger if exists rooms_touch_updated_at on public.rooms;
 create trigger rooms_touch_updated_at
 before update on public.rooms
 for each row
@@ -135,6 +143,7 @@ create table if not exists public.room_players (
   unique (room_id, seat)
 );
 
+drop trigger if exists room_players_touch_updated_at on public.room_players;
 create trigger room_players_touch_updated_at
 before update on public.room_players
 for each row

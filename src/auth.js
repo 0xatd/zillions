@@ -54,6 +54,7 @@ export class AuthClient {
     this.enabled = false;
     this.ready = false;
     this.error = null;
+    this.reason = null;
   }
 
   get user() {
@@ -76,6 +77,7 @@ export class AuthClient {
       username,
       needsUsername: !!user && needsUsername(this.profile),
       error: this.error,
+      reason: this.reason,
       ...extra,
     };
   }
@@ -83,8 +85,10 @@ export class AuthClient {
   async init() {
     this.ready = false;
     this.error = null;
+    this.reason = null;
     if (!backendEnabled()) {
       this.ready = true;
+      this.reason = 'static';
       return this.status({ enabled: false, reason: 'static' });
     }
 
@@ -95,6 +99,8 @@ export class AuthClient {
     if (!response.ok) {
       this.ready = true;
       this.error = 'Cloud profile config is unavailable.';
+      this.enabled = false;
+      this.reason = 'config_error';
       return this.status({ enabled: false });
     }
 
@@ -102,6 +108,7 @@ export class AuthClient {
     if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) {
       this.ready = true;
       this.enabled = false;
+      this.reason = 'not_configured';
       return this.status({ enabled: false, reason: 'not_configured' });
     }
 
@@ -116,6 +123,7 @@ export class AuthClient {
       },
     });
     this.enabled = true;
+    this.reason = null;
 
     const { data, error } = await this.client.auth.getSession();
     if (error) this.error = error.message || 'Could not load cloud profile.';

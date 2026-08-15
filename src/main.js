@@ -63,7 +63,6 @@ class App {
       },
       onCast: () => this.tryCast(),
       onBell: () => { this.audio.init(); this.issue({ t: 'bell', p: this.myPlayer }); },
-      onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
@@ -79,22 +78,14 @@ class App {
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
-      onMinimap: () => {}, // camera is locked to the hero
       onContinue: () => this.continueGame(),
       onSignIn: () => this._signIn(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
-      onName: () => {},
       onLobbyOpen: () => this._openLobby(),
       onChatSend: (text) => this.lobby && this.lobby.sendChat(text),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
-      onAddFriend: async (code) => {
-        if (!this.lobby) return;
-        const r = await this.lobby.addFriend(code);
-        this.ui.showBanner(r.ok ? `🤝 ${r.name} added!` : `❌ ${r.why}`, r.ok ? '' : 'bad', 3000);
-        this._renderFriends();
-      },
       onLevelPick: (id) => this.showMenuBackdrop(id),
     });
 
@@ -229,8 +220,8 @@ class App {
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
     this.ui.showBanner(mode === 'survival'
-      ? `${level.name} — SURVIVAL. The nights never stop. A boss walks every fifth. How long can you last?`
-      : `${level.name} — survive ${FINAL_NIGHT} nights. ${level.boss.icon} ${level.boss.name} comes on the last.`, '', 4500);
+      ? `${level.name} — SURVIVAL. The waves never stop. A boss walks every fifth assault. How long can you last?`
+      : `${level.name} — hold the Keep through ${FINAL_NIGHT} waves. ${level.boss.icon} ${level.boss.name} comes with the final assault.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games) this._startTutorial();
@@ -368,9 +359,9 @@ class App {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD SPACE — your coins build it. Coins appear at dawn — ride through them!'],
-      [24, '🌙 The horde marches every night from the hive nests. Raze a nest by day and it never spawns again!'],
-      [36, '🔔 Ready early? Ride to the KEEP and press SPACE to ring the bell and start the night.'],
+      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it, even while enemies attack.'],
+      [24, '🌙 Hordes march from hive nests. Raze a nest and it stops sending future waves.'],
+      [36, '🔔 Ready early? Ride to the KEEP and press SPACE to ring the bell and call the next wave.'],
       [48, '⚔️ Squads are autonomous — press 1 to defend, 2 to follow you, 3 to hunt hives.'],
     ];
     this._tut = { steps, i: 0 };
@@ -388,7 +379,13 @@ class App {
       });
     } catch (err) {
       console.warn('auth init failed', err);
-      this.authStatus = { ready: true, enabled: false, signedIn: false, error: err.message || 'Cloud sign-in failed.' };
+      this.authStatus = {
+        ready: true,
+        enabled: false,
+        signedIn: false,
+        reason: 'config_error',
+        error: err.message || 'Cloud sign-in failed.',
+      };
       this.ui.setAccount(this.authStatus);
     }
   }
@@ -413,7 +410,7 @@ class App {
     } else if (status.enabled) {
       this.lobby = null;
     }
-    this.authStatus = this.auth.status({ error: status.error });
+    this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
   }
 
@@ -700,7 +697,7 @@ class App {
     this.lobby = new OnlineLobby({
       onChat: (m) => this.ui.lobbyChatAdd(m),
       onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row)),
-      onOnline: (map) => { this.ui.lobbyOnline(map.size); this._renderFriends(); },
+      onOnline: (map) => { this.ui.lobbyOnline(map.size); },
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onKnock: (sig) => this._onKnock(sig),
       onSignal: (sig) => this._onSignal(sig),
@@ -712,22 +709,11 @@ class App {
       this.ui.lobbySetMe(me);
       this.ui.lobbyChatFill(await this.lobby.loadChat());
       this.lobby.refreshGames();
-      await this.lobby.loadFriends();
-      this._renderFriends();
     } catch (e) {
       this.ui.lobbyStatus('❌ offline');
       this.ui.showBanner('❌ Lobby unreachable — solo and manual invite codes still work.', 'bad', 6000);
     }
     return this.lobby;
-  }
-
-  _renderFriends() {
-    if (!this.lobby || !this.lobby.me) return;
-    const canInvite = !!(this.lobby.game && this.mpRole === 'host');
-    this.ui.lobbyFriends(this.lobby.friends, this.lobby.online, canInvite, (f) => {
-      this.lobby.inviteFriend(f.id);
-      this.ui.showBanner(`📨 Invite sent to ${f.name}.`, '', 2500);
-    });
   }
 
   async createOnlineGame(visibility) {
@@ -740,7 +726,6 @@ class App {
     try {
       const game = await lobby.createGame({ visibility, level: this.ui.selectedLevel || 1, mode: this.ui.selectedMode || 'campaign' });
       this.ui.showSetup({ online: game, mode: game.mode });
-      this._renderFriends();
     } catch (e) {
       this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
       this.mpRole = null;
@@ -763,7 +748,6 @@ class App {
       peer.send({ t: 'lobby', n: this.peers.length + 1 });
       this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
       if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
-      this._renderFriends();
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
     peer.onClose = () => {
@@ -2160,20 +2144,23 @@ class App {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (k === ' ') {
         e.preventDefault();
-        // Thronefall Space — THE interact key: found the city, HOLD at a
-        // foundation to build, ring the bell AT THE KEEP, special by night.
+        // Thronefall Space — THE interact key: found the city, hold at a
+        // foundation to build, ring the bell at the Keep, special when fighting.
         if (this.game.phase === 'found') this._tryFound();
-        else if (this.game.phase === 'day' && !this.game.belling) {
+        else {
           const h = this.myHero();
           const target = h && !h.dead && this.game.buildTargetFor(h);
-          if (target) { /* hold-to-build — _updateHeroInput streams while held */ }
-          else if (h && !h.dead && this.game.hq && (h.x - this.game.hq.cx) ** 2 + (h.z - this.game.hq.cz) ** 2 < 81) {
+          if (target) {
+            // hold-to-build — _updateHeroInput streams while held
+          } else if (this.game.phase === 'day' && !this.game.belling && h && !h.dead && this.game.hq && (h.x - this.game.hq.cx) ** 2 + (h.z - this.game.hq.cz) ** 2 < 81) {
             this.issue({ t: 'bell', p: this.myPlayer });
+          } else if (this.game.isNight || this.game.belling) {
+            this.tryCast();
           } else {
             this.audio.deny();
-            this.ui.showBanner('⌨️ Hold SPACE at a foundation to build · ring the bell AT THE KEEP to start the night', '', 2600);
+            this.ui.showBanner('⌨️ Hold SPACE or B at a foundation to build · ring the bell at the Keep to call the next wave', '', 2600);
           }
-        } else this.tryCast();
+        }
       }
       else if (k === 'q') this.tryCast();
       else if (k === '1') this.issue({ t: 'stance', s: 'defend', p: this.myPlayer });
@@ -2212,10 +2199,10 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Thronefall hold-to-build: SPACE held at a foundation streams your gold
-    // (B works too). Space only pays by day, near a plot — night Space casts.
+    // Thronefall hold-to-build: SPACE held at a foundation streams your gold.
+    // B does the same thing and is useful when you want SPACE reserved for casts.
     const h = this.myHero();
-    const spacePays = this.keys.has(' ') && this.game && this.game.phase === 'day' && !this.game.belling
+    const spacePays = this.keys.has(' ') && this.game && this.game.phase !== 'found'
       && h && !h.dead && !!this.game.buildTargetFor(h);
     const pay = this.keys.has('b') || spacePays;
     if (pay !== this.lastPay) {
@@ -2797,9 +2784,9 @@ class App {
       }
       this.ui.showBranch(branchPlot);
 
-      // "Hold B" prompt while parked on something fundable by day.
+      // Build prompt while parked on something fundable.
       let hint = null;
-      if (mh && !mh.dead && this.game.phase === 'day' && !branchPlot) {
+      if (mh && !mh.dead && this.game.phase !== 'found' && !branchPlot) {
         const target = this.game.buildTargetFor(mh);
         if (target) {
           const { plot, nt } = target;
@@ -2807,7 +2794,7 @@ class App {
           const role = this._plotRole(plot, nt);
           hint = mh.payHold
             ? (this.game.gold < 1 ? '🪙 Purse empty — collect coins at dawn!' : `🪙 ${cost} to go…`)
-            : `<div>Hold <kbd>SPACE</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+            : `<div>Hold <kbd>SPACE</kbd> or <kbd>B</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
         }
       }
       this.ui.showBuildHint(hint);

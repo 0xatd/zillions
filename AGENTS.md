@@ -37,20 +37,16 @@ Do not turn this back into a generic RTS launcher.
 
 ## Current vs Next Loop
 
-The current shipped game still uses day, bell, night, and dawn phases.
+The current shipped game still uses day, bell, night, and dawn phases. Building
+and upgrading now stay available during waves.
 
-Alex's next preferred direction is to remove the explicit night/day concept:
+`docs/product-contract.md` owns the next loop. Current direction is holdout
+mission waves: waves attach to hive timers, attack-lane warnings, boss gates,
+rescues, extraction moments, or player bell taunts.
 
-- Waves arrive every fixed interval.
-- Building and upgrading can happen at any time.
-- Building during a wave is allowed but dangerous.
-- The job is to clear the map.
-- Primary objectives are: protect the Keep, raze all hive nests, then kill the
-  map boss or final counterattack.
-
-Do not half-migrate this by changing text only. A real migration must update the
-simulation, UI, tutorials, save summaries, stats labels, economy tests, and docs
-together.
+Do not half-migrate this by changing text only. A real migration must update
+simulation, UI, tutorials, save summaries, stats labels, economy tests, and
+docs together.
 
 ## Production Rules
 

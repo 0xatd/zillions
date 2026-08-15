@@ -18,6 +18,7 @@ const IDLE = 0, WANDER = 1, AGGRO = 2;
 let nextId = 1000;
 const getNextId = () => nextId;
 const setNextId = (v) => { nextId = v; };
+const snapNum = (v) => (Number.isFinite(v) ? v : 0);
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -64,6 +65,7 @@ export class Game {
 
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
+    this.messageSeq = 0;
 
     this.stats = { kills: 0, built: 0, lost: 0, coins: 0, nests: 0, heroDeaths: 0, bossKillT: null };
 
@@ -89,9 +91,9 @@ export class Game {
   snapshot() {
     return {
       v: 3, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
-      time: +this.time.toFixed(3), night: this.night, phase: this.phase, phaseT: +this.phaseT.toFixed(3),
-      belling: this.belling ? +this.bellT.toFixed(3) : -1,
-      gold: +this.gold.toFixed(3),
+      time: snapNum(this.time), night: this.night, phase: this.phase, phaseT: snapNum(this.phaseT),
+      belling: this.belling ? snapNum(this.bellT) : -1,
+      gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
       relics: [...this.relics],
@@ -99,24 +101,44 @@ export class Game {
       nightPlan: this.nightPlan ? { ...this.nightPlan } : null,
       stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
-      plots: this.plots.map((p) => ({ id: p.id, tier: p.tier, paid: +p.paid.toFixed(3), branch: p.branch })),
+      plots: this.plots.map((p) => ({ id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch })),
       buildings: this.buildings.map((b) => ({
-        id: b.id, p: b.plotId, x: b.x, z: b.z, hp: +b.hp.toFixed(1), g: b.gate ? 1 : 0,
+        id: b.id, p: b.plotId, x: b.x, z: b.z, hp: snapNum(b.hp), g: b.gate ? 1 : 0,
+        cd: snapNum(b.cooldown || 0), stun: snapNum(b.stunT || 0),
       })),
-      coins: this.coins.map((cn) => [+cn.x.toFixed(2), +cn.z.toFixed(2), cn.v]),
+      coins: this.coins.map((cn) => [snapNum(cn.x), snapNum(cn.z), cn.v]),
       units: this.units.filter((u) => !u.hero).map((u) => ({
-        id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
-        hp: +u.hp.toFixed(2), camp: u.camp || 0,
-        hx: +(u.holdX || u.x).toFixed(2), hz: +(u.holdZ || u.z).toFixed(2),
+        id: u.id, k: u.key, x: snapNum(u.x), z: snapNum(u.z),
+        hp: snapNum(u.hp), camp: u.camp || 0,
+        hx: snapNum(u.holdX || u.x), hz: snapNum(u.holdZ || u.z),
+        cd: snapNum(u.cooldown || 0), rt: snapNum(u.retargetT || 0),
+        facing: snapNum(u.facing || 0), target: u.target ? u.target.id : null,
+        targetNest: u.targetNest ? u.targetNest.id : null,
       })),
       heroes: this.heroes.map((h) => ({
-        id: h.id, k: h.key, x: +h.x.toFixed(3), z: +h.z.toFixed(3), hp: +h.hp.toFixed(1),
-        dead: !!h.dead, reviveT: +(h.reviveT || 0).toFixed(1),
-        level: h.level, xp: Math.round(h.xp), cd: +h.abilCd.toFixed(1),
+        id: h.id, k: h.key, x: snapNum(h.x), z: snapNum(h.z), hp: snapNum(h.hp),
+        dead: !!h.dead, reviveT: snapNum(h.reviveT || 0),
+        level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd),
+        atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0),
+        facing: snapNum(h.facing || 0), mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0),
+        sprint: !!h.sprint, pay: !!h.payHold, target: h.target ? h.target.id : null,
+        targetNest: h.targetNest ? h.targetNest.id : null,
+        stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
+        weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
         items: [...(h.items || [])],
         upgrades: { ...h.upgrades },
       })),
-      zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0]),
+      zombies: this.zombies.map((z) => [z.type, snapNum(z.x), snapNum(z.z), snapNum(z.hp), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0, {
+        id: z.id, dx: snapNum(z.dirX || 0), dz: snapNum(z.dirZ || 0),
+        timer: snapNum(z.timer || 0), atk: snapNum(z.atkT || 0),
+        anim: snapNum(z.phase || 0), hit: snapNum(z.hitFlash || 0),
+        stun: snapNum(z.stunT || 0), slow: snapNum(z.slowT || 0),
+        slowMul: snapNum(z.slowMul || 1), progress: snapNum(z.progressT || 0),
+        px: snapNum(z.px || 0), pz: snapNum(z.pz || 0),
+        retarget: snapNum(z.retarget || 0), stuck: snapNum(z.stuckT || 0),
+        burst: z.burst ? 1 : 0, targetU: z.targetU ? z.targetU.id : null,
+        spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0),
+      }]),
     };
   }
 
@@ -136,7 +158,11 @@ export class Game {
       if (this.nests[i]) { this.nests[i].hp = hp; this.nests[i].alive = !!alive; }
     });
     this.nightPlan = snap.nightPlan ? { ...snap.nightPlan } : null;
-    this.stats = { nests: 0, heroDeaths: 0, bossKillT: null, ...snap.stats };
+    const stats = { kills: 0, built: 0, lost: 0, coins: 0, nests: 0, heroDeaths: 0, bossKillT: null, ...snap.stats };
+    this.stats = {
+      kills: stats.kills, built: stats.built, lost: stats.lost, coins: stats.coins,
+      nests: stats.nests, heroDeaths: stats.heroDeaths, bossKillT: stats.bossKillT,
+    };
 
     for (const ps of snap.plots) {
       const p = this.plots.find((o) => o.id === ps.id);
@@ -147,40 +173,100 @@ export class Game {
       if (!plot) continue;
       const def = this.tierDef(plot, plot.tier);
       this._addBuilding(plot, bs.x, bs.z, def, !!bs.g, bs.id, bs.hp);
+      const b = this.buildings[this.buildings.length - 1];
+      b.cooldown = bs.cd || 0;
+      b.stunT = bs.stun || 0;
     }
     this.hq = this.buildings.find((b) => b.kind === 'hq');
     this.coins = snap.coins.map(([x, z, v]) => ({ id: nextId++, x, z, v }));
+
+    const actorsById = new Map();
+    const zombiesById = new Map();
+    const pendingActorTargets = [];
+    const pendingZombieTargets = [];
 
     for (const us of snap.units) {
       const u = this._spawnUnit(us.k, us.x, us.z, us.camp || null);
       u.id = us.id; // keep saved ids so they can't collide with future spawns
       u.hp = us.hp;
       u.holdX = us.hx; u.holdZ = us.hz;
+      u.cooldown = us.cd || 0;
+      u.retargetT = us.rt || 0;
+      u.facing = us.facing || 0;
+      actorsById.set(u.id, u);
+      pendingActorTargets.push([u, us]);
     }
     for (const hs of snap.heroes) {
       const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [], upgrades: hs.upgrades || {} });
       if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
       h.abilCd = hs.cd;
+      h.cooldown = hs.atkCd || 0;
+      h.retargetT = hs.rt || 0;
+      h.facing = hs.facing || 0;
+      h.mx = hs.mx || 0;
+      h.mz = hs.mz || 0;
+      h.sprint = !!hs.sprint;
+      h.payHold = !!hs.pay;
+      h.stealth = !!hs.stealth;
+      h.weaveT = hs.weaveT || 0;
+      h.weaveDmg = hs.weaveDmg || 0;
+      h.weaveKey = hs.weaveKey || 0;
+      h.hasteT = hs.hasteT || 0;
+      h.hasteMult = hs.hasteMult || 1;
+      actorsById.set(h.id, h);
+      pendingActorTargets.push([h, hs]);
       if (hs.dead) {
         h.dead = true;
         h.reviveT = hs.reviveT;
         this.units = this.units.filter((u) => u !== h);
       }
     }
-    for (const [type, x, z, hp, state, wave, boss, enraged] of snap.zombies) {
+    for (const [type, x, z, hp, state, wave, boss, enraged, meta = {}] of snap.zombies) {
+      let zb = null;
       if (boss) {
         this._spawnBoss(0);
-        const zb = this.boss;
+        zb = this.boss;
         zb.x = x; zb.z = z; zb.hp = hp;
         if (enraged) {
           zb.enraged = true;
           zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
         }
-        continue;
+      } else {
+        zb = this._spawnZombie(type, x, z, state === 2, !!wave);
+        if (zb) { zb.hp = hp; zb.state = state; }
       }
-      const zb = this._spawnZombie(type, x, z, state === 2, !!wave);
-      if (zb) { zb.hp = hp; zb.state = state; }
+      if (!zb) continue;
+      if (meta.id) zb.id = meta.id;
+      zb.dirX = meta.dx ?? zb.dirX;
+      zb.dirZ = meta.dz ?? zb.dirZ;
+      zb.timer = meta.timer ?? zb.timer;
+      zb.atkT = meta.atk ?? zb.atkT;
+      zb.phase = meta.anim ?? zb.phase;
+      zb.hitFlash = meta.hit ?? zb.hitFlash;
+      zb.stunT = meta.stun || 0;
+      zb.slowT = meta.slow || 0;
+      zb.slowMul = meta.slowMul || 1;
+      zb.progressT = meta.progress || 0;
+      zb.px = meta.px || 0;
+      zb.pz = meta.pz || 0;
+      zb.retarget = meta.retarget || 0;
+      zb.stuckT = meta.stuck || 0;
+      zb.burst = !!meta.burst;
+      if (zb.boss) {
+        zb.spawnT = meta.spawnT ?? zb.spawnT;
+        zb.roarT = meta.roarT ?? zb.roarT;
+      }
+      zombiesById.set(zb.id, zb);
+      pendingZombieTargets.push([zb, meta]);
+    }
+
+    for (const [actor, saved] of pendingActorTargets) {
+      actor.target = saved.target == null ? null : zombiesById.get(saved.target) || null;
+      actor.targetNest = saved.targetNest == null ? null : this.nests[saved.targetNest] || null;
+    }
+    for (const [zb, meta] of pendingZombieTargets) {
+      zb.targetU = meta.targetU == null ? null : actorsById.get(meta.targetU) || null;
     }
 
     this.rng.setState(snap.rng);
@@ -219,7 +305,7 @@ export class Game {
     this._planNight();
     this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
     const founder = this.heroes[p];
-    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! Collect coins, hold B at foundations — night is coming.`, 'info');
+    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! Collect coins, hold B at foundations, and keep building under pressure.`, 'info');
   }
 
   _scatterCreeps() {
@@ -249,7 +335,10 @@ export class Game {
 
   // ---------- helpers ----------
 
-  msg(text, kind = 'info') { this.messages.push({ text, kind, t: this.time }); }
+  msg(text, kind = 'info') {
+    this.messages.push({ seq: this.messageSeq++, text, kind, t: this.time });
+    if (this.messages.length > 80) this.messages.splice(0, this.messages.length - 80);
+  }
   emit(e) { this.events.push(e); }
 
   get day() { return this.night; }
@@ -329,12 +418,12 @@ export class Game {
     return best ? { plot: best, nt: bestNt, payPoint: bestPoint } : null;
   }
 
-  // Thronefall building: walk to a foundation and HOLD the build key — coins
+  // Thronefall building: walk to a foundation and HOLD the build key. Coins
   // fly from your purse into the plot one by one until it rises. Partial
   // payments persist, so letting go never wastes anything.
   _updatePlots(dt) {
     if (this.over) return;
-    if (this.phase !== 'day') return; // no building at night — fight!
+    if (this.phase === 'found') return;
     for (const h of this.heroes) {
       if (h.dead || !h.payHold) continue;
       const target = this.buildTargetFor(h);
@@ -767,7 +856,7 @@ export class Game {
   }
 
   heroUltDamageMult(h) {
-    return 1 + ((h.upgrades && h.upgrades.ult) || 0) * 0.25;
+    return 1;
   }
 
   heroAuraRadius(h) {
@@ -824,7 +913,7 @@ export class Game {
       },
       {
         key: 'ult', icon: h.def.ability.icon, name: `${h.def.ability.name} Damage`,
-        desc: '+25% special damage per rank.',
+        desc: 'Raises the special damage tier.',
       },
     ].map((choice) => ({ ...choice, rank: h.upgrades[choice.key] || 0, max: HERO_UPGRADE_MAX }));
   }
@@ -889,7 +978,7 @@ export class Game {
     if (h.abilCd > 0) { this.emit({ type: 'deny' }); return; }
     const r = abilityRank(h.level, h.upgrades) - 1;
     const ultMult = this.heroUltDamageMult(h);
-    h.abilCd = ab.cd * (1 - h.mods.cdr);
+    h.abilCd = ab.cd * Math.max(0.15, 1 - h.mods.cdr);
 
     switch (ab.cast) {
       case 'aoeDmg': {
@@ -954,7 +1043,7 @@ export class Game {
   }
 
   _updateHeroOne(h, dt) {
-    if (h.abilCd > 0) h.abilCd -= dt;
+    if (h.abilCd > 0) h.abilCd = Math.max(0, h.abilCd - dt);
     if (h.dead) {
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
@@ -1536,10 +1625,8 @@ export class Game {
 
   _updateUnits(dt) {
     for (const u of this.units) {
-      if (u.dead || u.hero) { if (u.hero) { u.cooldown -= dt; u.retargetT -= dt; } } else {
-        u.cooldown -= dt;
-        u.retargetT -= dt;
-      }
+      u.cooldown = Math.max(0, (u.cooldown || 0) - dt);
+      u.retargetT = Math.max(0, (u.retargetT || 0) - dt);
       if (u.dead) continue;
 
       if (!u.hero) {
@@ -1683,7 +1770,7 @@ export class Game {
   _updateTowers(dt) {
     for (const b of this.buildings) {
       if (!b.alive || b.kind !== 'tower' || !b.def.dmg) continue;
-      b.cooldown -= dt;
+      b.cooldown = Math.max(0, (b.cooldown || 0) - dt);
       if (b.stunT > 0) { b.stunT -= dt; continue; }
       if (b.cooldown > 0) continue;
       const r2 = b.def.range * b.def.range;

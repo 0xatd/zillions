@@ -15,23 +15,19 @@ signs in with Google, claims a public username, picks a hero, founds a city at a
 flagged site, funds pre-planned plots with gold, defends the Keep, razes hive
 nests, and clears campaign maps.
 
-The current shipped combat loop still has the old day/bell/night phase model:
-the player builds during day, rings the bell at the Keep, fights a wave, then
-collects dawn income. Do not pretend this has already been migrated.
+The current shipped combat loop still has the old day/bell/night phase model,
+but building and upgrading now stay available during waves. The player rings
+the bell at the Keep, fights a wave, then collects dawn income. Do not pretend
+this has fully migrated to holdout mission waves.
 
 ## Next Gameplay Direction
 
-Alex's current preferred direction is to remove the explicit day/night concept.
-The intended next loop is continuous siege:
+`docs/product-contract.md` owns the next loop. Current direction is holdout
+mission waves: waves are tied to hive timers, attack-lane warnings, boss gates,
+rescues, extraction moments, or player taunts. The player should be able to
+build and upgrade during pressure.
 
-- Waves arrive every fixed interval.
-- Building and upgrading can happen at any time.
-- Building during a wave is allowed but dangerous.
-- The core job is to clear the map, not survive a fixed number of nights.
-- The win path is: protect the Keep, raze all hive nests, then defeat the map
-  boss or final counterattack.
-
-Do not half-migrate this by only changing copy. A real migration must update the
+Do not half-migrate this by only changing copy. A real migration must update
 simulation, UI, tutorials, save summaries, stats labels, balance checks, and
 docs together.
 

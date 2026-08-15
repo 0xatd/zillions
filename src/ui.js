@@ -3,9 +3,9 @@
 // In-game: Thronefall HUD — gold, current wave phase, and one big contextual
 // action button.
 const PORTRAITS = {
-  alexander: 'assets/heroes/images/alexander_portrait.png',
-  scott: 'assets/heroes/images/scott_barbarian.png',
-  danny: 'assets/heroes/images/danny_assassin.png',
+  alexander: 'assets/heroes/portraits/alexander_256.webp',
+  scott: 'assets/heroes/portraits/scott_256.webp',
+  danny: 'assets/heroes/portraits/danny_256.webp',
 };
 import {
   PLOT_KINDS, DIFFICULTY, FINAL_NIGHT, LEVELS, ITEMS,
@@ -94,12 +94,12 @@ export class UI {
 
         <div id="screen-main" class="mainmenu">
           <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Raise a city by day. Hold it by night. Survive ${FINAL_NIGHT} nights.</p>
+          <p class="gamesub">Raise a city under pressure. Hold the Keep through ${FINAL_NIGHT} waves.</p>
           <div class="menustack">
             <button class="menubtn primary" id="m-play">⚔️ &nbsp;Campaign</button>
             <div id="m-continuerow"></div>
-            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless nights</small></button>
-            <button class="menubtn" id="m-online">🌐 &nbsp;Online Lobby <small>games · chat · friends</small></button>
+            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless waves</small></button>
+            <button class="menubtn" id="m-online">🌐 &nbsp;Online Lobby <small>games · chat</small></button>
             <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
           </div>
           <div class="profilerow">
@@ -151,16 +151,10 @@ export class UI {
                   <span class="joincode"><input id="l-joincode" maxlength="6" placeholder="CODE"><button class="tbtn" id="l-joinbtn">Join</button></span>
                 </div>
                 <div id="l-games" class="lobbygames"></div>
-                <div class="mphint">Public games appear here for everyone. Private games are joined by code or friend invite. <a href="#" id="l-manual">Manual invite codes</a> (no internet lobby needed).</div>
+                <div class="mphint">Public games appear here for everyone. Private games are joined by code. <a href="#" id="l-manual">Manual invite codes</a> work without the internet lobby.</div>
               </div>
               <div id="l-tab-lore" class="ltabpane hidden"></div>
               <div id="l-tab-tips" class="ltabpane hidden"></div>
-            </div>
-            <div class="lobbyfriends">
-              <div class="steplabel">Friends</div>
-              <div class="friendcode">Your code: <b id="l-mycode">…</b></div>
-              <div class="lobbychatrow"><input id="l-friendcode" maxlength="6" placeholder="Friend's code"><button class="tbtn" id="l-friendadd">Add</button></div>
-              <div id="l-friends" class="friendlist"></div>
             </div>
           </div>
         </div>
@@ -172,13 +166,13 @@ export class UI {
           </div>
           <div class="howto">
             <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
-            <div><b>🪙 One resource: gold.</b> Your buildings pay coins every dawn. Ride through coins to collect them.</div>
-            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> — coins fly from your purse until it rises (a ghost shows what will be built). Same to upgrade. Top-tier towers let you choose a doctrine.</div>
-            <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
-            <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
+            <div><b>🪙 One resource: gold.</b> Your buildings pay coins at dawn. Ride through coins to collect them.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> or <b>B</b> — coins fly from your purse until it rises. You can build during a wave.</div>
+            <div><b>🌙 Hordes attack from hive beacons.</b> Build walls and towers on the threatened side. Destroy hives to reduce future waves.</div>
+            <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and call the next wave. In combat, SPACE fires your hero's special unless you are on a foundation. Q always casts.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
-            <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
+            <div><b>☠️ Survive wave ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
           </div>
         </div>
 
@@ -229,7 +223,6 @@ export class UI {
     q('#l-create-pub').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('public');
     q('#l-create-priv').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('private');
     q('#l-joinbtn').onclick = () => this.cb.onJoinCode && this.cb.onJoinCode(q('#l-joincode').value);
-    q('#l-friendadd').onclick = () => this.cb.onAddFriend && this.cb.onAddFriend(q('#l-friendcode').value);
     q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
@@ -250,7 +243,7 @@ export class UI {
       card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
       card.dataset.key = key;
       card.innerHTML = `
-        <img class="hface" src="${PORTRAITS[key]}" onerror="this.remove()" alt="">
+        <img class="hface" data-src="${PORTRAITS[key]}" loading="lazy" decoding="async" onerror="this.remove()" alt="">
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
@@ -312,25 +305,33 @@ export class UI {
     }
   }
 
+  _loadHeroPortraits() {
+    for (const img of this.root.querySelectorAll('#herorow img[data-src]')) {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    }
+  }
+
   showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._showScreen('setup');
+    this._loadHeroPortraits();
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
       : coop ? 'Co-op — one city, one hero each'
-      : mode === 'survival' ? '💀 Survival — how many nights can you last?'
+      : mode === 'survival' ? '💀 Survival — how many waves can you last?'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
     this._buildLevelRow(this._campaignCleared || 0, mode === 'survival');
     this.root.querySelector('#s-start').textContent = mode === 'survival'
       ? '▶  START — SURVIVE AS LONG AS YOU CAN'
-      : `▶  START — SURVIVE ${FINAL_NIGHT} NIGHTS`;
+      : `▶  START — SURVIVE ${FINAL_NIGHT} WAVES`;
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
       mp.dataset.init = '1';
-      mp.innerHTML = `<div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> or invite friends from the lobby.</span></div><div id="mp-sub"></div>`;
+      mp.innerHTML = `<div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div><div id="mp-sub"></div>`;
       return;
     }
     if (coop && !mp.dataset.init) {
@@ -396,6 +397,7 @@ export class UI {
   // ---------- in-game HUD ----------
 
   initHUD(game, p) {
+    this.msgSeen = 0;
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
     for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
@@ -404,7 +406,7 @@ export class UI {
     const h = game.heroes[p];
     const d = h.def;
     const face = this.root.querySelector('#a-face');
-    face.innerHTML = PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
+    face.innerHTML = PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
     this.root.querySelector('#a-name').textContent = d.name;
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
@@ -487,7 +489,7 @@ export class UI {
 
       this._updateUpgradePanel(game, h);
 
-      // The one big contextual button: found the city, bell by day, special by night.
+      // The one big contextual button: found the city, call a wave, or cast.
       const big = q('#bigaction');
       const ab = h.def.ability;
       if (game.phase === 'found') {
@@ -499,15 +501,15 @@ export class UI {
       } else if (game.phase === 'day' && !game.belling) {
         this._bigMode = 'bell';
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE at the Keep</small></span>`;
+        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Call the next wave<small>SPACE at the Keep</small></span>`;
         big.disabled = false;
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
-        const ultBonus = Math.round(((h.upgrades?.ult || 0) * 25));
+        const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT +${ultBonus}% · SPACE</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
@@ -515,8 +517,10 @@ export class UI {
 
     // Messages feed.
     const feed = q('#messages');
-    while (this.msgSeen < game.messages.length) {
-      const m = game.messages[this.msgSeen++];
+    for (const m of game.messages) {
+      const seq = m.seq ?? 0;
+      if (seq < this.msgSeen) continue;
+      this.msgSeen = seq + 1;
       const div = document.createElement('div');
       div.className = 'msg ' + m.kind;
       div.textContent = m.text;
@@ -649,14 +653,15 @@ export class UI {
     const usernameForm = this.root.querySelector('#a-username-form');
     const usernameInput = this.root.querySelector('#a-username');
     const needsUsername = !!state.signedIn && !!state.needsUsername;
+    const offlineAllowed = !state.enabled && state.reason === 'static';
     if (status) {
       if (!state.ready) status.textContent = 'Checking account…';
       else if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
       else if (state.signedIn) status.textContent = `Signed in as @${state.username || state.name || 'Commander'}.`;
-      else if (!state.enabled) status.textContent = 'Cloud sign-in is not available in this build.';
+      else if (offlineAllowed) status.textContent = 'Static dev build. Continue offline to test locally.';
+      else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. Check the deployment auth config.';
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
-    const offlineAllowed = !state.enabled && state.reason === 'static';
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
@@ -908,27 +913,6 @@ export class UI {
         <button class="tbtn gjoin">Join</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gjoin').onclick = () => onJoin(g);
-      box.appendChild(row);
-    }
-  }
-
-  lobbyFriends(friends, online, canInvite, onInvite) {
-    const box = this.root.querySelector('#l-friends');
-    if (!box) return;
-    if (!friends.length) {
-      box.innerHTML = '<div class="mphint">Trade commander codes with your squad to add each other.</div>';
-      return;
-    }
-    box.innerHTML = '';
-    for (const f of friends) {
-      const isOn = online.has(f.id);
-      const row = document.createElement('div');
-      row.className = 'friendrow';
-      row.innerHTML = `<span class="fdot ${isOn ? 'on' : ''}"></span><span class="fname"></span><span class="fcode">${f.code}</span>` +
-        (canInvite && isOn ? '<button class="tbtn finvite">Invite</button>' : '');
-      row.querySelector('.fname').textContent = f.name;
-      const btn = row.querySelector('.finvite');
-      if (btn) btn.onclick = () => onInvite(f);
       box.appendChild(row);
     }
   }

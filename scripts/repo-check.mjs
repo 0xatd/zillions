@@ -64,6 +64,12 @@ assert.ok(readme.includes('GitHub repo metadata should point to the production g
 
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
+assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
+
+const contract = read('docs/product-contract.md');
+assert.ok(contract.includes('holdout mission waves'), 'product contract must own the holdout-wave direction');
+assert.ok(contract.includes('bell becomes optional pressure control'), 'product contract must keep bell as optional pressure control');
+assert.ok(read('src/ui.js').includes('assets/heroes/portraits/'), 'runtime hero UI must use small portrait assets');
 
 const heroPalettes = {
   alexander: { color: 0x2f8f46, trim: 0xf3c53d },

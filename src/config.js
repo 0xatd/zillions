@@ -178,7 +178,7 @@ export function waveForNight(night, mult) {
 
 // ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
 // The whole kit, Thronefall-simple: you steer, your weapon fires itself, an
-// aura hums around you, and SPACE at night fires the special.
+// aura hums around you, and SPACE/Q fire the special when not funding a plot.
 // Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
 export const HERO_MAX_LEVEL = 10;

@@ -13,9 +13,9 @@ gold while hostile hive territory closes in around the map.
 - Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
 
 The current live build still uses a day, bell, night, and dawn loop. The next
-intended migration is continuous siege: waves arrive on timers, building is
-always available but dangerous, and the job is to clear the map by razing hive
-nests and killing the boss while protecting the Keep.
+loop is defined in `docs/product-contract.md`: holdout mission waves tied to
+hive timers, attack lanes, boss gates, rescues, extraction moments, or player
+bell taunts. Building should stay available during pressure.
 
 The production game runs on Vercel at `https://zillions.taborlin.co`. Static
 local play remains as a development fallback, but production identity is
@@ -40,23 +40,18 @@ Read `docs/agent-brief.md` before review or implementation work.
 Current shipped loop:
 
 - Found a city at a flagged site.
-- Build and upgrade by standing near plots and holding Space/B.
+- Build and upgrade by standing near plots and holding Space/B. This now works
+  during waves too.
 - Ring the bell at the Keep when ready.
 - Fight the wave.
 - Collect dawn income and repair.
 - Win campaign maps by surviving the final night or razing every hive nest.
 
-Next intended loop:
-
-- Remove explicit night/day as a player-facing concept.
-- Spawn waves every fixed interval.
-- Let the player build and upgrade at any time.
-- Make the main objective clear the map: protect the Keep, raze all hive nests,
-  then defeat the boss or final counterattack.
-
-Do not ship a partial migration that only changes copy. The simulation, UI,
-tutorials, stats labels, save summaries, balance checks, and docs must move
-together.
+Next intended loop lives in `docs/product-contract.md`. In short: keep waves,
+attach them to mission/world events, and make the objective read like a holdout
+defense mission. Do not ship a partial migration that only changes copy. The
+simulation, UI, tutorials, stats labels, save summaries, balance checks, and
+docs must move together.
 
 Serve the repo locally for static development:
 
@@ -81,17 +76,17 @@ behind them, gold mines wait on the ore veins, and a fully **closed** rampart
 circles it all. The only ways in are the four gates, each flanked by a pair
 of tower plots. Chokepoints, by design.
 
-- **Days are untimed.** Collect the coins your buildings paid out at dawn,
-  then walk to a glowing foundation and **hold Space** — coins arc out of
+- **Build under pressure.** Collect the coins your buildings paid out at dawn,
+  then walk to a glowing foundation and **hold Space or B**. Coins arc out of
   your purse one by one into the coin slots above the plot while a ghost
-  shows the building to come (partial payments persist). Hold Space beside
-  a built structure to upgrade it. Top-tier towers make you
+  shows the building to come. Partial payments persist. Hold beside a built
+  structure to upgrade it. Top-tier towers make you
   choose a doctrine: ballista (single-target sniper) or flame (splash).
 - **Ring the bell** (Space) when ready — night falls, and the horde marches
   out of its hive nests (red-beaconed all day). Night ends when the wave dies.
-- **Raze the hives.** Nests are guarded but destroyable — attack one by day
-  and it never spawns again. Raze every nest on a campaign map and the land
-  is won outright, boss or no boss.
+- **Raze the hives.** Nests are guarded but destroyable. Destroy one and it
+  never spawns again. Raze every nest on a campaign map and the land is won
+  outright, boss or no boss.
 - **Barriers are bought whole.** Each rampart segment is ONE purchase at its
   gate — pay once and the entire stretch rises, never piece by piece.
   Upgrade the same way: Razorwire Fence → Plasteel Barricade → then choose
@@ -259,12 +254,14 @@ supabase/schema.sql     Zillions Supabase schema and RLS
 src/utils.js            Shared helpers
 vendor/three.module.js  Vendored Three.js
 assets/heroes/          Generated hero portraits and cinematic clips
+assets/heroes/portraits Small runtime hero portraits for fast first load
 assets/audio/           Generated audio assets and manifests
 docs/product-contract.md Product source of truth for agents
 docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
+scripts/sim-determinism-check.mjs  Headless deterministic sim replay check
 ```
 
 ## Tech Notes
@@ -272,7 +269,8 @@ scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
 - Three.js r160 is vendored in `vendor/`.
 - The terrain is a custom flat-shaded mesh with per-tile vertex colors.
 - Zombies are instanced meshes. This keeps large hordes fast.
-- Zombies use a multi-source Dijkstra flow field. Player units use A*.
+- Zombies use a multi-source Dijkstra flow field. Player squads steer through
+  stance goals and local movement.
 - The game uses GPU particles for blood, dust, muzzle flashes, and smoke.
 - Lighting uses soft shadows, ACES tone mapping, and a day/night cycle.
 - The simulation runs at a fixed 30 Hz step. Rendering is separate.

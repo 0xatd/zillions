@@ -75,7 +75,6 @@ export class OnlineLobby {
     this.cb = cb; // {onChat, onGames, onOnline, onInvite, onKnock, onSignal, onError}
     this.sb = null;
     this.me = null;          // {id, code, name}
-    this.friends = [];
     this.online = new Map(); // playerId -> name (lobby presence)
     this.game = null;        // the game row we host or joined
     this.gameChan = null;
@@ -307,28 +306,6 @@ export class OnlineLobby {
     this.signal({ t: 'knock', name: this.me.name });
   }
 
-  // ---------- friends ----------
-
-  async addFriend(code) {
-    return { ok: false, why: 'Friends are not enabled on the Zillions account schema yet.' };
-  }
-
-  async loadFriends() {
-    this.friends = [];
-    return this.friends;
-  }
-
-  // Ping a friend's personal channel with a join-me invite.
-  async inviteFriend(friendId) {
-    if (!this.game) return;
-    const ch = this.sb.channel('zl-user-' + friendId);
-    await new Promise((resolve) => ch.subscribe((s) => s === 'SUBSCRIBED' && resolve()));
-    ch.send({
-      type: 'broadcast', event: 'invite',
-      payload: { gameId: this.game.id, joinCode: this.game.join_code, fromName: this.me.name, mode: this.game.mode, level: this.game.level },
-    });
-    setTimeout(() => this.sb.removeChannel(ch), 3000);
-  }
 }
 
 // The lobby is also a place to read about the world.
@@ -349,5 +326,5 @@ export const TIPS = [
   '⚔️ Press 1 at the gate before the wave hits — an army standing WITH you fights twice as well.',
   '⛏️ Gold mines pay double a manor — and the dead know it. Guard tower first, mine second.',
   '💀 In Survival, the horde never stops growing. Every night you survive is the record you\'ll brag about.',
-  '🤝 Add friends with their commander code — invite them straight into your war from the lobby.',
+  '🔐 Private rooms use join codes. Share the code with the commanders you want in the run.',
 ];

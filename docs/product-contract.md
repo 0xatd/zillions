@@ -23,9 +23,10 @@ Use the Thronefall-style city-defense direction as the gameplay base:
   A campaign level should start with enough gold for a real opening choice, and
   income upgrades should pay back before the 10-night level is effectively over.
 - Untimed day planning.
+- Building and upgrading can continue during wave pressure.
 - Player rings the bell when ready.
 - Hordes attack from visible hive nests.
-- Hive nests can be razed by day.
+- Hive nests can be razed.
 - Camps raise troops automatically.
 - No individual army micro. Squads are autonomous, but the player sets the
   global army stance: defend city, follow the hero, or hunt outward toward
@@ -42,7 +43,8 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 The live game still uses explicit phases:
 
 1. The player founds a city at a flagged site.
-2. Day is untimed. The player collects coins, builds, upgrades, and razes hives.
+2. The player collects coins, builds, upgrades, and razes hives. Building and
+   upgrading are available during waves.
 3. The player rings the bell at the Keep.
 4. A night wave attacks from visible hive nests.
 5. Dawn pays income, repairs ruins, and advances the run.
@@ -52,15 +54,21 @@ all hive nests. Survival mode currently counts nights survived.
 
 ## Next Gameplay Direction
 
-Alex's current direction is to remove the explicit night/day concept. The best
-target loop is continuous siege:
+Alex's current direction is holdout mission waves, not day/night phases. This
+should feel closer to classic StarCraft and Warcraft defense missions.
 
-- Waves arrive on fixed timers.
-- The player can build and upgrade at any time.
-- Building during a wave is allowed but creates real risk.
-- The objective is to clear the map, not wait through a fixed night count.
-- The primary win path is protect the Keep, raze all hive nests, then kill the
-  map boss or final counterattack.
+Target loop:
+
+- Waves are tied to mission and world events: hive pulse timers, lane warnings,
+  rescue or extraction moments, boss health gates, and player taunts.
+- The player can build, repair, upgrade, fight, and move at any time.
+- Building during pressure is allowed. It should be useful but risky.
+- The bell becomes optional pressure control. It can call the next wave early,
+  taunt hives, or trade higher danger for bonus gold and XP.
+- The HUD must show the next wave reason, timer, lane, and threat source.
+- Destroying hives reduces future pressure from that direction.
+- Mission goals can be hold the Keep for a duration, raze all hives, escort or
+  rescue a target, or survive a final boss counterattack.
 
 Do not do a copy-only migration. If this change starts, update the simulation,
 UI, tutorial, save summaries, stats labels, balance checks, and this contract
