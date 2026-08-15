@@ -71,6 +71,19 @@ assert.ok(contract.includes('holdout mission waves'), 'product contract must own
 assert.ok(contract.includes('bell becomes optional pressure control'), 'product contract must keep bell as optional pressure control');
 assert.ok(read('src/ui.js').includes('assets/heroes/portraits/'), 'runtime hero UI must use small portrait assets');
 
+const schema = read('supabase/schema.sql');
+assert.ok(schema.includes('public.lobby_chat'), 'schema must define Supabase-backed global lobby chat');
+assert.ok(schema.includes('public.friendships'), 'schema must define real friend requests/friendships');
+assert.ok(schema.includes("channel text not null default 'room'"), 'room_chat must separate room and in-game chat channels');
+assert.ok(schema.includes('room_chat_read_member'), 'room chat must be member-scoped, not readable by every authenticated user');
+const online = read('src/online.js');
+assert.ok(!online.includes('sendLobbyChat'), 'signed-in lobby chat must not use the unauthenticated Blob lobby route');
+assert.ok(online.includes("from('lobby_chat')"), 'online lobby must read/write Supabase lobby_chat');
+assert.ok(online.includes("from('friendships')"), 'online lobby must read/write Supabase friendships');
+const ui = read('src/ui.js');
+assert.ok(ui.includes('id="gamechat"'), 'UI must expose in-game team chat');
+assert.ok(ui.includes('id="l-friends"'), 'UI must expose friends list');
+
 const heroPalettes = {
   alexander: { color: 0x2f8f46, trim: 0xf3c53d },
   danny: { color: 0x2468c9, trim: 0x111318 },

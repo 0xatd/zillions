@@ -544,19 +544,28 @@ body::after {
 /* ---------- online lobby ---------- */
 .setup.lobby { width: min(1160px, calc(100vw - 32px)); }
 .lobbyme { margin-left: auto; font-size: 13px; opacity: 0.85; }
+.lobbycode { font-size: 11px; opacity: 0.55; font-family: monospace; }
 .lobbyonline { font-size: 12px; color: var(--good); }
 .lobbygrid {
-  display: grid; grid-template-columns: 280px 1fr; gap: 14px;
+  display: grid; grid-template-columns: 280px minmax(360px, 1fr) 240px; gap: 14px;
   min-height: 420px; max-height: calc(100vh - 160px);
 }
-.lobbychat { display: flex; flex-direction: column; background: rgba(0,0,0,0.28); border-radius: 10px; padding: 10px; }
+.lobbychat,
+.lobbyfriends,
+.roomchat {
+  display: flex; flex-direction: column; background: rgba(0,0,0,0.28);
+  border-radius: 10px; padding: 10px; min-height: 0;
+}
 .lobbychatlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; min-height: 0; }
 .chatmsg { line-height: 1.45; }
 .chatwho { color: var(--gold); font-weight: 700; }
 .chatwho::after { content: ':'; }
 .chatwhen { opacity: 0.35; font-size: 10px; margin-left: 6px; }
 .lobbychatrow { display: flex; gap: 6px; margin-top: 8px; }
-.lobbychatrow input {
+.lobbychatrow input,
+.friendadd input,
+.roomchatrow input,
+.gamechatrow input {
   flex: 1; min-width: 0; background: rgba(0,0,0,0.4); color: #e8e6df;
   border: 1px solid var(--panel-border); border-radius: 7px; padding: 6px 8px; font-size: 12.5px; font-family: inherit;
 }
@@ -576,6 +585,34 @@ body::after {
   border: 1px solid var(--panel-border); border-radius: 7px; padding: 5px 8px; font-family: monospace; font-size: 13px;
 }
 .lobbygames { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.friendshead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; color: var(--gold); }
+.friendshead span { color: #e8e6df; opacity: 0.55; font-size: 11px; }
+.friendadd,
+.roomchatrow,
+.gamechatrow { display: flex; gap: 6px; margin-top: 8px; }
+.friendlist { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.friendrow {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border);
+  border-radius: 8px; font-size: 12.5px;
+}
+.friendmeta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.friendmeta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friendmeta small { opacity: 0.55; font-size: 10.5px; }
+.friendactions { display: flex; gap: 4px; }
+.friendactions .tbtn { width: 26px; height: 26px; padding: 0; }
+.roomchat { margin-top: 10px; max-height: 190px; }
+.roomchatlog { min-height: 86px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.gamechat {
+  position: absolute; left: 14px; bottom: 164px; z-index: 45; width: min(340px, calc(100vw - 28px));
+  pointer-events: none;
+}
+.gamechatlog {
+  max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 10px; background: rgba(18,22,28,0.66); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px; font-size: 12.5px; text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+.gamechatrow { pointer-events: auto; }
 .gamerow {
   display: flex; gap: 10px; align-items: center;
   background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border);
@@ -598,4 +635,6 @@ body::after {
 @media (max-width: 980px) {
   .lobbygrid { grid-template-columns: 1fr; max-height: none; }
   .lobbychat { min-height: 180px; }
+  .lobbyfriends { min-height: 140px; }
+  .gamechat { bottom: 132px; }
 }

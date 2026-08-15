@@ -63,11 +63,11 @@ docs together.
 
 - `src/game.js`: simulation, waves, economy, combat, save snapshots.
 - `src/main.js`: renderer, input, camera, event FX, app orchestration.
-- `src/ui.js`: account gate, menus, HUD, lobby, minimap.
+- `src/ui.js`: account gate, menus, HUD, lobby, friends, chat, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, waves.
 - `src/plots.js`: city layout, ramparts, gates, build plots.
 - `src/auth.js`: Supabase auth, username, profile/save/stat sync.
-- `src/online.js`: account-backed room/lobby adapter.
+- `src/online.js`: account-backed room, friend, chat, invite, and lobby adapter.
 - `api/`: Vercel routes.
 - `supabase/schema.sql`: schema and RLS source of truth.
 

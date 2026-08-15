@@ -41,6 +41,13 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Waiting for the other player…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
+      <div id="gamechat" class="gamechat hidden">
+        <div class="gamechatlog" id="gamechat-log"></div>
+        <div class="gamechatrow hidden" id="gamechat-row">
+          <input id="gamechat-input" maxlength="500" placeholder="Team chat…">
+          <button class="tbtn" id="gamechat-send">Send</button>
+        </div>
+      </div>
 
       <div id="actionbar" class="hidden">
         <div class="rallyhints" id="stancebar">
@@ -128,6 +135,7 @@ export class UI {
             <button class="tbtn" id="l-back">← Back</button>
             <h2>🌐 The Lobby</h2>
             <span class="lobbyme" id="l-me"></span>
+            <span class="lobbycode" id="l-mycode"></span>
             <span class="lobbyonline" id="l-online">…</span>
           </div>
           <div class="lobbygrid">
@@ -155,6 +163,14 @@ export class UI {
               </div>
               <div id="l-tab-lore" class="ltabpane hidden"></div>
               <div id="l-tab-tips" class="ltabpane hidden"></div>
+            </div>
+            <div class="lobbyfriends">
+              <div class="friendshead"><b>Friends</b><span id="l-friend-count"></span></div>
+              <div class="friendadd">
+                <input id="l-friendcode" maxlength="32" placeholder="@username">
+                <button class="tbtn" id="l-friendadd">Add</button>
+              </div>
+              <div id="l-friends" class="friendlist"></div>
             </div>
           </div>
         </div>
@@ -220,6 +236,13 @@ export class UI {
     };
     q('#l-chatsend').onclick = chatSend;
     q('#l-chatinput').addEventListener('keydown', (e) => { if (e.key === 'Enter') chatSend(); });
+    const addFriend = () => {
+      const inp = q('#l-friendcode');
+      if (inp.value.trim() && this.cb.onAddFriend) this.cb.onAddFriend(inp.value);
+      inp.value = '';
+    };
+    q('#l-friendadd').onclick = addFriend;
+    q('#l-friendcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') addFriend(); });
     q('#l-create-pub').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('public');
     q('#l-create-priv').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('private');
     q('#l-joinbtn').onclick = () => this.cb.onJoinCode && this.cb.onJoinCode(q('#l-joincode').value);
@@ -285,11 +308,40 @@ export class UI {
 
     this.tooltip = q('#tooltip');
     this.banner = q('#banner');
+    const gameChatSend = () => {
+      const inp = q('#gamechat-input');
+      if (inp.value.trim() && this.cb.onGameChatSend) this.cb.onGameChatSend(inp.value);
+      inp.value = '';
+      this.closeGameChat();
+    };
+    q('#gamechat-send').onclick = gameChatSend;
+    q('#gamechat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); gameChatSend(); }
+      else if (e.key === 'Escape') { e.preventDefault(); this.closeGameChat(); }
+    });
   }
 
   _lobbyWasOpen() {
     const l = this.root.querySelector('#screen-lobby');
     return l && !l.classList.contains('hidden');
+  }
+
+  _wireRoomChat() {
+    const input = this.root.querySelector('#roomchat-input');
+    const button = this.root.querySelector('#roomchat-send');
+    if (!input || !button || input.dataset.wired) return;
+    const send = () => {
+      if (input.value.trim() && this.cb.onRoomChatSend) this.cb.onRoomChatSend(input.value);
+      input.value = '';
+    };
+    button.onclick = send;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        send();
+      }
+    });
+    input.dataset.wired = '1';
   }
 
   onlineStatus(text) {
@@ -331,7 +383,17 @@ export class UI {
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
       mp.dataset.init = '1';
-      mp.innerHTML = `<div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div><div id="mp-sub"></div>`;
+      mp.innerHTML = `
+        <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
+        <div id="mp-sub"></div>
+        <div class="roomchat">
+          <div class="roomchatlog" id="roomchat-log"></div>
+          <div class="roomchatrow">
+            <input id="roomchat-input" maxlength="500" placeholder="Room chat…">
+            <button class="tbtn" id="roomchat-send">Send</button>
+          </div>
+        </div>`;
+      this._wireRoomChat();
       return;
     }
     if (coop && !mp.dataset.init) {
@@ -864,7 +926,8 @@ export class UI {
 
   lobbySetMe(me) {
     this.root.querySelector('#l-me').textContent = `🪖 @${me.name}`;
-    this.root.querySelector('#l-mycode').textContent = me.code;
+    const code = this.root.querySelector('#l-mycode');
+    if (code) code.textContent = me.code ? `@${me.code.toLowerCase()}` : '';
   }
 
   lobbyStatus(text) {
@@ -892,6 +955,112 @@ export class UI {
     div.querySelector('.chattext').textContent = m.text;
     log.appendChild(div);
     while (log.children.length > 60) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  lobbyFriends(friends = []) {
+    const box = this.root.querySelector('#l-friends');
+    const count = this.root.querySelector('#l-friend-count');
+    if (!box) return;
+    if (count) count.textContent = friends.length ? `${friends.length}` : '';
+    if (!friends.length) {
+      box.innerHTML = '<div class="mphint">Add players by username, then invite them to your room.</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const f of friends) {
+      const row = document.createElement('div');
+      row.className = `friendrow ${f.status}`;
+      const status = f.status === 'accepted'
+        ? (f.online ? 'online' : 'offline')
+        : f.direction === 'incoming' ? 'request' : 'pending';
+      row.innerHTML = `
+        <div class="friendmeta"><b></b><small>${status}</small></div>
+        <div class="friendactions"></div>`;
+      row.querySelector('b').textContent = `@${f.name}`;
+      const actions = row.querySelector('.friendactions');
+      const makeButton = (label, title, handler) => {
+        const b = document.createElement('button');
+        b.className = 'tbtn';
+        b.textContent = label;
+        b.title = title;
+        b.onclick = handler;
+        actions.appendChild(b);
+      };
+      if (f.status === 'pending' && f.direction === 'incoming') {
+        makeButton('✓', 'Accept friend request', () => this.cb.onAcceptFriend && this.cb.onAcceptFriend(f.id));
+        makeButton('✕', 'Ignore friend request', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
+      } else if (f.status === 'accepted') {
+        makeButton('⚔️', 'Invite to current room', () => this.cb.onInviteFriend && this.cb.onInviteFriend(f.userId));
+        makeButton('✕', 'Remove friend', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
+      } else {
+        makeButton('✕', 'Cancel friend request', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
+      }
+      box.appendChild(row);
+    }
+  }
+
+  roomChatFill(msgs) {
+    const log = this.root.querySelector('#roomchat-log');
+    if (!log) return;
+    log.innerHTML = '';
+    for (const m of msgs || []) this.roomChatAdd(m);
+  }
+
+  roomChatAdd(m) {
+    const log = this.root.querySelector('#roomchat-log');
+    if (!log) return;
+    this._appendChatLine(log, m, 60);
+  }
+
+  setGameChatEnabled(on) {
+    this._gameChatEnabled = !!on;
+    const box = this.root.querySelector('#gamechat');
+    if (box) box.classList.toggle('hidden', !on);
+    if (!on) this.closeGameChat();
+  }
+
+  openGameChat() {
+    if (!this._gameChatEnabled) return;
+    const row = this.root.querySelector('#gamechat-row');
+    const input = this.root.querySelector('#gamechat-input');
+    row && row.classList.remove('hidden');
+    setTimeout(() => input && input.focus(), 0);
+  }
+
+  closeGameChat() {
+    const row = this.root.querySelector('#gamechat-row');
+    if (row) row.classList.add('hidden');
+  }
+
+  gameChatFill(msgs) {
+    const log = this.root.querySelector('#gamechat-log');
+    if (!log) return;
+    log.innerHTML = '';
+    this._seenGameChat = new Set();
+    for (const m of msgs || []) this.gameChatAdd(m);
+  }
+
+  gameChatAdd(m) {
+    const log = this.root.querySelector('#gamechat-log');
+    if (!log) return;
+    const seen = this._seenGameChat || new Set();
+    const id = m.id || `${m.name}-${m.created_at}-${m.text}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    this._seenGameChat = seen;
+    this._appendChatLine(log, m, 40);
+  }
+
+  _appendChatLine(log, m, max = 60) {
+    const div = document.createElement('div');
+    div.className = 'chatmsg';
+    const when = new Date(m.created_at || Date.now());
+    div.innerHTML = `<span class="chatwho"></span> <span class="chattext"></span><span class="chatwhen">${when.getHours()}:${String(when.getMinutes()).padStart(2, '0')}</span>`;
+    div.querySelector('.chatwho').textContent = m.name || 'Commander';
+    div.querySelector('.chattext').textContent = m.text || '';
+    log.appendChild(div);
+    while (log.children.length > max) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
   }
 

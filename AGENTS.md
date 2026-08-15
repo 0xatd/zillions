@@ -94,9 +94,9 @@ Preserve these files unless a task explicitly replaces the backend:
 - Production loads through Vercel.
 - Google/Supabase account sign-in gates the production game shell.
 - Supabase stores profiles, stats, cloud saves, match history, rooms, room
-  players, and room chat.
-- Vercel Blob remains a temporary compatibility layer for state mirror,
-  presence, and global lobby chat.
+  players, friends, global lobby chat, room chat, and in-game team chat.
+- Vercel Blob remains a compatibility layer for old state mirror and smoke-test
+  paths. It is not production social identity.
 - WebRTC carries match traffic. The backend is not server-authoritative yet.
 - Static local play can remain for development fallback, but it is not the
   production identity model.

@@ -106,6 +106,8 @@ Target shape:
 - Worlds show territory state: safe, contested, Xeno-held, player-held.
 - Xeno factions hold regions, nests, energy fields, or planets.
 - Open games are real backend rooms.
+- Friends, friend requests, and invites are real account data.
+- Global lobby chat, room chat, and in-game team chat are real Supabase rows.
 - Room players have real seats, ready state, hero picks, and chat.
 - Starting a room launches the current WebRTC match for now.
 - Match results write back to profiles, stats, saves, and history.
@@ -135,7 +137,9 @@ Supabase owns:
 - Match history.
 - Public/private rooms.
 - Room players.
-- Room chat.
+- Friendships.
+- Global lobby chat.
+- Room chat and in-game team chat.
 
 Vercel owns:
 
@@ -144,9 +148,9 @@ Vercel owns:
 - `/api/state`
 - `/api/lobby`
 
-Vercel Blob is a temporary compatibility layer for presence, global lobby chat,
-guest smoke tests, and old state mirror data. It is not the long-term source of
-truth for accounts or rooms.
+Vercel Blob is a compatibility layer for guest smoke tests and old state mirror
+data. It is not the source of truth for accounts, presence, friends, chat, or
+rooms.
 
 WebRTC still owns match transport. The server is not authoritative yet.
 

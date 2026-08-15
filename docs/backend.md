@@ -27,8 +27,8 @@ username. They must not show the email address or a Google account name.
 Vercel serves the game and same-origin API routes:
 
 - `api/state.js` stores and reads JSON state in Vercel Blob.
-- `api/lobby.js` stores short-lived public lobby presence and chat in Vercel
-  Blob.
+- `api/lobby.js` stores legacy short-lived lobby presence/chat in Vercel Blob
+  for compatibility only.
 - `api/auth-config.js` exposes only browser-safe Supabase config.
 
 Do not put server-only secrets in responses. The Supabase anon key is browser
@@ -43,8 +43,8 @@ Supabase owns the real account backend:
 - Lifetime stats.
 - Cloud save slots.
 - Private match history.
-- Public/private room records, room players, ready state, hero picks, and room
-  chat.
+- Public/private room records, room players, ready state, hero picks, global
+  lobby chat, room chat, in-game team chat, friendships, and invites.
 
 The active gameplay rules identifier is `survival-plots`. Do not introduce
 branch, agent, or prototype names into persisted room or match records.
@@ -63,8 +63,8 @@ localStorage remains the development/offline fallback:
 - Latest solo/host save.
 
 When backend support is available, the browser syncs signed-in account state to
-Supabase. Vercel Blob is still used for compatibility state, presence, and
-global lobby chat while room chat matures.
+Supabase. Vercel Blob is still used for compatibility state and legacy/static
+smoke paths, but signed-in social state must not depend on it.
 
 ### WebRTC
 
@@ -91,7 +91,7 @@ players/<playerId>/game/<id>.json
 This is compatibility storage for guest/offline profiles and smoke tests. It is
 not the long-term account source of truth once Supabase is fully wired.
 
-### Vercel Blob Public Lobby
+### Vercel Blob Legacy Lobby
 
 `/api/lobby` accepts `join`, `heartbeat`, `chat`, and `leave`.
 
@@ -103,8 +103,8 @@ lobbies/<mode>/chat/<timestamp>-<playerId>-<random>.json
 ```
 
 Presence expires after about 60 seconds. Heartbeats run from the browser. This
-lobby is a lightweight public presence/chat surface, not the final multiplayer
-room system.
+route is legacy compatibility for smoke tests and old static clients. It is not
+the production social identity path.
 
 ### Supabase Tables
 
@@ -122,14 +122,19 @@ Defined in `supabase/schema.sql`:
 - `rooms`: planned multiplayer room browser records.
 - `room_players`: planned room seats, ready state, hero pick, and connection
   state.
-- `room_chat`: planned room-scoped chat.
+- `lobby_chat`: global signed-in lobby chat.
+- `friendships`: friend requests and accepted friend pairs.
+- `room_chat`: room-scoped chat and in-game team chat. `channel = 'room'`
+  means setup/staging chat. `channel = 'game'` means live match team chat.
 
 RLS policy intent:
 
 - Authenticated users can read public lobby/profile surfaces.
 - Users can create/update their own profile, stats, saves, and match history.
 - Room hosts control their own rooms.
-- Room members can post room chat.
+- Authenticated users can read and write global lobby chat as themselves.
+- Users can read, create, accept, and remove their own friendship rows.
+- Room members can read and post room chat.
 
 ## Runtime Flows
 
@@ -156,10 +161,15 @@ RLS policy intent:
 ### Multiplayer Today
 
 1. Signed-in players join the Zillions lobby.
-2. Vercel Blob provides short-lived presence and global lobby chat.
-3. Supabase `rooms` and `room_players` provide real public/private room rows.
-4. Host co-op still uses WebRTC signaling and lockstep for the match.
-5. The match simulation is peer-to-peer and host-sequenced.
+2. Supabase profiles provide fresh signed-in presence.
+3. Supabase `lobby_chat` provides global lobby chat.
+4. Supabase `friendships` provides friend requests, accepted friends, and
+   friend room invites.
+5. Supabase `rooms`, `room_players`, and `room_chat` provide public/private
+   room rows and room chat.
+6. Host co-op still uses WebRTC signaling and lockstep for the match.
+7. In-game team chat writes to `room_chat` with `channel = 'game'`.
+8. The match simulation is peer-to-peer and host-sequenced.
 
 ### Multiplayer Target
 
@@ -168,7 +178,7 @@ The next backend step is to make the Multiplayer hub feel like a conquest map:
 1. Worlds are live rooms or games.
 2. Players can see signed-in players moving around.
 3. Regions show safe, contested, Xeno-held, and player-held territory.
-4. Rooms show seats, ready state, hero picks, and chat.
+4. Rooms show seats, ready state, hero picks, friends, and chat.
 5. Host starts WebRTC match.
 6. Match result writes to Supabase stats/history.
 
@@ -191,7 +201,7 @@ The next backend step is to make the Multiplayer hub feel like a conquest map:
 ## Known Limits
 
 - Room browser data is real Supabase data, but the room UI is still early.
-- Vercel Blob global lobby chat is temporary and not the final room chat system.
+- Vercel Blob lobby data is legacy compatibility, not production social state.
 - Server-authoritative multiplayer is not implemented.
 - There is no anti-cheat.
 - Cross-device identity depends on Google sign-in. Guest identity is per

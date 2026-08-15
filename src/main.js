@@ -83,7 +83,13 @@ class App {
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
       onLobbyOpen: () => this._openLobby(),
-      onChatSend: (text) => this.lobby && this.lobby.sendChat(text),
+      onChatSend: (text) => this._sendLobbyChat(text),
+      onRoomChatSend: (text) => this._sendRoomChat(text, 'room'),
+      onGameChatSend: (text) => this._sendGameChat(text),
+      onAddFriend: (handle) => this._addFriend(handle),
+      onAcceptFriend: (id) => this._acceptFriend(id),
+      onRemoveFriend: (id) => this._removeFriend(id),
+      onInviteFriend: (userId) => this._inviteFriend(userId),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
       onLevelPick: (id) => this.showMenuBackdrop(id),
@@ -214,6 +220,8 @@ class App {
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer);
+    this.ui.setGameChatEnabled(this.netMode);
+    if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
     // Gameplay uses a fixed world/minimap orientation: left in the viewport is
     // left on the minimap. The menu can orbit, but a run must not inherit it.
@@ -621,6 +629,10 @@ class App {
     if (m.t === 'hero') { this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k; this.ui.mpLobby(this.peers.length, this.peers.length < 2); }
     else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
+    else if (m.t === 'chat') {
+      this.ui.gameChatAdd(m);
+      this._broadcast(m);
+    }
   }
 
   _broadcast(msg) {
@@ -667,6 +679,7 @@ class App {
       this.desynced = true;
       this.ui.showBanner('⚠️ Games desynced — everyone should refresh and reconnect.', 'bad', 10000);
     }
+    else if (m.t === 'chat') this.ui.gameChatAdd(m);
   }
 
   _stateHash() {
@@ -696,8 +709,13 @@ class App {
     }
     this.lobby = new OnlineLobby({
       onChat: (m) => this.ui.lobbyChatAdd(m),
+      onRoomChat: (m) => {
+        if (m.channel === 'game') this.ui.gameChatAdd(m);
+        else this.ui.roomChatAdd(m);
+      },
       onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row)),
       onOnline: (map) => { this.ui.lobbyOnline(map.size); },
+      onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onKnock: (sig) => this._onKnock(sig),
       onSignal: (sig) => this._onSignal(sig),
@@ -708,12 +726,91 @@ class App {
       const me = await this.lobby.connect(this.profile.name || 'Commander');
       this.ui.lobbySetMe(me);
       this.ui.lobbyChatFill(await this.lobby.loadChat());
+      this.ui.lobbyFriends(await this.lobby.loadFriends());
       this.lobby.refreshGames();
     } catch (e) {
       this.ui.lobbyStatus('❌ offline');
       this.ui.showBanner('❌ Lobby unreachable — solo and manual invite codes still work.', 'bad', 6000);
     }
     return this.lobby;
+  }
+
+  async _sendLobbyChat(text) {
+    if (!this.lobby) return;
+    try {
+      await this.lobby.sendChat(text);
+    } catch (e) {
+      this.ui.showBanner('❌ Lobby chat failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  async _sendRoomChat(text, channel = 'room') {
+    if (!this.lobby || !this.lobby.game) return;
+    try {
+      await this.lobby.sendRoomChat(text, channel);
+    } catch (e) {
+      this.ui.showBanner('❌ Room chat failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  _localChatMessage(text) {
+    return {
+      t: 'chat',
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: this.profile.username || this.profile.name || 'Commander',
+      text: String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  async _sendGameChat(text) {
+    if (!this.game || !this.netMode) return;
+    if (this.lobby?.game) {
+      await this._sendRoomChat(text, 'game');
+      return;
+    }
+    const msg = this._localChatMessage(text);
+    if (!msg.text) return;
+    this.ui.gameChatAdd(msg);
+    if (this.mpRole === 'host') this._broadcast(msg);
+    else if (this.net?.open) this.net.send(msg);
+  }
+
+  async _addFriend(handle) {
+    if (!this.lobby) return;
+    try {
+      this.ui.lobbyFriends(await this.lobby.addFriend(handle));
+    } catch (e) {
+      this.ui.showBanner('❌ Friend request failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  async _acceptFriend(id) {
+    if (!this.lobby) return;
+    try {
+      this.ui.lobbyFriends(await this.lobby.acceptFriend(id));
+    } catch (e) {
+      this.ui.showBanner('❌ Could not accept friend: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  async _removeFriend(id) {
+    if (!this.lobby) return;
+    try {
+      this.ui.lobbyFriends(await this.lobby.removeFriend(id));
+    } catch (e) {
+      this.ui.showBanner('❌ Could not update friend: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  async _inviteFriend(userId) {
+    if (!this.lobby) return;
+    try {
+      await this.lobby.inviteFriend(userId);
+      this.ui.showBanner('⚔️ Invite sent.', '', 2200);
+    } catch (e) {
+      this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
+    }
   }
 
   async createOnlineGame(visibility) {
@@ -726,6 +823,7 @@ class App {
     try {
       const game = await lobby.createGame({ visibility, level: this.ui.selectedLevel || 1, mode: this.ui.selectedMode || 'campaign' });
       this.ui.showSetup({ online: game, mode: game.mode });
+      this.ui.roomChatFill(await lobby.loadRoomChat(game.id, 'room'));
     } catch (e) {
       this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
       this.mpRole = null;
@@ -801,6 +899,7 @@ class App {
     this.ui.onlineStatus('🔗 Knocking on the host\'s gate…');
     this.ui.root.querySelector('#s-start').classList.add('disabled');
     await lobby.joinGame(row);
+    this.ui.roomChatFill(await lobby.loadRoomChat(row.id, 'room'));
   }
 
   async joinByCode(code) {
@@ -2140,8 +2239,13 @@ class App {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
       this.keys.add(k);
-      if (!this.game) return;
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (this.game && k === 'enter' && this.netMode) {
+        e.preventDefault();
+        this.ui.openGameChat();
+        return;
+      }
+      if (!this.game) return;
       if (k === ' ') {
         e.preventDefault();
         // Thronefall Space — THE interact key: found the city, hold at a

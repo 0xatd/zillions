@@ -159,9 +159,16 @@ not the email address or Google account name. Stats, cloud save, match history,
 and rooms are owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
 **Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
-presence, global lobby chat, and real public rooms. Public/private room records
-come from Supabase `rooms` and `room_players`. Empty room lists show an empty
-state. Do not seed fake games or fake players.
+presence, global lobby chat, friends, and real public rooms. Public/private
+room records come from Supabase `rooms` and `room_players`. Lobby chat uses
+Supabase `lobby_chat`. Friend requests and accepted friends use Supabase
+`friendships`. Empty room lists show an empty state. Do not seed fake games or
+fake players.
+
+**Room and in-game chat**: each account-backed room has room chat during setup.
+When the match starts, Enter opens the in-game team chat. Room chat and in-game
+chat share Supabase `room_chat`, separated by `channel = 'room'` and
+`channel = 'game'`.
 
 The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
 hero each). The backend stores identity, rooms, saves, stats, and results. It
@@ -246,7 +253,7 @@ src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
-src/online.js           Supabase room adapter + Vercel lobby presence/chat
+src/online.js           Supabase room, chat, friends, invites, and presence adapter
 src/auth.js             Supabase auth/profile/save/stat sync
 src/backend.js          Vercel API helpers
 api/                    Vercel backend routes

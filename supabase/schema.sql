@@ -153,12 +153,67 @@ create table if not exists public.room_chat (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
+  channel text not null default 'room' check (channel in ('room', 'game')),
   message text not null check (length(message) between 1 and 500),
   created_at timestamptz not null default now()
 );
 
+alter table if exists public.room_chat
+add column if not exists channel text not null default 'room';
+
+do $$
+begin
+  alter table public.room_chat
+  add constraint room_chat_channel_check check (channel in ('room', 'game'));
+exception
+  when duplicate_object then null;
+end;
+$$;
+
 create index if not exists room_chat_room_created_idx
 on public.room_chat (room_id, created_at desc);
+
+create index if not exists room_chat_room_channel_created_idx
+on public.room_chat (room_id, channel, created_at desc);
+
+create table if not exists public.lobby_chat (
+  id uuid primary key default gen_random_uuid(),
+  scope text not null default 'global' check (scope in ('global')),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  message text not null check (length(message) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists lobby_chat_scope_created_idx
+on public.lobby_chat (scope, created_at desc);
+
+create table if not exists public.friendships (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references public.profiles(id) on delete cascade,
+  addressee_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'blocked')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (requester_id <> addressee_id)
+);
+
+create unique index if not exists friendships_pair_unique
+on public.friendships (
+  least(requester_id, addressee_id),
+  greatest(requester_id, addressee_id)
+);
+
+create index if not exists friendships_requester_idx
+on public.friendships (requester_id, status, updated_at desc);
+
+create index if not exists friendships_addressee_idx
+on public.friendships (addressee_id, status, updated_at desc);
+
+drop trigger if exists friendships_touch_updated_at on public.friendships;
+create trigger friendships_touch_updated_at
+before update on public.friendships
+for each row
+execute function public.touch_updated_at();
 
 alter table public.profiles enable row level security;
 alter table public.player_stats enable row level security;
@@ -167,6 +222,8 @@ alter table public.match_history enable row level security;
 alter table public.rooms enable row level security;
 alter table public.room_players enable row level security;
 alter table public.room_chat enable row level security;
+alter table public.lobby_chat enable row level security;
+alter table public.friendships enable row level security;
 
 drop policy if exists profiles_read_authenticated on public.profiles;
 create policy profiles_read_authenticated
@@ -300,10 +357,24 @@ using (
 );
 
 drop policy if exists room_chat_read_authenticated on public.room_chat;
-create policy room_chat_read_authenticated
+drop policy if exists room_chat_read_member on public.room_chat;
+create policy room_chat_read_member
 on public.room_chat for select
 to authenticated
-using (true);
+using (
+  exists (
+    select 1
+    from public.room_players
+    where room_players.room_id = room_chat.room_id
+      and room_players.user_id = auth.uid()
+  )
+  or exists (
+    select 1
+    from public.rooms
+    where rooms.id = room_chat.room_id
+      and rooms.host_user_id = auth.uid()
+  )
+);
 
 drop policy if exists room_chat_insert_member on public.room_chat;
 create policy room_chat_insert_member
@@ -318,6 +389,80 @@ with check (
       and room_players.user_id = auth.uid()
   )
 );
+
+drop policy if exists lobby_chat_read_authenticated on public.lobby_chat;
+create policy lobby_chat_read_authenticated
+on public.lobby_chat for select
+to authenticated
+using (scope = 'global');
+
+drop policy if exists lobby_chat_insert_self on public.lobby_chat;
+create policy lobby_chat_insert_self
+on public.lobby_chat for insert
+to authenticated
+with check (auth.uid() = user_id and scope = 'global');
+
+drop policy if exists friendships_read_own on public.friendships;
+create policy friendships_read_own
+on public.friendships for select
+to authenticated
+using (auth.uid() = requester_id or auth.uid() = addressee_id);
+
+drop policy if exists friendships_insert_request on public.friendships;
+create policy friendships_insert_request
+on public.friendships for insert
+to authenticated
+with check (
+  auth.uid() = requester_id
+  and requester_id <> addressee_id
+  and status = 'pending'
+);
+
+drop policy if exists friendships_update_own on public.friendships;
+create policy friendships_update_own
+on public.friendships for update
+to authenticated
+using (auth.uid() = requester_id or auth.uid() = addressee_id)
+with check (auth.uid() = requester_id or auth.uid() = addressee_id);
+
+drop policy if exists friendships_delete_own on public.friendships;
+create policy friendships_delete_own
+on public.friendships for delete
+to authenticated
+using (auth.uid() = requester_id or auth.uid() = addressee_id);
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'lobby_chat'
+    ) then
+      alter publication supabase_realtime add table public.lobby_chat;
+    end if;
+
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'room_chat'
+    ) then
+      alter publication supabase_realtime add table public.room_chat;
+    end if;
+
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'friendships'
+    ) then
+      alter publication supabase_realtime add table public.friendships;
+    end if;
+  end if;
+end;
+$$;
 
 create or replace function public.handle_new_user()
 returns trigger

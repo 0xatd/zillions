@@ -1,28 +1,16 @@
-// Online lobby: Zillions production account + room model.
-// Supabase config is loaded from /api/auth-config. The global lobby chat and
-// presence use the existing Vercel Blob route until room chat is fully moved.
-import {
-  getLobby,
-  heartbeatLobby,
-  joinLobby,
-  sendLobbyChat,
-} from './backend.js';
+// Online lobby: Zillions production account + room/social model.
+// Supabase config is loaded from /api/auth-config. Vercel Blob stays as a
+// legacy/static compatibility path; signed-in social state lives in Supabase.
 
 const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
+const CHAT_LIMIT = 500;
 
 function safePublicName(value) {
   const text = String(value || '').trim().slice(0, 24);
   if (!text || text.includes('@')) return 'Commander';
   return text;
-}
-
-function randomCode(n = 6) {
-  const abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < n; i++) s += abc[(Math.random() * abc.length) | 0];
-  return s;
 }
 
 async function loadSupabaseClient() {
@@ -45,6 +33,18 @@ async function loadSupabaseClient() {
       flowType: 'pkce',
     },
   });
+}
+
+function chatText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, CHAT_LIMIT);
+}
+
+function normalizeHandle(value) {
+  return String(value || '').trim().replace(/^@/, '').toLowerCase();
+}
+
+function profileName(profile, fallback = 'Commander') {
+  return safePublicName(profile?.handle || profile?.display_name || fallback);
 }
 
 function roomToGame(row) {
@@ -72,13 +72,15 @@ function roomToGame(row) {
 
 export class OnlineLobby {
   constructor(cb = {}) {
-    this.cb = cb; // {onChat, onGames, onOnline, onInvite, onKnock, onSignal, onError}
+    this.cb = cb; // {onChat, onRoomChat, onGames, onOnline, onFriends, onInvite, onKnock, onSignal, onError}
     this.sb = null;
     this.me = null;          // {id, code, name}
     this.online = new Map(); // playerId -> name (lobby presence)
     this.game = null;        // the game row we host or joined
     this.gameChan = null;
+    this.roomChatChan = null;
     this.connected = false;
+    this.profileCache = new Map();
   }
 
   async connect(name) {
@@ -101,17 +103,30 @@ export class OnlineLobby {
       name: profile.handle,
       hero: profile?.selected_hero || 'alexander',
     };
-    await this.sb.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', user.id);
+    this.profileCache.set(user.id, this.me.name);
+    await this._touchPresence();
     this.connected = true;
-    await this._refreshPresence(true);
-    this._presenceBeat = setInterval(() => this._refreshPresence(false), 15 * 1000);
+    await this.refreshOnline();
+    this._presenceBeat = setInterval(() => {
+      this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
+    }, 15 * 1000);
 
     this.sb.channel('zl-rooms-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => this.refreshGames())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, () => this.refreshGames())
       .subscribe();
 
-    this.sb.channel('zl-user-' + this.me.id)
+    this.sb.channel('zl-lobby-chat')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lobby_chat', filter: 'scope=eq.global' }, (m) => {
+        this._emitLobbyChat(m.new).catch(() => {});
+      })
+      .subscribe();
+
+    this.sb.channel('zl-friends-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => this.loadFriends().catch(() => {}))
+      .subscribe();
+
+    this.userChan = this.sb.channel('zl-user-' + this.me.id)
       .on('broadcast', { event: 'invite' }, (m) => this.cb.onInvite && this.cb.onInvite(m.payload))
       .subscribe();
 
@@ -122,63 +137,251 @@ export class OnlineLobby {
     // Display names are account data, not an always-editable lobby field.
     if (!this.me) return;
     this.me.name = this.me.name || name || 'Commander';
-    await this._refreshPresence(true);
+    await this._touchPresence();
   }
 
-  // ---------- chat ----------
+  // ---------- presence and social ----------
 
-  async _refreshPresence(join = false) {
+  async _touchPresence() {
     if (!this.me) return null;
-    const payload = {
-      mode: 'survival',
-      name: this.me.name,
-      hero: this.me.hero,
-      rules: CURRENT_RULES,
-      status: this.game ? `room ${this.game.join_code}` : 'lobby',
-    };
-    const state = join ? await joinLobby(payload) : await heartbeatLobby(payload);
-    const lobby = state?.lobby || (await getLobby('survival'))?.lobby;
-    if (!lobby) return null;
-    this.online.clear();
-    for (const p of lobby.players || []) this.online.set(p.playerId, p.name);
-    if (this.cb.onOnline) this.cb.onOnline(this.online);
-    if (this.cb.onChat) {
-      const seen = this._seenChat || new Set();
-      for (const m of lobby.messages || []) {
-        const id = m.id || `${m.playerId}-${m.createdAt}-${m.text}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        this.cb.onChat({
-          name: m.name,
-          text: m.text,
-          created_at: m.createdAt,
-        });
+    const now = new Date().toISOString();
+    await this.sb.from('profiles').update({ last_seen_at: now }).eq('id', this.me.id);
+    if (this.game) {
+      await this.sb.from('room_players')
+        .update({ connection_state: 'online', last_seen_at: now })
+        .eq('room_id', this.game.id)
+        .eq('user_id', this.me.id);
+      if (this.game.host_id === this.me.id) {
+        await this.sb.from('rooms').update({ last_seen_at: now }).eq('id', this.game.id);
       }
-      this._seenChat = seen;
     }
-    return lobby;
+    return now;
+  }
+
+  async refreshOnline() {
+    if (!this.sb) return this.online;
+    const since = new Date(Date.now() - FRESH_MS).toISOString();
+    const { data, error } = await this.sb.from('profiles')
+      .select('id,handle,display_name,last_seen_at')
+      .gt('last_seen_at', since)
+      .limit(100);
+    if (error) throw error;
+    this.online.clear();
+    for (const p of data || []) {
+      const name = profileName(p);
+      this.online.set(p.id, name);
+      this.profileCache.set(p.id, name);
+    }
+    if (this.cb.onOnline) this.cb.onOnline(this.online);
+    return this.online;
+  }
+
+  async _nameFor(userId) {
+    if (this.profileCache.has(userId)) return this.profileCache.get(userId);
+    const { data, error } = await this.sb.from('profiles')
+      .select('id,handle,display_name')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) return 'Commander';
+    const name = profileName(data);
+    this.profileCache.set(userId, name);
+    return name;
+  }
+
+  async loadFriends() {
+    if (!this.me) return [];
+    const { data, error } = await this.sb.from('friendships')
+      .select('id,requester_id,addressee_id,status,created_at,updated_at')
+      .or(`requester_id.eq.${this.me.id},addressee_id.eq.${this.me.id}`)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+
+    const ids = [...new Set((data || []).map((f) => f.requester_id === this.me.id ? f.addressee_id : f.requester_id))];
+    const profiles = new Map();
+    if (ids.length) {
+      const { data: rows, error: profileError } = await this.sb.from('profiles')
+        .select('id,handle,display_name,last_seen_at')
+        .in('id', ids);
+      if (profileError) throw profileError;
+      for (const p of rows || []) {
+        const name = profileName(p);
+        profiles.set(p.id, p);
+        this.profileCache.set(p.id, name);
+      }
+    }
+
+    const fresh = Date.now() - FRESH_MS;
+    const friends = (data || []).map((f) => {
+      const userId = f.requester_id === this.me.id ? f.addressee_id : f.requester_id;
+      const p = profiles.get(userId);
+      const online = p?.last_seen_at ? new Date(p.last_seen_at).getTime() > fresh : this.online.has(userId);
+      return {
+        id: f.id,
+        userId,
+        name: profileName(p, userId.slice(0, 6)),
+        status: f.status,
+        direction: f.requester_id === this.me.id ? 'outgoing' : 'incoming',
+        online,
+      };
+    });
+    if (this.cb.onFriends) this.cb.onFriends(friends);
+    return friends;
+  }
+
+  async addFriend(handle) {
+    const wanted = normalizeHandle(handle);
+    if (!wanted) throw new Error('enter a username');
+    if (wanted === normalizeHandle(this.me.name)) throw new Error('that is you');
+    const { data: profile, error } = await this.sb.from('profiles')
+      .select('id,handle,display_name')
+      .eq('handle', wanted)
+      .maybeSingle();
+    if (error) throw error;
+    if (!profile) throw new Error('no player with that username');
+    const { error: insertError } = await this.sb.from('friendships').insert({
+      requester_id: this.me.id,
+      addressee_id: profile.id,
+      status: 'pending',
+    });
+    if (insertError) throw new Error(insertError.code === '23505' ? 'friend request already exists' : insertError.message);
+    return this.loadFriends();
+  }
+
+  async acceptFriend(friendshipId) {
+    const { error } = await this.sb.from('friendships')
+      .update({ status: 'accepted' })
+      .eq('id', friendshipId);
+    if (error) throw error;
+    return this.loadFriends();
+  }
+
+  async removeFriend(friendshipId) {
+    const { error } = await this.sb.from('friendships')
+      .delete()
+      .eq('id', friendshipId);
+    if (error) throw error;
+    return this.loadFriends();
+  }
+
+  async inviteFriend(userId) {
+    if (!this.game) throw new Error('create or join a room first');
+    const payload = {
+      fromId: this.me.id,
+      fromName: this.me.name,
+      joinCode: this.game.join_code,
+      mode: this.game.mode,
+      roomId: this.game.id,
+    };
+    const channel = this.sb.channel('zl-user-' + userId);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('invite channel timeout')), 2500);
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    await channel.send({ type: 'broadcast', event: 'invite', payload });
+    this.sb.removeChannel(channel);
+    return payload;
   }
 
   async loadChat() {
-    const lobby = (await getLobby('survival'))?.lobby;
-    return (lobby?.messages || []).map((m) => ({
-      name: m.name,
-      text: m.text,
-      created_at: m.createdAt,
+    const { data, error } = await this.sb.from('lobby_chat')
+      .select('id,user_id,message,created_at,profiles(handle,display_name)')
+      .eq('scope', 'global')
+      .order('created_at', { ascending: false })
+      .limit(80);
+    if (error) throw error;
+    const rows = (data || []).reverse().map((m) => ({
+      id: m.id,
+      user_id: m.user_id,
+      name: profileName(m.profiles, this.profileCache.get(m.user_id)),
+      text: m.message,
+      created_at: m.created_at,
     }));
+    for (const m of rows) this.profileCache.set(m.user_id, m.name);
+    return rows;
   }
 
   async sendChat(text) {
-    text = String(text).slice(0, 400).trim();
-    if (!text) return;
-    await sendLobbyChat(text, {
-      mode: 'survival',
-      name: this.me.name,
-      hero: this.me.hero,
-      rules: CURRENT_RULES,
-      status: this.game ? `room ${this.game.join_code}` : 'lobby',
+    text = chatText(text);
+    if (!text || !this.me) return;
+    const { data, error } = await this.sb.from('lobby_chat').insert({
+      scope: 'global',
+      user_id: this.me.id,
+      message: text,
+    }).select('id,user_id,message,created_at').single();
+    if (error) throw error;
+    if (data) await this._emitLobbyChat(data);
+  }
+
+  async _emitLobbyChat(row) {
+    const seen = this._seenLobbyChat || new Set();
+    if (seen.has(row.id)) return;
+    seen.add(row.id);
+    this._seenLobbyChat = seen;
+    const name = row.user_id === this.me?.id ? this.me.name : await this._nameFor(row.user_id);
+    if (this.cb.onChat) this.cb.onChat({
+      id: row.id,
+      user_id: row.user_id,
+      name,
+      text: row.message,
+      created_at: row.created_at,
     });
-    await this._refreshPresence(false);
+  }
+
+  async loadRoomChat(roomId = this.game?.id, channel = 'room') {
+    if (!roomId) return [];
+    const { data, error } = await this.sb.from('room_chat')
+      .select('id,room_id,user_id,channel,message,created_at,profiles(handle,display_name)')
+      .eq('room_id', roomId)
+      .eq('channel', channel)
+      .order('created_at', { ascending: false })
+      .limit(80);
+    if (error) throw error;
+    const rows = (data || []).reverse().map((m) => ({
+      id: m.id,
+      room_id: m.room_id,
+      channel: m.channel || 'room',
+      user_id: m.user_id,
+      name: profileName(m.profiles, this.profileCache.get(m.user_id)),
+      text: m.message,
+      created_at: m.created_at,
+    }));
+    for (const m of rows) this.profileCache.set(m.user_id, m.name);
+    return rows;
+  }
+
+  async sendRoomChat(text, channel = 'room') {
+    text = chatText(text);
+    if (!text || !this.me || !this.game) return;
+    const { data, error } = await this.sb.from('room_chat').insert({
+      room_id: this.game.id,
+      user_id: this.me.id,
+      channel,
+      message: text,
+    }).select('id,room_id,user_id,channel,message,created_at').single();
+    if (error) throw error;
+    if (data) await this._emitRoomChat(data);
+  }
+
+  async _emitRoomChat(row) {
+    const seen = this._seenRoomChat || new Set();
+    if (seen.has(row.id)) return;
+    seen.add(row.id);
+    this._seenRoomChat = seen;
+    const name = row.user_id === this.me?.id ? this.me.name : await this._nameFor(row.user_id);
+    if (this.cb.onRoomChat) this.cb.onRoomChat({
+      id: row.id,
+      room_id: row.room_id,
+      channel: row.channel || 'room',
+      user_id: row.user_id,
+      name,
+      text: row.message,
+      created_at: row.created_at,
+    });
   }
 
   // ---------- games ----------
@@ -241,13 +444,7 @@ export class OnlineLobby {
         last_seen_at: new Date().toISOString(),
       })
       .eq('id', this.game.id);
-    await heartbeatLobby({
-      mode: 'survival',
-      name: this.me.name,
-      hero: this.me.hero,
-      rules: CURRENT_RULES,
-      status: `room ${this.game.join_code}`,
-    });
+    await this._touchPresence();
   }
 
   async endGame() {
@@ -269,12 +466,18 @@ export class OnlineLobby {
   // Join a game's signaling channel. Signals are {t, to, from, ...} — every
   // client sees every signal and ignores ones not addressed to it.
   _joinGameChannel(gameId, asHost) {
+    if (this.roomChatChan) this.sb.removeChannel(this.roomChatChan);
     this.gameChan = this.sb.channel('zl-game-' + gameId);
     this.gameChan
       .on('broadcast', { event: 'sig' }, (m) => {
         const s = m.payload;
         if (asHost && s.t === 'knock' && this.cb.onKnock) this.cb.onKnock(s);
         else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
+      })
+      .subscribe();
+    this.roomChatChan = this.sb.channel('zl-room-chat-' + gameId)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_chat', filter: `room_id=eq.${gameId}` }, (m) => {
+        this._emitRoomChat(m.new).catch(() => {});
       })
       .subscribe();
   }
