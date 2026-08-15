@@ -8,7 +8,7 @@ const PORTRAITS = {
   danny: 'assets/heroes/images/danny_assassin.png',
 };
 import {
-  PLOT_KINDS, DIFFICULTY, FINAL_NIGHT, LEVELS, ITEMS,
+  PLOT_KINDS, DIFFICULTY, LEVELS, ITEMS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
@@ -25,8 +25,9 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — collect coins at dawn, spend by holding SPACE at a foundation">🪙 <b>0</b></div>
-        <div class="res" id="r-day" title="Day and time until nightfall">☀️ <b>Day 1</b></div>
+        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Spend by holding SPACE at a foundation">🪙 <b>0</b></div>
+        <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
+        <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
         <div class="sep"></div>
         <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
@@ -44,7 +45,7 @@ export class UI {
 
       <div id="actionbar" class="hidden">
         <div class="rallyhints" id="stancebar">
-          <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Hunt enemies and push hives"><b>3</b> ⚔️ Hunt hives</span>
+          <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Push the lanes: take nodes, then siege the hives"><b>3</b> ⚔️ Push lanes</span>
         </div>
         <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         <div class="actionmain">
@@ -94,11 +95,11 @@ export class UI {
 
         <div id="screen-main" class="mainmenu">
           <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Raise a city by day. Hold it by night. Survive ${FINAL_NIGHT} nights.</p>
+          <p class="gamesub">Raise a city. Push the lanes. Take the planet.</p>
           <div class="menustack">
             <button class="menubtn primary" id="m-play">⚔️ &nbsp;Campaign</button>
             <div id="m-continuerow"></div>
-            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless nights</small></button>
+            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless siege</small></button>
             <button class="menubtn" id="m-online">🌐 &nbsp;Online Lobby <small>games · chat · friends</small></button>
             <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
           </div>
@@ -120,7 +121,7 @@ export class UI {
           <div class="steplabel">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
-          <button class="startbtn" id="s-start">▶ &nbsp;START — SURVIVE ${FINAL_NIGHT} NIGHTS</button>
+          <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
         </div>
 
         <div id="screen-lobby" class="setup lobby hidden">
@@ -172,13 +173,15 @@ export class UI {
           </div>
           <div class="howto">
             <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
-            <div><b>🪙 One resource: gold.</b> Your buildings pay coins every dawn. Ride through coins to collect them.</div>
+            <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
             <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> — coins fly from your purse until it rises (a ghost shows what will be built). Same to upgrade. Top-tier towers let you choose a doctrine.</div>
-            <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
-            <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
+            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh squad on a timer, forever. Press <kbd>3</kbd> and the army pushes out along the lanes on its own — no unit micro.</div>
+            <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
+            <div><b>🔥 Hives never stop.</b> Each living nest musters its own squads, faster as Threat climbs. Raze them all — then break the counterattack their champion leads.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Hold SPACE on a damaged building to repair it, or on a ruin to rebuild it at half price. SPACE away from a plot fires your special (Q works too), and <kbd>T</kbd> beside a tower changes what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
-            <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
+            <div><b>☠️ Threat is the clock.</b> It rises on its own, faster while hives stand, and every whole level makes every hive muster at once. If the Keep falls, all is lost.</div>
           </div>
         </div>
 
@@ -319,13 +322,13 @@ export class UI {
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
       : coop ? 'Co-op — one city, one hero each'
-      : mode === 'survival' ? '💀 Survival — how many nights can you last?'
+      : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
     this._buildLevelRow(this._campaignCleared || 0, mode === 'survival');
     this.root.querySelector('#s-start').textContent = mode === 'survival'
       ? '▶  START — SURVIVE AS LONG AS YOU CAN'
-      : `▶  START — SURVIVE ${FINAL_NIGHT} NIGHTS`;
+      : '▶  START — TAKE THE PLANET';
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
@@ -409,7 +412,6 @@ export class UI {
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
-      else if (this._bigMode === 'bell') this.cb.onBell();
       else this.cb.onCast();
     };
     big.onmouseenter = (e) => {
@@ -426,17 +428,19 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
 
-    const phase = game.phase === 'found' ? '🏳️' : game.isNight ? '🌙' : game.belling ? '🌇' : '☀️';
-    let waveLeft = 0;
-    for (const zb of game.zombies) if (zb.wave) waveLeft++;
+    // Threat: the clock that replaced nightfall. The bar inside the chip fills
+    // toward the next surge, so "something is coming" is always legible.
+    const held = game.heldNodes ? game.heldNodes() : 0;
+    const nests = game.liveNests ? game.liveNests() : 0;
+    const frac = Math.max(0, Math.min(1, (game.threat || 0) % 1));
     q('#r-day').innerHTML = game.phase === 'found'
-      ? `${phase} <b>Claim your ground</b>`
-      : game.isNight
-        ? `${phase} <b>Night ${game.mode === 'survival' ? game.night : Math.min(game.night, FINAL_NIGHT)}</b> — ${waveLeft} left`
-        : game.belling
-          ? `${phase} <b>Night ${game.night} falls…</b>`
-          : `${phase} <b>Day ${game.night}</b>${game.mode === 'survival' ? '' : ' / ' + FINAL_NIGHT}`;
-    q('#r-day').classList.toggle('danger', game.isNight || game.belling);
+      ? '🏳️ <b>Claim your ground</b>'
+      : game.finalStand
+        ? '☠️ <b>Final counterattack</b>'
+        : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+    q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
+    q('#r-front').innerHTML = `🚩 <b>${held}</b>/${game.nodes.length} · 🔥 <b>${nests}</b>`;
+    q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
 
     // Active army stance chip.
     if (this._stance !== game.stance) {
@@ -449,11 +453,11 @@ export class UI {
     const stanceText = {
       defend: 'holding the city line',
       guard: 'following your hero',
-      attack: 'hunting enemies and hives',
+      attack: 'pushing the lanes',
     }[game.stance] || 'awaiting orders';
     q('#army-status').innerHTML = army
       ? `<b>${army}</b> squad unit${army === 1 ? '' : 's'} · ${stanceText}`
-      : 'Build militia, ranger, or sniper camps to raise squads.';
+      : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
     // Hero plate.
@@ -496,11 +500,6 @@ export class UI {
         big.className = 'bigaction bell';
         big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>SPACE</small></span>`;
         big.disabled = !near || h.dead;
-      } else if (game.phase === 'day' && !game.belling) {
-        this._bigMode = 'bell';
-        big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🔔</span><span class="btext">Start the night<small>SPACE at the Keep</small></span>`;
-        big.disabled = false;
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
@@ -684,7 +683,7 @@ export class UI {
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games
-        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: night ${p.bestDay}`
+        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: Threat ${p.bestDay}`
         : 'first deployment';
     }
     this.refreshHeroBadges(p);
@@ -719,7 +718,7 @@ export class UI {
     if (!row) return;
     if (!snap) { row.innerHTML = ''; return; }
     const players = snap.heroKeys.length;
-    row.innerHTML = `<button class="menubtn" id="b-continue">📂 &nbsp;Continue <small>night ${snap.night}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</small></button>`;
+    row.innerHTML = `<button class="menubtn" id="b-continue">📂 &nbsp;Continue <small>Threat ${snap.threatLevel || 1}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</small></button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
@@ -819,7 +818,7 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
-  showEnd(won, stats, night, levelId, mode = 'campaign', best = 0, extra = null) {
+  showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -833,18 +832,19 @@ export class UI {
     const grants = (extra && extra.grants || []).map((k) => ITEMS[k]).filter(Boolean);
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
-        <h1>${survival ? `💀 NIGHT ${night}` : won ? '🏆 VICTORY' : '💀 THE CITY HAS FALLEN'}</h1>
+        <h1>${survival ? `💀 THREAT ${threat}` : won ? '🏆 PLANET TAKEN' : '💀 THE CITY HAS FALLEN'}</h1>
         <p class="tagline">${survival
-          ? `The dead are endless — but you held ${lv.name} for ${night - 1} night${night === 2 ? '' : 's'}.${night - 1 >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
+          ? `The dead are endless — but you drove ${lv.name} to Threat ${threat}.${threat >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
           : won
-          ? `${lv.name} is cleansed. The final horde lies rotting at your walls.`
-          : `The dead took the Keep on night ${night}.`}</p>
+          ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
+          : `The dead took the Keep at Threat ${threat}.`}</p>
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
           <div>🔥 Hive nests razed: <b>${stats.nests || 0}</b></div>
           <div>🏗️ Structures raised: <b>${stats.built}</b></div>
-          <div>🌙 Nights survived: <b>${survival ? night - 1 : Math.min(night, FINAL_NIGHT)}</b></div>
+          <div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>
+          <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
         ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${grants.length
@@ -990,15 +990,18 @@ export class UI {
       ctx.fillStyle = '#b44dff';
       ctx.fillRect(n.x - 2, n.z - 2, 4, 4);
     }
-    if (!game.isNight && game.nightPlan) {
-      const ph = (performance.now() / 700) % 1;
-      for (const id of game.nightPlan.nests || []) {
-        const n = game.nests[id];
-        if (!n) continue;
-        ctx.strokeStyle = `rgba(255,60,50,${0.9 - ph * 0.7})`;
-        ctx.lineWidth = 2;
+    // Lane nodes: yours green, the hive's red, unclaimed amber. Contested
+    // nodes pulse — this is the front line, read at a glance.
+    const nodePulse = (performance.now() / 500) % 1;
+    for (const n of game.nodes || []) {
+      const col = n.owner === 'player' ? '#59ff9c' : n.owner === 'hive' ? '#ff5a4a' : '#d8c07a';
+      ctx.fillStyle = col;
+      ctx.fillRect(n.x - 1.6, n.z - 1.6, 3.2, 3.2);
+      if (n.cap > 0.05) {
+        ctx.strokeStyle = `rgba(255,255,255,${0.9 - nodePulse * 0.7})`;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(n.x, n.z, 3 + ph * 8, 0, Math.PI * 2);
+        ctx.arc(n.x, n.z, 2.5 + nodePulse * 6, 0, Math.PI * 2);
         ctx.stroke();
       }
     }

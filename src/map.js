@@ -132,6 +132,59 @@ export class GameMap {
       }
     }
 
+    // Lane nodes — the ground worth holding. Two rings of contested ground
+    // between the city sites and the hives, plus one approach node outside
+    // each nest so there is always somewhere to stage a siege from.
+    this.nodeSpots = [];
+    const nodeMin = 13; // keep nodes from crowding each other
+    const tryNode = (x, z, name) => {
+      x = clamp(Math.round(x), 4, N - 5);
+      z = clamp(Math.round(z), 4, N - 5);
+      let found = null;
+      outer2: for (let r = 0; r < 12; r++) {
+        for (let dz = -r; dz <= r; dz++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+            const nx = x + dx, nz = z + dz;
+            if (nx < 4 || nz < 4 || nx > N - 5 || nz > N - 5) continue;
+            if (!this.isWalkable(nx, nz)) continue;
+            found = [nx, nz];
+            break outer2;
+          }
+        }
+      }
+      if (!found) return;
+      for (const s of this.nodeSpots) {
+        if (Math.hypot(found[0] - s.x, found[1] - s.z) < nodeMin) return;
+      }
+      // Never bury a node inside a city footprint — the city levels its ground.
+      for (const s of this.sites) {
+        if (Math.hypot(found[0] - s.x, found[1] - s.z) < 20) return;
+      }
+      this.nodeSpots.push({ x: found[0], z: found[1], name });
+    };
+
+    const NODE_NAMES = [
+      'The Crossing', 'Ashen Ford', 'Gallows Hill', 'The Cut', 'Old Toll',
+      'Broken Span', 'Kiln Yard', 'Weeping Rock', 'The Shelf', 'Hangman Reach',
+      'Salt Steps', 'Drowned Mill', 'Cairn Gate', 'Rust Hollow', 'The Narrows',
+      'Widow Bluff', 'Thorn Gate', 'Ember Walk',
+    ];
+    let nodeName = 0;
+    const nextName = () => NODE_NAMES[nodeName++ % NODE_NAMES.length];
+
+    for (const [count, radius] of [[6, N * 0.20], [7, N * 0.31]]) {
+      for (let i = 0; i < count; i++) {
+        const ang = (i / count) * Math.PI * 2 + this.rng() * 0.5 + (radius > N * 0.25 ? 0.4 : 0);
+        tryNode(cx + Math.cos(ang) * radius, cz + Math.sin(ang) * radius, nextName());
+      }
+    }
+    // A staging node on the city-facing side of every hive.
+    for (const [nx, nz] of this.nestSpots) {
+      const ang = Math.atan2(cz - nz, cx - nx);
+      tryNode(nx + Math.cos(ang) * 11, nz + Math.sin(ang) * 11, nextName());
+    }
+
     // Precompute tile heights (corners get averaged later).
     this.heightOf = (t) => (t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0);
   }

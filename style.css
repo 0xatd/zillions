@@ -44,6 +44,25 @@ body::after {
 .res small { opacity: 0.65; font-size: 11px; }
 .res.gold { font-size: 17px; color: var(--gold); }
 .res.danger { background: rgba(255, 93, 82, 0.22); color: #ffb3ad; }
+
+/* Threat chip: a thin fill that creeps toward the next surge. The bar is the
+   only "clock" the player gets now, so it has to read at a glance. */
+.threatbar {
+  display: block;
+  margin-top: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.threatbar::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: var(--f, 0%);
+  background: linear-gradient(90deg, #d8a04a, #ff5d52);
+  transition: width 0.25s linear;
+}
 .sep { width: 1px; height: 20px; background: var(--panel-border); margin: 0 4px; }
 
 .tbtn {

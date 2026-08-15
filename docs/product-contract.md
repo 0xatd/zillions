@@ -5,13 +5,13 @@ systems, menus, backend code, or docs.
 
 ## Target
 
-Zillions is a sci-fi Thronefall-style conquest defense game.
+Zillions is a sci-fi planet-conquest siege game.
 
 The player signs in, enters a living frontier, chooses or joins a world, rides a
-hero, founds a fortified city, buys pre-planned plots with coins, and survives
-night attacks from hostile Xeno territory.
+hero, founds a fortified city, buys pre-planned plots with coins, and pushes the
+front line outward until the planet is taken.
 
-Use the Thronefall-style city-defense direction as the gameplay base:
+Use continuous siege on a lane graph as the gameplay base:
 
 - Unclaimed frontier maps.
 - Multiple city sites.
@@ -21,15 +21,21 @@ Use the Thronefall-style city-defense direction as the gameplay base:
 - Hold the interact key to stream coins into a plot.
 - Economy must be level-balanced against gold the player can actually collect.
   A campaign level should start with enough gold for a real opening choice, and
-  income upgrades should pay back before the 10-night level is effectively over.
-- Untimed day planning.
-- Player rings the bell when ready.
-- Hordes attack from visible hive nests.
-- Hive nests can be razed by day.
-- Camps raise troops automatically.
+  income upgrades should pay back inside a few minutes of siege.
+- No day, no night, no bell. Building is always available and never safe.
+- Income is credited automatically; ground coins come from combat and conquest.
+- Nothing repairs itself — damage and ruins are paid for with the same
+  hold-to-build verb.
+- Threat is the clock, and every whole level makes every hive muster at once.
+- Hordes are produced by visible hive nests, continuously.
+- Hive nests are real bases: health, defenders, and blighted ground.
+- Lane nodes are taken by presence, pay income, and unlock Forward Camps.
+- Camps are faucets that muster squads forever.
 - No individual army micro. Squads are autonomous, but the player sets the
   global army stance: defend city, follow the hero, or hunt outward toward
   enemies and hive nests.
+- No individual squad micro. Squads are autonomous; the player sets the global
+  stance: Defend city, Follow hero, or Push the lanes.
 - Hero level-ups must be visible and player-directed. Each point can improve
   the hero aura, one of two passive paths, or ult damage. The HUD must show
   derived hero stats and whether the aura is affecting allies or enemies.
@@ -39,32 +45,25 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 
 ## Current Shipped Loop
 
-The live game still uses explicit phases:
-
 1. The player founds a city at a flagged site.
-2. Day is untimed. The player collects coins, builds, upgrades, and razes hives.
-3. The player rings the bell at the Keep.
-4. A night wave attacks from visible hive nests.
-5. Dawn pays income, repairs ruins, and advances the run.
+2. The siege runs continuously. The player builds, upgrades, repairs and
+   rebuilds at any time, and nothing pauses while they do.
+3. Camps muster squads forever. The player sets one global stance; the army
+   pushes the lanes and takes nodes on its own.
+4. Every living hive musters squads on a timer that tightens as Threat climbs.
+   Each whole Threat level triggers a simultaneous surge from every hive.
+5. Campaign maps end when every hive is razed and the champion leading the
+   final counterattack is killed — or when the Keep falls.
 
-Campaign maps currently end when the player survives the final night or razes
-all hive nests. Survival mode currently counts nights survived.
+Survival mode is endless; the score is the Threat level reached. The backend's
+`best_day` column carries that number.
 
-## Next Gameplay Direction
+## Longer-Range Direction
 
-Alex's current direction is to remove the explicit night/day concept. The best
-target loop is continuous siege:
-
-- Waves arrive on fixed timers.
-- The player can build and upgrade at any time.
-- Building during a wave is allowed but creates real risk.
-- The objective is to clear the map, not wait through a fixed night count.
-- The primary win path is protect the Keep, raze all hive nests, then kill the
-  map boss or final counterattack.
-
-Do not do a copy-only migration. If this change starts, update the simulation,
-UI, tutorial, save summaries, stats labels, balance checks, and this contract
-together.
+`docs/design-vision.md` holds the next horizon: folklore factions as
+rule-changers, fog of war, world-placed side missions, landmarks, and the
+planet/galaxy layers. None of it is implemented. Do not present it as shipped,
+and prove the siege loop with human playtesting before building on top of it.
 
 ## Production UX Rules
 

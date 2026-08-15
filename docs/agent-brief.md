@@ -10,30 +10,54 @@ Read this before you review, audit, or change Zillions.
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`.
 - Static GitHub Pages is only a fallback/review build.
 
-The live game is a sci-fi Thronefall-style conquest defense game. The player
-signs in with Google, claims a public username, picks a hero, founds a city at a
-flagged site, funds pre-planned plots with gold, defends the Keep, razes hive
+The live game is a sci-fi planet-conquest siege game. The player signs in with
+Google, claims a public username, picks a hero, founds a city at a flagged site,
+funds pre-planned plots with gold, pushes the lanes, takes nodes, razes hive
 nests, and clears campaign maps.
 
-The current shipped combat loop still has the old day/bell/night phase model:
-the player builds during day, rings the bell at the Keep, fights a wave, then
-collects dawn income. Do not pretend this has already been migrated.
+## Shipped Combat Loop
 
-## Next Gameplay Direction
+Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 
-Alex's current preferred direction is to remove the explicit day/night concept.
-The intended next loop is continuous siege:
+- Both sides run an economy. Camps muster a squad every `every` seconds forever
+  and sustain a standing force of `count * CAMP_STANDING`. Every living hive
+  musters its own squads on `hiveInterval(threat)`.
+- Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
+  your own conquests. Each whole level triggers a surge — every hive musters at
+  once at `SURGE_MULT`.
+- Lane graph in `src/lanes.js`: deterministic BFS-built lanes between capture
+  nodes, hives, and the city. Squads route node-to-node. A third of the army
+  (`_isHolder`, by unit id) takes and holds nodes; the rest march on hives.
+- Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
+  `SIEGE.nodeIncome`, and carry an `outpost` plot that is locked until the node
+  is player-owned.
+- Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
+  ground come only from kills, node captures, and razed hives.
+- Nothing auto-repairs. `plotAction()` returns `build | branch | repair |
+  rebuild`, all funded with the same hold-to-build verb.
+- Hives have real health, spit defenders when damaged (`defendT`), and blight
+  the ground within `NEST_BLIGHT_R`. Units siege a hive even while its garrison
+  swarms, unless something is inside `SIEGE_GUARD_R`.
+- Campaign win: raze every hive, then kill the champion of the final
+  counterattack. Loss: the Keep falls.
 
-- Waves arrive every fixed interval.
-- Building and upgrading can happen at any time.
-- Building during a wave is allowed but dangerous.
-- The core job is to clear the map, not survive a fixed number of nights.
-- The win path is: protect the Keep, raze all hive nests, then defeat the map
-  boss or final counterattack.
+## Balance Status
 
-Do not half-migrate this by only changing copy. A real migration must update the
-simulation, UI, tutorials, save summaries, stats labels, balance checks, and
-docs together.
+Balance is a first pass tuned against **simulated** runs, not human play:
+
+- Level 1 is validated winnable in roughly 13 minutes via the intended scaling
+  chain: hold nodes -> Forward Camps -> bigger army -> siege more hives.
+- Pure turtling and pure blitzing both lose, which is the intended shape.
+- Levels 3-5 were not beaten by the test bot. The bot never switches stance,
+  never picks tower doctrines, and steers the hero badly — and the hero is the
+  designed swing factor. These levels need human playtesting before anyone
+  calls them tuned or "too hard".
+
+## Not Implemented
+
+`docs/design-vision.md` describes folklore factions, fog of war, world-placed
+side missions, landmarks, and the planet/galaxy layers. None of that is built.
+Do not describe any of it as shipped.
 
 ## Product Boundaries
 
@@ -53,11 +77,14 @@ docs together.
 - Movement is fixed to world/minimap orientation, not camera-relative.
 - W moves north/up, A west/left, S south/down, D east/right.
 - Camera yaw stays fixed during gameplay.
-- Hold Space/B to build or upgrade.
+- Hold Space/B to build, upgrade, repair, or rebuild.
 - Upgrades must work from all sides of a building footprint.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
-  and `3 Hunt` pushes enemies and hive nests. Do not add individual unit micro.
+  and `3 Push` walks the lanes. Do not add individual unit micro.
+- Everything new must stay deterministic: seeded RNG and commands through
+  `exec()`, or lockstep co-op desyncs. The lane graph is built from the map
+  alone, with no RNG.
 - Hero level-ups grant visible upgrade points. The player chooses Aura,
   Passive I, Passive II, or Ult Damage from the hero panel. Aura upgrades must
   stay visually obvious in world and reflected in affected ally/enemy stats.
@@ -70,6 +97,7 @@ docs together.
 - `src/ui.js`: account gate, menus, HUD, lobby, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, waves.
 - `src/plots.js`: city layout, ramparts, gates, build plots.
+- `src/lanes.js`: lane graph, node routing, squad waypoints.
 - `src/auth.js`: Supabase auth, username, profile/save/stat sync.
 - `src/online.js`: account-backed room/lobby adapter.
 - `api/`: Vercel routes.

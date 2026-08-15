@@ -3,9 +3,18 @@
 A full review of the current game, a cleaned-up statement of the long-term
 vision, and a concrete proposal for the next gameplay model.
 
-This document is **design intent**, not shipped behavior. `docs/agent-brief.md`
-and `docs/product-contract.md` remain the source of truth for what is live.
-Nothing here is implemented yet.
+`docs/agent-brief.md` and `docs/product-contract.md` remain the source of truth
+for what is live.
+
+**Status.** Phases 1-3 of the build order in §11 are implemented: the lane
+graph, camps as faucets, hives as producers, Forward Camps, the Threat clock,
+the economy without dawn, paid repair and rebuild, the enemy roles, and tower
+targeting doctrine. Balance is a first pass tuned against simulated runs — level
+1 is validated winnable, later levels need human playtesting.
+
+**Phases 4-6 are NOT implemented** and remain design intent: the folklore
+factions (§7), world-placed side missions (§8), fog of war and landmarks (§9),
+and the planet and galaxy layers (§10).
 
 ---
 
@@ -475,26 +484,26 @@ cheapest "vast" on the list because it's mostly UI over a small amount of state.
 
 Sequenced so each phase is playable and each one unlocks the next.
 
-**Phase 1 — Pressure & Territory** *(the load-bearing one)*
+**Phase 1 — Pressure & Territory** *(the load-bearing one)* — **SHIPPED**
 Nodes, lanes, camps-as-faucets, hives-as-producers, forward camps. Delete the
 bell. This is the change that makes the game a different genre, and everything
 else is better on top of it. Do not do the folklore first, however tempting.
 
-**Phase 2 — Economy without dawn**
+**Phase 2 — Economy without dawn** — **SHIPPED**
 Trickle income, combat/conquest coins only, paid repair, the Threat meter.
 
-**Phase 3 — Enemy roles + tower priority**
+**Phase 3 — Enemy roles + tower priority** — **SHIPPED**
 Cheapest large win in tactical depth. Could honestly be done before Phase 2.
 
-**Phase 4 — First Folk faction: the Lycans**
+**Phase 4 — First Folk faction: the Lycans** — not started
 One faction, done fully: standing, Law, moon events, unlocked unit, betrayal.
 Werewolves first because the moon reuse means the lighting work already exists.
 Prove the faction template on one before authoring five.
 
-**Phase 5 — Fog, landmarks, world-placed quests**
+**Phase 5 — Fog, landmarks, world-placed quests** — not started
 The "vast" pass. Also where the map stops being noise.
 
-**Phase 6 — Planet view → galaxy layer**
+**Phase 6 — Planet view → galaxy layer** — not started
 The frame goes on last, once there's a picture worth framing.
 
 ---
@@ -529,14 +538,13 @@ all.
 
 Each of these is small, none of them depend on the big migration:
 
-- Tower targeting priority toggle.
-- Make ambient creeps worth killing — right now it's a 5% chance of one coin.
+- ~~Tower targeting priority toggle.~~ **Done** — press `T` beside a tower.
+- ~~Make ambient creeps worth killing.~~ **Done** — 14% for 2 coins.
 - Show side-quest progress in the HUD, not only in the pause menu.
-- Add one enemy role (Spitter is the highest-impact single addition).
-- A visible threat/pressure readout, so the player can see what's coming.
-- Minimap beacons for objectives, hives, and the front line.
-- Let a lost building be re-bought at a discount instead of free-rebuilt — one
-  line, and it immediately gives damage weight.
+- ~~Add one enemy role.~~ **Done** — spitter, burrower, sieger and caller all shipped.
+- ~~A visible threat/pressure readout.~~ **Done** — the Threat chip and its surge bar.
+- ~~Minimap beacons for the front line.~~ **Done** — lane nodes are drawn by owner and pulse while contested.
+- ~~Let a lost building be re-bought at a discount instead of free-rebuilt.~~ **Done** — ruins rebuild at half price.
 - Name the bosses' escapes: if a boss would die and the player is far away, let
   it flee at 10% and come back next map. Cheap, and it starts the nemesis
   system for almost nothing.
