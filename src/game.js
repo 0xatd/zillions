@@ -27,10 +27,11 @@ export class Game {
     this.levelId = snap ? snap.level : levelId;
     this.mode = snap ? snap.mode || 'campaign' : mode;
     this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
+    this.economy = { startGold: START_GOLD, income: 1, wave: 1, nightMax: NIGHT_MAX, ...(this.level.economy || {}) };
     this.boss = null;
     this.rng = makeRNG(999);
 
-    this.gold = START_GOLD;
+    this.gold = this.economy.startGold;
     this.coins = [];             // physical coins on the ground
     this.site = -1;              // chosen city site index (-1 = not founded yet)
     this.plots = [];             // generated when the city is founded
@@ -278,7 +279,13 @@ export class Game {
     const idx = plot.tier + 1;
     if (idx > kind.tiers.length) return null;
     const t = kind.tiers[idx - 1];
-    if (t && t.branch && !plot.branch) return { branch: true, options: t.options };
+    if (t && t.branch && !plot.branch) {
+      const options = {};
+      for (const [key, opt] of Object.entries(t.options)) {
+        options[key] = { ...opt, cost: kind.perTile ? Math.ceil(opt.cost * plot.tiles.length) : opt.cost };
+      }
+      return { branch: true, options };
+    }
     const def = this.tierDef(plot, idx);
     return def ? { def, cost: def.cost } : null;
   }
@@ -468,7 +475,7 @@ export class Game {
     // Co-op: the same city, the same shared purse — but more heroes on the
     // field means the hive sends more dead (+40% wave size per extra player).
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
-    const w = waveForNight(this.night, this.diff.mult * this.level.mult * coopMult);
+    const w = waveForNight(this.night, this.diff.mult * this.level.mult * this.economy.wave * coopMult);
     // The wave marches from living hive nests (the enemy's bases). Fewer
     // nests left standing = fewer directions to defend.
     const alive = this.nests.filter((n) => n.alive);
@@ -543,7 +550,7 @@ export class Game {
 
   _startNight() {
     this.phase = 'night';
-    this.phaseT = NIGHT_MAX;
+    this.phaseT = this.economy.nightMax;
     const plan = this.nightPlan;
     this._spawnHorde(plan.size, plan.nests || [], plan.types);
     if (plan.boss) this._spawnBoss((plan.nests || [])[0]);
@@ -574,7 +581,7 @@ export class Game {
 
   _dawnPayout() {
     for (const b of this.buildings) {
-      const inc = b.def.income ? Math.round(b.def.income * (1 + this.relicMods.income)) : 0;
+      const inc = b.def.income ? Math.round(b.def.income * this.economy.income * (1 + this.relicMods.income)) : 0;
       if (!inc || !b.alive) continue;
       // Split income into a handful of coins fountaining around the building.
       const n = Math.min(6, Math.max(2, Math.round(inc / 3)));
@@ -1484,7 +1491,7 @@ export class Game {
             }
           }
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         } else if (!chasing) {
           u.target = null;
@@ -1496,7 +1503,7 @@ export class Game {
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         } else if (!chasing) {
           u.targetNest = null;

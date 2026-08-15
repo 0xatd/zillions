@@ -19,6 +19,9 @@ Use the Claude Thronefall PR direction as the gameplay base:
 - Closed ramparts with gate chokepoints.
 - Pre-planned house, farm, mill, mine, camp, tower, and wall plots.
 - Hold the interact key to stream coins into a plot.
+- Economy must be level-balanced against gold the player can actually collect.
+  A campaign level should start with enough gold for a real opening choice, and
+  income upgrades should pay back before the 10-night level is effectively over.
 - Untimed day planning.
 - Player rings the bell when ready.
 - Hordes attack from visible hive nests.

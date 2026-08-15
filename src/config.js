@@ -13,7 +13,7 @@ export const FINAL_DAY = FINAL_NIGHT;   // compatibility for older backend docs/
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
-export const PAY_RATE = 22;            // gold per second streamed into a plot (hold B)
+export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
 
 export const TILE = {
@@ -41,55 +41,55 @@ export const PLOT_KINDS = {
     name: 'The Keep', icon: '🏰',
     tiers: [
       { name: 'The Keep', cost: 0, hp: 4200, income: 10 },
-      { name: 'Stone Keep', cost: 70, hp: 6500, income: 18 },
-      { name: 'High Keep', cost: 150, hp: 9000, income: 30 },
+      { name: 'Stone Keep', cost: 56, hp: 6500, income: 24 },
+      { name: 'High Keep', cost: 100, hp: 9000, income: 42 },
     ],
     desc: 'The heart of the city. If it falls, all is lost. Upgrades add income and armor.',
   },
   house: {
     name: 'House', icon: '🏠',
     tiers: [
-      { name: 'Cottage', cost: 10, hp: 300, income: 6 },
-      { name: 'House', cost: 22, hp: 420, income: 12 },
-      { name: 'Manor', cost: 45, hp: 560, income: 22 },
+      { name: 'Cottage', cost: 12, hp: 300, income: 6 },
+      { name: 'House', cost: 18, hp: 420, income: 13 },
+      { name: 'Manor', cost: 34, hp: 560, income: 24 },
     ],
     desc: 'Home to taxpaying settlers. Pays coins every dawn.',
   },
   farm: {
     name: 'Farm', icon: '🌾',
     tiers: [
-      { name: 'Field', cost: 6, hp: 240, income: 4 },
-      { name: 'Farm', cost: 14, hp: 320, income: 8 },
+      { name: 'Field', cost: 8, hp: 240, income: 5 },
+      { name: 'Farm', cost: 15, hp: 320, income: 11 },
     ],
     desc: 'Cheap early coins from the soil.',
   },
   mill: {
     name: 'Mill', icon: '🌀',
     tiers: [
-      { name: 'Windmill', cost: 18, hp: 380, income: 9 },
-      { name: 'Great Mill', cost: 36, hp: 500, income: 18 },
+      { name: 'Windmill', cost: 20, hp: 380, income: 11 },
+      { name: 'Great Mill', cost: 34, hp: 500, income: 23 },
     ],
     desc: 'Grinds a steady stream of coins.',
   },
   mine: {
     name: 'Gold Mine', icon: '⛏️',
     tiers: [
-      { name: 'Gold Mine', cost: 28, hp: 480, income: 14 },
-      { name: 'Deep Mine', cost: 55, hp: 640, income: 26 },
+      { name: 'Gold Mine', cost: 30, hp: 480, income: 18 },
+      { name: 'Deep Mine', cost: 48, hp: 640, income: 36 },
     ],
     desc: 'Rich veins, far from safety. The best coins are the hardest to hold.',
   },
   tower: {
     name: 'Tower', icon: '🏹',
     tiers: [
-      { name: 'Watchtower', cost: 18, hp: 560, dmg: 14, rof: 1.5, range: 10 },
-      { name: 'Guard Tower', cost: 36, hp: 720, dmg: 26, rof: 1.6, range: 11 },
+      { name: 'Watchtower', cost: 20, hp: 560, dmg: 14, rof: 1.5, range: 10 },
+      { name: 'Guard Tower', cost: 34, hp: 720, dmg: 26, rof: 1.6, range: 11 },
       {
         branch: true, // walk up and choose a doctrine before paying
         options: {
-          ballista: { name: 'Ballista Tower', icon: '🎯', cost: 60, hp: 850, dmg: 72, rof: 0.7, range: 15,
+          ballista: { name: 'Ballista Tower', icon: '🎯', cost: 54, hp: 850, dmg: 72, rof: 0.7, range: 15,
             blurb: 'Slow, huge single hits at extreme range. Boss killer.' },
-          flame: { name: 'Flame Tower', icon: '🔥', cost: 60, hp: 850, dmg: 13, rof: 1.7, range: 8.5, splash: 2.4,
+          flame: { name: 'Flame Tower', icon: '🔥', cost: 54, hp: 850, dmg: 13, rof: 1.7, range: 8.5, splash: 2.4,
             blurb: 'Fast burning splash. Melts packed hordes up close.' },
         },
       },
@@ -100,14 +100,14 @@ export const PLOT_KINDS = {
     name: 'Barrier', icon: '🧱',
     perTile: true, // cost scales with segment length — but it's ONE purchase
     tiers: [
-      { name: 'Razorwire Fence', cost: 0.8, hp: 220 },
-      { name: 'Plasteel Barricade', cost: 1.8, hp: 520 },
+      { name: 'Razorwire Fence', cost: 0.75, hp: 220 },
+      { name: 'Plasteel Barricade', cost: 1.45, hp: 520 },
       {
         branch: true, // stand at the gate and choose the segment's final form
         options: {
-          shock: { name: 'Shock Fence', icon: '⚡', cost: 2.8, hp: 700, zap: 7,
+          shock: { name: 'Shock Fence', icon: '⚡', cost: 2.2, hp: 700, zap: 7,
             blurb: 'Electrified — everything chewing it takes damage and slows.' },
-          bastion: { name: 'Bastion Wall', icon: '🧱', cost: 2.8, hp: 1400,
+          bastion: { name: 'Bastion Wall', icon: '🧱', cost: 2.2, hp: 1400,
             blurb: 'Twice the armor. The dead gnaw a long time.' },
         },
       },
@@ -118,8 +118,8 @@ export const PLOT_KINDS = {
     name: 'Militia Camp', icon: '⚔️',
     unit: 'soldier',
     tiers: [
-      { name: 'Militia Camp', cost: 22, hp: 460, count: 3 },
-      { name: 'War Camp', cost: 42, hp: 600, count: 5 },
+      { name: 'Militia Camp', cost: 24, hp: 460, count: 3 },
+      { name: 'War Camp', cost: 44, hp: 600, count: 5 },
     ],
     desc: 'Sturdy troopers. The fallen are replaced free at every dawn.',
   },
@@ -127,8 +127,8 @@ export const PLOT_KINDS = {
     name: 'Ranger Camp', icon: '🏹',
     unit: 'ranger',
     tiers: [
-      { name: 'Ranger Camp', cost: 16, hp: 420, count: 3 },
-      { name: 'Ranger Lodge', cost: 32, hp: 540, count: 5 },
+      { name: 'Ranger Camp', cost: 18, hp: 420, count: 3 },
+      { name: 'Ranger Lodge', cost: 34, hp: 540, count: 5 },
     ],
     desc: 'Fast, quiet scouts. Great early screen for your walls.',
   },
@@ -136,14 +136,14 @@ export const PLOT_KINDS = {
     name: 'Sniper Nest', icon: '🎯',
     unit: 'sniper',
     tiers: [
-      { name: 'Sniper Nest', cost: 38, hp: 420, count: 2 },
-      { name: 'Marksman Hall', cost: 66, hp: 540, count: 3 },
+      { name: 'Sniper Nest', cost: 34, hp: 420, count: 2 },
+      { name: 'Marksman Hall', cost: 56, hp: 540, count: 3 },
     ],
     desc: 'Massive damage at extreme range — every shot echoes.',
   },
 };
 
-export const START_GOLD = 14;
+export const START_GOLD = 58;
 
 export const UNITS = {
   ranger: {
@@ -297,6 +297,7 @@ export function itemMods(items) {
 export const LEVELS = [
   {
     id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8, size: 160, nests: 3,
+    economy: { startGold: 58, income: 1.0, wave: 0.9, nightMax: 105 },
     quests: [
       { id: 'l1q1', name: 'First Blood', desc: 'Slay 150 of the dead', reward: 'targeting_optic', check: (g) => g.stats.kills >= 150 },
       { id: 'l1q2', name: 'Not One Stone', desc: 'Win without losing a single building', reward: 'masonry_codex', check: (g) => g.stats.lost === 0 },
@@ -311,6 +312,7 @@ export const LEVELS = [
   },
   {
     id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 160, nests: 3,
+    economy: { startGold: 64, income: 1.04, wave: 0.96, nightMax: 115 },
     quests: [
       { id: 'l2q1', name: 'Drain the Fen', desc: 'Raze 2 hive nests', reward: 'tithe_ledger', check: (g) => g.stats.nests >= 2 },
       { id: 'l2q2', name: 'Untouchable', desc: 'Win without your hero falling', reward: 'servo_legs', check: (g) => g.stats.heroDeaths === 0 },
@@ -325,6 +327,7 @@ export const LEVELS = [
   },
   {
     id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 160, nests: 4,
+    economy: { startGold: 72, income: 1.08, wave: 1.0, nightMax: 125 },
     quests: [
       { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
       { id: 'l3q2', name: 'High Keep', desc: 'Upgrade the Keep to its final tier', reward: 'banner_keep', check: (g) => { const hq = g.plots.find((p) => p.kind === 'hq'); return hq && hq.tier >= 3; } },
@@ -339,6 +342,7 @@ export const LEVELS = [
   },
   {
     id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 160, nests: 4,
+    economy: { startGold: 82, income: 1.12, wave: 1.04, nightMax: 135 },
     quests: [
       { id: 'l4q1', name: 'Tomb Raider', desc: 'Raze 3 hive nests', reward: 'ballistics_manual', check: (g) => g.stats.nests >= 3 },
       { id: 'l4q2', name: 'Deathless', desc: 'Win without your hero falling', reward: 'aura_amp', check: (g) => g.stats.heroDeaths === 0 },
@@ -353,6 +357,7 @@ export const LEVELS = [
   },
   {
     id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 160, nests: 5,
+    economy: { startGold: 96, income: 1.16, wave: 1.08, nightMax: 145 },
     quests: [
       { id: 'l5q1', name: 'Blind the Eye', desc: 'Kill The Zillion within 120s', reward: 'void_shard', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 120 },
       { id: 'l5q2', name: 'Scour the Vale', desc: 'Raze every hive nest', reward: 'warlord_crest', check: (g) => g.nests.length > 0 && g.nests.every((n) => !n.alive) },

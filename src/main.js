@@ -1747,6 +1747,13 @@ class App {
     g.add(body);
     g.userData.body = body;
     const addB = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; body.add(mesh); return mesh; };
+    const weaponParts = [];
+    const trackWeapon = (mesh) => {
+      mesh.userData.restPos = mesh.position.clone();
+      mesh.userData.restRot = mesh.rotation.clone();
+      weaponParts.push(mesh);
+      return mesh;
+    };
 
     if (u.hero) {
       // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
@@ -1764,16 +1771,18 @@ class App {
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);
       if (u.key === 'scott') {
         // Stubby double-barrel shotgun + the gravity hammer slung on his back.
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x1e1f21)), 0.26, 0.62, 0.24);
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x2b2d31)), 0.26, 0.72, 0.24);
-        const haft = addB(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), M(0x3a3228)), -0.28, 0.8, -0.34);
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x1e1f21)), 0.26, 0.62, 0.24));
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x2b2d31)), 0.26, 0.72, 0.24));
+        const haft = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), M(0x3a3228)), -0.28, 0.8, -0.34));
         haft.rotation.z = 0.5;
-        const head = addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.2), trim), -0.5, 1.05, -0.34);
+        haft.userData.restRot = haft.rotation.clone();
+        const head = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.2), trim), -0.5, 1.05, -0.34));
         head.rotation.z = 0.5;
+        head.userData.restRot = head.rotation.clone();
       } else if (u.key === 'alexander') {
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26);   // long marksman rifle
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26));   // long marksman rifle
       } else {
-        addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24);   // long rifle
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24));   // long rifle
       }
       const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
       haloGeo.rotateX(-Math.PI / 2);
@@ -1799,12 +1808,13 @@ class App {
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.62, 8), M(d.color)), 0, 0.45, 0);
       addB(new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), M(0xc4a37e)), 0, 0.92, 0);
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color)), 0, 1.02, 0);
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18);
+      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18));
     }
+    if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
 
-  _syncUnits(t) {
+  _syncUnits(t, dt = 0) {
     const g = this.game;
     const seen = new Set();
     for (const u of g.units) {
@@ -1818,9 +1828,27 @@ class App {
       }
       rec.mesh.position.set(u.x, 0, u.z);
       rec.mesh.rotation.y = u.facing;
-      // Walk bob + a forward lean while moving — cheap but lively.
+      let attackPulse = 0;
+      let attackKind = '';
+      if (rec.attack) {
+        rec.attack.t -= dt;
+        attackKind = rec.attack.kind || '';
+        const p = clamp(1 - rec.attack.t / rec.attack.dur, 0, 1);
+        attackPulse = Math.sin(p * Math.PI);
+        if (rec.attack.t <= 0) rec.attack = null;
+      }
+      const weaponParts = rec.mesh.userData.weaponParts || [];
+      for (const part of weaponParts) {
+        const rp = part.userData.restPos;
+        const rr = part.userData.restRot;
+        if (rp) part.position.copy(rp);
+        if (rr) part.rotation.copy(rr);
+      }
+      // Walk bob + a forward lean while moving; attacks add a short lunge or
+      // weapon recoil exactly when the sim fires.
       const body = rec.mesh.userData.body;
       if (body) {
+        body.position.x = 0;
         if (u.moving) {
           body.position.y = Math.abs(Math.sin(t * 10 + u.id)) * 0.09;
           body.rotation.x = 0.12;
@@ -1829,6 +1857,26 @@ class App {
           body.position.y = Math.sin(t * 1.8 + u.id) * 0.02;
           body.rotation.x = 0;
           body.rotation.z = 0;
+        }
+        body.position.y += attackPulse * (u.hero ? 0.05 : 0.02);
+        body.position.z = attackPulse * (attackKind === 'melee' ? 0.22 : 0.08);
+        body.rotation.x += attackPulse * (attackKind === 'melee' ? -0.55 : -0.16);
+        body.rotation.z += attackPulse * (u.hero ? (u.key === 'danny' ? -0.16 : 0.12) : 0.06);
+      }
+      if (weaponParts.length && attackPulse > 0) {
+        for (const part of weaponParts) {
+          const rp = part.userData.restPos;
+          const rr = part.userData.restRot;
+          if (!rp || !rr) continue;
+          if (attackKind === 'melee') {
+            part.position.z = rp.z + 0.18 * attackPulse;
+            part.rotation.x = rr.x - 0.85 * attackPulse;
+            part.rotation.y = rr.y + 0.22 * attackPulse;
+          } else {
+            part.position.z = rp.z - 0.16 * attackPulse;
+            part.position.y = rp.y + 0.03 * attackPulse;
+            part.rotation.x = rr.x - 0.12 * attackPulse;
+          }
         }
       }
       if (u.hero) {
@@ -2106,6 +2154,7 @@ class App {
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
+          this._unitAttackCue(e);
           if (e.kind === 'melee') {
             this.audio.melee();
             this.burst(e.tx, 0.7, e.tz, { count: 8, color: 0xffd27a, speed: 2.4, life: 0.25, size: 0.4, up: 1.4 });
@@ -2339,6 +2388,15 @@ class App {
     g.events.length = 0;
   }
 
+  // Kick a living unit into a visible attack pose on the exact shot event.
+  _unitAttackCue(e) {
+    if (!e.fromId) return;
+    const rec = this.unitMeshes.get(e.fromId);
+    if (!rec) return;
+    const dur = e.kind === 'melee' ? 0.34 : e.kind === 'shotgun' ? 0.24 : e.heroKey ? 0.2 : 0.16;
+    rec.attack = { t: dur, dur, kind: e.kind || 'shot' };
+  }
+
   // Kick the nearest tower head toward its target with a little recoil.
   _towerRecoil(fx, fz, tx, tz) {
     for (const rec of this.buildingMeshes.values()) {
@@ -2423,7 +2481,7 @@ class App {
 
       this._consumeEvents();
       this._syncBuildings();
-      this._syncUnits(t);
+      this._syncUnits(t, dt);
       this._syncNests(t);
       this._syncPlots(t);
 

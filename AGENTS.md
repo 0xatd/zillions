@@ -17,6 +17,9 @@ The current gameplay source is the Claude Thronefall PR direction:
 - Closed ramparts and gate chokepoints.
 - Pre-planned plots.
 - Hold the interact key to stream coins into plots.
+- Campaign economy must be balanced against collectible gold. Each level needs
+  enough starting gold for a real opening build, and economy upgrades should
+  pay back inside the 10-night campaign window.
 - Untimed day planning.
 - Ring the bell to start night.
 - Hordes attack from visible hive nests.
