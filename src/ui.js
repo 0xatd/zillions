@@ -57,8 +57,10 @@ export class UI {
               <div id="a-items"></div>
             </div>
           </div>
+          <div id="herostats" class="herostats"></div>
           <button id="bigaction" class="bigaction"></button>
         </div>
+        <div id="upgradepanel" class="hidden"></div>
         <div id="branchpanel" class="hidden"></div>
         <div id="buildhint" class="hidden"></div>
       </div>
@@ -175,7 +177,7 @@ export class UI {
             <div><b>🌙 A horde attacks every night</b> from the red beacons shown during the day. Build walls and towers on that side.</div>
             <div><b>🔔 Ready early?</b> Ride to the KEEP and press SPACE to ring the bell and bring the night. At night SPACE fires your hero's special (Q works too).</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
-            <div><b>👑 Level up</b> from nearby kills. Your special grows stronger at levels 4 and 7.</div>
+            <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>☠️ Survive night ${FINAL_NIGHT}</b> — a boss leads the final horde. If the Keep falls, all is lost.</div>
           </div>
         </div>
@@ -252,7 +254,7 @@ export class UI {
         <span class="hicon">${h.icon}</span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>
-        <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${h.ability.icon} ${h.ability.name}</span>`;
+        <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
@@ -381,10 +383,14 @@ export class UI {
   _heroTip(h) {
     const a = h.ability;
     const au = h.aura;
+    const passives = (h.passives || [])
+      .map((p) => `<span class="tfx">${p.icon} <b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
+      .join('<br>');
     return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
       (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
+      (passives ? `${passives}<br>` : '') +
       `<span class="tfx">${a.icon} <b>${a.name}</b> — SPACE/Q, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
-      `<br><span class="tdesc">Ranks up automatically at hero levels 4 and 7.</span>`;
+      `<br><span class="tdesc">Level-ups grant upgrade points for Aura, Passive I, Passive II, or Ult Damage.</span>`;
   }
 
   // ---------- in-game HUD ----------
@@ -467,6 +473,20 @@ export class UI {
           .join('');
       }
 
+      const stats = game.heroStats ? game.heroStats(h) : null;
+      if (stats) {
+        q('#herostats').innerHTML = `
+          <span><b>${Math.round(stats.damage)}</b><small>DMG</small></span>
+          <span><b>${stats.rate.toFixed(1)}</b><small>APS</small></span>
+          <span><b>${stats.range.toFixed(1)}</b><small>RNG</small></span>
+          <span><b>${stats.speed.toFixed(1)}</b><small>SPD</small></span>
+          <span><b>${stats.regen.toFixed(1)}</b><small>REG</small></span>
+          <span class="aurastat"><b>${stats.auraRadius.toFixed(1)}</b><small>AURA</small></span>
+          <em>${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected</em>`;
+      }
+
+      this._updateUpgradePanel(game, h);
+
       // The one big contextual button: found the city, bell by day, special by night.
       const big = q('#bigaction');
       const ab = h.def.ability;
@@ -484,9 +504,10 @@ export class UI {
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
-        const rank = abilityRank(h.level);
+        const rank = abilityRank(h.level, h.upgrades);
+        const ultBonus = Math.round(((h.upgrades?.ult || 0) * 25));
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · SPACE</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT +${ultBonus}% · SPACE</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
@@ -504,6 +525,36 @@ export class UI {
       setTimeout(() => { div.classList.add('fade'); }, 6000);
       setTimeout(() => { div.remove(); }, 7000);
       if (m.kind === 'bad') this.showBanner(m.text, 'bad');
+    }
+  }
+
+  _updateUpgradePanel(game, h) {
+    const panel = this.root.querySelector('#upgradepanel');
+    if (!panel || !game.heroUpgradeChoices) return;
+    const choices = game.heroUpgradeChoices(h);
+    const points = h.skillPoints || 0;
+    const key = `${h.id}:${points}:${choices.map((c) => `${c.key}${c.rank}`).join('|')}`;
+    panel.classList.toggle('hidden', points <= 0);
+    if (points <= 0) {
+      this._upgradePanelKey = key;
+      return;
+    }
+    if (this._upgradePanelKey === key) return;
+    this._upgradePanelKey = key;
+    panel.innerHTML = `<div class="uphead"><b>${points}</b> upgrade point${points === 1 ? '' : 's'} available</div><div class="uprow"></div>`;
+    const row = panel.querySelector('.uprow');
+    for (const choice of choices) {
+      const button = document.createElement('button');
+      const capped = choice.rank >= choice.max;
+      button.className = 'upbtn' + (capped ? ' capped' : '');
+      button.disabled = capped;
+      button.innerHTML = `
+        <span class="upicon">${choice.icon}</span>
+        <b>${choice.name}</b>
+        <small>${choice.desc}</small>
+        <span class="uppips">${'●'.repeat(choice.rank)}${'○'.repeat(choice.max - choice.rank)}</span>`;
+      button.onclick = () => this.cb.onHeroUpgrade && this.cb.onHeroUpgrade(choice.key);
+      row.appendChild(button);
     }
   }
 

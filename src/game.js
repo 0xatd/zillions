@@ -7,6 +7,7 @@ import {
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
+  HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
@@ -113,6 +114,7 @@ export class Game {
         dead: !!h.dead, reviveT: +(h.reviveT || 0).toFixed(1),
         level: h.level, xp: Math.round(h.xp), cd: +h.abilCd.toFixed(1),
         items: [...(h.items || [])],
+        upgrades: { ...h.upgrades },
       })),
       zombies: this.zombies.map((z) => [z.type, +z.x.toFixed(2), +z.z.toFixed(2), +z.hp.toFixed(1), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0]),
     };
@@ -156,7 +158,7 @@ export class Game {
       u.holdX = us.hx; u.holdZ = us.hz;
     }
     for (const hs of snap.heroes) {
-      const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [] });
+      const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [], upgrades: hs.upgrades || {} });
       if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
       h.abilCd = hs.cd;
@@ -712,22 +714,131 @@ export class Game {
   _spawnHero(key, x, z, camp = null) {
     const d = HEROES[key];
     const items = camp && camp.items ? [...camp.items] : [];
-    const mods = itemMods(items);
+    const itemModsOnly = itemMods(items);
+    const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
-    const maxHp = d.hp + d.levelHp * (level - 1) + mods.hp;
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
-      hp: maxHp, maxHp,
+      hp: d.hp, maxHp: d.hp,
       mx: 0, mz: 0, sprint: false,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
-      items, mods,
+      items, itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
       reviveT: 0, hasteT: 0, hasteMult: 1,
     };
+    this._refreshHeroDerived(h, false);
     this.units.push(h);
     this.heroes.push(h);
     if (!this.hero) this.hero = h;
     return h;
+  }
+
+  _heroPassiveMods(h) {
+    const mods = itemMods([]);
+    const defs = h.def.passives || [];
+    for (let i = 0; i < defs.length; i++) {
+      const rank = h.upgrades[`passive${i + 1}`] || 0;
+      if (!rank) continue;
+      for (const [key, value] of Object.entries(defs[i].mods || {})) {
+        mods[key] = (mods[key] || 0) + value * rank;
+      }
+    }
+    return mods;
+  }
+
+  _refreshHeroDerived(h, keepHp = true) {
+    const previousMax = h.maxHp || h.def.hp;
+    const previousHp = h.hp || previousMax;
+    const passiveMods = this._heroPassiveMods(h);
+    const mods = { ...h.itemMods };
+    for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
+    h.mods = mods;
+    h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1) + h.mods.hp;
+    h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
+    h.auraRank = h.upgrades.aura || 0;
+    h.ultRank = h.upgrades.ult || 0;
+    h.auraRadius = this.heroAuraRadius(h);
+    if (!keepHp) h.hp = h.maxHp;
+    else h.hp = Math.min(h.maxHp, previousHp + Math.max(0, h.maxHp - previousMax));
+  }
+
+  heroRange(h) {
+    return h.def.range + ((h.mods && h.mods.range) || 0);
+  }
+
+  heroUltDamageMult(h) {
+    return 1 + ((h.upgrades && h.upgrades.ult) || 0) * 0.25;
+  }
+
+  heroAuraRadius(h) {
+    const aura = h.def.aura;
+    if (!aura) return 0;
+    return aura.radius * (1 + ((h.mods && h.mods.auraR) || 0) + ((h.upgrades && h.upgrades.aura) || 0) * 0.16);
+  }
+
+  heroAuraEffect(h) {
+    const aura = h.def.aura;
+    const rank = (h.upgrades && h.upgrades.aura) || 0;
+    if (!aura) return null;
+    return {
+      radius: this.heroAuraRadius(h),
+      slow: aura.slow ? Math.max(0.35, aura.slow - rank * 0.07) : 0,
+      regen: aura.regen ? aura.regen * (1 + rank * 0.22) : 0,
+      drain: aura.drain ? aura.drain * (1 + rank * 0.25) : 0,
+      leech: aura.leech ? aura.leech * (1 + rank * 0.12) : 0,
+      dmgMult: aura.dmgMult ? aura.dmgMult + rank * 0.08 : 0,
+    };
+  }
+
+  heroStats(h) {
+    const aura = this.heroAuraEffect(h);
+    const cdMult = 1 - ((h.mods && h.mods.cdr) || 0);
+    return {
+      damage: this.heroDmg(h),
+      range: this.heroRange(h),
+      rate: h.def.rof * (1 + ((h.mods && h.mods.rof) || 0)),
+      speed: h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + ((h.mods && h.mods.speed) || 0)),
+      regen: h.def.regen + 0.25 * (h.level - 1) + ((h.mods && h.mods.regen) || 0),
+      cooldown: h.def.ability.cd * Math.max(0.15, cdMult),
+      auraRadius: aura ? aura.radius : 0,
+      auraAllies: h.auraAllies || 0,
+      auraEnemies: h.auraEnemies || 0,
+      skillPoints: h.skillPoints || 0,
+    };
+  }
+
+  heroUpgradeChoices(h) {
+    const passives = h.def.passives || [];
+    return [
+      {
+        key: 'aura', icon: h.def.aura?.icon || '◯', name: h.def.aura?.name || 'Aura',
+        desc: 'Bigger aura radius and stronger aura effect.',
+      },
+      {
+        key: 'passive1', icon: passives[0]?.icon || '◆', name: passives[0]?.name || 'Passive I',
+        desc: passives[0]?.desc || 'Improves core combat stats.',
+      },
+      {
+        key: 'passive2', icon: passives[1]?.icon || '◆', name: passives[1]?.name || 'Passive II',
+        desc: passives[1]?.desc || 'Improves survivability or utility.',
+      },
+      {
+        key: 'ult', icon: h.def.ability.icon, name: `${h.def.ability.name} Damage`,
+        desc: '+25% special damage per rank.',
+      },
+    ].map((choice) => ({ ...choice, rank: h.upgrades[choice.key] || 0, max: HERO_UPGRADE_MAX }));
+  }
+
+  upgradeHero(p = 0, key) {
+    const h = this.heroes[p];
+    if (!h || h.dead || !HERO_UPGRADE_KEYS.includes(key)) { this.emit({ type: 'deny' }); return; }
+    this._refreshHeroDerived(h);
+    if (h.skillPoints <= 0 || (h.upgrades[key] || 0) >= HERO_UPGRADE_MAX) { this.emit({ type: 'deny' }); return; }
+    h.upgrades[key]++;
+    this._refreshHeroDerived(h);
+    const choice = this.heroUpgradeChoices(h).find((c) => c.key === key);
+    this.emit({ type: key === 'aura' ? 'auraupgrade' : 'levelup', x: h.x, z: h.z });
+    this.msg(`⭐ ${h.def.name} upgraded ${choice ? `${choice.icon} ${choice.name}` : key} to rank ${h.upgrades[key]}.`, 'info');
   }
 
   // Central command entry point — local input and remote co-op players both go
@@ -745,6 +856,7 @@ export class Game {
         if (h) h.payHold = !!c.on;
         break;
       }
+      case 'heroUpgrade': this.upgradeHero(c.p || 0, c.key); break;
       case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'bell': this.bell(c.p || 0); break;
@@ -762,12 +874,10 @@ export class Game {
     while (h.level < HERO_MAX_LEVEL && h.xp >= xpForLevel(h.level)) {
       h.xp -= xpForLevel(h.level);
       h.level++;
-      h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1) + h.mods.hp;
+      this._refreshHeroDerived(h);
       h.hp = h.maxHp; // full heal on level up
       this.emit({ type: 'levelup', x: h.x, z: h.z });
-      const r = abilityRank(h.level);
-      const wasR = abilityRank(h.level - 1);
-      this.msg(`⭐ ${h.def.name} reached level ${h.level}!${r > wasR ? ` ${h.def.ability.icon} ${h.def.ability.name} rank ${r}!` : ''}`, 'info');
+      this.msg(`⭐ ${h.def.name} reached level ${h.level}! Choose an upgrade in the hero panel.`, 'info');
     }
     if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
   }
@@ -777,7 +887,8 @@ export class Game {
     if (!h || h.dead) return;
     const ab = h.def.ability;
     if (h.abilCd > 0) { this.emit({ type: 'deny' }); return; }
-    const r = abilityRank(h.level) - 1;
+    const r = abilityRank(h.level, h.upgrades) - 1;
+    const ultMult = this.heroUltDamageMult(h);
     h.abilCd = ab.cd * (1 - h.mods.cdr);
 
     switch (ab.cast) {
@@ -787,7 +898,7 @@ export class Game {
           if (zb.dead) continue;
           if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
             if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
-            this.damageZombie(zb, ab.dmg[r], h.x, h.z);
+            this.damageZombie(zb, ab.dmg[r] * ultMult, h.x, h.z);
           }
         }
         break;
@@ -812,7 +923,7 @@ export class Game {
             }
           }
           zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
-          this.damageZombie(zb, ab.dmg[r], bx, bz);
+          this.damageZombie(zb, ab.dmg[r] * ultMult, bx, bz);
         }
         for (let step = ab.hop || 3; step > 0.4; step -= 0.4) {
           const nx = ox - dirX * step, nz = oz - dirZ * step;
@@ -829,7 +940,7 @@ export class Game {
         // damage lands on everything Danny brushes (see _updateHeroOne).
         h.stealth = true;
         h.weaveT = ab.dur[r];
-        h.weaveDmg = ab.dmg[r];
+        h.weaveDmg = ab.dmg[r] * ultMult;
         h.weaveKey = (h.weaveKey || 0) + 1;
         this.emit({ type: 'stealth', x: h.x, z: h.z });
         break;
@@ -1148,41 +1259,59 @@ export class Game {
   // Hero auras — the passive third of the kit (auto-attack, aura, special).
   // Each hero hums one effect into the ground around them, always on.
   _updateAuras(dt) {
-    for (const u of this.units) if (!u.hero) u.auraDmg = 1;
+    for (const u of this.units) {
+      if (!u.hero) u.auraDmg = 1;
+      u.auraSources = [];
+    }
+    for (const zb of this.zombies) zb.auraSources = [];
     for (const h of this.heroes) {
       if (h.dead) continue;
       const aura = h.def.aura;
       if (!aura) continue;
-      const radius = aura.radius * (1 + h.mods.auraR);
+      const effect = this.heroAuraEffect(h);
+      const radius = effect.radius;
       const r2 = radius * radius;
-      if (aura.dmgMult || aura.regen) {
+      h.auraAllies = 0;
+      h.auraEnemies = 0;
+      if (effect.dmgMult || effect.regen) {
         for (const u of this.units) {
           if (u.dead || u === h) continue;
           if (dist2(h.x, h.z, u.x, u.z) > r2) continue;
-          if (aura.dmgMult && !u.hero) u.auraDmg = Math.max(u.auraDmg, aura.dmgMult);
-          if (aura.regen) u.hp = Math.min(u.maxHp, u.hp + aura.regen * dt);
+          h.auraAllies++;
+          u.auraSources.push(aura.key);
+          if (effect.dmgMult && !u.hero) u.auraDmg = Math.max(u.auraDmg, effect.dmgMult);
+          if (effect.regen) u.hp = Math.min(u.maxHp, u.hp + effect.regen * dt);
         }
       }
-      if (aura.slow || aura.drain) {
+      if (effect.slow || effect.drain) {
         h._auraT = (h._auraT || 0) - dt;
-        if (h._auraT <= 0) {
-          const tick = 0.3;
-          h._auraT = tick;
-          let drained = 0;
-          for (const zb of this.zombies) {
-            if (zb.dead) continue;
-            if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
-            if (aura.slow) {
-              zb.slowT = Math.max(zb.slowT || 0, 0.5);
-              zb.slowMul = aura.slow;
-            }
-            if (aura.drain) {
-              const bite = Math.min(zb.hp, aura.drain * tick);
-              this.damageZombie(zb, aura.drain * tick);
-              drained += bite;
-            }
+        const tick = 0.3;
+        const applyTick = h._auraT <= 0;
+        if (applyTick) h._auraT = tick;
+        let drained = 0;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
+          h.auraEnemies++;
+          zb.auraSources.push(aura.key);
+          if (!applyTick) continue;
+          if (effect.slow) {
+            zb.slowT = Math.max(zb.slowT || 0, 0.5);
+            zb.slowMul = effect.slow;
           }
-          if (drained > 0 && aura.leech) h.hp = Math.min(h.maxHp, h.hp + drained * aura.leech);
+          if (effect.drain) {
+            const bite = Math.min(zb.hp, effect.drain * tick);
+            this.damageZombie(zb, effect.drain * tick);
+            drained += bite;
+          }
+        }
+        if (applyTick && drained > 0 && effect.leech) h.hp = Math.min(h.maxHp, h.hp + drained * effect.leech);
+      } else {
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
+          h.auraEnemies++;
+          zb.auraSources.push(aura.key);
         }
       }
     }
@@ -1469,7 +1598,8 @@ export class Game {
         // Attacking troops HUNT (see far beyond weapon range); everyone else
         // only engages what wanders into range.
         const hunting = !u.hero && this.stance === 'attack';
-        const seek = hunting ? 30 : u.def.range;
+        const range = u.hero ? this.heroRange(u) : u.def.range;
+        const seek = hunting ? 30 : range;
         let best = null, bd = seek * seek;
         for (const zb of this.zombies) {
           if (zb.dead) continue;
@@ -1481,7 +1611,7 @@ export class Game {
         // attackers will cross the whole map to do it.
         u.targetNest = null;
         if (!best) {
-          let bn = null, bnd = hunting ? Infinity : (u.def.range + 1.5) ** 2;
+          let bn = null, bnd = hunting ? Infinity : (range + 1.5) ** 2;
           for (const n of this.nests) {
             if (!n.alive) continue;
             const d = dist2(u.x, u.z, n.x, n.z);
@@ -1492,10 +1622,11 @@ export class Game {
       }
       const chasing = !u.hero && this.stance === 'attack'; // hunters keep far targets and close in
       const rofMult = (u.hero && u.hasteT > 0 ? u.hasteMult : 1) * (u.hero ? 1 + u.mods.rof : 1);
+      const attackRange = u.hero ? this.heroRange(u) : u.def.range;
       const hitDmg = () => (u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg));
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
-        if (dist2(u.x, u.z, zb.x, zb.z) <= u.def.range * u.def.range) {
+        if (dist2(u.x, u.z, zb.x, zb.z) <= attackRange * attackRange) {
           u.cooldown = 1 / (u.def.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = hitDmg();
@@ -1516,7 +1647,7 @@ export class Game {
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
         const n = u.targetNest;
-        if (dist2(u.x, u.z, n.x, n.z) <= (u.def.range + 1.5) ** 2) {
+        if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 1.5) ** 2) {
           u.cooldown = 1 / (u.def.rof * rofMult);
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());

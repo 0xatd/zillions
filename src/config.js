@@ -184,7 +184,34 @@ export function waveForNight(night, mult) {
 export const HERO_MAX_LEVEL = 10;
 export const XP_RADIUS = 14;                       // hero earns XP for kills nearby
 export const xpForLevel = (lvl) => 80 + 70 * (lvl - 1);   // XP to go from lvl -> lvl+1
-export const abilityRank = (lvl) => (lvl >= 7 ? 3 : lvl >= 4 ? 2 : 1);
+export const HERO_UPGRADE_KEYS = ['aura', 'passive1', 'passive2', 'ult'];
+export const HERO_UPGRADE_MAX = 3;
+
+export function normalizeHeroUpgrades(upgrades = {}) {
+  const out = {};
+  for (const key of HERO_UPGRADE_KEYS) {
+    const raw = Number(upgrades[key]) || 0;
+    out[key] = Math.max(0, Math.min(HERO_UPGRADE_MAX, raw | 0));
+  }
+  return out;
+}
+
+export function heroUpgradePoints(level) {
+  return Math.max(0, Math.min(HERO_MAX_LEVEL, level | 0) - 1);
+}
+
+export function heroSpentUpgrades(upgrades = {}) {
+  const u = normalizeHeroUpgrades(upgrades);
+  return HERO_UPGRADE_KEYS.reduce((sum, key) => sum + u[key], 0);
+}
+
+export function heroUnspentUpgrades(level, upgrades = {}) {
+  return Math.max(0, heroUpgradePoints(level) - heroSpentUpgrades(upgrades));
+}
+
+export const abilityRank = (lvl, upgrades = null) => upgrades
+  ? Math.min(3, 1 + normalizeHeroUpgrades(upgrades).ult)
+  : (lvl >= 7 ? 3 : lvl >= 4 ? 2 : 1);
 
 export const HEROES = {
   scott: {
@@ -201,6 +228,10 @@ export const HEROES = {
       cast: 'aoeDmg', radius: 3.6, dmg: [350, 550, 800], stun: [0.8, 1.0, 1.3],
       desc: 'Scott swings the gravity maul in a full circle — one cataclysmic blow, ten times the shotgun, everything close is paste.',
     },
+    passives: [
+      { key: 'scattercore', name: 'Scatter Core', icon: '🔩', mods: { dmg: 0.12, rof: 0.08 }, desc: 'Shotgun damage and reload speed.' },
+      { key: 'siegeplate', name: 'Siege Plate', icon: '🛡️', mods: { hp: 90, regen: 0.7 }, desc: 'More health and in-combat regeneration.' },
+    ],
   },
   alexander: {
     key: 'alexander', name: 'Alexander Thomas', icon: '🌿', color: 0x2f8f46, trim: 0xf3c53d,
@@ -217,6 +248,10 @@ export const HEROES = {
       dmg: [60, 100, 150], knock: [2.0, 2.6, 3.2], stun: [0.6, 0.7, 0.8],
       desc: 'Alexander lobs a concussion charge ahead and kicks himself backward — the blast flings the dead away and buys back the range he loves.',
     },
+    passives: [
+      { key: 'deadeye', name: 'Deadeye Optics', icon: '🎯', mods: { dmg: 0.10, range: 0.55 }, desc: 'Rifle damage and attack range.' },
+      { key: 'fieldkit', name: 'Field Kit', icon: '🧪', mods: { regen: 0.8, cdr: 0.06 }, desc: 'More self-repair and faster special recharge.' },
+    ],
   },
   danny: {
     key: 'danny', name: 'Danny Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
@@ -232,6 +267,10 @@ export const HEROES = {
       cast: 'weave', dur: [3, 4, 5], dmg: [50, 85, 130], speed: 1.6,
       desc: 'Danny slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
     },
+    passives: [
+      { key: 'ghostmotor', name: 'Ghost Motor', icon: '👟', mods: { speed: 0.08, rof: 0.08 }, desc: 'Move speed and fire rate.' },
+      { key: 'needlesight', name: 'Needle Sight', icon: '🪡', mods: { dmg: 0.10, range: 0.5 }, desc: 'Precision damage and attack range.' },
+    ],
   },
 };
 
@@ -273,7 +312,7 @@ export const ITEMS = {
 
 export const BOSS_DROPS = { 1: 'butchers_cleaver', 2: 'broodmother_heart', 3: 'shrieker_lung', 4: 'gravelord_plate', 5: 'zillion_eye' };
 
-const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
+const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'range', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
 export function itemMods(items) {
   const m = {};
   for (const k of MOD_KEYS) m[k] = 0;

@@ -58,6 +58,9 @@ docs together.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `Defend` holds the city line, `Guard` follows the hero, and
   `Attack` hunts enemies and pushes hive nests. Do not add individual unit micro.
+- Hero level-ups grant visible upgrade points. The player chooses Aura,
+  Passive I, Passive II, or Ult Damage from the hero panel. Aura upgrades must
+  stay visually obvious in world and reflected in affected ally/enemy stats.
 - Campaign economy must be balanced against collectible gold.
 
 ## Key Files

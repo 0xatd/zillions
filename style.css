@@ -128,6 +128,27 @@ body::after {
 .hpbar.herohp { height: 7px; margin: 5px 0 0; }
 .hpbar.heroxp { height: 5px; margin: 3px 0 0; }
 .xpfill { height: 100%; background: linear-gradient(90deg, #7f5ce8, #c9a44a); border-radius: 4px; }
+.herostats {
+  width: 208px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  align-content: center;
+}
+.herostats span {
+  min-width: 0; height: 30px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.34); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+.herostats b { font-size: 13px; color: #ffe9a8; line-height: 1; }
+.herostats small { font-size: 8px; opacity: 0.62; line-height: 1.1; margin-top: 3px; }
+.herostats .aurastat { border-color: rgba(159, 214, 255, 0.35); background: rgba(80, 140, 180, 0.16); }
+.herostats em {
+  grid-column: 1 / -1; min-height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-style: normal; font-size: 10.5px; color: #cfe8ff;
+  background: rgba(159, 214, 255, 0.08); border: 1px solid rgba(159, 214, 255, 0.18);
+  border-radius: 6px;
+}
 
 .bigaction {
   position: relative;
@@ -156,6 +177,47 @@ body::after {
 #stancebar .stance { cursor: pointer; padding: 5px 10px; border-radius: 7px; border: 1px solid transparent; transition: all 0.12s; }
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
 #stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
+
+/* hero level-up picker */
+#upgradepanel {
+  width: min(760px, calc(100vw - 26px));
+  background: rgba(12, 16, 22, 0.92);
+  border: 1px solid rgba(159, 214, 255, 0.42);
+  border-radius: 12px; padding: 9px 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 24px rgba(159, 214, 255, 0.12);
+}
+.uphead { text-align: center; font-size: 12px; color: #d8ecff; margin-bottom: 7px; }
+.uphead b { color: #ffd75e; }
+.uprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.upbtn {
+  display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto auto;
+  column-gap: 6px; align-items: center;
+  min-height: 86px; padding: 8px;
+  background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px; color: #e8e6df; cursor: pointer; font-family: inherit;
+  text-align: left; transition: all 0.12s;
+}
+.upbtn:hover:not(:disabled) { transform: translateY(-2px); border-color: rgba(159, 214, 255, 0.6); background: rgba(159, 214, 255, 0.14); }
+.upbtn:disabled { opacity: 0.45; cursor: not-allowed; }
+.upicon { grid-row: 1 / 4; font-size: 24px; text-align: center; }
+.upbtn b { font-size: 12px; color: #ffe9a8; line-height: 1.15; }
+.upbtn small { font-size: 10px; opacity: 0.68; line-height: 1.25; margin-top: 2px; }
+.uppips { font-size: 11px; color: #9fd6ff; letter-spacing: 1px; margin-top: 4px; }
+
+@media (max-width: 900px), (max-height: 650px) {
+  #actionbar { width: calc(100vw - 18px); bottom: 8px; }
+  .actionmain {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 8px;
+  }
+  #heroplate { min-width: 190px; flex: 1 1 210px; }
+  .herostats { width: auto; flex: 1 1 205px; }
+  .bigaction { min-width: 0; flex: 1 1 210px; }
+  .uprow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #minimap-wrap { width: 132px; height: 132px; right: 8px; top: 54px; bottom: auto; }
+}
 
 /* soft vignette over the battlefield (cel-look framing) */
 body::after {

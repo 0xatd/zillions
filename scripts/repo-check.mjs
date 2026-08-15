@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HEROES } from '../src/config.js';
+import { HEROES, HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX } from '../src/config.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -69,4 +69,17 @@ const heroPalettes = {
 for (const [key, expected] of Object.entries(heroPalettes)) {
   assert.equal(HEROES[key]?.color, expected.color, `${key} hero model armor color changed`);
   assert.equal(HEROES[key]?.trim, expected.trim, `${key} hero model trim color changed`);
+}
+
+assert.deepEqual(HERO_UPGRADE_KEYS, ['aura', 'passive1', 'passive2', 'ult'], 'hero upgrade branch order changed');
+assert.equal(HERO_UPGRADE_MAX, 3, 'hero upgrade branches should stay capped at rank 3');
+for (const [key, hero] of Object.entries(HEROES)) {
+  assert.equal((hero.passives || []).length, 2, `${key} must keep exactly two passive upgrade paths`);
+  assert.ok(hero.aura, `${key} must keep an aura upgrade path`);
+  assert.ok(hero.ability, `${key} must keep an ult damage upgrade path`);
+}
+
+const oldAutoRankCopy = /special ranks up automatically|levels 4 and 7/i;
+for (const rel of ['README.md', 'src/ui.js', 'src/online.js', 'docs/agent-brief.md', 'docs/product-contract.md']) {
+  assert.ok(!oldAutoRankCopy.test(read(rel)), `${rel} still describes hidden automatic hero ranks`);
 }

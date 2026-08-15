@@ -30,6 +30,9 @@ Use the Thronefall-style city-defense direction as the gameplay base:
 - No individual army micro. Squads are autonomous, but the player sets the
   global army stance: defend city, guard hero, or attack outward toward enemies
   and hive nests.
+- Hero level-ups must be visible and player-directed. Each point can improve
+  the hero aura, one of two passive paths, or ult damage. The HUD must show
+  derived hero stats and whether the aura is affecting allies or enemies.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn Survival back into a generic RTS or a debug launcher.

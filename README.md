@@ -6,7 +6,8 @@ gold while hostile hive territory closes in around the map.
 
 - Thronefall-style build-by-standing economy with one resource: gold.
 - A wave every night; you decide when night falls by ringing the bell.
-- Direct hero control (WASD) with auto-attack and one signature ability each.
+- Direct hero control (WASD) with auto-attack, visible hero stats, and one
+  signature ability each.
 - Grimdark space-marine heroes, procedural hordes, flow-field pathfinding.
 - Campaign (5 maps, 5 bosses) and endless Survival mode.
 - Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
@@ -117,8 +118,9 @@ everyone's relics pool for the shared city.
 
 ## Hero Roster
 
-The kit is Thronefall-simple: heroes auto-attack on their own, a passive aura
-hums around them, and Space at night fires the one special. You steer.
+The kit is Thronefall-simple with Dota-style readability: heroes auto-attack on
+their own, a passive aura hums around them, two passive upgrade paths shape
+their stats, and Space at night fires the one special. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |
@@ -126,8 +128,11 @@ hums around them, and Space at night fires the one special. You steer.
 | Alexander Thomas | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
 | Danny Donovan | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health back to him | The Weave — invisible and fast, walks through the horde cutting everything touched |
 
-Heroes earn XP from kills within 14 tiles, level 1–10, and their special ranks
-up automatically at levels 4 and 7. A fallen hero revives at the Keep.
+Heroes earn XP from kills within 14 tiles and level 1–10. Each level grants an
+upgrade point that the player spends on Aura, Passive I, Passive II, or Ult
+Damage. The in-game hero plate shows damage, attack speed, range, speed, regen,
+aura radius, and how many allies/enemies are affected by the aura. A fallen
+hero revives at the Keep.
 
 ## Controls
 
@@ -140,6 +145,7 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 | B (hold) | Build / upgrade (alias for holding Space) |
 | Q | Cast your special |
 | 1 / 2 / 3 | Army stance: Defend city / Follow hero / Hunt enemies and hives |
+| Hero upgrade buttons | Spend level-up points on Aura, Passive I, Passive II, or Ult Damage |
 | Mouse wheel | Zoom |
 | P | Pause (solo) |
 | Esc | Menu |
@@ -168,8 +174,8 @@ needed.
 **Solo and co-op play the same game.** Same fixed-seed map and pre-planned
 city per level, one shared gold purse (anyone's coins, anyone's hold-B), one
 shared horde and boss. Each player brings their own hero with its own aura,
-special, XP and levels — auras stack, so a good comp covers slow + heal +
-drain. Waves grow +40% per extra player, any player may ring the bell, and
+special, XP, levels, and upgrade choices — auras stack, so a good comp covers
+slow + heal + drain. Waves grow +40% per extra player, any player may ring the bell, and
 the deterministic lockstep sim means every command (move, build, cast, rally)
 runs identically on every machine.
 
@@ -201,7 +207,8 @@ credentials in project env. Do not put env values in the repo.
 - CC0 3D assets come from [KayKit Dungeon Remastered](https://kaylousberg.com): stone rampart walls, torches, war banners, crates, barrels, and a golden treasure chest. See `assets/KAYKIT-LICENSE.txt`.
 - The game has procedural fallbacks if model assets fail to load.
 - Zombies use ballistic corpse physics. Killed zombies launch away from the hit, tumble, bounce, and sink into the mud.
-- Big hits can knock back survivors. Sun Strike can send many bodies into the air at max rank.
+- Big hits can knock back survivors. Upgraded specials can throw, stun, or shred
+  whole packs.
 
 ## Audio Assets
 

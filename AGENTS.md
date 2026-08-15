@@ -28,6 +28,9 @@ The current gameplay source is the Thronefall-style city-defense direction:
 - Camps raise troops automatically.
 - No individual squad micro. Squads are autonomous, but the player sets the
   global stance: Defend city, Follow hero, or Hunt hives.
+- Hero progression is player-chosen. Level-ups grant upgrade points for Aura,
+  Passive I, Passive II, or Ult Damage. Do not return to hidden automatic
+  special ranks.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn this back into a generic RTS launcher.

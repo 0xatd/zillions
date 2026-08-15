@@ -343,7 +343,7 @@ export const LORE = [
 export const TIPS = [
   '🪙 Coins on the ground never expire — but uncollected coins are towers you don\'t have yet.',
   '🏰 The horde beacons are visible ALL day. Spend where the arrows point.',
-  '🌪️ Your special ranks up automatically at hero levels 4 and 7 — hunt creeps by day for XP.',
+  '🌪️ Hero levels grant upgrade points — choose Aura, Passive I, Passive II, or Ult Damage from the hero panel.',
   '🧱 Walls are not for stopping the horde. They are for choosing where it stands while your towers work.',
   '🎯 Ballista towers delete brutes and bosses; flame towers erase packed walkers. Mix them.',
   '⚔️ Press 1 at the gate before the wave hits — an army standing WITH you fights twice as well.',

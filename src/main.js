@@ -73,6 +73,7 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k, camp: this.campFor(k) }); },
       onFound: () => this._tryFound(),
+      onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => location.reload(),
       onQuit: () => location.reload(),
@@ -471,6 +472,7 @@ class App {
     return {
       level: ch.level || 1, xp: ch.xp || 0,
       items: ch.items ? [...ch.items] : [],
+      upgrades: ch.upgrades ? { ...ch.upgrades } : {},
       relics: [...(this.profile.relics || [])],
     };
   }
@@ -522,12 +524,13 @@ class App {
       p.campaignHeroes = p.campaignHeroes || {};
       p.relics = p.relics || [];
       p.questsDone = p.questsDone || {};
-      const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [] });
+      const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [], upgrades: {} });
       if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
         cur.level = h.level;
         cur.xp = Math.round(h.xp);
       }
       cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
+      cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
       const grants = [];
       for (const q of this.game.questResults || []) {
         if (!q.done || p.questsDone[q.id]) continue;
@@ -680,6 +683,7 @@ class App {
     h = (h * 31 + g.stats.kills) | 0;
     for (const hr of g.heroes) {
       h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
+      for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;
     }
     return h;
   }
@@ -1169,13 +1173,14 @@ class App {
       this.zEyes.setMatrixAt(i, d.matrix);
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
       else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
+      else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else c.setHex(zb.def.color);
       this.zBody.setColorAt(i, c);
       this.zArm.setColorAt(i, c);
       c.multiplyScalar(0.8);
       this.zHead.setColorAt(i, c);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
-      c.setHex(zb.state === 2 ? 0xff4636 : 0xd8973a);
+      c.setHex(zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a);
       this.zEyes.setColorAt(i, c);
     }
     for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
@@ -1964,13 +1969,28 @@ class App {
       // (The whole hero group is scaled 1.18×, so compensate.)
       if (d.aura) {
         const S = 1.18;
-        const auraR = d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        const auraGeo = new THREE.RingGeometry((auraR - 0.3) / S, auraR / S, 56);
+        const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
+        const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
+        auraFillGeo.rotateX(-Math.PI / 2);
+        const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
+        auraFill.position.y = 0.035;
+        g.add(auraFill);
+        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
         auraGeo.rotateX(-Math.PI / 2);
         const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
         aura.position.y = 0.05;
         g.add(aura);
+        const pulseGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.82) / S, Math.max(0.3, auraR - 0.62) / S, 72);
+        pulseGeo.rotateX(-Math.PI / 2);
+        const pulse = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.18, depthWrite: false }));
+        pulse.position.y = 0.065;
+        g.add(pulse);
+        aura.userData.baseRadius = auraR;
+        auraFill.userData.baseRadius = auraR;
+        pulse.userData.baseRadius = auraR;
         g.userData.aura = aura;
+        g.userData.auraFill = auraFill;
+        g.userData.auraPulse = pulse;
       }
       g.scale.setScalar(1.18);
     } else {
@@ -1981,6 +2001,13 @@ class App {
       addB(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color)), 0, 1.02, 0);
       trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18));
     }
+    const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
+    affectedGeo.rotateX(-Math.PI / 2);
+    const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
+    affected.position.y = 0.085;
+    affected.visible = false;
+    g.add(affected);
+    g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
@@ -2063,9 +2090,29 @@ class App {
         }
         const aura = rec.mesh.userData.aura;
         if (aura) {
-          aura.visible = !u.stealth; // veiled heroes hum nothing
-          aura.material.opacity = 0.13 + Math.sin(t * 2.2 + u.id) * 0.05;
+          const fill = rec.mesh.userData.auraFill;
+          const pulse = rec.mesh.userData.auraPulse;
+          const visible = !u.stealth; // veiled heroes hum nothing
+          const rank = u.auraRank || 0;
+          const radius = u.auraRadius || aura.userData.baseRadius || 1;
+          for (const part of [aura, fill, pulse]) {
+            if (!part) continue;
+            part.visible = visible;
+            const base = part.userData.baseRadius || radius;
+            part.scale.setScalar(radius / base);
+          }
+          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
+          if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
+          if (pulse) {
+            pulse.rotation.z = t * (0.28 + rank * 0.04);
+            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
+          }
         }
+      }
+      const affected = rec.mesh.userData.affected;
+      if (affected) {
+        affected.visible = !!(u.auraSources && u.auraSources.length) && !u.dead;
+        affected.material.opacity = 0.34 + Math.sin(t * 4.6 + u.id) * 0.12;
       }
     }
     for (const [id, rec] of this.unitMeshes) {
@@ -2552,6 +2599,11 @@ class App {
         case 'levelup':
           this.audio.levelup();
           this.burst(e.x, 0.3, e.z, { count: 30, color: 0xffd75e, speed: 1.6, life: 0.9, size: 0.55, up: 3.2 });
+          break;
+        case 'auraupgrade':
+          this.audio.levelup();
+          this.burst(e.x, 0.18, e.z, { count: 36, color: 0x9fd6ff, speed: 1.2, life: 0.8, size: 0.5, up: 1.8, spread: 2.6 });
+          this._impactRing(e.x, e.z, { color: 0x9fd6ff, count: 32, radius: 3.2, life: 0.5, size: 0.5 });
           break;
         case 'herodown':
           this.audio.herodown();
