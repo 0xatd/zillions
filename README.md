@@ -42,7 +42,7 @@ Current modes:
 The main menu uses a game-shell layout:
 
 - **Play** is the first screen for new players. It keeps solo Survival, hero pick, campaign, continue, and difficulty in one clear path.
-- **Multiplayer** is the StarCraft-style hub. It shows the public lobby, chat, active players, co-op host, join code, and future mode slots.
+- **Multiplayer** is the StarCraft-style hub. It uses an Open Lobbies table, selected-room preview, player slots, lobby chat, co-op host, and join-code flow.
 - **Profile** and **Settings** hold account state, player stats, backend notes, and controls so the first screen does not become a debug launcher.
 
 Each day has a build phase and a dusk raid. A final wave attacks from all sides on night 10.
@@ -98,7 +98,7 @@ Hero rules:
 
 ## Co-op multiplayer (up to 3 players, no server)
 
-On the Vercel build, players can join the **Online Lobby** before a match. The lobby shows active players, their selected hero, Survival status, and basic profile stats. It also includes simple chat plus direct **Start solo** and **Host co-op** actions. GitHub Pages and local static servers still run without the lobby backend.
+On the Vercel build, players can use the **Open Lobbies** browser before a match. The current backend exposes a single Survival staging room from live lobby presence: room table, selected-room detail, player slots, chat, **Start solo**, **Host co-op**, and **Join code** actions. GitHub Pages and local static servers still run without the lobby backend.
 
 Click **🌐 Host co-op** and send the invite code to a friend; they **🔗 Join co-op**, paste it, and send back a reply code. After the first friend connects the host can **➕ invite a third player** the same way. Everyone picks a hero, the host picks a difficulty, and you're defending **one colony with up to three heroes**.
 

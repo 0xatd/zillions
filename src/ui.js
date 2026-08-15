@@ -149,53 +149,85 @@ export class UI {
             </section>
 
             <section class="menu-view" id="menu-view-multiplayer" data-view="multiplayer">
-              <div class="section-head wide">
-                <div>
-                  <span class="eyebrow">Multiplayer Hub</span>
-                  <h2>Lobby, chat, then launch co-op.</h2>
+              <div class="sc2-shell">
+                <div class="sc2-tabs" aria-label="Multiplayer sections">
+                  <span>Campaign</span>
+                  <span>Co-op</span>
+                  <span>Versus</span>
+                  <b>Custom</b>
+                  <span>Collection</span>
+                  <span>Replays</span>
                 </div>
-                <small>Presence and chat are server-backed. The current match still uses WebRTC invite codes.</small>
-              </div>
-              <div class="multiplayer-grid">
-                <div id="public-lobby" class="lobbybox">
-                  <div class="lobbytop">
-                    <div><b>Public Lobby</b><small id="lobby-mode">Survival</small></div>
+                <div class="sc2-subtabs">
+                  <b>Lobbies</b>
+                  <span>Melee</span>
+                  <span>Arcade</span>
+                </div>
+                <div class="sc2-heading">
+                  <div>
+                    <span class="eyebrow">Custom</span>
+                    <h2>Open Lobbies</h2>
+                    <p>Browse open Survival rooms, check slots, then join or host a co-op run.</p>
                   </div>
-                  <div class="lobbyactions">
-                    <button class="tbtn" id="lobby-join" type="button">Join lobby</button>
-                    <button class="tbtn" id="lobby-refresh" type="button">Refresh</button>
+                  <div class="sc2-online">
+                    <small>Players online</small>
+                    <b id="lobby-mode">Survival</b>
                   </div>
+                </div>
+                <div class="sc2-grid">
+                  <div id="public-lobby" class="lobby-browser">
+                    <div class="lobby-filters">
+                      <input id="lobby-filter" type="search" autocomplete="off" placeholder="Filter open lobbies">
+                      <select id="lobby-kind" aria-label="Lobby filter">
+                        <option>All</option>
+                        <option>Survival</option>
+                      </select>
+                      <button class="tbtn" id="lobby-refresh" type="button" title="Refresh lobbies">Refresh</button>
+                    </div>
+                    <div class="lobby-table" role="table" aria-label="Open lobbies">
+                      <div class="lobby-table-head" role="row">
+                        <span>Map</span>
+                        <span>Lobby</span>
+                        <span>Mode</span>
+                        <span>Players</span>
+                        <span>Host</span>
+                      </div>
+                      <div id="lobby-rows" class="lobby-rows"></div>
+                    </div>
+                    <div class="lobbyactions">
+                      <button class="diffbtn primary" id="lobby-join" type="button">Join Lobby</button>
+                      <button class="diffbtn" id="mp-join" type="button">Join Code</button>
+                    </div>
+                  </div>
+
+                  <aside class="lobby-detail">
+                    <div class="detail-tabs"><b>Map</b><span>Mod</span></div>
+                    <div class="map-preview" aria-hidden="true">
+                      <div class="preview-sun"></div>
+                      <div class="preview-keep"></div>
+                    </div>
+                    <div class="map-copy">
+                      <b id="lobby-detail-title">Frontier Survival</b>
+                      <small id="lobby-detail-host">Host: open</small>
+                      <p id="lobby-detail-desc">Thronefall-style day builds, night raids, fixed city plots, and three hero slots.</p>
+                    </div>
+                    <div class="slots-title">Lobby</div>
+                    <div id="lobby-slots" class="lobby-slots"></div>
+                    <div class="roomactions">
+                      <button class="diffbtn primary" id="lobby-host" type="button">Host Co-op</button>
+                      <button class="diffbtn js-start-survival" id="lobby-start" type="button">Start Solo</button>
+                    </div>
+                  </aside>
+                </div>
+                <div class="sc2-chatbar">
                   <div id="lobby-status" class="lobbystatus">Checking online lobby...</div>
-                  <div id="lobby-players" class="lobbyplayers"></div>
                   <div id="lobby-chat" class="lobbychat"></div>
                   <form id="lobby-form" class="lobbyform">
-                    <input id="lobby-chat-input" maxlength="220" autocomplete="off" placeholder="Lobby chat">
+                    <input id="lobby-chat-input" maxlength="220" autocomplete="off" placeholder="Press Enter to chat or / for commands">
                     <button class="tbtn" type="submit">Send</button>
                   </form>
                 </div>
-                <div class="roomhub">
-                  <div class="roomcard active">
-                    <b>Survival Co-op</b>
-                    <small>Up to 3 heroes defend one colony.</small>
-                    <div class="roomactions">
-                      <button class="diffbtn primary" id="lobby-host" type="button">Host co-op</button>
-                      <button class="diffbtn" id="mp-join" type="button">Join code</button>
-                    </div>
-                  </div>
-                  <div class="roomcard">
-                    <b>Practice Run</b>
-                    <small>Start solo from the multiplayer hub.</small>
-                    <button class="diffbtn js-start-survival" id="lobby-start" type="button">Start solo</button>
-                  </div>
-                  <div class="roomcard locked">
-                    <b>Labyrinth</b>
-                    <small>Future mode. Not built yet.</small>
-                  </div>
-                  <div class="mprow hidden">
-                    <button class="diffbtn" id="mp-host" type="button">Host co-op</button>
-                  </div>
-                  <div id="mp-panel" class="hidden"></div>
-                </div>
+                <div id="mp-panel" class="hidden"></div>
               </div>
             </section>
 
@@ -413,6 +445,9 @@ export class UI {
     this.root.querySelector('#lobby-host').onclick = () => this.cb.onLobbyHost && this.cb.onLobbyHost();
     this.root.querySelector('#lobby-join').onclick = () => this.cb.onLobbyJoin && this.cb.onLobbyJoin();
     this.root.querySelector('#lobby-refresh').onclick = () => this.cb.onLobbyRefresh && this.cb.onLobbyRefresh();
+    this.root.querySelector('#lobby-filter')?.addEventListener('input', () => {
+      if (this._lastLobby) this.setLobby(this._lastLobby, this._lastLobbyJoined);
+    });
     this.root.querySelector('#lobby-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const input = this.root.querySelector('#lobby-chat-input');
@@ -421,10 +456,13 @@ export class UI {
       if (this.cb.onLobbyChat) this.cb.onLobbyChat(text);
       input.value = '';
     });
-    this.root.querySelector('#mp-host').onclick = () => {
-      this.mpStatus('Creating invite code…');
-      this.cb.onHost();
-    };
+    const mpHost = this.root.querySelector('#mp-host');
+    if (mpHost) {
+      mpHost.onclick = () => {
+        this.mpStatus('Creating invite code...');
+        this.cb.onHost();
+      };
+    }
     this.root.querySelector('#mp-join').onclick = () => this.mpShowJoinInput();
 
     this.tooltip = this.root.querySelector('#tooltip');
@@ -861,38 +899,92 @@ export class UI {
   }
 
   setLobby(lobby, joined = false) {
+    let unavailable = false;
     if (!lobby) {
-      this.setLobbyStatus('Open the Vercel build to use the online lobby.', false);
-      return;
+      unavailable = true;
+      lobby = { players: [], messages: [], activeCount: 0 };
     }
+    this._lastLobby = lobby;
+    this._lastLobbyJoined = joined;
     const players = lobby.players || [];
     const messages = lobby.messages || [];
     const activeCount = lobby.activeCount ?? players.length;
     this.root.querySelector('#lobby-count').textContent = `${activeCount} active`;
-    this.root.querySelector('#lobby-join').textContent = joined ? 'In lobby' : 'Join lobby';
+    this.root.querySelector('#lobby-join').innerHTML = joined ? 'In Lobby<small>visible online</small>' : 'Join Lobby<small>enter selected room</small>';
     this.root.querySelector('#lobby-mode').textContent = 'Survival';
-    this.setLobbyStatus(joined ? 'You are visible in the lobby.' : 'Join to appear here.', joined);
+    this.setLobbyStatus(
+      unavailable ? 'Open the Vercel build to use live lobbies. Static builds still support invite codes.' : joined ? 'You are visible in the lobby.' : 'Join to appear here.',
+      joined,
+    );
 
-    const playerList = this.root.querySelector('#lobby-players');
-    playerList.innerHTML = '';
-    if (!players.length) {
+    const host = players[0] || null;
+    const filter = this.root.querySelector('#lobby-filter')?.value?.trim().toLowerCase() || '';
+    const room = {
+      map: 'Frontier Colony',
+      lobby: players.length ? `${host.name || 'Commander'}'s Survival` : 'Open Survival Room',
+      mode: 'Survival',
+      players: `${Math.min(players.length, 3)}/3`,
+      host: host?.name || 'Open',
+    };
+    const matchesFilter = !filter || Object.values(room).some((value) => String(value).toLowerCase().includes(filter));
+    const rows = this.root.querySelector('#lobby-rows');
+    rows.innerHTML = '';
+    if (!matchesFilter) {
       const empty = document.createElement('div');
-      empty.className = 'lobbyempty';
-      empty.textContent = 'No active players yet.';
-      playerList.appendChild(empty);
+      empty.className = 'lobby-row empty';
+      empty.textContent = 'No open lobbies match that filter.';
+      rows.appendChild(empty);
     } else {
-      for (const player of players.slice(0, 8)) {
-        const hero = HEROES[player.hero] || HEROES.alexander;
-        const row = document.createElement('div');
-        row.className = 'lobbyplayer';
-        const name = document.createElement('span');
-        name.textContent = `${hero.icon} ${player.name || 'Commander'}`;
-        const status = document.createElement('small');
-        const rules = player.rules ? 'Survival' : '';
-        status.textContent = player.status || rules || 'in-lobby';
-        row.append(name, status);
-        playerList.appendChild(row);
+      const row = document.createElement('button');
+      row.className = 'lobby-row selected';
+      row.type = 'button';
+      const mapCell = document.createElement('span');
+      const mapName = document.createElement('b');
+      mapName.textContent = 'Survival';
+      const mapSub = document.createElement('small');
+      mapSub.textContent = room.map;
+      mapCell.append(mapName, mapSub);
+      for (const value of [room.lobby, room.mode, room.players, room.host]) {
+        const cell = document.createElement('span');
+        cell.textContent = value;
+        row.appendChild(cell);
       }
+      row.prepend(mapCell);
+      rows.appendChild(row);
+    }
+
+    const title = this.root.querySelector('#lobby-detail-title');
+    const hostText = this.root.querySelector('#lobby-detail-host');
+    const desc = this.root.querySelector('#lobby-detail-desc');
+    if (title) title.textContent = room.map;
+    if (hostText) hostText.textContent = host ? `Host: ${host.name || 'Commander'} · ${room.players}` : 'Host: open · 0/3';
+    if (desc) {
+      desc.textContent = players.length
+        ? 'A Survival co-op staging room. Pick a hero, join the lobby, then use Host Co-op or Join Code to connect the current WebRTC match.'
+        : 'No public co-op room is active yet. Host one to make this room visible, or start a solo Survival run.';
+    }
+
+    const slots = this.root.querySelector('#lobby-slots');
+    slots.innerHTML = '';
+    const visiblePlayers = players.slice(0, 3);
+    for (let i = 0; i < 3; i++) {
+      const player = visiblePlayers[i];
+      const slot = document.createElement('div');
+      slot.className = 'lobby-slot' + (player ? ' filled' : '');
+      const label = document.createElement('b');
+      label.textContent = `Player ${i + 1}`;
+      const name = document.createElement('span');
+      const status = document.createElement('small');
+      if (player) {
+        const hero = HEROES[player.hero] || HEROES.alexander;
+        name.textContent = `${hero.icon} ${player.name || 'Commander'}`;
+        status.textContent = player.status || 'in-lobby';
+      } else {
+        name.textContent = 'Open Slot';
+        status.textContent = 'Waiting';
+      }
+      slot.append(label, name, status);
+      slots.appendChild(slot);
     }
 
     const chat = this.root.querySelector('#lobby-chat');
