@@ -30,7 +30,8 @@ class App {
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camDist = 30;
-    this.camYaw = Math.PI * 0.25;
+    this.camYaw = 0;
+    this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
 
     this.speed = 1;
@@ -216,6 +217,10 @@ class App {
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer);
     this.setSpeed(1);
+    // Gameplay uses a fixed world/minimap orientation: left in the viewport is
+    // left on the minimap. The menu can orbit, but a run must not inherit it.
+    this.camYaw = 0;
+    this.lastDir = { x: 0, z: 0, s: false };
     this.ui.showBanner(mode === 'survival'
       ? `${level.name} — SURVIVAL. The nights never stop. A boss walks every fifth. How long can you last?`
       : `${level.name} — survive ${FINAL_NIGHT} nights. ${level.boss.icon} ${level.boss.name} comes on the last.`, '', 4500);
@@ -1925,22 +1930,21 @@ class App {
   }
 
   // WASD → hero direction, sent through the lockstep pipe only on change.
+  // Zillions uses a fixed Thronefall-style orientation during gameplay:
+  // W/S move left/right on the minimap, and D/A move up/down. This keeps
+  // keyboard movement, player view movement, and minimap movement aligned.
   _updateHeroInput() {
     if (!this.game || this.game.over) return;
     let dx = 0, dz = 0;
-    if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
-    if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
-    if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
-    // Camera-relative: W always runs "up the screen".
-    const cos = Math.cos(this.camYaw), sin = Math.sin(this.camYaw);
-    const wx = dx * cos - dz * sin;
-    const wz = dx * sin + dz * cos;
+    if (this.keys.has('w') || this.keys.has('arrowleft')) dx -= 1;
+    if (this.keys.has('s') || this.keys.has('arrowright')) dx += 1;
+    if (this.keys.has('d') || this.keys.has('arrowup')) dz -= 1;
+    if (this.keys.has('a') || this.keys.has('arrowdown')) dz += 1;
     const s = this.keys.has('shift');
     const last = this.lastDir;
-    if (Math.abs(wx - last.x) > 0.001 || Math.abs(wz - last.z) > 0.001 || s !== last.s) {
-      this.lastDir = { x: wx, z: wz, s };
-      this.issue({ t: 'hdir', p: this.myPlayer, x: +wx.toFixed(3), z: +wz.toFixed(3), s });
+    if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
+      this.lastDir = { x: dx, z: dz, s };
+      this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
     // Thronefall hold-to-build: SPACE held at a foundation streams your gold
     // (B works too). Space only pays by day, near a plot — night Space casts.
@@ -2014,20 +2018,18 @@ class App {
   _updateCamera(dt) {
     if (!this.game) {
       // Menu: slow cinematic orbit over the battlefield.
-      this.camYaw += dt * 0.05;
+      this.menuYaw += dt * 0.05;
       this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
       const dist = 55;
       const elev = 0.72;
       this.camera.position.set(
-        this.focus.x + Math.sin(this.camYaw) * Math.cos(elev) * dist,
+        this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
         Math.sin(elev) * dist,
-        this.focus.z + Math.cos(this.camYaw) * Math.cos(elev) * dist,
+        this.focus.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
       );
       this.camera.lookAt(this.focus);
       return;
     }
-    if (this.keys.has('z')) this.camYaw += dt * 1.6;
-    if (this.keys.has('c')) this.camYaw -= dt * 1.6;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
     const h = this.myHero();

@@ -42,6 +42,9 @@ Do not turn Survival back into a generic RTS or a debug launcher.
   settings flow exists.
 - Empty lobbies must show an empty state. Do not seed fake rooms or fake players.
 - Stats must be real account stats or a clean zero state.
+- Movement orientation is fixed, not camera-relative. W moves left on the
+  minimap, S moves right, D moves up, and A moves down. The minimap and player
+  view must show the same movement direction.
 
 ## Lobby Target
 
@@ -109,4 +112,3 @@ WebRTC still owns match transport. The server is not authoritative yet.
 - Do not expose `assets.html` from the game screen.
 - Do not add fake room rows, fake players, fake stats, or fake account labels.
 - Update this document when the product target changes.
-
