@@ -1,7 +1,7 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import {
-  PLOT_KINDS, SIM_DT, MAP_SIZE, FINAL_NIGHT, LEVELS, PAY_RADIUS, DAY_TIME,
+  PLOT_KINDS, SIM_DT, MAP_SIZE, FINAL_NIGHT, LEVELS, PAY_RADIUS,
   ITEMS, BOSS_DROPS,
 } from './config.js';
 import { GameMap } from './map.js';
@@ -552,7 +552,7 @@ class App {
       this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
       this.auth.recordMatch({
         mode: this.game.mode || 'campaign',
-        rules: 'claude-thronefall-campaign',
+        rules: 'survival-plots',
         hero: h?.key || this.ui.selectedHero,
         won,
         day: Math.min(this.game.night, FINAL_NIGHT),

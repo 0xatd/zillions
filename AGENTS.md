@@ -2,6 +2,7 @@
 
 Read this first. Then read:
 
+- `docs/agent-brief.md`
 - `docs/product-contract.md`
 - `docs/backend.md`
 - `README.md`
@@ -10,7 +11,7 @@ Read this first. Then read:
 
 Zillions is a sci-fi Thronefall-style conquest defense game.
 
-The current gameplay source is the Claude Thronefall PR direction:
+The current gameplay source is the Thronefall-style city-defense direction:
 
 - Frontier maps with multiple city sites.
 - Found a city at a flagged site.
@@ -29,6 +30,23 @@ The current gameplay source is the Claude Thronefall PR direction:
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn this back into a generic RTS launcher.
+
+## Current vs Next Loop
+
+The current shipped game still uses day, bell, night, and dawn phases.
+
+Alex's next preferred direction is to remove the explicit night/day concept:
+
+- Waves arrive every fixed interval.
+- Building and upgrading can happen at any time.
+- Building during a wave is allowed but dangerous.
+- The job is to clear the map.
+- Primary objectives are: protect the Keep, raze all hive nests, then kill the
+  map boss or final counterattack.
+
+Do not half-migrate this by changing text only. A real migration must update the
+simulation, UI, tutorials, save summaries, stats labels, economy tests, and docs
+together.
 
 ## Production Rules
 
@@ -107,6 +125,7 @@ Do not implement fake conquest data as if it is live.
 - `src/backend.js` - Vercel API helpers.
 - `api/` - Vercel server routes.
 - `docs/product-contract.md` - product source of truth.
+- `docs/agent-brief.md` - quick current-state and pitfall brief.
 - `docs/backend.md` - backend source of truth.
 
 ## Validation
@@ -120,7 +139,7 @@ jq empty assets/audio/manifest.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
-rg -n 'source credential|api key|private key|sb_publishable_|qgvpfkncgpqtxxozatax' .
+rg -n 'source credential|api key|private key|sb_publishable_|qgvpfkncgpqtxxozatax' . --glob '!node_modules/**'
 ```
 
 Also smoke test:

@@ -11,7 +11,7 @@ The player signs in, enters a living frontier, chooses or joins a world, rides a
 hero, founds a fortified city, buys pre-planned plots with coins, and survives
 night attacks from hostile Xeno territory.
 
-Use the Claude Thronefall PR direction as the gameplay base:
+Use the Thronefall-style city-defense direction as the gameplay base:
 
 - Unclaimed frontier maps.
 - Multiple city sites.
@@ -31,6 +31,35 @@ Use the Claude Thronefall PR direction as the gameplay base:
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn Survival back into a generic RTS or a debug launcher.
+
+## Current Shipped Loop
+
+The live game still uses explicit phases:
+
+1. The player founds a city at a flagged site.
+2. Day is untimed. The player collects coins, builds, upgrades, and razes hives.
+3. The player rings the bell at the Keep.
+4. A night wave attacks from visible hive nests.
+5. Dawn pays income, repairs ruins, and advances the run.
+
+Campaign maps currently end when the player survives the final night or razes
+all hive nests. Survival mode currently counts nights survived.
+
+## Next Gameplay Direction
+
+Alex's current direction is to remove the explicit night/day concept. The best
+target loop is continuous siege:
+
+- Waves arrive on fixed timers.
+- The player can build and upgrade at any time.
+- Building during a wave is allowed but creates real risk.
+- The objective is to clear the map, not wait through a fixed night count.
+- The primary win path is protect the Keep, raze all hive nests, then kill the
+  map boss or final counterattack.
+
+Do not do a copy-only migration. If this change starts, update the simulation,
+UI, tutorial, save summaries, stats labels, balance checks, and this contract
+together.
 
 ## Production UX Rules
 

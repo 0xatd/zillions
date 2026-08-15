@@ -10,6 +10,7 @@ import {
 
 const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const FRESH_MS = 2 * 60 * 1000;
+const CURRENT_RULES = 'survival-plots';
 
 function safePublicName(value) {
   const text = String(value || '').trim().slice(0, 24);
@@ -133,7 +134,7 @@ export class OnlineLobby {
       mode: 'survival',
       name: this.me.name,
       hero: this.me.hero,
-      rules: 'claude-thronefall-campaign',
+      rules: CURRENT_RULES,
       status: this.game ? `room ${this.game.join_code}` : 'lobby',
     };
     const state = join ? await joinLobby(payload) : await heartbeatLobby(payload);
@@ -175,7 +176,7 @@ export class OnlineLobby {
       mode: 'survival',
       name: this.me.name,
       hero: this.me.hero,
-      rules: 'claude-thronefall-campaign',
+      rules: CURRENT_RULES,
       status: this.game ? `room ${this.game.join_code}` : 'lobby',
     });
     await this._refreshPresence(false);
@@ -204,7 +205,7 @@ export class OnlineLobby {
       name: `${this.me.name}'s frontier`,
       host_user_id: this.me.id,
       visibility,
-      rules: 'claude-thronefall-campaign',
+      rules: CURRENT_RULES,
       difficulty: 'normal',
       metadata,
       last_seen_at: new Date().toISOString(),
@@ -245,7 +246,7 @@ export class OnlineLobby {
       mode: 'survival',
       name: this.me.name,
       hero: this.me.hero,
-      rules: 'claude-thronefall-campaign',
+      rules: CURRENT_RULES,
       status: `room ${this.game.join_code}`,
     });
   }

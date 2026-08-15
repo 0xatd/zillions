@@ -1,4 +1,5 @@
-// Procedural WebAudio: no sound assets, everything synthesized.
+// Runtime audio: procedural WebAudio for core SFX, with generated MP3 barks
+// layered in where they are wired.
 
 const BARK_HERO = { alexander: 'alex', scott: 'scott', danny: 'danny' };
 

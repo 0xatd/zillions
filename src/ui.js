@@ -1,6 +1,7 @@
 // DOM HUD & menus. Menu flow: WC3-style main menu (buttons over the live 3D
 // battlefield) → SC2-style setup screen (level / hero / difficulty / START).
-// In-game: Thronefall HUD — gold, day timer, one big contextual action button.
+// In-game: Thronefall HUD — gold, current wave phase, and one big contextual
+// action button.
 const PORTRAITS = {
   alexander: 'assets/heroes/images/alexander_portrait.png',
   scott: 'assets/heroes/images/scott_barbarian.png',

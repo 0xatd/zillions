@@ -1,7 +1,7 @@
-// Serverless 2-player co-op transport: WebRTC DataChannel with copy/paste
-// signaling. No accounts, no backend — one player hosts and shares an invite
-// code, the other answers with a reply code. STUN via Google's public server
-// handles most home NATs.
+// Serverless manual co-op transport: WebRTC DataChannel with copy/paste
+// signaling. Account-backed rooms can discover games, but the match itself is
+// still peer-to-peer lockstep. STUN via Google's public server handles most
+// home NATs.
 
 const RTC_CONFIG = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
 

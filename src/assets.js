@@ -49,8 +49,6 @@ export function loadAssets() {
   }));
 }
 
-export function hasAsset(key) { return !!TEMPLATES[key]; }
-
 // Clone an asset scaled so its horizontal footprint fits `fit` world units
 // (uniform scale). Returns a fresh Group positioned with base at y=0.
 export function assetClone(key, fit) {

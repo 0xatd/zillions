@@ -1,8 +1,11 @@
 # Faction Audio Pack
 
-These are concept audio assets for a Zillions-style RTS with Warcraft, StarCraft, and Warhammer flavor.
+These are generated audio assets for Zillions with Warcraft, StarCraft, and
+grim sci-fi flavor.
 
-The pack is not wired into runtime playback yet. It is stored so the voice direction and sound palette are ready when the asset loader exists.
+The game still uses procedural WebAudio for most runtime SFX. Some UI, alert,
+weapon, zombie, and town sounds are referenced by the runtime audio layer as
+sweeteners. The robot and alien groups are manifest-ready for future factions.
 
 ## Faction Voices
 
@@ -78,4 +81,4 @@ The generated sound effect pack is in `assets/audio/sfx-pack/`.
 - Load these files after the first user gesture so browser autoplay policy does not block playback.
 - Use short cooldowns on voice barks so repeated orders do not overlap.
 - Route factions through separate gain nodes. Creature barks should sit lower than hero barks.
-- Start with UI and alerts first. Then wire unit selection and combat sweeteners.
+- Before adding new audio files, check whether `src/audio.js` already has a procedural or MP3-backed cue for that event.

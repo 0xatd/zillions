@@ -1,8 +1,11 @@
 # Hero Audio Pack
 
-These are saved concept assets for Zillions. They are short, Warcraft III / Dota-style click barks and first-pass generated audio samples.
+These are saved and partially wired runtime assets for Zillions. They are short
+Warcraft III / Dota-style click barks and first-pass generated audio samples.
 
-The current game still synthesizes runtime sound through WebAudio. These files are stored so the voice direction, map music, and line writing do not get lost.
+The game still uses procedural WebAudio for core SFX and music fallback. Hero
+click barks are wired through `src/audio.js` and load from
+`assets/audio/click-pack/index.json` after user interaction.
 
 ## Generated Click-Pack
 
@@ -147,7 +150,6 @@ Attack:
 
 ## Implementation Notes
 
-- Add a lightweight asset loader before wiring these into selection clicks or map starts.
 - Keep the existing WebAudio synth as a fallback for browsers that block autoplay until user input.
-- Use short one-shot files for selection, move, attack, and repeated-click barks if we expand beyond the three first-pass samples.
-- Add per-hero cooldowns so repeated clicks feel intentional and do not spam overlapping audio.
+- Keep bark cooldowns so repeated clicks feel intentional and do not spam overlapping audio.
+- If map music becomes MP3-backed, wire it in `src/audio.js` and keep WebAudio fallback.

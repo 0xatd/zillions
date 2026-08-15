@@ -46,6 +46,9 @@ Supabase owns the real account backend:
 - Public/private room records, room players, ready state, hero picks, and room
   chat.
 
+The active gameplay rules identifier is `survival-plots`. Do not introduce
+branch, agent, or prototype names into persisted room or match records.
+
 The schema source of truth is `supabase/schema.sql`. It enables RLS and defines
 all account, save, match, and room tables. Do not point Zillions at Soshi,
 Weather.fun, or any other product's Supabase project.

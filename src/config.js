@@ -5,11 +5,10 @@ export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
 export const UNIT_CAP = 60;
 
-export const DAY_TIME = 65;            // seconds of daylight (build & collect)
+export const DAY_TIME = 65;            // legacy save-summary period; live day is untimed
 export const NIGHT_MAX = 150;          // safety: a night never lasts longer than this
 export const FINAL_NIGHT = 10;         // survive this many nights to win
 export const DAY_LENGTH = DAY_TIME;     // compatibility for account save summaries
-export const FINAL_DAY = FINAL_NIGHT;   // compatibility for older backend docs/scripts
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it

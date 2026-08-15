@@ -2,7 +2,7 @@
 
 Zillions is a browser-based zombie survival game in the spirit of **Thronefall**:
 you are the hero, riding through a pre-designed city that you bring to life with
-gold — by day you build and collect, by night you fight the horde.
+gold while hostile hive territory closes in around the map.
 
 - Thronefall-style build-by-standing economy with one resource: gold.
 - A wave every night; you decide when night falls by ringing the bell.
@@ -11,8 +11,13 @@ gold — by day you build and collect, by night you fight the horde.
 - Campaign (5 maps, 5 bosses) and endless Survival mode.
 - Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
 
-The production game runs on Vercel at `https://zillions.taborlin.co`.
-Static local play remains as a development fallback, but production identity is
+The current live build still uses a day, bell, night, and dawn loop. The next
+intended migration is continuous siege: waves arrive on timers, building is
+always available but dangerous, and the job is to clear the map by razing hive
+nests and killing the boss while protecting the Keep.
+
+The production game runs on Vercel at `https://zillions.taborlin.co`. Static
+local play remains as a development fallback, but production identity is
 Google/Supabase account-based.
 
 ## Live URLs
@@ -21,6 +26,31 @@ Google/Supabase account-based.
 - Vercel fallback: https://zillions-iota.vercel.app
 - Static fallback: https://0xatd.github.io/zillions/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
+
+## Current State And Next Direction
+
+Read `docs/agent-brief.md` before review or implementation work.
+
+Current shipped loop:
+
+- Found a city at a flagged site.
+- Build and upgrade by standing near plots and holding Space/B.
+- Ring the bell at the Keep when ready.
+- Fight the wave.
+- Collect dawn income and repair.
+- Win campaign maps by surviving the final night or razing every hive nest.
+
+Next intended loop:
+
+- Remove explicit night/day as a player-facing concept.
+- Spawn waves every fixed interval.
+- Let the player build and upgrade at any time.
+- Make the main objective clear the map: protect the Keep, raze all hive nests,
+  then defeat the boss or final counterattack.
+
+Do not ship a partial migration that only changes copy. The simulation, UI,
+tutorials, stats labels, save summaries, balance checks, and docs must move
+together.
 
 Serve the repo locally for static development:
 
@@ -219,8 +249,10 @@ vendor/three.module.js  Vendored Three.js
 assets/heroes/          Generated hero portraits and cinematic clips
 assets/audio/           Generated audio assets and manifests
 docs/product-contract.md Product source of truth for agents
+docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
+scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
 ```
 
 ## Tech Notes
@@ -239,9 +271,9 @@ AGENTS.md               Agent handoff and review instructions
 
 ## Agent Handoff
 
-Read `AGENTS.md` before changing the repo.
+Read `AGENTS.md` and `docs/agent-brief.md` before changing the repo.
 
-High-level rule: keep Claude PR gameplay as the source direction, and keep the
+High-level rule: keep the current Thronefall-style gameplay base, and keep the
 production backend/account files intact unless Alex explicitly replaces them.
 
 When reviewing or changing gameplay, check:

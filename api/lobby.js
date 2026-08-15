@@ -9,7 +9,7 @@ const ACTIVE_MS = 60_000;
 const MESSAGE_LIMIT = 50;
 const VALID_MODES = new Set(['survival', 'smoke']);
 const VALID_HEROES = new Set(['alexander', 'scott', 'danny']);
-const VALID_RULES = new Set(['survival-plots', 'claude-thronefall-campaign']);
+const VALID_RULES = new Set(['survival-plots']);
 
 function send(res, status, body) {
   res.writeHead(status, JSON_HEADERS);
