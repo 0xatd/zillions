@@ -50,11 +50,11 @@ The player rides a hero, holds Space on fixed city foundations to spend coins, a
 ## Current Modes
 
 - Survival is the playable mode. It supports solo play and the existing WebRTC co-op flow.
-- Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, small foundation markers, hero movement, hold-Space building, construction previews/timers on inspected plots, one coin spend path, and day-build/night-defend pressure.
+- Survival uses the Thronefall-style ruleset only: pre-planned city plots around the Command Center, small foundation markers, hero movement, hold-Space building, construction previews/timers on inspected plots, one coin spend path, dawn payouts, and a dusk raid every day.
 - Old RTS placement, economy automation, and extra mode cards are not part of the playable surface.
 - The Vercel online lobby is presence and chat. It shows active players, selected hero, Survival status, and profile-style stats. It also exposes quick start and host actions. The actual co-op simulation still uses WebRTC invite/reply codes.
 - Supabase project `skqggyvkblqtyggtcxbc` owns the account backend: Auth, Google sign-in, profiles, stats, cloud saves, and match history. Rooms, ready state, hero picks, and room chat are still next. Do not point Zillions at Soshi or another product's Supabase project.
-- The bottom bar is intentionally context-sensitive. With no unit selected it shows the current foundation/build action. With units selected it shows selected-unit cards plus Move/Stop/Hero/Army/hero ability commands. With a building selected it shows building-specific commands such as Barracks training or Demolish.
+- The bottom bar in Survival must stay focused on ride/build/dawn/foundation context. Do not reintroduce selected-unit cards, manual train buttons, or Army commands into the Survival ruleset. Barracks squads rally and replenish automatically at dawn.
 
 ## Audio State
 

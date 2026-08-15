@@ -236,7 +236,7 @@ export class UI {
                 <span><b>WASD</b> ride hero</span><span><b>Shift</b> sprint</span>
                 <span><b>Left click foundation</b> ride there</span><span><b>Space</b> hold build</span>
                 <span><b>Q/E/R</b> abilities</span>
-                <span><b>T</b> select army</span><span><b>right-click</b> orders</span>
+                <span><b>F</b> center hero</span><span><b>right-click</b> ride target</span>
                 <span><b>wheel</b> zoom</span><span><b>P</b> pause</span>
               </div>
             </section>
@@ -811,8 +811,8 @@ export class UI {
     this.root.querySelector('#buildmenu').classList.add('hidden');
     this.root.querySelector('#unitmenu').classList.add('hidden');
     const sig = plot
-      ? `plot:${plot.id}:${plot.built ? 1 : 0}:${Math.round(plotPaidTotal(plot) * 100)}:${plotCostText(plot)}`
-      : `plot:none:${game ? game.plots.filter((p) => !p.built).length : 0}`;
+      ? `plot:${plot.id}:${plot.built ? 1 : 0}:${game?.isNight ? 1 : 0}:${Math.round(plotPaidTotal(plot) * 100)}:${plotCostText(plot)}`
+      : `plot:none:${game?.isNight ? 1 : 0}:${game ? game.plots.filter((p) => !p.built).length : 0}`;
     if (sig === this._plotSig) return;
     this._plotSig = sig;
     roster.innerHTML = '';
@@ -820,13 +820,14 @@ export class UI {
 
     if (!plot || plot.built) {
       roster.innerHTML = `
-        <div class="selection-title"><b>Build The City</b><small>Ride to a glowing foundation</small></div>
+        <div class="selection-title"><b>Survival</b><small>Build by day. Defend at night.</small></div>
         <div class="plot-card">
           <span class="plot-icon">🏗️</span>
-          <div><b>Foundation Build</b><small>Left-click a plot. Stand there and hold Space to spend coins.</small></div>
+          <div><b>Ride the hero</b><small>Left-click a foundation, stand on it, then hold Space to spend coins.</small></div>
         </div>`;
-      actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Center on hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
-      actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Rally fighters', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
+      actions.appendChild(this._commandButton('center', '⭐', 'Center', 'F follows hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
+      actions.appendChild(this._commandButton('build', '␣', 'Build', 'hold Space', null, true));
+      actions.appendChild(this._commandButton('night', '🌙', 'Night', 'raids at dusk', null, true));
       return;
     }
 
@@ -846,8 +847,8 @@ export class UI {
         </div>
       </div>`;
     actions.appendChild(this._commandButton('ride', '🏇', 'Ride', 'Move hero here', () => this.cb.onPlotFocus && this.cb.onPlotFocus(plot.id)));
-    actions.appendChild(this._commandButton('hero', '⭐', 'Hero', 'Center on hero', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('hero')));
-    actions.appendChild(this._commandButton('army', '⚔️', 'Army', 'Rally fighters', () => this.cb.onSelectionCommand && this.cb.onSelectionCommand('army')));
+    actions.appendChild(this._commandButton('build', '␣', 'Build', game?.isNight ? 'day only' : 'hold Space', null, true));
+    actions.appendChild(this._commandButton('dawn', '☀️', 'Dawn', 'coin payout', null, true));
   }
 
   // ---------- public lobby ----------
@@ -1033,6 +1034,12 @@ export class UI {
   }
 
   showSelection(sel, game) {
+    if (game?.plotMode) {
+      this.selpanel.classList.add('hidden');
+      this._selSig = null;
+      this.showPlotCommandBar(game, game.activePlot || null);
+      return;
+    }
     if (!sel || (Array.isArray(sel) && sel.length === 0)) {
       this.selpanel.classList.add('hidden');
       this._selSig = null;
@@ -1223,7 +1230,7 @@ export class UI {
 
     const rate = (v) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
     q('#r-gold').innerHTML = game.plotMode
-      ? `🪙 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`
+      ? `🪙 ${Math.floor(game.res.gold)} <small>dawn pay</small>`
       : `💰 ${Math.floor(game.res.gold)} <small>${rate(game.starving ? e.gold * 0.4 : e.gold)}</small>`;
     q('#r-wood').innerHTML = `🪵 ${Math.floor(game.res.wood)} <small>${rate(e.wood)}</small>`;
     q('#r-stone').innerHTML = `🪨 ${Math.floor(game.res.stone)} <small>${rate(e.stone)}</small>`;

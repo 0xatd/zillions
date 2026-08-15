@@ -2,7 +2,8 @@
 
 export const MAP_SIZE = 120;
 export const DAY_LENGTH = 75;          // seconds per day at 1x speed
-export const FINAL_DAY = 10;           // final horde arrives at the start of this day
+export const NIGHT_START_FRAC = 0.72;  // Thronefall-style: build by day, defend after dusk
+export const FINAL_DAY = 10;           // final horde arrives on this night
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
 export const UNIT_CAP = 40;
@@ -121,13 +122,18 @@ export const ZOMBIES = {
   brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0x6e4a82, scale: 1.75, score: 8 },
 };
 
-// Horde waves: day → config. Sizes get multiplied by difficulty.
+// Horde waves: each day attacks at dusk. Sizes get multiplied by difficulty.
 export const WAVES = [
-  { day: 2,  size: 26,  types: { walker: 1 } },
-  { day: 4,  size: 60,  types: { walker: 0.9, runner: 0.1 } },
-  { day: 6,  size: 120, types: { walker: 0.8, runner: 0.18, brute: 0.02 } },
-  { day: 8,  size: 190, types: { walker: 0.72, runner: 0.24, brute: 0.04 } },
-  { day: FINAL_DAY, size: 380, types: { walker: 0.66, runner: 0.27, brute: 0.07 }, final: true },
+  { day: 1,  size: 18,  types: { walker: 1 } },
+  { day: 2,  size: 28,  types: { walker: 0.92, runner: 0.08 } },
+  { day: 3,  size: 42,  types: { walker: 0.88, runner: 0.12 } },
+  { day: 4,  size: 62,  types: { walker: 0.82, runner: 0.18 } },
+  { day: 5,  size: 86,  types: { walker: 0.78, runner: 0.2, brute: 0.02 } },
+  { day: 6,  size: 116, types: { walker: 0.74, runner: 0.23, brute: 0.03 } },
+  { day: 7,  size: 150, types: { walker: 0.7, runner: 0.26, brute: 0.04 } },
+  { day: 8,  size: 190, types: { walker: 0.68, runner: 0.27, brute: 0.05 } },
+  { day: 9,  size: 240, types: { walker: 0.66, runner: 0.28, brute: 0.06 } },
+  { day: FINAL_DAY, size: 340, types: { walker: 0.62, runner: 0.3, brute: 0.08 }, final: true },
 ];
 
 // ---------- WC3-style heroes ----------
@@ -268,4 +274,4 @@ export const DIFFICULTY = {
   brutal: { label: 'Brutal', mult: 1.7, ambient: 1.5 },
 };
 
-export const START_RESOURCES = { gold: 650, wood: 320, stone: 120 };
+export const START_RESOURCES = { gold: 650, wood: 0, stone: 0 };

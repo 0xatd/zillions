@@ -61,8 +61,14 @@ export function plotTimerText(plot) {
 export function plotEffectText(key) {
   const d = BUILDINGS[key];
   if (!d) return '';
+  if (key === 'tent') return '+4 citizens. Pays dawn coins. Falls into zombies if overrun.';
+  if (key === 'farm') return 'Farmstead income. Adds a larger dawn coin payout.';
+  if (key === 'sawmill') return 'Sawmill income. Adds dawn coins and frontier growth.';
+  if (key === 'quarry') return 'Quarry income. Adds a heavy dawn coin payout.';
+  if (key === 'mine') return 'Gold mine. Adds the largest dawn coin payout.';
+  if (key === 'mill') return 'Generator mill. Supports the city and adds dawn coins.';
   if (key === 'tower') return `Range ${d.range} tower. Auto-shoots zombies.`;
-  if (key === 'barracks') return `Trains ${Object.values(UNITS).map((u) => u.name).join(', ')} squads.`;
+  if (key === 'barracks') return `Raises and replenishes ${Object.values(UNITS).map((u) => u.name).join(', ')} squads at dawn.`;
   if (key === 'wall') return `${d.hp} HP wall. Blocks and slows the horde.`;
 
   const parts = [];

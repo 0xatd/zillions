@@ -1820,8 +1820,8 @@ class App {
       else if (k === 'h') { this.pause(); this.ui.showHelp(); }
       else if (k === 'escape') { this.targeting = null; this.canvas.style.cursor = 'default'; this.setBuildMode(null); this._clearSelection(); }
       else if (k === 'f' || k === 'f1') { e.preventDefault(); this._selectHero(); }
-      else if (k === 't') { this._selectArmy(); }
-      else if (this._heroSelected() && ['q', 'e', 'r'].includes(k)) {
+      else if (k === 't' && !this.game.plotMode) { this._selectArmy(); }
+      else if ((this.game.plotMode || this._heroSelected()) && ['q', 'e', 'r'].includes(k)) {
         this.tryCast(['q', 'w', 'e', 'r'].indexOf(k));
       } else {
         if (!this.game.plotMode) {
@@ -1884,6 +1884,10 @@ class App {
         if (this.orderMode) { this._resetOrderMode(); return; }
         if (this.targeting != null) { this.targeting = null; this.canvas.style.cursor = 'default'; return; }
         if (this.buildMode) { this.setBuildMode(null); return; }
+        if (this.game?.plotMode) {
+          this._moveHeroToPoint(this.mouse.gx, this.mouse.gz);
+          return;
+        }
         if (this.selection.length) {
           this._issueMoveOrder(this.mouse.gx, this.mouse.gz);
         }
@@ -1915,8 +1919,10 @@ class App {
         this.lastWallTile = null;
         if (this.dragStart) {
           const dx = Math.abs(e.clientX - this.dragStart.x), dy = Math.abs(e.clientY - this.dragStart.y);
-          if (dx > 6 || dy > 6) this._selectInRect(this.dragStart, { x: e.clientX, y: e.clientY });
-          else if (!this._clickSelect() && this.game?.plotMode) this._moveHeroToPoint(this.mouse.gx, this.mouse.gz);
+          if (this.game?.plotMode) {
+            if (dx <= 8 && dy <= 8) this._moveHeroToPoint(this.mouse.gx, this.mouse.gz);
+          } else if (dx > 6 || dy > 6) this._selectInRect(this.dragStart, { x: e.clientX, y: e.clientY });
+          else this._clickSelect();
           this.dragStart = null;
           document.getElementById('dragrect').style.display = 'none';
         }
@@ -2048,6 +2054,7 @@ class App {
 
   _selectUnitById(id, focus = false) {
     if (!this.game) return;
+    if (this.game.plotMode) return;
     const unit = this.game.units.find((u) => u.id === id && !u.dead);
     if (!unit) return;
     this._clearSelection();
@@ -2065,6 +2072,7 @@ class App {
 
   _toggleUnitById(id) {
     if (!this.game) return;
+    if (this.game.plotMode) return;
     const unit = this.game.units.find((u) => u.id === id && !u.dead);
     if (!unit) return;
     this.selectedBuilding = null;
@@ -2087,6 +2095,7 @@ class App {
 
   _selectUnitsByKey(key) {
     if (!this.game) return;
+    if (this.game.plotMode) return;
     this._clearSelection();
     for (const u of this.game.units) {
       if (u.dead || u.turret || u.key !== key) continue;
@@ -2104,6 +2113,7 @@ class App {
 
   _clickSelect() {
     const g = this.game;
+    if (g?.plotMode) return false;
     this._clearSelection();
     // Unit near click?
     let best = null, bd = 1.0;
@@ -2202,6 +2212,10 @@ class App {
   // T selects the whole army (hero + troops + summons).
   _selectArmy() {
     if (!this.game) return;
+    if (this.game.plotMode) {
+      this.game.msg('Barracks squads defend on their own. Ride the hero and build the city.', 'info');
+      return;
+    }
     this._clearSelection();
     for (const u of this.game.units) {
       if (u.dead || u.turret) continue;
@@ -2220,6 +2234,13 @@ class App {
     const h = this.myHero();
     if (!h || h.dead) return;
     const now = performance.now();
+    if (this.game?.plotMode) {
+      this.focus.x = h.x;
+      this.focus.z = h.z;
+      if (now - (this._lastHeroSel || 0) > 700) this.audio.bark(h.key, 'selection');
+      this._lastHeroSel = now;
+      return;
+    }
     if (this._heroSelected() && now - (this._lastHeroSel || 0) < 450) {
       this.focus.x = h.x; this.focus.z = h.z;
     }

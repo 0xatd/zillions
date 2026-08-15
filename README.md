@@ -45,18 +45,18 @@ The main menu uses a game-shell layout:
 - **Multiplayer** is the StarCraft-style hub. It shows the public lobby, chat, active players, co-op host, join code, and future mode slots.
 - **Profile** and **Settings** hold account state, player stats, backend notes, and controls so the first screen does not become a debug launcher.
 
-Hordes strike on days 2, 4, 6, and 8. A final wave attacks from all sides on day 10.
+Each day has a build phase and a dusk raid. A final wave attacks from all sides on night 10.
 
 Core systems:
 
 - Build only through foundations. Free-placement building is removed from the playable game.
 - Foundations around the Command Center show where the city can grow. Stand on a foundation and hold Space to spend coins into it. Inactive foundations stay clean with a small marker and building silhouette. Hover, focus, or build a foundation to see its name, timer, and payoff. The final model fades in as construction progresses.
-- Train scouts, troopers, and snipers.
+- Barracks raise scouts, troopers, and snipers automatically. They replenish missing fighters at dawn.
 - Noise matters. Gunfire attracts nearby zombies.
 - Infection matters. Destroyed hab-tents spawn their residents into the horde.
 - Night matters. Zombies move faster and attack harder at night.
 - The horde uses flow-field pathfinding. Zombies chew through walls or route around them.
-- The bottom command bar defaults to the current foundation/build action. Unit and building selections still expose the commands that matter.
+- The bottom command bar stays focused on Survival: ride, build, dawn income, and inspected foundations. It does not expose RTS squad micro in Survival.
 
 ## Hero Roster
 
@@ -85,16 +85,12 @@ Hero rules:
 | WASD / arrows | Ride the hero north / south / west / east on the map |
 | Shift | Sprint |
 | Mouse wheel | Zoom |
-| F | Select hero |
-| Double-tap F | Center camera on hero |
+| F | Center camera on hero |
 | Q / E / R | Cast selected hero ability hotkeys. W is movement now; click the W-slot ability if needed. |
-| Left click / drag | Select units |
-| Right click | Move squad or cancel build |
-| Bottom selection cards | Focus one unit; double-click a card to select all units of that type |
 | Left click a foundation | Send your hero to that plot and preview the building |
+| Left click ground | Ride the hero there |
+| Right click | Ride the hero there or cancel targeting |
 | Space | Hold to build while standing on a foundation |
-| T | Select whole army |
-| U / I / O | Train scout / trooper / sniper |
 | P | Pause |
 | M | Mute |
 | H | Help |

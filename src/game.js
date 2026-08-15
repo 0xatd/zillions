@@ -1,7 +1,7 @@
 // Core simulation: economy, buildings, zombies, units, hordes, win/lose.
 // Pure logic — rendering/audio consume `game.events` each frame.
 import {
-  BUILDINGS, UNITS, ZOMBIES, WAVES, TILE, DAY_LENGTH, FINAL_DAY,
+  BUILDINGS, UNITS, ZOMBIES, WAVES, TILE, DAY_LENGTH, NIGHT_START_FRAC, FINAL_DAY,
   START_RESOURCES, ZOMBIE_CAP, UNIT_CAP, DIFFICULTY, LEVELS,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, rankReqLevel, ULT_REQ_LEVEL, DROPS,
 } from './config.js';
@@ -77,6 +77,7 @@ export class Game {
       id: u.id, k: u.key, x: +u.x.toFixed(3), z: +u.z.toFixed(3),
       hp: +u.hp.toFixed(2), maxHp: u.maxHp,
       turret: !!u.turret, summon: !!u.summon, life: u.life,
+      sourceId: u.sourceId || null,
       facing: +(u.facing || 0).toFixed(3),
       def: (u.turret || u.summon) ? { ...u.def } : undefined,
     });
@@ -149,6 +150,7 @@ export class Game {
       this.units.push({
         id: u.id, key: u.k, def, x: u.x, z: u.z, hp: u.hp, maxHp: u.maxHp,
         turret: u.turret || undefined, summon: u.summon || undefined, life: u.life,
+        sourceId: u.sourceId || null,
         path: null, pathI: 0, cooldown: 0, target: null, selected: false,
         facing: u.facing, retargetT: 0,
       });
@@ -199,12 +201,10 @@ export class Game {
   _setupStart() {
     const c = (this.map.size / 2) | 0;
     this.hq = this._placeRaw('hq', c - 2, c - 2);
-    for (let i = 0; i < 3; i++) this._spawnUnit('ranger', c - 4 + i * 1.5, c + 3);
-    this._spawnUnit('soldier', c + 3, c + 3);
     this.heroKeys.forEach((k, i) => this._spawnHero(k, c - 1 + i * 2.5, c + 4));
     this._scatterInitialZombies();
     this.recalcEconomy();
-    this.msg('Survival online: ride onto glowing foundations, then hold Space to spend coins and raise the city.', 'info');
+    this.msg('Survival online: spend the day raising plots. At night, defend what you built.', 'info');
   }
 
   _scatterInitialZombies() {
@@ -228,11 +228,15 @@ export class Game {
 
   get day() { return Math.floor(this.time / DAY_LENGTH) + 1; }
   get dayFrac() { return (this.time % DAY_LENGTH) / DAY_LENGTH; }
-  get isNight() { return this.dayFrac > 0.72; }
+  get isNight() { return this.dayFrac > NIGHT_START_FRAC; }
+
+  waveTime(day) {
+    return (day - 1) * DAY_LENGTH + DAY_LENGTH * NIGHT_START_FRAC;
+  }
 
   nextWave() {
     for (const w of WAVES) {
-      if (!this.wavesDone.has(w.day)) return { ...w, at: (w.day - 1) * DAY_LENGTH };
+      if (!this.wavesDone.has(w.day)) return { ...w, at: this.waveTime(w.day) };
     }
     return null;
   }
@@ -349,6 +353,13 @@ export class Game {
     this.stats.plots = (this.stats.plots || 0) + 1;
     this.emit({ type: 'build', key: plot.key, x: b.cx, z: b.cz });
     this.msg(`${BUILDINGS[plot.key].icon} ${BUILDINGS[plot.key].name} funded and built.`, 'info');
+    if (plot.key === 'barracks') {
+      const made = this._spawnBarracksSquad(b);
+      if (made) {
+        this.emit({ type: 'train' });
+        this.msg(`⚔️ Barracks squad rallies: ${made} fighter${made > 1 ? 's' : ''}.`, 'info');
+      }
+    }
     return b;
   }
 
@@ -400,6 +411,11 @@ export class Game {
   // ---------- units ----------
 
   trainUnit(key) {
+    if (this.plotMode) {
+      this.msg('Barracks rally and replenish squads automatically at dawn.', 'info');
+      this.emit({ type: 'deny' });
+      return null;
+    }
     const d = UNITS[key];
     const barracks = this.buildings.find((b) => b.key === 'barracks' && b.alive);
     if (!barracks) { this.msg('Build a Barracks first.', 'warn'); this.emit({ type: 'deny' }); return null; }
@@ -411,15 +427,43 @@ export class Game {
     return u;
   }
 
-  _spawnUnit(key, x, z) {
+  _spawnUnit(key, x, z, opts = {}) {
     const d = UNITS[key];
     const u = {
       id: nextId++, key, def: d, x, z, hp: d.hp, maxHp: d.hp,
       path: null, pathI: 0, cooldown: 0, target: null, selected: false,
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
+      sourceId: opts.sourceId || null,
     };
     this.units.push(u);
     return u;
+  }
+
+  _spawnBarracksSquad(b) {
+    if (!b || !b.alive || b.key !== 'barracks') return 0;
+    const roster = ['ranger', 'soldier', 'sniper'];
+    let made = 0;
+    for (let i = 0; i < roster.length && this.units.length < UNIT_CAP; i++) {
+      const key = roster[i];
+      const alive = this.units.some((u) => !u.dead && !u.hero && !u.turret && u.sourceId === b.id && u.key === key);
+      if (alive) continue;
+      const a = -Math.PI / 2 + i * 0.72;
+      const r = 2.1;
+      this._spawnUnit(key, b.cx + Math.cos(a) * r, b.cz + Math.sin(a) * r, { sourceId: b.id });
+      made++;
+    }
+    return made;
+  }
+
+  _replenishBarracksSquads() {
+    let made = 0;
+    for (const b of this.buildings) {
+      if (b.alive && b.key === 'barracks') made += this._spawnBarracksSquad(b);
+    }
+    if (made) {
+      this.emit({ type: 'train' });
+      this.msg(`⚔️ Dawn muster: ${made} fighter${made > 1 ? 's' : ''} report from the barracks.`, 'info');
+    }
   }
 
   // ---------- hero ----------
@@ -1147,8 +1191,8 @@ export class Game {
 
     // Day/night announcements.
     const night = this.isNight;
-    if (night && !this._wasNight) { this.msg('🌙 Night falls — the dead grow bold…', 'warn'); this.emit({ type: 'night' }); }
-    else if (!night && this._wasNight) this.msg('☀️ Dawn breaks. You survived the night.', 'info');
+    if (night && !this._wasNight) { this.msg('🌙 Night raid begins — hold the line.', 'warn'); this.emit({ type: 'night' }); }
+    else if (!night && this._wasNight) this._onDawn();
     this._wasNight = night;
 
     this._updateWaves(prevTime);
@@ -1178,7 +1222,7 @@ export class Game {
       this.emit({ type: 'horde', final: true });
     }
     for (const w of WAVES) {
-      const at = (w.day - 1) * DAY_LENGTH;
+      const at = this.waveTime(w.day);
       if (prevTime < at && this.time >= at && !this.wavesDone.has(w.day)) {
         this.wavesDone.add(w.day);
         let size = Math.round(w.size * this.diff.mult * this.level.mult);
@@ -1208,11 +1252,12 @@ export class Game {
         if (w.final) this.finalSpawned = true;
       }
     }
-    // Ambient night stragglers.
+    // Ambient night stragglers belong to the old RTS mode. Plot Survival gets
+    // one clear raid each night so the rhythm stays legible.
     this.ambientTimer -= 1 / 30;
     if (this.ambientTimer <= 0) {
       this.ambientTimer = 22 + this.rng() * 15;
-      if (this.isNight && !this.finalSpawned) {
+      if (this.isNight && !this.plotMode && !this.finalSpawned) {
         const n = Math.round((2 + this.rng() * 4) * this.diff.ambient);
         this._spawnHorde(n, [(this.rng() * 4) | 0], { walker: 0.9, runner: 0.1 });
       }
@@ -1222,6 +1267,16 @@ export class Game {
   _updateEconomy(dt) {
     const e = this.eco;
     this.starving = e.food < 0;
+    if (this.plotMode) {
+      this.res.wood = 0;
+      this.res.stone = 0;
+      for (const b of this.buildings) {
+        if (b.alive && b.hp < b.maxHp && this.time - (b.hitT || 0) > 12) {
+          b.hp = Math.min(b.maxHp, b.hp + (2 + b.maxHp * 0.004) * dt);
+        }
+      }
+      return;
+    }
     // Starving slows the economy rather than freezing it — less punishing micro.
     const goldRate = this.starving ? e.gold * 0.4 : e.gold;
     this.res.gold = Math.max(0, this.res.gold + goldRate * dt);
@@ -1234,6 +1289,31 @@ export class Game {
         b.hp = Math.min(b.maxHp, b.hp + (2 + b.maxHp * 0.004) * dt);
       }
     }
+  }
+
+  _dawnIncomeFor(b) {
+    if (!b?.alive) return 0;
+    const table = {
+      hq: 90,
+      tent: 45,
+      farm: 70,
+      sawmill: 55,
+      quarry: 85,
+      mine: 130,
+      mill: 45,
+    };
+    return table[b.key] || 0;
+  }
+
+  _onDawn() {
+    let payout = 0;
+    for (const b of this.buildings) payout += this._dawnIncomeFor(b);
+    payout = Math.round(payout);
+    if (payout > 0) this.res.gold += payout;
+    this._replenishBarracksSquads();
+    this.msg(payout > 0
+      ? `☀️ Dawn breaks. The city pays ${payout} coins. Build before nightfall.`
+      : '☀️ Dawn breaks. Build before nightfall.', 'info');
   }
 
   _updatePlotFunding(dt) {
