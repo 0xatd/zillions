@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HEROES } from '../src/config.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -59,3 +60,13 @@ assert.ok(!index.includes('assets.html'), 'index.html must not expose the review
 
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
+
+const heroPalettes = {
+  alexander: { color: 0x2f8f46, trim: 0xf3c53d },
+  danny: { color: 0x2468c9, trim: 0x111318 },
+  scott: { color: 0xb32020, trim: 0xf4f1e8 },
+};
+for (const [key, expected] of Object.entries(heroPalettes)) {
+  assert.equal(HEROES[key]?.color, expected.color, `${key} hero model armor color changed`);
+  assert.equal(HEROES[key]?.trim, expected.trim, `${key} hero model trim color changed`);
+}
