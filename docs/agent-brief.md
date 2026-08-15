@@ -56,37 +56,48 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Campaign win: raze every hive, then kill the champion of the final
   counterattack. Loss: the Keep falls.
 
-## Balance Status — OPEN ISSUE, read before tuning
+## Balance Status
 
-Balance was tuned against **simulated** runs, not human play, and there is a
-known unresolved stall.
+Tuned against **simulated** runs, not human play. Treat the numbers as a
+starting point, not a verdict.
 
-What works:
+Where it stands:
 
-- The scaling chain works: hold nodes -> Forward Camps -> bigger army. The test
-  bot reliably reaches the unit cap and holds 6-10 nodes.
+- **Greenfall Marches (level 1) completes in ~17 minutes** and **The Black Vale
+  (level 5) in ~12**, both by razing every hive and breaking the counterattack.
+- **Cinder Wastes (level 3) does not complete** — the bot razes 2 of 4 hives and
+  stalls. It is the outlier; the other two levels win. Investigate its lane
+  topology before assuming the systems are at fault.
 - Pure turtling and pure blitzing both lose, which is the intended shape.
-- Two of three hives on level 1 are razed reliably.
+- The scaling chain works end to end: survey ground -> take nodes -> Forward
+  Camps -> supply ceiling rises -> bigger army -> siege the next hive.
 
-What does not:
+Known balance inversions, unresolved:
 
-- **No campaign level is completed by the test bot.** The army razes the
-  nearer hives and then stalls before finishing the last one, on every level.
-- An earlier build DID complete level 1 in ~13 minutes. That was a false pass:
-  the lane graph was fragmented, `_routeTo` failed for most targets, and units
-  fell through to steering straight at the objective. Fixing the graph made
-  routing real, and real routing exposed the stall. Do not "fix" this by
-  reverting the connectivity work.
-- Suspected cause: squads in transit disperse to chase (`seek` is
-  `max(range + 2, 10)` while pushing), so a column bound for the far hive is
-  perpetually engaged in open ground and never masses on the objective.
-  Two attempted fixes made it worse and were reverted: making the route outrank
-  the chase (squads then walked past everything and razed nothing), and
-  narrowing `seek` in transit (same). The fix likely needs squads to *mass*
-  rather than to ignore combat — a rally-then-commit behaviour, or a per-hive
-  assignment quota, rather than a per-unit distance rule.
-- The hero is the designed swing factor and the bot steers it badly, so human
-  play may already close this gap. That is untested. Do not assume it does.
+- **More hives currently makes a map EASIER, not harder.** More hives means more
+  lane nodes, which means more supply, which means a bigger army sooner — which
+  is why level 5 finishes faster than level 1. Nest health scales only gently
+  with `level.mult` (`0.5 + 0.5 * mult`). If levels are meant to get harder in
+  order, this needs decoupling.
+- The hive captures undefended neutral nodes, and hive-held nodes stage ~40% of
+  its musters, so ignoring the map compounds against the player. That may be
+  good pressure or a runaway; only human play will tell.
+
+History worth keeping, so old mistakes are not repeated:
+
+- An earlier build appeared to win level 1 in 13 minutes. That was a FALSE PASS:
+  the lane graph was fragmented, routing failed, and units fell through to
+  steering straight at the objective. Do not "fix" a regression by reverting the
+  connectivity work.
+- The long stall after that was three separate bugs, not balance. In order:
+  routes joined at index 0 (a squad mid-lane was sent BACK to the node behind
+  it, arrived, re-pathed, and oscillated forever — 114 of 114 units routed to
+  the last hive with zero within 40 tiles of it); the stall detector asked "did
+  it move" instead of "did it get closer"; and supply was a flat cap, so the
+  player's power went flat while Threat rose and 26,000 gold sat unspendable.
+- Two attempted fixes made things worse and were reverted: making the route
+  outrank the chase, and narrowing the transit `seek` radius. Both caused squads
+  to walk past everything and raze nothing.
 
 ## Not Implemented
 

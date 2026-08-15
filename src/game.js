@@ -12,7 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
-  ZOMBIE_CAP, UNIT_CAP, DROPS, itemMods,
+  ZOMBIE_CAP, UNIT_CAP, SUPPLY, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
@@ -436,6 +436,11 @@ export class Game {
   // Marooned nodes are excluded everywhere: they are not capturable, not
   // counted, and not drawn.
   activeNodes() { return this.nodes.filter((n) => !n.offMap); }
+  // How many troops you can field. Ground you hold is what raises it, so the
+  // answer to "I am stuck and rich" is always "go take something".
+  unitCap() {
+    return Math.min(SUPPLY.max, SUPPLY.base + SUPPLY.perNode * this.heldNodes());
+  }
   heldNodes() { return this.nodes.filter((n) => !n.offMap && n.owner === 'player').length; }
   liveNests() { return this.nests.filter((n) => n.alive).length; }
 
@@ -745,8 +750,9 @@ export class Game {
     // many camps you have bought — not with how long you have been alive.
     const standing = this.units.filter((u) => u.camp === plot.id && !u.dead).length;
     const room = def.count * CAMP_STANDING - standing;
+    const cap = this.unitCap();
     let spawned = 0;
-    for (let i = 0; i < Math.min(def.count, room) && this.units.length < UNIT_CAP; i++) {
+    for (let i = 0; i < Math.min(def.count, room) && this.units.length < cap; i++) {
       const a = (i / Math.max(1, def.count)) * Math.PI * 2;
       const u = this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
       u.homeNodeId = plot.nodeId != null ? plot.nodeId : null;
@@ -1059,11 +1065,22 @@ export class Game {
     const pts = routeWaypoints(this.laneGraph, route);
     const [tx, tz] = this._giPoint(gi);
     pts.push([tx, tz]);
+    if (!pts.length) return false;
+    // Join the path at the waypoint we are ALREADY nearest to, never at index 0.
+    // A route always begins at the nearest graph node, so a squad halfway down
+    // a lane was being sent back to the node behind it, arriving, re-pathing,
+    // and oscillating between the two forever — the whole army marching all day
+    // and never once reaching the objective.
+    let start = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = dist2(actor.x, actor.z, pts[i][0], pts[i][1]);
+      if (d < bd) { bd = d; start = i; }
+    }
     actor.route = pts;
-    actor.routeI = 0;
+    actor.routeI = start;
     actor.routeStuck = 0;
     actor.routeBest = Infinity;
-    return pts.length > 0;
+    return true;
   }
 
   // Steer one step along a route. Returns true while the route is still live.

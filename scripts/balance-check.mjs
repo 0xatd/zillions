@@ -206,6 +206,12 @@ function assertSiegeLoop(level) {
   assert.ok(!game.plotLocked(game.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id)),
     `${level.name} kept the Forward Camp locked on a node the player holds`);
 
+  // Supply must grow with territory, or the player's power goes flat while
+  // Threat keeps climbing and the run becomes unwinnable with a full purse.
+  const baseCap = game.unitCap();
+  for (const n of game.activeNodes().slice(0, 3)) n.owner = 'player';
+  assert.ok(game.unitCap() > baseCap, `${level.name}: holding ground does not raise supply`);
+
   // Damage no longer heals itself — repairing is a real gold sink. Upgrading
   // still restores health, so repair is only offered once a plot is maxed.
   const house = game.plots.find((p) => p.kind === 'house');

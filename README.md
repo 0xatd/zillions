@@ -103,6 +103,9 @@ of tower plots. Chokepoints, by design.
   chews it) or **Bastion Wall** (double armor).
 - **Ruins rebuild free at dawn** — losing a building costs you its function for
   the night and its dawn payout, not the building itself.
+- **Supply comes from territory.** Your army ceiling is what the city can
+  sustain plus what the ground you hold adds. When you are rich and stuck, the
+  answer is always to go and take something.
 - **Camps are faucets, not garrisons.** Every camp musters a fresh squad on a
   timer, forever, and sustains a standing force proportional to its tier — so
   buying more camps buys more army. Army control is blended: squads fight on
