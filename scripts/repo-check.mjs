@@ -58,6 +58,10 @@ for (const rel of [...filesUnder('api'), ...filesUnder('src'), 'supabase/schema.
 const index = read('index.html');
 assert.ok(!index.includes('assets.html'), 'index.html must not expose the review-only asset browser');
 
+const readme = read('README.md');
+assert.ok(readme.includes('GitHub repository: https://github.com/0xatd/zillions'), 'README must link the GitHub repo');
+assert.ok(readme.includes('GitHub repo metadata should point to the production game'), 'README must document GitHub repo metadata expectations');
+
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
 

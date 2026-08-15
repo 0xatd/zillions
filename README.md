@@ -23,10 +23,15 @@ Google/Supabase account-based.
 
 ## Live URLs
 
+- GitHub repository: https://github.com/0xatd/zillions
 - Production game: https://zillions.taborlin.co
 - Vercel fallback: https://zillions-iota.vercel.app
 - Static fallback: https://0xatd.github.io/zillions/
 - Asset browser: https://0xatd.github.io/zillions/assets.html
+
+GitHub repo metadata should point to the production game, not the Vercel
+fallback. The default branch is `main`. GitHub Pages is useful for static review
+and asset review only; Vercel is the production host.
 
 ## Current State And Next Direction
 

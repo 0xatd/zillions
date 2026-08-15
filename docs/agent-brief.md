@@ -56,8 +56,8 @@ docs together.
 - Hold Space/B to build or upgrade.
 - Upgrades must work from all sides of a building footprint.
 - Army control is blended: squads fight automatically, but the player sets the
-  global stance. `Defend` holds the city line, `Guard` follows the hero, and
-  `Attack` hunts enemies and pushes hive nests. Do not add individual unit micro.
+  global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
+  and `3 Hunt` pushes enemies and hive nests. Do not add individual unit micro.
 - Hero level-ups grant visible upgrade points. The player chooses Aura,
   Passive I, Passive II, or Ult Damage from the hero panel. Aura upgrades must
   stay visually obvious in world and reflected in affected ally/enemy stats.
