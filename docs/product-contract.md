@@ -42,9 +42,9 @@ Do not turn Survival back into a generic RTS or a debug launcher.
   settings flow exists.
 - Empty lobbies must show an empty state. Do not seed fake rooms or fake players.
 - Stats must be real account stats or a clean zero state.
-- Movement orientation is fixed, not camera-relative. W moves left on the
-  minimap, S moves right, D moves up, and A moves down. The minimap and player
-  view must show the same movement direction.
+- Movement orientation is fixed, not camera-relative. W moves north/up, A moves
+  west/left, S moves south/down, and D moves east/right on the minimap. The
+  minimap and player view must show the same movement direction.
 
 ## Lobby Target
 

@@ -38,8 +38,8 @@ Do not turn this back into a generic RTS launcher.
 - Empty room lists must show a clean empty state.
 - Keep `https://zillions.taborlin.co` as the canonical player URL.
 - Gameplay camera orientation is fixed. Do not make gameplay movement
-  camera-relative. W moves left on the minimap, S right, D up, and A down.
-  The player view and minimap must agree.
+  camera-relative. W moves north/up, A west/left, S south/down, and D
+  east/right on the minimap. The player view and minimap must agree.
 
 ## Backend Rules
 

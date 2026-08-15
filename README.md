@@ -103,8 +103,8 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 
 | Input | Action |
 | --- | --- |
-| W / S | Move left / right on the minimap |
-| A / D | Move down / up on the minimap |
+| W / S | Move north/up · south/down on the minimap |
+| A / D | Move west/left · east/right on the minimap |
 | Shift | Gallop (full health only, like Thronefall) |
 | Space | THE interact key: found the city at a site · HOLD at a foundation to build · ring the bell at the Keep · cast your special at night |
 | B (hold) | Build / upgrade (alias for holding Space) |

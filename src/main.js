@@ -1931,15 +1931,15 @@ class App {
 
   // WASD → hero direction, sent through the lockstep pipe only on change.
   // Zillions uses a fixed Thronefall-style orientation during gameplay:
-  // W/S move left/right on the minimap, and D/A move up/down. This keeps
-  // keyboard movement, player view movement, and minimap movement aligned.
+  // WASD maps to the minimap cardinal directions. This keeps keyboard
+  // movement, player view movement, and minimap movement aligned.
   _updateHeroInput() {
     if (!this.game || this.game.over) return;
     let dx = 0, dz = 0;
-    if (this.keys.has('w') || this.keys.has('arrowleft')) dx -= 1;
-    if (this.keys.has('s') || this.keys.has('arrowright')) dx += 1;
-    if (this.keys.has('d') || this.keys.has('arrowup')) dz -= 1;
-    if (this.keys.has('a') || this.keys.has('arrowdown')) dz += 1;
+    if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
+    if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
+    if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
+    if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
     const s = this.keys.has('shift');
     const last = this.lastDir;
     if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
