@@ -11,9 +11,13 @@ export const ZOMBIE_CAP = 1600;
 // field more than one penned into a city — and without this the player's power
 // is flat while Threat rises forever, which leaves them sitting on a pile of
 // gold with nothing to buy and no way to crack the last hive.
+// Measured as a SHARE of the planet, not a count of nodes. Counting nodes made
+// bigger maps easier — more nodes meant more supply meant a bigger army — which
+// is why the five-hive map used to finish faster than the three-hive one.
+// Holding the whole planet is worth the same army whatever size the planet is.
 export const SUPPLY = {
   base: 42,        // what the city alone can sustain
-  perNode: 6,      // every held lane node raises the ceiling
+  perPlanet: 72,   // added at 100% of the planet's lane nodes held
   max: 130,        // absolute ceiling, for the simulation's sake
 };
 export const UNIT_CAP = SUPPLY.max;   // hard ceiling; the live cap is Game.unitCap()
@@ -451,6 +455,11 @@ export function itemMods(items) {
 // Each map is a frontier lane graph: hive nests (the enemy's producing bases),
 // neutral lane nodes to take, and 3 candidate city sites.
 // Win by razing every hive and breaking the counterattack the last one calls.
+
+// How much of a hive's health comes from the level's difficulty multiplier.
+// Kept explicit because it is the main lever on campaign pacing.
+export const NEST_HP_BASE = 9000;
+export const NEST_HP_LEVEL_SHARE = 0.8;   // hp = base * (1 - share + share * level.mult)
 
 export const LEVELS = [
   {

@@ -3,8 +3,8 @@ import { Game } from '../src/game.js';
 import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
-  LEVELS, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, START_GOLD, THREAT, TILE, UNITS,
-  hiveInterval, hiveSquad,
+  LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE,
+  START_GOLD, SUPPLY, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
 } from '../src/config.js';
 
 function fakeMap(level) {
@@ -211,6 +211,12 @@ function assertSiegeLoop(level) {
   const baseCap = game.unitCap();
   for (const n of game.activeNodes().slice(0, 3)) n.owner = 'player';
   assert.ok(game.unitCap() > baseCap, `${level.name}: holding ground does not raise supply`);
+  // Supply is a SHARE of the planet, so owning all of it is worth the same
+  // army on a small map as on a large one. Counting nodes made big maps easier.
+  for (const n of game.activeNodes()) n.owner = 'player';
+  assert.equal(game.unitCap(), Math.min(SUPPLY.max, SUPPLY.base + SUPPLY.perPlanet),
+    `${level.name}: a fully held planet does not give the standard supply ceiling`);
+  for (const n of game.activeNodes()) n.owner = 'neutral';
 
   // Damage no longer heals itself — repairing is a real gold sink. Upgrading
   // still restores health, so repair is only offered once a plot is maxed.
@@ -278,6 +284,23 @@ for (const [key, kind] of Object.entries(PLOT_KINDS)) {
   for (const tier of kind.tiers) {
     assert.ok(tier.count > 0, `${key} tier ${tier.name} musters nobody`);
     assert.ok(tier.every >= 10 && tier.every <= 40, `${key} tier ${tier.name} has an out-of-bounds muster cadence`);
+  }
+}
+
+// The campaign has to get harder in order. Nest health is the main lever, and
+// it must rise faster than the extra ground a bigger map hands the player.
+{
+  const nestHp = (lv) => NEST_HP_BASE * (1 - NEST_HP_LEVEL_SHARE + NEST_HP_LEVEL_SHARE * lv.mult);
+  for (let i = 1; i < LEVELS.length; i++) {
+    assert.ok(nestHp(LEVELS[i]) > nestHp(LEVELS[i - 1]) * 1.05,
+      `${LEVELS[i].name} hives are not meaningfully tougher than ${LEVELS[i - 1].name}`);
+  }
+  // Total health to chew through must also climb, counting the nest count.
+  let prev = 0;
+  for (const lv of LEVELS) {
+    const total = nestHp(lv) * lv.nests;
+    assert.ok(total > prev, `${lv.name} has less total hive health than the level before it`);
+    prev = total;
   }
 }
 

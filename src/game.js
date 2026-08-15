@@ -12,7 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
-  ZOMBIE_CAP, UNIT_CAP, SUPPLY, DROPS, itemMods,
+  ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
@@ -62,7 +62,10 @@ export class Game {
     // Hive nests: the enemy's producing bases. Each musters squads on its own
     // timer — raze one and you can hear the pressure drop.
     this.nests = (map.nestSpots || []).map((s, i) => {
-      const hp = Math.round(9000 * (0.5 + 0.5 * this.level.mult) * Math.max(0.6, this.diff.mult));
+      const hp = Math.round(
+        NEST_HP_BASE * (1 - NEST_HP_LEVEL_SHARE + NEST_HP_LEVEL_SHARE * this.level.mult)
+        * Math.max(0.6, this.diff.mult),
+      );
       return { id: i, x: s[0] + 0.5, z: s[1] + 0.5, hp, maxHp: hp, alive: true, musterT: 8 + i * 4, defendT: 0 };
     });
 
@@ -439,7 +442,9 @@ export class Game {
   // How many troops you can field. Ground you hold is what raises it, so the
   // answer to "I am stuck and rich" is always "go take something".
   unitCap() {
-    return Math.min(SUPPLY.max, SUPPLY.base + SUPPLY.perNode * this.heldNodes());
+    const total = this.activeNodes().length;
+    const share = total ? this.heldNodes() / total : 0;
+    return Math.min(SUPPLY.max, Math.round(SUPPLY.base + SUPPLY.perPlanet * share));
   }
   heldNodes() { return this.nodes.filter((n) => !n.offMap && n.owner === 'player').length; }
   liveNests() { return this.nests.filter((n) => n.alive).length; }

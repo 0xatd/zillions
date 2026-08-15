@@ -72,13 +72,27 @@ Where it stands:
 - The scaling chain works end to end: survey ground -> take nodes -> Forward
   Camps -> supply ceiling rises -> bigger army -> siege the next hive.
 
-Known balance inversions, unresolved:
+Known inversion, diagnosed but NOT fixed — and it is not a balance knob:
 
-- **More hives currently makes a map EASIER, not harder.** More hives means more
-  lane nodes, which means more supply, which means a bigger army sooner — which
-  is why level 5 finishes faster than level 1. Nest health scales only gently
-  with `level.mult` (`0.5 + 0.5 * mult`). If levels are meant to get harder in
-  order, this needs decoupling.
+- Level 5 still finishes faster than level 1 (~9 min vs ~15). One real cause was
+  found and fixed: supply used to be counted per node, so bigger maps handed the
+  player a bigger army. It is now a share of the planet, so a fully held map is
+  worth the same army whatever its size.
+- The symptom survived that fix, and the throughput numbers say why. The Black
+  Vale carries **3.6x the total hive health and 3x the hive pressure** of
+  Greenfall, and the player still destroys **5.8x more hive health per minute**
+  there (8,900/min vs 1,500/min). Pressure is not the binding constraint — the
+  army handles any of it at 95-114 troops. What binds is **how much of the army
+  actually reaches a hive**, which is a function of that map's lane topology.
+- So: do NOT try to fix the campaign ordering by tuning nest health, pressure or
+  Threat. Those knobs are not what is deciding it. Investigate routing and lane
+  topology per map — Cinder Wastes, which never completes, is the worst case and
+  the best place to look. A useful measure is hive-health-destroyed-per-minute
+  rather than win time.
+- Related: nest health now scales with `NEST_HP_LEVEL_SHARE` and balance-check
+  asserts both per-nest and total hive health rise across the campaign, so the
+  intended difficulty curve is at least encoded even though play does not yet
+  follow it.
 - The hive captures undefended neutral nodes, and hive-held nodes stage ~40% of
   its musters, so ignoring the map compounds against the player. That may be
   good pressure or a runaway; only human play will tell.

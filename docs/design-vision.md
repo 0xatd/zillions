@@ -11,9 +11,10 @@ graph, camps as faucets, hives as producers, Forward Camps, the Threat clock,
 the economy without dawn, paid repair and rebuild, the enemy roles, and tower
 targeting doctrine, plus terrain-derived lane nodes with the ground-versus-owner
 split and territory-based supply. Balance is a first pass tuned against
-simulated runs: levels 1 and 5 complete, level 3 does not, and more hives
-currently makes a map easier rather than harder. See the Balance Status section
-of `docs/agent-brief.md` before tuning.
+simulated runs: levels 1 and 5 complete, level 3 does not, and the campaign
+difficulty ordering is inverted for reasons that are routing-related rather than
+balance-related. See the Balance Status section of `docs/agent-brief.md` before
+touching any knob.
 
 **Phases 4-6 are NOT implemented** and remain design intent: the folklore
 factions (§7), world-placed side missions (§8), fog of war and landmarks (§9),
