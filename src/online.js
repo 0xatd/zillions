@@ -11,6 +11,12 @@ import {
 const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const FRESH_MS = 2 * 60 * 1000;
 
+function safePublicName(value) {
+  const text = String(value || '').trim().slice(0, 24);
+  if (!text || text.includes('@')) return 'Commander';
+  return text;
+}
+
 function randomCode(n = 6) {
   const abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let s = '';
@@ -47,7 +53,7 @@ function roomToGame(row) {
     id: row.id,
     name: row.name,
     host_id: row.host_user_id,
-    host_name: metadata.hostName || players.find((p) => p.user_id === row.host_user_id)?.display_name || 'Commander',
+    host_name: safePublicName(metadata.hostName || players.find((p) => p.user_id === row.host_user_id)?.display_name),
     visibility: row.visibility,
     join_code: row.code,
     level: metadata.level || 1,
@@ -84,14 +90,15 @@ export class OnlineLobby {
     if (!user) throw new Error('sign in required');
     const { data: profile, error: profileError } = await this.sb
       .from('profiles')
-      .select('id,handle,display_name,selected_hero')
+      .select('id,handle,display_name,selected_hero,username_set')
       .eq('id', user.id)
       .maybeSingle();
     if (profileError) throw profileError;
+    if (!profile?.username_set || !profile?.handle) throw new Error('choose a username first');
     this.me = {
       id: user.id,
       code: (profile?.handle || user.id.slice(0, 6)).toUpperCase().slice(0, 12),
-      name: profile?.display_name || name || user.email?.split('@')[0] || 'Commander',
+      name: profile.handle,
       hero: profile?.selected_hero || 'alexander',
     };
     await this.sb.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', user.id);

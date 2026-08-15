@@ -35,9 +35,12 @@ Do not turn this back into a generic RTS launcher.
 - Production is account-first.
 - Do not show `local profile` in player UI.
 - Do not show fake rooms, fake players, fake stats, or seeded production data.
-- Do not let the player freely edit display name from the main menu.
-- Display name comes from the authenticated account unless a real profile
-  settings flow exists.
+- Google sign-in is private account identity. Public identity is the username
+  the player claims for that account.
+- Do not show email addresses or Google account names on profile, lobby, chat,
+  room, invite, or presence surfaces.
+- Do not let the player freely edit display name from the main menu unless a
+  deliberate profile settings flow exists.
 - Empty room lists must show a clean empty state.
 - Keep `https://zillions.taborlin.co` as the canonical player URL.
 - Gameplay camera orientation is fixed. Do not make gameplay movement

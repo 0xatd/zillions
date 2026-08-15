@@ -76,6 +76,15 @@ export class UI {
             <div class="accountstatus" id="account-status">Checking account…</div>
             <button class="menubtn primary" id="a-google">Continue with Google</button>
             <button class="menubtn hidden" id="a-offline">Continue in offline dev mode</button>
+            <form class="usernameform hidden" id="a-username-form">
+              <label for="a-username">Public username</label>
+              <div class="usernamerow">
+                <span>@</span>
+                <input id="a-username" maxlength="18" autocomplete="username" spellcheck="false" placeholder="commander_name">
+              </div>
+              <button class="menubtn primary" type="submit">Claim username</button>
+              <small>Letters, numbers, and underscores. Other players see this.</small>
+            </form>
           </div>
         </div>
 
@@ -185,6 +194,11 @@ export class UI {
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
     q('#a-offline').onclick = () => this.cb.onOfflineContinue && this.cb.onOfflineContinue();
+    q('#a-username-form').onsubmit = (e) => {
+      e.preventDefault();
+      const input = q('#a-username');
+      if (this.cb.onUsername) this.cb.onUsername(input.value);
+    };
     q('#m-play').onclick = () => this.showSetup({ mode: 'campaign' });
     q('#m-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
@@ -570,15 +584,26 @@ export class UI {
     const status = this.root.querySelector('#account-status');
     const google = this.root.querySelector('#a-google');
     const offline = this.root.querySelector('#a-offline');
+    const usernameForm = this.root.querySelector('#a-username-form');
+    const usernameInput = this.root.querySelector('#a-username');
+    const needsUsername = !!state.signedIn && !!state.needsUsername;
     if (status) {
       if (!state.ready) status.textContent = 'Checking account…';
-      else if (state.signedIn) status.textContent = `Signed in as ${state.name || 'Commander'}.`;
+      else if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
+      else if (state.signedIn) status.textContent = `Signed in as @${state.username || state.name || 'Commander'}.`;
       else if (!state.enabled) status.textContent = 'Cloud sign-in is not available in this build.';
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     const offlineAllowed = !state.enabled && state.reason === 'static';
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
+    if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (needsUsername) {
+      this._accountAccepted = false;
+      this._showScreen('account');
+      setTimeout(() => usernameInput && usernameInput.focus(), 0);
+      return;
+    }
     if (state.ready && (state.signedIn || offlineAllowed)) {
       if (!this._accountAccepted) {
         this._accountAccepted = true;
@@ -592,7 +617,8 @@ export class UI {
 
   setProfile(p) {
     const nameEl = this.root.querySelector('#prof-name-display');
-    if (nameEl) nameEl.textContent = `🪖 ${p.name || 'Commander'}`;
+    const publicName = p.username || p.name || 'Commander';
+    if (nameEl) nameEl.textContent = `🪖 @${publicName}`;
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games
@@ -770,7 +796,7 @@ export class UI {
   // ---------- online lobby rendering ----------
 
   lobbySetMe(me) {
-    this.root.querySelector('#l-me').textContent = `🪖 ${me.name}`;
+    this.root.querySelector('#l-me').textContent = `🪖 @${me.name}`;
     this.root.querySelector('#l-mycode').textContent = me.code;
   }
 

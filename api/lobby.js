@@ -34,7 +34,8 @@ function cleanText(value, fallback = '') {
 }
 
 function cleanName(value) {
-  return cleanText(value, 'Commander').slice(0, 24) || 'Commander';
+  const name = cleanText(value, 'Commander').slice(0, 24) || 'Commander';
+  return name.includes('@') ? 'Commander' : name;
 }
 
 function cleanMode(value) {

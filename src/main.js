@@ -80,6 +80,7 @@ class App {
       onContinue: () => this.continueGame(),
       onSignIn: () => this._signIn(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
+      onUsername: (username) => this._claimUsername(username),
       onName: () => {},
       onLobbyOpen: () => this._openLobby(),
       onChatSend: (text) => this.lobby && this.lobby.sendChat(text),
@@ -406,7 +407,8 @@ class App {
     } else if (status.enabled) {
       this.lobby = null;
     }
-    this.ui.setAccount(status);
+    this.authStatus = this.auth.status({ error: status.error });
+    this.ui.setAccount(this.authStatus);
   }
 
   async _signIn() {
@@ -415,6 +417,27 @@ class App {
       await this.auth.signInWithGoogle();
     } catch (err) {
       this.ui.setAccount({ ...this.auth.status(), error: err.message || 'Google sign-in failed.' });
+    }
+  }
+
+  async _claimUsername(username) {
+    try {
+      await this.auth.setUsername(username);
+      const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
+      if (cloud) {
+        this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
+        this._saveProfile();
+        this.ui.setProfile(this.profile);
+        this.ui.setCampaign(this.profile.campaign || 0);
+      }
+      await this._applyAuth(this.auth.status());
+    } catch (err) {
+      this.ui.setAccount({
+        ...this.auth.status(),
+        signedIn: true,
+        needsUsername: true,
+        error: err.message || 'Could not claim that username.',
+      });
     }
   }
 

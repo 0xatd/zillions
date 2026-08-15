@@ -294,6 +294,32 @@ body::after {
   font-size: 13px;
   opacity: 0.82;
 }
+.usernameform {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(255, 215, 94, 0.18);
+  border-radius: 10px;
+  text-align: left;
+}
+.usernameform label {
+  font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+  color: #ffe9a8; opacity: 0.82;
+}
+.usernameform small { font-size: 11px; color: #cfc9bc; opacity: 0.72; line-height: 1.35; }
+.usernamerow {
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(0,0,0,0.42);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px; padding: 9px 11px;
+}
+.usernamerow span { color: var(--gold); font-weight: 800; }
+.usernamerow input {
+  flex: 1; min-width: 0; border: 0; outline: 0;
+  background: transparent; color: #e8e6df;
+  font-size: 16px; font-family: inherit;
+}
+.usernamerow input::placeholder { color: rgba(232, 230, 223, 0.38); }
 
 /* SC2-lobby-style setup screen: one centered panel, 1-2-3 steps, big START. */
 .setup {

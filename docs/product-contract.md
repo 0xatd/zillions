@@ -37,12 +37,15 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 - Production must be account-first.
 - The player should see a real sign-in gate before the game shell.
 - Google-backed Zillions accounts are the durable identity.
+- After Google sign-in, the player must choose a public username for that
+  email-backed account. Other players see the username, not the email address or
+  Google account name.
 - Guest/local/offline mode is only for static dev fallback. Do not present it as
   a production profile.
 - Do not show the phrase `local profile` in player UI.
 - Do not let players edit their display name from the main menu at all times.
-- Display name comes from the authenticated account unless a real profile
-  settings flow exists.
+- Public display name is the chosen username. Do not derive public identity from
+  email local parts or Google profile names.
 - Empty lobbies must show an empty state. Do not seed fake rooms or fake players.
 - Stats must be real account stats or a clean zero state.
 - Movement orientation is fixed, not camera-relative. W moves north/up, A moves

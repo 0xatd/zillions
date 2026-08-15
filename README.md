@@ -117,9 +117,10 @@ up automatically at levels 4 and 7. A fallen hero revives at the Keep.
 
 ## Playing Together
 
-Production play is account-gated. A player signs in with Google before the game
-shell opens. The display name, stats, cloud save, match history, and rooms are
-owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
+Production play is account-gated. A player signs in with Google, then claims a
+public username before the game shell opens. Other players see that username,
+not the email address or Google account name. Stats, cloud save, match history,
+and rooms are owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
 **Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
 presence, global lobby chat, and real public rooms. Public/private room records
@@ -145,7 +146,7 @@ runs identically on every machine.
 ## Profiles And Saved Games
 
 - **Zillions account**: Google/Supabase identity is the production profile. The
-  player name is account-derived unless a real profile settings flow exists.
+  visible player name is the claimed public username tied to that account.
 - **Stats**: games, wins, kills, best day, favorite hero, and match history sync
   to Supabase.
 - **Cloud save**: the latest solo/host save syncs to Supabase `save_slots`.

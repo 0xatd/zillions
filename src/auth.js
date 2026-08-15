@@ -2,24 +2,43 @@ import { backendEnabled } from './backend.js';
 import { DAY_LENGTH } from './config.js';
 
 const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
+const USERNAME_MIN = 3;
+const USERNAME_MAX = 18;
+const USERNAME_RE = /^[a-z0-9_]+$/;
 
 function safeName(value, fallback = 'Commander') {
   const text = String(value || '').trim().slice(0, 24);
   return text || fallback;
 }
 
-function handleFor(user) {
-  const emailName = String(user?.email || '').split('@')[0] || 'player';
-  const base = emailName.toLowerCase().replace(/[^a-z0-9_]+/g, '').slice(0, 18) || 'player';
-  return `${base}_${String(user?.id || '0000').replace(/-/g, '').slice(0, 6)}`;
+function fallbackHandleFor(user) {
+  const id = String(user?.id || '000000000000').replace(/-/g, '').slice(0, 12) || '000000000000';
+  return `player_${id}`;
 }
 
-function userDisplayName(user) {
-  return safeName(
-    user?.user_metadata?.name
-    || user?.user_metadata?.full_name
-    || user?.email?.split('@')[0]
-  );
+function normalizeUsername(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function validateUsername(value) {
+  const username = normalizeUsername(value);
+  if (username.length < USERNAME_MIN) return { ok: false, username, message: `Use at least ${USERNAME_MIN} characters.` };
+  if (username.length > USERNAME_MAX) return { ok: false, username, message: `Use ${USERNAME_MAX} characters or fewer.` };
+  if (!USERNAME_RE.test(username)) return { ok: false, username, message: 'Use letters, numbers, and underscores only.' };
+  if (username.startsWith('_') || username.endsWith('_')) return { ok: false, username, message: 'Do not start or end with underscore.' };
+  if (['admin', 'support', 'zillions', 'system', 'moderator'].includes(username)) {
+    return { ok: false, username, message: 'That username is reserved.' };
+  }
+  return { ok: true, username };
+}
+
+function publicName(profile) {
+  if (!profile?.username_set) return '';
+  return safeName(profile.handle || profile.display_name || '', '');
+}
+
+function needsUsername(profile) {
+  return !profile?.username_set || !publicName(profile);
 }
 
 function isoNow() {
@@ -30,6 +49,8 @@ export class AuthClient {
   constructor() {
     this.client = null;
     this.session = null;
+    this.profile = null;
+    this.stats = null;
     this.enabled = false;
     this.ready = false;
     this.error = null;
@@ -45,12 +66,15 @@ export class AuthClient {
 
   status(extra = {}) {
     const user = this.user;
+    const username = publicName(this.profile);
     return {
       ready: this.ready,
       enabled: this.enabled,
       signedIn: !!user,
-      email: user?.email || '',
-      name: userDisplayName(user),
+      email: '',
+      name: username || 'Commander',
+      username,
+      needsUsername: !!user && needsUsername(this.profile),
       error: this.error,
       ...extra,
     };
@@ -133,8 +157,12 @@ export class AuthClient {
     if (!bundle?.profile) return null;
     const profile = bundle.profile;
     const stats = bundle.stats || {};
+    const username = publicName(profile);
     return {
-      name: profile.display_name || '',
+      name: username,
+      username,
+      usernameSet: !!profile.username_set,
+      needsUsername: needsUsername(profile),
       games: stats.games_played || 0,
       wins: stats.wins || 0,
       kills: stats.total_kills || 0,
@@ -147,16 +175,37 @@ export class AuthClient {
   async ensureProfile(localProfile = {}) {
     if (!this.client || !this.user) return null;
     const user = this.user;
-    const displayName = userDisplayName(user);
-    const selectedHero = localProfile.lastHero || 'alexander';
-    const { error: profileError } = await this.client.from('profiles').upsert({
-      id: user.id,
-      handle: handleFor(user),
-      display_name: displayName,
-      selected_hero: selectedHero,
-      last_seen_at: isoNow(),
-    }, { onConflict: 'id' });
-    if (profileError) throw profileError;
+    let selectedHero = localProfile.lastHero || this.profile?.selected_hero || 'alexander';
+    const { data: existing, error: readError } = await this.client.from('profiles')
+      .select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (readError) throw readError;
+
+    if (existing) {
+      selectedHero = localProfile.lastHero || existing.selected_hero || selectedHero;
+      const { data, error } = await this.client.from('profiles').update({
+        selected_hero: selectedHero,
+        last_seen_at: isoNow(),
+      }).eq('id', user.id)
+        .select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
+        .single();
+      if (error) throw error;
+      this.profile = data || existing;
+    } else {
+      const handle = fallbackHandleFor(user);
+      const { data, error } = await this.client.from('profiles').insert({
+        id: user.id,
+        handle,
+        display_name: handle,
+        username_set: false,
+        selected_hero: selectedHero,
+        last_seen_at: isoNow(),
+      }).select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
+        .single();
+      if (error) throw error;
+      this.profile = data;
+    }
 
     const { error: statsError } = await this.client.from('player_stats').upsert({
       user_id: user.id,
@@ -171,7 +220,7 @@ export class AuthClient {
     const userId = this.user.id;
     const [{ data: profile, error: profileError }, { data: stats, error: statsError }] = await Promise.all([
       this.client.from('profiles')
-        .select('id,handle,display_name,selected_hero,updated_at,last_seen_at')
+        .select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
         .eq('id', userId)
         .maybeSingle(),
       this.client.from('player_stats')
@@ -181,7 +230,30 @@ export class AuthClient {
     ]);
     if (profileError) throw profileError;
     if (statsError) throw statsError;
+    this.profile = profile || this.profile;
+    this.stats = stats || this.stats;
     return { profile, stats };
+  }
+
+  async setUsername(value) {
+    if (!this.client || !this.user) throw new Error('Sign in before choosing a username.');
+    const checked = validateUsername(value);
+    if (!checked.ok) throw new Error(checked.message);
+    await this.ensureProfile();
+    const { data, error } = await this.client.from('profiles').update({
+      handle: checked.username,
+      display_name: checked.username,
+      username_set: true,
+      last_seen_at: isoNow(),
+    }).eq('id', this.user.id)
+      .select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
+      .single();
+    if (error) {
+      if (error.code === '23505') throw new Error('That username is taken.');
+      throw error;
+    }
+    this.profile = data;
+    return data;
   }
 
   async syncLocalProfile(localProfile = {}) {
@@ -192,7 +264,6 @@ export class AuthClient {
     await this.ensureProfile(localProfile);
     const [{ error: profileError }, { error: statsError }] = await Promise.all([
       this.client.from('profiles').update({
-        display_name: userDisplayName(this.user),
         selected_hero: hero,
         last_seen_at: isoNow(),
       }).eq('id', this.user.id),

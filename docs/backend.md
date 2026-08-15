@@ -16,6 +16,9 @@ this file.
 Production is account-first. On `zillions.taborlin.co`, the game shell is gated
 by Google/Supabase sign-in. Static local play can remain for development and
 offline smoke tests, but it must not be presented as a production profile.
+After Google sign-in, players claim a public username for the email-backed
+account. Public profile, lobby, chat, room, and invite surfaces use that
+username. They must not show the email address or a Google account name.
 
 ## Backend Boundaries
 
@@ -104,8 +107,9 @@ room system.
 
 Defined in `supabase/schema.sql`:
 
-- `profiles`: one row per authenticated player. Stores handle, display name,
-  selected hero, avatar color, timestamps, and last seen time.
+- `profiles`: one row per authenticated player. Stores the public username in
+  `handle`, mirrors it in `display_name`, tracks `username_set`, selected hero,
+  avatar color, timestamps, and last seen time.
 - `player_stats`: lifetime games, wins, losses, kills, best day/wave,
   buildings built, and favorite hero.
 - `save_slots`: authenticated cloud save slots. Current UI uses `slot_key =
@@ -140,9 +144,11 @@ RLS policy intent:
    from ESM.
 3. The account modal starts Google OAuth.
 4. Supabase Auth returns to `https://zillions.taborlin.co/`.
-5. The browser upserts `profiles` and `player_stats`.
-6. Signed-in play syncs commander name, selected hero, stats, latest save, and
-   private match history to Supabase.
+5. The browser creates a private fallback handle if the profile is missing.
+6. If `username_set` is false, the account gate asks the player to claim a
+   username before the game shell opens.
+7. Signed-in play syncs selected hero, stats, latest save, and private match
+   history to Supabase.
 
 ### Multiplayer Today
 

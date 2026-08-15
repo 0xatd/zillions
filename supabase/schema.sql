@@ -18,6 +18,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   handle text not null unique,
   display_name text not null,
+  username_set boolean not null default false,
   selected_hero text not null default 'scott',
   avatar_color text not null default '#f0e6c8',
   created_at timestamptz not null default now(),
@@ -26,6 +27,14 @@ create table if not exists public.profiles (
   check (length(handle) between 3 and 32),
   check (handle ~ '^[a-z0-9_]+$')
 );
+
+alter table if exists public.profiles
+add column if not exists username_set boolean not null default false;
+
+update public.profiles
+set handle = 'player_' || substr(replace(id::text, '-', ''), 1, 12),
+    display_name = 'player_' || substr(replace(id::text, '-', ''), 1, 12)
+where username_set = false;
 
 create trigger profiles_touch_updated_at
 before update on public.profiles
@@ -310,17 +319,14 @@ as $$
 declare
   base_handle text;
 begin
-  base_handle := lower(regexp_replace(coalesce(split_part(new.email, '@', 1), 'player'), '[^a-z0-9_]+', '', 'g'));
+  base_handle := 'player_' || substr(replace(new.id::text, '-', ''), 1, 12);
 
-  if base_handle = '' then
-    base_handle := 'player';
-  end if;
-
-  insert into public.profiles (id, handle, display_name)
+  insert into public.profiles (id, handle, display_name, username_set)
   values (
     new.id,
-    left(base_handle, 18) || '_' || substr(new.id::text, 1, 4),
-    coalesce(nullif(new.raw_user_meta_data->>'name', ''), nullif(new.raw_user_meta_data->>'full_name', ''), base_handle)
+    base_handle,
+    base_handle,
+    false
   )
   on conflict (id) do nothing;
 
