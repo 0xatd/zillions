@@ -31,6 +31,8 @@ const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
 const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
 const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guard first
 const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
+const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, it's a sealed pocket
 
 let nextId = 1000;
 const getNextId = () => nextId;
@@ -1056,25 +1058,79 @@ export class Game {
       this.occ[(z + dz) * this.map.size + (x + dx)] = b.id;
     }
     if (gate) this.gateIds.add(b.id);
+    const N = this.map.size;
     // Eject anyone standing on the fresh foundation — you pay standing ON the
     // plot, so the new walls must not entomb you.
     for (const u of this.units) {
       const ux = u.x | 0, uz = u.z | 0;
-      if (ux >= x && ux < x + size && uz >= z && uz < z + size) this._ejectActor(u, b);
+      if (ux >= x && ux < x + size && uz >= z && uz < z + size) {
+        this._ejectActor(u, x + (size >> 1), z + (size >> 1));
+      }
+    }
+    // This building can also seal someone in from the OUTSIDE: they never set
+    // foot on the new foundation, so the loop above never sees them, but the
+    // last open gap in whatever room/nook they were standing in just became
+    // a wall. Flood-fill their reachable ground (capped, so this stays cheap)
+    // — anyone whose whole reachable area is a small sealed pocket, not the
+    // open map, gets moved to the nearest tile that is NOT part of that
+    // pocket, i.e. just outside whatever just sealed them in.
+    const bx = x + (size >> 1), bz = z + (size >> 1);
+    for (const u of this.units) {
+      const ux = u.x | 0, uz = u.z | 0;
+      if (ux >= x && ux < x + size && uz >= z && uz < z + size) continue; // already handled above
+      if (Math.max(Math.abs(ux - bx), Math.abs(uz - bz)) > size + 12) continue; // too far to be affected
+      if (this.occ[uz * N + ux] > 0) continue; // not on solid ground themselves
+      const pocket = this._reachablePocket(ux, uz, POCKET_CAP);
+      if (pocket.size >= POCKET_CAP) continue; // plenty of open ground reachable — not sealed
+      this._ejectActor(u, ux, uz, pocket);
     }
     this.flowDirty = true;
     return b;
   }
 
-  _ejectActor(u, b) {
+  // Flood-fill the walkable, unoccupied (or gate) ground reachable from
+  // (sx, sz), 4-directionally, stopping once `cap` tiles have been visited.
+  // If the returned set is smaller than `cap`, that IS the actor's entire
+  // reachable area — a sealed pocket, not a sample of the open map.
+  _reachablePocket(sx, sz, cap) {
     const N = this.map.size;
-    for (let r = 1; r < 8; r++) {
+    const visited = new Set([sz * N + sx]);
+    const queue = [[sx, sz]];
+    for (let qi = 0; qi < queue.length && visited.size < cap; qi++) {
+      const [x, z] = queue[qi];
+      for (const [dx, dz] of DIR4) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+        const idx = nz * N + nx;
+        if (visited.has(idx) || !this.map.isWalkable(nx, nz)) continue;
+        const occId = this.occ[idx];
+        if (occId !== 0 && !this.gateIds.has(occId)) continue;
+        visited.add(idx);
+        queue.push([nx, nz]);
+        if (visited.size >= cap) break;
+      }
+    }
+    return visited;
+  }
+
+  // Ring-search out from (cx, cz) for the nearest walkable, unoccupied tile
+  // and drop the actor there. Used both for someone caught standing ON a
+  // fresh foundation and for someone a fresh foundation just sealed in from
+  // the outside — the caller picks the search origin accordingly. `pocket`,
+  // when given, is the actor's known sealed-off reachable set: candidates
+  // inside it are skipped, since hopping there would just be the same trap.
+  _ejectActor(u, cx, cz, pocket = null) {
+    const N = this.map.size;
+    for (let r = 1; r < 24; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-          const nx = (b.x + (b.size >> 1)) + dx, nz = (b.z + (b.size >> 1)) + dz;
+          const nx = cx + dx, nz = cz + dz;
           if (nx < 1 || nz < 1 || nx >= N - 1 || nz >= N - 1) continue;
-          if (this.map.isWalkable(nx, nz) && this.occ[nz * N + nx] === 0) {
+          const idx = nz * N + nx;
+          if (pocket && pocket.has(idx)) continue;
+          const occId = this.occ[idx];
+          if (this.map.isWalkable(nx, nz) && (occId === 0 || this.gateIds.has(occId))) {
             u.x = nx + 0.5; u.z = nz + 0.5;
             return;
           }
