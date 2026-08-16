@@ -14,6 +14,7 @@ import { OnlineLobby, LORE, TIPS } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
+import { roomConnectionReadiness } from './multiplayer-readiness.js';
 
 const ZMAX = 1700;
 const NET_STEP = 3;          // one lockstep command window every 3 sim ticks
@@ -58,6 +59,14 @@ class App {
         if (this.mpRole === 'guest') return; // host launches the match
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
+          if (this.onlineMode && this.lobby?.game) {
+            const readiness = roomConnectionReadiness(this.lobby.game, this.peers.length + 1);
+            if (!readiness.ready) {
+              this.ui.onlineStatus(`⏳ ${readiness.pending} player${readiness.pending === 1 ? '' : 's'} still connecting. START unlocks when everyone is linked.`);
+              this._onRoomUpdate(this.lobby.game);
+              return;
+            }
+          }
           const level = this.ui.selectedLevel || 1;
           const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
           this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
@@ -847,20 +856,25 @@ class App {
   _onRoomUpdate(game) {
     if (!game) return;
     const isHost = this.mpRole === 'host';
-    const connected = this.peers.length + 1;
+    const readiness = roomConnectionReadiness(game, this.peers.length + 1);
+    const { connected, expectedPlayers, pending, ready } = readiness;
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
       isHost,
       code: game.join_code,
       mode: game.mode || this.ui.selectedMode || 'campaign',
       launchText: isHost
-        ? (connected > 1 ? `WebRTC is connected for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
+        ? (!ready
+          ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
+          : connected > 1 ? `The game connection is ready for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
         : 'You are in the room. Pick your hero and wait for the host to press START.',
     });
     this.ui.setStartButton(isHost ? {
-      text: `▶  START ROOM — LAUNCH ${Math.max(connected, game.players || 1)} PLAYER${Math.max(connected, game.players || 1) === 1 ? '' : 'S'}`,
-      disabled: false,
-      title: 'The host launches the match for everyone connected.',
+      text: ready
+        ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
+        : `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`,
+      disabled: !ready,
+      title: ready ? 'The host launches the match for everyone connected.' : 'Start unlocks when every player in the room has a direct game connection.',
     } : {
       text: '⏳  WAITING FOR HOST TO START',
       disabled: true,
