@@ -694,11 +694,17 @@ export class Game {
   // stops while you do it.
   _updatePlots(dt) {
     if (this.over || this.phase !== 'live') return;
+    const activePayments = new Set();
+    const forcedRefunds = new Set();
     for (const h of this.heroes) {
       if (h.dead || !h.payHold) continue;
       const target = this.buildTargetFor(h);
       if (!target) continue;
       const { plot, act } = target;
+      if (act.mode === 'build' || act.mode === 'rebuild') {
+        activePayments.add(plot.id);
+        plot.refundHero = this.heroes.indexOf(h);
+      }
       const need = act.cost - (act.mode === 'build' || act.mode === 'rebuild' ? plot.paid : 0);
       const pay = Math.min(PAY_RATE * dt, this.gold, need);
       if (pay <= 0) continue;
@@ -722,8 +728,36 @@ export class Game {
         plot.paid = 0;
         if (act.mode === 'rebuild') this._rebuildPlot(plot);
         else this._construct(plot);
+      } else if (this.gold <= 1e-6) {
+        // Thronefall rule: an incomplete purchase is not a savings account.
+        // If the purse runs dry, cancel this hold and send every committed coin
+        // back. The player must release and press again before another attempt.
+        h.payHold = false;
+        forcedRefunds.add(plot.id);
       }
     }
+    for (const plot of this.plots) {
+      if (plot.paid <= 1e-6) continue;
+      if (forcedRefunds.has(plot.id) || !activePayments.has(plot.id)) this._refundPlot(plot);
+    }
+  }
+
+  _refundPlot(plot) {
+    const amount = plot.paid;
+    if (amount <= 1e-6) return;
+    plot.paid = 0;
+    this.gold += amount;
+    const h = this.heroes[plot.refundHero || 0] || this.heroes[0];
+    if (h) h._coinAcc = 0;
+    const [px, pz] = this.payPoint(plot, h);
+    this.emit({
+      type: 'refundcoin',
+      fx: px, fz: pz,
+      tx: h?.x ?? px, tz: h?.z ?? pz,
+      n: Math.min(24, Math.max(1, Math.ceil(amount))),
+      v: amount,
+    });
+    this.msg(`↩️ ${Math.ceil(amount)} coin${amount >= 1.5 ? 's' : ''} returned — finish the cost in one hold.`, 'info');
   }
 
   _repairPlot(plot, hp) {
@@ -1838,9 +1872,12 @@ export class Game {
           this.addXp(h, zb.def.score * 8);
         }
       }
-      // Combat pays now that dawn doesn't.
-      if (zb.type === 'brute' || zb.type === 'sieger') this._spawnCoin(zb.x, zb.z, DROPS.bruteCoins, zb.x, zb.z);
-      else if (this.rng() < DROPS.smallChance) this._spawnCoin(zb.x, zb.z, DROPS.smallCoins, zb.x, zb.z);
+      // Every enemy pays. Large enemies and bosses keep their larger rewards,
+      // but no kill can produce an empty corpse.
+      if (!zb.boss) {
+        const value = zb.type === 'brute' || zb.type === 'sieger' ? DROPS.bruteCoins : DROPS.enemyCoins;
+        this._spawnCoin(zb.x, zb.z, value, zb.x, zb.z);
+      }
     }
   }
 

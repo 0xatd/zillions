@@ -406,7 +406,7 @@ export const HEROES = {
 // Coin drops. Coins are no longer paid by the calendar — income is credited
 // automatically and physical coins fall from combat and conquest only.
 export const DROPS = {
-  smallChance: 0.14, smallCoins: 2, bruteCoins: 5, bossCoins: 20, nodeCoins: 18, nestCoins: 40,
+  enemyCoins: 1, bruteCoins: 5, bossCoins: 20, nodeCoins: 18, nestCoins: 40,
 };
 
 // ---------- Items: WC3-style persistent gear ----------

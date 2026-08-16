@@ -273,6 +273,39 @@ function assertSiegeLoop(level) {
   assert.ok(game.gold < goldBefore, `${level.name} repair did not spend gold`);
   assert.ok(b.hp > b.maxHp * 0.5, `${level.name} repair did not restore health`);
 
+  // Incomplete construction is temporary. Walking away or running out of
+  // coins returns the whole partial payment instead of trapping it in a plot.
+  const refundPlot = game.plots.find((p) => p.tier === 0 && !game.plotLocked(p));
+  assert.ok(refundPlot, `${level.name} has no plot for refund validation`);
+  hero.x = refundPlot.cx; hero.z = refundPlot.cz;
+  game.gold = 2;
+  hero.payHold = true;
+  game.events.length = 0;
+  game._updatePlots(1);
+  assert.equal(game.gold, 2, `${level.name} did not return an unaffordable partial payment`);
+  assert.equal(refundPlot.paid, 0, `${level.name} left refunded coins trapped in the plot`);
+  assert.equal(hero.payHold, false, `${level.name} kept auto-paying after an insufficient-funds refund`);
+  assert.ok(game.events.some((e) => e.type === 'refundcoin'), `${level.name} emitted no refund animation event`);
+
+  game.gold = 100;
+  hero.x = refundPlot.cx; hero.z = refundPlot.cz;
+  hero.payHold = true;
+  game._updatePlots(0.1);
+  assert.ok(refundPlot.paid > 0, `${level.name} did not stream a partial payment before walk-away`);
+  const beforeWalkRefund = game.gold + refundPlot.paid;
+  hero.x = 0; hero.z = 0;
+  game._updatePlots(0.1);
+  assert.equal(refundPlot.paid, 0, `${level.name} kept partial payment after the hero walked away`);
+  assert.equal(game.gold, beforeWalkRefund, `${level.name} walk-away refund lost coins`);
+
+  // Every ordinary enemy drops one coin; no random empty kills.
+  const coinCount = game.coins.length;
+  const enemy = game._spawnZombie('walker', hero.x + 8, hero.z, true, true);
+  assert.ok(enemy, `${level.name} could not spawn the coin-drop test enemy`);
+  game.damageZombie(enemy, enemy.hp + 1, hero.x, hero.z);
+  assert.equal(game.coins.length, coinCount + 1, `${level.name} ordinary enemy did not drop a coin`);
+  assert.equal(game.coins.at(-1).v, 1, `${level.name} ordinary enemy coin value changed`);
+
   // A destroyed structure leaves a ruin that must be bought back.
   const b2 = game.buildings.find((o) => o.plotId === house.id);
   game._destroyBuilding(b2, true);
