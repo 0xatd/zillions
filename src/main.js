@@ -2479,6 +2479,11 @@ class App {
         head.userData.restRot = head.rotation.clone();
       } else if (u.key === 'alexander') {
         trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26));   // long marksman rifle
+      } else if (d.melee) {
+        // Generic close-quarters weapon for melee heroes without a bespoke
+        // model (Turtle, John, Tiger) — a stout haft with a trim-colored head.
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.58), M(0x2b2d31)), 0.28, 0.6, 0.2));
+        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), trim), 0.28, 0.64, 0.48));
       } else {
         trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24));   // long rifle
       }
@@ -3239,8 +3244,8 @@ class App {
 
         case 'deny': this.audio.deny(); break;
         case 'cast': {
-          this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike' }[e.key] || e.key);
-          const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e };
+          this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
+          const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
           const R = e.radius;
           const n = Math.min(40, Math.round(R * 6));
@@ -3255,10 +3260,36 @@ class App {
             this._spawnAbilityRing(e.x, e.z, { color: 0x7a9cf0, radius: 0.7, to: R * 1.18, life: 0.48, opacity: 0.72, width: 0.28, delay: 0.06 });
           } else if (e.key === 'weave') {
             this._spawnAbilityRing(e.x, e.z, { color: 0x72cfff, radius: 0.5, to: 2.3, life: 0.38, opacity: 0.85, width: 0.16 });
+          } else if (e.key === 'fortify') {
+            this._spawnAbilityRing(e.x, e.z, { color: 0x8fd0ff, radius: 0.4, to: R, life: 0.4, opacity: 0.9, width: 0.24 });
+          } else if (e.key === 'brew') {
+            this._spawnAbilityRing(e.x, e.z, { color: 0xffb347, radius: 0.4, to: R, life: 0.5, opacity: 0.6, width: 0.3 });
           }
-          this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : 0.18);
+          this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : e.key === 'fortify' ? 0.35 : 0.18);
           break;
         }
+        case 'evade':
+          this.burst(e.x, 1.0, e.z, { count: 6, color: 0xdfe8ff, speed: 1.0, life: 0.3, size: 0.34, up: 1.4 });
+          break;
+        case 'expire':
+          this.burst(e.x, 0.5, e.z, { count: 10, color: 0xc9d8ff, speed: 1.1, life: 0.5, size: 0.5, up: 1.4 });
+          break;
+        case 'fortify':
+          this.audio.click();
+          this._impactRing(e.x, e.z, { color: 0x8fd0ff, count: 24, radius: e.r || 7, life: 0.5, size: 0.5 });
+          break;
+        case 'clone':
+          this.burst(e.x, 0.5, e.z, { count: 18, color: 0xffa64d, speed: 1.8, life: 0.5, size: 0.5, up: 1.6 });
+          break;
+        case 'summon':
+          this.burst(e.x, 0.6, e.z, { count: 20, color: 0x8fd6ff, speed: 1.6, life: 0.6, size: 0.5, up: 1.8 });
+          break;
+        case 'shieldproc':
+          this.burst(e.x, 1.0, e.z, { count: 10, color: 0x9fd6ff, speed: 1.0, life: 0.4, size: 0.42, up: 1.4 });
+          break;
+        case 'brewzone':
+          this.burst(e.x, 0.2, e.z, { count: 6, color: 0xffb347, speed: 0.4, life: 0.5, size: 0.6, spread: 1.6, up: 0.4 });
+          break;
         case 'zap':
           this.burst(e.x, 0.6, e.z, { count: 5, color: 0x4dd8c8, speed: 1.8, life: 0.25, size: 0.4, up: 1.4 });
           break;

@@ -277,6 +277,18 @@ export const UNITS = {
     key: 'sniper', name: 'Sniper', icon: '🎯',
     hp: 90, dmg: 65, range: 14, rof: 0.55, speed: 3.0, noise: 24, color: 0x8a6ac8,
   },
+  // Temporary allied units spawned by hero ults (Tiger's clones, Aaron's spirit
+  // sentinel) — real `units` entries reusing the same muster/damage/snapshot
+  // path as camp troops, just tagged `temp` with a lifespan. These base stats
+  // are fallback defaults; the cast that spawns one overrides hp/dmg per rank.
+  tiger_clone: {
+    key: 'tiger_clone', name: 'Tiger Echo', icon: '🐯',
+    hp: 200, dmg: 20, range: 1.9, rof: 1.3, speed: 5.0, noise: 6, color: 0xd8721f, melee: true,
+  },
+  aaron_spirit: {
+    key: 'aaron_spirit', name: 'Astral Sentinel', icon: '👻',
+    hp: 220, dmg: 22, range: 8, rof: 0.9, speed: 3.8, noise: 10, color: 0x8fd6ff,
+  },
 };
 
 // ---------- The horde: roles, not stat blocks ----------
@@ -436,6 +448,89 @@ export const HEROES = {
     passives: [
       { key: 'ghostmotor', name: 'Ghost Motor', icon: '👟', mods: { speed: 0.08, rof: 0.08 }, desc: 'Move speed and fire rate.' },
       { key: 'needlesight', name: 'Needle Sight', icon: '🪡', mods: { dmg: 0.10, range: 0.5 }, desc: 'Precision damage and attack range.' },
+    ],
+  },
+  turtle: {
+    key: 'turtle', name: 'Turtle Voss', icon: '🐢', color: 0x3f6b5e, trim: 0xb8ae86,
+    tagline: 'Melee. Nothing gets past him twice.',
+    hp: 640, dmg: 34, range: 1.8, rof: 0.9, speed: 3.6, noise: 8,
+    levelHp: 58, levelDmg: 4, regen: 3.6, melee: true,
+    armor: 0.16, thorns: 0.22,
+    aura: {
+      key: 'bulwark', name: 'Bulwark Field', icon: '🛡️', radius: 5.5, armor: 0.15, color: 0x8fd0ff,
+      desc: 'A standing wave of plating hardens the air around Turtle — nearby troops shrug off 15% more of every hit.',
+    },
+    ability: {
+      key: 'fortify', name: 'Last Stand', icon: '🐢', cd: 12,
+      cast: 'fortify', radius: 7, dur: [3, 4, 5], armor: [0.30, 0.45, 0.60], thorns: [0.25, 0.40, 0.55],
+      desc: 'Turtle plants his feet and roars — armor and thorns spike, and every zombie in earshot forgets there is anyone else on the field.',
+    },
+    passives: [
+      { key: 'plating', name: 'Reactive Plating', icon: '🔩', mods: { hp: 110, armor: 0.05 }, desc: 'More max health and a harder shell.' },
+      { key: 'ironwill', name: 'Iron Will', icon: '🦾', mods: { thorns: 0.08, regen: 1.0 }, desc: 'Thorns reflect harder, and he mends faster between hits.' },
+    ],
+  },
+  john: {
+    key: 'john', name: 'John Marlowe', icon: '🐼', color: 0x3a3a3f, trim: 0xf0ece0,
+    tagline: 'Melee. Falls down. Gets up meaner.',
+    hp: 430, dmg: 46, range: 1.9, rof: 1.0, speed: 4.4, noise: 9,
+    levelHp: 40, levelDmg: 6, regen: 2.6, melee: true,
+    critChance: 0.20, critMult: 2.2, evadeChance: 0.15,
+    aura: {
+      key: 'bravado', name: 'Reckless Bravado', icon: '🍶', radius: 5, crit: 0.15, color: 0xffb347,
+      desc: "John fights like the bar is about to close, and it's contagious — nearby troops swing wilder and land more crits.",
+    },
+    ability: {
+      key: 'brew', name: 'Last Call', icon: '🍻', cd: 12,
+      cast: 'brew', radius: 4.2, dur: [4, 5, 6], slow: [0.40, 0.50, 0.60], dmg: [75, 115, 165],
+      desc: "John cracks a keg open on the crowd — the blast splashes them, and the puddle that's left staggers and slows anyone still standing in it.",
+    },
+    passives: [
+      { key: 'liquidcourage', name: 'Liquid Courage', icon: '🍺', mods: { critChance: 0.06, dmg: 0.06 }, desc: 'Bigger hits, more of them crits.' },
+      { key: 'wobblestep', name: 'Wobble Step', icon: '👣', mods: { evadeChance: 0.06, speed: 0.06 }, desc: 'Harder to pin down, faster on his feet.' },
+    ],
+  },
+  tiger: {
+    key: 'tiger', name: 'Tiger Reyes', icon: '🐯', color: 0xd8721f, trim: 0x1c1a18,
+    tagline: 'Melee. Fast, brutal, gone before you blink.',
+    hp: 490, dmg: 58, range: 1.9, rof: 1.3, speed: 5.0, noise: 10,
+    levelHp: 45, levelDmg: 7, regen: 2.4, melee: true,
+    critChance: 0.14, critMult: 1.9,
+    aura: {
+      key: 'instinct', name: "Hunter's Instinct", icon: '🐾', radius: 5.5, dmgMult: 0.12, color: 0xffa64d,
+      desc: 'Tiger sets the pace of the fight, and nearby troops hit harder chasing it.',
+    },
+    ability: {
+      key: 'clone', name: 'Pack Tactics', icon: '🐾', cd: 13,
+      cast: 'clone', count: [1, 1, 2], dur: [8, 10, 12], statMult: [0.40, 0.45, 0.50],
+      desc: 'Tiger calls the rest of the pack — temporary copies fight beside him at reduced strength until they fade.',
+    },
+    passives: [
+      { key: 'bladework', name: 'Bladework', icon: '🗡️', mods: { dmg: 0.10, critChance: 0.05 }, desc: 'More damage, more crits.' },
+      { key: 'packleader', name: 'Pack Leader', icon: '🐺', mods: { speed: 0.10, cdr: 0.08 }, desc: 'Faster on his feet, faster back into the fight.' },
+    ],
+  },
+  aaron: {
+    key: 'aaron', name: 'Aaron Whitlock', icon: '🔮', color: 0x6a4fae, trim: 0xf0d060,
+    tagline: 'Long range. Wins the fight before it starts.',
+    hp: 300, dmg: 27, range: 12, rof: 1.0, speed: 4.4, noise: 14,
+    levelHp: 29, levelDmg: 3.5, regen: 2.1,
+    aura: {
+      key: 'ward', name: 'Warding Field', icon: '✨', radius: 6.5, regen: 5, haste: 0.22, color: 0x8fd6ff,
+      desc: 'A shimmering ward keeps nearby allies mended (+5 hp/s) and quickens their hands (+22% attack rate).',
+    },
+    ability: {
+      key: 'summon', name: 'Astral Sentinel', icon: '👻', cd: 11,
+      cast: 'summon', dur: [20, 26, 32], hp: [220, 300, 380], dmg: [24, 34, 46],
+      desc: 'Aaron calls a spirit sentinel to fight at his side until its time runs out — or he calls another and the old one fades.',
+    },
+    passives: [
+      {
+        key: 'aegisward', name: 'Aegis Ward', icon: '🛡️', mods: { auraR: 0.06 },
+        proc: { key: 'wardshield', kind: 'shield', every: [8, 6.5, 5], amount: [60, 100, 140] },
+        desc: 'Periodically shields the most wounded ally near him.',
+      },
+      { key: 'focuslens', name: 'Focus Lens', icon: '🔭', mods: { range: 0.5, dmg: 0.10 }, desc: 'More range and a little more punch.' },
     ],
   },
 };

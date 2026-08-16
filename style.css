@@ -548,9 +548,11 @@ body::after {
 .tagline { opacity: 0.85; margin-bottom: 18px; font-size: 15px; }
 
 /* ---------- hero picker ---------- */
-.herorow { display: flex; gap: 10px; }
+/* flex-wrap + a min-width keep this readable as the roster grows past a
+   single row's worth of cards, instead of squeezing everyone paper-thin. */
+.herorow { display: flex; flex-wrap: wrap; gap: 10px; }
 .herocard {
-  flex: 1; display: flex; flex-direction: column; gap: 3px; align-items: center;
+  flex: 1 1 108px; min-width: 108px; display: flex; flex-direction: column; gap: 3px; align-items: center;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--panel-border); border-radius: 12px;
   padding: 10px 8px; color: #e8e6df; cursor: pointer;

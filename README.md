@@ -171,6 +171,10 @@ Build mode and Fight mode. Q always casts intentionally. You steer.
 | Scott English | Shotgun brawler — short range, huge slow blasts with spread | Heavy Gravity — nearby dead move 35% slower | Gravity Hammer — cataclysmic AoE melee slam, ~10× his auto |
 | Alexander Thomas | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
 | Danny Donovan | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health back to him | The Weave — invisible and fast, walks through the horde cutting everything touched |
+| Turtle Voss | Melee tank — highest HP/armor, reflects melee damage (thorns) | Bulwark Field — nearby troops take 15% less damage | Last Stand — armor/thorns spike, taunts everything nearby for a few seconds |
+| John Marlowe | Melee brawler — crit chance and evade chance are his core stats | Reckless Bravado — nearby troops gain bonus crit chance | Last Call — beer blast, then a lingering puddle that slows and staggers |
+| Tiger Reyes | Melee bruiser — highest single-target damage and top speed | Hunter's Instinct — nearby troops deal bonus damage | Pack Tactics — temporary reduced-stat copies of himself fight at his side |
+| Aaron Whitlock | Long-range support caster — low personal damage, high utility | Warding Field — heals and hastens nearby allies at once | Astral Sentinel — summons a temporary ally; recasting replaces it |
 
 Heroes earn XP from kills within 14 tiles and level 1–10. Each level grants an
 upgrade point that the player spends on Aura, Passive I, Passive II, or Ult
