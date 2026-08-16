@@ -3,7 +3,7 @@ import { Game } from '../src/game.js';
 import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
-  LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, UPGRADE_PAY_RATE,
+  HEROES, LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, UPGRADE_PAY_RATE,
   START_GOLD, SUPPLY, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
 } from '../src/config.js';
 
@@ -385,6 +385,28 @@ for (const [name, cost, incomeGain] of paybacks) {
     for (const [type, share] of Object.entries(squad.types)) {
       assert.ok(share >= 0, `hive squad share for ${type} went negative at Threat ${threat}`);
     }
+  }
+}
+
+// Every hero — however many there are — must sit in the same rough power band
+// and have a well-formed kit. This is a sanity check, not a min-max target:
+// it exists so a future roster addition gets caught here instead of in play.
+for (const [key, hero] of Object.entries(HEROES)) {
+  assert.ok(hero.hp >= 250 && hero.hp <= 700, `${key} hp ${hero.hp} is out of the hero power band`);
+  assert.ok(hero.dmg >= 18 && hero.dmg <= 70, `${key} dmg ${hero.dmg} is out of the hero power band`);
+  assert.ok(hero.range >= 1.2 && hero.range <= 14, `${key} range ${hero.range} is out of the hero power band`);
+  assert.ok(hero.speed > 0 && hero.regen >= 0, `${key} has a non-positive speed or negative regen`);
+  assert.ok(hero.ability.cd >= 10 && hero.ability.cd <= 14, `${key} ult cooldown ${hero.ability.cd}s is out of band`);
+  // Any rank-scaled array on the ability (dmg, dur, radius-per-rank, etc.)
+  // must have exactly 3 entries — one per ult rank.
+  for (const [field, val] of Object.entries(hero.ability)) {
+    if (Array.isArray(val)) assert.equal(val.length, 3, `${key} ability.${field} must have 3 rank entries`);
+  }
+  assert.ok(hero.aura && hero.aura.icon && hero.aura.name, `${key} aura is missing an icon/name`);
+  assert.equal((hero.passives || []).length, 2, `${key} must have exactly 2 passives`);
+  for (const proc of hero.passives.map((p) => p.proc).filter(Boolean)) {
+    assert.equal(proc.every.length, 3, `${key} passive proc.every must have 3 rank entries`);
+    assert.equal(proc.amount.length, 3, `${key} passive proc.amount must have 3 rank entries`);
   }
 }
 
