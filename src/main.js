@@ -40,7 +40,7 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    this.controlMode = 'build'; // Alt toggles whether Space prioritizes build or fight.
+    this.controlMode = 'build'; // Alt toggles whether Space builds or fires the special.
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
@@ -1692,10 +1692,11 @@ class App {
   _syncPlots(t) {
     const g = this.game;
     const mh = this.myHero();
+    const buildMode = this.controlMode !== 'fight';
     if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
     // Pips belong to ONE plot: the nearest fundable one within reach.
     let pipPlotId = -1;
-    if (mh && !mh.dead) {
+    if (buildMode && mh && !mh.dead) {
       let bd = 4.5 * 4.5;
       for (const plot of g.plots) {
         const act = g.plotAction(plot);
@@ -1727,12 +1728,16 @@ class App {
         : act.mode === 'branch' ? act.nt
         : { def: act.def || { name: act.label }, cost: act.cost, mode: act.mode };
       const built = plot.tier > 0 && !plot.ruined;
+      if (!buildMode && !built) {
+        rec.group.visible = false;
+        continue;
+      }
       // Foundation scenery (pad, posts, rubble, ghost) hides once built.
       rec.group.children.forEach((ch) => {
         if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
       });
 
-      if (!nt) { // fully built & maxed
+      if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
         ud.ring.visible = false;
         ud.prog.visible = false;
@@ -2421,14 +2426,10 @@ class App {
       if (!this.game) return;
       if (k === ' ') {
         e.preventDefault();
-        // Space follows the current control mode. Build mode keeps the original
-        // Thronefall feel; fight mode lets Space cast even while standing at a plot.
+        // Space follows the current control mode. Build mode never fires the
+        // special; hero auto-attacks still run on their own.
         if (this.game.phase === 'found') this._tryFound();
-        else {
-          const h = this.myHero();
-          const target = h && !h.dead && this.game.buildTargetFor(h);
-          if (this.controlMode === 'fight' || !target) this.tryCast();
-        }
+        else if (this.controlMode === 'fight') this.tryCast();
       }
       else if (k === 'q') this.tryCast();
       else if (k === 'alt') {
@@ -3110,8 +3111,9 @@ class App {
 
       // Branch choice UI when standing at a branch-ready plot.
       const mh = this.myHero();
+      const buildMode = this.controlMode !== 'fight';
       let branchPlot = null;
-      if (mh && !mh.dead) {
+      if (buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch) continue;
@@ -3127,17 +3129,20 @@ class App {
         const target = this.game.buildTargetFor(mh);
         if (target) {
           const { plot, act, nt } = target;
-          const paid = act.mode === 'repair' ? 0 : plot.paid;
-          const cost = Math.max(1, Math.ceil(act.cost - paid));
-          const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
-          const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-          const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
-          const buildKeys = this.controlMode === 'build'
-            ? '<kbd>SPACE</kbd> or <kbd>B</kbd>'
-            : '<kbd>B</kbd>';
-          hint = mh.payHold
-            ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-            : `<div>Hold ${buildKeys} — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}${this.controlMode === 'fight' ? ' · Fight mode: Space fires your special. Alt toggles.' : ' · Alt toggles Fight mode.'}</div>`;
+          const actualBuilding = plot.tier > 0 || act.mode === 'repair' || act.mode === 'rebuild';
+          if (buildMode || actualBuilding) {
+            const paid = act.mode === 'repair' ? 0 : plot.paid;
+            const cost = Math.max(1, Math.ceil(act.cost - paid));
+            const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
+            const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
+            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const buildKeys = buildMode
+              ? '<kbd>SPACE</kbd> or <kbd>B</kbd>'
+              : '<kbd>B</kbd>';
+            hint = mh.payHold
+              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
+              : `<div>Hold ${buildKeys} — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}${buildMode ? ' · Alt toggles Fight mode.' : ' · Fight mode: Space fires your special. Alt toggles.'}</div>`;
+          }
         }
       }
       this.ui.showBuildHint(hint);

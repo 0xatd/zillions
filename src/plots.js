@@ -33,6 +33,21 @@ export function generatePlots(map, anchor = null) {
       for (let dx = -pad; dx < size + pad; dx++) taken.add((z + dz) * N + (x + dx));
     }
   };
+  const markPathTile = (x, z) => {
+    x = Math.round(x); z = Math.round(z);
+    if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) return;
+    const k = z * N + x;
+    if (taken.has(k)) return;
+    if (map.tiles[k] === TILE.GRASS || map.tiles[k] === TILE.PATH) map.tiles[k] = TILE.PATH;
+    taken.add(k);
+  };
+  const markPathLine = (x0, z0, x1, z1) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) * 2));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      markPathTile(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t);
+    }
+  };
   const free = (x, z, size) => {
     for (let dz = 0; dz < size; dz++) {
       for (let dx = 0; dx < size; dx++) {
@@ -60,8 +75,8 @@ export function generatePlots(map, anchor = null) {
   };
 
   let nextId = 1;
-  const add = (kind, x, z, size, extra = {}) => {
-    const spot = findSpot(x, z, size);
+  const add = (kind, x, z, size, extra = {}, maxR = 6) => {
+    const spot = findSpot(x, z, size, maxR);
     if (!spot) return null;
     const p = {
       id: nextId++, kind, x: spot[0], z: spot[1], size,
@@ -147,10 +162,7 @@ export function generatePlots(map, anchor = null) {
     const dx = -Math.cos(ang), dz = -Math.sin(ang); // inward
     for (let d = 1; d <= WALL_R - 5.4; d += 0.5) {
       const x = Math.round(gate[0] + dx * d), z = Math.round(gate[1] + dz * d);
-      const k = z * N + x;
-      if (taken.has(k)) continue;
-      if (map.tiles[k] === TILE.GRASS) map.tiles[k] = TILE.PATH;
-      taken.add(k); // keep plots off the lanes
+      markPathTile(x, z);
     }
   }
 
@@ -182,11 +194,13 @@ export function generatePlots(map, anchor = null) {
   add('mill', ...ringSpot(10.4, -Math.PI / 2 + 0.4), 2);
   add('mill', ...ringSpot(10.4, Math.PI / 2 - 0.4), 2);
 
+  const campPlots = [];
   const campKinds = ['camp_militia', 'camp_ranger', 'camp_sniper'];
   campKinds.forEach((kind, i) => {
-    const ang = Math.PI / 2 + (i - 1) * 0.6 + 0.3; // fan just south of the Keep, off the road
+    const ang = Math.PI / 2 + (i - 1) * 0.6 + 0.3; // fan just south of the Keep
     const [x, z] = ringSpot(8.6, ang);
-    add(kind, x, z, 2);
+    const camp = add(kind, x, z, 2);
+    if (camp) campPlots.push(camp);
   });
 
   // --- Mid towers on the diagonals: the ring between houses and wall ---
@@ -208,6 +222,37 @@ export function generatePlots(map, anchor = null) {
     const ang = rng() * Math.PI * 2;
     const [x, z] = ringSpot(19 + rng() * 3, ang);
     add('farm', x, z, 2);
+  }
+
+  const plotAt = (x, z) => plots.some((p) => {
+    if (p.kind === 'wall') return false;
+    return x >= p.x && x < p.x + p.size && z >= p.z && z < p.z + p.size;
+  });
+  const paintPathTile = (x, z) => {
+    x = Math.round(x); z = Math.round(z);
+    if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1 || plotAt(x, z)) return;
+    const k = z * N + x;
+    if (map.tiles[k] === TILE.GRASS || map.tiles[k] === TILE.PATH) map.tiles[k] = TILE.PATH;
+  };
+  const paintPathLine = (x0, z0, x1, z1) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) * 2));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      paintPathTile(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t);
+    }
+  };
+  for (const camp of campPlots) {
+    // Give every barracks/camp a small dirt apron and spur. The plots still sit
+    // off the main roads, but they no longer look disconnected from the city.
+    for (let x = camp.x - 1; x <= camp.x + camp.size; x++) {
+      paintPathTile(x, camp.z - 1);
+      paintPathTile(x, camp.z + camp.size);
+    }
+    for (let z = camp.z - 1; z <= camp.z + camp.size; z++) {
+      paintPathTile(camp.x - 1, z);
+      paintPathTile(camp.x + camp.size, z);
+    }
+    paintPathLine(camp.cx, camp.cz, cx, cz + Math.sign(camp.cz - cz) * 6);
   }
 
   return plots;

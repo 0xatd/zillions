@@ -43,6 +43,8 @@ The shipped loop is continuous siege:
 - Build, upgrade and repair at any time by standing near plots and holding
   Space in Build mode or B anytime. Nothing pauses while you do it — that is
   the risk.
+- Fight mode hides vacant foundation affordances; real buildings remain visible
+  and auto-attacks keep running.
 - Camps muster squads forever. Set the army stance and it pushes the lanes on
   its own, taking nodes as the front line moves.
 - Every living hive musters its own squads on a timer that tightens as Threat
@@ -85,6 +87,9 @@ of tower plots. Chokepoints, by design.
   doctrine: ballista (single-target sniper) or flame (splash), and **T** beside
   a tower changes what it shoots first — nearest, strongest, siege-first or
   ranged-first.
+- **Camps connect to the roads.** The militia, ranger and sniper camps sit off
+  the main plaza, but each has dirt road apron/spur tiles touching the building
+  footprint so army production reads as part of the city network.
 - **Income is automatic; coins are earned.** Buildings and held nodes credit
   gold continuously. Physical coins now drop only from kills, captured nodes
   and razed hives — so the coin-hoover is a reward for fighting, not a chore
@@ -151,8 +156,8 @@ everyone's relics pool for the shared city.
 
 The kit is Thronefall-simple with Dota-style readability: heroes auto-attack on
 their own, a passive aura hums around them, two passive upgrade paths shape
-their stats, and Space/Q fires the one special. Alt toggles whether Space
-prioritizes building or fighting. You steer.
+their stats, and the player controls the one special. Alt toggles Space between
+Build mode and Fight mode. Q always casts intentionally. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |

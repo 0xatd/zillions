@@ -139,8 +139,12 @@ Do not describe any of it as shipped.
 - Camera yaw stays fixed during gameplay.
 - Alt toggles Space between Build mode and Fight mode. In Build mode, hold
   Space/B to build, upgrade, repair, or rebuild. In Fight mode, Space casts and
-  B still builds.
+  B still builds. Build mode does not fire the special with Space; auto-attacks
+  still run. Fight mode hides vacant plot rings/dots so combat stays clean, but
+  actual buildings remain visible.
 - Upgrades must work from all sides of a building footprint.
+- City camps/barracks must stay visually road-connected. The balance check
+  verifies all three city camps exist and each has a dirt road edge.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
   and `3 Push` walks the lanes. Do not add individual unit micro.

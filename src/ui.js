@@ -55,7 +55,7 @@ export class UI {
           <div class="rallyhints" id="stancebar">
             <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Push the lanes: take nodes, then siege the hives"><b>3</b> ⚔️ Push lanes</span>
           </div>
-          <button class="mode-toggle build" id="mode-toggle" title="Alt toggles whether Space builds or fires the hero special"><b>ALT</b><span>Build mode</span></button>
+          <button class="mode-toggle build" id="mode-toggle" title="Alt toggles Space between build and special ability"><b>ALT</b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
         <div class="actionmain">
@@ -187,7 +187,7 @@ export class UI {
           <div class="howto">
             <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Space between Build and Fight. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Top-tier towers let you choose a doctrine.</div>
+            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Space between Build and Fight. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh squad on a timer, forever. Press <kbd>3</kbd> and the army pushes out along the lanes on its own — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives never stop.</b> Each living nest musters its own squads, faster as Threat climbs. Raze them all — then break the counterattack their champion leads.</div>
@@ -482,7 +482,7 @@ export class UI {
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
-      else if (this._bigMode !== 'build') this.cb.onCast();
+      else if (this._bigMode === 'cast') this.cb.onCast();
     };
     big.onpointerdown = (e) => {
       if (this._bigMode !== 'build') return;
@@ -513,7 +513,7 @@ export class UI {
     if (label) label.textContent = fight ? 'Fight mode' : 'Build mode';
     chip.title = fight
       ? 'Fight mode: Space fires the hero special. Hold B to build. Alt toggles.'
-      : 'Build mode: Space builds near plots, otherwise fires. Alt toggles.';
+      : 'Build mode: Space/B builds. Auto-attacks still run. Alt toggles.';
   }
 
   update(game, p = 0, controls = {}) {
@@ -612,14 +612,10 @@ export class UI {
           big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold SPACE/B · ${cost}🪙 · ALT fight</small></span>`;
           big.disabled = h.dead;
         } else {
-          this._bigMode = 'cast';
-          const cd = Math.max(0, h.abilCd);
-          const rank = abilityRank(h.level, h.upgrades);
-          const ultRank = (h.upgrades?.ult || 0);
-          big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-          big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE</small></span>` +
-            (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
-          big.disabled = h.dead;
+          this._bigMode = 'idle';
+          big.className = 'bigaction build';
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Auto-attacks on · ride to a plot · ALT fight</small></span>`;
+          big.disabled = true;
         }
       } else {
         this._bigMode = 'cast';

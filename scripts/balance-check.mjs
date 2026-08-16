@@ -101,6 +101,24 @@ function assertUpgradeReachFromAllSides(level) {
   }
 }
 
+function assertCampRoadAccess(level) {
+  const map = fakeMap(level);
+  const plots = generatePlots(map, map.sites[0]);
+  const camps = plots.filter((p) => p.kind.startsWith('camp_'));
+  assert.equal(camps.length, 3, `${level.name} must generate all three city camps`);
+
+  for (const camp of camps) {
+    let hasPathEdge = false;
+    for (let z = camp.z - 1; z <= camp.z + camp.size; z++) {
+      for (let x = camp.x - 1; x <= camp.x + camp.size; x++) {
+        const inside = x >= camp.x && x < camp.x + camp.size && z >= camp.z && z < camp.z + camp.size;
+        if (!inside && map.tiles[z * map.size + x] === TILE.PATH) hasPathEdge = true;
+      }
+    }
+    assert.ok(hasPathEdge, `${level.name} ${camp.kind} has no visible road edge`);
+  }
+}
+
 // The siege must actually run: hives muster, camps muster, nodes flip, and
 // repairing a damaged structure has to cost gold and restore health.
 function assertSiegeLoop(level) {
@@ -317,5 +335,6 @@ for (const level of LEVELS) {
   const plots = generatePlots(map, map.sites[0]);
   assert.ok(plots.length >= 40, `${level.name} generated too few city plots`);
   assertUpgradeReachFromAllSides(level);
+  assertCampRoadAccess(level);
   assertSiegeLoop(level);
 }
