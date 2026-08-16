@@ -1,0 +1,62 @@
+# Zillions repository guide for language models
+
+Project: browser-based sci-fi planet-conquest siege game
+Production: https://zillions.taborlin.co
+Repository: https://github.com/0xatd/zillions
+Default branch: main
+
+## Read first
+
+- AGENTS.md: hard rules, workflow, and code map
+- docs/product-contract.md: product boundaries and shipped behavior
+- docs/architecture.md: modules, runtime flow, and state ownership
+- docs/agent-brief.md: implementation details and known traps
+- docs/backend.md: Supabase and Vercel data boundaries
+- docs/review-guide.md: pull request review gate
+
+## Source of truth
+
+1. Current source code and supabase/schema.sql
+2. Automated checks in scripts/
+3. docs/product-contract.md
+4. docs/architecture.md
+5. docs/agent-brief.md
+6. Future design documents
+
+## Runtime summary
+
+- src/main.js composes the browser runtime.
+- src/game.js owns deterministic simulation state.
+- src/config.js owns balance, heroes, levels, plots, and items.
+- src/terrain.js creates deterministic terrain and terrain-derived sites.
+- src/map.js renders terrain relief and set dressing.
+- src/plots.js creates colony plans, ramparts, gates, and plots.
+- src/lanes.js creates the deterministic lane graph.
+- src/ui.js owns menus, lobby UI, HUD, and overlays.
+- src/online.js owns Supabase room and signaling state.
+- src/net.js owns WebRTC transport and diagnostics.
+- src/auth.js owns sign-in, profiles, saves, and stats.
+- src/supabase.js provides the one shared Supabase client.
+- api/ contains Vercel server routes.
+- supabase/schema.sql is the database schema source.
+
+## Critical rules
+
+- Keep simulation deterministic.
+- Do not use Math.random() in simulation code.
+- Preserve snapshot and restore state.
+- Do not restore day or night phases.
+- Keep maps and colony plans terrain-derived.
+- Use levelById() for level lookup.
+- Keep the canonical seven-hero roster.
+- Keep multiplayer version, connection, eligibility, Ready, and load gates.
+- Never show private Google identity.
+- Never commit secrets.
+- Never seed fake production activity.
+
+## Validation
+
+Run npm run check.
+Run git diff --check.
+Run a local Vercel production build.
+Do not call a pull request deployable until all three pass.

@@ -75,6 +75,13 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   nearest site, and `_connectFrontier` floods from the heart site and bridges
   anything it could not reach. The check asserts every hive is reachable from
   every site — a marooned hive is an unwinnable campaign.
+- The terrain renderer uses the elevation field. `TerrainField.heightAt()`
+  converts terrain elevation to world height. `GameMap.groundY()` interpolates
+  the rendered surface for units, structures, effects, and camera focus.
+- Visual relief does not change tile walkability. Crag, water, and deep woods
+  remain the simulation barriers. Keep that boundary explicit.
+- `GameMap._buildDetail()` adds deterministic instanced set dressing. Keep prop
+  placement seeded. Dispose owned geometry and materials when a map is removed.
 - `CITY_PLANS` in `src/plots.js` is a radial silhouette `radius(t, R)` plus a
   gate list, both in the city's own frame where `t = 0` faces the hives. The
   rampart tracer walks one axis at a time, so any silhouette stays closed and
@@ -161,6 +168,8 @@ History worth keeping, so old mistakes are not repeated:
 - The room screen shows the host's mode, map, difficulty, hero, and player
   limit. Guests can select their own hero. Only the host changes match setup.
 - The host cannot start until each listed player has a direct connection.
+- A room records its multiplayer protocol and build version. Reject an old
+  client before the client takes a seat or starts Watch.
 - A guest must explicitly mark Ready after choosing a hero. Changing the hero
   clears Ready. The host owns START and is implicitly ready.
 - Back from online staging is a real lifecycle action. The host closes an open
@@ -185,7 +194,7 @@ Key multiplayer files:
 - `src/main.js`: host sequencing, startup barrier, repair, rejoin, and Watch.
 - `src/online.js`: Supabase rooms, seats, roster refresh, and signaling.
 - `src/multiplayer-readiness.js`: direct-connection readiness.
-- `src/multiplayer-start.js`: guest load-barrier readiness.
+- `src/main.js`: guest load-barrier readiness and `startReady` handling.
 - `src/multiplayer-eligibility.js`: campaign unlock checks.
 - `src/multiplayer-pacing.js`: adaptive buffer and window history helpers.
 
