@@ -57,6 +57,12 @@ for (const rel of [...filesUnder('api'), ...filesUnder('src'), 'supabase/schema.
 
 const index = read('index.html');
 assert.ok(!index.includes('assets.html'), 'index.html must not expose the review-only asset browser');
+assert.ok(index.includes('three/addons/'), 'index.html must map vendored Three.js addons');
+
+const tacticalVisuals = read('src/tactical-visuals.js');
+assert.ok(tacticalVisuals.includes('class TacticalVisuals'), 'tactical visual pipeline must exist');
+assert.ok(tacticalVisuals.includes("QUALITY_KEY = 'zillions_graphics_quality'"), 'graphics quality must persist locally');
+assert.ok(read('src/main.js').includes('this.tacticalVisuals.render()'), 'main renderer must use the tactical visual pipeline');
 
 const readme = read('README.md');
 assert.ok(readme.includes('GitHub repository: https://github.com/0xatd/zillions'), 'README must link the GitHub repo');

@@ -13,6 +13,7 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
+import { TacticalVisuals } from './tactical-visuals.js';
 
 const ZMAX = 1700;
 
@@ -20,7 +21,6 @@ class App {
   constructor() {
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -28,6 +28,7 @@ class App {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
+    this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camDist = 30;
     this.camYaw = 0;
@@ -70,6 +71,7 @@ class App {
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
@@ -142,6 +144,7 @@ class App {
     this.minimapT = 0;
 
     this.ui.setProfile(this.profile);
+    this.ui.setQualityUI(this.tacticalVisuals.quality);
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -318,7 +321,7 @@ class App {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 1.1;
       const blob = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6),
-        new THREE.MeshLambertMaterial({ color: 0xb44dff, emissive: 0xb44dff, emissiveIntensity: 0.8 }));
+        new THREE.MeshLambertMaterial({ color: 0xb44dff, emissive: 0xb44dff, emissiveIntensity: 1.8 }));
       blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
       g.add(blob);
     }
@@ -2381,6 +2384,27 @@ class App {
     if (this._hivePingT && this._hivePingT > now) return;
     this._hivePingT = now + 6;
     this.ui.addPing(x, z);
+    this.tacticalVisuals.pulse(x, z, { color: 0xff493d, radius: 4.2, life: 1.5 });
+  }
+
+  // Outline the one object the local hero can act on. This is presentation
+  // state only; it must never enter commands, snapshots, or lockstep hashes.
+  _updateTacticalSelection() {
+    const h = this.myHero();
+    if (!this.game || !h || h.dead || this.game.phase !== 'live') {
+      this.tacticalVisuals.setSelection([]);
+      return;
+    }
+    const target = this.game.buildTargetFor(h);
+    if (!target) {
+      this.tacticalVisuals.setSelection([]);
+      return;
+    }
+    const building = [...this.buildingMeshes.values()].find((rec) => rec.b.plotId === target.plot.id);
+    const plot = this.plotMeshes.get(target.plot.id);
+    const color = target.act.mode === 'repair' || target.act.mode === 'rebuild' ? 0x75dfff
+      : target.act.mode === 'branch' ? 0xd49aff : 0xffdf72;
+    this.tacticalVisuals.setSelection([building ? building.mesh : plot?.group], color);
   }
 
   // Lane nodes: a capture ring and a banner in your colour, the hive's, or
@@ -2570,6 +2594,7 @@ class App {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.tacticalVisuals.resize(w, h);
   }
 
   _updateCamera(dt) {
@@ -3070,6 +3095,7 @@ class App {
       this._syncUnits(t, dt);
       this._syncNests(t);
       this._syncPlots(t);
+      this._updateTacticalSelection();
 
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
@@ -3187,7 +3213,8 @@ class App {
     this._updateCorpses(dt);
     this._updatePayCoins(dt);
     this._updateProjectiles(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.tacticalVisuals.update(dt);
+    this.tacticalVisuals.render();
   }
 }
 

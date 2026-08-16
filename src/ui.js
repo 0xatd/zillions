@@ -34,6 +34,7 @@ export class UI {
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
+        <button class="tbtn" id="b-quality" title="Toggle graphics quality">✨</button>
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
       </div>
 
@@ -309,6 +310,7 @@ export class UI {
     q('#b-pause').onclick = () => this.cb.onSpeed(0);
     for (const b of this.root.querySelectorAll('.speed')) b.onclick = () => this.cb.onSpeed(+b.dataset.s);
     q('#b-mute').onclick = () => this.cb.onMute();
+    q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
     this.pings = [];
 
@@ -759,6 +761,15 @@ export class UI {
   }
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
+
+  setQualityUI(quality) {
+    const button = this.root.querySelector('#b-quality');
+    if (!button) return;
+    const high = quality === 'high';
+    button.textContent = high ? '✨' : '◐';
+    button.title = high ? 'Graphics: high (outlines, bloom, SMAA)' : 'Graphics: low (direct rendering)';
+    button.classList.toggle('active', high);
+  }
 
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
