@@ -217,6 +217,13 @@ built. The endless procedural frontier worlds are built and shipped.
 
 ## Gameplay Invariants
 
+- The canonical hero roster is Scott English, Alexander Thomas, Danny
+  Donovan, Turtle Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock. Do not
+  rename heroes from stale branches or summaries. `src/config.js` is the
+  source of truth for keys, names, stats, and abilities.
+- Scott, Alexander, and Danny have portrait and voice assets. The other four
+  heroes intentionally use emoji portrait fallbacks and procedural sound until
+  approved character assets exist. Do not invent asset paths for them.
 - Movement is fixed to world/minimap orientation, not camera-relative.
 - W moves north/up, A west/left, S south/down, D east/right.
 - Camera yaw stays fixed during gameplay.
