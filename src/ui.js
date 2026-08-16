@@ -31,6 +31,7 @@ export class UI {
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
         <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
+        <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
         <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
         <button class="tbtn speed" data-s="1">1×</button>
@@ -1008,6 +1009,19 @@ export class UI {
     if (!el) return;
     if (text && el.textContent !== text) el.textContent = text;
     el.classList.toggle('hidden', !on);
+  }
+
+  setNetworkDiagnostics(diag = null) {
+    const el = this.root.querySelector('#netdiag');
+    if (!el) return;
+    if (!diag) { el.classList.add('hidden'); return; }
+    const fps = diag.frameMs > 0 ? Math.round(1000 / diag.frameMs) : 0;
+    const networkBad = diag.stalled || diag.jitterMs > 80 || diag.rttMs > 350;
+    const deviceBad = diag.frameMs > 55;
+    el.className = `netdiag ${networkBad || deviceBad ? 'bad' : diag.jitterMs > 35 || diag.rttMs > 180 ? 'warn' : 'good'}`;
+    el.textContent = deviceBad
+      ? `⚠ Device ${fps} FPS`
+      : `${networkBad ? '⚠' : '●'} ${diag.route || 'peer'} ${diag.rttMs || 0}ms · J${diag.jitterMs || 0} · B${diag.buffered || 0}/${diag.target || 0}`;
   }
 
   // ---------- co-op lobby ----------

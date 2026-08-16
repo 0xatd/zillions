@@ -18,12 +18,13 @@ import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
-import { consecutiveWindowCount, hasConsecutiveWindowBuffer } from './multiplayer-pacing.js';
+import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
-const NET_GUEST_BUFFER = 2;  // windows a guest keeps banked before it will run
-const NET_REDUNDANCY = 3;    // past windows repeated in every window packet
+const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
+const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 
@@ -162,6 +163,7 @@ class App {
     this.inbox = new Map();
     this.hashes = { local: new Map() };
     this._recentWindows = []; // host: last few windows, resent for redundancy
+    this._windowHistory = new Map();
     this.startExpectedGuests = 0;
     this.startReadyGuests = new Set();
     this.startBarrier = false;
@@ -174,6 +176,12 @@ class App {
     this.desynced = false;
     this.netPrimed = false;
     this.netStallT = 0;
+    this.netBufferTarget = NET_GUEST_BUFFER_MIN;
+    this.netDiagnostics = { route: 'peer', rttMs: 0, jitterMs: 0, bufferedBytes: 0 };
+    this._missingWindow = -1;
+    this._missingRequestAt = 0;
+    this._frameMs = 16.7;
+    this._diagUiAt = 0;
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
 
@@ -269,6 +277,10 @@ class App {
       this.speed = 1;
       this.desynced = false;
       this._recentWindows = [];
+      this._windowHistory = new Map();
+      this.netBufferTarget = adaptiveWindowTarget(this.netDiagnostics.rttMs, this.netDiagnostics.jitterMs);
+      this._missingWindow = -1;
+      this._missingRequestAt = 0;
       this._netClockLast = performance.now();
       // Co-op keeps the graphics the player chose. The sim pump below keeps
       // windows flowing even when the render loop hitches, so guests no
@@ -857,6 +869,7 @@ class App {
   // Each joining player gets their own invite/reply exchange.
   async _newInvite() {
     const peer = new NetSession();
+    this._attachNetDiagnostics(peer);
     this.pendingPeer = peer;
     const idx = this.peers.length; // becomes player idx+1
     peer.onOpen = () => {
@@ -908,6 +921,11 @@ class App {
       }
     }
     else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
+    else if (m.t === 'needWindow') {
+      const bundle = this._windowHistory.get(Number(m.w));
+      const peer = this.peers[idx];
+      if (bundle && peer) peer.sendFast({ t: 'w', w: Number(m.w), c: bundle, p: [] });
+    }
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
       this.ui.gameChatAdd(m);
@@ -936,6 +954,7 @@ class App {
     this.audio.init();
     this.mpRole = 'guest';
     this.net = new NetSession();
+    this._attachNetDiagnostics(this.net);
     this.net.onOpen = () => this.net.send(this._heroPayload());
     this.net.onMessage = (m) => this._onGuestMsg(m);
     this.net.onClose = () => {
@@ -1031,6 +1050,37 @@ class App {
 
   // ---------------- lockstep engine ----------------
 
+  _attachNetDiagnostics(session) {
+    session.onDiagnostics = (diag) => {
+      this.netDiagnostics = diag;
+      this.netBufferTarget = adaptiveWindowTarget(diag.rttMs, diag.jitterMs);
+      this._refreshDiagnosticsUI();
+    };
+  }
+
+  _refreshDiagnosticsUI(stalled = false) {
+    if (!this.netMode) { this.ui.setNetworkDiagnostics(null); return; }
+    const now = performance.now();
+    if (!stalled && now - this._diagUiAt < 350) return;
+    this._diagUiAt = now;
+    this.ui.setNetworkDiagnostics({
+      ...this.netDiagnostics,
+      stalled,
+      buffered: this.mpRole === 'guest' ? this._windowsBuffered() : 0,
+      target: this.mpRole === 'guest' ? this.netBufferTarget : 0,
+      frameMs: this._frameMs,
+    });
+  }
+
+  _requestMissingWindow(w) {
+    if (!this.net || this.mpRole !== 'guest') return;
+    const now = performance.now();
+    if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
+    this._missingWindow = w;
+    this._missingRequestAt = now;
+    this.net.send({ t: 'needWindow', w });
+  }
+
   // Host-sequenced lockstep: the host merges every player's commands into
   // numbered windows and broadcasts them; guests advance only as windows
   // arrive, so all sims stay in step. Driven by BOTH the render loop and the
@@ -1048,12 +1098,12 @@ class App {
     this._netClockLast = now;
 
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
-    // rate a few percent to hold NET_GUEST_BUFFER windows in the bank.
+    // rate a few percent to hold its measured jitter target in the bank.
     // Network jitter then shows up as imperceptible speed drift, not freezes.
     if (this.mpRole === 'guest') {
       const banked = this._windowsBuffered();
-      if (banked < NET_GUEST_BUFFER) dt *= NET_PACE_SLOW;
-      else if (banked >= NET_GUEST_BUFFER + 2) dt *= NET_PACE_FAST;
+      if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
+      else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
     }
 
     this.acc += dt;
@@ -1073,6 +1123,7 @@ class App {
           this._broadcastFast({ t: 'w', w, c: bundle, p: this._recentWindows.slice() });
           this._recentWindows.push([w, bundle]);
           if (this._recentWindows.length > NET_REDUNDANCY) this._recentWindows.shift();
+          rememberWindow(this._windowHistory, w, bundle, NET_HISTORY);
         } else {
           bundle = this.inbox.get(w);
           if (!bundle) {
@@ -1080,6 +1131,7 @@ class App {
             // instead of running window-to-window and stuttering forever.
             stalled = true;
             this.netPrimed = false;
+            this._requestMissingWindow(w);
             break;
           }
           if (!this.netPrimed) {
@@ -1087,7 +1139,7 @@ class App {
             // not necessarily a usable buffer: [w, w+2] still has a hole at
             // w+1 and would restart for one tick, freeze, then repeat. Resume
             // only behind a consecutive run of windows.
-            const hasBuffer = hasConsecutiveWindowBuffer(this.inbox, w, NET_GUEST_BUFFER);
+            const hasBuffer = hasConsecutiveWindowBuffer(this.inbox, w, this.netBufferTarget);
             if (!hasBuffer) { stalled = true; break; }
             this.netPrimed = true;
           }
@@ -1107,7 +1159,11 @@ class App {
     }
     if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
     this.netStallT = stalled ? this.netStallT + dt : 0;
-    this.ui.setWaiting(stalled && this.netStallT > 0.25, this.netStallT > 1.2 ? '⏳ Network catch-up…' : '⏳ Syncing co-op…');
+    const visibleStall = stalled && this.netStallT > 0.25;
+    this.ui.setWaiting(visibleStall, this.netStallT > 1.2
+      ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
+      : '⏳ Syncing co-op…');
+    this._refreshDiagnosticsUI(visibleStall);
   }
 
   // Consecutive windows banked ahead of the guest's next lockstep boundary.
@@ -1351,6 +1407,7 @@ class App {
     if (!this.netMode && this.peers.length >= 2) return;
     if (this.onlinePending.has(sig.from)) return;
     const peer = new NetSession(this.lobby?.iceServers);
+    this._attachNetDiagnostics(peer);
     const idx = rejoining ? rejoinIdx : this.peers.length;
     peer.onOpen = () => {
       this.onlinePending.delete(sig.from);
@@ -1435,6 +1492,7 @@ class App {
   async _onSignal(sig) {
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
       this.net = new NetSession(this.lobby?.iceServers);
+      this._attachNetDiagnostics(this.net);
       this.net.onOpen = () => {
         if (this.mpRole === 'guest') {
           this._reconnectTries = 0;
@@ -3901,8 +3959,10 @@ class App {
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
+    this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);
 
     if (this.game) {

@@ -47,6 +47,13 @@ body::after {
 .res small { opacity: 0.65; font-size: 11px; }
 .res.gold { font-size: 17px; color: var(--gold); }
 .res.danger { background: rgba(255, 93, 82, 0.22); color: #ffb3ad; }
+.netdiag {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.2px;
+  padding: 4px 7px; border: 1px solid var(--panel-border); border-radius: 7px;
+}
+.netdiag.good { color: #8ff0b6; background: rgba(89, 255, 156, 0.08); }
+.netdiag.warn { color: #ffd75e; background: rgba(255, 215, 94, 0.09); }
+.netdiag.bad { color: #ffaaa2; background: rgba(255, 93, 82, 0.12); }
 
 /* Threat chip: a thin fill that creeps toward the next surge. The bar is the
    only "clock" the player gets now, so it has to read at a glance. */

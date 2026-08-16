@@ -36,12 +36,16 @@ export class NetSession {
     this.onOpen = null;
     this.onClose = null;
     this.onIce = null;       // trickle mode: (candidateJSON|null) => {}
+    this.onDiagnostics = null;
     this.isHost = false;
     this.rtcConfig = {
       iceServers: Array.isArray(iceServers) && iceServers.length ? iceServers : DEFAULT_ICE,
     };
     this._pendingIce = [];
     this._remoteSet = false;
+    this._statsTimer = null;
+    this._lastRttMs = null;
+    this._jitterMs = 0;
   }
 
   _makePc(trickle) {
@@ -62,11 +66,13 @@ export class NetSession {
       if (fast) return; // 'game' opening is what counts as connected
       this.open = true;
       this._logRoute();
+      this._startDiagnostics();
       if (this.onOpen) this.onOpen();
     };
     ch.onclose = () => {
       if (fast) { this.chFast = null; return; }
       this.open = false;
+      this._stopDiagnostics();
       if (this.onClose) this.onClose();
     };
     ch.onmessage = (e) => {
@@ -87,6 +93,43 @@ export class NetSession {
         }
       }
     } catch { /* stats are best-effort */ }
+  }
+
+  _startDiagnostics() {
+    this._stopDiagnostics();
+    const sample = () => this._sampleDiagnostics();
+    sample();
+    this._statsTimer = setInterval(sample, 1500);
+  }
+
+  _stopDiagnostics() {
+    if (this._statsTimer) clearInterval(this._statsTimer);
+    this._statsTimer = null;
+  }
+
+  async _sampleDiagnostics() {
+    if (!this.pc || !this.onDiagnostics) return;
+    try {
+      const stats = await this.pc.getStats();
+      for (const pair of stats.values()) {
+        if (pair.type !== 'candidate-pair' || pair.state !== 'succeeded' || !(pair.selected || pair.nominated)) continue;
+        const local = stats.get(pair.localCandidateId);
+        const remote = stats.get(pair.remoteCandidateId);
+        const rttMs = Math.max(0, Number(pair.currentRoundTripTime || 0) * 1000);
+        if (this._lastRttMs != null) {
+          const delta = Math.abs(rttMs - this._lastRttMs);
+          this._jitterMs = this._jitterMs ? this._jitterMs * 0.72 + delta * 0.28 : delta;
+        }
+        this._lastRttMs = rttMs;
+        this.onDiagnostics({
+          route: local?.candidateType || remote?.candidateType || 'unknown',
+          rttMs: Math.round(rttMs),
+          jitterMs: Math.round(this._jitterMs),
+          bufferedBytes: (this.ch?.bufferedAmount || 0) + (this.chFast?.bufferedAmount || 0),
+        });
+        return;
+      }
+    } catch { /* stats are best-effort; gameplay never depends on them */ }
   }
 
   _createChannels() {
@@ -175,6 +218,7 @@ export class NetSession {
   }
 
   destroy() {
+    this._stopDiagnostics();
     try {
       if (this.ch) this.ch.close();
       if (this.chFast) this.chFast.close();
