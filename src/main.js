@@ -1,10 +1,11 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import {
-  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
+  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
+import { surveySite } from './plots.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
@@ -184,7 +185,7 @@ class App {
 
   showMenuBackdrop(levelId) {
     if (this.game) return;
-    const level = LEVELS[(levelId || 1) - 1] || LEVELS[0];
+    const level = levelById(levelId || 1);
     if (this.menuLevelId === level.id) return;
     this.menuLevelId = level.id;
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; }
@@ -205,7 +206,7 @@ class App {
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
-    const level = LEVELS[levelId - 1] || LEVELS[0];
+    const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
@@ -243,6 +244,7 @@ class App {
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
     this._clearSiteMarkers();
     this._clearNestMeshes();
+    this._clearLootMeshes();
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -269,25 +271,32 @@ class App {
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
   }
 
-  // A cobbled plaza + lanes radiating to the districts — the city looks
-  // designed even before anything is built.
+  // A cobbled plaza + a lane out to every gate this city actually has — the
+  // city looks designed even before anything is built, and it looks like ITS
+  // plan: a square fort gets a square plaza, a crescent gets two lanes, not
+  // four. Falls back to a plain ring if the plan is not known yet.
   _buildPlaza(cx, cz) {
     const g = new THREE.Group();
+    const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
+    const plan = hq && hq.plan;
+    const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(7.2, 40),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
       new THREE.MeshLambertMaterial({ color: 0x565149 }),
     );
     disc.rotation.x = -Math.PI / 2;
+    if (squarePlaza) disc.rotation.z = -plan.facing;
     disc.position.set(cx, 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
     const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 10.5), laneMat);
+    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
+    for (const a of lanes) {
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * 10.5, 0.012, cz + Math.sin(a) * 10.5);
+      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), 0.012, cz + Math.sin(a) * (len / 2 + 4));
       g.add(lane);
     }
     return g;
@@ -313,7 +322,7 @@ class App {
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
-      const label = this._makeLabelSprite('🏳️', `SITE ${i + 1}`);
+      const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
@@ -325,6 +334,35 @@ class App {
   _clearSiteMarkers() {
     for (const m of this.siteMarkers || []) this.scene.remove(m);
     this.siteMarkers = [];
+    this._surveyed = null;
+  }
+
+  // Ride up to a flagged site and the ground tells you what it is. The three
+  // sites on a map are different bargains — a shore with fewer ways in, a
+  // crag shelf, ore inside the walls — so the player needs to be told which is
+  // which before they commit the run to one.
+  _surveySites() {
+    if (!this.game || this.game.phase !== 'found') return;
+    const h = this.myHero();
+    if (!h || h.dead) return;
+    this._surveyed = this._surveyed || new Set();
+    this.map.sites.forEach((s, i) => {
+      if (this._surveyed.has(i)) return;
+      if ((h.x - s.x) ** 2 + (h.z - s.z) ** 2 > 10 * 10) return;
+      this._surveyed.add(i);
+      // Survey the ground the way a real siege engineer would: how much of the
+      // wall line does the land itself already close?
+      const survey = surveySite(this.map, s, { levelId: this.game.levelId, siteIdx: i });
+      const pct = Math.round(survey.natural * 100);
+      const wall = pct >= 45 ? `The land itself closes ${pct}% of the wall line — you build the gaps.`
+        : pct >= 18 ? `Crag and wood close ${pct}% of the wall line; the rest you build.`
+          : 'Open on nearly every side: you will be building the whole wall.';
+      // The survey is the authoritative claim about this ground, so drop the
+      // generic "open on every side" flavour when the wall line says otherwise.
+      const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
+      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
+        `A ${survey.plan.label} would stand here · SPACE to found the city`, 5600);
+    });
   }
 
   _makeNestMesh(n) {
@@ -375,6 +413,49 @@ class App {
     }
   }
 
+  // Field loot: a small floating find with its own icon over it. Hidden caches
+  // are not drawn at all — you have to walk near them to spot them.
+  _syncLoot(t) {
+    if (!this.game) return;
+    this.lootMeshes = this.lootMeshes || new Map();
+    const live = new Set();
+    for (const l of this.game.loot) {
+      if (l.hidden) continue;
+      live.add(l.id);
+      let mesh = this.lootMeshes.get(l.id);
+      if (!mesh) {
+        const it = ITEMS[l.key];
+        mesh = new THREE.Group();
+        const gem = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.34, 0),
+          new THREE.MeshLambertMaterial({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+        );
+        gem.castShadow = true;
+        mesh.add(gem);
+        mesh.userData.gem = gem;
+        const label = this._makeLabelSprite(it ? it.icon : '📦', '');
+        label.position.y = 1.5;
+        label.scale.set(2.2, 1.1, 1);
+        mesh.add(label);
+        mesh.position.set(l.x, 0, l.z);
+        this.scene.add(mesh);
+        this.lootMeshes.set(l.id, mesh);
+      }
+      mesh.position.set(l.x, 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
+      mesh.userData.gem.rotation.y = t * 1.4 + l.id;
+    }
+    for (const [id, mesh] of this.lootMeshes) {
+      if (live.has(id)) continue;
+      this.scene.remove(mesh);
+      this.lootMeshes.delete(id);
+    }
+  }
+
+  _clearLootMeshes() {
+    for (const m of (this.lootMeshes || new Map()).values()) this.scene.remove(m);
+    this.lootMeshes = new Map();
+  }
+
   _clearNestMeshes() {
     for (const m of (this.nestMeshes || new Map()).values()) this.scene.remove(m);
     this.nestMeshes = new Map();
@@ -402,7 +483,8 @@ class App {
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
       [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
-      [24, '⚔️ Camps muster a squad every few seconds, forever. Press 3 and they push out along the lanes on their own.'],
+      [24, '⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press 3 and those squads push out along the lanes on their own.'],
+      [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
       [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
@@ -599,7 +681,7 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 4 ? s : null;
+      return s && s.snap && s.snap.v === 5 ? s : null;
     } catch { return null; }
   }
 
@@ -633,37 +715,48 @@ class App {
     // and quest/boss rewards granted here await them on the next map.
     this._endExtras = null;
     const h = this.game.heroes[this.myPlayer];
-    if (h && this.game.mode === 'campaign') {
+    if (h) {
       p.campaignHeroes = p.campaignHeroes || {};
       p.relics = p.relics || [];
       p.questsDone = p.questsDone || {};
       const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [], upgrades: {} });
-      if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
-        cur.level = h.level;
-        cur.xp = Math.round(h.xp);
-      }
-      cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
-      cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
       const grants = [];
-      for (const q of this.game.questResults || []) {
-        if (!q.done || p.questsDone[q.id]) continue;
-        p.questsDone[q.id] = true;
-        const it = ITEMS[q.reward];
-        if (!it) continue;
-        if (it.kind === 'relic') {
-          if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
-        } else if (!cur.items.includes(q.reward)) {
-          cur.items.push(q.reward);
-          grants.push(q.reward);
-        }
+      // Whatever the hero was still carrying off the field is theirs to keep —
+      // in survival too. Waves are the only progression a survival run has, so
+      // the finds have to survive the run.
+      const finds = [...new Set(h.pack || [])].filter((k) => ITEMS[k] && !(cur.items || []).includes(k));
+      if (finds.length) {
+        cur.items = [...(cur.items || []), ...finds];
+        grants.push(...finds);
       }
-      if (won) {
-        const drop = BOSS_DROPS[this.game.levelId];
-        if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+      // Levels, career gear and quest/boss rewards are the campaign's ladder.
+      if (this.game.mode === 'campaign') {
+        if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
+          cur.level = h.level;
+          cur.xp = Math.round(h.xp);
+        }
+        cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
+        cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
+        for (const q of this.game.questResults || []) {
+          if (!q.done || p.questsDone[q.id]) continue;
+          p.questsDone[q.id] = true;
+          const it = ITEMS[q.reward];
+          if (!it) continue;
+          if (it.kind === 'relic') {
+            if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
+          } else if (!cur.items.includes(q.reward)) {
+            cur.items.push(q.reward);
+            grants.push(q.reward);
+          }
+        }
+        if (won) {
+          const drop = BOSS_DROPS[this.game.levelId];
+          if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+        }
       }
       this._endExtras = {
         heroKey: h.key, heroName: h.def.name, level: cur.level, grants,
-        quests: this.game.questResults || [],
+        quests: this.game.mode === 'campaign' ? (this.game.questResults || []) : [],
       };
       this.ui.refreshHeroBadges(p);
     }
@@ -1906,7 +1999,8 @@ class App {
   _makePlotGroup(plot) {
     const g = new THREE.Group();
     const kind = PLOT_KINDS[plot.kind];
-    const [mx, mz] = plot.kind === 'wall' ? [plot.gate[0] + 0.5, plot.gate[1] + 0.5] : [plot.cx, plot.cz];
+    const anchor = plot.anchor || plot.gate;
+    const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
     const beacon = this._makeBeacon(mx, mz);
     g.add(beacon);
     g.userData.beacon = beacon;
@@ -2822,6 +2916,7 @@ class App {
       else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
       else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
+      else if (k === 'g') this.issue({ t: 'drop', p: this.myPlayer, i: -1 });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();
@@ -2899,7 +2994,7 @@ class App {
   // Live side-quest status for the pause menu (campaign only).
   _questStatus() {
     if (!this.game || this.game.mode !== 'campaign') return null;
-    const lv = LEVELS[this.game.levelId - 1];
+    const lv = levelById(this.game.levelId);
     return (lv.quests || []).map((q) => ({
       name: q.name, desc: q.desc, reward: q.reward,
       claimed: !!(this.profile.questsDone || {})[q.id],
@@ -3137,6 +3232,20 @@ class App {
           this.stream(e.x, 0.4, e.z, e.hx, 0.9, e.hz, { count: 3, color: 0xffd75e, size: 0.42, life: 0.25 });
           this.burst(e.hx, 0.9, e.hz, { count: 3, color: 0xfff2b0, speed: 0.8, life: 0.25, size: 0.4, up: 1 });
           break;
+        case 'lootseen':
+          this.audio.click();
+          this.burst(e.x, 0.6, e.z, { count: 12, color: 0xa8e6ff, speed: 1.4, life: 0.7, size: 0.4, up: 1.6 });
+          break;
+        case 'lootdrop':
+          this.burst(e.x, 0.6, e.z, { count: 6, color: 0xcfd8dc, speed: 1.0, life: 0.5, size: 0.35, up: 1.2 });
+          break;
+        case 'loot': {
+          this.audio.build();
+          this.burst(e.x, 1.0, e.z, { count: 18, color: 0xffe38a, speed: 2.0, life: 0.8, size: 0.5, up: 2.2 });
+          const it = ITEMS[e.key];
+          if (it) this.ui.showBanner(`${it.icon} ${it.name}`, it.desc, 2600);
+          break;
+        }
         case 'income':
           this.audio.coin();
           this.burst(e.x, 2.6, e.z, { count: 4, color: 0xffd75e, speed: 1.1, life: 0.5, size: 0.45, up: 1.8 });
@@ -3473,6 +3582,7 @@ class App {
       this._syncBuildings();
       this._syncUnits(t, dt);
       this._syncNests(t);
+      this._syncLoot(t);
       this._syncPlots(t);
       this._updateTacticalSelection();
 
@@ -3483,6 +3593,7 @@ class App {
         m.userData.ring.scale.setScalar(1 + ph * 0.25);
         m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
+      this._surveySites();
       this._updateCoins(t);
       this._updateZombieMeshes(t, dt);
       this._updateBars();

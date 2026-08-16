@@ -31,14 +31,13 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
   `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
   until the node is player-owned.
-- Forward Camps are the lane-anchor ladder. Tier 1 musters blockers, Tier 2 adds
-  short-range fire, Tier 3 becomes a Lane Bastion, and Tier 4 becomes a Repair
-  Bastion that automatically maintains nearby structures.
-- Node placement comes from terrain analysis (`GameMap._findNodeFeatures`):
+- Node placement comes from terrain analysis (`TerrainField._findNodeFeatures`):
   a summed-area openness field finds fords and clearings, tile clustering finds
   ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
-  against per-kind quotas so every map has a mix. Pure function of the tiles —
-  no RNG, because lockstep peers must agree.
+  against per-kind quotas so every map has a mix, and the quota is per-landform
+  (`TERRAIN_SHAPES[kind].nodes`) so a fen is a map of fords and the wastes are
+  stone and ore. Pure function of the tiles — no RNG, because lockstep peers
+  must agree.
 - Kind vs owner is the design rule: `node.kind`/`node.def` (NODE_KINDS) is
   terrain and always true; `node.owner` is claimed at setup by `_claimNodes`
   (hive takes the ground furthest from the city, ~`SIEGE.hiveClaim` of it, some
@@ -51,13 +50,58 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
-- Manual `plotAction()` returns `build | branch | repair | rebuild`, all funded
-  with the same hold-to-build verb. Bought Auto-Workshops and Repair Bastions
-  automatically repair nearby standing structures. They do not rebuild ruins
-  or buy upgrades.
-- The city has a physical Hero Forge. Its three expensive tiers apply large
-  damage, health, and cooldown upgrades to every allied hero. Core plots also
-  have expensive capstones so late-game income remains spendable.
+- Node works (`Game._buildNodeWorks`) are created in `_buildLaneSystems`, which
+  runs on BOTH found and restore — keep it a pure function of map + node, never
+  `this.rng`, or lockstep peers desync. Plot ids come from fixed bases so they
+  survive a reload. `plotLocked` gates anything with a `nodeId`.
+- Field loot lives in `game.loot`, is scattered once in `_setupStart` (seeded),
+  and round-trips through the snapshot. Pickup and drop are sim-side, so the
+  drop key goes over the wire as a `drop` command like every other input. A
+  hero's `pack` is separate from career `items`; mods are the sum of both, via
+  `_refreshPackMods`.
+
+## Maps and Cities
+
+- Every level names a landform (`theme.terrain`) and a city plan
+  (`theme.city`). Both must stay unique per level — `scripts/map-check.mjs`
+  fails the build if two levels share either, because that is exactly how the
+  maps became interchangeable last time.
+- `TERRAIN_SHAPES` in `src/terrain.js` paints a pattern (basins, ridged crag
+  lines, barrow domes, a rift band with passes) and then thresholds it by
+  COVERAGE QUANTILE, not by a fixed noise value. That is why a map is always
+  playable however the noise landed: "19% of this planet is crag" holds either
+  way. Change the pattern freely; change the coverage carefully.
+- Nothing may be marooned. `_carveWarRoads` gives every hive a road toward the
+  nearest site, and `_connectFrontier` floods from the heart site and bridges
+  anything it could not reach. The check asserts every hive is reachable from
+  every site — a marooned hive is an unwinnable campaign.
+- `CITY_PLANS` in `src/plots.js` is a radial silhouette `radius(t, R)` plus a
+  gate list, both in the city's own frame where `t = 0` faces the hives. The
+  rampart tracer walks one axis at a time, so any silhouette stays closed and
+  4-connected. Gate-flanking towers are placed from the gate tile
+  (`gateFlank`), never by angle offset — an angle offset lands outside the wall
+  on a star or a throat.
+- Founding levels the INTERIOR only (`d < radius - 2.2`). The rampart band is
+  left as the land made it, and ring tiles that are impassable become free,
+  indestructible wall. A wall plot's `tiles` are only the open tiles of its
+  side, so barriers (which cost per tile) get cheaper on good ground. A plot
+  may now have `gate: null` — use `plot.anchor` for build targeting and UI, and
+  guard `plot.gate` before dereferencing it.
+- Every gate gets two towers and a ward camp in `generatePlots`, not in the
+  per-plan layouts; layouts only place districts and their signature towers.
+  `map-check` asserts the ward kit, and asserts squads actually get OUT of the
+  city under the attack stance — friendly units only pass buildings in
+  `gateIds`, so a city whose gates the terrain closed would trap its own army.
+- `TerrainField._findChokepoints` finds gaps 2-9 tiles wide pinched between
+  impassable masses; `pickOuterWorks` turns the best three near the city into
+  fence + watchtower plots. Outer works always carry a gate.
+- The historical reasoning behind all of the above is in
+  `docs/fortress-inspiration.md`. Read it before redesigning any of it.
+- The check plays two real minutes of siege on every level's real terrain
+  (lane graph, hive musters, the horde's walk to the walls). If you change map
+  generation, run `node scripts/map-check.mjs --report` and read the numbers.
+- Nothing auto-repairs. `plotAction()` returns `build | branch | repair |
+  rebuild`, all funded with the same hold-to-build verb.
 - Hives have real health, spit defenders when damaged (`defendT`), and blight
   the ground within `NEST_BLIGHT_R`. Units siege a hive even while its garrison
   swarms, unless something is inside `SIEGE_GUARD_R`.
@@ -153,17 +197,12 @@ Do not describe any of it as shipped.
 - Upgrades must work from all sides of a building footprint.
 - City camps/barracks must stay visually road-connected. The balance check
   verifies all three city camps exist and each has a dirt road edge.
-- Lane routes must stay tile-steppable. Squads steer straight between waypoints,
-  so compressed lane paths can cut across terrain and pin units. `balance-check`
-  asserts every lane segment is at most one tile/diagonal step.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
   and `3 Push` walks the lanes. Do not add individual unit micro.
 - Everything new must stay deterministic: seeded RNG and commands through
   `exec()`, or lockstep co-op desyncs. The lane graph is built from the map
   alone, with no RNG.
-- Co-op starts in low graphics and guests keep a tiny lockstep jitter buffer.
-  Do not remove this unless WebRTC jitter is solved another way.
 - Hero level-ups grant visible upgrade points. The player chooses Aura,
   Passive I, Passive II, or Ult Damage from the hero panel. Aura upgrades must
   stay visually obvious in world and reflected in affected ally/enemy stats.
@@ -173,12 +212,12 @@ Do not describe any of it as shipped.
 
 - `src/game.js`: simulation, siege, economy, combat, save snapshots.
 - `src/main.js`: renderer, input, camera, event FX, app orchestration.
-- `src/tactical-visuals.js`: postprocessing, actionable outlines, tactical
-  ground pulses, and the local high/low graphics setting. It is presentation
-  state only. Do not put it into snapshots or lockstep hashes.
 - `src/ui.js`: account gate, menus, HUD, lobby, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, siege.
-- `src/plots.js`: city layout, ramparts, gates, build plots.
+- `src/terrain.js`: landform archetypes, city sites, hive lairs, node features.
+  No three.js import — keep it that way, `scripts/map-check.mjs` runs it in Node.
+- `src/map.js`: map rendering only (terrain mesh, foliage, minimap).
+- `src/plots.js`: city plans, ramparts, gates, build plots.
 - `src/lanes.js`: lane graph, node routing, squad waypoints.
 - `src/auth.js`: Supabase auth, username, profile/save/stat sync.
 - `src/online.js`: account-backed room, lobby chat, friends, and game chat adapter.

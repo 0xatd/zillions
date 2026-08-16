@@ -8,10 +8,12 @@ const PORTRAITS = {
   danny: 'assets/heroes/portraits/danny_256.webp',
 };
 import {
-  PLOT_KINDS, DIFFICULTY, LEVELS, ITEMS,
+  PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
+import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
+import { CITY_PLANS } from './plots.js';
 
 export class UI {
   constructor(root, cb) {
@@ -67,6 +69,7 @@ export class UI {
               <div class="hpbar herohp"><div class="hpfill" id="a-hp"></div></div>
               <div class="hpbar heroxp"><div class="xpfill" id="a-xp"></div></div>
               <div id="a-items"></div>
+              <div id="a-pack" class="packrow" title="Field finds — walk over loot to pick it up, G to drop"></div>
             </div>
           </div>
           <div id="herostats" class="herostats"></div>
@@ -125,7 +128,7 @@ export class UI {
             <button class="tbtn" id="s-back">← Back</button>
             <h2 id="s-title">Choose your battle</h2>
           </div>
-          <div class="steplabel">1 · Battlefield</div>
+          <div class="steplabel">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
           <div class="steplabel">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
           <div class="herorow" id="herorow"></div>
@@ -445,18 +448,42 @@ export class UI {
     this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
     row.innerHTML = '';
-    this.selectedLevel = allUnlocked ? 1 : Math.min(cleared + 1, LEVELS.length);
-    for (const lv of LEVELS) {
+    // The war, in one line: Earth first, then the stars — and every world you
+    // have taken back stays taken.
+    const status = this.root.querySelector('#warstatus');
+    if (status) {
+      const worlds = Math.max(0, cleared - LEVELS.length);
+      status.textContent = cleared >= LEVELS.length
+        ? `🌍 Earth retaken · ${worlds ? `${worlds} frontier world${worlds === 1 ? '' : 's'} liberated` : 'the galaxy awaits'}`
+        : `🌍 The war for Earth: ${cleared}/${LEVELS.length} fronts won`;
+    }
+    this.selectedLevel = allUnlocked ? 1 : cleared + 1;
+    // The authored war first; once it is won, the galaxy opens — every planet
+    // you have cleared plus the next frontier world, without end.
+    const ids = LEVELS.map((l) => l.id);
+    if (allUnlocked || cleared >= LEVELS.length) {
+      for (let id = LEVELS.length + 1; id <= Math.max(cleared + 1, LEVELS.length + 1); id++) ids.push(id);
+    }
+    for (const id of ids) {
+      const lv = levelById(id);
       const locked = allUnlocked ? false : lv.id > cleared + 1;
       const done = lv.id <= cleared;
+      // Landform and city plan are part of what a level IS — say so before
+      // the player commits twenty minutes to it.
+      const land = (TERRAIN_SHAPES[lv.theme.terrain] || {}).label || 'frontier';
+      const plan = CITY_PLANS[lv.theme.city];
+      const city = plan ? plan.label : 'frontier city';
       const card = document.createElement('button');
-      card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '') + (locked ? ' locked' : '');
+      card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '')
+        + (locked ? ' locked' : '') + (lv.galaxy ? ' galaxy' : '');
       card.dataset.level = lv.id;
       card.disabled = locked;
       card.innerHTML = `
-        <span class="lvnum">${done ? '✅' : locked ? '🔒' : lv.id}</span>
+        <canvas class="lvmap" width="80" height="80"></canvas>
+        <span class="lvnum">${done ? '✅' : locked ? '🔒' : lv.galaxy ? '🌌' : lv.id}</span>
         <b>${lv.name}</b>
         <small>${lv.blurb}</small>
+        <span class="lvland">🗺️ ${land} · 🏰 ${city}</span>
         <span class="lvboss">${lv.boss.icon} ${lv.boss.name}</span>`;
       if (!locked) {
         card.onclick = () => {
@@ -464,12 +491,76 @@ export class UI {
           for (const c of row.children) c.classList.toggle('sel', c === card);
           if (this.cb.onLevelPick) this.cb.onLevelPick(lv.id);
         };
-        card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`);
+        card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`
+          + (plan ? `<br><br><b>🏰 ${plan.label}</b><br><span class="tdesc">${plan.blurb}</span>` : ''));
         card.onmousemove = (e) => this._moveTip(e);
         card.onmouseleave = () => this._hideTip();
       }
       row.appendChild(card);
+      this._queueLevelThumb(lv, card.querySelector('.lvmap'), locked);
     }
+  }
+
+  // The planet, drawn from its real terrain — the level select is a map of the
+  // war, not a row of coloured buttons. Generation costs ~50ms per planet, so
+  // thumbs render one per idle tick and cache by level id.
+  _queueLevelThumb(lv, canvas, locked) {
+    this._thumbCache = this._thumbCache || new Map();
+    const cached = this._thumbCache.get(lv.id);
+    if (cached) { canvas.getContext('2d').drawImage(cached, 0, 0); if (locked) this._dimThumb(canvas); return; }
+    this._thumbQueue = this._thumbQueue || [];
+    this._thumbQueue.push({ lv, canvas, locked });
+    if (this._thumbTimer) return;
+    const step = () => {
+      const job = (this._thumbQueue || []).shift();
+      if (!job) { this._thumbTimer = null; return; }
+      if (job.canvas.isConnected) {
+        try { this._drawLevelThumb(job.lv, job.canvas, job.locked); } catch { /* a thumb is decoration */ }
+      }
+      this._thumbTimer = setTimeout(step, 30);
+    };
+    this._thumbTimer = setTimeout(step, 10);
+  }
+
+  _drawLevelThumb(lv, canvas, locked) {
+    const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
+    const N = map.size;
+    const off = document.createElement('canvas');
+    off.width = canvas.width; off.height = canvas.height;
+    const ctx = off.getContext('2d');
+    const img = ctx.createImageData(off.width, off.height);
+    const pal = lv.theme.palette;
+    const colors = {
+      0: pal.grass, 1: pal.forest, 2: pal.water, 3: pal.mountain,
+      4: pal.sand, 5: pal.path, 6: 0xf3c53d, 7: 0xb8ccd8,
+    };
+    const sx = N / off.width, sz = N / off.height;
+    for (let y = 0; y < off.height; y++) {
+      for (let x = 0; x < off.width; x++) {
+        const t = map.tiles[((y * sz) | 0) * N + ((x * sx) | 0)];
+        const c = colors[t] ?? pal.grass;
+        const o = (y * off.width + x) * 4;
+        img.data[o] = (c >> 16) & 255; img.data[o + 1] = (c >> 8) & 255;
+        img.data[o + 2] = c & 255; img.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    // The stakes, marked: gold flags for city sites, red for hives.
+    for (const s of map.sites) {
+      ctx.fillStyle = '#ffd75e';
+      ctx.fillRect(s.x / sx - 1.5, s.z / sz - 1.5, 3, 3);
+    }
+    ctx.fillStyle = '#ff4a3c';
+    for (const [x, z] of map.nestSpots) ctx.fillRect(x / sx - 1.5, z / sz - 1.5, 3, 3);
+    this._thumbCache.set(lv.id, off);
+    canvas.getContext('2d').drawImage(off, 0, 0);
+    if (locked) this._dimThumb(canvas);
+  }
+
+  _dimThumb(canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(8,10,14,0.62)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   setCampaign(cleared) { this._buildLevelRow(cleared || 0); }
@@ -599,6 +690,24 @@ export class UI {
         q('#a-items').innerHTML = (h.items || [])
           .map((k) => (ITEMS[k] ? `<span class="hitem" title="${ITEMS[k].name} — ${ITEMS[k].desc}">${ITEMS[k].icon}</span>` : ''))
           .join('');
+      }
+
+      // Pack: what this hero has picked up off the field, and how much room is
+      // left. Walking over loot fills it; G empties the newest slot.
+      const packKey = (h.pack || []).join(',');
+      if (this._packKey !== packKey) {
+        this._packKey = packKey;
+        const slots = [];
+        for (let i = 0; i < PACK_SLOTS; i++) {
+          const key = (h.pack || [])[i];
+          const it = key ? ITEMS[key] : null;
+          slots.push(it
+            ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
+            : '<span class="pslot"></span>');
+        }
+        const full = (h.pack || []).length >= PACK_SLOTS;
+        q('#a-pack').innerHTML = slots.join('')
+          + `<span class="pkey${full ? ' urgent' : ''}">${full ? 'FULL · G drops' : 'G drops'}</span>`;
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;
@@ -1080,7 +1189,7 @@ export class UI {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    const lv = LEVELS[(levelId || 1) - 1];
+    const lv = levelById(levelId || 1);
     const survival = mode === 'survival';
     const questRows = (extra && extra.quests || []).map((q) => {
       const it = ITEMS[q.reward];
@@ -1107,7 +1216,7 @@ export class UI {
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
         ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${grants.length
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
-        ${!survival && won && lv.id < LEVELS.length ? `<p class="tagline">🔓 Unlocked: <b>${LEVELS[lv.id].name}</b></p>` : ''}
+        ${!survival && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
         <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
@@ -1297,7 +1406,7 @@ export class UI {
       for (const g of rows) {
       const row = document.createElement('div');
       row.className = `gamerow ${activeGame ? 'active' : 'open'}`;
-      const lv = LEVELS[(g.level || 1) - 1];
+      const lv = levelById(g.level || 1);
       const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       row.innerHTML = `
         <span class="gamestate">${activeGame ? 'LIVE' : 'OPEN'}</span>
@@ -1351,6 +1460,15 @@ export class UI {
     }
     ctx.fillStyle = '#ffd75e';
     for (const cn of game.coins) ctx.fillRect(cn.x - 0.6, cn.z - 0.6, 1.2, 1.2);
+    // Loot you have already spotted stays on the minimap — finding a cache and
+    // then losing it because a wave arrived is not interesting.
+    for (const l of game.loot || []) {
+      if (l.hidden) continue;
+      ctx.fillStyle = '#a8e6ff';
+      ctx.fillRect(l.x - 1.2, l.z - 1.2, 2.4, 2.4);
+      ctx.fillStyle = '#0b0e13';
+      ctx.fillRect(l.x - 0.4, l.z - 0.4, 0.8, 0.8);
+    }
     ctx.fillStyle = '#43d17c';
     for (const u of game.units) {
       if (u.hero) { ctx.fillStyle = '#7fd6ff'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }
