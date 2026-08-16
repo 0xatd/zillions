@@ -201,7 +201,9 @@ The sparkle button in the top bar switches graphics quality. High quality uses
 vendored Three.js postprocessing for tactical outlines, restrained high-threshold
 bloom, and SMAA. Low quality uses direct rendering at a lower pixel ratio and
 disables shadows. The choice is stored on the device and does not affect the
-simulation or multiplayer lockstep.
+simulation or multiplayer lockstep. Co-op starts in low graphics by default
+because weaker laptops and video calls can turn high-quality postprocessing into
+visible lag.
 
 ## Playing Together
 
@@ -217,7 +219,9 @@ state. Do not seed fake games or fake players.
 
 The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
 hero each). The backend stores identity, rooms, saves, stats, and results. It
-does not run the combat simulation yet.
+does not run the combat simulation yet. Guest clients keep a tiny command-window
+buffer so normal WebRTC jitter causes catch-up pauses instead of constant
+micro-stutters.
 
 **Manual invite codes** (lobby → "Manual invite codes"): the serverless
 fallback — trade invite/reply codes over any chat channel, no lobby backend

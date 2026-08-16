@@ -40,7 +40,7 @@ export class UI {
 
       <div id="banner"></div>
       <div id="invitetoast" class="hidden"></div>
-      <div id="waitind" class="hidden">⏳ Waiting for the other player…</div>
+      <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
       <div id="gamechat" class="gamechat hidden">
@@ -767,7 +767,7 @@ export class UI {
     if (!button) return;
     const high = quality === 'high';
     button.textContent = high ? '✨' : '◐';
-    button.title = high ? 'Graphics: high (outlines, high-threshold bloom, SMAA)' : 'Graphics: low (direct rendering)';
+    button.title = high ? 'Graphics: high (outlines, high-threshold bloom, SMAA)' : 'Graphics: low (direct rendering, best for co-op or older laptops)';
     button.classList.toggle('active', high);
   }
 
@@ -853,9 +853,11 @@ export class UI {
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
-  setWaiting(on) {
+  setWaiting(on, text = '⏳ Syncing co-op…') {
     const el = this.root.querySelector('#waitind');
-    if (el) el.classList.toggle('hidden', !on);
+    if (!el) return;
+    if (text && el.textContent !== text) el.textContent = text;
+    el.classList.toggle('hidden', !on);
   }
 
   // ---------- co-op lobby ----------

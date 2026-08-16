@@ -162,6 +162,8 @@ Do not describe any of it as shipped.
 - Everything new must stay deterministic: seeded RNG and commands through
   `exec()`, or lockstep co-op desyncs. The lane graph is built from the map
   alone, with no RNG.
+- Co-op starts in low graphics and guests keep a tiny lockstep jitter buffer.
+  Do not remove this unless WebRTC jitter is solved another way.
 - Hero level-ups grant visible upgrade points. The player chooses Aura,
   Passive I, Passive II, or Ult Damage from the hero panel. Aura upgrades must
   stay visually obvious in world and reflected in affected ally/enemy stats.

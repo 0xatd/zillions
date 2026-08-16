@@ -16,6 +16,8 @@ import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 
 const ZMAX = 1700;
+const NET_STEP = 3;          // one lockstep command window every 3 sim ticks
+const NET_GUEST_BUFFER = 2;  // keep guests slightly behind to absorb jitter
 
 class App {
   constructor() {
@@ -129,6 +131,10 @@ class App {
     this.inbox = new Map();
     this.hashes = { local: new Map() };
     this.desynced = false;
+    this.netPrimed = false;
+    this.netStallT = 0;
+    this.slowFrameT = 0;
+    this.autoQualityDropped = false;
 
     // Profiles & saves. Production identity comes from Supabase; localStorage is only
     // a development/offline mirror.
@@ -193,6 +199,8 @@ class App {
     this.pal = level.theme.palette; // drives sky/fog grading
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    this.slowFrameT = 0;
+    this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
@@ -210,7 +218,12 @@ class App {
       this.outbox = [];
       this.inbox = new Map();
       this.hashes = { local: new Map() };
+      this.netPrimed = false;
+      this.netStallT = 0;
       this.speed = 1;
+      if (this.tacticalVisuals.quality === 'high') {
+        this.ui.setQualityUI(this.tacticalVisuals.applyQuality('low', false));
+      }
     }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
@@ -999,6 +1012,8 @@ class App {
   }
 
   burst(x, y, z, { count = 10, color = 0xffffff, speed = 3, life = 0.5, size = 0.5, spread = 0.4, up = 1.5 } = {}) {
+    const fxScale = this.tacticalVisuals?.quality === 'low' ? 0.45 : this.netMode ? 0.75 : 1;
+    count = Math.max(1, Math.ceil(count * fxScale));
     const c = new THREE.Color(color);
     for (let i = 0; i < count; i++) {
       if (this.pcount >= this.pmax) return;
@@ -3160,9 +3175,24 @@ class App {
     }
   }
 
+  _autoTuneQuality(dt) {
+    if (!this.game || this.paused || this.tacticalVisuals.quality !== 'high') {
+      this.slowFrameT = 0;
+      return;
+    }
+    const slow = dt > (this.netMode ? 1 / 28 : 1 / 24);
+    this.slowFrameT = slow ? this.slowFrameT + dt : Math.max(0, this.slowFrameT - dt * 0.75);
+    if (this.slowFrameT < 2.5 || this.autoQualityDropped) return;
+    this.autoQualityDropped = true;
+    this.slowFrameT = 0;
+    this.ui.setQualityUI(this.tacticalVisuals.applyQuality('low', false));
+    this.ui.showBanner('Graphics lowered for smoother play. Use ◐ to turn high graphics back on.', '', 5500);
+  }
+
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const t = this.clock.elapsedTime;
+    this._autoTuneQuality(dt);
     this._updateCamera(dt);
 
     if (this.game) {
@@ -3172,7 +3202,6 @@ class App {
           // Host-sequenced lockstep: the host merges every player's commands
           // into numbered windows and broadcasts them; guests advance only
           // as windows arrive, so all sims stay in step.
-          const NET_STEP = 3;
           this.acc += dt;
           let steps = 0;
           let stalled = false;
@@ -3188,6 +3217,11 @@ class App {
               } else {
                 bundle = this.inbox.get(w);
                 if (!bundle) { stalled = true; break; }
+                if (!this.netPrimed) {
+                  const hasBuffer = this.inbox.has(w + NET_GUEST_BUFFER - 1) || this.inbox.size >= NET_GUEST_BUFFER;
+                  if (!hasBuffer) { stalled = true; break; }
+                  this.netPrimed = true;
+                }
                 this.inbox.delete(w);
               }
               for (const c of bundle) this.game.exec(c);
@@ -3203,7 +3237,8 @@ class App {
             steps++;
           }
           if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
-          this.ui.setWaiting(stalled);
+          this.netStallT = stalled ? this.netStallT + dt : 0;
+          this.ui.setWaiting(stalled, this.netStallT > 0.6 ? '⏳ Network catch-up…' : '⏳ Syncing co-op…');
         } else {
           this.acc += dt * this.speed;
           let steps = 0;
