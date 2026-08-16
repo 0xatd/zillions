@@ -16,7 +16,7 @@ import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
-import { inboxForMatchStart } from './multiplayer-windows.js';
+import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -74,6 +74,9 @@ class App {
           }
           const level = this.ui.selectedLevel || 1;
           const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+          this.startExpectedGuests = this.peers.length;
+          this.startReadyGuests.clear();
+          this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
           this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
           this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode });
           if (this.lobby && this.lobby.game) this.lobby.touchGame({ status: 'playing' });
@@ -150,6 +153,9 @@ class App {
     this.inbox = new Map();
     this.hashes = { local: new Map() };
     this._recentWindows = []; // host: last few windows, resent for redundancy
+    this.startExpectedGuests = 0;
+    this.startReadyGuests = new Set();
+    this.startBarrier = false;
 
     // Terrain readability: pulses + one-time warnings when a hero shoves
     // against impassable ground (lava, deep water, woods, crags).
@@ -878,6 +884,19 @@ class App {
       this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
     }
+    else if (m.t === 'startReady') {
+      this.startReadyGuests.add(idx);
+      if (matchStartReady(this.startExpectedGuests, this.startReadyGuests.size)) {
+        this.startBarrier = false;
+        this._netClockLast = performance.now();
+        this.acc = 0;
+        this.ui.setWaiting(false);
+        this.ui.showBanner('⚔️ All players loaded — the war begins.', '', 2600);
+      } else {
+        const pending = this.startExpectedGuests - this.startReadyGuests.size;
+        this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
+      }
+    }
     else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
@@ -942,8 +961,11 @@ class App {
       }
     }
     else if (m.t === 'start') {
-      if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
+      this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
+      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
+      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
+      this.net.send({ t: 'startReady' });
+      this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
     }
     else if (m.t === 'spectateStart') {
       await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
@@ -1006,6 +1028,11 @@ class App {
   // emitting windows even when rendering hitches or the tab is hidden.
   _advanceNetSim() {
     if (!this.netMode || !this.game || this.paused || this.game.over) return;
+    if (this.mpRole === 'host' && this.startBarrier) {
+      this._netClockLast = performance.now();
+      this.ui.setWaiting(true, '⏳ Waiting for every player to load…');
+      return;
+    }
     const now = performance.now();
     let dt = Math.min((now - (this._netClockLast ?? now)) / 1000, 0.25);
     this._netClockLast = now;
