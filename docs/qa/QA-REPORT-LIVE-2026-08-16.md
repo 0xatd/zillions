@@ -14,6 +14,26 @@ This is a playtest report, not a code audit. Written as a player who sat down wi
 
 ## Verdict
 
+### 2026-08-16 lobby coordination fix pass
+
+The implementation attached to this report now addresses the staging-room
+coordination and lifecycle findings:
+
+- Online staging puts the roster, readiness, room status, and chat beside a
+  compact host setup panel.
+- Guests must mark Ready after they choose a hero.
+- The host can launch only after every guest is Ready and directly connected.
+- Back performs a real leave. A host closes the staging room. A guest removes
+  their seat.
+- Page shutdown marks a seat offline on a best-effort basis. Explicit Leave is
+  authoritative because browsers do not wait for asynchronous unload work.
+- Account and lobby code share one Supabase client.
+
+This pass still needs one fresh production test with two signed-in browsers
+before merge. The original gameplay replication, movement, and spawn findings
+remain separate blockers unless that test proves current `main` already fixed
+them.
+
 Solo campaign is playable and the economy/threat loop works.  
 **Co-op is not a co-op game yet.**
 

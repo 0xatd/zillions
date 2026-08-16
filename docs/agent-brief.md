@@ -161,6 +161,11 @@ History worth keeping, so old mistakes are not repeated:
 - The room screen shows the host's mode, map, difficulty, hero, and player
   limit. Guests can select their own hero. Only the host changes match setup.
 - The host cannot start until each listed player has a direct connection.
+- A guest must explicitly mark Ready after choosing a hero. Changing the hero
+  clears Ready. The host owns START and is implicitly ready.
+- Back from online staging is a real lifecycle action. The host closes an open
+  room. A guest removes their seat. Do not replace this with screen-only
+  navigation or an async unload handler.
   Campaign rooms also block levels that any seated player has not unlocked.
 - Match startup uses a load barrier. Each guest sends `startReady` after the
   battlefield loads. The host starts window 0 after all guests are ready.

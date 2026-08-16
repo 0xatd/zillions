@@ -568,6 +568,34 @@ body::after {
 .startbtn.disabled,
 .startbtn:disabled { pointer-events: none; filter: grayscale(0.7); opacity: 0.5; }
 
+/* Online staging is a room first and a loadout editor second. Keep roster,
+   status, ready state and chat visible without scrolling past solo controls. */
+.setup.roommode {
+  width: min(1120px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: minmax(480px, 1.35fr) minmax(340px, 0.85fr);
+  grid-template-areas:
+    "head head"
+    "room fieldlabel"
+    "room fields"
+    "room herolabel"
+    "room heroes"
+    "room difflabel"
+    "room diffs"
+    "start start";
+  gap: 0 18px;
+}
+.setup.roommode .setuphead { grid-area: head; }
+.setup.roommode .field-label { grid-area: fieldlabel; }
+.setup.roommode .levelrow { grid-area: fields; }
+.setup.roommode .hero-label { grid-area: herolabel; }
+.setup.roommode .herorow { grid-area: heroes; max-height: 250px; overflow-y: auto; }
+.setup.roommode .diff-label { grid-area: difflabel; }
+.setup.roommode .diffseg { grid-area: diffs; }
+.setup.roommode #mp-panel { grid-area: room; margin-top: 10px; }
+.setup.roommode #s-start { grid-area: start; }
+.roomready { width: 100%; min-height: 44px; font-size: 15px; letter-spacing: 0.08em; }
+
 .howto {
   text-align: left; font-size: 13.5px; line-height: 1.65;
   background: rgba(0, 0, 0, 0.25); border-radius: 10px;
@@ -879,6 +907,7 @@ body::after {
 }
 #invitetoast b { color: var(--gold); }
 @media (max-width: 980px) {
+  .setup.roommode { display: block; }
   .lobbygrid { grid-template-columns: 1fr; max-height: none; }
   .lobbychat { min-height: 180px; }
   .lobbyfriends { min-height: 140px; }

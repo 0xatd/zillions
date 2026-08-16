@@ -15,7 +15,7 @@ import { OnlineLobby, LORE, TIPS, canRejoinRoom } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
-import { roomConnectionReadiness } from './multiplayer-readiness.js';
+import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
@@ -76,9 +76,11 @@ class App {
               this._onRoomUpdate(this.lobby.game);
               return;
             }
-            const readiness = roomConnectionReadiness(this.lobby.game, this.peers.length + 1);
+            const readiness = roomLaunchReadiness(this.lobby.game, this.peers.length + 1);
             if (!readiness.ready) {
-              this.ui.onlineStatus(`⏳ ${readiness.pending} player${readiness.pending === 1 ? '' : 's'} still connecting. START unlocks when everyone is linked.`);
+              this.ui.onlineStatus(readiness.pending
+                ? `⏳ ${readiness.pending} player${readiness.pending === 1 ? '' : 's'} still connecting. START unlocks when everyone is linked.`
+                : `⏳ ${readiness.waiting.length} player${readiness.waiting.length === 1 ? ' has' : 's have'} not marked Ready.`);
               this._onRoomUpdate(this.lobby.game);
               return;
             }
@@ -131,6 +133,8 @@ class App {
       onJoinCode: (code) => this.joinByCode(code),
       onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
+      onRoomReady: (ready) => this._setRoomReady(ready),
+      onRoomLeave: () => this._leaveOnlineRoom(),
     });
 
     this._setupLights();
@@ -671,7 +675,7 @@ class App {
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
     if (this.lobby?.game) {
-      this.lobby.updateRoomPlayer({ hero: key }).catch((e) => {
+      this.lobby.updateRoomPlayer({ hero: key, ...(this.mpRole === 'guest' ? { ready: false } : {}) }).catch((e) => {
         console.warn('room hero update failed', e);
       });
     }
@@ -1247,7 +1251,7 @@ class App {
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
-      const me = await this.lobby.connect(this.profile.name || 'Commander');
+      const me = await this.lobby.connect(this.profile.name || 'Commander', this.auth?.client || null);
       this.ui.lobbySetMe(me);
       this.ui.lobbyChatFill(await this.lobby.loadChat());
       this.ui.lobbyFriends(await this.lobby.loadFriends());
@@ -1263,10 +1267,11 @@ class App {
     if (!game) return;
     const isHost = this.mpRole === 'host';
     const isSpectator = this.mpRole === 'spectator';
-    const readiness = roomConnectionReadiness(game, this.peers.length + 1);
+    const readiness = roomLaunchReadiness(game, this.peers.length + 1);
     const eligibility = roomLevelEligibility(game);
     const compatible = eligibility.eligible;
-    const { connected, expectedPlayers, pending, ready } = readiness;
+    const { connected, expectedPlayers, pending, waiting, ready } = readiness;
+    const waitingToReady = waiting?.length || 0;
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
@@ -1278,8 +1283,10 @@ class App {
       launchText: isHost
         ? (!compatible
           ? `Cannot start Level ${eligibility.level}: ${eligibility.blockers.map((p) => `@${p.name} has only unlocked through Level ${p.unlockedLevel}`).join('; ')}.`
-          : !ready
+          : pending
           ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
+          : waitingToReady
+          ? `${waitingToReady} player${waitingToReady === 1 ? ' has' : 's have'} not marked Ready.`
           : connected > 1 ? `The game connection is ready for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
         : isSpectator ? 'You are connecting as a read-only watcher. The live battle will open automatically.'
         : 'You are in the room. Pick your hero and wait for the host to press START.',
@@ -1289,11 +1296,15 @@ class App {
         ? `🔒  LEVEL ${eligibility.level} LOCKED FOR ${eligibility.blockers.length} PLAYER${eligibility.blockers.length === 1 ? '' : 'S'}`
         : ready
         ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
-        : `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`,
+        : pending
+        ? `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`
+        : `⏳  WAITING FOR ${waitingToReady} READY`,
       disabled: !ready || !compatible,
       title: !compatible
         ? 'Choose a level every player has unlocked before starting.'
-        : ready ? 'The host launches the match for everyone connected.' : 'Start unlocks when every player in the room has a direct game connection.',
+        : ready ? 'The host launches the match for everyone connected.' : pending
+        ? 'Start unlocks when every player in the room has a direct game connection.'
+        : 'Start unlocks when every guest marks Ready.',
     } : isSpectator ? {
       text: '⏳  LOADING LIVE BATTLE',
       disabled: true,
@@ -1303,6 +1314,40 @@ class App {
       disabled: true,
       title: 'Only the host can launch this room.',
     });
+    const self = (game._players || []).find((player) => player.user_id === this.lobby?.me?.id);
+    this.ui.setRoomReady({
+      visible: !isHost && !isSpectator && game.status === 'open',
+      ready: !!self?.ready,
+    });
+  }
+
+  async _setRoomReady(ready) {
+    if (!this.lobby?.game || this.mpRole !== 'guest') return;
+    try {
+      await this.lobby.updateRoomPlayer({ ready: !!ready });
+    } catch (e) {
+      this.ui.showBanner(`Could not update ready state: ${e.message}`, 'bad', 3500);
+    }
+  }
+
+  async _leaveOnlineRoom() {
+    if (!this.lobby?.game || this.netMode) {
+      this.ui.showLobby();
+      return;
+    }
+    this.ui.onlineStatus('Leaving room…');
+    try {
+      await this.lobby.leaveRoom();
+      for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
+      if (this.net) { try { this.net.destroy(); } catch { /* closed */ } }
+      this.peers = [];
+      this.net = null;
+      this.mpRole = null;
+      this.onlineMode = false;
+      this.ui.showLobby();
+    } catch (e) {
+      this.ui.showBanner(`Could not leave room: ${e.message}`, 'bad', 4000);
+    }
   }
 
   async _sendLobbyChat(text) {
@@ -1463,6 +1508,17 @@ class App {
     peer.onClose = () => {
       if (this.netMode && this.game && !this.game.over && this.peers[idx] === peer) {
         this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on until they return.`, 'warn');
+      } else if (!this.netMode) {
+        const liveIdx = this.peers.indexOf(peer);
+        if (liveIdx >= 0) {
+          this.peers.splice(liveIdx, 1);
+          this.guestHeroes.splice(liveIdx, 1);
+          this.guestNames.splice(liveIdx, 1);
+          this.guestCmdQueues.splice(liveIdx, 1);
+          this.peerUserIds.splice(liveIdx, 1);
+          this.lobby?.refreshCurrentGame().catch(() => {});
+          this._syncSetupRoster();
+        }
       }
     };
     this.onlinePending.set(sig.from, peer);
