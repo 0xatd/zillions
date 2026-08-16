@@ -865,9 +865,10 @@ class App {
     this.onlinePending.set(sig.from, peer);
     try {
       const code = await peer.host();
-      this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
+      await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
     } catch (e) {
       this.onlinePending.delete(sig.from);
+      this.ui.onlineStatus('❌ Could not reach the joining player. Ask them to try JOIN again.');
     }
   }
 
@@ -888,9 +889,9 @@ class App {
       };
       try {
         const reply = await this.net.join(sig.sdp);
-        this.lobby.signal({ t: 'answer', to: sig.from, sdp: reply });
+        await this.lobby.signal({ t: 'answer', to: sig.from, sdp: reply });
       } catch (e) {
-        this.ui.onlineStatus('❌ Handshake failed — refresh and try again.');
+        this.ui.onlineStatus(`❌ Handshake failed: ${e.message}. Try JOIN again.`);
       }
     } else if (sig.t === 'answer' && this.mpRole === 'host' && this.onlinePending) {
       const peer = this.onlinePending.get(sig.from);
@@ -907,8 +908,15 @@ class App {
     this.ui.showSetup({ online: row, mode: row.mode });
     this.ui.onlineStatus('🔗 Knocking on the host\'s gate…');
     this.ui.root.querySelector('#s-start').classList.add('disabled');
-    await lobby.joinGame(row);
-    this.ui.roomChatFill(await lobby.loadRoomChat(row.id, 'room'));
+    try {
+      await lobby.joinGame(row);
+      this.ui.onlineStatus('🔗 Host found. Establishing the game connection…');
+      this.ui.roomChatFill(await lobby.loadRoomChat(row.id, 'room'));
+    } catch (e) {
+      this.mpRole = null;
+      this.onlineMode = false;
+      this.ui.onlineStatus(`❌ Could not join: ${e.message}. Try JOIN again.`);
+    }
   }
 
   async joinByCode(code) {

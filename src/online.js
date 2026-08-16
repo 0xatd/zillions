@@ -6,6 +6,28 @@ const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
 const CHAT_LIMIT = 500;
+const CHANNEL_READY_MS = 8000;
+const SIGNAL_ATTEMPTS = 3;
+const SIGNAL_RETRY_MS = 350;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForSubscription(channel, timeoutMs = CHANNEL_READY_MS) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('room connection timed out')), timeoutMs);
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        clearTimeout(timer);
+        resolve(channel);
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        clearTimeout(timer);
+        reject(new Error(`room connection failed (${String(status).toLowerCase()})`));
+      }
+    });
+  });
+}
 
 function safePublicName(value) {
   const text = String(value || '').trim().slice(0, 24);
@@ -425,7 +447,7 @@ export class OnlineLobby {
     }, { onConflict: 'room_id,user_id' });
     if (seatError) throw new Error(seatError.message);
     this.game = roomToGame({ ...data, room_players: [{ user_id: this.me.id, display_name: this.me.name, hero: this.me.hero }] });
-    this._joinGameChannel(data.id, true);
+    await this._joinGameChannel(data.id, true);
     // Heartbeat so the listing stays fresh; stops when the page dies.
     this._beat = setInterval(() => this.touchGame({}), 45 * 1000);
     window.addEventListener('beforeunload', () => this.endGame());
@@ -465,7 +487,8 @@ export class OnlineLobby {
 
   // Join a game's signaling channel. Signals are {t, to, from, ...} — every
   // client sees every signal and ignores ones not addressed to it.
-  _joinGameChannel(gameId, asHost) {
+  async _joinGameChannel(gameId, asHost) {
+    if (this.gameChan) this.sb.removeChannel(this.gameChan);
     if (this.roomChatChan) this.sb.removeChannel(this.roomChatChan);
     this.gameChan = this.sb.channel('zl-game-' + gameId);
     this.gameChan
@@ -474,17 +497,27 @@ export class OnlineLobby {
         if (asHost && s.t === 'knock' && this.cb.onKnock) this.cb.onKnock(s);
         else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
       })
-      .subscribe();
+    await waitForSubscription(this.gameChan);
     this.roomChatChan = this.sb.channel('zl-room-chat-' + gameId)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_chat', filter: `room_id=eq.${gameId}` }, (m) => {
         this._emitRoomChat(m.new).catch(() => {});
       })
-      .subscribe();
+    await waitForSubscription(this.roomChatChan);
   }
 
-  signal(payload) {
-    if (!this.gameChan) return;
-    this.gameChan.send({ type: 'broadcast', event: 'sig', payload: { ...payload, from: this.me.id } });
+  async signal(payload) {
+    if (!this.gameChan) throw new Error('room connection is not ready');
+    let lastStatus = 'unknown';
+    for (let attempt = 1; attempt <= SIGNAL_ATTEMPTS; attempt++) {
+      lastStatus = await this.gameChan.send({
+        type: 'broadcast',
+        event: 'sig',
+        payload: { ...payload, from: this.me.id },
+      });
+      if (lastStatus === 'ok') return;
+      if (attempt < SIGNAL_ATTEMPTS) await delay(SIGNAL_RETRY_MS * attempt);
+    }
+    throw new Error(`room message was not delivered (${lastStatus})`);
   }
 
   async joinGame(game) {
@@ -503,10 +536,8 @@ export class OnlineLobby {
       last_seen_at: new Date().toISOString(),
     }, { onConflict: 'room_id,user_id' });
     if (error) throw new Error(error.message);
-    this._joinGameChannel(game.id, false);
-    // Give the websocket a beat to subscribe before knocking.
-    await new Promise((r) => setTimeout(r, 800));
-    this.signal({ t: 'knock', name: this.me.name });
+    await this._joinGameChannel(game.id, false);
+    await this.signal({ t: 'knock', name: this.me.name });
   }
 
 }
