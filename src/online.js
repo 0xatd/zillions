@@ -154,6 +154,10 @@ export class OnlineLobby {
         return;
       }
       this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
+      // Poll the games list too: realtime events on rooms depend on the
+      // supabase_realtime publication, so the browse list must self-heal even
+      // when no postgres_changes event arrives.
+      this.refreshGames().catch(() => {});
     }, 15 * 1000);
 
     this.sb.channel('zl-rooms-feed')
@@ -542,6 +546,23 @@ export class OnlineLobby {
     this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
   }
 
+  // A room refresh improves the first roster sent to a guest, but it must not
+  // hold the WebRTC handshake open when Supabase is slow or unreachable.
+  async refreshCurrentGameBounded(timeoutMs = 1500) {
+    let timeoutId;
+    const timeout = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve(this.game), Math.max(0, timeoutMs));
+    });
+    try {
+      return await Promise.race([
+        this.refreshCurrentGame().catch(() => this.game),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   async refreshCurrentGame() {
     if (!this.game?.id) return null;
     const gameId = this.game.id;
@@ -618,8 +639,12 @@ export class OnlineLobby {
     this.gameChan
       .on('broadcast', { event: 'sig' }, (m) => {
         const s = m.payload;
-        if (asHost && s.t === 'knock' && this.cb.onKnock) this.cb.onKnock(s);
-        else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
+        if (asHost && s.t === 'knock') {
+          // The knocker has already written their seat row; re-read the room
+          // so the roster shows them even if no postgres_changes event fires.
+          this._refreshCurrentThrottled();
+          if (this.cb.onKnock) this.cb.onKnock(s);
+        } else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${gameId}` }, () => {
         this._refreshCurrentThrottled();

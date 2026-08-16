@@ -1411,7 +1411,7 @@ class App {
     const peer = new NetSession(this.lobby?.iceServers);
     this._attachNetDiagnostics(peer);
     const idx = rejoining ? rejoinIdx : this.peers.length;
-    peer.onOpen = () => {
+    peer.onOpen = async () => {
       this.onlinePending.delete(sig.from);
       if (rejoining) {
         const old = this.peers[idx];
@@ -1428,6 +1428,9 @@ class App {
         this.guestNames.push(sig.name || null);
         this.guestCmdQueues.push([]);
         this.peerUserIds.push(sig.from);
+        // The guest's roster is whatever we send here — re-read the room first
+        // so their freshly written seat is in it, not our pre-join snapshot.
+        await this.lobby.refreshCurrentGameBounded();
         peer.send({ t: 'lobby', n: this.peers.length + 1, players: this._roomRosterFromGame(this.lobby.game) });
         this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
         this._syncSetupRoster();

@@ -151,6 +151,15 @@ export class TerrainField {
   isBuildable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].build; }
   heightOf(t) { return t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0; }
 
+  // Name for impassable terrain, for the blocked-movement banner. Walkable
+  // ground returns null: a block there came from a building, not the land.
+  terrainLabel(t) {
+    if (t === TILE.WATER) return this.theme?.liquidName || 'Deep water';
+    if (t === TILE.FOREST) return 'Dense woods';
+    if (t === TILE.MOUNTAIN) return 'Sheer crags';
+    return null;
+  }
+
   generate() {
     const shape = this.shape;
     const elev = this._elevationField(shape);
