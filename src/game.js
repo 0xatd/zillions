@@ -14,7 +14,7 @@ import {
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
-  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
+  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
 import { FlowField } from './flowfield.js';
@@ -1601,7 +1601,7 @@ export class Game {
     const mods = { ...h.itemMods };
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
     h.mods = mods;
-    h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1) + h.mods.hp;
+    h.maxHp = h.def.hp + h.def.levelHp * heroGrowthUnits(h.level) + h.mods.hp;
     h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
     h.auraRank = h.upgrades.aura || 0;
     h.ultRank = h.upgrades.ult || 0;
@@ -1714,7 +1714,7 @@ export class Game {
   }
 
   heroDmg(h) {
-    return (h.def.dmg + h.def.levelDmg * (h.level - 1)) * (1 + h.mods.dmg);
+    return (h.def.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
   }
 
   addXp(h, amount) {

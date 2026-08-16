@@ -98,6 +98,16 @@ for (const [key, expected] of Object.entries(heroPalettes)) {
 
 assert.deepEqual(HERO_UPGRADE_KEYS, ['aura', 'passive1', 'passive2', 'ult'], 'hero upgrade branch order changed');
 assert.equal(HERO_UPGRADE_MAX, 3, 'hero upgrade branches should stay capped at rank 3');
+// The ladder runs long but the build stays tight: nine points against twelve
+// ranks, and stat growth tapers after the campaign band.
+{
+  const cfg = await import('../src/config.js');
+  assert.equal(cfg.HERO_MAX_LEVEL, 100, 'hero ladder should run to level 100');
+  assert.equal(cfg.heroUpgradePoints(100), 9, 'upgrade points must stay capped — levels past the cap are stats, not ranks');
+  const early = cfg.heroGrowthUnits(10) - cfg.heroGrowthUnits(9);
+  const late = cfg.heroGrowthUnits(100) - cfg.heroGrowthUnits(99);
+  assert.ok(late < early, 'late-level stat growth must taper below campaign-band growth');
+}
 for (const [key, hero] of Object.entries(HEROES)) {
   assert.equal((hero.passives || []).length, 2, `${key} must keep exactly two passive upgrade paths`);
   assert.ok(hero.aura, `${key} must keep an aura upgrade path`);

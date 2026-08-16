@@ -309,11 +309,34 @@ export const SURGE_MULT = 2.0;
 // an aura hums around you, and SPACE/Q fires the special.
 // Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
-export const HERO_MAX_LEVEL = 10;
+// A hero's ladder runs to 100. The first ten levels are exactly what they
+// always were — the campaign is paced against them — and everything past ten is
+// the long tail a persistent hero grinds out over many runs. At ~150 XP a
+// minute, level 100 is about 350k XP: dozens of hours, which is the point.
+export const HERO_MAX_LEVEL = 100;
 export const XP_RADIUS = 14;                       // hero earns XP for kills nearby
 export const xpForLevel = (lvl) => 80 + 70 * (lvl - 1);   // XP to go from lvl -> lvl+1
+
+// Stat growth tapers after the campaign band. Paying full levelHp/levelDmg for
+// ninety-nine levels would hand a grinder a hero with thirteen times the damage
+// the game is balanced around; a quarter-rate tail keeps the ladder worth
+// climbing without turning the campaign into a walkover.
+export const HERO_FULL_GROWTH_LEVEL = 10;
+export const HERO_LATE_GROWTH_SCALE = 0.25;
+// How many levels' worth of stat growth a hero of this level has earned.
+export function heroGrowthUnits(level) {
+  const lvl = Math.max(1, Math.min(HERO_MAX_LEVEL, level | 0));
+  const full = Math.min(lvl, HERO_FULL_GROWTH_LEVEL) - 1;
+  const late = Math.max(0, lvl - HERO_FULL_GROWTH_LEVEL);
+  return full + late * HERO_LATE_GROWTH_SCALE;
+}
+
 export const HERO_UPGRADE_KEYS = ['aura', 'passive1', 'passive2', 'ult'];
 export const HERO_UPGRADE_MAX = 3;
+// The choice budget does NOT grow with the ladder. Four branches at rank 3 is
+// twelve ranks and a hero only ever earns nine points, so something always goes
+// unbought — that tension is the hero build, and levels past it are stats.
+export const HERO_UPGRADE_POINT_CAP = 9;
 
 export function normalizeHeroUpgrades(upgrades = {}) {
   const out = {};
@@ -325,7 +348,7 @@ export function normalizeHeroUpgrades(upgrades = {}) {
 }
 
 export function heroUpgradePoints(level) {
-  return Math.max(0, Math.min(HERO_MAX_LEVEL, level | 0) - 1);
+  return Math.max(0, Math.min(HERO_UPGRADE_POINT_CAP, (level | 0) - 1));
 }
 
 export function heroSpentUpgrades(upgrades = {}) {
