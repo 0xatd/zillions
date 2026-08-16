@@ -68,16 +68,36 @@ Then open:
 
 ## How It Plays
 
-Each map is a contested planet. Hive nests — the enemy's producing bases — ring
-the wilds, a graph of **lane nodes** covers the ground between, and three
-flagged **city sites** offer different ground to defend. You start un-founded:
-ride the frontier,
-pick your site, press Space, and the city plan appears there — the ground
-inside the rampart is levelled clean, dirt lanes run from each gate to the
-plaza, a ring of house plots surrounds the Keep, farm and mill lanes sit
-behind them, gold mines wait on the ore veins, and a fully **closed** rampart
-circles it all. The only ways in are the four gates, each flanked by a pair
-of tower plots. Chokepoints, by design.
+Each map is a contested planet with its own **landform**. Greenfall is open
+rolling moorland; Rotmire is a drowned fen of causeways and fords; the Cinder
+Wastes are ash plains cut by long crag canyons; Barrow Hills is a field of
+grave mounds and hollows; the Black Vale is split by one great mountain rift
+with three passes through it. The landform decides how much water, crag and
+wood there is and where it sits, so the ground plays differently — not just
+looks different — on every level.
+
+Hive nests — the enemy's producing bases — lair in the ugly ground far from
+you, a graph of **lane nodes** covers the ground between, and three flagged
+**city sites** offer genuinely different ground to defend: a shore with fewer
+ways in, a crag shelf, ore inside the walls. Ride up to a site and it tells you
+what it is.
+
+You start un-founded: ride the frontier, pick your site, press Space, and the
+**city plan** rises there. Every level builds a different plan, always turned
+to face the hives:
+
+| Level | Plan | What it changes |
+| --- | --- | --- |
+| Greenfall Marches | **ringed bastion** | A round ring, four gates. Open on every side. |
+| Rotmire | **square fort** | Bastioned corners, gridded streets, a solid back wall — three gates, and a safe rear quarter to build economy in. |
+| Cinder Wastes | **star fort** | Five towered spurs, gates sunk in the valleys between them. No room inside: the farms go outside the wall. |
+| Barrow Hills | **crescent hold** | A broad front arc and a dead-straight back wall. One heavy gate, one postern, one street between them. |
+| The Black Vale | **throat keep** | A long walled throat jutting at the horde, lined with towers, plus a postern. They come up the corridor or not at all. |
+
+Whichever plan it is, the ground inside is levelled clean, dirt lanes run from
+each gate to the plaza, gold mines wait on the ore veins, and the rampart is
+fully **closed**: the only ways in are its gates, and every gate is covered by
+towers. Chokepoints, by design.
 
 - **Build whenever you like — and it is never safe.** Walk to a glowing
   foundation and **hold Space in Build mode** or **hold B anytime**: coins arc
@@ -287,7 +307,9 @@ src/game.js             Main simulation and rules
 src/config.js           Balance, heroes, buildings, units, siege
 src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
-src/map.js              Procedural map
+src/terrain.js          Landform archetypes, city sites, hive lairs, node features
+src/map.js              Map rendering: terrain mesh, foliage, minimap
+src/plots.js            City plans: rampart silhouettes, gates, districts
 src/flowfield.js        Horde pathfinding
 src/lanes.js            Lane graph: capture nodes, lanes, and squad routing
 src/assets.js           GLB and hero media loader
@@ -306,6 +328,7 @@ docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
+scripts/map-check.mjs   Builds every level's map and city and checks it plays
 ```
 
 ## Tech Notes

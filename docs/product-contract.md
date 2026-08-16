@@ -13,10 +13,13 @@ front line outward until the planet is taken.
 
 Use continuous siege on a lane graph as the gameplay base:
 
-- Unclaimed frontier maps.
-- Multiple city sites.
+- Unclaimed frontier maps, each with its own landform. Two levels must never
+  share a landform, and a level's terrain must shape play, not just palette.
+- Multiple city sites, each with a different character, named and explained to
+  the player before they commit.
 - Found the city at a flagged site.
-- Closed ramparts with gate chokepoints.
+- Closed ramparts with gate chokepoints. Each level raises a different city
+  plan — silhouette, gate count, street pattern — and no two levels share one.
 - Pre-planned house, farm, mill, mine, camp, tower, and wall plots.
 - Hold the interact key to stream coins into a plot.
 - Economy must be level-balanced against gold the player can actually collect.
@@ -30,7 +33,7 @@ Use continuous siege on a lane graph as the gameplay base:
 - Hordes are produced by visible hive nests, continuously.
 - Hive nests are real bases: health, defenders, and blighted ground.
 - Lane nodes are taken by presence, pay income, and unlock Forward Camps.
-- Node placement is derived from terrain, never from a ring.
+- Node, hive and city-site placement are derived from terrain, never from a ring.
 - What a node IS may be readable from the map. Who HOLDS it must not be, until
   the player has scouted it.
 - Camps are faucets that muster squads forever.

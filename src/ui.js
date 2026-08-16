@@ -12,6 +12,8 @@ import {
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
+import { TERRAIN_SHAPES } from './terrain.js';
+import { CITY_PLANS } from './plots.js';
 
 export class UI {
   constructor(root, cb) {
@@ -424,6 +426,11 @@ export class UI {
     for (const lv of LEVELS) {
       const locked = allUnlocked ? false : lv.id > cleared + 1;
       const done = lv.id <= cleared;
+      // Landform and city plan are part of what a level IS — say so before
+      // the player commits twenty minutes to it.
+      const land = (TERRAIN_SHAPES[lv.theme.terrain] || {}).label || 'frontier';
+      const plan = CITY_PLANS[lv.theme.city];
+      const city = plan ? plan.label : 'frontier city';
       const card = document.createElement('button');
       card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '') + (locked ? ' locked' : '');
       card.dataset.level = lv.id;
@@ -432,6 +439,7 @@ export class UI {
         <span class="lvnum">${done ? '✅' : locked ? '🔒' : lv.id}</span>
         <b>${lv.name}</b>
         <small>${lv.blurb}</small>
+        <span class="lvland">🗺️ ${land} · 🏰 ${city}</span>
         <span class="lvboss">${lv.boss.icon} ${lv.boss.name}</span>`;
       if (!locked) {
         card.onclick = () => {
@@ -439,7 +447,8 @@ export class UI {
           for (const c of row.children) c.classList.toggle('sel', c === card);
           if (this.cb.onLevelPick) this.cb.onLevelPick(lv.id);
         };
-        card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`);
+        card.onmouseenter = (e) => this._showTip(e, `<b>${lv.boss.icon} ${lv.boss.name}</b><br><span class="tdesc">${lv.boss.desc}</span>`
+          + (plan ? `<br><br><b>🏰 ${plan.label}</b><br><span class="tdesc">${plan.blurb}</span>` : ''));
         card.onmousemove = (e) => this._moveTip(e);
         card.onmouseleave = () => this._hideTip();
       }

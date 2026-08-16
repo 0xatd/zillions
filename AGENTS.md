@@ -34,9 +34,20 @@ The gameplay base is continuous siege on a lane graph:
   around them, and can be razed.
 - Lane nodes are captured by uncontested presence, pay income, and carry
   Forward Camp plots that only unlock on ground the player holds.
-- Node placement is READ FROM TERRAIN (`GameMap._findNodeFeatures`) — ore
+- Node placement is READ FROM TERRAIN (`TerrainField._findNodeFeatures`) — ore
   fields, fords, clearings, barrows, quarries — never from a ring. Do not put
-  them back on a ring; identical skeletons across maps kill the mystery.
+  them back on a ring; identical skeletons across maps kill the mystery. Hive
+  lairs and city sites are read from terrain too, for the same reason.
+- Every level owns a LANDFORM and a CITY PLAN, and no two levels may share
+  either. `theme.terrain` picks the landform (`TERRAIN_SHAPES` in
+  `src/terrain.js`: moor, fen, wastes, hills, vale) and `theme.city` picks the
+  plan (`CITY_PLANS` in `src/plots.js`: bastion, fort, star, crescent,
+  keyhole). One generic round base on every map is the failure state this
+  replaced — do not collapse it back.
+- Ramparts stay CLOSED whatever the silhouette, every gate keeps towers
+  covering it, and every plan still lays out all three muster camps on roads.
+- The three city sites on a map must stay meaningfully different, named, and
+  described to the player before they commit the run to one.
 - A node's KIND and its OWNER are separate facts. Kind is terrain and is always
   true. Ownership is claimed at setup (`Game._claimNodes`, hive takes the far
   ground) and is hidden behind `node.seen` until a friendly unit gets within

@@ -5,6 +5,7 @@ import {
   ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
+import { CITY_PLANS } from './plots.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
@@ -240,25 +241,32 @@ class App {
     if (!this.profile.games) this._startTutorial();
   }
 
-  // A cobbled plaza + lanes radiating to the districts — the city looks
-  // designed even before anything is built.
+  // A cobbled plaza + a lane out to every gate this city actually has — the
+  // city looks designed even before anything is built, and it looks like ITS
+  // plan: a square fort gets a square plaza, a crescent gets two lanes, not
+  // four. Falls back to a plain ring if the plan is not known yet.
   _buildPlaza(cx, cz) {
     const g = new THREE.Group();
+    const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
+    const plan = hq && hq.plan;
+    const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(7.2, 40),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
       new THREE.MeshLambertMaterial({ color: 0x565149 }),
     );
     disc.rotation.x = -Math.PI / 2;
+    if (squarePlaza) disc.rotation.z = -plan.facing;
     disc.position.set(cx, 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
     const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 10.5), laneMat);
+    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
+    for (const a of lanes) {
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * 10.5, 0.012, cz + Math.sin(a) * 10.5);
+      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), 0.012, cz + Math.sin(a) * (len / 2 + 4));
       g.add(lane);
     }
     return g;
@@ -284,7 +292,7 @@ class App {
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
-      const label = this._makeLabelSprite('🏳️', `SITE ${i + 1}`);
+      const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
@@ -296,6 +304,27 @@ class App {
   _clearSiteMarkers() {
     for (const m of this.siteMarkers || []) this.scene.remove(m);
     this.siteMarkers = [];
+    this._surveyed = null;
+  }
+
+  // Ride up to a flagged site and the ground tells you what it is. The three
+  // sites on a map are different bargains — a shore with fewer ways in, a
+  // crag shelf, ore inside the walls — so the player needs to be told which is
+  // which before they commit the run to one.
+  _surveySites() {
+    if (!this.game || this.game.phase !== 'found') return;
+    const h = this.myHero();
+    if (!h || h.dead) return;
+    this._surveyed = this._surveyed || new Set();
+    this.map.sites.forEach((s, i) => {
+      if (this._surveyed.has(i)) return;
+      if ((h.x - s.x) ** 2 + (h.z - s.z) ** 2 > 10 * 10) return;
+      this._surveyed.add(i);
+      const plan = CITY_PLANS[(this.map.theme && this.map.theme.city)] || null;
+      const city = plan ? `A ${plan.label} would stand here — ${plan.blurb} · ` : '';
+      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${s.hint || ''}`,
+        `${city}SPACE to found the city here`, 5200);
+    });
   }
 
   _makeNestMesh(n) {
@@ -3059,6 +3088,7 @@ class App {
         m.userData.ring.scale.setScalar(1 + ph * 0.25);
         m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
+      this._surveySites();
       this._updateCoins(t);
       this._updateZombieMeshes(t, dt);
       this._updateBars();

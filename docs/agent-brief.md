@@ -31,11 +31,13 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
   `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
   until the node is player-owned.
-- Node placement comes from terrain analysis (`GameMap._findNodeFeatures`):
+- Node placement comes from terrain analysis (`TerrainField._findNodeFeatures`):
   a summed-area openness field finds fords and clearings, tile clustering finds
   ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
-  against per-kind quotas so every map has a mix. Pure function of the tiles —
-  no RNG, because lockstep peers must agree.
+  against per-kind quotas so every map has a mix, and the quota is per-landform
+  (`TERRAIN_SHAPES[kind].nodes`) so a fen is a map of fords and the wastes are
+  stone and ore. Pure function of the tiles — no RNG, because lockstep peers
+  must agree.
 - Kind vs owner is the design rule: `node.kind`/`node.def` (NODE_KINDS) is
   terrain and always true; `node.owner` is claimed at setup by `_claimNodes`
   (hive takes the ground furthest from the city, ~`SIEGE.hiveClaim` of it, some
@@ -48,6 +50,31 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
+
+## Maps and Cities
+
+- Every level names a landform (`theme.terrain`) and a city plan
+  (`theme.city`). Both must stay unique per level — `scripts/map-check.mjs`
+  fails the build if two levels share either, because that is exactly how the
+  maps became interchangeable last time.
+- `TERRAIN_SHAPES` in `src/terrain.js` paints a pattern (basins, ridged crag
+  lines, barrow domes, a rift band with passes) and then thresholds it by
+  COVERAGE QUANTILE, not by a fixed noise value. That is why a map is always
+  playable however the noise landed: "19% of this planet is crag" holds either
+  way. Change the pattern freely; change the coverage carefully.
+- Nothing may be marooned. `_carveWarRoads` gives every hive a road toward the
+  nearest site, and `_connectFrontier` floods from the heart site and bridges
+  anything it could not reach. The check asserts every hive is reachable from
+  every site — a marooned hive is an unwinnable campaign.
+- `CITY_PLANS` in `src/plots.js` is a radial silhouette `radius(t, R)` plus a
+  gate list, both in the city's own frame where `t = 0` faces the hives. The
+  rampart tracer walks one axis at a time, so any silhouette stays closed and
+  4-connected. Gate-flanking towers are placed from the gate tile
+  (`gateFlank`), never by angle offset — an angle offset lands outside the wall
+  on a star or a throat.
+- The check plays two real minutes of siege on every level's real terrain
+  (lane graph, hive musters, the horde's walk to the walls). If you change map
+  generation, run `node scripts/map-check.mjs --report` and read the numbers.
 - Nothing auto-repairs. `plotAction()` returns `build | branch | repair |
   rebuild`, all funded with the same hold-to-build verb.
 - Hives have real health, spit defenders when damaged (`defendT`), and blight
@@ -162,7 +189,10 @@ Do not describe any of it as shipped.
 - `src/main.js`: renderer, input, camera, event FX, app orchestration.
 - `src/ui.js`: account gate, menus, HUD, lobby, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, siege.
-- `src/plots.js`: city layout, ramparts, gates, build plots.
+- `src/terrain.js`: landform archetypes, city sites, hive lairs, node features.
+  No three.js import — keep it that way, `scripts/map-check.mjs` runs it in Node.
+- `src/map.js`: map rendering only (terrain mesh, foliage, minimap).
+- `src/plots.js`: city plans, ramparts, gates, build plots.
 - `src/lanes.js`: lane graph, node routing, squad waypoints.
 - `src/auth.js`: Supabase auth, username, profile/save/stat sync.
 - `src/online.js`: account-backed room, lobby chat, friends, and game chat adapter.

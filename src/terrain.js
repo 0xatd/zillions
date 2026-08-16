@@ -1,0 +1,838 @@
+// Terrain generation — the landform half of a map, with no renderer attached.
+//
+// This file is deliberately free of three.js so a map can be generated (and
+// checked) in plain Node: `scripts/map-check.mjs` builds every campaign level
+// here and asserts it is distinct, connected and worth playing. `GameMap` in
+// `map.js` extends this class and adds the meshes.
+//
+// The rule that shapes everything below: two planets must never read the same.
+// A map is not "noise with a different palette" — it is a LANDFORM. One is a
+// drowned fen of islands and fords, one is an ash plain cut by crag walls, one
+// is a rift with two passes through it. The archetype decides the pattern; the
+// coverage quantiles decide how much of it there is, so a map is playable no
+// matter how the noise landed.
+import { MAP_SIZE, TILE, TILE_INFO } from './config.js';
+import { makeRNG, makeNoise, clamp } from './utils.js';
+
+// ---------------------------------------------------------------------------
+// Landform archetypes
+// ---------------------------------------------------------------------------
+// `elev` paints a pattern in 0..1; `cover` says what fraction of the map ends
+// up water / mountain / forest, applied as quantiles over that pattern. Pattern
+// gives identity, coverage gives playability.
+export const TERRAIN_SHAPES = {
+  // Open rolling moorland: room to manoeuvre, a river to cross, copses of pine.
+  // The teaching map — you can see what is coming and there is space to answer.
+  moor: {
+    label: 'rolling moorland',
+    cover: { water: 0.07, mountain: 0.07, forest: 0.22 },
+    rivers: 1,
+    ore: { gold: 9, stone: 9 },
+    nodes: { ore: 4, ford: 2, clearing: 3, barrow: 1, quarry: 2 },
+    elev: (x, z, S) => S.base(x, z, 0.045, 4) * 0.85 + S.region(x, z) * 0.15,
+  },
+  // A drowned fen: broad shallow basins, so the land is a web of causeways and
+  // fords. Movement is the puzzle here — a third of the map is water.
+  fen: {
+    label: 'drowned fen',
+    cover: { water: 0.27, mountain: 0.03, forest: 0.17 },
+    rivers: 2,
+    ore: { gold: 8, stone: 7 },
+    nodes: { ford: 5, ore: 3, clearing: 2, quarry: 2, barrow: 0 },
+    elev: (x, z, S) => S.base(x, z, 0.055, 3) * 0.45 + S.region(x, z, 0.02) * 0.55,
+  },
+  // Ash plains cut by long crag walls. Ridged noise puts the mountains on thin
+  // sinuous contour lines, so the map is a system of canyons and passes.
+  wastes: {
+    label: 'ash canyons',
+    cover: { water: 0.02, mountain: 0.19, forest: 0.06 },
+    rivers: 0,
+    ore: { gold: 10, stone: 12 },
+    nodes: { quarry: 4, ore: 4, ford: 3, barrow: 1, clearing: 0 },
+    elev: (x, z, S) => {
+      const r = S.ridge(S.base(x, z, 0.035, 2));
+      return 0.25 + Math.pow(r, 2.2) * 0.7 + S.fine(x, z) * 0.05;
+    },
+  },
+  // Grave hills: dozens of separate rounded mounds with crag caps, and hollows
+  // between them. Broken sightlines, lots of small defensible shelves.
+  hills: {
+    label: 'barrow hills',
+    cover: { water: 0.08, mountain: 0.16, forest: 0.15 },
+    rivers: 1,
+    ore: { gold: 9, stone: 10 },
+    nodes: { barrow: 4, ford: 3, ore: 3, quarry: 2, clearing: 0 },
+    elev: (x, z, S) => {
+      const mound = S.ridge(S.fine(x, z, 0.07, 2));
+      return S.base(x, z, 0.06, 3) * 0.4 + Math.pow(mound, 1.6) * 0.6;
+    },
+  },
+  // A rift: one great mountain wall snaking across the planet with a handful of
+  // passes through it. The far side is another country.
+  vale: {
+    label: 'riven vale',
+    cover: { water: 0.09, mountain: 0.20, forest: 0.18 },
+    rivers: 1,
+    ore: { gold: 9, stone: 11 },
+    nodes: { ford: 4, barrow: 3, ore: 3, quarry: 2, clearing: 1 },
+    elev: (x, z, S) => {
+      const N = S.N;
+      // Wall centre-line: a sine snaking left to right across the map.
+      const line = N * 0.5 + Math.sin((x / N) * Math.PI * 2.1 + 0.6) * N * 0.15;
+      const d = Math.abs(z - line);
+      let band = Math.exp(-((d / (N * 0.05)) ** 2));
+      // Passes: three gaps punched through the wall, the only ways across.
+      for (const px of [0.2, 0.52, 0.83]) {
+        const gap = Math.exp(-(((x - N * px) / (N * 0.05)) ** 2));
+        band *= 1 - gap * 0.96;
+      }
+      return S.base(x, z, 0.05, 3) * 0.55 + band * 0.45;
+    },
+  },
+};
+
+const SHAPE_ORDER = ['moor', 'fen', 'wastes', 'hills', 'vale'];
+
+// Site character: what the ground around a candidate city site actually is.
+// The player picks one of three sites at the start of a run, so the choice has
+// to be legible — a name and one honest line about what holding it means.
+const SITE_FLAVOR = {
+  crossroads: {
+    names: ['Old Crossroads', 'The Meeting Stones', 'Waymeet', 'Kingsford Bend'],
+    hint: 'Open ground on every side. Everything can reach you — and you can reach everything.',
+  },
+  lakeshore: {
+    names: ['Sunken Reach', 'Drowned Landing', 'Still Water', 'The Causeway'],
+    hint: 'Backed by water. Fewer ways in, but the good ground is thin.',
+  },
+  highland: {
+    names: ['High Shelf', 'Craghold', 'The Overlook', 'Stonewatch'],
+    hint: 'Crags at your back. Hard to surround, slow to expand out of.',
+  },
+  woodland: {
+    names: ['Pinefall', 'The Deep Stand', 'Blackwood Clearing', 'Timberhold'],
+    hint: 'Woods close in around it. They come out of the trees with no warning.',
+  },
+  orefield: {
+    names: ['Gilt Hollow', 'Assay Camp', 'The Rich Cut', 'Coinground'],
+    hint: 'Ore veins in reach of the walls. Rich — and worth taking from you.',
+  },
+};
+
+// Enough of a thing around a site that it names the place outright, whatever
+// the rest of the planet looks like.
+const SITE_ENOUGH = { lakeshore: 0.13, highland: 0.10, woodland: 0.24, orefield: 0.005 };
+
+export class TerrainField {
+  // theme (optional): per-level landform archetype + palette overrides.
+  // opts: { size, nests } — frontier maps are big and carry hive-nest spots
+  // (enemy bases) plus 3 candidate city sites.
+  constructor(seed, theme = null, opts = {}) {
+    this.seed = seed;
+    this.theme = theme;
+    this.size = opts.size || MAP_SIZE;
+    this.nestCount = opts.nests || 3;
+    // Archetype comes from the level; without one, pick a stable archetype from
+    // the seed so a custom/random map still gets a real landform.
+    const named = theme && theme.terrain;
+    this.terrainKind = TERRAIN_SHAPES[named]
+      ? named
+      : SHAPE_ORDER[Math.abs((seed | 0) % SHAPE_ORDER.length)];
+    this.shape = TERRAIN_SHAPES[this.terrainKind];
+    this.tiles = new Uint8Array(this.size * this.size);
+    this.rng = makeRNG(seed);
+    this.generate();
+  }
+
+  idx(x, z) { return z * this.size + x; }
+  inBounds(x, z) { return x >= 0 && z >= 0 && x < this.size && z < this.size; }
+  tileAt(x, z) { return this.inBounds(x, z) ? this.tiles[this.idx(x, z)] : TILE.WATER; }
+  isWalkable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].walk; }
+  isBuildable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].build; }
+  heightOf(t) { return t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0; }
+
+  generate() {
+    const shape = this.shape;
+    const elev = this._elevationField(shape);
+    this.sites = this._pickSites(elev);
+    this._flattenSites(elev);
+    this._paintTiles(elev, shape);
+    this._carveRivers(shape.rivers || 0, elev);
+    this._clearSiteFootprints();
+    const ore = shape.ore || {};
+    this._orePatches(TILE.GOLDORE, ore.gold ?? 9);
+    this._orePatches(TILE.STONEORE, ore.stone ?? 10);
+    this.nestSpots = this._pickNests();
+    this._carveWarRoads();
+    this._connectFrontier();
+    this.nodeSpots = this._findNodeFeatures();
+    this._nameSites();
+  }
+
+  // ---- landform ---------------------------------------------------------
+
+  _elevationField(shape) {
+    const N = this.size;
+    const nBase = makeNoise(this.rng);
+    const nRegion = makeNoise(this.rng);
+    const nFine = makeNoise(this.rng);
+    this._moistNoise = makeNoise(this.rng);
+    const S = {
+      N, cx: N / 2, cz: N / 2,
+      base: (x, z, f = 0.045, o = 4) => nBase(x * f, z * f, o),
+      region: (x, z, f = 0.018, o = 2) => nRegion(x * f + 40, z * f + 40, o),
+      fine: (x, z, f = 0.11, o = 2) => nFine(x * f + 90, z * f + 90, o),
+      ridge: (v) => 1 - Math.abs(v * 2 - 1),
+    };
+    const elev = new Float32Array(N * N);
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        // Fade the outermost tiles down so the planet ends in coast/scree
+        // instead of a hard cut — and so nothing spawns pinned to the edge.
+        const edge = clamp(Math.min(x, z, N - 1 - x, N - 1 - z) / 7, 0, 1);
+        const v = shape.elev(x, z, S);
+        elev[z * N + x] = v * (0.35 + 0.65 * edge);
+      }
+    }
+    return elev;
+  }
+
+  // Sites sit on ground the city can actually be raised on, so pull the
+  // elevation around each one toward mid-height before classifying tiles.
+  _flattenSites(elev) {
+    const N = this.size;
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        let near = 0;
+        for (const s of this.sites) {
+          near = Math.max(near, clamp(1 - Math.hypot(x - s.x, z - s.z) / 26, 0, 1));
+        }
+        if (!near) continue;
+        const i = z * N + x;
+        const w = near * 0.7;
+        elev[i] = elev[i] * (1 - w) + 0.5 * w;
+      }
+    }
+  }
+
+  // Value at the given fraction of the sorted field. Coverage targets are
+  // expressed as quantiles so "19% of this map is crag" holds whatever shape
+  // the noise happened to take.
+  _quantile(elev, frac) {
+    const N = this.size;
+    const sample = [];
+    for (let z = 1; z < N; z += 2) {
+      for (let x = 1; x < N; x += 2) sample.push(elev[z * N + x]);
+    }
+    sample.sort((a, b) => a - b);
+    const i = clamp(Math.round(frac * (sample.length - 1)), 0, sample.length - 1);
+    return sample[i];
+  }
+
+  _paintTiles(elev, shape) {
+    const N = this.size;
+    const th = this.theme || {};
+    const cover = { ...shape.cover, ...(th.cover || {}) };
+    const waterT = this._quantile(elev, cover.water);
+    const sandT = this._quantile(elev, Math.min(0.98, cover.water + 0.025));
+    const mountT = this._quantile(elev, 1 - cover.mountain);
+    const moist = this._moistNoise;
+
+    // Forest is moisture-led, but only on the land that is left over, so the
+    // coverage number stays honest.
+    const land = [];
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const e = elev[z * N + x];
+        if (e >= sandT && e <= mountT) land.push(moist(x * 0.06 + 100, z * 0.06 + 100, 3));
+      }
+    }
+    land.sort((a, b) => a - b);
+    const wantForest = clamp((cover.forest * N * N) / Math.max(1, land.length), 0, 1);
+    const forestT = land.length
+      ? land[clamp(Math.round((1 - wantForest) * (land.length - 1)), 0, land.length - 1)]
+      : 1;
+
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const e = elev[z * N + x];
+        let t = TILE.GRASS;
+        if (e < waterT) t = TILE.WATER;
+        else if (e < sandT) t = TILE.SAND;
+        else if (e > mountT) t = TILE.MOUNTAIN;
+        else if (moist(x * 0.06 + 100, z * 0.06 + 100, 3) > forestT) t = TILE.FOREST;
+        this.tiles[z * N + x] = t;
+      }
+    }
+  }
+
+  // A river is a chokepoint generator: it splits the ground into halves joined
+  // by a handful of fords, and `_findNodeFeatures` reads those fords as the
+  // ground worth holding.
+  _carveRivers(count, elev) {
+    if (!count) return;
+    const N = this.size;
+    for (let r = 0; r < count; r++) {
+      // Start on one edge, aim across the map, meander toward low ground.
+      const vertical = this.rng() < 0.5;
+      let x = vertical ? 6 + this.rng() * (N - 12) : 2;
+      let z = vertical ? 2 : 6 + this.rng() * (N - 12);
+      let ang = vertical ? Math.PI / 2 : 0;
+      let guard = 0;
+      let sinceFord = 0;
+      const width = this.rng() < 0.5 ? 1 : 2;
+      while (this.inBounds(x | 0, z | 0) && guard++ < N * 3) {
+        // Steer downhill a little so the channel sits in real valleys.
+        let bestA = ang, bestE = Infinity;
+        for (const da of [-0.5, -0.25, 0, 0.25, 0.5]) {
+          const nx = clamp((x + Math.cos(ang + da) * 4) | 0, 0, N - 1);
+          const nz = clamp((z + Math.sin(ang + da) * 4) | 0, 0, N - 1);
+          const e = elev[nz * N + nx];
+          if (e < bestE) { bestE = e; bestA = ang + da; }
+        }
+        ang = bestA + (this.rng() - 0.5) * 0.25;
+        x += Math.cos(ang); z += Math.sin(ang);
+        sinceFord++;
+        // Every so often the channel shallows out — that gap is a ford, and a
+        // ford is where the war happens.
+        if (sinceFord > 14 && this.rng() < 0.12) { sinceFord = 0; continue; }
+        if (sinceFord === 0) continue;
+        for (let dz = -width; dz <= width; dz++) {
+          for (let dx = -width; dx <= width; dx++) {
+            if (dx * dx + dz * dz > width * width + 0.5) continue;
+            const tx = (x | 0) + dx, tz = (z | 0) + dz;
+            if (!this.inBounds(tx, tz)) continue;
+            // Never flood the ground a city can be founded on.
+            if (this.sites.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue;
+            this.tiles[this.idx(tx, tz)] = TILE.WATER;
+          }
+        }
+      }
+    }
+  }
+
+  _clearSiteFootprints() {
+    const N = this.size;
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        for (const s of this.sites) {
+          if (Math.hypot(x - s.x, z - s.z) < 10) { this.tiles[this.idx(x, z)] = TILE.GRASS; break; }
+        }
+      }
+    }
+  }
+
+  // ---- city sites -------------------------------------------------------
+
+  // Three candidate sites, read out of the ground rather than dropped on a
+  // ring: one at the heart of the map, two out on the frontier, all three on
+  // ground flat and dry enough to actually raise a city on.
+  _pickSites(elev) {
+    const N = this.size;
+    const waterT = this._quantile(elev, 0.14);
+    const mountT = this._quantile(elev, 0.88);
+    const cands = [];
+    for (let z = 24; z < N - 24; z += 4) {
+      for (let x = 24; x < N - 24; x += 4) {
+        const e = elev[z * N + x];
+        if (e < waterT || e > mountT) continue;
+        // Flatness: how much the ground moves inside a city footprint.
+        let lo = Infinity, hi = -Infinity, wet = 0, n = 0;
+        for (let dz = -9; dz <= 9; dz += 3) {
+          for (let dx = -9; dx <= 9; dx += 3) {
+            const v = elev[(z + dz) * N + (x + dx)];
+            lo = Math.min(lo, v); hi = Math.max(hi, v);
+            if (v < waterT) wet++;
+            n++;
+          }
+        }
+        if (wet > n * 0.25) continue;             // half-drowned: not a city
+        const flat = 1 - clamp((hi - lo) * 2.5, 0, 1);
+        cands.push({ x, z, score: flat + this.rng() * 0.25 });
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    const cx = N / 2, cz = N / 2;
+    const sites = [];
+    const pick = (filter) => {
+      for (const c of cands) {
+        if (sites.some((s) => Math.hypot(c.x - s.x, c.z - s.z) < N * 0.26)) continue;
+        if (!filter(c)) continue;
+        sites.push({ x: c.x, z: c.z });
+        return true;
+      }
+      return false;
+    };
+    // The heart of the map first — someone always wants the crossroads.
+    pick((c) => Math.hypot(c.x - cx, c.z - cz) < N * 0.16)
+      || pick((c) => Math.hypot(c.x - cx, c.z - cz) < N * 0.3)
+      || pick(() => true);
+    // Then two frontier grounds, kept well apart from the heart and each other.
+    for (let i = 0; i < 2; i++) {
+      pick((c) => Math.hypot(c.x - cx, c.z - cz) > N * 0.2) || pick(() => true);
+    }
+    // A map with almost no viable ground still has to be playable.
+    while (sites.length < 3) {
+      const ang = sites.length * 2.2;
+      sites.push({
+        x: clamp(Math.round(cx + Math.cos(ang) * N * 0.22), 24, N - 24),
+        z: clamp(Math.round(cz + Math.sin(ang) * N * 0.22), 24, N - 24),
+      });
+    }
+    return sites;
+  }
+
+  // Once the tiles exist, each site can be told what it IS — which is what the
+  // player is really choosing between when they ride out to found the city.
+  //
+  // Character is RELATIVE to the planet: a shore on the fen is not remarkable,
+  // a shore on the ash canyons is the whole story. And no two sites get the
+  // same label, because three identical flags is not a choice.
+  _nameSites() {
+    const N = this.size, area = N * N;
+    const global = {
+      lakeshore: this.countNearby(N / 2, N / 2, N, TILE.WATER) / area,
+      highland: this.countNearby(N / 2, N / 2, N, TILE.MOUNTAIN) / area,
+      woodland: this.countNearby(N / 2, N / 2, N, TILE.FOREST) / area,
+      orefield: this.countNearby(N / 2, N / 2, N, TILE.GOLDORE) / area,
+    };
+    const R = 18, local = (R * 2 + 1) ** 2;
+    const scored = [];
+    this.sites.forEach((s, i) => {
+      const x = Math.round(s.x), z = Math.round(s.z);
+      const near = {
+        lakeshore: this.countNearby(x, z, R, TILE.WATER) / local,
+        highland: this.countNearby(x, z, R, TILE.MOUNTAIN) / local,
+        woodland: this.countNearby(x, z, R, TILE.FOREST) / local,
+        orefield: this.countNearby(x, z, R, TILE.GOLDORE) / local,
+      };
+      for (const [kind, frac] of Object.entries(near)) {
+        // Two ways to earn a label: plainly a lot of it, or notably more of it
+        // than the rest of this planet has.
+        const plenty = frac >= SITE_ENOUGH[kind];
+        if (!plenty && frac < 0.03) continue;
+        scored.push({ i, kind, score: frac / Math.max(0.01, global[kind]) + (plenty ? 1 : 0) });
+      }
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    const kindOf = new Array(this.sites.length).fill(null);
+    const usedKinds = new Set();
+    for (const c of scored) {
+      if (kindOf[c.i] || usedKinds.has(c.kind) || c.score < 1.1) continue;
+      kindOf[c.i] = c.kind;
+      usedKinds.add(c.kind);
+    }
+
+    const usedNames = new Set();
+    this.sites.forEach((s, i) => {
+      const kind = kindOf[i] || 'crossroads';
+      const flavor = SITE_FLAVOR[kind];
+      let name = flavor.names.find((n) => !usedNames.has(n)) || `${flavor.names[0]} ${i + 1}`;
+      usedNames.add(name);
+      s.kind = kind;
+      s.name = name;
+      s.hint = flavor.hint;
+    });
+  }
+
+  // ---- hives ------------------------------------------------------------
+
+  // Hives are lairs, not a ring of pins. They want ground that is far from
+  // every city site and ugly to fight through — deep woods, crag country, the
+  // far shore — and they want to be spread out from each other.
+  _pickNests() {
+    const N = this.size;
+    const minFromSite = N * 0.28;
+    let minApart = N * 0.24;
+    const cands = [];
+    for (let z = 12; z < N - 12; z += 3) {
+      for (let x = 12; x < N - 12; x += 3) {
+        if (!this.isWalkable(x, z)) continue;
+        let dSite = Infinity;
+        for (const s of this.sites) dSite = Math.min(dSite, Math.hypot(x - s.x, z - s.z));
+        if (dSite < minFromSite) continue;
+        // A lair reads better with cover around it than in the open — and it
+        // wants room around it, not to be pinned against the map edge.
+        const cover = this.countNearby(x, z, 6, TILE.FOREST) + this.countNearby(x, z, 6, TILE.MOUNTAIN);
+        const room = clamp(Math.min(x, z, N - 1 - x, N - 1 - z) / (N * 0.16), 0, 1);
+        cands.push({ x, z, score: (dSite / N) * 0.8 + cover * 0.004 + room * 0.25 + this.rng() * 0.12 });
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    const spots = [];
+    for (let pass = 0; pass < 4 && spots.length < this.nestCount; pass++) {
+      for (const c of cands) {
+        if (spots.length >= this.nestCount) break;
+        if (spots.some(([x, z]) => Math.hypot(c.x - x, c.z - z) < minApart)) continue;
+        spots.push([c.x, c.z]);
+      }
+      minApart *= 0.7; // relax rather than ship a map missing a hive
+    }
+    while (spots.length < this.nestCount) {
+      const ang = (spots.length / this.nestCount) * Math.PI * 2;
+      const x = clamp(Math.round(N / 2 + Math.cos(ang) * N * 0.36), 6, N - 6);
+      const z = clamp(Math.round(N / 2 + Math.sin(ang) * N * 0.36), 6, N - 6);
+      spots.push(this._nearestWalkable(x, z));
+    }
+
+    // Stamp a blighted clearing so a nest reads from across the map.
+    for (const [x, z] of spots) {
+      for (let dz = -3; dz <= 3; dz++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          if (dx * dx + dz * dz > 11 || !this.inBounds(x + dx, z + dz)) continue;
+          this.tiles[this.idx(x + dx, z + dz)] = TILE.GRASS;
+        }
+      }
+    }
+    return spots;
+  }
+
+  _nearestWalkable(x, z) {
+    for (let r = 0; r < 20; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          if (this.isWalkable(x + dx, z + dz)) return [x + dx, z + dz];
+        }
+      }
+    }
+    return [x, z];
+  }
+
+  // Forests and crags are impassable, so every hive gets a road to war: a
+  // meandering pass carved from the nest toward the nearest city site.
+  _carveWarRoads() {
+    const N = this.size;
+    for (const [x, z] of this.nestSpots) {
+      let target = this.sites[0];
+      let bd = Infinity;
+      for (const s of this.sites) {
+        const d = Math.hypot(x - s.x, z - s.z);
+        if (d < bd) { bd = d; target = s; }
+      }
+      let px = x, pz = z, guard = 0;
+      while (Math.hypot(px - target.x, pz - target.z) > 8 && guard++ < N * 3) {
+        const ang = Math.atan2(target.z - pz, target.x - px) + (this.rng() - 0.5) * 0.7;
+        px = clamp(px + Math.cos(ang) * 1.2, 2, N - 3);
+        pz = clamp(pz + Math.sin(ang) * 1.2, 2, N - 3);
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const k = this.idx((px | 0) + dx, (pz | 0) + dz);
+            const t = this.tiles[k];
+            if (t === TILE.FOREST || t === TILE.MOUNTAIN) this.tiles[k] = TILE.GRASS;
+            else if (t === TILE.WATER) this.tiles[k] = TILE.SAND; // a causeway
+          }
+        }
+      }
+    }
+  }
+
+  // Nothing the run depends on may be marooned. Flood from the heart site and
+  // bridge anything — hive or candidate site — the flood could not reach.
+  _connectFrontier() {
+    const targets = [
+      ...this.sites.slice(1).map((s) => [Math.round(s.x), Math.round(s.z)]),
+      ...this.nestSpots,
+    ];
+    const from = [Math.round(this.sites[0].x), Math.round(this.sites[0].z)];
+    for (let pass = 0; pass < 3; pass++) {
+      const reach = this._floodWalkable(from[0], from[1]);
+      const N = this.size;
+      let bridged = false;
+      for (const [tx, tz] of targets) {
+        if (reach[tz * N + tx]) continue;
+        this._bridge(from[0], from[1], tx, tz);
+        bridged = true;
+      }
+      if (!bridged) return;
+    }
+  }
+
+  _floodWalkable(sx, sz) {
+    const N = this.size;
+    const seen = new Uint8Array(N * N);
+    if (!this.isWalkable(sx, sz)) return seen;
+    const stack = [sz * N + sx];
+    seen[sz * N + sx] = 1;
+    while (stack.length) {
+      const i = stack.pop();
+      const x = i % N, z = (i / N) | 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+        const ni = nz * N + nx;
+        if (seen[ni] || !this.isWalkable(nx, nz)) continue;
+        seen[ni] = 1;
+        stack.push(ni);
+      }
+    }
+    return seen;
+  }
+
+  // A straight causeway, two tiles wide: the last-resort guarantee that the
+  // campaign is winnable on a map whose water landed badly.
+  _bridge(x0, z0, x1, z1) {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0)));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = Math.round(x0 + (x1 - x0) * t), z = Math.round(z0 + (z1 - z0) * t);
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!this.inBounds(x + dx, z + dz)) continue;
+          const k = this.idx(x + dx, z + dz);
+          const t2 = this.tiles[k];
+          if (t2 === TILE.WATER) this.tiles[k] = TILE.SAND;
+          else if (t2 === TILE.MOUNTAIN || t2 === TILE.FOREST) this.tiles[k] = TILE.GRASS;
+        }
+      }
+    }
+  }
+
+  // ---- terrain reading -------------------------------------------------
+  // Everything below is a pure function of the generated tiles: same map, same
+  // features, on every machine. No RNG — lockstep peers must agree.
+
+  // Count of walkable tiles in the square of radius r around each tile, via a
+  // summed-area table. This one number tells us most of what we need: a low
+  // count is a pass, a high count is open ground.
+  _opennessField() {
+    const N = this.size;
+    const W = N + 1;
+    const sat = new Int32Array(W * W);
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const w = this.isWalkable(x, z) ? 1 : 0;
+        sat[(z + 1) * W + (x + 1)] = w + sat[z * W + (x + 1)] + sat[(z + 1) * W + x] - sat[z * W + x];
+      }
+    }
+    return (x, z, r) => {
+      const x0 = clamp(x - r, 0, N), z0 = clamp(z - r, 0, N);
+      const x1 = clamp(x + r + 1, 0, N), z1 = clamp(z + r + 1, 0, N);
+      return sat[z1 * W + x1] - sat[z0 * W + x1] - sat[z1 * W + x0] + sat[z0 * W + x0];
+    };
+  }
+
+  // Grid clustering over tiles matching `match` — used for ore fields.
+  _tileClusters(match, minSize) {
+    const N = this.size;
+    const seen = new Uint8Array(N * N);
+    const out = [];
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const i = z * N + x;
+        if (seen[i] || !match(this.tiles[i])) continue;
+        const stack = [i];
+        seen[i] = 1;
+        let sx = 0, sz = 0, n = 0;
+        while (stack.length) {
+          const k = stack.pop();
+          const kx = k % N, kz = (k / N) | 0;
+          sx += kx; sz += kz; n++;
+          for (let dz = -2; dz <= 2; dz++) {
+            for (let dx = -2; dx <= 2; dx++) {
+              const nx = kx + dx, nz = kz + dz;
+              if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+              const ni = nz * N + nx;
+              if (seen[ni] || !match(this.tiles[ni])) continue;
+              seen[ni] = 1;
+              stack.push(ni);
+            }
+          }
+        }
+        if (n >= minSize) out.push({ x: Math.round(sx / n), z: Math.round(sz / n), n });
+      }
+    }
+    return out;
+  }
+
+  _countNear(x, z, r, tile) {
+    let n = 0;
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (this.tileAt(x + dx, z + dz) === tile) n++;
+      }
+    }
+    return n;
+  }
+
+  // Nudge a point to the nearest walkable tile that is not inside a city
+  // footprint (the city levels its ground when founded) or on top of a hive.
+  _settleSpot(x, z) {
+    const N = this.size;
+    x = clamp(Math.round(x), 4, N - 5);
+    z = clamp(Math.round(z), 4, N - 5);
+    for (let r = 0; r < 10; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = x + dx, nz = z + dz;
+          if (nx < 4 || nz < 4 || nx > N - 5 || nz > N - 5) continue;
+          if (!this.isWalkable(nx, nz)) continue;
+          if (this.sites.some((s) => Math.hypot(nx - s.x, nz - s.z) < 26)) continue;
+          if (this.nestSpots.some(([ex, ez]) => Math.hypot(nx - ex, nz - ez) < 9)) continue;
+          return [nx, nz];
+        }
+      }
+    }
+    return null;
+  }
+
+  // Read the map and return the ground worth fighting over, tagged by what it
+  // actually is. Candidates are scored, then thinned so they stay spread out.
+  _findNodeFeatures() {
+    const N = this.size;
+    const open = this._opennessField();
+    const MAX3 = 7 * 7, MAX5 = 11 * 11;
+    const cands = [];
+
+    // Ore fields: the "mineral patch". The most valuable ground, and the most
+    // obvious — you can see it from the ridge, which is the point.
+    for (const c of this._tileClusters((t) => t === TILE.GOLDORE, 5)) {
+      cands.push({ x: c.x, z: c.z, kind: 'ore', score: c.n });
+    }
+    for (const c of this._tileClusters((t) => t === TILE.STONEORE, 7)) {
+      cands.push({ x: c.x, z: c.z, kind: 'quarry', score: c.n });
+    }
+
+    // Passes and clearings, sampled on a coarse lattice so the scan is cheap
+    // and the results are evenly spread rather than clumped on one ridge.
+    for (let z = 6; z < N - 6; z += 3) {
+      for (let x = 6; x < N - 6; x += 3) {
+        if (!this.isWalkable(x, z)) continue;
+        const o3 = open(x, z, 3);
+        const o5 = open(x, z, 5);
+        // A ford is pinched close in but opens out further away — that is what
+        // separates a real pass from a dead-end nook.
+        const pinched = o3 < MAX3 * 0.52 && o3 > MAX3 * 0.18;
+        const leadsSomewhere = o5 > MAX5 * 0.42;
+        if (pinched && leadsSomewhere) {
+          cands.push({ x, z, kind: 'ford', score: (MAX3 - o3) + (o5 - MAX5 * 0.42) * 0.35 });
+          continue;
+        }
+        // Sheltered clearing: wide open, but ringed by woods rather than being
+        // the middle of a featureless plain.
+        if (o3 >= MAX3 * 0.96 && this._countNear(x, z, 7, TILE.FOREST) > 26) {
+          cands.push({ x, z, kind: 'clearing', score: this._countNear(x, z, 7, TILE.FOREST) });
+          continue;
+        }
+        // Barrow shelf: walkable ground tucked under crags.
+        const crags = this._countNear(x, z, 4, TILE.MOUNTAIN);
+        if (crags > 22 && o3 > MAX3 * 0.35) {
+          cands.push({ x, z, kind: 'barrow', score: crags });
+        }
+      }
+    }
+
+    // Draw round-robin from each kind rather than strictly by score, so every
+    // planet gets a mix. Sorting purely by score buried the barrows and
+    // clearings under a dozen ore fields and made all five maps read the same.
+    // The quota is per-landform: a fen is a map OF fords, the wastes are stone
+    // and ore, the barrow hills are graves. What a planet pays you, and how it
+    // pays, is part of what makes it its own place.
+    const QUOTA = { ore: 4, ford: 4, barrow: 2, clearing: 2, quarry: 2, ...(this.shape.nodes || {}) };
+    const ORDER = ['ore', 'ford', 'barrow', 'clearing', 'quarry'];
+    const pools = {};
+    for (const kind of ORDER) {
+      pools[kind] = cands.filter((c) => c.kind === kind)
+        .sort((p, q) => (q.score - p.score) || (p.x - q.x) || (p.z - q.z));
+    }
+
+    const NAMES = {
+      ore: ['Gilt Seam', 'Coinvein', 'The Glitter', 'Old Assay', 'Bright Cut', 'Deepcut'],
+      quarry: ['Stonecrop', 'The Quarry', 'Grey Steps', 'Breakstone'],
+      ford: ['The Crossing', 'Ashen Ford', 'The Cut', 'The Narrows', 'Broken Span', 'Thorn Gate'],
+      barrow: ['Gallows Hill', 'Weeping Rock', 'Widow Bluff', 'Hangman Reach'],
+      clearing: ['Kiln Yard', 'Rust Hollow', 'Ember Walk', 'The Moot'],
+    };
+
+    const spots = [];
+    const taken = {};
+    const MIN_SEP = 15;
+    const MAX_NODES = 12;
+    const place = (c) => {
+      const settled = this._settleSpot(c.x, c.z);
+      if (!settled) return false;
+      const [x, z] = settled;
+      if (spots.some((sp) => Math.hypot(x - sp.x, z - sp.z) < MIN_SEP)) return false;
+      taken[c.kind] = taken[c.kind] || 0;
+      const list = NAMES[c.kind];
+      spots.push({ x, z, kind: c.kind, name: list[taken[c.kind] % list.length] });
+      taken[c.kind]++;
+      return true;
+    };
+
+    for (let round = 0; round < 6 && spots.length < MAX_NODES; round++) {
+      for (const kind of ORDER) {
+        if (spots.length >= MAX_NODES) break;
+        if ((taken[kind] || 0) >= QUOTA[kind]) continue;
+        const pool = pools[kind];
+        while (pool.length) {
+          if (place(pool.shift())) break;
+        }
+      }
+    }
+    // Still thin (a map with almost no features)? Top up from whatever is left.
+    if (spots.length < 7) {
+      const rest = ORDER.flatMap((k) => pools[k]);
+      for (const c of rest) {
+        if (spots.length >= MAX_NODES) break;
+        place(c);
+      }
+    }
+    return spots;
+  }
+
+  _orePatches(oreTile, count) {
+    const N = this.size, cx = N / 2, cz = N / 2;
+    let placed = 0, guard = 0;
+    while (placed < count && guard++ < 4000) {
+      const x = 4 + Math.floor(this.rng() * (N - 8));
+      const z = 4 + Math.floor(this.rng() * (N - 8));
+      const d = Math.hypot(x - cx, z - cz);
+      if (d < 10 || d > N * 0.46) continue;
+      if (this.tiles[this.idx(x, z)] !== TILE.GRASS) continue;
+      // Blob of 5-9 tiles.
+      const blob = 5 + Math.floor(this.rng() * 5);
+      let done = 0, bx = x, bz = z;
+      for (let i = 0; i < blob * 3 && done < blob; i++) {
+        if (this.inBounds(bx, bz) && this.tiles[this.idx(bx, bz)] === TILE.GRASS) {
+          this.tiles[this.idx(bx, bz)] = oreTile;
+          done++;
+        }
+        bx += Math.floor(this.rng() * 3) - 1;
+        bz += Math.floor(this.rng() * 3) - 1;
+      }
+      if (done > 0) placed++;
+    }
+  }
+
+  // Corner height = average of the 4 adjacent tiles' heights, for smooth slopes.
+  cornerHeight(x, z) {
+    let sum = 0, n = 0;
+    for (let dz = -1; dz <= 0; dz++) {
+      for (let dx = -1; dx <= 0; dx++) {
+        const tx = x + dx, tz = z + dz;
+        if (this.inBounds(tx, tz)) { sum += this.heightOf(this.tiles[this.idx(tx, tz)]); n++; }
+      }
+    }
+    return n ? sum / n : 0;
+  }
+
+  groundY(x, z) {
+    // Approximate ground height at a world position (tile units).
+    return this.heightOf(this.tileAt(Math.floor(x), Math.floor(z)));
+  }
+
+  countNearby(x0, z0, radius, tile) {
+    let n = 0;
+    for (let z = z0 - radius; z <= z0 + radius; z++) {
+      for (let x = x0 - radius; x <= x0 + radius; x++) {
+        if (this.inBounds(x, z) && this.tiles[this.idx(x, z)] === tile) n++;
+      }
+    }
+    return n;
+  }
+}

@@ -202,7 +202,7 @@ export class Game {
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
     if (this.site >= 0) {
-      this.plots = generatePlots(this.map, this.map.sites[this.site]);
+      this.plots = generatePlots(this.map, this.map.sites[this.site], { levelId: this.levelId, siteIdx: this.site });
       this._claimed = true; // ownership comes from the save, not a fresh roll
       this._buildLaneSystems(this.map.sites[this.site]);
     }
@@ -379,7 +379,7 @@ export class Game {
     const site = this.map.sites[siteIdx];
     if (!site) return;
     this.site = siteIdx;
-    this.plots = generatePlots(this.map, site);
+    this.plots = generatePlots(this.map, site, { levelId: this.levelId, siteIdx: siteIdx });
     const hqPlot = this.plots.find((pl) => pl.kind === 'hq');
     this._construct(hqPlot, true); // the Keep rises with the founding
     this.hq = this.buildings.find((b) => b.kind === 'hq');
@@ -391,7 +391,10 @@ export class Game {
     this.flowDirty = true;
     this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
     const founder = this.heroes[p];
-    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! The hives are already mustering — build, then push out and take the lanes.`, 'info');
+    const plan = hqPlot && hqPlot.plan;
+    const where = site.name ? ` at ${site.name}` : '';
+    const shape = plan ? ` The plan is a ${plan.label}: ${plan.blurb}` : '';
+    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city${where}!${shape} The hives are already mustering — build, then push out and take the lanes.`, 'info');
   }
 
   // Wire the planet's lane graph: capture nodes, then the hives, then the city.
