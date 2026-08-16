@@ -16,6 +16,7 @@ import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
+import { inboxForMatchStart } from './multiplayer-windows.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -208,6 +209,10 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    // The host can finish startup first and send window zero while this guest
+    // is still loading assets. Keep the existing Map alive across every await
+    // so early windows are not discarded when the sim is initialized.
+    const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
@@ -241,7 +246,7 @@ class App {
       this.mpRole = mp.role;
       this.simFrame = 0;
       this.outbox = [];
-      this.inbox = new Map();
+      this.inbox = matchInbox;
       this.hashes = { local: new Map() };
       this.netPrimed = false;
       this.netStallT = 0;
