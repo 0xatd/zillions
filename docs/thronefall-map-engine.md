@@ -294,6 +294,18 @@ curtains with amber perimeter lights and bright-lit gates; houses are hab
 units with tilted solar roofs; mills are wind turbines; camps are quonset
 bays with a doctrine-colored light stripe.
 
+Units wear the same kit: every marine is a sealed suit — legs, doctrine-
+colored torso, pauldrons, white helmet with a glow visor, life-support
+pack. Doctrine color (militia blue / ranger green / sniper violet) does the
+telling-apart; heroes are the same silhouette scaled up with bespoke
+weapons. No bare heads on a hostile planet.
+
+**Variation is id-keyed, never random.** A street of identical habs reads
+as a print run, so hab roofs flip pitch, doors swap sides, antennas come
+and go, and hull tint shifts a few percent — all keyed off the plot id.
+Deterministic (peers and rebuilds agree), and it costs zero authored
+content.
+
 Two rules that keep the perimeter pretty, both purely presentational:
 
 - **Walls render as a smoothed polyline, never a tile staircase.** Each wall

@@ -2693,9 +2693,9 @@ class App {
         if (tier >= 3) { pylon(1.35, -1.35); pylon(-1.35, 1.35); }
         // The spire: taller with every tier.
         const spireH = 2.2 + tier * 0.5;
-        cyl(0.68, 0.9, spireH, HULL, 0, 2.4 + spireH / 2, 0, 8);
+        cyl(0.68, 0.9, spireH, HULL, 0, 2.4 + spireH / 2, 0, 12);
         lit(1.5, 0.12, 1.5, GLOW, 0, 2.4 + spireH * 0.62, 0, 0.3); // control ring
-        cyl(0.95, 0.72, 0.3, HULL2, 0, 2.5 + spireH, 0, 8);        // crown deck
+        cyl(0.95, 0.72, 0.3, HULL2, 0, 2.5 + spireH, 0, 12);        // crown deck
         // Comms dish, aimed at the sky.
         const dish = cyl(0.55, 0.08, 0.3, 0xd8d2c2, 0.45, 2.85 + spireH, 0.35, 10);
         dish.rotation.x = -0.7; dish.rotation.z = -0.35;
@@ -2712,26 +2712,36 @@ class App {
       case 'house': {
         // Hab unit: white prefab hull, tilted solar roof, lit door. Bigger
         // tiers stack a second module instead of growing a random block.
+        // Variation is keyed off the plot id — deterministic, so peers and
+        // rebuilds agree — and flips the roof pitch, door side and antenna,
+        // so a street of habs reads as a neighborhood, not a print run.
+        const vid = b.plotId || b.id || 0;
+        const flip = vid % 2 ? 1 : -1;
+        const hullVar = new THREE.Color(HULL).offsetHSL(0, 0.004 * (vid % 3), ((vid % 5) - 2) * 0.012).getHex();
         if (tier === 1) {
-          box(1.3, 0.7, 1.1, HULL, 0, 0.35);
-          const roof = box(1.36, 0.08, 1.16, SOLAR, 0, 0.78);
-          roof.rotation.z = 0.07;
-          lit(0.3, 0.44, 0.04, TRIM, 0, 0.24, 0.56, 0.4);
+          box(1.5, 0.1, 1.3, PAD, 0, 0.05);                 // foundation skirt
+          box(1.3, 0.7, 1.1, hullVar, 0, 0.4);
+          const roof = box(1.36, 0.08, 1.16, SOLAR, 0, 0.83);
+          roof.rotation.z = 0.07 * flip;
+          lit(0.3, 0.44, 0.04, TRIM, 0.3 * flip, 0.29, 0.56, 0.4);
+          if (vid % 3 === 0) box(0.04, 0.5, 0.04, 0x4a5058, -0.5 * flip, 1.0, -0.35);
         } else if (tier === 2) {
-          box(1.5, 1.0, 1.3, HULL, 0, 0.5);
-          const roof = box(1.56, 0.09, 1.36, SOLAR, 0, 1.08);
-          roof.rotation.z = 0.07;
-          lit(0.32, 0.5, 0.04, TRIM, 0, 0.27, 0.66, 0.4);
-          box(0.05, 0.7, 0.05, 0x4a5058, -0.55, 1.4, -0.4); // antenna
+          box(1.7, 0.1, 1.5, PAD, 0, 0.05);
+          box(1.5, 1.0, 1.3, hullVar, 0, 0.55);
+          const roof = box(1.56, 0.09, 1.36, SOLAR, 0, 1.13);
+          roof.rotation.z = 0.07 * flip;
+          lit(0.32, 0.5, 0.04, TRIM, 0.32 * flip, 0.32, 0.66, 0.4);
+          box(0.05, 0.7, 0.05, 0x4a5058, -0.55 * flip, 1.45, -0.4); // antenna
         } else {
-          box(1.6, 1.4, 1.4, HULL, 0, 0.7);
-          box(1.0, 0.8, 1.0, HULL2, 0.45, 1.8, 0.25);
-          const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45, 2.26, 0.25);
-          roof.rotation.z = 0.07;
-          box(1.1, 0.1, 1.3, 0x6da06a, -0.4, 1.48, 0);      // roof garden
-          lit(0.32, 0.52, 0.04, TRIM, 0, 0.28, 0.72, 0.4);
+          box(1.8, 0.1, 1.6, PAD, 0, 0.05);
+          box(1.6, 1.4, 1.4, hullVar, 0, 0.75);
+          box(1.0, 0.8, 1.0, HULL2, 0.45 * flip, 1.85, 0.25);
+          const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45 * flip, 2.31, 0.25);
+          roof.rotation.z = 0.07 * flip;
+          box(1.1, 0.1, 1.3, 0x6da06a, -0.4 * flip, 1.53, 0);      // roof garden
+          lit(0.32, 0.52, 0.04, TRIM, 0.3 * flip, 0.33, 0.72, 0.4);
         }
-        windows(tier + 1, tier >= 3 ? 0.8 : 0.4, 0.72);
+        windows(tier + 1, tier >= 3 ? 0.85 : 0.45, 0.72);
         break;
       }
       case 'farm': {
@@ -2788,12 +2798,12 @@ class App {
         const h = 2.3 + tier * 0.5;
         const hull = tier >= 3 ? 0xece6d6 : HULL;
         box(1.75, 0.36, 1.75, PAD, 0, 0.18);
-        cyl(0.58, 0.78, h - 0.3, hull, 0, 0.3 + (h - 0.3) / 2, 0, 8);
-        const band = cyl(0.63, 0.72, 0.16, GLOW, 0, h * 0.45, 0, 8);
+        cyl(0.58, 0.78, h - 0.3, hull, 0, 0.3 + (h - 0.3) / 2, 0, 12);
+        const band = cyl(0.63, 0.72, 0.16, GLOW, 0, h * 0.45, 0, 12);
         band.material.emissive.setHex(GLOW);
         band.material.emissiveIntensity = 0.5;
-        cyl(0.92, 0.66, 0.42, HULL2, 0, h + 0.06, 0, 8);   // flared gun deck
-        cyl(0.98, 0.98, 0.1, PAD, 0, h + 0.32, 0, 8);      // deck plate
+        cyl(0.92, 0.66, 0.42, HULL2, 0, h + 0.06, 0, 12);   // flared gun deck
+        cyl(0.98, 0.98, 0.1, PAD, 0, h + 0.32, 0, 12);      // deck plate
         for (let i = 0; i < 6; i++) {                       // deck railing
           const a = (i / 6) * Math.PI * 2 + 0.26;
           box(0.06, 0.3, 0.06, 0x4a5058, Math.cos(a) * 0.86, h + 0.5, Math.sin(a) * 0.86);
@@ -3192,12 +3202,22 @@ class App {
       }
       g.scale.setScalar(1.18);
     } else {
-      // Guardsman-style trooper.
+      // Colony marine: a sealed suit — nobody walks this planet bare-headed.
+      // A slimmer cut of the hero kit (legs, doctrine-colored torso, white
+      // helmet with glow visor, pauldrons, life-support pack) so the army
+      // reads as one corps, with doctrine color doing the telling-apart.
       const d = u.def;
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.62, 8), M(d.color)), 0, 0.45, 0);
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), M(0xc4a37e)), 0, 0.92, 0);
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color)), 0, 1.02, 0);
-      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18));
+      const armor = M(d.color);
+      const shell = M(0xd9d3c3);
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.2), M(0x26282c)), 0, 0.16, 0);          // legs
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.26), armor), 0, 0.52, 0);                 // torso
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), shell), 0, 0.58, 0.145);              // chest plate
+      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), -0.24, 0.7, 0);                // pauldron L
+      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), 0.24, 0.7, 0);                 // pauldron R
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.19, 0.19), shell), 0, 0.86, 0);                 // helmet
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.03), M(0x35ff70, 0.9)), 0, 0.87, 0.105); // visor glow
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.13), M(0x4a4d52)), 0, 0.56, -0.2);        // life-support pack
+      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.62), M(0x232426)), 0.2, 0.56, 0.18));
     }
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
     affectedGeo.rotateX(-Math.PI / 2);
