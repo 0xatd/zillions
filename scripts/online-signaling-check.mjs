@@ -46,4 +46,20 @@ await assert.rejects(
   'signaling must report a failed delivery instead of silently hanging',
 );
 
+const watched = { id: 'room-live', status: 'in_game', host_id: 'host-1' };
+const watcher = new OnlineLobby();
+watcher.me = { id: 'watcher-1', name: 'Observer' };
+let subscribedRoom = null;
+let spectatorSignal = null;
+watcher._joinGameChannel = async (roomId, asHost) => {
+  subscribedRoom = { roomId, asHost };
+};
+watcher.signal = async (payload) => {
+  spectatorSignal = payload;
+};
+await watcher.watchGame(watched);
+assert.equal(watcher.game, watched, 'watching must retain the active game without taking a player seat');
+assert.deepEqual(subscribedRoom, { roomId: 'room-live', asHost: false }, 'watching must subscribe as a non-host');
+assert.deepEqual(spectatorSignal, { t: 'knock', role: 'spectator', name: 'Observer' }, 'watching must identify a read-only spectator to the host');
+
 console.log('Online signaling check passed.');

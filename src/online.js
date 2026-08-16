@@ -414,7 +414,7 @@ export class OnlineLobby {
     const { data, error } = await this.sb.from('rooms')
       .select(ROOM_SELECT)
       .eq('visibility', 'public')
-      .eq('status', 'open')
+      .in('status', ['open', 'starting', 'in_game'])
       .gt('last_seen_at', since)
       .order('created_at', { ascending: false })
       .limit(20);
@@ -577,6 +577,12 @@ export class OnlineLobby {
     await this._joinGameChannel(game.id, false);
     await this.refreshCurrentGame();
     await this.signal({ t: 'knock', name: this.me.name });
+  }
+
+  async watchGame(game) {
+    this.game = game;
+    await this._joinGameChannel(game.id, false);
+    await this.signal({ t: 'knock', role: 'spectator', name: this.me.name });
   }
 
 }

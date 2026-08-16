@@ -170,6 +170,8 @@ export class UI {
               <div id="l-tab-tips" class="ltabpane hidden"></div>
             </div>
             <div class="lobbyfriends">
+              <div class="friendshead"><b>Online now</b><span id="l-player-count"></span></div>
+              <div id="l-players" class="onlineplayers"></div>
               <div class="friendshead"><b>Friends</b><span id="l-friend-count"></span></div>
               <div class="friendadd">
                 <input id="l-friendcode" maxlength="32" placeholder="@username">
@@ -1123,8 +1125,26 @@ export class UI {
     this.root.querySelector('#l-online').textContent = text;
   }
 
-  lobbyOnline(n) {
+  lobbyOnline(players) {
+    const entries = players instanceof Map ? [...players.entries()] : [];
+    const n = entries.length || Number(players) || 0;
     this.root.querySelector('#l-online').textContent = `🟢 ${n} online`;
+    const box = this.root.querySelector('#l-players');
+    const count = this.root.querySelector('#l-player-count');
+    if (!box) return;
+    if (count) count.textContent = String(n);
+    box.innerHTML = '';
+    if (!entries.length) {
+      box.innerHTML = '<div class="mphint">No other commanders are visible.</div>';
+      return;
+    }
+    for (const [, name] of entries.sort((a, b) => a[1].localeCompare(b[1]))) {
+      const row = document.createElement('div');
+      row.className = 'onlineplayer';
+      row.innerHTML = '<span class="onlinedot"></span><b></b>';
+      row.querySelector('b').textContent = `@${name}`;
+      box.appendChild(row);
+    }
   }
 
   lobbyChatFill(msgs) {
@@ -1253,7 +1273,7 @@ export class UI {
     log.scrollTop = log.scrollHeight;
   }
 
-  lobbyGames(games, onJoin) {
+  lobbyGames(games, onJoin, onWatch) {
     const box = this.root.querySelector('#l-games');
     if (!box) return;
     if (!games.length) {
@@ -1261,18 +1281,37 @@ export class UI {
       return;
     }
     box.innerHTML = '';
-    for (const g of games) {
+    const open = games.filter((g) => g.status === 'open');
+    const active = games.filter((g) => g.status === 'in_game' || g.status === 'starting');
+    const renderGroup = (title, rows, activeGame = false) => {
+      const heading = document.createElement('div');
+      heading.className = 'gamegrouphead';
+      heading.textContent = `${title} · ${rows.length}`;
+      box.appendChild(heading);
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mphint gameempty';
+        empty.textContent = activeGame ? 'No wars are in progress.' : 'No rooms are waiting for players.';
+        box.appendChild(empty);
+      }
+      for (const g of rows) {
       const row = document.createElement('div');
-      row.className = 'gamerow';
+      row.className = `gamerow ${activeGame ? 'active' : 'open'}`;
       const lv = LEVELS[(g.level || 1) - 1];
+      const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       row.innerHTML = `
-        <span class="gname"></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/3</span>
-        <button class="tbtn gjoin">Join</button>`;
+        <span class="gamestate">${activeGame ? 'LIVE' : 'OPEN'}</span>
+        <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
+        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
+        <button class="tbtn gjoin">${activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
-      row.querySelector('.gjoin').onclick = () => onJoin(g);
+      row.querySelector('.gplayers').textContent = names || `@${g.host_name}`;
+      row.querySelector('.gjoin').onclick = () => activeGame ? onWatch(g) : onJoin(g);
       box.appendChild(row);
-    }
+      }
+    };
+    renderGroup('Open games', open, false);
+    renderGroup('In progress', active, true);
   }
 
   fillLore(lore, tips) {

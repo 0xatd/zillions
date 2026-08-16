@@ -131,6 +131,8 @@ class App {
     this.mpRole = null;
     this.net = null;
     this.peers = [];
+    this.spectators = [];
+    this.pendingSpectators = [];
     this.pendingPeer = null;
     this.guestHeroes = [];
     this.guestNames = [];
@@ -264,7 +266,7 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
-    if (!this.profile.games) this._startTutorial();
+    if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
   }
 
   // A cobbled plaza + lanes radiating to the districts — the city looks
@@ -489,6 +491,7 @@ class App {
 
   issue(cmd) {
     if (!this.game) return;
+    if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
     else this.net.send({ t: 'cmd', c: cmd });
@@ -602,7 +605,7 @@ class App {
 
   // Guests never autosave — the host owns the co-op save.
   _autosave(force = false) {
-    if (!this.game || this.game.over || this.mpRole === 'guest') return;
+    if (!this.game || this.game.over || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -612,6 +615,7 @@ class App {
   }
 
   _recordGameEnd(won) {
+    if (this.mpRole === 'spectator') return;
     const p = this.profile;
     p.games++;
     if (won && this.game.mode !== 'survival') {
@@ -752,6 +756,10 @@ class App {
     for (const p of this.peers) p.send(msg);
   }
 
+  _broadcastSpectators(msg) {
+    for (const p of this.spectators) p.send(msg);
+  }
+
   _checkGuestHash(w, h, idx) {
     const mine = this.hashes.local.get(w);
     if (mine !== undefined && mine !== h && !this.desynced) {
@@ -781,7 +789,7 @@ class App {
     }
   }
 
-  _onGuestMsg(m) {
+  async _onGuestMsg(m) {
     if (m.t === 'lobby') {
       this.mpSeat = m.n;
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
@@ -791,6 +799,13 @@ class App {
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
       else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
+    }
+    else if (m.t === 'spectateStart') {
+      await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
+      this.simFrame = m.frame;
+      this.netPrimed = false;
+      this.net.send({ t: 'spectateReady' });
+      this.ui.showBanner('Watching live — camera controls work, battle controls are read-only.', '', 5000);
     }
     else if (m.t === 'desync' && !this.desynced) {
       this.desynced = true;
@@ -830,8 +845,8 @@ class App {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row)),
-      onOnline: (map) => { this.ui.lobbyOnline(map.size); },
+      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row)),
+      onOnline: (map) => { this.ui.lobbyOnline(map); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onRoom: (game) => this._onRoomUpdate(game),
@@ -856,6 +871,7 @@ class App {
   _onRoomUpdate(game) {
     if (!game) return;
     const isHost = this.mpRole === 'host';
+    const isSpectator = this.mpRole === 'spectator';
     const readiness = roomConnectionReadiness(game, this.peers.length + 1);
     const { connected, expectedPlayers, pending, ready } = readiness;
     this.ui.roomRoster(this._roomRosterFromGame(game), {
@@ -867,6 +883,7 @@ class App {
         ? (!ready
           ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
           : connected > 1 ? `The game connection is ready for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
+        : isSpectator ? 'You are connecting as a read-only watcher. The live battle will open automatically.'
         : 'You are in the room. Pick your hero and wait for the host to press START.',
     });
     this.ui.setStartButton(isHost ? {
@@ -875,6 +892,10 @@ class App {
         : `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`,
       disabled: !ready,
       title: ready ? 'The host launches the match for everyone connected.' : 'Start unlocks when every player in the room has a direct game connection.',
+    } : isSpectator ? {
+      text: '⏳  LOADING LIVE BATTLE',
+      disabled: true,
+      title: 'Connecting to the host as a read-only spectator.',
     } : {
       text: '⏳  WAITING FOR HOST TO START',
       disabled: true,
@@ -984,6 +1005,7 @@ class App {
   // Host side of the automatic handshake: a guest knocked — offer them a
   // WebRTC session through the signaling channel.
   async _onKnock(sig) {
+    if (sig.role === 'spectator') return this._acceptSpectator(sig);
     if (this.peers.length >= 2 || this.netMode || !this.onlinePending) return;
     if (this.onlinePending.has(sig.from)) return;
     const peer = new NetSession();
@@ -1015,13 +1037,47 @@ class App {
     }
   }
 
+  async _acceptSpectator(sig) {
+    if (!this.netMode || this.mpRole !== 'host' || !this.game || !this.onlinePending) return;
+    if (this.onlinePending.has(sig.from)) return;
+    const peer = new NetSession();
+    const rec = { peer, name: sig.name || 'Watcher', started: false, buffer: [] };
+    peer.onOpen = () => {
+      this.onlinePending.delete(sig.from);
+      this.pendingSpectators.push(rec);
+      this.ui.showBanner(`👁️ @${rec.name} is watching.`, '', 2600);
+    };
+    peer.onMessage = (m) => {
+      if (m.t !== 'spectateReady') return;
+      for (const packet of rec.buffer) peer.send(packet);
+      rec.buffer.length = 0;
+      this.pendingSpectators = this.pendingSpectators.filter((entry) => entry !== rec);
+      if (!this.spectators.includes(peer)) this.spectators.push(peer);
+    };
+    peer.onClose = () => {
+      this.pendingSpectators = this.pendingSpectators.filter((entry) => entry !== rec);
+      this.spectators = this.spectators.filter((entry) => entry !== peer);
+    };
+    this.onlinePending.set(sig.from, peer);
+    try {
+      const code = await peer.host();
+      await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code, role: 'spectator' });
+    } catch (e) {
+      this.onlinePending.delete(sig.from);
+    }
+  }
+
   // Guest side: the host's offer arrived — answer it.
   async _onSignal(sig) {
-    if (sig.t === 'offer' && this.mpRole === 'guest') {
+    if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
       this.net = new NetSession();
       this.net.onOpen = () => {
-        this.net.send(this._heroPayload());
-        this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
+        if (this.mpRole === 'guest') {
+          this.net.send(this._heroPayload());
+          this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
+        } else {
+          this.ui.onlineStatus('🟢 Connected to the host. Loading the live battle…');
+        }
       };
       this.net.onMessage = (m) => this._onGuestMsg(m);
       this.net.onClose = () => {
@@ -1065,6 +1121,24 @@ class App {
       this.mpRole = null;
       this.onlineMode = false;
       this.ui.onlineStatus(`❌ Could not join: ${e.message}. Try JOIN again.`);
+    }
+  }
+
+  async watchOnlineGame(row) {
+    const lobby = await this._openLobby();
+    if (!lobby || !lobby.connected || this.netMode) return;
+    this.audio.init();
+    this.mpRole = 'spectator';
+    this.onlineMode = true;
+    this.ui.showSetup({ online: row, mode: row.mode });
+    this.ui.onlineStatus(`👁️ Connecting to @${row.host_name}'s live war…`);
+    this.ui.setStartButton({ text: '⏳  LOADING LIVE BATTLE', disabled: true, title: 'Connecting to the host as a read-only spectator.' });
+    try {
+      await lobby.watchGame(row);
+    } catch (e) {
+      this.mpRole = null;
+      this.onlineMode = false;
+      this.ui.onlineStatus(`❌ Could not watch: ${e.message}. The host may have left.`);
     }
   }
 
@@ -2769,7 +2843,7 @@ class App {
   // WASD maps to the minimap cardinal directions. This keeps keyboard
   // movement, player view movement, and minimap movement aligned.
   _updateHeroInput() {
-    if (!this.game || this.game.over) return;
+    if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
     if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
     if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
@@ -3348,7 +3422,16 @@ class App {
                 bundle = [...this.outbox];
                 this.outbox = [];
                 for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
-                this._broadcast({ t: 'w', w, c: bundle });
+                for (const rec of this.pendingSpectators) {
+                  if (!rec.started) {
+                    rec.peer.send({ t: 'spectateStart', snap: this.game.snapshot(), frame: this.simFrame });
+                    rec.started = true;
+                  }
+                }
+                const packet = { t: 'w', w, c: bundle };
+                this._broadcast(packet);
+                this._broadcastSpectators(packet);
+                for (const rec of this.pendingSpectators) if (rec.started) rec.buffer.push(packet);
               } else {
                 bundle = this.inbox.get(w);
                 if (!bundle) { stalled = true; break; }
@@ -3363,7 +3446,7 @@ class App {
               if (w > 0 && w % 30 === 0) {
                 const hsh = this._stateHash();
                 if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
-                else this.net.send({ t: 'h', w, h: hsh });
+                else if (this.mpRole !== 'spectator') this.net.send({ t: 'h', w, h: hsh });
               }
             }
             this.game.update(SIM_DT);
