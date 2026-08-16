@@ -102,6 +102,7 @@ export class Game {
     this._nodeT = 0;
     this._campT = 0;
     this._supportT = 0;
+    this.brews = [];             // John's lingering beer-blast ground zones
 
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
@@ -147,6 +148,10 @@ export class Game {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
         nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
       },
+      brews: this.brews.map((b) => ({
+        x: snapNum(b.x), z: snapNum(b.z), r: snapNum(b.r),
+        t: snapNum(b.t), slow: snapNum(b.slow), tickT: snapNum(b.tickT || 0),
+      })),
       nests: this.nests.map((n) => [snapNum(n.hp), n.alive ? 1 : 0, snapNum(n.musterT), snapNum(n.defendT || 0)]),
       nodes: this.nodes.map((n) => [n.owner, snapNum(n.cap), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
       stats: { ...this.stats },
@@ -170,6 +175,16 @@ export class Game {
         node: u.targetNodeId != null ? u.targetNodeId : -1, gi: u.targetGi ?? -1,
         route: snapRoute(u.route), routeI: u.routeI || 0, routeStuck: snapNum(u.routeStuck || 0),
         routeBest: Number.isFinite(u.routeBest) ? snapNum(u.routeBest) : null, repathT: snapNum(u.repathT || 0),
+        shield: snapNum(u.shieldHp || 0),
+        // Temporary allies (Tiger's clones, Aaron's spirit) carry a lifespan and
+        // a per-instance stat override instead of the shared UNITS[key] def.
+        temp: u.temp ? 1 : 0, expire: u.expireT != null ? snapNum(u.expireT) : null,
+        ownerHero: u.ownerHeroId != null ? u.ownerHeroId : null,
+        def: u.temp ? Object.fromEntries(
+          ['hp', 'dmg', 'range', 'rof', 'speed', 'noise', 'color', 'melee', 'shotgun', 'splash']
+            .filter((key) => u.def[key] != null)
+            .map((key) => [key, typeof u.def[key] === 'number' ? snapNum(u.def[key]) : u.def[key]]),
+        ) : null,
       })),
       heroes: this.heroes.map((h) => ({
         id: h.id, k: h.key, x: snapNum(h.x), z: snapNum(h.z), hp: snapNum(h.hp),
@@ -182,6 +197,9 @@ export class Game {
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
+        shield: snapNum(h.shieldHp || 0),
+        fortifyT: snapNum(h.fortifyT || 0), fortifyArmor: snapNum(h.fortifyArmor || 0), fortifyThorns: snapNum(h.fortifyThorns || 0),
+        summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
         upgrades: { ...h.upgrades },
@@ -274,6 +292,9 @@ export class Game {
       const [id, x, z, v] = saved.length >= 4 ? saved : [nextId++, saved[0], saved[1], saved[2]];
       return { id, x, z, v };
     });
+    this.brews = (snap.brews || []).map((b) => ({
+      x: b.x, z: b.z, r: b.r, t: b.t, slow: b.slow, tickT: b.tickT || 0,
+    }));
 
     const actorsById = new Map();
     const zombiesById = new Map();
@@ -296,6 +317,15 @@ export class Game {
       u.routeStuck = us.routeStuck || 0;
       u.routeBest = us.routeBest == null ? Infinity : us.routeBest;
       u.repathT = us.repathT || 0;
+      u.shieldHp = us.shield || 0;
+      if (us.temp) {
+        u.temp = true;
+        u.expireT = us.expire;
+        u.ownerHeroId = us.ownerHero;
+        const savedDef = us.def || (us.defHp != null ? { hp: us.defHp, dmg: us.defDmg } : null);
+        if (savedDef) u.def = { ...u.def, ...savedDef };
+        u.maxHp = savedDef && savedDef.hp != null ? savedDef.hp : u.maxHp;
+      }
       actorsById.set(u.id, u);
       pendingActorTargets.push([u, us]);
     }
@@ -321,6 +351,12 @@ export class Game {
       h.weaveKey = hs.weaveKey || 0;
       h.hasteT = hs.hasteT || 0;
       h.hasteMult = hs.hasteMult || 1;
+      h.shieldHp = hs.shield || 0;
+      h.fortifyT = hs.fortifyT || 0;
+      h.fortifyArmor = hs.fortifyArmor || 0;
+      h.fortifyThorns = hs.fortifyThorns || 0;
+      h._summonId = hs.summonId != null ? hs.summonId : null;
+      h._procT = { ...(hs.procT || {}) };
       actorsById.set(h.id, h);
       pendingActorTargets.push([h, hs]);
       if (hs.dead) {
@@ -1678,7 +1714,8 @@ export class Game {
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
-      reviveT: 0, hasteT: 0, hasteMult: 1,
+      reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
+      fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
     this._refreshHeroDerived(h, false);
     this.units.push(h);
@@ -1756,6 +1793,11 @@ export class Game {
       drain: aura.drain ? aura.drain * (1 + rank * 0.25) : 0,
       leech: aura.leech ? aura.leech * (1 + rank * 0.12) : 0,
       dmgMult: aura.dmgMult ? aura.dmgMult + rank * 0.08 : 0,
+      // Newer aura fields — same object, more simultaneous effects, following
+      // the existing pattern instead of a second aura slot.
+      crit: aura.crit ? aura.crit + rank * 0.03 : 0,
+      armor: aura.armor ? Math.min(0.6, aura.armor + rank * 0.03) : 0,
+      haste: aura.haste ? aura.haste + rank * 0.05 : 0,
     };
   }
 
@@ -1792,8 +1834,10 @@ export class Game {
         desc: passives[1]?.desc || 'Improves survivability or utility.',
       },
       {
-        key: 'ult', icon: h.def.ability.icon, name: `${h.def.ability.name} Damage`,
-        desc: '+25% special damage per rank.',
+        // Not every ult is a pure nuke (Turtle fortifies, Tiger clones, Aaron
+        // summons) — keep this label honest for all of them.
+        key: 'ult', icon: h.def.ability.icon, name: `${h.def.ability.name} Rank`,
+        desc: 'Unlocks a stronger tier of your special, and +25% damage per rank where it deals any.',
       },
     ].map((choice) => ({ ...choice, rank: h.upgrades[choice.key] || 0, max: HERO_UPGRADE_MAX }));
   }
@@ -1914,6 +1958,72 @@ export class Game {
         h.weaveKey = (h.weaveKey || 0) + 1;
         this.emit({ type: 'stealth', x: h.x, z: h.z });
         break;
+      case 'fortify': {
+        // Turtle: an armor/thorns spike plus an instant taunt — anything close
+        // forgets there is anyone else on the field for the duration.
+        h.fortifyT = ab.dur[r];
+        h.fortifyArmor = ab.armor[r];
+        h.fortifyThorns = ab.thorns[r];
+        const r2 = (ab.radius || 7) * (ab.radius || 7);
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) zb.targetU = h;
+        }
+        this.emit({ type: 'fortify', x: h.x, z: h.z, r: ab.radius || 7 });
+        break;
+      }
+      case 'brew': {
+        // John: an initial splash, then a lingering puddle that slows and
+        // periodically staggers anything still standing in it (see _updateBrews).
+        const r2 = ab.radius * ab.radius;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) this.damageZombie(zb, ab.dmg[r] * ultMult, h.x, h.z);
+        }
+        this.brews.push({ x: h.x, z: h.z, r: ab.radius, t: ab.dur[r], slow: ab.slow[r], tickT: 0 });
+        break;
+      }
+      case 'clone': {
+        // Tiger: temporary copies of himself at reduced stats — real squad
+        // units (so they use the same damage/snapshot path), tagged `temp`
+        // with a lifespan, and exempt from XP/coin rewards on death like any
+        // other non-hero unit.
+        const count = ab.count[r];
+        const dur = ab.dur[r];
+        const mult = ab.statMult[r];
+        const baseDmg = this.heroDmg(h);
+        for (let i = 0; i < count; i++) {
+          const a = (i / Math.max(1, count)) * Math.PI * 2;
+          const x = h.x + Math.cos(a) * 1.4, z = h.z + Math.sin(a) * 1.4;
+          const u = this._spawnUnit('tiger_clone', x, z, null);
+          const hp = Math.round(h.maxHp * mult);
+          u.def = { ...UNITS.tiger_clone, hp, dmg: Math.round(baseDmg * mult * ultMult), range: h.def.range, rof: h.def.rof, speed: h.def.speed, color: h.def.color };
+          u.hp = hp; u.maxHp = hp;
+          u.holdX = x; u.holdZ = z;
+          u.temp = true; u.expireT = dur; u.ownerHeroId = h.id;
+        }
+        this.emit({ type: 'clone', x: h.x, z: h.z, count });
+        break;
+      }
+      case 'summon': {
+        // Aaron: a single spirit sentinel that fights until its time runs out
+        // — recasting replaces it instead of stacking summons.
+        if (h._summonId != null) {
+          const old = this.units.find((u) => u.id === h._summonId && !u.dead);
+          if (old) { old.dead = true; this.emit({ type: 'expire', x: old.x, z: old.z }); }
+        }
+        const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
+        const sx = h.x + dirX * 1.6, sz = h.z + dirZ * 1.6;
+        const u = this._spawnUnit('aaron_spirit', sx, sz, null);
+        const hp = ab.hp[r];
+        u.def = { ...UNITS.aaron_spirit, hp, dmg: Math.round(ab.dmg[r] * ultMult) };
+        u.hp = hp; u.maxHp = hp;
+        u.holdX = sx; u.holdZ = sz;
+        u.temp = true; u.expireT = ab.dur[r]; u.ownerHeroId = h.id;
+        h._summonId = u.id;
+        this.emit({ type: 'summon', x: sx, z: sz });
+        break;
+      }
     }
     this.wakeZombies(h.x, h.z, 8);
     this.emit({ type: 'cast', x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
@@ -1921,6 +2031,69 @@ export class Game {
 
   _updateHero(dt) {
     for (const h of this.heroes) this._updateHeroOne(h, dt);
+  }
+
+  // Generic auto-cast proc infrastructure: any hero passive can carry a
+  // `proc: { key, kind, every: [r1,r2,r3], amount: [r1,r2,r3] }` alongside its
+  // stat `mods`, and it fires on its own timer once that passive is ranked up.
+  // Aaron's Aegis Ward (a periodic shield on the nearest wounded ally) is the
+  // first user; this stays hero-agnostic so a future passive can reuse it.
+  _updateHeroProcs(h, dt) {
+    const passives = h.def.passives || [];
+    if (!passives.length) return;
+    for (let i = 0; i < passives.length; i++) {
+      const proc = passives[i].proc;
+      if (!proc) continue;
+      const rank = h.upgrades[`passive${i + 1}`] || 0;
+      if (rank <= 0) continue;
+      const r = rank - 1;
+      h._procT = h._procT || {};
+      const t = (h._procT[proc.key] ?? 0) - dt;
+      if (t > 0) { h._procT[proc.key] = t; continue; }
+      h._procT[proc.key] = proc.every[r];
+      if (proc.kind === 'shield') this._procShield(h, proc.amount[r]);
+    }
+  }
+
+  // Shields the most wounded living ally (hero or squad unit) within aura
+  // range. Uses the shieldHp pool that _damageUnit soaks before HP.
+  _procShield(h, amount) {
+    const radius = this.heroAuraRadius(h);
+    const r2 = radius * radius;
+    let best = null, bestFrac = 0.97;
+    for (const u of this.units) {
+      if (u.dead || u === h) continue;
+      if (dist2(h.x, h.z, u.x, u.z) > r2) continue;
+      const frac = u.hp / u.maxHp;
+      if (frac < bestFrac) { bestFrac = frac; best = u; }
+    }
+    if (!best) return;
+    best.shieldHp = Math.max(best.shieldHp || 0, amount);
+    this.emit({ type: 'shieldproc', x: best.x, z: best.z });
+  }
+
+  // John's Last Call: a lingering puddle that slows and periodically staggers
+  // any zombie standing in it. Brew state is snapshotted because reconnecting
+  // players and mid-game spectators must continue the same simulation.
+  _updateBrews(dt) {
+    if (!this.brews.length) return;
+    const stagger = 1.4;
+    for (const brew of this.brews) {
+      brew.t -= dt;
+      brew.tickT = (brew.tickT ?? 0) - dt;
+      const pulse = brew.tickT <= 0;
+      if (pulse) brew.tickT = stagger;
+      const r2 = brew.r * brew.r;
+      for (const zb of this.zombies) {
+        if (zb.dead) continue;
+        if (dist2(brew.x, brew.z, zb.x, zb.z) > r2) continue;
+        zb.slowT = Math.max(zb.slowT || 0, 0.5);
+        zb.slowMul = Math.min(zb.slowMul ?? 1, brew.slow);
+        if (pulse) zb.stunT = Math.max(zb.stunT || 0, 0.35);
+      }
+      if (pulse) this.emit({ type: 'brewzone', x: brew.x, z: brew.z, r: brew.r });
+    }
+    if (this.brews.some((b) => b.t <= 0)) this.brews = this.brews.filter((b) => b.t > 0);
   }
 
   _updateHeroOne(h, dt) {
@@ -1940,7 +2113,18 @@ export class Game {
     }
     const regen = h.def.regen + 0.25 * (h.level - 1) + h.mods.regen;
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
-    if (h.hasteT > 0) h.hasteT -= dt;
+    // hasteT/hasteMult decay centrally in _updateUnits (it walks every unit,
+    // heroes included, once per tick — decrementing it here too would burn it
+    // twice as fast).
+
+    // Turtle's Last Stand: armor/thorns spike expires on its own clock.
+    if (h.fortifyT > 0) {
+      h.fortifyT -= dt;
+      if (h.fortifyT <= 0) { h.fortifyT = 0; h.fortifyArmor = 0; h.fortifyThorns = 0; }
+    }
+
+    // Aaron's Aegis Ward (and any future proc-style passive) ticks here.
+    this._updateHeroProcs(h, dt);
 
     // The Weave: while it lasts, cut everything brushed against (once per cast).
     if (h.weaveT > 0) {
@@ -2210,7 +2394,29 @@ export class Game {
     if (b.hp <= 0) this._destroyBuilding(b, true);
   }
 
-  _damageUnit(u, dmg) {
+  // Single choke point for damage landing on a hero OR a squad unit. Evade,
+  // armor, shield-absorb and thorns-reflect all live here so every attacker
+  // (zombie melee/ranged, blight DoT) gets the same defensive resolution.
+  // `attacker` is the zombie that dealt the hit, when one is available — pass
+  // null for damage sources thorns should not reflect against (e.g. blight).
+  _damageUnit(u, dmg, attacker = null) {
+    const mods = u.mods || null;
+    const evade = (u.def.evadeChance || 0) + ((mods && mods.evadeChance) || 0);
+    if (dmg > 0 && evade > 0 && this.rng() < evade) {
+      this.emit({ type: 'evade', x: u.x, z: u.z });
+      return;
+    }
+    const armor = (u.def.armor || 0) + ((mods && mods.armor) || 0) + (u.fortifyArmor || 0) + (u.auraArmor || 0);
+    if (armor > 0) dmg *= Math.max(0.25, 1 - armor);
+    if (u.shieldHp > 0 && dmg > 0) {
+      const absorb = Math.min(u.shieldHp, dmg);
+      u.shieldHp -= absorb;
+      dmg -= absorb;
+    }
+    const thorns = (u.def.thorns || 0) + ((mods && mods.thorns) || 0) + (u.fortifyThorns || 0);
+    if (thorns > 0 && dmg > 0 && attacker && !attacker.dead) {
+      this.damageZombie(attacker, dmg * thorns, u.x, u.z);
+    }
     u.hp -= dmg;
     if (u.hp <= 0) {
       u.dead = true;
@@ -2252,6 +2458,7 @@ export class Game {
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateAuras(dt);
+    this._updateBrews(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
     this._updateHero(dt);
@@ -2262,6 +2469,8 @@ export class Game {
   _updateAuras(dt) {
     for (const u of this.units) {
       if (!u.hero) u.auraDmg = 1;
+      u.auraCrit = 0;
+      u.auraArmor = 0;
       u.auraSources = [];
     }
     for (const zb of this.zombies) zb.auraSources = [];
@@ -2274,7 +2483,7 @@ export class Game {
       const r2 = radius * radius;
       h.auraAllies = 0;
       h.auraEnemies = 0;
-      if (effect.dmgMult || effect.regen) {
+      if (effect.dmgMult || effect.regen || effect.crit || effect.armor || effect.haste) {
         for (const u of this.units) {
           if (u.dead || u === h) continue;
           if (dist2(h.x, h.z, u.x, u.z) > r2) continue;
@@ -2282,6 +2491,9 @@ export class Game {
           u.auraSources.push(aura.key);
           if (effect.dmgMult && !u.hero) u.auraDmg = Math.max(u.auraDmg, effect.dmgMult);
           if (effect.regen) u.hp = Math.min(u.maxHp, u.hp + effect.regen * dt);
+          if (effect.crit) u.auraCrit = Math.max(u.auraCrit || 0, effect.crit);
+          if (effect.armor) u.auraArmor = Math.max(u.auraArmor || 0, effect.armor);
+          if (effect.haste) { u.hasteT = Math.max(u.hasteT || 0, 0.4); u.hasteMult = Math.max(u.hasteMult || 1, 1 + effect.haste); }
         }
       }
       if (effect.slow || effect.drain) {
@@ -2480,7 +2692,9 @@ export class Game {
           const cd = range ? (1 / (zb.def.rof || 0.5)) : 0.8;
           if (zb.atkT <= 0) {
             zb.atkT = cd;
-            this._damageUnit(u, zb.def.dmg * dmgMul);
+            // Thorns only reflects real melee contact (a bite), not a spitter's
+            // ranged acid from outside the fight.
+            this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
             this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
           }
         } else {
@@ -2614,6 +2828,17 @@ export class Game {
 
   _updateUnits(dt) {
     for (const u of this.units) {
+      // Temporary allies (Tiger's clones, Aaron's spirit sentinel) expire on
+      // their own clock instead of dying to damage. No XP/coins either way —
+      // _damageUnit never revives or rewards a non-hero unit's death.
+      if (!u.dead && u.expireT != null) {
+        u.expireT -= dt;
+        if (u.expireT <= 0) {
+          u.dead = true;
+          this.emit({ type: 'expire', x: u.x, z: u.z });
+        }
+      }
+      if (u.hasteT > 0) u.hasteT -= dt;
       if (u.dead || u.hero) { if (u.hero) { u.cooldown -= dt; u.retargetT -= dt; } } else {
         u.cooldown -= dt;
         u.retargetT -= dt;
@@ -2693,9 +2918,21 @@ export class Game {
           u.target = null;
         }
       }
-      const rofMult = (u.hero && u.hasteT > 0 ? u.hasteMult : 1) * (u.hero ? 1 + u.mods.rof : 1);
+      // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
+      // squad troops too), not just heroes self-buffing.
+      const rofMult = (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);
       const attackRange = u.hero ? this.heroRange(u) : u.def.range;
-      const hitDmg = () => (u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg));
+      // Crit: a hero's own chance (base + passives) plus whatever an aura is
+      // granting right now (John's Reckless Bravado reaches squad troops too).
+      // Rolled here — the actual attack execution, not heroStats()/heroDmg()
+      // display math — so the shared RNG stream stays identical across peers
+      // regardless of how often each client's HUD happens to re-render.
+      const hitDmg = () => {
+        let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
+        const critChance = (u.hero ? (u.def.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
+        if (critChance > 0 && this.rng() < critChance) dmg *= (u.hero && u.def.critMult) || 1.75;
+        return dmg;
+      };
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= attackRange * attackRange) {
