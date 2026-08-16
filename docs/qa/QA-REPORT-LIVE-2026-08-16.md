@@ -1,11 +1,11 @@
 # Live QA Report — zillions.taborlin.co
 
-**Date:** 2026-08-16  
-**Build:** production `https://zillions.taborlin.co`  
-**Code at test start:** `main` @ `c2a9f40` (SHA-256 of live static assets matched that commit)  
-**Later main (not re-tested live):** `38059c4` (PRs #24 four heroes + #25 multiplayer-first menu merged after this session)  
-**Testers:** Lyra (`@lyra`, host, Google sign-in via lyra@taborlin.co) + Alex (`@atd`, guest, human)  
-**Session:** public room **B48083** — Campaign · Greenfall Marches · Normal · Scott English  
+**Date:** 2026-08-16
+**Build:** production `https://zillions.taborlin.co`
+**Code at test start:** `main` @ `c2a9f40` (SHA-256 of live static assets matched that commit)
+**Later main (not re-tested live):** `38059c4` (PRs #24 four heroes + #25 multiplayer-first menu merged after this session)
+**Testers:** Lyra (`@lyra`, host, Google sign-in via lyra@taborlin.co) + Alex (`@atd`, guest, human)
+**Session:** public room **B48083** — Campaign · Greenfall Marches · Normal · Scott English
 **Audience:** main agent. Fix the multiplayer bugs first. The rest is human-voice polish.
 
 This is a playtest report, not a code audit. Written as a player who sat down with a friend and tried to have a war.
@@ -34,10 +34,10 @@ before merge. The original gameplay replication, movement, and spawn findings
 remain separate blockers unless that test proves current `main` already fixed
 them.
 
-Solo campaign is playable and the economy/threat loop works.  
+Solo campaign is playable and the economy/threat loop works.
 **Co-op is not a co-op game yet.**
 
-The lobby connects. The room starts. Rejoin works. Gold and threat tick.  
+The lobby connects. The room starts. Rejoin works. Gold and threat tick.
 Then your friend says: *"I don't see your guy moving at all."*
 
 That is the report.
@@ -78,10 +78,10 @@ Not fully tested this pass: Watch mode, private rooms, Brutal, maps 2–5, victo
 
 **Player quote:** *"i dont see yoru guy moving at all"*
 
-**What happened:**  
+**What happened:**
 Host ran, sprinted, cast Q, funded plots. Guest never saw the host hero move. Host *could* see the guest.
 
-**Why this kills the game:**  
+**Why this kills the game:**
 You cannot play together if only one person can see the other. You cannot rally, cover a gate, or even know if your friend is dead.
 
 **Repro:**
@@ -89,7 +89,7 @@ You cannot play together if only one person can see the other. You cannot rally,
 2. Host runs around in view of guest.
 3. Guest: host is missing or frozen.
 
-**Asymmetry:** guest → host works. host → guest does not.  
+**Asymmetry:** guest → host works. host → guest does not.
 Rejoin did **not** fix it.
 
 **Fix direction:** host outbound hero snapshot / lockstep unit id for the host avatar. Guest is applying peer heroes and skipping the host, or host never broadcasts its own unit the same way guests do.
@@ -98,13 +98,13 @@ Rejoin did **not** fix it.
 
 ### BUG-MP-2 — Guest movement feels nothing like solo
 
-**Player quote:** *"all of a sudden i got transported to town and could move but it is super laggy and not smooth walking around like it normally is in campaign solo"*  
+**Player quote:** *"all of a sudden i got transported to town and could move but it is super laggy and not smooth walking around like it normally is in campaign solo"*
 **After rejoin:** *"i quit and could rejoin, but it still isnt smooth movemnt ... when i run around"*
 
-**What happened:**  
+**What happened:**
 Same map, same hero family, same ~8ms rtt — guest walk is stuttery. Solo is fine. This is not "my wifi."
 
-**Why it matters:**  
+**Why it matters:**
 Movement is the whole verb. If WASD feels like remote desktop, people leave.
 
 **Fix direction:** client-side prediction + reconcile for the local hero. Do not wait on lockstep snapshots to place your own feet. Interpolation is for *other* people.
@@ -175,7 +175,7 @@ Threat ticks while you read. Fine for veterans. First launch should pause or dim
 
 ### BUG-SOLO-4 — Defeat screen hides the retry
 
-"THE CITY HAS FALLEN" is clear. Stats are good (64 slain, 198 coins, 5 structures razed, side quests including failed "Not One Stone").  
+"THE CITY HAS FALLEN" is clear. Stats are good (64 slain, 198 coins, 5 structures razed, side quests including failed "Not One Stone").
 **"Try again" is below the fold.** After a loss you get a wall of text and a scrollbar.
 
 Post-defeat return to menu took ~15s of "Checking account…". Fresh reload is ~4s. Not a hang. Still feels dead.
@@ -293,9 +293,9 @@ Re-run B48083-style co-op on the current live SHA after the net fixes. If guest 
 
 # Campaign playthrough — live notes (session 2)
 
-**Started:** 2026-08-16 ~19:37 UTC  
-**Protocol:** Alex hosts public rooms. Lyra (@lyra) joins as guest. New hero each mission. Stop → note → push PR #27 → resume.  
-**Live build:** `main` @ `38059c4` (PR #24 four heroes + PR #25 multiplayer-first menu now on prod).  
+**Started:** 2026-08-16 ~19:37 UTC
+**Protocol:** Alex hosts public rooms. Lyra (@lyra) joins as guest. New hero each mission. Stop → note → push PR #27 → resume.
+**Live build:** `main` @ `38059c4` (PR #24 four heroes + PR #25 multiplayer-first menu now on prod).
 **PR:** https://github.com/0xatd/zillions/pull/27
 
 ## Mission 1 — room `2C7EC1` (in lobby / waiting to start)
