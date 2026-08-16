@@ -196,9 +196,16 @@ and the mapping.
   Camp built on it half again as tough. A Clearing lets it muster an extra
   trooper. A Ford is always well guarded, because whoever holds the pinch holds
   the road. A Barrow has something buried under it, once.
-- **Campaign**: raze every hive on each of the 5 maps, then break the
-  counterattack its unique champion leads. **Survival**: endless siege, a boss
-  every fifth Threat level — your record is the Threat you drove it to.
+- **Campaign — the war for Earth, then the stars.** Raze every hive on each of
+  Earth's 5 fronts, then break the counterattack its unique champion leads.
+  Win all five and Earth is retaken — and turns out to be one star among many:
+  the **procedural galaxy** opens. Frontier worlds are generated from their
+  number alone (same galaxy for every player), recombining the landforms and
+  city plans on bigger and bigger maps with harder hives and renamed elder
+  bosses, without end. Every world you clear stays liberated on your profile —
+  the level select is a map of the war, each planet drawn from its real
+  terrain. **Survival**: endless siege, a boss every fifth Threat level — your
+  record is the Threat you drove it to.
 
 ## Side Quests, Items & Campaign Persistence (WC3-style)
 

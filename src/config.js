@@ -4,6 +4,8 @@
 // no bell — pressure is produced by both sides and the front line is wherever
 // the two flows meet.
 
+import { makeRNG } from './utils.js';
+
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
@@ -498,7 +500,11 @@ export function itemMods(items) {
   return m;
 }
 
-// ---------- Campaign: 5 levels, 5 maps, 5 bosses ----------
+// ---------- Campaign: retaking EARTH — 5 fronts, 5 maps, 5 bosses ----------
+// The authored campaign is the war for the homeworld. Win all five fronts and
+// Earth is retaken — and turns out to be one star among many: the procedural
+// galaxy (below) opens, and every frontier world you clear stays liberated on
+// your profile.
 // Fixed seeds mean every player fights on the same battlegrounds.
 // Each map is a frontier lane graph: hive nests (the enemy's producing bases),
 // neutral lane nodes to take, and 3 candidate city sites.
@@ -587,6 +593,108 @@ export const LEVELS = [
       desc: 'All of it, at once: armored, enraging, screaming, and endlessly spawning.' },
   },
 ];
+
+// ---------- The galaxy: the campaign never runs out of planets ----------
+//
+// The five authored planets above are the war's first front. Past them the
+// galaxy is procedural: `levelById(n)` builds planet n deterministically from
+// its number alone, so every player's galaxy is the same galaxy and lockstep
+// peers agree without shipping data. A galaxy planet is a seeded recombination
+// of the systems the authored levels introduced — landform x city plan x
+// palette x boss — with difficulty climbing steadily and no ceiling.
+
+const GALAXY_TERRAINS = ['moor', 'fen', 'wastes', 'hills', 'vale'];
+const GALAXY_PLANS = ['bastion', 'fort', 'star', 'crescent', 'keyhole'];
+const GALAXY_NAMES_A = ['Ashen', 'Broken', 'Cold', 'Dim', 'Far', 'Grey', 'Hollow', 'Iron', 'Last', 'Mourn', 'Null', 'Pale', 'Red', 'Silent', 'Veiled'];
+const GALAXY_NAMES_B = ['Reach', 'Verge', 'Drift', 'Expanse', 'Barrens', 'Threshold', 'March', 'Deep', 'Shelf', 'Crossing', 'Waste', 'Hollow', 'Terminus'];
+const GALAXY_BLURBS = {
+  moor: 'Open moorland under a strange sun.',
+  fen: 'A drowned world. The causeways decide everything.',
+  wastes: 'Canyon country: whoever holds the passes holds the war.',
+  hills: 'Mounded, blind ground. They are always closer than they look.',
+  vale: 'One great rift splits it. Cross it or die on your own side.',
+};
+const GALAXY_BOSS_EPITHETS = ['Elder', 'Vast', 'Twice-Born', 'Howling', 'Crowned', 'Blighted', 'Ancient'];
+
+// Shift a 0xRRGGBB colour around the hue wheel without pulling in three.js.
+function shiftHue(hex, deg) {
+  const r = (hex >> 16 & 255) / 255, g = (hex >> 8 & 255) / 255, b = (hex & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  let h = 0;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d > 0) {
+    h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  h = ((h + deg) % 360 + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * sat, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [r2, g2, b2] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const to = (v) => Math.round(Math.max(0, Math.min(1, v + m)) * 255);
+  return (to(r2) << 16) | (to(g2) << 8) | to(b2);
+}
+
+export function isGalaxyLevel(id) { return (id | 0) > LEVELS.length; }
+
+// Planet n of the galaxy, the same for everyone, forever.
+export function galaxyLevel(id) {
+  const n = id - LEVELS.length;           // 1st, 2nd, ... galaxy planet
+  const rng = makeRNG((0x9a1a70 ^ Math.imul(id, 0x9e3779b1)) >>> 0);
+  // Walk the 25 landform x plan combos with a stride co-prime to 25, so every
+  // combination appears once before any repeats and neighbours never match.
+  const combo = (n * 7) % 25;
+  const terrain = GALAXY_TERRAINS[combo % 5];
+  const city = GALAXY_PLANS[(combo / 5) | 0];
+  const donor = LEVELS.find((l) => l.theme.terrain === terrain) || LEVELS[0];
+  const hue = Math.round((rng() - 0.5) * 140);
+  const palette = {};
+  for (const [k, v] of Object.entries(donor.theme.palette)) palette[k] = shiftHue(v, hue);
+
+  const name = `${GALAXY_NAMES_A[(id * 7) % GALAXY_NAMES_A.length]} ${GALAXY_NAMES_B[(id * 11) % GALAXY_NAMES_B.length]}`;
+  // Difficulty climbs without ceiling, but gently — the galaxy is a long war.
+  const mult = 2.0 + n * 0.22;
+  const baseBoss = LEVELS[(id * 3) % LEVELS.length].boss;
+  const boss = {
+    ...baseBoss,
+    name: `${GALAXY_BOSS_EPITHETS[(id * 5) % GALAXY_BOSS_EPITHETS.length]} ${baseBoss.name}`,
+    hp: Math.round(baseBoss.hp * (1 + n * 0.18)),
+    dmg: Math.round(baseBoss.dmg * (1 + n * 0.06)),
+  };
+  const kills = 800 + n * 200;
+  const held = Math.min(9, 5 + (n >> 1));
+  const nests = Math.min(7, 4 + (n >> 2));
+  // Frontier worlds are big and get bigger: more ground between you and the
+  // hives, longer lanes, more room for the front to be a place. Capped where
+  // the flow-field and mesh still stay comfortable.
+  const size = Math.min(220, 172 + n * 6);
+  return {
+    id, name, galaxy: true, seed: (77000 + id * 613) >>> 0,
+    mult, size, nests,
+    economy: {
+      startGold: Math.min(140, 96 + n * 4),
+      income: Math.min(1.25, 1.16 + n * 0.01),
+      pressure: Math.min(1.15, 1.08 + n * 0.01),
+    },
+    quests: [
+      { id: `g${id}q1`, name: 'Deeper Still', desc: `Slay ${kills} of the dead`, reward: null, check: (g) => g.stats.kills >= kills },
+      { id: `g${id}q2`, name: 'Ground Held', desc: `Hold ${held} lane nodes at once`, reward: null, check: (g) => g.stats.bestHeld >= held },
+      { id: `g${id}q3`, name: 'Liberation', desc: 'Raze every hive', reward: null, check: (g) => g.stats.nests >= nests },
+    ],
+    blurb: `${GALAXY_BLURBS[terrain]} Frontier world ${n} — the war goes on.`,
+    theme: { terrain, city, palette },
+    boss,
+  };
+}
+
+// The one lookup the whole game uses. Ids 1..5 are the authored war; everything
+// past them is the procedural galaxy.
+const _galaxyCache = new Map();
+export function levelById(id) {
+  const n = Math.max(1, id | 0);
+  if (n <= LEVELS.length) return LEVELS[n - 1];
+  if (!_galaxyCache.has(n)) _galaxyCache.set(n, galaxyLevel(n));
+  return _galaxyCache.get(n);
+}
 
 export const DIFFICULTY = {
   casual: { label: 'Casual', mult: 0.5, ambient: 0.6 },

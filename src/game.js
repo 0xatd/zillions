@@ -14,7 +14,7 @@ import {
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
-  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits,
+  HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
 import { FlowField } from './flowfield.js';
@@ -46,7 +46,7 @@ export class Game {
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.levelId = snap ? snap.level : levelId;
     this.mode = snap ? snap.mode || 'campaign' : mode;
-    this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
+    this.level = levelById(this.levelId || 1);
     this.economy = { startGold: START_GOLD, income: 1, pressure: 1, ...(this.level.economy || {}) };
     this.boss = null;
     this.rng = makeRNG(999);

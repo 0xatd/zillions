@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
-import { LEVELS, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
+import { LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
 
@@ -281,6 +281,46 @@ for (const level of LEVELS) {
     console.log(`  forts   ${nodeForts.nodes} expansion sites, ${nodeForts.palisades} with a natural pinch to fence`);
     console.log(`  siege   ${sortie.units} troops (${sortie.out} pushed out), ${sortie.zombies} dead afoot, threat ${sortie.threat} after 2min`);
     console.log(`  chokes  ${map.chokeSpots.length} natural gaps: ${map.chokeSpots.slice(0, 5).map((c) => `${c.name} (${c.width} wide)`).join(', ')}`);
+  }
+}
+
+// --- the galaxy: the campaign must never run out of playable planets -------
+// Spot-check a spread of procedural planets the same way the horde will see
+// them: generated, founded, connected, and never sealed or marooned.
+{
+  const spotIds = [6, 7, 8, 9, 13, 21, 40];
+  const combos = new Set();
+  for (const id of spotIds) {
+    const lv = levelById(id);
+    const label = `${lv.name} (galaxy planet ${id})`;
+    assert.ok(lv.galaxy, `${label} did not come from the galaxy generator`);
+    // Deterministic: the same planet number is the same planet, always.
+    const again = galaxyLevel(id);
+    assert.equal(lv.seed, again.seed, `${label} is not deterministic`);
+    assert.equal(lv.name, again.name, `${label} name is not deterministic`);
+    combos.add(`${lv.theme.terrain}/${lv.theme.city}`);
+    assert.ok(lv.economy.income <= 1.25 && lv.economy.pressure <= 1.15,
+      `${label} economy multipliers out of bounds`);
+
+    const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
+    const game = new Game(map, 'normal', 'alexander', null, id, 'campaign');
+    game.foundCity(0, 0);
+    assert.equal(game.level.id, id, `${label}: the sim looked up a different level`);
+    assert.ok(game.laneGraph && game.laneGraph.size > 0, `${label} built no lane graph`);
+    assert.ok(game.nests.every((n) => n.alive), `${label} shipped an unreachable hive`);
+    assert.ok(game.activeNodes().length >= 6, `${label} has too few reachable nodes`);
+    for (let i = 0; i < 20 * 30; i++) game.update(1 / 30);
+    assert.ok(game.zombies.length > 0, `${label}: the hives never mustered`);
+  }
+  assert.ok(combos.size === spotIds.length,
+    `galaxy planets repeat landform/plan combos too early (${combos.size}/${spotIds.length} distinct)`);
+  if (REPORT) {
+    console.log(`
+galaxy — first frontier worlds:`);
+    for (const id of spotIds) {
+      const lv = levelById(id);
+      console.log(`  ${String(id).padStart(3)}  ${lv.name.padEnd(18)} ${lv.theme.terrain}/${lv.theme.city}  x${lv.mult.toFixed(2)}  ${lv.boss.name}`);
+    }
   }
 }
 

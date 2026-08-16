@@ -73,6 +73,10 @@ Do not turn Survival back into a generic RTS or a debug launcher.
    Each whole Threat level triggers a simultaneous surge from every hive.
 5. Campaign maps end when every hive is razed and the champion leading the
    final counterattack is killed — or when the Keep falls.
+6. The campaign is the war for Earth (five authored fronts). Past it the
+   galaxy is procedural and endless: frontier worlds are deterministic from
+   their number, get larger and harder with depth, and stay liberated on the
+   player's profile once cleared.
 
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.

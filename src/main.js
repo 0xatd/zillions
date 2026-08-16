@@ -1,7 +1,7 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import {
-  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
+  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
@@ -163,7 +163,7 @@ class App {
 
   showMenuBackdrop(levelId) {
     if (this.game) return;
-    const level = LEVELS[(levelId || 1) - 1] || LEVELS[0];
+    const level = levelById(levelId || 1);
     if (this.menuLevelId === level.id) return;
     this.menuLevelId = level.id;
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; }
@@ -184,7 +184,7 @@ class App {
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
-    const level = LEVELS[levelId - 1] || LEVELS[0];
+    const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
@@ -2612,7 +2612,7 @@ class App {
   // Live side-quest status for the pause menu (campaign only).
   _questStatus() {
     if (!this.game || this.game.mode !== 'campaign') return null;
-    const lv = LEVELS[this.game.levelId - 1];
+    const lv = levelById(this.game.levelId);
     return (lv.quests || []).map((q) => ({
       name: q.name, desc: q.desc, reward: q.reward,
       claimed: !!(this.profile.questsDone || {})[q.id],

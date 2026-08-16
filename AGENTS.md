@@ -66,6 +66,13 @@ The gameplay base is continuous siege on a lane graph:
   `SIEGE.scoutRadius`. Never reveal ownership the player has not scouted.
 - Campaign win: raze every hive, then kill the champion that leads the final
   counterattack. Loss: the Keep falls.
+- The campaign is the war for EARTH (the five authored levels), and Earth is
+  one star in a procedural galaxy. `levelById(n)` in `src/config.js` is the ONE
+  level lookup: 1-5 are authored, 6+ are generated deterministically from the
+  planet number (landform x plan combo walk, hue-shifted palette, scaled
+  economy and elder-boss variants, maps growing to 220). Never index LEVELS
+  directly for a level id. Cleared worlds persist via `profile.campaign` —
+  liberation must stay sticky.
 - No individual squad micro. Squads are autonomous, but the player sets the
   global stance: Defend city, Follow hero, or Push the lanes.
 - Hero progression is player-chosen. Level-ups grant upgrade points for Aura,
