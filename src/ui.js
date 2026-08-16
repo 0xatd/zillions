@@ -767,7 +767,7 @@ export class UI {
     if (!button) return;
     const high = quality === 'high';
     button.textContent = high ? '✨' : '◐';
-    button.title = high ? 'Graphics: high (outlines, emissive bloom, SMAA)' : 'Graphics: low (direct rendering)';
+    button.title = high ? 'Graphics: high (outlines, high-threshold bloom, SMAA)' : 'Graphics: low (direct rendering)';
     button.classList.toggle('active', high);
   }
 

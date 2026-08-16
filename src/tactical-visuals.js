@@ -4,6 +4,7 @@ import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from '../vendor/jsm/postprocessing/OutlinePass.js';
 import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
+import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 
 const QUALITY_KEY = 'zillions_graphics_quality';
 
@@ -44,6 +45,7 @@ export class TacticalVisuals {
 
     this.smaa = new SMAAPass(1, 1);
     this.composer.addPass(this.smaa);
+    this.composer.addPass(new OutputPass());
     this.applyQuality(this.quality, false);
   }
 
