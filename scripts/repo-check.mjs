@@ -26,9 +26,12 @@ function filesUnder(rel) {
 for (const rel of [
   'AGENTS.md',
   'README.md',
+  'llms.txt',
   'docs/agent-brief.md',
+  'docs/architecture.md',
   'docs/backend.md',
   'docs/product-contract.md',
+  'docs/review-guide.md',
   'supabase/schema.sql',
 ]) {
   assert.ok(read(rel).trim().length > 0, `${rel} must exist and be non-empty`);
@@ -67,11 +70,11 @@ assert.ok(tacticalVisuals.includes('new OutputPass()'), 'postprocessing must pre
 assert.ok(read('src/main.js').includes('this.tacticalVisuals.render()'), 'main renderer must use the tactical visual pipeline');
 
 const readme = read('README.md');
-assert.ok(readme.includes('GitHub repository: https://github.com/0xatd/zillions'), 'README must link the GitHub repo');
-assert.ok(readme.includes('GitHub repo metadata should point to the production game'), 'README must document GitHub repo metadata expectations');
+assert.ok(readme.includes('https://github.com/0xatd/zillions'), 'README must link the GitHub repo');
+assert.ok(readme.includes('https://zillions.taborlin.co'), 'README must link production');
 assert.ok(readme.includes('can reach level 100'), 'README must document the live hero level cap');
-assert.ok(readme.includes('adaptive buffer of 3–10 consecutive windows'), 'README must document adaptive multiplayer buffering');
-assert.ok(readme.includes('watch an active game without taking a seat'), 'README must document read-only Watch mode');
+assert.ok(read('docs/architecture.md').includes('consecutive-window buffer'), 'architecture must document consecutive multiplayer buffering');
+assert.ok(read('docs/product-contract.md').includes('Watch'), 'product contract must document Watch mode');
 assert.ok(!/Heroes earn XP[^\n]*level 1[–-]10/i.test(readme), 'README must not describe level 10 as the hero cap');
 
 for (const rel of ['AGENTS.md', 'README.md', 'docs/agent-brief.md', 'docs/product-contract.md']) {
@@ -121,7 +124,7 @@ for (const [key, expected] of Object.entries(canonicalHeroes)) {
   assert.equal(HEROES[key]?.name, expected.name, `${key} canonical hero name changed`);
   assert.equal(HEROES[key]?.color, expected.color, `${key} hero model armor color changed`);
   assert.equal(HEROES[key]?.trim, expected.trim, `${key} hero model trim color changed`);
-  assert.ok(readme.includes(`| ${expected.name} |`), `${expected.name} is missing from the README roster`);
+  assert.ok(readme.includes(expected.name), `${expected.name} is missing from the README roster`);
 }
 assert.ok(read('docs/agent-brief.md').includes('The canonical hero roster is Scott English'),
   'agent brief must identify the canonical roster');
@@ -192,3 +195,30 @@ assert.match(uiSource, /id="solo-campaign-resume"/, 'campaign resumes must stay 
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
 assert.doesNotMatch(uiSource, /id="m-play"/, 'Campaign must not return as the primary home-screen action');
+
+const architecture = read('docs/architecture.md');
+for (const rel of [
+  'src/config.js',
+  'src/game.js',
+  'src/main.js',
+  'src/map.js',
+  'src/net.js',
+  'src/online.js',
+  'src/plots.js',
+  'src/supabase.js',
+  'src/terrain.js',
+  'src/ui.js',
+  'supabase/schema.sql',
+]) {
+  assert.ok(architecture.includes(`\`${rel}\``), `architecture must document ${rel}`);
+}
+
+const llms = read('llms.txt');
+assert.ok(llms.includes('docs/architecture.md'), 'llms.txt must link the architecture guide');
+assert.ok(llms.includes('docs/review-guide.md'), 'llms.txt must link the review guide');
+assert.ok(llms.includes('Keep simulation deterministic'), 'llms.txt must state the determinism rule');
+
+const vision = read('docs/design-vision.md');
+assert.ok(vision.includes('This document describes possible future systems'), 'design vision must identify itself as future intent');
+assert.ok(!vision.includes('The bell makes stalling'), 'design vision must not present removed bell code as current');
+assert.ok(!vision.includes('levels 1 and 5 complete'), 'design vision must not keep obsolete simulated completion claims');
