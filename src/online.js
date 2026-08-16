@@ -9,7 +9,7 @@ const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
 const SIGNAL_ATTEMPTS = 3;
 const SIGNAL_RETRY_MS = 350;
-const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)';
+const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state,unlocked_level)';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -450,7 +450,7 @@ export class OnlineLobby {
     return games;
   }
 
-  async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal' } = {}) {
+  async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1 } = {}) {
     const metadata = { level, mode, hostName: this.me.name, players: 1 };
     const { data, error } = await this.sb.from('rooms').insert({
       name: `${this.me.name}'s frontier`,
@@ -470,6 +470,7 @@ export class OnlineLobby {
       hero: this.me.hero,
       ready: false,
       connection_state: 'online',
+      unlocked_level: Math.max(1, Number(unlockedLevel) || 1),
       last_seen_at: new Date().toISOString(),
     }, { onConflict: 'room_id,user_id' });
     if (seatError) throw new Error(seatError.message);
@@ -482,6 +483,7 @@ export class OnlineLobby {
       hero: this.me.hero,
       ready: false,
       connection_state: 'online',
+      unlocked_level: Math.max(1, Number(unlockedLevel) || 1),
     };
     this.game = roomToGame({ ...data, room_players: [{ user_id: this.me.id, display_name: this.me.name, hero: this.me.hero }] });
     await this._joinGameChannel(data.id, true);
@@ -648,7 +650,7 @@ export class OnlineLobby {
     throw new Error(`room message was not delivered (${lastStatus})`);
   }
 
-  async joinGame(game) {
+  async joinGame(game, unlockedLevel = 1) {
     this.game = game;
     const used = new Set((game._players || []).map((p) => Number(p.seat || 0)));
     let seat = 2;
@@ -661,6 +663,7 @@ export class OnlineLobby {
       hero: this.me.hero,
       ready: false,
       connection_state: 'online',
+      unlocked_level: Math.max(1, Number(unlockedLevel) || 1),
       last_seen_at: new Date().toISOString(),
     };
     const { error } = await this.sb.from('room_players').upsert(localPlayer, { onConflict: 'room_id,user_id' });

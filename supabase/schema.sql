@@ -136,12 +136,16 @@ create table if not exists public.room_players (
   hero text not null default 'scott',
   ready boolean not null default false,
   connection_state text not null default 'online' check (connection_state in ('online', 'away', 'offline')),
+  unlocked_level integer not null default 1 check (unlocked_level >= 1),
   joined_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   primary key (room_id, user_id),
   unique (room_id, seat)
 );
+
+alter table if exists public.room_players
+add column if not exists unlocked_level integer not null default 1;
 
 drop trigger if exists room_players_touch_updated_at on public.room_players;
 create trigger room_players_touch_updated_at

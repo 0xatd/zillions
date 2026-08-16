@@ -1151,11 +1151,14 @@ export class UI {
           : p.state === 'connected' || p.state === 'online' ? 'in room'
           : p.state === 'offline' ? 'offline'
           : 'joining';
+        const unlock = mode === 'campaign' && Number(p.unlockedLevel || 1) < Number(level || 1)
+          ? ` · 🔒 unlocked through Level ${Math.max(1, Number(p.unlockedLevel) || 1)}`
+          : '';
         slots.push(`
           <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''}">
             <span class="roomseat">${label}</span>
             <b></b>
-            <small>${hero} · ${state}</small>
+            <small>${hero} · ${state}${unlock}</small>
           </div>`);
       } else {
         slots.push(`

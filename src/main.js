@@ -17,6 +17,7 @@ import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
+import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -65,6 +66,13 @@ class App {
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
           if (this.onlineMode && this.lobby?.game) {
+            const eligibility = roomLevelEligibility(this.lobby.game);
+            if (!eligibility.eligible) {
+              const names = eligibility.blockers.map((p) => `@${p.name}`).join(', ');
+              this.ui.onlineStatus(`🔒 Level ${eligibility.level} cannot start. ${names} ${eligibility.blockers.length === 1 ? 'has' : 'have'} not unlocked it yet.`);
+              this._onRoomUpdate(this.lobby.game);
+              return;
+            }
             const readiness = roomConnectionReadiness(this.lobby.game, this.peers.length + 1);
             if (!readiness.ready) {
               this.ui.onlineStatus(`⏳ ${readiness.pending} player${readiness.pending === 1 ? '' : 's'} still connecting. START unlocks when everyone is linked.`);
@@ -663,6 +671,7 @@ class App {
       you: p.user_id === this.lobby?.me?.id,
       ready: !!p.ready,
       state: p.connection_state || 'online',
+      unlockedLevel: Math.max(1, Number(p.unlocked_level) || 1),
     }));
   }
 
@@ -1172,6 +1181,8 @@ class App {
     const isHost = this.mpRole === 'host';
     const isSpectator = this.mpRole === 'spectator';
     const readiness = roomConnectionReadiness(game, this.peers.length + 1);
+    const eligibility = roomLevelEligibility(game);
+    const compatible = eligibility.eligible;
     const { connected, expectedPlayers, pending, ready } = readiness;
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
@@ -1182,18 +1193,24 @@ class App {
       level: game.level || 1,
       difficulty: game.difficulty || 'normal',
       launchText: isHost
-        ? (!ready
+        ? (!compatible
+          ? `Cannot start Level ${eligibility.level}: ${eligibility.blockers.map((p) => `@${p.name} has only unlocked through Level ${p.unlockedLevel}`).join('; ')}.`
+          : !ready
           ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
           : connected > 1 ? `The game connection is ready for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
         : isSpectator ? 'You are connecting as a read-only watcher. The live battle will open automatically.'
         : 'You are in the room. Pick your hero and wait for the host to press START.',
     });
     this.ui.setStartButton(isHost ? {
-      text: ready
+      text: !compatible
+        ? `🔒  LEVEL ${eligibility.level} LOCKED FOR ${eligibility.blockers.length} PLAYER${eligibility.blockers.length === 1 ? '' : 'S'}`
+        : ready
         ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
         : `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`,
-      disabled: !ready,
-      title: ready ? 'The host launches the match for everyone connected.' : 'Start unlocks when every player in the room has a direct game connection.',
+      disabled: !ready || !compatible,
+      title: !compatible
+        ? 'Choose a level every player has unlocked before starting.'
+        : ready ? 'The host launches the match for everyone connected.' : 'Start unlocks when every player in the room has a direct game connection.',
     } : isSpectator ? {
       text: '⏳  LOADING LIVE BATTLE',
       disabled: true,
@@ -1304,6 +1321,7 @@ class App {
         level: this.ui.selectedLevel || 1,
         mode: this.ui.selectedMode || 'campaign',
         difficulty: this.ui.selectedDiff || 'normal',
+        unlockedLevel: highestUnlockedLevel(this.profile.campaign),
       });
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
       const room = lobby.game || game;
@@ -1512,7 +1530,7 @@ class App {
       title: rejoining ? 'Reconnecting you to the running match.' : 'Only the host can launch this room.',
     });
     try {
-      await lobby.joinGame(row);
+      await lobby.joinGame(row, highestUnlockedLevel(this.profile.campaign));
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
       const joinedRoom = lobby.game || row;
       this._onRoomUpdate(joinedRoom);
