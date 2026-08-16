@@ -423,7 +423,7 @@ body::after {
 }
 .gametitle.small { font-size: 44px; }
 .gamesub { opacity: 0.8; font-size: 15px; margin-bottom: 30px; max-width: 420px; }
-.menustack { display: flex; flex-direction: column; gap: 10px; width: min(340px, 80vw); margin-bottom: 26px; }
+.menustack { display: flex; flex-direction: column; gap: 10px; width: min(380px, 86vw); margin-bottom: 26px; }
 .menubtn {
   display: flex; align-items: baseline; gap: 4px;
   padding: 14px 22px; font-size: 18px; font-weight: 700; letter-spacing: 1px;
@@ -434,6 +434,29 @@ body::after {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: all 0.13s;
 }
+.homeactions .menubtn {
+  min-height: 72px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+}
+.homeactions .menubtn > span:nth-child(2) { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.homeactions .menubtn b { font-size: 19px; letter-spacing: 1.5px; }
+.homeactions .menubtn small { margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.4px; }
+.menuicon { width: 34px; text-align: center; font-size: 26px; }
+.menuarrow { margin-left: auto; color: var(--gold); font-size: 32px; line-height: 1; }
+.playonline {
+  min-height: 88px !important;
+  box-shadow: 0 0 28px rgba(255, 215, 94, 0.12), 0 5px 16px rgba(0, 0, 0, 0.55) !important;
+}
+.playonline .menuicon { font-size: 32px; }
+.playonline b { font-size: 23px !important; }
+.menuutilities { display: flex; gap: 8px; margin-top: 2px; }
+.utilitybtn {
+  padding: 9px 12px; color: rgba(232, 230, 223, 0.72); cursor: pointer; font: 600 12px/1 inherit;
+  background: rgba(24, 28, 34, 0.76); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px;
+}
+.utilitybtn:hover { color: #fff; border-color: rgba(255, 215, 94, 0.45); }
 .menubtn small { font-size: 11px; font-weight: 400; opacity: 0.6; margin-left: auto; }
 .menubtn:hover { transform: translateX(6px); border-color: rgba(255, 215, 94, 0.6); }
 .menubtn.primary {
@@ -443,6 +466,36 @@ body::after {
 }
 .menubtn.primary:hover { background: linear-gradient(180deg, rgba(170, 132, 44, 0.95), rgba(110, 82, 22, 0.95)); }
 .mainmenu .profilerow { justify-content: flex-start; }
+
+.solomenu { padding-right: 28px; }
+.menuback { position: absolute; top: 24px; left: max(6vw, 40px); }
+.solomodes {
+  display: grid; grid-template-columns: repeat(2, minmax(250px, 330px)); gap: 16px;
+  width: min(700px, calc(100vw - max(12vw, 80px))); margin-bottom: 24px;
+}
+.modecard {
+  display: flex; flex-direction: column; min-height: 300px; padding: 22px;
+  background: linear-gradient(145deg, rgba(39, 45, 54, 0.94), rgba(15, 18, 23, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.modecard:hover { border-color: rgba(255, 215, 94, 0.38); }
+.modeeyebrow { color: var(--gold); font-size: 10px; font-weight: 800; letter-spacing: 2px; opacity: 0.8; }
+.modecard h2 { margin: 10px 0 8px; color: #fff0bd; font-size: 22px; }
+.modecard p { min-height: 68px; margin: 0 0 16px; color: rgba(232, 230, 223, 0.72); font-size: 13px; line-height: 1.5; }
+.moderesume { min-height: 58px; margin-bottom: 10px; }
+.moderesume:empty { min-height: 0; margin-bottom: 0; }
+.resumebtn {
+  display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 11px; color: #dff7d9;
+  text-align: left; cursor: pointer; font-family: inherit; background: rgba(72, 135, 68, 0.2);
+  border: 1px solid rgba(137, 211, 122, 0.4); border-radius: 9px;
+}
+.resumebtn:hover { background: rgba(72, 135, 68, 0.32); border-color: rgba(137, 211, 122, 0.7); }
+.resumebtn > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.resumebtn b { font-size: 13px; }
+.resumebtn small { font-size: 10px; opacity: 0.68; text-transform: capitalize; }
+.modeprimary { width: 100%; margin-top: auto; font-size: 15px; }
+.modeprimary .menuarrow { font-size: 24px; }
 
 .accountscreen {
   position: absolute; inset: 0;
@@ -832,6 +885,15 @@ body::after {
   .gamechat { bottom: calc(var(--command-height) + var(--command-gap) * 2); }
 }
 @media (max-width: 600px) {
+  .mainmenu { padding: 76px 18px 24px; justify-content: center; background: rgba(7, 9, 13, 0.82); }
+  .gametitle { font-size: 42px; letter-spacing: 4px; }
+  .gametitle.small { font-size: 32px; }
+  .gamesub { margin-bottom: 18px; }
+  .menustack { width: 100%; }
+  .menuback { top: 18px; left: 18px; }
+  .solomenu { justify-content: flex-start; overflow-y: auto; }
+  .solomodes { grid-template-columns: 1fr; width: 100%; }
+  .modecard { min-height: 230px; }
   .lobbycreate { flex-wrap: wrap; }
   .joincode { width: 100%; }
   .joincode input { min-width: 0; flex: 1; }

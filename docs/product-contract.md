@@ -92,6 +92,12 @@ before you add more strategic systems.
 ## Production UX Rules
 
 - Production must be account-first.
+- The signed-in home screen is multiplayer-first. `Play Online` is the primary
+  action. `Play Solo` contains Story Campaign and Survival.
+- Campaign and Survival own their saved runs. Show Resume inside the matching
+  solo mode. Do not add a generic Continue button to the home screen.
+- Treat Campaign as the finite story/onboarding path. Do not present it as the
+  whole product or as the primary repeat-play action.
 - The player should see a real sign-in gate before the game shell.
 - Google-backed Zillions accounts are the durable identity.
 - After Google sign-in, the player must choose a public username for that
