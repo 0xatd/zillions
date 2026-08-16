@@ -464,6 +464,27 @@ begin
     ) then
       alter publication supabase_realtime add table public.friendships;
     end if;
+
+    -- The lobby games feed and room rosters subscribe to postgres_changes on
+    -- these two tables; without them in the publication no event ever fires
+    -- and clients only see new games / joined players after a manual refresh.
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'rooms'
+    ) then
+      alter publication supabase_realtime add table public.rooms;
+    end if;
+
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'room_players'
+    ) then
+      alter publication supabase_realtime add table public.room_players;
+    end if;
   end if;
 end;
 $$;

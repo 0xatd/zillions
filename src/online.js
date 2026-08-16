@@ -154,6 +154,10 @@ export class OnlineLobby {
         return;
       }
       this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
+      // Poll the games list too: realtime events on rooms depend on the
+      // supabase_realtime publication, so the browse list must self-heal even
+      // when no postgres_changes event arrives.
+      this.refreshGames().catch(() => {});
     }, 15 * 1000);
 
     this.sb.channel('zl-rooms-feed')
@@ -618,8 +622,12 @@ export class OnlineLobby {
     this.gameChan
       .on('broadcast', { event: 'sig' }, (m) => {
         const s = m.payload;
-        if (asHost && s.t === 'knock' && this.cb.onKnock) this.cb.onKnock(s);
-        else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
+        if (asHost && s.t === 'knock') {
+          // The knocker has already written their seat row; re-read the room
+          // so the roster shows them even if no postgres_changes event fires.
+          this._refreshCurrentThrottled();
+          if (this.cb.onKnock) this.cb.onKnock(s);
+        } else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${gameId}` }, () => {
         this._refreshCurrentThrottled();
