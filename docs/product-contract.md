@@ -19,11 +19,15 @@ Use continuous siege on a lane graph as the gameplay base:
 - Closed ramparts with gate chokepoints.
 - Pre-planned house, farm, mill, mine, camp, tower, and wall plots.
 - Hold the interact key to stream coins into a plot.
+- An incomplete build or upgrade refunds its committed coins when the player
+  releases the key, walks away, or cannot pay the full cost. Show the coins
+  flying back to the hero.
 - Economy must be level-balanced against gold the player can actually collect.
   A campaign level should start with enough gold for a real opening choice, and
   income upgrades should pay back inside a few minutes of siege.
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; ground coins come from combat and conquest.
+  Every enemy drops at least one coin.
 - Nothing repairs itself — damage and ruins are paid for with the same
   hold-to-build verb.
 - Threat is the clock, and every whole level makes every hive muster at once.

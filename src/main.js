@@ -2791,6 +2791,11 @@ class App {
         case 'paycoin':
           this._spawnPayCoins(e.fx, e.fz, e.tx, e.tz, e.n || 1);
           break;
+        case 'refundcoin':
+          this._spawnPayCoins(e.fx, e.fz, e.tx, e.tz, e.n || 1);
+          this.audio.coin();
+          this.stream(e.fx, 0.3, e.fz, e.tx, 0.9, e.tz, { count: Math.min(12, e.n || 1), color: 0xfff2b0, size: 0.48, life: 0.45 });
+          break;
         case 'coinspawn':
           if (e.fx !== undefined) {
             this.stream(e.fx, 1.2, e.fz, e.x, 0.35, e.z, { count: 2, color: 0xffd75e, size: 0.35, life: 0.3 });
