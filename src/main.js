@@ -19,6 +19,7 @@ import { roomConnectionReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
+import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -214,7 +215,8 @@ class App {
 
     // WC3-style menu: the battlefield lives behind the buttons.
     this.showMenuBackdrop(this.ui.selectedLevel || 1);
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
+    this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
 
   // ---------------- menu backdrop ----------------
@@ -847,19 +849,39 @@ class App {
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
-  continueGame() {
+  async continueGame() {
     const save = this._loadSave();
     if (!save) return;
-    if (this.mpRole === 'host' && this.peers.length) {
-      if (save.snap.heroKeys.length !== this.peers.length + 1) {
-        this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
-        return;
+    await recoverableRestore(async () => {
+      if (this.mpRole === 'host' && this.peers.length) {
+        if (save.snap.heroKeys.length !== this.peers.length + 1) {
+          this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
+          return;
+        }
+        this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1 }));
+        await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
+      } else if (!this.mpRole) {
+        await this.startGame(save.snap.diff, null, null, save.snap);
       }
-      this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1 }));
-      this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
-    } else if (!this.mpRole) {
-      this.startGame(save.snap.diff, null, null, save.snap);
+    }, (error) => this._discardBrokenSave(error));
+  }
+
+  _discardBrokenSave(error) {
+    console.error('saved game restore failed', error);
+    try { localStorage.removeItem('zillions_save'); } catch { /* blocked storage */ }
+    this.ui.setContinue(null);
+    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    this.ui.showBanner('That save could not be restored and was removed. Start a new war.', 'bad', 8000);
+    if (this.auth?.isSignedIn()) {
+      this.auth.clearLatestSave().catch((cloudError) => console.warn('cloud save clear failed', cloudError));
     }
+  }
+
+  _handleFrameError(error) {
+    this.paused = true;
+    this._netPumpStop();
+    console.error('game frame failed', error);
+    this.ui.showBanner('The battlefield stopped after an error. Reload to continue.', 'bad', 15000);
   }
 
   async hostGame() {

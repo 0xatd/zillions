@@ -238,6 +238,17 @@ function assertSiegeLoop(level) {
     `${level.name} camp never mustered a second squad`,
   );
 
+  // A branch tier without a selected doctrine is not a valid construction.
+  // Reject it before changing the plot or its existing building definition.
+  const branchPlot = game.plots.find((p) => p.kind === 'tower');
+  while (game.nextTier(branchPlot) && !game.nextTier(branchPlot).branch) game._construct(branchPlot, true);
+  const branchBuilding = game.buildings.find((b) => b.plotId === branchPlot.id);
+  const branchTierBefore = branchPlot.tier;
+  const branchDefBefore = branchBuilding.def;
+  game._construct(branchPlot, true);
+  assert.equal(branchPlot.tier, branchTierBefore, `${level.name} invalid branch construction changed the tier`);
+  assert.equal(branchBuilding.def, branchDefBefore, `${level.name} invalid branch construction poisoned the building`);
+
   // Hives keep producing on their own, forever.
   const before = game.zombies.length;
   for (let i = 0; i < 40; i++) game._updateHives(1);
