@@ -94,9 +94,13 @@ of tower plots. Chokepoints, by design.
   gold continuously. Physical coins now drop only from kills, captured nodes
   and razed hives — so the coin-hoover is a reward for fighting, not a chore
   at sunrise.
-- **Nothing repairs itself.** Hold Space in Build mode, or B anytime, on a
+- **Repairs can be automated.** Hold Space in Build mode, or B anytime, on a
   damaged building to repair it for gold, or on a ruin to rebuild it at half
-  price. Damage is a bill.
+  price. Auto-Workshops and final-tier Repair Bastions maintain nearby standing
+  structures. They never rebuild ruins or choose upgrades.
+- **Major progression lives in the city.** Build the Hero Forge beside the Keep
+  for large shared hero upgrades. Core plots have expensive capstone tiers for
+  late-game income.
 - **Threat is the clock.** It climbs on its own, faster while hives stand, and
   a little every time you take ground. Every whole Threat level, every hive
   musters at once.

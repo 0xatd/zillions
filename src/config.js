@@ -114,6 +114,7 @@ export const PLOT_KINDS = {
       { name: 'The Keep', cost: 0, hp: 4200, income: 10 },
       { name: 'Stone Keep', cost: 56, hp: 6500, income: 24 },
       { name: 'High Keep', cost: 100, hp: 9000, income: 42 },
+      { name: 'Citadel Nexus', cost: 220, hp: 14000, income: 70 },
     ],
     desc: 'The heart of the city. If it falls, all is lost. Upgrades add income and armor.',
   },
@@ -123,6 +124,7 @@ export const PLOT_KINDS = {
       { name: 'Cottage', cost: 12, hp: 300, income: 6 },
       { name: 'House', cost: 18, hp: 420, income: 13 },
       { name: 'Manor', cost: 34, hp: 560, income: 24 },
+      { name: 'Arcology', cost: 82, hp: 900, income: 44 },
     ],
     desc: 'Home to taxpaying settlers. Pays coins on every income tick.',
   },
@@ -131,6 +133,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Field', cost: 8, hp: 240, income: 5 },
       { name: 'Farm', cost: 15, hp: 320, income: 11 },
+      { name: 'Hydroponic Estate', cost: 58, hp: 520, income: 24 },
     ],
     desc: 'Cheap early coins from the soil.',
   },
@@ -139,6 +142,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Windmill', cost: 20, hp: 380, income: 11 },
       { name: 'Great Mill', cost: 34, hp: 500, income: 23 },
+      { name: 'Matter Mill', cost: 88, hp: 760, income: 44 },
     ],
     desc: 'Grinds a steady stream of coins.',
   },
@@ -147,6 +151,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Gold Mine', cost: 30, hp: 480, income: 18 },
       { name: 'Deep Mine', cost: 48, hp: 640, income: 36 },
+      { name: 'Planetary Bore', cost: 120, hp: 980, income: 70 },
     ],
     desc: 'Rich veins, far from safety. The best coins are the hardest to hold.',
   },
@@ -162,6 +167,15 @@ export const PLOT_KINDS = {
             blurb: 'Slow, huge single hits at extreme range. Boss killer.' },
           flame: { name: 'Flame Tower', icon: '🔥', cost: 54, hp: 850, dmg: 13, rof: 1.7, range: 8.5, splash: 2.4,
             blurb: 'Fast burning splash. Melts packed hordes up close.' },
+        },
+      },
+      {
+        branch: true, // preserves the chosen doctrine for its capstone
+        options: {
+          ballista: { name: 'Rail Bastion', icon: '☄️', cost: 145, hp: 1400, dmg: 145, rof: 0.85, range: 18, splash: 0.8,
+            blurb: 'A major long-range rail battery for champions and hive sieges.' },
+          flame: { name: 'Plasma Crucible', icon: '🌋', cost: 145, hp: 1400, dmg: 29, rof: 2.1, range: 10, splash: 3.4,
+            blurb: 'A major plasma capstone that erases packed pressure.' },
         },
       },
     ],
@@ -191,6 +205,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Militia Camp', cost: 24, hp: 460, count: 2, every: 26 },
       { name: 'War Camp', cost: 44, hp: 600, count: 3, every: 20 },
+      { name: 'Legion Foundry', cost: 110, hp: 900, count: 5, every: 16 },
     ],
     desc: 'Sturdy troopers. Musters a fresh squad on a timer, forever.',
   },
@@ -200,6 +215,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Ranger Camp', cost: 18, hp: 420, count: 2, every: 22 },
       { name: 'Ranger Lodge', cost: 34, hp: 540, count: 3, every: 17 },
+      { name: 'Pathfinder Command', cost: 96, hp: 820, count: 5, every: 14 },
     ],
     desc: 'Fast, quiet scouts. The cheapest steady pressure you can buy.',
   },
@@ -209,6 +225,7 @@ export const PLOT_KINDS = {
     tiers: [
       { name: 'Sniper Nest', cost: 34, hp: 420, count: 1, every: 30 },
       { name: 'Marksman Hall', cost: 56, hp: 540, count: 2, every: 26 },
+      { name: 'Longshot Academy', cost: 132, hp: 820, count: 3, every: 20 },
     ],
     desc: 'Massive damage at extreme range — every shot echoes.',
   },
@@ -220,8 +237,28 @@ export const PLOT_KINDS = {
       { name: 'Forward Camp', cost: 34, hp: 620, count: 2, every: 24, income: 6 },
       { name: 'War Outpost', cost: 58, hp: 900, count: 3, every: 19, income: 12, dmg: 16, rof: 1.0, range: 6.2 },
       { name: 'Lane Bastion', cost: 86, hp: 1250, count: 4, every: 16, income: 16, dmg: 28, rof: 0.9, range: 6.8, splash: 1.1 },
+      { name: 'Repair Bastion', cost: 165, hp: 1900, count: 5, every: 14, income: 24, dmg: 42, rof: 1.0, range: 7.2, splash: 1.4,
+        repairRadius: 9, repairRate: 32 },
     ],
     desc: 'Raise it on ground you hold. Upgrades turn each lane into a short-range guard post that musters blockers and shoots nearby pressure.',
+  },
+  workshop: {
+    name: 'Auto-Workshop', icon: '🔧',
+    tiers: [
+      { name: 'Repair Depot', cost: 46, hp: 620, repairRadius: 12, repairRate: 18 },
+      { name: 'Drone Workshop', cost: 105, hp: 980, repairRadius: 18, repairRate: 42 },
+      { name: 'City Fabricator', cost: 190, hp: 1450, repairRadius: 28, repairRate: 78 },
+    ],
+    desc: 'Automatically repairs damaged structures in range. Upgrade it to cover most of the city.',
+  },
+  hero_forge: {
+    name: 'Hero Forge', icon: '⚛️',
+    tiers: [
+      { name: 'Hero Armory', cost: 55, hp: 700, heroDmg: 0.12, heroHp: 90, heroCdr: 0.05 },
+      { name: 'Augmentation Forge', cost: 125, hp: 1100, heroDmg: 0.25, heroHp: 220, heroCdr: 0.12 },
+      { name: 'Ascension Core', cost: 240, hp: 1700, heroDmg: 0.42, heroHp: 420, heroCdr: 0.22 },
+    ],
+    desc: 'A physical home for hero progression. Each tier upgrades every allied hero.',
   },
 };
 

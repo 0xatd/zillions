@@ -114,6 +114,9 @@ for (const [key, hero] of Object.entries(HEROES)) {
 const outpost = PLOT_KINDS.outpost;
 assert.equal(outpost.onNode, true, 'Forward Camps must stay tied to captured lane nodes');
 assert.ok(outpost.tiers.length >= 3, 'Forward Camps must upgrade into a lane-anchor tier');
+assert.ok(outpost.tiers.at(-1).repairRate > 0, 'final Forward Camp must automate local repairs');
+assert.ok(PLOT_KINDS.workshop?.tiers?.length >= 3, 'city must have a deep Auto-Workshop progression');
+assert.ok(PLOT_KINDS.hero_forge?.tiers?.length >= 3, 'city must have a physical Hero Forge progression');
 assert.ok(outpost.tiers[1].dmg > 0 && outpost.tiers[1].range <= 7, 'War Outpost must be short-range lane support');
 assert.ok(outpost.tiers[2].dmg > outpost.tiers[1].dmg && outpost.tiers[2].splash > 0, 'Lane Bastion must add siege/splash support');
 

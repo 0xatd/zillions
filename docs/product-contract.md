@@ -28,8 +28,11 @@ Use continuous siege on a lane graph as the gameplay base:
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; ground coins come from combat and conquest.
   Every enemy drops at least one coin.
-- Nothing repairs itself — damage and ruins are paid for with the same
-  hold-to-build verb.
+- Damage and ruins use the hold-to-build verb. Bought Auto-Workshops and final
+  Repair Bastions automatically repair nearby standing structures, but never
+  rebuild ruins or choose upgrades.
+- The main base has a physical Hero Forge with three major shared hero tiers.
+  Core economy, army, Keep, and Forward Camp plots have expensive capstones.
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
 - Hive nests are real bases: health, defenders, and blighted ground.
