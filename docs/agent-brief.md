@@ -137,7 +137,9 @@ Do not describe any of it as shipped.
 - Movement is fixed to world/minimap orientation, not camera-relative.
 - W moves north/up, A west/left, S south/down, D east/right.
 - Camera yaw stays fixed during gameplay.
-- Hold Space/B to build, upgrade, repair, or rebuild.
+- Alt toggles Space between Build mode and Fight mode. In Build mode, hold
+  Space/B to build, upgrade, repair, or rebuild. In Fight mode, Space casts and
+  B still builds.
 - Upgrades must work from all sides of a building footprint.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,

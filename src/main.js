@@ -40,7 +40,9 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    this.lastPay = false;       // build key (B) held state, mirrored into the sim
+    this.controlMode = 'build'; // Alt toggles whether Space prioritizes build or fight.
+    this.buttonPay = false;     // command-bar build button held state
+    this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
     this.projectiles = [];      // visible bullets/bolts/globs, slower than damage
     this.zombieAttacks = new Map();
@@ -62,6 +64,8 @@ class App {
         }
       },
       onCast: () => this.tryCast(),
+      onControlMode: () => this.toggleControlMode(),
+      onBuildHold: (on) => { this.buttonPay = !!on; },
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
@@ -368,11 +372,11 @@ class App {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. Income is paid automatically; coins drop from fighting.'],
+      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
       [24, '⚔️ Camps muster a squad every few seconds, forever. Press 3 and they push out along the lanes on their own.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, '🔧 Nothing repairs itself — hold SPACE or B on damaged or ruined buildings to fix them. Press T beside a tower to change what it shoots.'],
+      [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -1074,8 +1078,60 @@ class App {
       flame: { color: 0xff7a2e, trail: 0xffd75e, speed: 11, size: 0.3, tail: 0.16, arc: 0.12 },
       shotgun: { color: 0xfff2b0, trail: 0xffd75e, speed: 18, size: 0.18, tail: 0.1, arc: 0.08 },
       grenade: { color: 0xffb84d, trail: 0xd8b45e, speed: 10, size: 0.34, tail: 0.18, arc: 2.2 },
+      spit: { color: 0xc9d84e, trail: 0xefff7a, speed: 9, size: 0.28, tail: 0.16, arc: 0.42 },
     };
     return specs[kind] || specs.soldier;
+  }
+
+  _shotVector(e) {
+    const dx = (e.tx ?? e.x ?? e.fx) - e.fx;
+    const dz = (e.tz ?? e.z ?? e.fz) - e.fz;
+    const d = Math.hypot(dx, dz) || 1;
+    return { sx: dx / d, sz: dz / d, rx: dz / d, rz: -dx / d };
+  }
+
+  _muzzlePoint(e, kind, extra = {}) {
+    const fx = extra.fx ?? e.fx;
+    const fz = extra.fz ?? e.fz;
+    if (fx == null || fz == null) return { x: 0, y: extra.fy ?? e.fy ?? 0.7, z: 0 };
+    const v = this._shotVector({ ...e, fx, fz, tx: extra.tx ?? e.tx, tz: extra.tz ?? e.tz });
+    let side = 0, forward = 0.35, y = extra.fy ?? e.fy ?? 0.72;
+    if (kind === 'tower' || kind === 'ballista' || kind === 'flame') {
+      forward = kind === 'ballista' ? 0.85 : 0.68;
+      y = extra.fy ?? e.fy ?? 3.1;
+    } else if (kind === 'spit') {
+      forward = 0.42;
+      y = extra.fy ?? e.fy ?? 0.92;
+    } else if (e.fromId) {
+      const rec = this.unitMeshes.get(e.fromId);
+      const u = rec && rec.u;
+      if (u && u.hero) {
+        side = u.key === 'scott' ? 0.26 : 0.3;
+        forward = u.def.melee ? 0.55 : 0.58;
+        y = extra.fy ?? e.fy ?? 0.92;
+      } else {
+        side = 0.2;
+        forward = 0.48;
+        y = extra.fy ?? e.fy ?? 0.74;
+      }
+    }
+    return {
+      x: fx + v.sx * forward + v.rx * side,
+      y,
+      z: fz + v.sz * forward + v.rz * side,
+    };
+  }
+
+  _targetPoint(e, kind, extra = {}) {
+    const tx = extra.tx ?? e.tx ?? e.x;
+    const tz = extra.tz ?? e.tz ?? e.z;
+    let y = extra.ty;
+    if (y == null) {
+      if (e.targetKind === 'nest') y = 1.45;
+      else if (e.targetKind === 'building') y = 1.0;
+      else y = kind === 'ballista' ? 0.75 : Math.max(0.52, 0.62 * (e.targetScale || 1));
+    }
+    return { x: tx, y, z: tz };
   }
 
   _spawnProjectile(e, extra = {}) {
@@ -1087,10 +1143,11 @@ class App {
     }
     const kind = extra.kind || e.kind || 'soldier';
     const spec = { ...this._projectileSpec(kind), ...extra };
-    const fx = extra.fx ?? e.fx, fz = extra.fz ?? e.fz;
-    const tx = extra.tx ?? e.tx, tz = extra.tz ?? e.tz;
-    const from = new THREE.Vector3(fx, extra.fy ?? e.fy ?? 0.75, fz);
-    const to = new THREE.Vector3(tx, extra.ty ?? 0.62, tz);
+    spec.kind = kind;
+    const muzzle = this._muzzlePoint(e, kind, extra);
+    const hit = this._targetPoint(e, kind, extra);
+    const from = new THREE.Vector3(muzzle.x, muzzle.y, muzzle.z);
+    const to = new THREE.Vector3(hit.x, hit.y, hit.z);
     const dist = Math.hypot(to.x - from.x, to.z - from.z);
     const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
     const core = new THREE.Mesh(
@@ -1106,7 +1163,7 @@ class App {
     core.renderOrder = 30;
     trail.renderOrder = 29;
     this.scene.add(trail, core);
-    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec });
+    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
   }
 
   _destroyProjectile(p) {
@@ -1151,11 +1208,35 @@ class App {
       p.core.material.opacity = Math.max(0, fade);
       p.trail.material.opacity = Math.max(0, 0.64 * fade);
       if (q >= 1) {
-        this.burst(p.to.x, p.to.y, p.to.z, { count: 3, color: p.spec.color, speed: 0.9, life: 0.18, size: p.spec.size * 1.6, spread: 0.08, up: 0.7 });
+        this._projectileImpact(p);
         this._destroyProjectile(p);
         this.projectiles.splice(i, 1);
       }
     }
+  }
+
+  _projectileImpact(p) {
+    const kind = p.impact?.kind || p.spec.kind;
+    const color = p.impact?.color ?? p.spec.color;
+    const x = p.to.x, y = p.to.y, z = p.to.z;
+    if (p.impact?.ring !== false) {
+      this._impactRing(x, z, {
+        color,
+        count: p.impact?.count || (kind === 'ballista' ? 18 : 12),
+        radius: p.impact?.radius || (kind === 'ballista' ? 1.35 : kind === 'flame' ? 1.25 : 0.9),
+        life: p.impact?.life || 0.22,
+        size: p.impact?.size || p.spec.size * 1.5,
+      });
+    }
+    this.burst(x, y, z, {
+      count: p.impact?.burst || (kind === 'flame' ? 16 : kind === 'shotgun' ? 8 : 5),
+      color,
+      speed: p.impact?.speed || (kind === 'flame' ? 2.4 : 1.4),
+      life: p.impact?.life || 0.32,
+      size: p.impact?.size || p.spec.size * 1.7,
+      up: p.impact?.up || 1.1,
+      spread: p.impact?.spread || 0.12,
+    });
   }
 
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
@@ -2340,18 +2421,20 @@ class App {
       if (!this.game) return;
       if (k === ' ') {
         e.preventDefault();
-        // Space — THE interact key: found the city, HOLD at a foundation to
-        // build/repair, otherwise fire the special.
+        // Space follows the current control mode. Build mode keeps the original
+        // Thronefall feel; fight mode lets Space cast even while standing at a plot.
         if (this.game.phase === 'found') this._tryFound();
         else {
           const h = this.myHero();
           const target = h && !h.dead && this.game.buildTargetFor(h);
-          // Standing on something fundable? _updateHeroInput streams gold while
-          // held. Standing anywhere else? Space is your special.
-          if (!target) this.tryCast();
+          if (this.controlMode === 'fight' || !target) this.tryCast();
         }
       }
       else if (k === 'q') this.tryCast();
+      else if (k === 'alt') {
+        e.preventDefault();
+        this.toggleControlMode();
+      }
       else if (k === '1') this.issue({ t: 'stance', s: 'defend', p: this.myPlayer });
       else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
@@ -2389,12 +2472,12 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Hold-to-build: SPACE held at a foundation streams your gold (B works
-    // too). Building never stops now — which is the whole risk.
+    // Hold-to-build: B always pays. Space/button pay only in Build mode, so the
+    // player can toggle into Fight mode when they want the special to win.
     const h = this.myHero();
-    const spacePays = this.keys.has(' ') && this.game && this.game.phase === 'live'
-      && h && !h.dead && !!this.game.buildTargetFor(h);
-    const pay = this.keys.has('b') || spacePays;
+    const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
+    const buildModePays = this.controlMode === 'build' && canPay && (this.keys.has(' ') || this.buttonPay);
+    const pay = this.keys.has('b') || buildModePays;
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -2402,6 +2485,17 @@ class App {
   }
 
   myHero() { return this.game ? this.game.heroes[this.myPlayer] : null; }
+
+  toggleControlMode() {
+    this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
+    this.buttonPay = false;
+    if (this.lastPay && !this.keys.has('b')) {
+      this.lastPay = false;
+      this.issue({ t: 'pay', p: this.myPlayer, on: false });
+    }
+    if (this.ui.setControlMode) this.ui.setControlMode(this.controlMode);
+    this.audio.click();
+  }
 
   tryCast() {
     if (!this.game) return;
@@ -2559,45 +2653,57 @@ class App {
             break;
           }
           if (e.kind === 'shotgun') {
-            // Point-blank thunder: wide muzzle blast + a fan of pellet streaks.
+            // Point-blank thunder: pellets now travel to the actual hit volume
+            // before the impact VFX fires, so the eye can track the shot.
             this.audio.shoot('shotgun');
-            this.burst(e.fx, e.fy || 0.9, e.fz, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
+            const muzzle = this._muzzlePoint(e, 'shotgun');
+            this.burst(muzzle.x, muzzle.y, muzzle.z, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
             const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
             for (let p = 0; p < 9; p++) {
               const a = ang + (p - 4) * 0.13;
-              const d = 0.8 + Math.random() * 0.5;
+              const spread = 0.25 + Math.random() * 0.35;
               this._spawnProjectile(e, {
                 kind: 'shotgun',
-                tx: e.fx + Math.sin(a) * (4.6 + d * 1.2),
-                tz: e.fz + Math.cos(a) * (4.6 + d * 1.2),
-                dur: 0.26 + Math.random() * 0.05,
+                tx: e.tx + Math.sin(a) * spread,
+                tz: e.tz + Math.cos(a) * spread,
+                ty: 0.6,
+                dur: 0.22 + Math.random() * 0.04,
+                impact: { kind: 'shotgun', color: 0xfff2b0, ring: p === 4, burst: p === 4 ? 12 : 2, radius: 1.1, speed: 2.2, life: 0.28, size: 0.38, up: 1.1 },
               });
-              this.burst(lerp(e.fx, e.fx + Math.sin(a) * 6.5, d * 0.18 + 0.35), 0.7, lerp(e.fz, e.fz + Math.cos(a) * 6.5, d * 0.18 + 0.35),
-                { count: 1, color: 0xfff2b0, speed: 0.2, life: 0.14, size: 0.44, spread: 0.05, up: 0 });
             }
-            this._impactRing(e.tx, e.tz, { color: 0xfff2b0, count: 16, radius: 1.15, life: 0.22, size: 0.4 });
-            this.burst(e.tx, 0.6, e.tz, { count: 12, color: 0x9c1f1f, speed: 2.4, life: 0.45, size: 0.58, up: 1.6 });
             this.shake = Math.max(this.shake, 0.14);
             break;
           }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
-            this._spawnProjectile(e, { kind: 'flame', ty: 0.45 });
-            this.stream(e.fx, e.fy || 2.6, e.fz, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
-            this._impactRing(e.tx, e.tz, { color: 0xff8a3c, count: 18, radius: 1.3, life: 0.25, size: 0.44 });
-            this.burst(e.tx, 0.5, e.tz, { count: 16, color: 0xff7a2e, speed: 2.5, life: 0.45, size: 0.68, up: 1.8, spread: 1.9 });
+            const muzzle = this._muzzlePoint(e, 'flame');
+            this._spawnProjectile(e, { kind: 'flame', ty: 0.45, impact: { kind: 'flame', color: 0xff8a3c, count: 18, radius: 1.3, burst: 18, speed: 2.5, life: 0.34, size: 0.56, up: 1.6, spread: 1.2 } });
+            this.stream(muzzle.x, muzzle.y, muzzle.z, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' ? 'sniper' : e.kind);
-          this._spawnProjectile(e, { ty: e.kind === 'ballista' ? 0.8 : 0.62 });
-          this.burst(e.fx, e.fy || 0.7, e.fz, { count: 6, color: 0xffe08a, speed: 1.0, life: 0.16, size: 0.58, spread: 0.12, up: 0.35 });
-          this._impactRing(e.tx, e.tz, { color: e.kind === 'ballista' ? 0xfff2b0 : 0xffd75e, count: 14, radius: e.kind === 'ballista' ? 1.35 : 0.95, life: 0.22, size: 0.38 });
-          this.burst(e.tx, 0.6, e.tz, { count: 8, color: 0x9c1f1f, speed: 1.9, life: 0.38, size: 0.48, up: 1.35 });
+          this._spawnProjectile(e, {
+            ty: e.kind === 'ballista' ? 0.8 : undefined,
+            impact: {
+              kind: e.kind,
+              color: e.kind === 'ballista' ? 0xfff2b0 : 0xffd75e,
+              count: e.kind === 'ballista' ? 16 : 12,
+              radius: e.kind === 'ballista' ? 1.35 : 0.95,
+              burst: e.kind === 'ballista' ? 10 : 6,
+              speed: e.kind === 'ballista' ? 1.8 : 1.35,
+              life: 0.28,
+              size: e.kind === 'ballista' ? 0.44 : 0.34,
+              up: 1.25,
+            },
+          });
+          const muzzle = this._muzzlePoint(e, e.kind || 'soldier');
+          const hit = this._targetPoint(e, e.kind || 'soldier', { ty: e.kind === 'ballista' ? 0.8 : undefined });
+          this.burst(muzzle.x, muzzle.y, muzzle.z, { count: 6, color: 0xffe08a, speed: 1.0, life: 0.16, size: 0.58, spread: 0.12, up: 0.35 });
           const steps = 8;
           for (let i = 1; i < steps; i++) {
             const t = i / steps;
-            this.burst(lerp(e.fx, e.tx, t), lerp(e.fy || 0.7, 0.6, t), lerp(e.fz, e.tz, t),
+            this.burst(lerp(muzzle.x, hit.x, t), lerp(muzzle.y, hit.y, t), lerp(muzzle.z, hit.z, t),
               { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.14, size: 0.38, spread: 0.02, up: 0 });
           }
           if (e.kind === 'tower' || e.kind === 'ballista') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
@@ -2685,7 +2791,16 @@ class App {
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
-          this.stream(e.fx, 1.0, e.fz, e.tx, 0.8, e.tz, { count: 4, color: 0xc9d84e, size: 0.4, life: 0.3 });
+          this._spawnProjectile(e, {
+            kind: 'spit',
+            fy: 0.92,
+            ty: e.targetKind === 'building' ? 1.0 : 0.62,
+            impact: { kind: 'spit', color: 0xc9d84e, count: 10, radius: 0.75, burst: 8, speed: 1.4, life: 0.28, size: 0.34, up: 0.9, spread: 0.2 },
+          });
+          {
+            const muzzle = this._muzzlePoint(e, 'spit', { fy: 0.92 });
+            this.stream(muzzle.x, muzzle.y, muzzle.z, e.tx, e.targetKind === 'building' ? 1.0 : 0.65, e.tz, { count: 2, color: 0xc9d84e, size: 0.34, life: 0.22 });
+          }
           break;
         case 'founded': {
           // The chosen ground is levelled and the city plan appears — rebuild
@@ -3017,14 +3132,17 @@ class App {
           const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+          const buildKeys = this.controlMode === 'build'
+            ? '<kbd>SPACE</kbd> or <kbd>B</kbd>'
+            : '<kbd>B</kbd>';
           hint = mh.payHold
             ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-            : `<div>Hold <kbd>SPACE</kbd> or <kbd>B</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+            : `<div>Hold ${buildKeys} — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}${this.controlMode === 'fight' ? ' · Fight mode: Space fires your special. Alt toggles.' : ' · Alt toggles Fight mode.'}</div>`;
         }
       }
       this.ui.showBuildHint(hint);
 
-      this.ui.update(this.game, this.myPlayer);
+      this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
       this.ui.updateBoss(this.game);
 
       this.autosaveT -= dt;

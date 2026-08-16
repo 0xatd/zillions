@@ -25,7 +25,7 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Spend by holding SPACE at a foundation">🪙 <b>0</b></div>
+        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold Space in Build mode, or B anytime, to spend at a foundation">🪙 <b>0</b></div>
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
         <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
@@ -55,6 +55,7 @@ export class UI {
           <div class="rallyhints" id="stancebar">
             <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Push the lanes: take nodes, then siege the hives"><b>3</b> ⚔️ Push lanes</span>
           </div>
+          <button class="mode-toggle build" id="mode-toggle" title="Alt toggles whether Space builds or fires the hero special"><b>ALT</b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
         <div class="actionmain">
@@ -125,7 +126,7 @@ export class UI {
           </div>
           <div class="steplabel">1 · Battlefield</div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE</small></div>
+          <div class="steplabel">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
           <div class="herorow" id="herorow"></div>
           <div class="steplabel">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
@@ -186,11 +187,11 @@ export class UI {
           <div class="howto">
             <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> Walk to a glowing foundation and HOLD <b>SPACE</b> or <b>B</b> — coins fly from your purse until it rises. Same to upgrade. Top-tier towers let you choose a doctrine.</div>
+            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Space between Build and Fight. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Top-tier towers let you choose a doctrine.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh squad on a timer, forever. Press <kbd>3</kbd> and the army pushes out along the lanes on its own — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives never stop.</b> Each living nest musters its own squads, faster as Threat climbs. Raze them all — then break the counterattack their champion leads.</div>
-            <div><b>🔧 Nothing repairs itself.</b> Hold SPACE or B on a damaged building to repair it, or on a ruin to rebuild it at half price. SPACE away from a plot fires your special (Q works too), and <kbd>T</kbd> beside a tower changes what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE fires your special and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>☠️ Threat is the clock.</b> It rises on its own, faster while hives stand, and every whole level makes every hive muster at once. If the Keep falls, all is lost.</div>
@@ -471,6 +472,8 @@ export class UI {
     for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
       chip.onclick = () => this.cb.onStance && this.cb.onStance(chip.dataset.st);
     }
+    const mode = this.root.querySelector('#mode-toggle');
+    if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
     const d = h.def;
     const face = this.root.querySelector('#a-face');
@@ -479,8 +482,17 @@ export class UI {
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
-      else this.cb.onCast();
+      else if (this._bigMode !== 'build') this.cb.onCast();
     };
+    big.onpointerdown = (e) => {
+      if (this._bigMode !== 'build') return;
+      e.preventDefault();
+      this.cb.onBuildHold && this.cb.onBuildHold(true);
+      try { big.setPointerCapture(e.pointerId); } catch {}
+    };
+    big.onpointerup = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
+    big.onpointercancel = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
+    big.onpointerleave = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
     big.onmouseenter = (e) => {
       const hh = this._game ? this._game.heroes[this._p] : null;
       if (hh) this._showTip(e, this._heroTip(hh.def));
@@ -491,8 +503,23 @@ export class UI {
     this._p = p;
   }
 
-  update(game, p = 0) {
+  setControlMode(mode = 'build') {
+    const chip = this.root.querySelector('#mode-toggle');
+    if (!chip) return;
+    const fight = mode === 'fight';
+    chip.classList.toggle('fight', fight);
+    chip.classList.toggle('build', !fight);
+    const label = chip.querySelector('span');
+    if (label) label.textContent = fight ? 'Fight mode' : 'Build mode';
+    chip.title = fight
+      ? 'Fight mode: Space fires the hero special. Hold B to build. Alt toggles.'
+      : 'Build mode: Space builds near plots, otherwise fires. Alt toggles.';
+  }
+
+  update(game, p = 0, controls = {}) {
     const q = (id) => this.root.querySelector(id);
+    const controlMode = controls.controlMode || 'build';
+    this.setControlMode(controlMode);
     q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
@@ -563,7 +590,7 @@ export class UI {
 
       this._updateUpgradePanel(game, h);
 
-      // The one big contextual button: found the city, cast, or show cooldown.
+      // The one big contextual button: found the city, build in Build mode, or cast.
       const big = q('#bigaction');
       const ab = h.def.ability;
       if (game.phase === 'found') {
@@ -572,13 +599,35 @@ export class UI {
         big.className = 'bigaction bell';
         big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>SPACE</small></span>`;
         big.disabled = !near || h.dead;
+      } else if (controlMode === 'build' && game.buildTargetFor) {
+        const target = game.buildTargetFor(h);
+        if (target) {
+          const { plot, act, nt } = target;
+          const paid = act.mode === 'repair' ? 0 : plot.paid;
+          const cost = Math.max(1, Math.ceil(act.cost - paid));
+          const verb = act.mode === 'repair' ? 'Repair' : act.mode === 'rebuild' ? 'Rebuild' : plot.tier > 0 ? 'Upgrade' : 'Build';
+          const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
+          this._bigMode = 'build';
+          big.className = 'bigaction build ready';
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold SPACE/B · ${cost}🪙 · ALT fight</small></span>`;
+          big.disabled = h.dead;
+        } else {
+          this._bigMode = 'cast';
+          const cd = Math.max(0, h.abilCd);
+          const rank = abilityRank(h.level, h.upgrades);
+          const ultRank = (h.upgrades?.ult || 0);
+          big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
+          big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE</small></span>` +
+            (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
+          big.disabled = h.dead;
+        }
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE${controlMode === 'fight' ? ' · ALT build' : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }

@@ -128,7 +128,7 @@ body::after {
 }
 .commandtop {
   display: grid;
-  grid-template-columns: minmax(300px, 450px) minmax(260px, 1fr);
+  grid-template-columns: minmax(300px, 450px) 132px minmax(260px, 1fr);
   gap: 8px;
   min-width: 0;
 }
@@ -149,6 +149,25 @@ body::after {
   box-shadow: none;
 }
 .armystatus b { color: #ffd75e; }
+.mode-toggle {
+  min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 4px 8px; border-radius: 7px;
+  font-family: inherit; color: #e8e6df; cursor: pointer;
+  background: rgba(10, 14, 20, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.mode-toggle:hover { transform: translateY(-1px); background: rgba(255, 255, 255, 0.1); }
+.mode-toggle b {
+  color: var(--gold); font-size: 11px;
+  padding: 1px 5px; border-radius: 5px;
+  background: rgba(255, 215, 94, 0.14);
+  border: 1px solid rgba(255, 215, 94, 0.32);
+}
+.mode-toggle span { font-size: 12px; font-weight: 800; white-space: nowrap; }
+.mode-toggle.build { border-color: rgba(255, 215, 94, 0.42); }
+.mode-toggle.fight { border-color: rgba(89, 255, 156, 0.42); background: rgba(89, 255, 156, 0.08); }
 .actionmain {
   display: grid;
   grid-template-columns: 220px 208px minmax(280px, 1fr) 210px;
@@ -212,6 +231,9 @@ body::after {
 .bigaction .btext small { display: block; font-size: 10px; font-weight: 400; opacity: 0.65; letter-spacing: 1px; }
 .bigaction.bell { border-color: rgba(255, 215, 94, 0.55); background: rgba(255, 215, 94, 0.13); }
 .bigaction.bell:hover { background: rgba(255, 215, 94, 0.28); transform: translateY(-2px); }
+.bigaction.build.ready { border-color: rgba(255, 215, 94, 0.6); background: rgba(255, 215, 94, 0.12); }
+.bigaction.build.ready:hover { background: rgba(255, 215, 94, 0.24); transform: translateY(-2px); }
+.bigaction.build.ready:active { transform: translateY(0); background: rgba(255, 215, 94, 0.32); }
 .bigaction.cast.ready { border-color: rgba(89, 255, 156, 0.55); background: rgba(89, 255, 156, 0.1); }
 .bigaction.cast.ready:hover { background: rgba(89, 255, 156, 0.22); transform: translateY(-2px); }
 .bigaction.cooling { opacity: 0.75; }
@@ -267,7 +289,7 @@ body::after {
 @media (max-width: 900px), (max-height: 650px) {
   :root { --command-height: 132px; --command-gap: 8px; --minimap-size: 132px; }
   #actionbar { padding: 7px; grid-template-rows: 28px minmax(0, 1fr); gap: 6px; }
-  .commandtop { grid-template-columns: 1fr; }
+  .commandtop { grid-template-columns: 1fr 112px; }
   .armystatus { display: none; }
   .actionmain,
   .actionmain:has(#upgradepanel.hidden) {

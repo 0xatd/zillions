@@ -41,7 +41,8 @@ The shipped loop is continuous siege:
 
 - Found a city at a flagged site.
 - Build, upgrade and repair at any time by standing near plots and holding
-  Space/B. Nothing pauses while you do it — that is the risk.
+  Space in Build mode or B anytime. Nothing pauses while you do it — that is
+  the risk.
 - Camps muster squads forever. Set the army stance and it pushes the lanes on
   its own, taking nodes as the front line moves.
 - Every living hive musters its own squads on a timer that tightens as Threat
@@ -77,18 +78,20 @@ circles it all. The only ways in are the four gates, each flanked by a pair
 of tower plots. Chokepoints, by design.
 
 - **Build whenever you like — and it is never safe.** Walk to a glowing
-  foundation and **hold Space**: coins arc out of your purse one by one into
-  the coin slots above the plot while a ghost shows the building to come
-  (partial payments persist). Hold Space beside a built structure to upgrade
-  it. Top-tier towers make you choose a doctrine: ballista (single-target
-  sniper) or flame (splash), and **T** beside a tower changes what it shoots
-  first — nearest, strongest, siege-first or ranged-first.
+  foundation and **hold Space in Build mode** or **hold B anytime**: coins arc
+  out of your purse one by one into the coin slots above the plot while a ghost
+  shows the building to come (partial payments persist). Hold the same input
+  beside a built structure to upgrade it. Top-tier towers make you choose a
+  doctrine: ballista (single-target sniper) or flame (splash), and **T** beside
+  a tower changes what it shoots first — nearest, strongest, siege-first or
+  ranged-first.
 - **Income is automatic; coins are earned.** Buildings and held nodes credit
   gold continuously. Physical coins now drop only from kills, captured nodes
   and razed hives — so the coin-hoover is a reward for fighting, not a chore
   at sunrise.
-- **Nothing repairs itself.** Hold Space on a damaged building to repair it for
-  gold, or on a ruin to rebuild it at half price. Damage is a bill.
+- **Nothing repairs itself.** Hold Space in Build mode, or B anytime, on a
+  damaged building to repair it for gold, or on a ruin to rebuild it at half
+  price. Damage is a bill.
 - **Threat is the clock.** It climbs on its own, faster while hives stand, and
   a little every time you take ground. Every whole Threat level, every hive
   musters at once.
@@ -148,7 +151,8 @@ everyone's relics pool for the shared city.
 
 The kit is Thronefall-simple with Dota-style readability: heroes auto-attack on
 their own, a passive aura hums around them, two passive upgrade paths shape
-their stats, and Space/Q fires the one special. You steer.
+their stats, and Space/Q fires the one special. Alt toggles whether Space
+prioritizes building or fighting. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |
@@ -169,8 +173,9 @@ hero revives at the Keep.
 | W / S | Move north/up · south/down on the minimap |
 | A / D | Move west/left · east/right on the minimap |
 | Shift | Gallop (full health only, like Thronefall) |
-| Space | THE interact key: found the city at a site · HOLD at a foundation to build, upgrade, repair or rebuild · cast your special anywhere else |
-| B (hold) | Build / upgrade / repair (alias for holding Space) |
+| Alt | Toggle Build mode / Fight mode for Space |
+| Space | Found the city at a site · in Build mode, hold at a foundation/building to build, upgrade, repair or rebuild · in Fight mode, cast your special |
+| B (hold) | Build / upgrade / repair in either mode |
 | Q | Cast your special |
 | T | Cycle the targeting doctrine of the nearest tower |
 | 1 / 2 / 3 | Army stance: Defend city / Follow hero / Push the lanes |

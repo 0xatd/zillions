@@ -2126,7 +2126,7 @@ export class Game {
           if (zb.atkT <= 0) {
             zb.atkT = cd;
             this._damageUnit(u, zb.def.dmg * dmgMul);
-            this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z });
+            this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
           }
         } else {
           this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
@@ -2182,7 +2182,7 @@ export class Game {
     zb.atkT = 1 / (zb.def.rof || 0.5);
     zb.dirX = best.cx - zb.x; zb.dirZ = best.cz - zb.z;
     this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
-    this.emit({ type: 'spit', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz });
+    this.emit({ type: 'spit', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz, targetKind: 'building' });
     return true;
   }
 
@@ -2205,7 +2205,7 @@ export class Game {
       if (zb.atkT <= 0) {
         zb.atkT = 1.1;
         this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
-        this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz });
+        this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz, targetKind: 'building' });
       }
       return;
     }
@@ -2357,7 +2357,7 @@ export class Game {
             }
           }
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
@@ -2367,7 +2367,7 @@ export class Game {
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7, targetKind: 'nest' });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
         }
       }
@@ -2502,10 +2502,14 @@ export class Game {
           for (const zb of this.zombies) {
             if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, tdmg, b.cx, b.cz);
           }
-          this.emit({ type: 'shot', kind: 'flame', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
+          const plot = this.plots.find((p) => p.id === b.plotId);
+          const towerY = 2.2 + ((plot && plot.tier) || 1) * 0.45 + 0.48;
+          this.emit({ type: 'shot', kind: 'flame', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: towerY, targetScale: best.def.scale });
         } else {
           this.damageZombie(best, tdmg, b.cx, b.cz);
-          this.emit({ type: 'shot', kind: b.def.branch === 'ballista' ? 'ballista' : 'tower', fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: 2.6 });
+          const plot = this.plots.find((p) => p.id === b.plotId);
+          const towerY = 2.2 + ((plot && plot.tier) || 1) * 0.45 + 0.48;
+          this.emit({ type: 'shot', kind: b.def.branch === 'ballista' ? 'ballista' : 'tower', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: towerY, targetScale: best.def.scale });
         }
         b.lastTx = best.x; b.lastTz = best.z;
         this.wakeZombies(b.cx, b.cz, 9);
