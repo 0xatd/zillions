@@ -421,11 +421,54 @@ export class Game {
   // city sites, lane nodes and hive nests. Claim a site to raise the city.
   _setupStart() {
     this.phase = 'found';
-    const c = this.map.size / 2;
-    this.heroSetups.forEach((e, i) => this._spawnHero(e.k, c - 1 + i * 2, c + 3.5, e.camp));
+    const spawns = this._frontierSpawnPoints(this.heroSetups.length);
+    this.heroSetups.forEach((e, i) => this._spawnHero(e.k, spawns[i][0], spawns[i][1], e.camp));
     this._scatterCreeps();
     this._scatterLoot();
     this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and press SPACE to found your city.', 'info');
+  }
+
+  // Terrain generation owns the centre of the map. It may place deep forest,
+  // water, or crag there, so fixed centre coordinates can seal an entire
+  // co-op party inside impassable ground. Find the nearest connected patch of
+  // walkable tiles and place every hero on that patch deterministically.
+  _frontierSpawnPoints(count) {
+    const N = this.map.size;
+    const cx = N >> 1, cz = N >> 1;
+    const candidates = [];
+    for (let z = 1; z < N - 1; z++) {
+      for (let x = 1; x < N - 1; x++) {
+        if (this.map.isWalkable(x, z)) candidates.push([x, z]);
+      }
+    }
+    candidates.sort((a, b) => {
+      const ad = (a[0] - cx) ** 2 + (a[1] - cz) ** 2;
+      const bd = (b[0] - cx) ** 2 + (b[1] - cz) ** 2;
+      return ad - bd || a[1] - b[1] || a[0] - b[0];
+    });
+
+    const required = Math.max(1, count);
+    const checked = new Set();
+    for (const [sx, sz] of candidates) {
+      const startKey = sz * N + sx;
+      if (checked.has(startKey)) continue;
+      const queue = [[sx, sz]];
+      const component = [];
+      checked.add(startKey);
+      for (let i = 0; i < queue.length && component.length < Math.max(12, required); i++) {
+        const [x, z] = queue[i];
+        component.push([x + 0.5, z + 0.5]);
+        for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+          const nx = x + dx, nz = z + dz, key = nz * N + nx;
+          if (nx <= 0 || nz <= 0 || nx >= N - 1 || nz >= N - 1
+            || checked.has(key) || !this.map.isWalkable(nx, nz)) continue;
+          checked.add(key);
+          queue.push([nx, nz]);
+        }
+      }
+      if (component.length >= required) return component.slice(0, required);
+    }
+    throw new Error('Map has no connected walkable frontier spawn');
   }
 
   foundCity(siteIdx, p = 0) {

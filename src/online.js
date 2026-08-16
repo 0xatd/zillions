@@ -36,7 +36,7 @@ function safePublicName(value) {
   return text;
 }
 
-async function loadSupabaseClient() {
+async function loadSupabaseClient(existingClient = null) {
   const response = await fetch('/api/auth-config', {
     headers: { accept: 'application/json' },
     cache: 'no-store',
@@ -46,6 +46,7 @@ async function loadSupabaseClient() {
   if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) {
     throw new Error('account backend not configured');
   }
+  if (existingClient) return { client: existingClient, config };
   const { createClient } = await import(SUPABASE_JS);
   const client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
     auth: {
@@ -72,6 +73,7 @@ function profileName(profile, fallback = 'Commander') {
 }
 
 function roomToGame(row) {
+  const hasRoster = Array.isArray(row.room_players);
   const players = row.room_players || [];
   const metadata = row.metadata || {};
   return {
@@ -86,7 +88,9 @@ function roomToGame(row) {
     rules: row.rules,
     metadata,
     difficulty: row.difficulty || 'normal',
-    players: Math.max(1, players.length || Number(metadata.players || 1)),
+    // A selected roster is authoritative. metadata.players is only a legacy
+    // fallback for rows fetched without the nested relation.
+    players: Math.max(1, hasRoster ? players.length : Number(metadata.players || 1)),
     max_players: row.max_players || 3,
     status: row.status,
     updated_at: row.updated_at || row.last_seen_at,
@@ -121,9 +125,9 @@ export class OnlineLobby {
     this.matchActive = !!active;
   }
 
-  async connect(name) {
+  async connect(name, existingClient = null) {
     if (this.sb) return this.me;
-    const { client, config } = await loadSupabaseClient();
+    const { client, config } = await loadSupabaseClient(existingClient);
     this.sb = client;
     this.iceServers = Array.isArray(config.iceServers) && config.iceServers.length ? config.iceServers : null;
     const { data: sessionData, error: sessionError } = await this.sb.auth.getSession();
@@ -472,7 +476,7 @@ export class OnlineLobby {
       seat: 1,
       display_name: this.me.name,
       hero: this.me.hero,
-      ready: false,
+      ready: true,
       connection_state: 'online',
       unlocked_level: Math.max(1, Number(unlockedLevel) || 1),
       last_seen_at: new Date().toISOString(),
@@ -485,7 +489,7 @@ export class OnlineLobby {
       seat: 1,
       display_name: this.me.name,
       hero: this.me.hero,
-      ready: false,
+      ready: true,
       connection_state: 'online',
       unlocked_level: Math.max(1, Number(unlockedLevel) || 1),
     };
@@ -493,10 +497,22 @@ export class OnlineLobby {
     await this._joinGameChannel(data.id, true);
     // Heartbeat so the listing stays fresh; stops when the page dies.
     this._beat = setInterval(() => this.touchGame({}), 45 * 1000);
-    window.addEventListener('beforeunload', () => this.endGame());
+    this._installPageHide();
     await this.refreshCurrentGame();
     await this.refreshGames();
     return this.game;
+  }
+
+  _installPageHide() {
+    if (this._pageHide) window.removeEventListener('pagehide', this._pageHide);
+    this._pageHide = () => {
+      if (!this.game?.id || !this.me?.id) return;
+      this.sb.from('room_players').update({
+        connection_state: 'offline',
+        last_seen_at: new Date().toISOString(),
+      }).eq('room_id', this.game.id).eq('user_id', this.me.id).then(() => {}).catch(() => {});
+    };
+    window.addEventListener('pagehide', this._pageHide);
   }
 
   async touchGame(fields) {
@@ -612,13 +628,53 @@ export class OnlineLobby {
     return this.refreshCurrentGame();
   }
 
-  async endGame() {
-    if (!this.game) return;
+  _clearRoomState() {
     clearInterval(this._beat);
-    try { await this.sb.from('rooms').update({ status: 'finished' }).eq('id', this.game.id); } catch { /* closing */ }
+    if (this._pageHide) window.removeEventListener('pagehide', this._pageHide);
+    this._pageHide = null;
+    if (this.gameChan) this.sb.removeChannel(this.gameChan);
+    if (this.roomChatChan) this.sb.removeChannel(this.roomChatChan);
+    this.gameChan = null;
+    this.roomChatChan = null;
     this._seatedRoomId = null;
     this._localRoomPlayer = null;
     this.game = null;
+  }
+
+  // Leave staging explicitly. Hosts close the room (the FK removes seats and
+  // room chat); guests remove only their own seat. Do not use this for a
+  // temporary mid-match disconnect because that seat is needed for Rejoin.
+  async leaveRoom() {
+    if (!this.game || !this.me) return;
+    const game = this.game;
+    const isHost = game.host_id === this.me.id;
+    if (isHost) {
+      const { error } = await this.sb.from('rooms').delete().eq('id', game.id);
+      if (error) throw new Error(error.message);
+    } else if (this._seatedRoomId === game.id) {
+      const { error } = await this.sb.from('room_players')
+        .delete()
+        .eq('room_id', game.id)
+        .eq('user_id', this.me.id);
+      if (error) throw new Error(error.message);
+    }
+    this._clearRoomState();
+    await this.refreshGames();
+  }
+
+  async endGame() {
+    if (!this.game) return;
+    const game = this.game;
+    try {
+      if (game.host_id === this.me?.id) {
+        await this.sb.from('rooms').update({ status: 'finished' }).eq('id', game.id);
+      } else if (this._seatedRoomId === game.id) {
+        await this.sb.from('room_players').update({ connection_state: 'offline' })
+          .eq('room_id', game.id).eq('user_id', this.me.id);
+      }
+    } finally {
+      this._clearRoomState();
+    }
   }
 
   async findByCode(code) {
@@ -703,6 +759,7 @@ export class OnlineLobby {
       ],
     });
     await this._joinGameChannel(game.id, false);
+    this._installPageHide();
     await this.refreshCurrentGame();
     await this.signal({ t: 'knock', name: this.me.name });
   }

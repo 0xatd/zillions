@@ -159,11 +159,11 @@ export class UI {
             <button class="tbtn" id="s-back">← Back</button>
             <h2 id="s-title">Choose your battle</h2>
           </div>
-          <div class="steplabel">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
+          <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
+          <div class="steplabel hero-label">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
           <div class="herorow" id="herorow"></div>
-          <div class="steplabel">3 · Difficulty</div>
+          <div class="steplabel diff-label">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
           <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
@@ -262,7 +262,10 @@ export class UI {
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
-    q('#s-back').onclick = () => this._showScreen(this._fromLobby ? 'lobby' : 'main');
+    q('#s-back').onclick = () => {
+      if (this._fromLobby && this.cb.onRoomLeave) this.cb.onRoomLeave();
+      else this._showScreen('main');
+    };
     q('#l-back').onclick = () => this._showScreen('main');
 
     // ----- lobby -----
@@ -391,6 +394,26 @@ export class UI {
     input.dataset.wired = '1';
   }
 
+  _wireRoomReady() {
+    const button = this.root.querySelector('#room-ready');
+    if (!button || button.dataset.wired) return;
+    button.onclick = () => this.cb.onRoomReady && this.cb.onRoomReady(button.dataset.ready !== '1');
+    button.dataset.wired = '1';
+  }
+
+  setRoomReady({ visible = false, ready = false } = {}) {
+    const button = this.root.querySelector('#room-ready');
+    if (!button) return;
+    button.classList.toggle('hidden', !visible);
+    button.classList.toggle('sel', ready);
+    button.dataset.ready = ready ? '1' : '0';
+    button.textContent = ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE';
+  }
+
+  showLobby() {
+    this._showScreen('lobby');
+  }
+
   onlineStatus(text) {
     const el = this.root.querySelector('#online-status');
     if (el) el.innerHTML = text;
@@ -441,6 +464,7 @@ export class UI {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._showScreen('setup');
+    this.root.querySelector('#screen-setup').classList.toggle('roommode', !!online);
     this._loadHeroPortraits();
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
@@ -463,6 +487,7 @@ export class UI {
       mp.innerHTML = `
         <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
         <div id="room-roster" class="roomroster"></div>
+        <button class="diffbtn roomready hidden" id="room-ready">READY FOR BATTLE</button>
         <div id="mp-sub"></div>
         <div class="roomchat">
           <div class="roomchatlog" id="roomchat-log"></div>
@@ -478,6 +503,7 @@ export class UI {
         mode: online.mode || mode,
       });
       this._wireRoomChat();
+      this._wireRoomReady();
       return;
     }
     if (coop && !mp.dataset.init) {
