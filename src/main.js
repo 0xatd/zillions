@@ -1,7 +1,7 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import {
-  PLOT_KINDS, SIM_DT, MAP_SIZE, FINAL_NIGHT, LEVELS, PAY_RADIUS,
+  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
@@ -62,7 +62,7 @@ class App {
         }
       },
       onCast: () => this.tryCast(),
-      onBell: () => { this.audio.init(); this.issue({ t: 'bell', p: this.myPlayer }); },
+      onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
@@ -216,6 +216,7 @@ class App {
       this.scene.add(this.plaza);
     } else {
       this._makeSiteMarkers();
+      this._clearNodeMarkers();
     }
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
@@ -228,8 +229,8 @@ class App {
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
     this.ui.showBanner(mode === 'survival'
-      ? `${level.name} — SURVIVAL. The waves never stop. A boss walks every fifth assault. How long can you last?`
-      : `${level.name} — hold the Keep through ${FINAL_NIGHT} waves. ${level.boss.icon} ${level.boss.name} comes with the final assault.`, '', 4500);
+      ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
+      : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games) this._startTutorial();
@@ -367,10 +368,11 @@ class App {
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it, even while enemies attack.'],
-      [24, '🌙 Hordes march from hive nests. Raze a nest and it stops sending future waves.'],
-      [36, '🔔 Ready early? Ride to the KEEP and press SPACE to ring the bell and call the next wave.'],
-      [48, '⚔️ Squads are autonomous — press 1 to defend, 2 to follow you, 3 to hunt hives.'],
+      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. Income is paid automatically; coins drop from fighting.'],
+      [24, '⚔️ Camps muster a squad every few seconds, forever. Press 3 and they push out along the lanes on their own.'],
+      [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
+      [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
+      [62, '🔧 Nothing repairs itself — hold SPACE or B on damaged or ruined buildings to fix them. Press T beside a tower to change what it shoots.'],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -492,7 +494,7 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 3 ? s : null;
+      return s && s.snap && s.snap.v === 4 ? s : null;
     } catch { return null; }
   }
 
@@ -515,10 +517,10 @@ class App {
       p.campaign = Math.max(p.campaign || 0, this.game.levelId);
     }
     if (this.game.mode === 'survival') {
-      p.bestSurvival = Math.max(p.bestSurvival || 0, this.game.night - 1);
+      p.bestSurvival = Math.max(p.bestSurvival || 0, this.game.threatLevel);
     }
     p.kills += this.game.stats.kills;
-    p.bestDay = Math.max(p.bestDay, Math.min(this.game.night, FINAL_NIGHT));
+    p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
     p.lastHero = this.ui.selectedHero;
 
     // WC3-style persistence: the campaign hero keeps every level and item —
@@ -565,10 +567,10 @@ class App {
       this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
       this.auth.recordMatch({
         mode: this.game.mode || 'campaign',
-        rules: 'survival-plots',
+        rules: 'continuous-siege',
         hero: h?.key || this.ui.selectedHero,
         won,
-        day: Math.min(this.game.night, FINAL_NIGHT),
+        day: this.game.threatLevel,
         kills: this.game.stats.kills,
         built: this.game.stats.built || 0,
         level: this.game.levelId,
@@ -1435,7 +1437,7 @@ class App {
   }
 
   _buildingHeight(kind) {
-    return { hq: 4.2, mill: 3.4, tower: 3.2, camp_militia: 2.2, camp_ranger: 2.2, camp_sniper: 2.2, wall: 1.2 }[kind] || 2.0;
+    return { hq: 4.2, mill: 3.4, tower: 3.2, camp_militia: 2.2, camp_ranger: 2.2, camp_sniper: 2.2, outpost: 2.6, wall: 1.2 }[kind] || 2.0;
   }
 
   // ---------------- plot foundations ----------------
@@ -1470,10 +1472,10 @@ class App {
       const u = UNITS[kind.unit];
       const count = def.count || 0;
       return compact
-        ? `${count} ${u.icon}`
-        : `${count} ${u.name}${count === 1 ? '' : 's'} join the army. Refilled at dawn.`;
+        ? `${count} ${u.icon}/${def.every}s`
+        : `Musters ${count} ${u.name}${count === 1 ? '' : 's'} every ${def.every}s, forever.`;
     }
-    if (def.income) return compact ? `+${Math.round(def.income)} coin` : `Pays ${Math.round(def.income)} coins every dawn.`;
+    if (def.income) return compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`;
     if (def.dmg) {
       const splash = def.splash ? ' splash' : '';
       return compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`;
@@ -1615,14 +1617,20 @@ class App {
     if (mh && !mh.dead) {
       let bd = 4.5 * 4.5;
       for (const plot of g.plots) {
-        const nt = g.nextTier(plot);
-        if (!nt || nt.branch) continue;
+        const act = g.plotAction(plot);
+        if (!act || act.mode === 'branch') continue;
         const [px, pz] = g.payPoint(plot, mh);
         const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
         if (d < bd) { bd = d; pipPlotId = plot.id; }
       }
     }
     for (const plot of g.plots) {
+      // A Forward Camp doesn't exist until the node under it is yours.
+      if (g.plotLocked(plot)) {
+        const hidden = this.plotMeshes.get(plot.id);
+        if (hidden) hidden.group.visible = false;
+        continue;
+      }
       let rec = this.plotMeshes.get(plot.id);
       if (!rec) {
         const group = this._makePlotGroup(plot);
@@ -1630,9 +1638,14 @@ class App {
         rec = { group, tier: -1 };
         this.plotMeshes.set(plot.id, rec);
       }
+      rec.group.visible = true;
       const ud = rec.group.userData;
-      const nt = g.nextTier(plot);
-      const built = plot.tier > 0;
+      const act = g.plotAction(plot);
+      // `nt` keeps the shape the rest of this function has always read.
+      const nt = !act ? null
+        : act.mode === 'branch' ? act.nt
+        : { def: act.def || { name: act.label }, cost: act.cost, mode: act.mode };
+      const built = plot.tier > 0 && !plot.ruined;
       // Foundation scenery (pad, posts, rubble, ghost) hides once built.
       rec.group.children.forEach((ch) => {
         if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
@@ -1665,7 +1678,10 @@ class App {
         gem.rotation.y = t * 2;
         gem.position.y = 0.95 + Math.sin(t * 2.4 + plot.id) * 0.08;
       }
-      const wantSub = nt.branch ? 'choose!' : this._plotRole(plot, nt, true);
+      const wantSub = nt.branch ? 'choose!'
+        : nt.mode === 'repair' ? 'repair'
+        : nt.mode === 'rebuild' ? 'rebuild'
+        : this._plotRole(plot, nt, true);
       const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
@@ -1927,6 +1943,21 @@ class App {
         if (!panels.length) box(0.9, H, 0.9, stone, 0, H / 2); // stranded stub (shouldn't happen)
         break;
       }
+      case 'outpost': {
+        // A staked claim: palisade stubs, a muster tent and a tall banner you
+        // can pick out from across the map.
+        box(1.9, 0.28, 1.9, 0x6b6152, 0, 0.14);
+        cone(0.95, 1.05, 0xcfc7b4, -0.35, 0.55, -0.25);
+        box(0.9, 0.6, 0.7, 0x5c6470, 0.55, 0.3, 0.5);
+        box(0.08, 3.4, 0.08, 0x2f2a24, 0.85, 1.7, -0.7);
+        box(0.7, 0.45, 0.03, 0x59b06e, 0.52, 3.15, -0.7);
+        if (tier >= 2) {
+          box(0.75, 0.85, 0.75, 0x4d5560, -0.7, 0.42, 0.75);
+          box(0.08, 3.4, 0.08, 0x2f2a24, -0.85, 1.7, -0.7);
+          box(0.7, 0.45, 0.03, 0x59b06e, -0.52, 3.15, -0.7);
+        }
+        break;
+      }
       case 'camp_militia':
       case 'camp_ranger':
       case 'camp_sniper': {
@@ -1950,7 +1981,7 @@ class App {
       dress('banner', 0.85, 1.7, 0.6, Math.PI);
       dress('crates', 1.1, -1.4, 1.5, 0.4);
       dress('torch', 0.45, 1.5, 1.6);
-    } else if (b.kind.startsWith('camp')) {
+    } else if (b.kind.startsWith('camp') || b.kind === 'outpost') {
       dress('boxes', 0.9, -0.75, -0.6, 0.7);
       dress('torch', 0.42, 0.2, 0.85);
     } else if (b.kind === 'house' && tier >= 2) {
@@ -2231,6 +2262,67 @@ class App {
     this.waveMarkers = [];
   }
 
+  _clearNodeMarkers() {
+    for (const m of this.nodeMarkers || []) this.scene.remove(m);
+    this.nodeMarkers = null;
+  }
+
+  // A short red pulse over a hive that just mustered — the player should always
+  // be able to see where the next push is coming from.
+  _pingHive(x, z) {
+    // Throttled: hives muster constantly, and a minimap that never stops
+    // flashing tells the player nothing.
+    const now = this.game ? this.game.time : 0;
+    if (this._hivePingT && this._hivePingT > now) return;
+    this._hivePingT = now + 6;
+    this.ui.addPing(x, z);
+  }
+
+  // Lane nodes: a capture ring and a banner in your colour, the hive's, or
+  // nobody's. This is the front line made visible.
+  _updateNodeMarkers(t) {
+    const g = this.game;
+    if (!g || !g.nodes || !g.nodes.length || g.phase === 'found') return;
+    if (!this.nodeMarkers) {
+      this.nodeMarkers = [];
+      for (const node of g.nodes) {
+        if (node.offMap) continue;
+        const gr = new THREE.Group();
+        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
+        ring.position.set(node.x, 0.06, node.z);
+        gr.add(ring);
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshLambertMaterial({ color: 0x39332a }));
+        pole.position.set(node.x, 2.2, node.z);
+        gr.add(pole);
+        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshLambertMaterial({ color: 0xd8c07a }));
+        flag.position.set(node.x + 0.75, 3.8, node.z);
+        gr.add(flag);
+        const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());
+        label.position.set(node.x, 5.4, node.z);
+        label.scale.set(4.6, 2.3, 1);
+        gr.add(label);
+        gr.userData = { ring, flag, label, node };
+        this.scene.add(gr);
+        this.nodeMarkers.push(gr);
+      }
+    }
+    for (const gr of this.nodeMarkers) {
+      const node = gr.userData.node;
+      // Grey until surveyed: the banner is there, but whose banner is not known.
+      const col = !node.seen ? 0x76828d
+        : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
+      gr.userData.ring.material.color.setHex(col);
+      gr.userData.flag.material.color.setHex(col);
+      const contested = node.cap > 0.05;
+      gr.userData.ring.material.opacity = contested
+        ? 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(t * 9))
+        : (node.owner === 'player' ? 0.34 : 0.2);
+      gr.userData.flag.rotation.y = Math.sin(t * 2.2 + node.id) * 0.28;
+    }
+  }
+
   // ---------------- input ----------------
 
   _setupInput() {
@@ -2248,28 +2340,22 @@ class App {
       if (!this.game) return;
       if (k === ' ') {
         e.preventDefault();
-        // Thronefall Space — THE interact key: found the city, hold at a
-        // foundation to build, ring the bell at the Keep, special when fighting.
+        // Space — THE interact key: found the city, HOLD at a foundation to
+        // build/repair, otherwise fire the special.
         if (this.game.phase === 'found') this._tryFound();
         else {
           const h = this.myHero();
           const target = h && !h.dead && this.game.buildTargetFor(h);
-          if (target) {
-            // hold-to-build — _updateHeroInput streams while held
-          } else if (this.game.phase === 'day' && !this.game.belling && h && !h.dead && this.game.hq && (h.x - this.game.hq.cx) ** 2 + (h.z - this.game.hq.cz) ** 2 < 81) {
-            this.issue({ t: 'bell', p: this.myPlayer });
-          } else if (this.game.isNight || this.game.belling) {
-            this.tryCast();
-          } else {
-            this.audio.deny();
-            this.ui.showBanner('⌨️ Hold SPACE or B at a foundation to build · ring the bell at the Keep to call the next wave', '', 2600);
-          }
+          // Standing on something fundable? _updateHeroInput streams gold while
+          // held. Standing anywhere else? Space is your special.
+          if (!target) this.tryCast();
         }
       }
       else if (k === 'q') this.tryCast();
       else if (k === '1') this.issue({ t: 'stance', s: 'defend', p: this.myPlayer });
       else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
+      else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();
@@ -2303,10 +2389,10 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Thronefall hold-to-build: SPACE held at a foundation streams your gold.
-    // B does the same thing and is useful when you want SPACE reserved for casts.
+    // Hold-to-build: SPACE held at a foundation streams your gold (B works
+    // too). Building never stops now — which is the whole risk.
     const h = this.myHero();
-    const spacePays = this.keys.has(' ') && this.game && this.game.phase !== 'found'
+    const spacePays = this.keys.has(' ') && this.game && this.game.phase === 'live'
       && h && !h.dead && !!this.game.buildTargetFor(h);
     const pay = this.keys.has('b') || spacePays;
     if (pay !== this.lastPay) {
@@ -2422,14 +2508,13 @@ class App {
     this.sun.target.position.set(this.focus.x, 0, this.focus.z);
   }
 
+  // No day and no night any more — but the sky still tells you something. The
+  // light bleeds out of the world as Threat climbs, so a late siege LOOKS like
+  // a late siege without ever gating the player on a clock.
   _updateDayNight(dt) {
     const g = this.game;
-    // Cel-look clock: sun-drenched teal day → salmon dusk while the bell
-    // tolls → deep-NAVY night that stays fully readable (the whole scene
-    // shifts blue; warm windows and torches carry the light).
-    let want;
-    if (g.phase === 'day' || g.phase === 'found') want = g.belling ? 0.42 : 1;
-    else want = 0;
+    const dread = g.phase === 'found' ? 0 : Math.min(1, (g.threat || 0) / Math.max(1, THREAT.max * 0.7));
+    const want = 1 - dread * 0.8;
     this._bright = this._bright === undefined ? want : this._bright + (want - this._bright) * (1 - Math.exp(-2.2 * dt));
     const b = this._bright;
     const daySky = new THREE.Color(this.pal && this.pal.sky ? this.pal.sky : 0xa8cfc4);
@@ -2439,12 +2524,11 @@ class App {
     this.sun.intensity = lerp(0.85, 2.6, b);
     // Warm cream by day, ember at dusk, cool moon-blue at night.
     this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xfff0cf), b));
-    if (g.belling) this.sun.color.lerp(new THREE.Color(0xffb070), 0.5);
     this.hemi.intensity = lerp(0.35, 0.85, b);
     this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
     this.amb.intensity = lerp(0.85, 0.5, b);
     this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
-    const sky = nightSky.clone().lerp(g.belling ? duskSky : daySky, b);
+    const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
     this.scene.background = sky;
     this.scene.fog.color.copy(sky);
 
@@ -2558,14 +2642,50 @@ class App {
           this.stream(e.x, 0.4, e.z, e.hx, 0.9, e.hz, { count: 3, color: 0xffd75e, size: 0.42, life: 0.25 });
           this.burst(e.hx, 0.9, e.hz, { count: 3, color: 0xfff2b0, speed: 0.8, life: 0.25, size: 0.4, up: 1 });
           break;
-        case 'bell':
-          this.audio.bell();
+        case 'income':
+          this.audio.coin();
+          this.burst(e.x, 2.6, e.z, { count: 4, color: 0xffd75e, speed: 1.1, life: 0.5, size: 0.45, up: 1.8 });
           break;
-        case 'dawn':
-          this.audio.dawn();
+        case 'muster':
+          this.audio.train();
+          this.burst(e.x, 0.5, e.z, { count: 8, color: 0x8fd8ff, speed: 1.6, life: 0.5, size: 0.42, up: 1.6 });
           break;
-        case 'nightplan':
-          this._setWaveMarkers(e.spots);
+        case 'hivemuster':
+          this._pingHive(e.x, e.z);
+          break;
+        case 'surge':
+          this.audio.alarm();
+          this.shake = Math.max(this.shake, 0.7);
+          this.ui.showBanner(`☠️ THREAT ${e.level}`, 'Every hive musters at once', 2600);
+          break;
+        case 'nodeseen':
+          this.audio.click();
+          this.ui.addPing(e.x, e.z);
+          break;
+        case 'loot':
+          this.audio.build();
+          this.burst(e.x, 0.7, e.z, { count: 30, color: 0xd8b45e, speed: 2.6, life: 1.0, size: 0.6, up: 2.4 });
+          break;
+        case 'nodetaken':
+          this.audio.build();
+          this.burst(e.x, 0.6, e.z, { count: 34, color: 0x59ff9c, speed: 3, life: 0.9, size: 0.65, up: 2.6 });
+          break;
+        case 'nodelost':
+          this.audio.demolish();
+          this.burst(e.x, 0.6, e.z, { count: 26, color: 0xff3c2e, speed: 2.6, life: 0.8, size: 0.6, up: 2.2 });
+          break;
+        case 'repair':
+          this.burst(e.x, 1.0, e.z, { count: 3, color: 0x8fe8ff, speed: 1.0, life: 0.35, size: 0.34, up: 1.4 });
+          break;
+        case 'towerpriority':
+          this.audio.click();
+          this.burst(e.x, 2.8, e.z, { count: 8, color: 0xffe9a8, speed: 1.2, life: 0.4, size: 0.36, up: 1.2 });
+          break;
+        case 'spit':
+          this.bhitSfxT -= 1;
+          if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
+          if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
+          this.stream(e.fx, 1.0, e.fz, e.tx, 0.8, e.tz, { count: 4, color: 0xc9d84e, size: 0.4, life: 0.3 });
           break;
         case 'founded': {
           // The chosen ground is levelled and the city plan appears — rebuild
@@ -2612,10 +2732,7 @@ class App {
           this.audio.alarm();
           this.shake = Math.max(this.shake, e.final ? 1.2 : 0.6);
           break;
-        case 'night':
-          this.audio.night();
-          this._clearWaveMarkers();
-          break;
+
         case 'deny': this.audio.deny(); break;
         case 'cast': {
           this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike' }[e.key] || e.key);
@@ -2708,14 +2825,14 @@ class App {
           this.audio.victory();
           this.pause();
           this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
           this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.night, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
           break;
       }
     }
@@ -2829,6 +2946,7 @@ class App {
       this._updateCoins(t);
       this._updateZombieMeshes(t, dt);
       this._updateBars();
+      this._updateNodeMarkers(t);
       this._updateDayNight(dt);
       this._updateTutorial(dt);
 
@@ -2890,15 +3008,18 @@ class App {
 
       // Build prompt while parked on something fundable.
       let hint = null;
-      if (mh && !mh.dead && this.game.phase !== 'found' && !branchPlot) {
+      if (mh && !mh.dead && this.game.phase === 'live' && !branchPlot) {
         const target = this.game.buildTargetFor(mh);
         if (target) {
-          const { plot, nt } = target;
-          const cost = Math.max(1, Math.ceil(nt.cost - plot.paid));
-          const role = this._plotRole(plot, nt);
+          const { plot, act, nt } = target;
+          const paid = act.mode === 'repair' ? 0 : plot.paid;
+          const cost = Math.max(1, Math.ceil(act.cost - paid));
+          const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
+          const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
+          const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
           hint = mh.payHold
-            ? (this.game.gold < 1 ? '🪙 Purse empty — collect coins at dawn!' : `🪙 ${cost} to go…`)
-            : `<div>Hold <kbd>SPACE</kbd> or <kbd>B</kbd> — ${plot.tier > 0 ? 'upgrade to' : 'build'} <b>${nt.def.name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+            ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
+            : `<div>Hold <kbd>SPACE</kbd> or <kbd>B</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
         }
       }
       this.ui.showBuildHint(hint);

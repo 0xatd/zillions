@@ -10,11 +10,19 @@ import {
 const scriptPath = fileURLToPath(import.meta.url);
 const TOTAL_TICKS = 720;
 const RESTORE_TICK = 360;
+const ticksArg = process.argv.find((arg) => arg.startsWith('--ticks='));
+const RUN_TICKS = ticksArg ? Math.max(1, Number(ticksArg.slice('--ticks='.length)) | 0) : TOTAL_TICKS;
 
 function fakeMap(level) {
   const size = level.size || 160;
   const tiles = new Uint8Array(size * size).fill(TILE.GRASS);
   const site = { x: size / 2, z: size / 2 };
+  const nodeSpots = [
+    { x: Math.round(size * 0.35), z: Math.round(size * 0.5), kind: 'crossroads', name: 'West Road' },
+    { x: Math.round(size * 0.65), z: Math.round(size * 0.5), kind: 'crossroads', name: 'East Road' },
+    { x: Math.round(size * 0.5), z: Math.round(size * 0.35), kind: 'clearing', name: 'North Field' },
+    { x: Math.round(size * 0.5), z: Math.round(size * 0.65), kind: 'ore', name: 'South Ore' },
+  ];
   return {
     size,
     seed: level.seed,
@@ -24,6 +32,7 @@ function fakeMap(level) {
       [Math.round(size * 0.82), Math.round(size * 0.5)],
       [Math.round(size * 0.5), Math.round(size * 0.18)],
     ].slice(0, level.nests || 3),
+    nodeSpots,
     tiles,
     idx: (x, z) => z * size + x,
     inBounds: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
@@ -38,8 +47,16 @@ function makeGame(snap = null) {
   return new Game(map, snap?.diff || 'normal', snap?.heroKeys || 'alexander', snap, level.id || 1, snap?.mode || 'campaign');
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function hashSnapshot(snap) {
-  return createHash('sha256').update(JSON.stringify(snap)).digest('hex');
+  return createHash('sha256').update(stableStringify(snap)).digest('hex');
 }
 
 function firstPlot(game, kind, tier = 0) {
@@ -108,15 +125,14 @@ function applyScriptedCommand(game, tick, activeFunding) {
       break;
     }
     case 260:
-      game.exec({ t: 'bell', p: 0 });
+      assert.equal(game.phase, 'live', 'continuous siege should stay live');
       break;
     case 365:
-      assert.equal(game.phase, 'night', 'bell should start the night wave');
       game.exec({ t: 'cast', p: 0 });
       break;
     case 384:
       activeFunding.id = startFunding(game, 'house');
-      assert.equal(game.phase, 'night', 'night building should happen under pressure');
+      assert.equal(game.phase, 'live', 'building should happen while the siege keeps running');
       break;
     case 428:
       game.exec({ t: 'pay', p: 0, on: false });
@@ -140,7 +156,7 @@ function runScenario({ restore, includeSnapshot = false }) {
   let game = makeGame();
   const activeFunding = { id: null };
 
-  for (let tick = 0; tick < TOTAL_TICKS; tick++) {
+  for (let tick = 0; tick < RUN_TICKS; tick++) {
     applyScriptedCommand(game, tick, activeFunding);
     game.update(SIM_DT);
 
@@ -154,7 +170,8 @@ function runScenario({ restore, includeSnapshot = false }) {
     hash: hashSnapshot(snap),
     summary: {
       phase: snap.phase,
-      night: snap.night,
+      threat: snap.threat,
+      threatLevel: snap.threatLevel,
       gold: snap.gold,
       buildings: snap.buildings.length,
       units: snap.units.length,
@@ -175,7 +192,10 @@ function runWorker() {
 }
 
 function runChild(args = []) {
-  const child = spawnSync(process.execPath, [scriptPath, '--worker', ...args], {
+  const workerArgs = [scriptPath, '--worker'];
+  if (ticksArg) workerArgs.push(ticksArg);
+  workerArgs.push(...args);
+  const child = spawnSync(process.execPath, workerArgs, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -195,5 +215,5 @@ if (process.argv.includes('--worker')) {
   assert.equal(restored.hash, fullA.hash, 'snapshot restore diverged from uninterrupted replay');
   assert.deepEqual(restored.summary, fullA.summary, 'snapshot restore summary diverged');
 
-  console.log(`sim determinism ok: ${fullA.hash.slice(0, 12)} (${TOTAL_TICKS} ticks, restore at ${RESTORE_TICK})`);
+  console.log(`sim determinism ok: ${fullA.hash.slice(0, 12)} (${RUN_TICKS} ticks, restore at ${RESTORE_TICK})`);
 }

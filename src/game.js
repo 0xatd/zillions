@@ -1,24 +1,39 @@
-// Core simulation — Thronefall-style: a pre-designed city of plots you bring
-// to life with coins, a wave every night, direct hero control, rally-to-me
-// troops. Pure logic — rendering/audio consume `game.events` each frame.
+// Core simulation — continuous siege.
+//
+// There is no day, no night and no bell. Both sides run an economy: your camps
+// muster squads on a timer and push them out along the lane graph to take
+// nodes; every living hive musters its own squads and sends them back. The
+// front line is wherever the two flows meet, and Threat — which rises with the
+// clock, with every hive still standing, and with your own conquests — decides
+// how hard the hives push.
+//
+// Pure logic — rendering/audio consume `game.events` each frame.
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
-  NIGHT_MAX, FINAL_NIGHT, waveForNight,
+  SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
-  ZOMBIE_CAP, UNIT_CAP, DROPS, itemMods,
+  ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
+import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
 import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
+const OUTPOST_PLOT_BASE = 5000;   // outpost plot ids never collide with city plots
+const CAMP_STANDING = 5;          // a camp sustains count x this many living troops
+const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
+const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
+const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guard first
+const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
 
 let nextId = 1000;
 const getNextId = () => nextId;
 const setNextId = (v) => { nextId = v; };
 const snapNum = (v) => (Number.isFinite(v) ? v : 0);
+const snapRoute = (route) => Array.isArray(route) ? route.map(([x, z]) => [snapNum(x), snapNum(z)]) : null;
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -29,7 +44,7 @@ export class Game {
     this.levelId = snap ? snap.level : levelId;
     this.mode = snap ? snap.mode || 'campaign' : mode;
     this.level = LEVELS[(this.levelId || 1) - 1] || LEVELS[0];
-    this.economy = { startGold: START_GOLD, income: 1, wave: 1, nightMax: NIGHT_MAX, ...(this.level.economy || {}) };
+    this.economy = { startGold: START_GOLD, income: 1, pressure: 1, ...(this.level.economy || {}) };
     this.boss = null;
     this.rng = makeRNG(999);
 
@@ -46,28 +61,50 @@ export class Game {
     this.flowDirty = true;
     this.flowTimer = 0;
 
-    // Hive nests: the enemy's bases. Nightly waves march from them, and they
-    // can be razed — raze them all on a campaign map and the land is won.
+    // Hive nests: the enemy's producing bases. Each musters squads on its own
+    // timer — raze one and you can hear the pressure drop.
     this.nests = (map.nestSpots || []).map((s, i) => {
-      const hp = Math.round(2200 * this.level.mult * Math.max(0.6, this.diff.mult));
-      return { id: i, x: s[0] + 0.5, z: s[1] + 0.5, hp, maxHp: hp, alive: true };
+      const hp = Math.round(
+        NEST_HP_BASE * (1 - NEST_HP_LEVEL_SHARE + NEST_HP_LEVEL_SHARE * this.level.mult)
+        * Math.max(0.6, this.diff.mult),
+      );
+      return { id: i, x: s[0] + 0.5, z: s[1] + 0.5, hp, maxHp: hp, alive: true, musterT: 8 + i * 4, defendT: 0 };
     });
+
+    // Lane nodes: the ground worth holding.
+    // A node's KIND comes from the terrain and never changes. Its OWNER is a
+    // separate fact, decided below, and the player does not learn it until they
+    // have been close enough to survey the place.
+    this.nodes = (map.nodeSpots || []).map((s, i) => ({
+      id: i, x: s.x + 0.5, z: s.z + 0.5, name: s.name || `Node ${i + 1}`,
+      kind: s.kind || 'clearing', def: NODE_KINDS[s.kind] || NODE_KINDS.clearing,
+      owner: 'neutral', cap: 0, capOwner: null, gi: i, seen: false, looted: false,
+    }));
+    this.laneGraph = null;
+    this.cityGi = -1;
 
     this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
-    this.night = 1;              // current day/night number (1..FINAL_NIGHT)
-    this.phase = 'day';
-    this.phaseT = 0;             // day: counts up (untimed); night: counts down
-    this.belling = false;
-    this.nightPlan = null;
+    this.threat = 0;             // the clock that replaced nightfall
+    this.threatLevel = 1;
+    this.phase = 'found';
+    this.finalStand = false;     // every hive razed — the counterattack is coming
     this.over = false;
     this.won = false;
 
+    this.incomeT = SIEGE.incomeTick;
+    this._incomeAcc = 0;
+    this.incomeRate = 0;
+    this._nodeT = 0;
+    this._campT = 0;
+
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
-    this.messageSeq = 0;
 
-    this.stats = { kills: 0, built: 0, lost: 0, coins: 0, nests: 0, heroDeaths: 0, bossKillT: null };
+    this.stats = {
+      kills: 0, built: 0, lost: 0, coins: 0, nests: 0, nodes: 0, bestHeld: 0,
+      heroDeaths: 0, bossKillT: null, repaired: 0,
+    };
 
     // heroKeys entries: 'scott' (fresh) or { k, camp: { level, xp, items, relics } }
     // — the WC3-style persistent campaign hero each player brings along.
@@ -86,43 +123,54 @@ export class Game {
     else this._setupStart();
   }
 
-  // ---------- save / restore (v2: plot economy) ----------
+  // ---------- save / restore (v4: continuous siege) ----------
 
   snapshot() {
     return {
-      v: 3, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
-      time: snapNum(this.time), night: this.night, phase: this.phase, phaseT: snapNum(this.phaseT),
-      belling: this.belling ? snapNum(this.bellT) : -1,
+      v: 4, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
+      time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
+      phase: this.phase, finalStand: this.finalStand ? 1 : 0,
       gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
       relics: [...this.relics],
-      nests: this.nests.map((n) => [Math.round(n.hp), n.alive ? 1 : 0]),
-      nightPlan: this.nightPlan ? { ...this.nightPlan } : null,
+      timers: {
+        incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
+        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
+      },
+      nests: this.nests.map((n) => [snapNum(n.hp), n.alive ? 1 : 0, snapNum(n.musterT), snapNum(n.defendT || 0)]),
+      nodes: this.nodes.map((n) => [n.owner, snapNum(n.cap), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
       stats: { ...this.stats },
       rng: this.rng.getState(), nextId: getNextId(),
-      plots: this.plots.map((p) => ({ id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch })),
+      plots: this.plots.map((p) => ({
+        id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch,
+        ruined: p.ruined ? 1 : 0, musterT: p.musterT != null ? snapNum(p.musterT) : null,
+      })),
       buildings: this.buildings.map((b) => ({
         id: b.id, p: b.plotId, x: b.x, z: b.z, hp: snapNum(b.hp), g: b.gate ? 1 : 0,
-        cd: snapNum(b.cooldown || 0), stun: snapNum(b.stunT || 0),
+        pr: b.priority || 0, cd: snapNum(b.cooldown || 0), stun: snapNum(b.stunT || 0),
       })),
-      coins: this.coins.map((cn) => [snapNum(cn.x), snapNum(cn.z), cn.v]),
+      coins: this.coins.map((cn) => [cn.id, snapNum(cn.x), snapNum(cn.z), cn.v]),
       units: this.units.filter((u) => !u.hero).map((u) => ({
         id: u.id, k: u.key, x: snapNum(u.x), z: snapNum(u.z),
+        order: this.units.indexOf(u),
         hp: snapNum(u.hp), camp: u.camp || 0,
         hx: snapNum(u.holdX || u.x), hz: snapNum(u.holdZ || u.z),
-        cd: snapNum(u.cooldown || 0), rt: snapNum(u.retargetT || 0),
-        facing: snapNum(u.facing || 0), target: u.target ? u.target.id : null,
-        targetNest: u.targetNest ? u.targetNest.id : null,
+        cd: snapNum(u.cooldown || 0), rt: snapNum(u.retargetT || 0), facing: snapNum(u.facing || 0),
+        target: u.target ? u.target.id : null, targetNest: u.targetNest ? u.targetNest.id : null,
+        node: u.targetNodeId != null ? u.targetNodeId : -1, gi: u.targetGi ?? -1,
+        route: snapRoute(u.route), routeI: u.routeI || 0, routeStuck: snapNum(u.routeStuck || 0),
+        routeBest: Number.isFinite(u.routeBest) ? snapNum(u.routeBest) : null, repathT: snapNum(u.repathT || 0),
       })),
       heroes: this.heroes.map((h) => ({
         id: h.id, k: h.key, x: snapNum(h.x), z: snapNum(h.z), hp: snapNum(h.hp),
+        order: this.units.indexOf(h),
         dead: !!h.dead, reviveT: snapNum(h.reviveT || 0),
         level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd),
-        atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0),
-        facing: snapNum(h.facing || 0), mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0),
-        sprint: !!h.sprint, pay: !!h.payHold, target: h.target ? h.target.id : null,
-        targetNest: h.targetNest ? h.targetNest.id : null,
+        atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
+        mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
+        coinAcc: snapNum(h._coinAcc || 0),
+        target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
         items: [...(h.items || [])],
@@ -131,12 +179,14 @@ export class Game {
       zombies: this.zombies.map((z) => [z.type, snapNum(z.x), snapNum(z.z), snapNum(z.hp), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0, {
         id: z.id, dx: snapNum(z.dirX || 0), dz: snapNum(z.dirZ || 0),
         timer: snapNum(z.timer || 0), atk: snapNum(z.atkT || 0),
-        anim: snapNum(z.phase || 0), hit: snapNum(z.hitFlash || 0),
-        stun: snapNum(z.stunT || 0), slow: snapNum(z.slowT || 0),
-        slowMul: snapNum(z.slowMul || 1), progress: snapNum(z.progressT || 0),
-        px: snapNum(z.px || 0), pz: snapNum(z.pz || 0),
-        retarget: snapNum(z.retarget || 0), stuck: snapNum(z.stuckT || 0),
-        burst: z.burst ? 1 : 0, targetU: z.targetU ? z.targetU.id : null,
+        targetU: z.targetU ? z.targetU.id : null, anim: snapNum(z.phase || 0), hit: snapNum(z.hitFlash || 0),
+        stun: snapNum(z.stunT || 0), slow: snapNum(z.slowT || 0), slowMul: snapNum(z.slowMul || 1),
+        progress: snapNum(z.progressT || 0), px: snapNum(z.px || 0), pz: snapNum(z.pz || 0),
+        retarget: snapNum(z.retarget || 0), stuck: snapNum(z.stuckT || 0), burst: !!z.burst,
+        route: snapRoute(z.route), routeI: z.routeI || 0, routeStuck: snapNum(z.routeStuck || 0),
+        routeBest: Number.isFinite(z.routeBest) ? snapNum(z.routeBest) : null, repathT: snapNum(z.repathT || 0),
+        frenzy: snapNum(z.frenzy || 0), speedMul: snapNum(z.speedMul || 1), raider: !!z.raider,
+        armor: snapNum(z.armor || 0), maxHp: snapNum(z.maxHp || 0),
         spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0),
       }]),
     };
@@ -144,41 +194,71 @@ export class Game {
 
   _restore(snap) {
     this.time = snap.time;
-    this.night = snap.night;
-    this.phase = snap.phase;
-    this.phaseT = snap.phaseT;
-    if (snap.belling != null && snap.belling >= 0) { this.belling = true; this.bellT = snap.belling; }
+    this.threat = snap.threat || 0;
+    this.threatLevel = snap.threatLevel || 1;
+    this.phase = snap.phase === 'found' ? 'found' : 'live';
+    this.finalStand = !!snap.finalStand;
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
-    if (this.site >= 0) this.plots = generatePlots(this.map, this.map.sites[this.site]);
+    if (this.site >= 0) {
+      this.plots = generatePlots(this.map, this.map.sites[this.site]);
+      this._claimed = true; // ownership comes from the save, not a fresh roll
+      this._buildLaneSystems(this.map.sites[this.site]);
+    }
     this.relics = [...(snap.relics || [])];
     this.relicMods = itemMods(this.relics);
-    (snap.nests || []).forEach(([hp, alive], i) => {
-      if (this.nests[i]) { this.nests[i].hp = hp; this.nests[i].alive = !!alive; }
+    const timers = snap.timers || {};
+    this.incomeT = timers.incomeT ?? this.incomeT;
+    this._incomeAcc = timers.incomeAcc ?? 0;
+    this.incomeRate = timers.incomeRate ?? 0;
+    this._nodeT = timers.nodeT ?? 0;
+    this._campT = timers.campT ?? 0;
+    this.bossSpawnT = timers.bossSpawnT ?? null;
+    (snap.nests || []).forEach(([hp, alive, musterT, defendT], i) => {
+      if (this.nests[i]) {
+        this.nests[i].hp = hp;
+        this.nests[i].alive = !!alive;
+        if (musterT != null) this.nests[i].musterT = musterT;
+        if (defendT != null) this.nests[i].defendT = defendT;
+      }
     });
-    this.nightPlan = snap.nightPlan ? { ...snap.nightPlan } : null;
-    const stats = { kills: 0, built: 0, lost: 0, coins: 0, nests: 0, heroDeaths: 0, bossKillT: null, ...snap.stats };
-    this.stats = {
-      kills: stats.kills, built: stats.built, lost: stats.lost, coins: stats.coins,
-      nests: stats.nests, heroDeaths: stats.heroDeaths, bossKillT: stats.bossKillT,
-    };
+    (snap.nodes || []).forEach(([owner, cap, capOwner, seen, empty, looted], i) => {
+      const n = this.nodes[i];
+      if (!n) return;
+      n.owner = owner || 'neutral';
+      n.cap = cap || 0;
+      n.capOwner = capOwner || null;
+      n.seen = !!seen;
+      n.empty = !!empty;
+      n.looted = !!looted;
+    });
+    this.stats = { nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0, ...snap.stats };
 
     for (const ps of snap.plots) {
       const p = this.plots.find((o) => o.id === ps.id);
-      if (p) { p.tier = ps.tier; p.paid = ps.paid; p.branch = ps.branch; }
+      if (p) {
+        p.tier = ps.tier; p.paid = ps.paid; p.branch = ps.branch;
+        p.ruined = !!ps.ruined;
+        if (ps.musterT != null) p.musterT = ps.musterT;
+      }
     }
     for (const bs of snap.buildings) {
       const plot = this.plots.find((o) => o.id === bs.p);
       if (!plot) continue;
       const def = this.tierDef(plot, plot.tier);
-      this._addBuilding(plot, bs.x, bs.z, def, !!bs.g, bs.id, bs.hp);
-      const b = this.buildings[this.buildings.length - 1];
-      b.cooldown = bs.cd || 0;
-      b.stunT = bs.stun || 0;
+      const b = this._addBuilding(plot, bs.x, bs.z, def, !!bs.g, bs.id, bs.hp);
+      if (b) {
+        b.priority = bs.pr || 0;
+        b.cooldown = bs.cd || 0;
+        b.stunT = bs.stun || 0;
+      }
     }
     this.hq = this.buildings.find((b) => b.kind === 'hq');
-    this.coins = snap.coins.map(([x, z, v]) => ({ id: nextId++, x, z, v }));
+    this.coins = (snap.coins || []).map((saved) => {
+      const [id, x, z, v] = saved.length >= 4 ? saved : [nextId++, saved[0], saved[1], saved[2]];
+      return { id, x, z, v };
+    });
 
     const actorsById = new Map();
     const zombiesById = new Map();
@@ -191,8 +271,16 @@ export class Game {
       u.hp = us.hp;
       u.holdX = us.hx; u.holdZ = us.hz;
       u.cooldown = us.cd || 0;
+      u._restoreOrder = us.order ?? Number.MAX_SAFE_INTEGER;
       u.retargetT = us.rt || 0;
       u.facing = us.facing || 0;
+      if (us.node != null && us.node >= 0) u.targetNodeId = us.node;
+      u.targetGi = us.gi ?? -1;
+      u.route = us.route || null;
+      u.routeI = us.routeI || 0;
+      u.routeStuck = us.routeStuck || 0;
+      u.routeBest = us.routeBest == null ? Infinity : us.routeBest;
+      u.repathT = us.repathT || 0;
       actorsById.set(u.id, u);
       pendingActorTargets.push([u, us]);
     }
@@ -200,7 +288,8 @@ export class Game {
       const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [], upgrades: hs.upgrades || {} });
       if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
-      h.abilCd = hs.cd;
+      h.abilCd = hs.cd || 0;
+      h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
       h.cooldown = hs.atkCd || 0;
       h.retargetT = hs.rt || 0;
       h.facing = hs.facing || 0;
@@ -208,6 +297,7 @@ export class Game {
       h.mz = hs.mz || 0;
       h.sprint = !!hs.sprint;
       h.payHold = !!hs.pay;
+      h._coinAcc = hs.coinAcc || 0;
       h.stealth = !!hs.stealth;
       h.weaveT = hs.weaveT || 0;
       h.weaveDmg = hs.weaveDmg || 0;
@@ -225,60 +315,57 @@ export class Game {
     for (const [type, x, z, hp, state, wave, boss, enraged, meta = {}] of snap.zombies) {
       let zb = null;
       if (boss) {
-        this._spawnBoss(0);
+        this._spawnBoss(null);
         zb = this.boss;
-        zb.x = x; zb.z = z; zb.hp = hp;
-        if (enraged) {
-          zb.enraged = true;
-          zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
-        }
+        if (!zb) continue;
       } else {
         zb = this._spawnZombie(type, x, z, state === 2, !!wave);
-        if (zb) { zb.hp = hp; zb.state = state; }
+        if (!zb) continue;
       }
-      if (!zb) continue;
       if (meta.id) zb.id = meta.id;
-      zb.dirX = meta.dx ?? zb.dirX;
-      zb.dirZ = meta.dz ?? zb.dirZ;
-      zb.timer = meta.timer ?? zb.timer;
-      zb.atkT = meta.atk ?? zb.atkT;
-      zb.phase = meta.anim ?? zb.phase;
-      zb.hitFlash = meta.hit ?? zb.hitFlash;
-      zb.stunT = meta.stun || 0;
-      zb.slowT = meta.slow || 0;
-      zb.slowMul = meta.slowMul || 1;
-      zb.progressT = meta.progress || 0;
-      zb.px = meta.px || 0;
-      zb.pz = meta.pz || 0;
-      zb.retarget = meta.retarget || 0;
-      zb.stuckT = meta.stuck || 0;
-      zb.burst = !!meta.burst;
-      if (zb.boss) {
-        zb.spawnT = meta.spawnT ?? zb.spawnT;
-        zb.roarT = meta.roarT ?? zb.roarT;
+      zb.x = x; zb.z = z; zb.hp = hp; zb.state = state;
+      if (meta.maxHp) zb.maxHp = meta.maxHp;
+      zb.dirX = meta.dx || 0; zb.dirZ = meta.dz || 0;
+      zb.timer = meta.timer || 0; zb.atkT = meta.atk || 0;
+      zb.phase = meta.anim || 0; zb.hitFlash = meta.hit || 0;
+      zb.stunT = meta.stun || 0; zb.slowT = meta.slow || 0; zb.slowMul = meta.slowMul || 1;
+      zb.progressT = meta.progress || 0; zb.px = meta.px || 0; zb.pz = meta.pz || 0;
+      zb.retarget = meta.retarget || 0; zb.stuckT = meta.stuck || 0; zb.burst = !!meta.burst;
+      zb.route = meta.route || null; zb.routeI = meta.routeI || 0;
+      zb.routeStuck = meta.routeStuck || 0; zb.routeBest = meta.routeBest == null ? Infinity : meta.routeBest; zb.repathT = meta.repathT || 0;
+      zb.frenzy = meta.frenzy || 0; zb.speedMul = meta.speedMul || 1; zb.raider = !!meta.raider;
+      if (meta.armor) zb.armor = meta.armor;
+      if (meta.spawnT != null) zb.spawnT = meta.spawnT;
+      if (meta.roarT != null) zb.roarT = meta.roarT;
+      if (enraged) {
+        zb.enraged = true;
+        zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
       }
       zombiesById.set(zb.id, zb);
       pendingZombieTargets.push([zb, meta]);
     }
 
-    for (const [actor, saved] of pendingActorTargets) {
-      actor.target = saved.target == null ? null : zombiesById.get(saved.target) || null;
-      actor.targetNest = saved.targetNest == null ? null : this.nests[saved.targetNest] || null;
+    for (const [u, saved] of pendingActorTargets) {
+      if (saved.target != null) u.target = zombiesById.get(saved.target) || null;
+      if (saved.targetNest != null) u.targetNest = this.nests[saved.targetNest] || null;
     }
     for (const [zb, meta] of pendingZombieTargets) {
-      zb.targetU = meta.targetU == null ? null : actorsById.get(meta.targetU) || null;
+      if (meta.targetU != null) zb.targetU = actorsById.get(meta.targetU) || null;
     }
+    this.units.sort((a, b) => (a._restoreOrder ?? 0) - (b._restoreOrder ?? 0));
+    for (const u of this.units) delete u._restoreOrder;
+    if (timers.bossSpawnT != null) this.bossSpawnT = timers.bossSpawnT;
 
     this.rng.setState(snap.rng);
     setNextId(snap.nextId);
     this.flowDirty = true;
-    this.msg('📂 The city stands as you left it — the fight continues.', 'info');
+    this.msg('📂 The city stands as you left it — the siege continues.', 'info');
   }
 
   // ---------- setup ----------
 
   // The run opens un-founded: heroes ride a wild frontier dotted with marked
-  // city sites and hive nests. Claim a site to raise the city there.
+  // city sites, lane nodes and hive nests. Claim a site to raise the city.
   _setupStart() {
     this.phase = 'found';
     const c = this.map.size / 2;
@@ -296,16 +383,125 @@ export class Game {
     const hqPlot = this.plots.find((pl) => pl.kind === 'hq');
     this._construct(hqPlot, true); // the Keep rises with the founding
     this.hq = this.buildings.find((b) => b.kind === 'hq');
+    this._buildLaneSystems(site);
     this.heroes.forEach((h, i) => {
       if (!h.dead) { h.x = this.hq.cx - 1 + i * 2; h.z = this.hq.cz + 3.5; }
     });
-    this.phase = 'day';
-    this.phaseT = 0;
+    this.phase = 'live';
     this.flowDirty = true;
-    this._planNight();
     this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
     const founder = this.heroes[p];
-    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! Collect coins, hold B at foundations, and keep building under pressure.`, 'info');
+    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city! The hives are already mustering — build, then push out and take the lanes.`, 'info');
+  }
+
+  // Wire the planet's lane graph: capture nodes, then the hives, then the city.
+  // Also drops a Forward Camp plot on every capture node — you can only fund it
+  // once that node is yours.
+  _buildLaneSystems(site) {
+    const points = [
+      ...this.nodes.map((n) => ({ x: n.x, z: n.z })),
+      ...this.nests.map((n) => ({ x: n.x, z: n.z })),
+      { x: site.x, z: site.z },
+    ];
+    this.nodes.forEach((n, i) => { n.gi = i; });
+    this.nests.forEach((n, i) => { n.gi = this.nodes.length + i; });
+    this.cityGi = this.nodes.length + this.nests.length;
+    this.laneGraph = buildLaneGraph(this.map, points, SIEGE);
+
+    // Anything the city cannot walk to is marooned — an island, a lake-locked
+    // shelf. Leaving it on the map would be content the player can see and
+    // never reach, and a marooned HIVE would make the map unwinnable, because
+    // the win condition is razing every one of them.
+    const reach = reachableFrom(this.laneGraph, this.cityGi);
+    for (const node of this.nodes) node.offMap = !reach.has(node.gi);
+    for (const nest of this.nests) {
+      if (reach.has(nest.gi)) continue;
+      nest.offMap = true;
+      nest.alive = false;   // unreachable, so it can never muster or be razed
+      nest.hp = 0;
+    }
+
+    if (!this._claimed) { this._claimed = true; this._claimNodes(); }
+
+    for (const node of this.nodes) {
+      if (node.offMap) continue;
+      if (this.plots.some((pl) => pl.kind === 'outpost' && pl.nodeId === node.id)) continue;
+      const spot = this._outpostSpot(node);
+      if (!spot) continue;
+      this.plots.push({
+        id: OUTPOST_PLOT_BASE + node.id, kind: 'outpost', nodeId: node.id,
+        x: spot[0], z: spot[1], size: 2,
+        cx: spot[0] + 1, cz: spot[1] + 1,
+        tier: 0, paid: 0, branch: null, ruined: false,
+      });
+    }
+  }
+
+  // A clear 2x2 footprint beside a node, never on top of its centre so the
+  // hero can always stand in the capture ring.
+  _outpostSpot(node) {
+    const bx = (node.x | 0) - 1, bz = (node.z | 0) - 1;
+    for (let r = 1; r <= 5; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const x = bx + dx, z = bz + dz;
+          let ok = true;
+          for (let sz = 0; sz < 2 && ok; sz++) {
+            for (let sx = 0; sx < 2; sx++) {
+              if (!this.map.isBuildable(x + sx, z + sz)) { ok = false; break; }
+            }
+          }
+          if (ok) return [x, z];
+        }
+      }
+    }
+    return null;
+  }
+
+  // The hive got here first. It holds some of the good ground already — but
+  // which ground is not something you can read off the terrain, so you have to
+  // go and look. Seeded, so both lockstep peers claim identically.
+  _claimNodes() {
+    const pool = this.nodes.filter((n) => !n.offMap);
+    if (!pool.length) return;
+    // Deterministic shuffle, then claim from the far end of the map inward:
+    // the hive's grip is strongest where you are not.
+    const cx = this.hq ? this.hq.cx : this.map.size / 2;
+    const cz = this.hq ? this.hq.cz : this.map.size / 2;
+    const claimSeed = ((this.map.seed || 0) >>> 0)
+      ^ Math.imul((this.site + 1) >>> 0, 0x9e3779b1)
+      ^ Math.imul((this.levelId || 1) >>> 0, 0x85ebca6b)
+      ^ Math.imul((cx | 0) + ((cz | 0) << 8), 0xc2b2ae35);
+    const claimRng = makeRNG(claimSeed);
+    const ranked = pool
+      .map((n) => [dist2(n.x, n.z, cx, cz) * (0.75 + claimRng() * 0.5), n])
+      .sort((a, b) => b[0] - a[0]);
+    const want = Math.round(pool.length * SIEGE.hiveClaim);
+    for (let i = 0; i < ranked.length; i++) {
+      const node = ranked[i][1];
+      if (i < want) node.owner = 'hive';
+      // Some neutral ground is simply empty — a gift, if you find it first.
+      else node.empty = claimRng() < 0.3;
+    }
+  }
+
+  // Survey: get close enough and you learn who holds it and what it is.
+  _updateScouting() {
+    const r2 = SIEGE.scoutRadius * SIEGE.scoutRadius;
+    for (const node of this.nodes) {
+      if (node.seen || node.offMap) continue;
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (dist2(u.x, u.z, node.x, node.z) > r2) continue;
+        node.seen = true;
+        const holder = node.owner === 'hive' ? 'The hive holds it.'
+          : node.empty ? 'Nobody is on it.' : 'It is guarded.';
+        this.msg(`${node.def.icon} Surveyed ${node.name} — ${node.def.name}. ${holder}`, 'info');
+        this.emit({ type: 'nodeseen', x: node.x, z: node.z, id: node.id });
+        break;
+      }
+    }
   }
 
   _scatterCreeps() {
@@ -331,18 +527,40 @@ export class Game {
         }
       }
     }
+    // Ground is guarded in proportion to who claims it: hive-held nodes are a
+    // real fight, neutral ones a skirmish, and the empty ones are free.
+    for (const node of this.nodes) {
+      if (node.offMap || node.empty) continue;
+      const base = node.owner === 'hive' ? 7 : 3;
+      const guards = Math.round((base + 2 * this.diff.mult) * (node.def.garrison || 1));
+      for (let i = 0; i < guards; i++) {
+        const a = this.rng() * Math.PI * 2, r = 1.5 + this.rng() * 3.5;
+        const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
+        if (this.map.isWalkable(x | 0, z | 0)) {
+          this._spawnZombie(node.owner === 'hive' && this.rng() < 0.25 ? 'runner' : 'walker', x, z, false);
+        }
+      }
+    }
   }
 
   // ---------- helpers ----------
 
-  msg(text, kind = 'info') {
-    this.messages.push({ seq: this.messageSeq++, text, kind, t: this.time });
-    if (this.messages.length > 80) this.messages.splice(0, this.messages.length - 80);
-  }
+  msg(text, kind = 'info') { this.messages.push({ text, kind, t: this.time }); }
   emit(e) { this.events.push(e); }
 
-  get day() { return this.night; }
-  get isNight() { return this.phase === 'night'; }
+  get isNight() { return false; } // kept so old call sites read false, not undefined
+  // Marooned nodes are excluded everywhere: they are not capturable, not
+  // counted, and not drawn.
+  activeNodes() { return this.nodes.filter((n) => !n.offMap); }
+  // How many troops you can field. Ground you hold is what raises it, so the
+  // answer to "I am stuck and rich" is always "go take something".
+  unitCap() {
+    const total = this.activeNodes().length;
+    const share = total ? this.heldNodes() / total : 0;
+    return Math.min(SUPPLY.max, Math.round(SUPPLY.base + SUPPLY.perPlanet * share));
+  }
+  heldNodes() { return this.nodes.filter((n) => !n.offMap && n.owner === 'player').length; }
+  liveNests() { return this.nests.filter((n) => n.alive).length; }
 
   // ---------- plots & construction ----------
 
@@ -351,6 +569,19 @@ export class Game {
     const kind = PLOT_KINDS[plot.kind];
     const t = kind.tiers[tier - 1];
     if (!t) return null;
+    // A Forward Camp is shaped by the ground under it: stone makes it tough,
+    // open ground lets it muster more.
+    if (plot.kind === 'outpost') {
+      const node = this.nodes[plot.nodeId];
+      const nd = node && node.def;
+      if (nd) {
+        return {
+          ...t,
+          hp: Math.round(t.hp * (1 + (nd.outpostHp || 0))),
+          count: t.count + (nd.outpostCount || 0),
+        };
+      }
+    }
     if (t.branch) {
       const opt = t.options[plot.branch];
       if (!opt) return null;
@@ -381,9 +612,26 @@ export class Game {
     return def ? { def, cost: def.cost } : null;
   }
 
+  // A Forward Camp only exists on ground you actually hold.
+  plotLocked(plot) {
+    if (plot.kind !== 'outpost') return false;
+    const node = this.nodes[plot.nodeId];
+    return !node || node.owner !== 'player';
+  }
+
+  // Health of everything standing on a plot, plus how much of it is missing.
+  plotHpState(plot) {
+    let hp = 0, maxHp = 0, count = 0;
+    for (const b of this.buildings) {
+      if (b.plotId !== plot.id || !b.alive) continue;
+      hp += b.hp; maxHp += b.maxHp; count++;
+    }
+    const total = plot.kind === 'wall' ? plot.tiles.length : 1;
+    return { hp, maxHp, count, total, missing: total - count };
+  }
+
   // Where you stand to fund a plot. With a hero, measure reach against the
-  // whole footprint so upgrades work from every side and corner. Without a
-  // hero, keep the old visual plate for rings and dawn coin spacing.
+  // whole footprint so upgrades work from every side and corner.
   payPoint(plot, h = null) {
     if (plot.kind === 'wall') return [plot.gate[0] + 0.5, plot.gate[1] + 0.5];
     if (h) {
@@ -404,38 +652,57 @@ export class Game {
     return plot._plate;
   }
 
-  // The hero's nearest fundable plot — what holding the build key would pay
-  // into. Shared by the sim and by the HUD prompt.
-  buildTargetFor(h) {
-    let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestNt = null, bestPoint = null;
-    for (const plot of this.plots) {
-      const nt = this.nextTier(plot);
-      if (!nt || nt.branch) continue;
-      const [px, pz] = this.payPoint(plot, h);
-      const d = dist2(h.x, h.z, px, pz);
-      if (d <= bd) { bd = d; best = plot; bestNt = nt; bestPoint = [px, pz]; }
+  // What holding the build key beside this plot would actually do, and what it
+  // costs. One verb, four jobs: raise, upgrade, rebuild a ruin, repair damage.
+  plotAction(plot) {
+    if (this.plotLocked(plot)) return null;
+    if (plot.ruined) {
+      const def = this.tierDef(plot, plot.tier);
+      if (!def) return null;
+      const state = this.plotHpState(plot);
+      const share = plot.kind === 'wall' ? Math.max(0, state.missing) / Math.max(1, state.total) : 1;
+      const cost = Math.max(1, Math.ceil(def.cost * SIEGE.rebuildDiscount * share));
+      return { mode: 'rebuild', cost, def, label: `Rebuild ${def.name}` };
     }
-    return best ? { plot: best, nt: bestNt, payPoint: bestPoint } : null;
+    const nt = this.nextTier(plot);
+    if (nt) return nt.branch ? { mode: 'branch', nt } : { mode: 'build', cost: nt.cost, nt, def: nt.def, label: nt.def.name };
+    const state = this.plotHpState(plot);
+    if (state.maxHp > 0 && state.hp < state.maxHp - 0.5) {
+      const cost = Math.max(1, Math.ceil((state.maxHp - state.hp) / SIEGE.repairHpPerGold));
+      return { mode: 'repair', cost, label: 'Repair' };
+    }
+    return null;
   }
 
-  // Thronefall building: walk to a foundation and HOLD the build key. Coins
-  // fly from your purse into the plot one by one until it rises. Partial
-  // payments persist, so letting go never wastes anything.
+  // The hero's nearest actionable plot — what holding the build key would pay
+  // into. Shared by the sim and by the HUD prompt.
+  buildTargetFor(h) {
+    let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestAct = null, bestPoint = null;
+    for (const plot of this.plots) {
+      const act = this.plotAction(plot);
+      if (!act || act.mode === 'branch') continue;
+      const [px, pz] = this.payPoint(plot, h);
+      const d = dist2(h.x, h.z, px, pz);
+      if (d <= bd) { bd = d; best = plot; bestAct = act; bestPoint = [px, pz]; }
+    }
+    if (!best) return null;
+    // `nt` is kept for the HUD, which has always read target.nt.
+    return { plot: best, act: bestAct, nt: bestAct.nt || { def: bestAct.def, cost: bestAct.cost }, payPoint: bestPoint };
+  }
+
+  // Building is always available now — and always dangerous, because nothing
+  // stops while you do it.
   _updatePlots(dt) {
-    if (this.over) return;
-    if (this.phase === 'found') return;
+    if (this.over || this.phase !== 'live') return;
     for (const h of this.heroes) {
       if (h.dead || !h.payHold) continue;
       const target = this.buildTargetFor(h);
       if (!target) continue;
-      const { plot, nt } = target;
-      const need = nt.cost - plot.paid;
+      const { plot, act } = target;
+      const need = act.cost - (act.mode === 'build' || act.mode === 'rebuild' ? plot.paid : 0);
       const pay = Math.min(PAY_RATE * dt, this.gold, need);
       if (pay <= 0) continue;
       this.gold -= pay;
-      plot.paid += pay;
-      plot.payFx = 0.3; // renderer hint
-      // Emit one arc-coin per whole gold piece — the Thronefall purse animation.
       const [px, pz] = target.payPoint || this.payPoint(plot, h);
       h._coinAcc = (h._coinAcc || 0) + pay;
       if (h._coinAcc >= 1) {
@@ -443,11 +710,48 @@ export class Game {
         h._coinAcc -= n;
         this.emit({ type: 'paycoin', fx: h.x, fz: h.z, tx: px, tz: pz, n: Math.min(n, 4) });
       }
-      if (plot.paid >= nt.cost - 1e-6) {
+      plot.payFx = 0.3; // renderer hint
+
+      if (act.mode === 'repair') {
+        this._repairPlot(plot, pay * SIEGE.repairHpPerGold);
+        this.stats.repaired += pay;
+        continue;
+      }
+      plot.paid += pay;
+      if (plot.paid >= act.cost - 1e-6) {
         plot.paid = 0;
-        this._construct(plot);
+        if (act.mode === 'rebuild') this._rebuildPlot(plot);
+        else this._construct(plot);
       }
     }
+  }
+
+  _repairPlot(plot, hp) {
+    const damaged = this.buildings.filter((b) => b.plotId === plot.id && b.alive && b.hp < b.maxHp);
+    if (!damaged.length) return;
+    const each = hp / damaged.length;
+    for (const b of damaged) b.hp = Math.min(b.maxHp, b.hp + each);
+    this.emit({ type: 'repair', x: plot.cx, z: plot.cz });
+  }
+
+  // Raise a ruin again at a discount — the ground remembers the plan.
+  _rebuildPlot(plot) {
+    const def = this.tierDef(plot, plot.tier);
+    if (!def) return;
+    if (plot.kind === 'wall') {
+      for (const [x, z] of plot.tiles) {
+        if (this.occ[z * this.map.size + x] === 0) {
+          this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
+          this.emit({ type: 'build', kind: 'wall', plotId: plot.id, tier: plot.tier, x: x + 0.5, z: z + 0.5, quiet: true });
+        }
+      }
+    } else if (!this.buildings.some((b) => b.plotId === plot.id)) {
+      this._addBuilding(plot, plot.x, plot.z, def, false);
+      this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
+    }
+    plot.ruined = false;
+    if (PLOT_KINDS[plot.kind].unit) plot.musterT = def.every;
+    this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} stands again.`, 'info');
   }
 
   _construct(plot, free = false) {
@@ -474,15 +778,18 @@ export class Game {
       }
     }
 
-    // Camps field a squad immediately (and refill at dawn).
+    // Camps are faucets: they muster a squad now, then again on their timer.
     const unitKey = PLOT_KINDS[plot.kind].unit;
-    if (unitKey) this._refillCamp(plot);
+    if (unitKey) {
+      plot.musterT = def.every;
+      this._muster(plot, def);
+    }
 
     this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
     if (!free) {
       if (unitKey) {
         const unit = UNITS[unitKey];
-        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} joined. 1 holds, 2 escorts, 3 hunts hives.`, 'info');
+        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s. 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
       } else {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
       }
@@ -499,7 +806,7 @@ export class Game {
       id: id || nextId++, plotId: plot.id, kind: plot.kind, key: plot.kind,
       def, x, z, size,
       cx: x + size / 2, cz: z + size / 2,
-      hp: hp != null ? hp : maxHp, maxHp, alive: true, cooldown: 0, gate,
+      hp: hp != null ? hp : maxHp, maxHp, alive: true, cooldown: 0, gate, priority: 0,
     };
     this.buildings.push(b);
     for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
@@ -533,15 +840,43 @@ export class Game {
     }
   }
 
-  _refillCamp(plot) {
-    const kindDef = PLOT_KINDS[plot.kind];
-    const def = this.tierDef(plot, plot.tier);
-    if (!def) return;
-    const have = this.units.filter((u) => u.camp === plot.id && !u.dead).length;
-    for (let i = have; i < def.count && this.units.length < UNIT_CAP; i++) {
-      const a = (i / def.count) * Math.PI * 2;
-      this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
+  // Camps and outposts muster a fresh squad on their own timer — this is the
+  // faucet that replaced the dawn refill.
+  _updateCamps(dt) {
+    this._campT -= dt;
+    if (this._campT > 0) return;
+    const step = 0.5;
+    this._campT = step;
+    for (const plot of this.plots) {
+      const kd = PLOT_KINDS[plot.kind];
+      if (!kd.unit || plot.tier === 0 || plot.ruined) continue;
+      const def = this.tierDef(plot, plot.tier);
+      if (!def || !def.every) continue;
+      const standing = this.buildings.some((b) => b.plotId === plot.id && b.alive);
+      if (!standing) continue;
+      plot.musterT = (plot.musterT != null ? plot.musterT : def.every) - step;
+      if (plot.musterT <= 0) {
+        plot.musterT = def.every;
+        this._muster(plot, def);
+      }
     }
+  }
+
+  _muster(plot, def) {
+    const kindDef = PLOT_KINDS[plot.kind];
+    // Each camp sustains its own standing force, so army size scales with how
+    // many camps you have bought — not with how long you have been alive.
+    const standing = this.units.filter((u) => u.camp === plot.id && !u.dead).length;
+    const room = def.count * CAMP_STANDING - standing;
+    const cap = this.unitCap();
+    let spawned = 0;
+    for (let i = 0; i < Math.min(def.count, room) && this.units.length < cap; i++) {
+      const a = (i / Math.max(1, def.count)) * Math.PI * 2;
+      const u = this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
+      u.homeNodeId = plot.nodeId != null ? plot.nodeId : null;
+      spawned++;
+    }
+    if (spawned) this.emit({ type: 'muster', x: plot.cx, z: plot.cz, n: spawned, kind: plot.kind });
   }
 
   chooseBranch(plotId, branch, p = 0) {
@@ -552,6 +887,24 @@ export class Game {
     plot.branch = branch;
     this.emit({ type: 'branch', x: plot.cx, z: plot.cz });
     this.msg(`${nt.options[branch].icon} Doctrine chosen: ${nt.options[branch].name}. Hold B beside it to fund it.`, 'info');
+  }
+
+  // Cycle a nearby tower's targeting doctrine. Free, instant, and the cheapest
+  // real decision on the board.
+  cycleTowerPriority(p = 0) {
+    const h = this.heroes[p];
+    if (!h || h.dead) return;
+    let best = null, bd = 9;
+    for (const b of this.buildings) {
+      if (!b.alive || b.kind !== 'tower' || !b.def.dmg) continue;
+      const d = dist2(h.x, h.z, b.cx, b.cz);
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (!best) { this.emit({ type: 'deny' }); return; }
+    best.priority = ((best.priority || 0) + 1) % TOWER_PRIORITY.length;
+    const mode = TOWER_PRIORITY[best.priority];
+    this.emit({ type: 'towerpriority', x: best.cx, z: best.cz });
+    this.msg(`${mode.icon} ${best.def.name} now targets: ${mode.name} — ${mode.desc}`, 'info');
   }
 
   _destroyBuilding(b, byZombie) {
@@ -568,167 +921,352 @@ export class Game {
       this.stats.lost++;
       this.emit({ type: 'bdestroyed', x: b.cx, z: b.cz });
       if (b.kind === 'hq') { this._gameOver(false); return; }
-      // Thronefall-style: ruins rebuild free at dawn — the real price is a
-      // night without that tower/income/camp.
-      this.msg(b.kind === 'wall' ? '🧱 The wall is breached!' : `${PLOT_KINDS[b.kind].icon} ${b.def.name} destroyed! It will be rebuilt at dawn.`, 'bad');
-    }
-  }
-
-  // ---------- day / night cycle ----------
-
-  _planNight() {
-    // Co-op: the same city, the same shared purse — but more heroes on the
-    // field means the hive sends more dead (+40% wave size per extra player).
-    const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
-    const w = waveForNight(this.night, this.diff.mult * this.level.mult * this.economy.wave * coopMult);
-    // The wave marches from living hive nests (the enemy's bases). Fewer
-    // nests left standing = fewer directions to defend.
-    const alive = this.nests.filter((n) => n.alive);
-    const picks = [];
-    const pool = alive.map((n) => n.id);
-    for (let i = 0; i < Math.min(w.edges, pool.length); i++) {
-      picks.push(pool.splice((this.rng() * pool.length) | 0, 1)[0]);
-    }
-    const final = this.mode === 'campaign' && w.final;
-    // Survival: a boss leads every 5th night, cycling the campaign roster
-    // with ever-growing health.
-    const bossNight = this.mode === 'survival' && this.night % 5 === 0;
-    this.nightPlan = { size: w.size, types: w.types, nests: picks, final, boss: final || bossNight };
-    this.emit({ type: 'nightplan', spots: picks.map((id) => [this.nests[id].x, this.nests[id].z]) });
-  }
-
-  // Which boss stalks this night (survival cycles the roster).
-  nightBossDef() {
-    if (this.mode === 'campaign') return this.level.boss;
-    const base = LEVELS[Math.max(0, (((this.night / 5) | 0) - 1) % LEVELS.length)].boss;
-    return { ...base, hp: Math.round(base.hp * (0.8 + this.night * 0.06)) };
-  }
-
-  // Thronefall-exact: the day is untimed — night begins only when someone
-  // rings the bell (then a short dusk countdown).
-  bell(p = 0) {
-    if (this.phase !== 'day' || this.over || this.belling) return;
-    this.belling = true;
-    this.phaseT = 3;
-    const h = this.heroes[p];
-    this.msg(`🔔 ${h ? h.def.name : 'The city'} rings the bell — night falls!`, 'warn');
-    this.emit({ type: 'bell' });
-  }
-
-  _updatePhase(dt) {
-    if (this.phase === 'found') return; // the clock starts when the city does
-    if (this.phase === 'day') {
-      // Castle-defense alternate victory: raze every hive and the land is won.
-      if (this.mode === 'campaign' && this.site >= 0 && this.nests.length && this.nests.every((n) => !n.alive)) {
-        this.msg('🔥 Every hive lies in ashes. The source is cleansed!', 'info');
-        this._gameOver(true);
-        return;
-      }
-      this.phaseT += dt; // day length is informational only
-      if (this.belling) {
-        this.bellT = (this.bellT ?? 3) - dt;
-        if (this.bellT <= 0) { this.belling = false; this.bellT = null; this._startNight(); }
-      }
-    } else {
-      this.phaseT -= dt;
-      // Night ends when the wave is destroyed (or the safety timer runs out).
-      let waveLeft = 0;
-      for (const zb of this.zombies) if (zb.wave && !zb.dead) waveLeft++;
-      if (waveLeft === 0) {
-        if (this.nightPlan && this.nightPlan.final) { this._gameOver(true); return; }
-        this._startDay();
-      } else if (this.phaseT <= 0 && !(this.nightPlan && this.nightPlan.final)) {
-        // Safety valve — but the final night only ends in victory or defeat.
-        this._startDay();
-      }
-    }
-  }
-
-  // Compass label for a nest as seen from the city.
-  _dirName(x, z) {
-    const cx = this.hq ? this.hq.cx : this.map.size / 2;
-    const cz = this.hq ? this.hq.cz : this.map.size / 2;
-    const a = Math.atan2(z - cz, x - cx);
-    const names = ['EAST', 'SOUTHEAST', 'SOUTH', 'SOUTHWEST', 'WEST', 'NORTHWEST', 'NORTH', 'NORTHEAST'];
-    return names[((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8];
-  }
-
-  _startNight() {
-    this.phase = 'night';
-    this.phaseT = this.economy.nightMax;
-    const plan = this.nightPlan;
-    this._spawnHorde(plan.size, plan.nests || [], plan.types);
-    if (plan.boss) this._spawnBoss((plan.nests || [])[0]);
-    for (const id of plan.nests || []) this.emit({ type: 'ping', x: this.nests[id].x, z: this.nests[id].z });
-    const dirNames = [...new Set((plan.nests || []).map((id) => this._dirName(this.nests[id].x, this.nests[id].z)))];
-    this.msg(plan.final
-      ? `☠️ THE FINAL NIGHT. Everything they have, all at once. Survive this and the land is yours!`
-      : `🌙 Night ${this.night}: ${plan.size} of the dead march from the ${dirNames.length ? dirNames.join(' and ') : 'wilds'}!${plan.boss ? ' Something enormous walks among them…' : ''}`, 'bad');
-    this.emit({ type: 'horde', final: !!plan.final });
-    this.emit({ type: 'night' });
-  }
-
-  _startDay() {
-    // Straggling wave zombies (safety timeout) keep fighting, but the sun
-    // rises. Bosses stay "wave" — a night is never clear while one stands.
-    for (const zb of this.zombies) if (zb.wave && !zb.boss) zb.wave = false;
-    this.night++;
-    this.phase = 'day';
-    this.phaseT = 0;
-    this.belling = false;
-    this.bellT = null;
-    this._dawnPayout();
-    this._repairCity();
-    this._planNight();
-    this.msg(`☀️ Dawn of day ${this.night}. The city pays its taxes — go collect!`, 'info');
-    this.emit({ type: 'dawn' });
-  }
-
-  _dawnPayout() {
-    for (const b of this.buildings) {
-      const inc = b.def.income ? Math.round(b.def.income * this.economy.income * (1 + this.relicMods.income)) : 0;
-      if (!inc || !b.alive) continue;
-      // Split income into a handful of coins fountaining around the building.
-      const n = Math.min(6, Math.max(2, Math.round(inc / 3)));
-      const each = Math.floor(inc / n);
-      let rem = inc - each * n;
       const plot = this.plots.find((p) => p.id === b.plotId);
-      const plate = plot ? this.payPoint(plot) : null;
-      for (let i = 0; i < n; i++) {
-        const a = this.rng() * Math.PI * 2;
-        const r = 1.4 + this.rng() * 1.8;
-        let x = b.cx + Math.cos(a) * r, z = b.cz + Math.sin(a) * r;
-        // Keep coins off the pay plate so sweeping them never funds upgrades
-        // by accident.
-        if (plate && dist2(x, z, plate[0], plate[1]) < 4) { x = 2 * b.cx - x; z = 2 * b.cz - z; }
-        if (!this.map.isWalkable(x | 0, z | 0)) { x = b.cx; z = b.cz + b.size / 2 + 0.8; }
-        this._spawnCoin(x, z, each + (rem-- > 0 ? 1 : 0), b.cx, b.cz);
+      if (plot) plot.ruined = true;
+      // Nothing rebuilds itself any more — a ruin is a bill.
+      this.msg(b.kind === 'wall'
+        ? '🧱 The wall is breached! Hold B at the gate to raise it again.'
+        : `${PLOT_KINDS[b.kind].icon} ${b.def.name} destroyed! Hold B on the ruin to rebuild it at half price.`, 'bad');
+    }
+  }
+
+  // ---------- the siege clock ----------
+
+  _updateSiege(dt) {
+    if (this.phase !== 'live' || this.over) return;
+
+    // Threat: the clock the player can blame themselves for.
+    const before = this.threatLevel;
+    // Nest count is capped for the clock: a five-hive map should mean MORE
+    // sieges, not a faster clock on top of more sieges. Razing below three
+    // still visibly slows it, which is the reward for pushing.
+    this.threat = Math.min(THREAT.max, this.threat
+      + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * dt * this.diff.mult);
+    this.threatLevel = Math.max(1, Math.floor(this.threat) + 1);
+    if (this.threatLevel > before) this._surge();
+
+    this._updateIncome(dt);
+    this._updateScouting();
+    this._updateHives(dt);
+    this._updateNodeBlight(dt);
+    this._updateNodes(dt);
+
+    // Campaign: raze every hive and the survivors call one last counterattack.
+    if (!this.finalStand && this.nests.length && !this.liveNests()) {
+      this.finalStand = true;
+      this.msg('🔥 Every hive lies in ashes — but something enormous is already walking. Hold the Keep!', 'bad');
+      this._spawnBoss(null);
+      this._edgeAssault(Math.round(48 * this.diff.mult * this.level.mult));
+    }
+  }
+
+  _surge() {
+    if (!this.liveNests()) return;
+    this.msg(`☠️ THREAT ${this.threatLevel}. Every hive musters at once — they are coming from all sides.`, 'bad');
+    for (const n of this.nests) {
+      if (!n.alive) continue;
+      this._hiveMuster(n, SURGE_MULT);
+      this.emit({ type: 'ping', x: n.x, z: n.z });
+    }
+    this.emit({ type: 'surge', level: this.threatLevel });
+    // Survival: a boss walks every fifth Threat level, forever.
+    if (this.mode === 'survival' && this.threatLevel % 5 === 0 && !this.boss) this._spawnBoss(null);
+  }
+
+  // Income is credited automatically now. Physical coins fall from combat and
+  // conquest only — no more laps around your own town at dawn.
+  _updateIncome(dt) {
+    let rate = 0;
+    for (const b of this.buildings) if (b.alive && b.def.income) rate += b.def.income;
+    rate *= this.economy.income * (1 + this.relicMods.income);
+    for (const n of this.nodes) {
+      if (!n.offMap && n.owner === 'player') rate += SIEGE.nodeIncome * (n.def.income || 1);
+    }
+    rate /= SIEGE.incomePeriod;
+    this.incomeRate = rate;
+    this._incomeAcc += rate * dt;
+    this.incomeT -= dt;
+    if (this.incomeT > 0) return;
+    this.incomeT = SIEGE.incomeTick;
+    const pay = Math.floor(this._incomeAcc);
+    if (pay <= 0) return;
+    this._incomeAcc -= pay;
+    this.gold += pay;
+    this.stats.coins += pay;
+    if (this.hq) this.emit({ type: 'income', x: this.hq.cx, z: this.hq.cz, v: pay });
+  }
+
+  // The ground around a living hive is poison. You cannot simply park an army
+  // on a nest and grind it down for free.
+  _updateNodeBlight(dt) {
+    const r2 = NEST_BLIGHT_R * NEST_BLIGHT_R;
+    const dps = NEST_BLIGHT_DPS;
+    for (const n of this.nests) {
+      if (!n.alive) continue;
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (dist2(u.x, u.z, n.x, n.z) > r2) continue;
+        this._damageUnit(u, dps * dt * (u.hero ? 0.45 : 1));
       }
     }
   }
 
-  _repairCity() {
-    for (const b of this.buildings) if (b.alive) b.hp = b.maxHp;
-    // Ruined structures (and breached wall tiles) rise again with the sun.
-    for (const plot of this.plots) {
-      if (plot.tier === 0) continue;
-      const def = this.tierDef(plot, plot.tier);
-      if (plot.kind === 'wall') {
-        for (const [x, z] of plot.tiles) {
-          if (this.occ[z * this.map.size + x] === 0) {
-            this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
-            this.emit({ type: 'build', kind: 'wall', plotId: plot.id, tier: plot.tier, x: x + 0.5, z: z + 0.5, quiet: true });
-          }
-        }
-      } else if (!this.buildings.some((b) => b.plotId === plot.id)) {
-        this._addBuilding(plot, plot.x, plot.z, def, false);
-        this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz, quiet: true });
+  _updateHives(dt) {
+    for (const n of this.nests) {
+      if (!n.alive) continue;
+      n.musterT -= dt;
+      if (n.musterT <= 0) {
+        n.musterT = hiveInterval(this.threat);
+        this._hiveMuster(n, 1);
       }
     }
-    // Camps refill their fallen.
-    for (const plot of this.plots) {
-      if (PLOT_KINDS[plot.kind].unit && plot.tier > 0) this._refillCamp(plot);
+  }
+
+  _hiveMuster(nest, mult) {
+    const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
+    const share = 3 / Math.max(3, this.nests.length);
+    const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure * coopMult * mult * share);
+    // Ground the hive holds is where part of its muster ACTUALLY appears. This
+    // moves pressure closer to you without adding any more of it — so taking a
+    // hive-held node is worth doing for position, not just for income.
+    const staging = this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
+    let fromNest = w.size;
+    let spawned = 0;
+    if (staging.length) {
+      const forward = Math.floor(w.size * 0.4);
+      fromNest -= forward;
+      for (let i = 0; i < forward; i++) {
+        const node = staging[(this.rng() * staging.length) | 0];
+        const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 4;
+        const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
+        if (!this.map.isWalkable(x | 0, z | 0)) continue;
+        if (this._spawnZombie(this._pickHiveType(w.types), x, z, true, true)) spawned++;
+      }
     }
+    spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
+    if (spawned) this.emit({ type: 'hivemuster', x: nest.x, z: nest.z, n: spawned });
+  }
+
+  _pickHiveType(types) {
+    let roll = this.rng(), acc = 0;
+    for (const [t, p] of Object.entries(types)) { acc += p; if (roll <= acc) return t; }
+    return 'walker';
+  }
+
+  // The final counterattack, once no hive is left to march from.
+  _edgeAssault(size) {
+    const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
+    this._spawnHorde(size, [], w.types);
+    this.emit({ type: 'horde', final: true });
+  }
+
+  // ---------- lane nodes ----------
+
+  _updateNodes(dt) {
+    this._nodeT -= dt;
+    if (this._nodeT > 0) return;
+    const step = 0.25;
+    this._nodeT = step;
+    const r2 = SIEGE.captureRadius * SIEGE.captureRadius;
+
+    for (const node of this.nodes) {
+      if (node.offMap) continue;
+      let friendly = 0, hostile = 0;
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (dist2(u.x, u.z, node.x, node.z) <= r2) friendly++;
+      }
+      for (const zb of this.zombies) {
+        if (zb.dead) continue;
+        if (dist2(zb.x, zb.z, node.x, node.z) <= r2) { hostile++; if (hostile > 2) break; }
+      }
+      node.friendly = friendly;
+      node.hostile = hostile;
+
+      let claimant = null;
+      if (friendly > 0 && hostile === 0) claimant = 'player';
+      else if (hostile > 0 && friendly === 0) claimant = 'hive';
+
+      if (!claimant || claimant === node.owner) {
+        // Uncontested and already settled, or nobody there — bleed back down.
+        node.cap = Math.max(0, node.cap - step * 0.5);
+        if (node.cap === 0) node.capOwner = null;
+        continue;
+      }
+      if (node.capOwner !== claimant) { node.capOwner = claimant; node.cap = 0; }
+      node.cap += step;
+      if (node.cap >= SIEGE.captureTime) this._flipNode(node, claimant);
+    }
+
+    const held = this.heldNodes();
+    if (held > this.stats.bestHeld) this.stats.bestHeld = held;
+  }
+
+  _flipNode(node, owner) {
+    const was = node.owner;
+    node.owner = owner;
+    node.cap = 0;
+    node.capOwner = null;
+    if (owner === 'player') {
+      this.stats.nodes++;
+      node.seen = true;
+      this.threat = Math.min(THREAT.max, this.threat + THREAT.perCapture);
+      // Some ground has something under it. Once only.
+      const prize = node.def.firstClaim;
+      if (prize && !node.looted) {
+        node.looted = true;
+        this.gold += prize.gold;
+        this.stats.coins += prize.gold;
+        for (const h of this.heroes) if (!h.dead) this.addXp(h, prize.xp);
+        this.msg(`${node.def.icon} You break open ${node.name}: ${prize.gold} gold and old knowledge.`, 'info');
+        this.emit({ type: 'loot', x: node.x, z: node.z });
+      }
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        this._spawnCoin(node.x + Math.cos(a) * 1.6, node.z + Math.sin(a) * 1.6, Math.ceil(DROPS.nodeCoins / 4), node.x, node.z);
+      }
+      this.msg(`🚩 ${node.name} is yours. It pays, it spawns, and you can raise a Forward Camp on it.`, 'info');
+      this.emit({ type: 'nodetaken', x: node.x, z: node.z, id: node.id });
+    } else {
+      // Losing a node also ruins whatever you built on it.
+      const plot = this.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id);
+      if (plot && plot.tier > 0) {
+        for (const b of this.buildings.filter((b) => b.plotId === plot.id)) this._destroyBuilding(b, true);
+      }
+      if (was === 'player') {
+        this.msg(`🩸 ${node.name} has been overrun.`, 'bad');
+        this.emit({ type: 'nodelost', x: node.x, z: node.z, id: node.id });
+      }
+    }
+  }
+
+  // ---------- routing ----------
+
+  // Nearest graph index to a world position — where a squad joins the lanes.
+  _nearestGi(x, z) {
+    if (!this.laneGraph) return -1;
+    let best = -1, bd = Infinity;
+    for (const n of this.nodes) {
+      if (n.offMap) continue;
+      const d = dist2(x, z, n.x, n.z);
+      if (d < bd) { bd = d; best = n.gi; }
+    }
+    if (this.hq) {
+      const d = dist2(x, z, this.hq.cx, this.hq.cz);
+      if (d < bd) { bd = d; best = this.cityGi; }
+    }
+    return best;
+  }
+
+  _giPoint(gi) {
+    if (gi < this.nodes.length) return [this.nodes[gi].x, this.nodes[gi].z];
+    const ni = gi - this.nodes.length;
+    if (ni < this.nests.length) return [this.nests[ni].x, this.nests[ni].z];
+    return this.hq ? [this.hq.cx, this.hq.cz] : [this.map.size / 2, this.map.size / 2];
+  }
+
+  // Walk `actor` onto the lanes and out to `gi`. Returns false if unreachable.
+  _routeTo(actor, gi) {
+    if (!this.laneGraph || gi < 0) return false;
+    // Close enough to see it? Go straight there. Lanes exist to cross terrain,
+    // and forcing a short hop back out through a lane node is how squads used
+    // to circle an objective they were already standing next to.
+    const [gx, gz] = this._giPoint(gi);
+    if (dist2(actor.x, actor.z, gx, gz) < DIRECT_APPROACH_R * DIRECT_APPROACH_R) {
+      actor.route = null;
+      return true;
+    }
+    const from = this._nearestGi(actor.x, actor.z);
+    if (from < 0) return false;
+    const route = nodeRoute(this.laneGraph, from, gi);
+    if (!route) return false;
+    const pts = routeWaypoints(this.laneGraph, route);
+    const [tx, tz] = this._giPoint(gi);
+    pts.push([tx, tz]);
+    if (!pts.length) return false;
+    // Join the path at the waypoint we are ALREADY nearest to, never at index 0.
+    // A route always begins at the nearest graph node, so a squad halfway down
+    // a lane was being sent back to the node behind it, arriving, re-pathing,
+    // and oscillating between the two forever — the whole army marching all day
+    // and never once reaching the objective.
+    let start = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = dist2(actor.x, actor.z, pts[i][0], pts[i][1]);
+      if (d < bd) { bd = d; start = i; }
+    }
+    actor.route = pts;
+    actor.routeI = start;
+    actor.routeStuck = 0;
+    actor.routeBest = Infinity;
+    return true;
+  }
+
+  // Steer one step along a route. Returns true while the route is still live.
+  _followRoute(actor, speed, dt, zombie = false) {
+    if (!actor.route || actor.routeI >= actor.route.length) { actor.route = null; return false; }
+    const [wx, wz] = actor.route[actor.routeI];
+    const dx = wx - actor.x, dz = wz - actor.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 2.4) {
+      actor.routeI++;
+      actor.routeStuck = 0;
+      actor.routeBest = Infinity;
+      if (actor.routeI >= actor.route.length) { actor.route = null; return false; }
+      return true;
+    }
+    // Progress watchdog. "Did it move at all" is the wrong question — a squad
+    // grinding along a shoreline moves every tick and gets nowhere. Watch the
+    // distance to the waypoint instead, and when that stops falling, throw the
+    // route away so a fresh one is flooded from where the squad actually is.
+    // Skipping ahead to the NEXT waypoint (the old behaviour) only aims it at
+    // something further past the same obstacle.
+    if (d < (actor.routeBest ?? Infinity) - 0.25) {
+      actor.routeBest = d;
+      actor.routeStuck = 0;
+    } else {
+      actor.routeStuck = (actor.routeStuck || 0) + dt;
+      if (actor.routeStuck > 2.5) {
+        actor.routeStuck = 0;
+        actor.routeBest = Infinity;
+        actor.route = null;
+        actor.repathT = 0;
+        return false;
+      }
+    }
+    if (zombie) this._moveZombie(actor, dx / d, dz / d, speed, dt, true);
+    else this._moveActor(actor, dx / d, dz / d, speed, dt);
+    actor.facing = Math.atan2(dx, dz);
+    return true;
+  }
+
+  // Every squad is born into one of two jobs, decided by id so it is stable and
+  // deterministic. HOLDERS take a node and stay on it — ground you do not sit
+  // on does not stay yours. PUSHERS march on a hive, capturing whatever the
+  // holders are already standing on as the front line moves up.
+  _isHolder(u) { return (u.id % 3) === 0; }
+
+  _rank(u, list, spread) {
+    if (!list.length) return -1;
+    list.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    return list[u.id % Math.min(spread, list.length)][1];
+  }
+
+  _pickPushTarget(u) {
+    const openNodes = () => this.nodes
+      .filter((n) => !n.offMap && n.owner !== 'player')
+      .map((n) => [dist2(u.x, u.z, n.x, n.z), n.gi]);
+    const liveNests = () => this.nests
+      .filter((n) => n.alive)
+      .map((n) => [dist2(u.x, u.z, n.x, n.z), n.gi]);
+
+    if (this._isHolder(u)) {
+      const gi = this._rank(u, openNodes(), 6);
+      if (gi >= 0) return gi;
+      // Everything is ours — fall in with the push.
+    }
+    const gi = this._rank(u, liveNests(), 2);
+    if (gi >= 0) return gi;
+    return this._rank(u, openNodes(), 3);
   }
 
   // ---------- coins ----------
@@ -777,23 +1315,23 @@ export class Game {
       id: nextId++, key, def: d, x, z, hp: d.hp, maxHp: d.hp,
       camp, path: null, pathI: 0, cooldown: 0, target: null,
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
+      route: null, routeI: 0, targetNodeId: null, targetGi: -1,
     };
     this.units.push(u);
     return u;
   }
 
-  // Army stance — DotA-creep control: no unit micro, just one order for the
-  // whole army. DEFEND holds the city, GUARD escorts the heroes, ATTACK
-  // marches out to hunt the dead and push the hives on its own.
+  // Army stance — one order for the whole army, no unit micro. DEFEND holds
+  // the line, GUARD escorts the heroes, ATTACK walks the lanes and takes ground.
   setStance(st, p = 0) {
     if (!['defend', 'guard', 'attack'].includes(st) || st === this.stance) return;
     this.stance = st;
-    // Defenders remember where home is right now.
     if (st === 'defend') for (const u of this.units) if (!u.hero && !u.dead) { u.holdX = u.x; u.holdZ = u.z; }
+    if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; }
     const h = this.heroes[p];
     this.msg(st === 'defend' ? '🛡️ The army falls back to hold the line.'
       : st === 'guard' ? `🚩 The army forms up around ${h ? h.def.name : 'the heroes'}.`
-      : '⚔️ The army marches out to hunt!', 'info');
+      : '⚔️ The army pushes the lanes — take the nodes, then the hives!', 'info');
     this.emit({ type: st === 'defend' ? 'hold' : 'rally', x: h ? h.x : 0, z: h ? h.z : 0 });
   }
 
@@ -856,7 +1394,7 @@ export class Game {
   }
 
   heroUltDamageMult(h) {
-    return 1;
+    return 1 + ((h.upgrades && h.upgrades.ult) || 0) * 0.25;
   }
 
   heroAuraRadius(h) {
@@ -913,7 +1451,7 @@ export class Game {
       },
       {
         key: 'ult', icon: h.def.ability.icon, name: `${h.def.ability.name} Damage`,
-        desc: 'Raises the special damage tier.',
+        desc: '+25% special damage per rank.',
       },
     ].map((choice) => ({ ...choice, rank: h.upgrades[choice.key] || 0, max: HERO_UPGRADE_MAX }));
   }
@@ -948,7 +1486,7 @@ export class Game {
       case 'heroUpgrade': this.upgradeHero(c.p || 0, c.key); break;
       case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
-      case 'bell': this.bell(c.p || 0); break;
+      case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
     }
   }
@@ -1043,7 +1581,7 @@ export class Game {
   }
 
   _updateHeroOne(h, dt) {
-    if (h.abilCd > 0) h.abilCd = Math.max(0, h.abilCd - dt);
+    if (h.abilCd > 0) h.abilCd -= dt;
     if (h.dead) {
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
@@ -1115,23 +1653,25 @@ export class Game {
   _spawnZombie(type, x, z, aggro, wave = false) {
     if (this.zombies.length >= ZOMBIE_CAP) return null;
     const d = ZOMBIES[type];
+    if (!d) return null;
     const zb = {
       id: nextId++, type, def: d, x, z,
       hp: d.hp, maxHp: d.hp,
       state: aggro ? AGGRO : IDLE,
       dirX: 0, dirZ: 0, timer: this.rng() * 4,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
-      wave, hitFlash: 0,
+      wave, hitFlash: 0, route: null, routeI: 0, frenzy: 0,
     };
     this.zombies.push(zb);
     return zb;
   }
 
   _spawnBoss(nestId) {
+    if (this.boss) return;
     const B = this.nightBossDef();
     this.bossDef = B;
     const nest = nestId != null ? this.nests[nestId] : null;
-    let [x, z] = nest ? [nest.x, nest.z] : this._edgeSpawnPoint();
+    let [x, z] = nest && nest.alive ? [nest.x, nest.z] : this._edgeSpawnPoint();
     for (let r = 0; r < 12; r++) {
       if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
       if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }
@@ -1146,7 +1686,7 @@ export class Game {
       hp: def.hp, maxHp: def.hp,
       state: AGGRO, dirX: 0, dirZ: 0, timer: 0,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
-      wave: true, hitFlash: 0, boss: true, cfg: B,
+      wave: true, hitFlash: 0, boss: true, cfg: B, route: null, routeI: 0, frenzy: 0,
       armor: B.armor || 0, spawnT: B.spawn ? B.spawn.every : 0, roarT: B.roar ? B.roar.every : 0,
     };
     this.zombies.push(zb);
@@ -1154,6 +1694,14 @@ export class Game {
     this.msg(`${B.icon} ${B.name} has entered the field: "${B.desc}"`, 'bad');
     this.emit({ type: 'bossspawn', x, z });
     this.emit({ type: 'ping', x, z });
+  }
+
+  // Which boss stalks this run (survival cycles the roster as Threat climbs).
+  nightBossDef() {
+    if (this.mode === 'campaign') return this.level.boss;
+    const idx = Math.max(0, (((this.threatLevel / 5) | 0) - 1) % LEVELS.length);
+    const base = LEVELS[idx].boss;
+    return { ...base, hp: Math.round(base.hp * (0.8 + this.threatLevel * 0.06)) };
   }
 
   _updateBoss(zb, dt) {
@@ -1195,8 +1743,8 @@ export class Game {
     }
   }
 
-  // A random spawn point at the map rim — survival's fallback once every
-  // nest is ash, and the escape hatch for marooned wave zombies.
+  // A random spawn point at the map rim — the final counterattack's road in,
+  // and the escape hatch for marooned horde zombies.
   _edgeSpawnPoint() {
     const N = this.map.size;
     const edge = (this.rng() * 4) | 0;
@@ -1215,10 +1763,11 @@ export class Game {
       for (const [t, p] of Object.entries(types)) { acc += p; if (roll <= acc) return t; }
       return 'walker';
     };
+    // Raiders peel off to hit the ground you hold; the rest march on the Keep.
+    const playerNodes = this.nodes.filter((n) => !n.offMap && n.owner === 'player');
     while (spawned < size && guard++ < size * 30) {
       let x, z;
       if (nestIds.length) {
-        // The horde boils out of its hives.
         const n = this.nests[nestIds[(this.rng() * nestIds.length) | 0]];
         const a = this.rng() * Math.PI * 2, r = 1.5 + this.rng() * 6;
         x = n.x + Math.cos(a) * r; z = n.z + Math.sin(a) * r;
@@ -1226,10 +1775,16 @@ export class Game {
         [x, z] = this._edgeSpawnPoint();
       }
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
-      // Only spawn where the city is actually reachable, so hordes always
-      // arrive (and every night can always be cleared).
+      // Only spawn where the city is actually reachable, so the siege always
+      // arrives and the map can always be cleared.
       if (this.flow.distAt(x | 0, z | 0) === Infinity && guard < size * 25) continue;
-      if (this._spawnZombie(pickType(), x, z, true, true)) spawned++;
+      const zb = this._spawnZombie(pickType(), x, z, true, true);
+      if (!zb) continue;
+      spawned++;
+      if (playerNodes.length && this.rng() < SIEGE.raiderShare) {
+        const node = playerNodes[(this.rng() * playerNodes.length) | 0];
+        if (this._routeTo(zb, node.gi)) zb.raider = true;
+      }
     }
     return spawned;
   }
@@ -1255,12 +1810,14 @@ export class Game {
       if (zb.boss) {
         this.boss = null;
         this.stats.bossKillT = Math.round(this.time - (this.bossSpawnT || 0));
-        this.msg(`🏆 ${(zb.cfg || this.level.boss).name} IS SLAIN! Purge the stragglers!`, 'info');
+        this.msg(`🏆 ${(zb.cfg || this.level.boss).name} IS SLAIN!`, 'info');
         this.emit({ type: 'bossdown', x: zb.x, z: zb.z });
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2;
           this._spawnCoin(zb.x + Math.cos(a) * 1.4, zb.z + Math.sin(a) * 1.4, Math.ceil(DROPS.bossCoins / 5), zb.x, zb.z);
         }
+        // Campaign victory: the hives are ash and their champion is down.
+        if (this.mode === 'campaign' && this.finalStand) { this._gameOver(true); return; }
       }
       // Launch vector for corpse physics: away from the damage source.
       let ldx, ldz;
@@ -1273,16 +1830,16 @@ export class Game {
         ldx = Math.cos(a); ldz = Math.sin(a);
       }
       const force = dmg >= 150 ? 2.4 : dmg >= 60 ? 1.4 : 0.8;
-      this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute', dx: ldx, dz: ldz, force });
+      this.emit({ type: 'zdeath', x: zb.x, z: zb.z, big: zb.type === 'brute' || zb.type === 'sieger', dx: ldx, dz: ldz, force });
       // Shared XP for kills near any hero.
       for (const h of this.heroes) {
         if (!h.dead && dist2(h.x, h.z, zb.x, zb.z) < XP_RADIUS * XP_RADIUS) {
           this.addXp(h, zb.def.score * 8);
         }
       }
-      // Thronefall-style coin drops.
-      if (zb.type === 'brute') this._spawnCoin(zb.x, zb.z, DROPS.bruteCoins, zb.x, zb.z);
-      else if (this.rng() < DROPS.smallChance) this._spawnCoin(zb.x, zb.z, 1, zb.x, zb.z);
+      // Combat pays now that dawn doesn't.
+      if (zb.type === 'brute' || zb.type === 'sieger') this._spawnCoin(zb.x, zb.z, DROPS.bruteCoins, zb.x, zb.z);
+      else if (this.rng() < DROPS.smallChance) this._spawnCoin(zb.x, zb.z, DROPS.smallCoins, zb.x, zb.z);
     }
   }
 
@@ -1332,9 +1889,10 @@ export class Game {
   update(dt) {
     if (this.over) return;
     this.time += dt;
-    this._updatePhase(dt);
+    this._updateSiege(dt);
     if (this.over) return;
     this._updatePlots(dt);
+    this._updateCamps(dt);
     this._updateCoins();
     this._updateFlow(dt);
     this._updateZombies(dt);
@@ -1346,7 +1904,6 @@ export class Game {
   }
 
   // Hero auras — the passive third of the kit (auto-attack, aura, special).
-  // Each hero hums one effect into the ground around them, always on.
   _updateAuras(dt) {
     for (const u of this.units) {
       if (!u.hero) u.auraDmg = 1;
@@ -1424,7 +1981,6 @@ export class Game {
 
   _updateZombies(dt) {
     const N = this.map.size;
-    const nightMul = this.isNight ? 1.2 : 1;
 
     // Cheap separation: shove apart zombies sharing a tile.
     if (!this._sepMap) this._sepMap = new Map();
@@ -1455,6 +2011,18 @@ export class Game {
       }
     }
 
+    // Callers: everything near one hits harder and moves faster until it dies.
+    for (const zb of this.zombies) zb.frenzy = 0;
+    for (const caller of this.zombies) {
+      const call = caller.def.call;
+      if (!call || caller.dead) continue;
+      const r2 = call.radius * call.radius;
+      for (const zb of this.zombies) {
+        if (zb.dead || zb === caller) continue;
+        if (dist2(caller.x, caller.z, zb.x, zb.z) <= r2) zb.frenzy = Math.max(zb.frenzy, 1);
+      }
+    }
+
     for (const zb of this.zombies) {
       if (zb.dead) continue;
       if (zb.hitFlash > 0) zb.hitFlash -= dt;
@@ -1464,7 +2032,7 @@ export class Game {
       if (zb.boss) this._updateBoss(zb, dt);
 
       if (zb.stunT > 0) { zb.stunT -= dt; continue; }
-      let speedMul = nightMul;
+      let speedMul = 1 + (zb.frenzy ? (zb.def.call ? 0 : 0.3) : 0);
       if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
       zb.speedMul = speedMul;
 
@@ -1476,8 +2044,8 @@ export class Game {
           zb.dirX = Math.cos(a); zb.dirZ = Math.sin(a);
           zb.timer = 2 + this.rng() * 4;
         }
-        // Wake only when the city practically touches them — days are for
-        // building; creeps are optional XP out in the wild.
+        // Wake only when the city practically touches them — creeps out in the
+        // wild are optional XP, not an ambush.
         if (this.flow.distAt(zb.x | 0, zb.z | 0) < 5) zb.state = AGGRO;
         continue;
       }
@@ -1497,10 +2065,9 @@ export class Game {
         zb.progressT = 0;
         const moved = dist2(zb.x, zb.z, zb.px || 0, zb.pz || 0);
         zb.px = zb.x; zb.pz = zb.z;
-        // Marooned on ground the city can't be reached from (e.g. shoved
-        // across water)? Relocate the horde zombie to a valid spawn edge so
-        // every night can always be finished.
-        if (zb.wave && this.flow.distAt(zb.x | 0, zb.z | 0) === Infinity) {
+        // Marooned on ground the city can't be reached from? Relocate the
+        // horde zombie so every siege can always be finished.
+        if (zb.wave && !zb.route && this.flow.distAt(zb.x | 0, zb.z | 0) === Infinity) {
           const aliveNests = this.nests.filter((n) => n.alive);
           for (let tries = 0; tries < 60; tries++) {
             let x, z;
@@ -1529,12 +2096,18 @@ export class Game {
       }
 
       // AGGRO
+      const dmgMul = 1 + (zb.frenzy && !zb.def.call ? (ZOMBIES.caller.call.dmg) : 0);
+      const range = zb.def.ranged || 0;
+
+      // Siegers ignore your army entirely and go eat a building.
+      if (zb.def.siege) { this._updateSieger(zb, dt, dmgMul); continue; }
+
       // 1) Chase a nearby living unit if close. Veiled heroes are invisible.
       if (zb.targetU && (zb.targetU.dead || zb.targetU.stealth || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
       zb.retarget = (zb.retarget || 0) - dt;
       if (!zb.targetU && zb.retarget <= 0) {
         zb.retarget = 0.4 + this.rng() * 0.3;
-        let best = null, bd = 100; // within 10 tiles
+        let best = null, bd = Math.max(100, (range + 2) * (range + 2)); // within 10 tiles, or weapon reach
         for (const u of this.units) {
           if (u.dead || (u.hero && u.stealth)) continue;
           const d = dist2(zb.x, zb.z, u.x, u.z);
@@ -1547,11 +2120,13 @@ export class Game {
         const u = zb.targetU;
         const dx = u.x - zb.x, dz = u.z - zb.z;
         const d = Math.hypot(dx, dz);
-        if (d < 0.75) {
+        const reach = range || 0.75;
+        if (d < reach) {
+          const cd = range ? (1 / (zb.def.rof || 0.5)) : 0.8;
           if (zb.atkT <= 0) {
-            zb.atkT = 0.8;
-            this._damageUnit(u, zb.def.dmg);
-            this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z });
+            zb.atkT = cd;
+            this._damageUnit(u, zb.def.dmg * dmgMul);
+            this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z });
           }
         } else {
           this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
@@ -1559,7 +2134,13 @@ export class Game {
         continue;
       }
 
-      // 2) Follow the flow field toward the city.
+      // 2) Raiders walk their lane to the ground you took.
+      if (zb.route && this._followRoute(zb, zb.def.chase * zb.speedMul, dt, true)) continue;
+
+      // 3) Spitters shell whatever structure is in reach before closing.
+      if (range && this._spitAtBuilding(zb, range, dmgMul)) continue;
+
+      // 4) Follow the flow field toward the city.
       const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
       if (dir) {
         this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
@@ -1583,11 +2164,64 @@ export class Game {
     }
   }
 
+  // Spitter: hits structures from outside their reach, so turtling is not a
+  // strategy — somebody has to come out.
+  _spitAtBuilding(zb, range, dmgMul) {
+    if (zb.atkT > 0) {
+      // Already shelling something this cycle; hold position.
+      return !!zb._spitTarget;
+    }
+    let best = null, bd = range * range;
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      const d = dist2(zb.x, zb.z, b.cx, b.cz);
+      if (d < bd) { bd = d; best = b; }
+    }
+    zb._spitTarget = best;
+    if (!best) return false;
+    zb.atkT = 1 / (zb.def.rof || 0.5);
+    zb.dirX = best.cx - zb.x; zb.dirZ = best.cz - zb.z;
+    this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
+    this.emit({ type: 'spit', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz });
+    return true;
+  }
+
+  // Sieger: walks past your army, ignores it completely, and eats structures.
+  _updateSieger(zb, dt, dmgMul) {
+    let best = null, bd = Infinity;
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      const d = dist2(zb.x, zb.z, b.cx, b.cz);
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (!best) {
+      const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
+      if (dir) this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
+      return;
+    }
+    const dx = best.cx - zb.x, dz = best.cz - zb.z;
+    const d = Math.hypot(dx, dz) || 1;
+    if (d < best.size / 2 + 1.1) {
+      if (zb.atkT <= 0) {
+        zb.atkT = 1.1;
+        this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
+        this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz });
+      }
+      return;
+    }
+    this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
+  }
+
   _moveZombie(zb, dx, dz, speed, dt, canAttack) {
     const nx = zb.x + dx * speed * dt;
     const nz = zb.z + dz * speed * dt;
     const tx = nx | 0, tz = nz | 0;
     const occId = this.occ[tz * this.map.size + tx];
+    // Burrowers tunnel: barriers simply are not there for them.
+    if (occId > 0 && zb.def.burrow) {
+      if (this.map.isWalkable(tx, tz)) { zb.x = nx; zb.z = nz; zb.dirX = dx; zb.dirZ = dz; }
+      return;
+    }
     if (occId > 0 && canAttack) {
       // Chew on whatever is in the way (gates included).
       if (zb.atkT <= 0) {
@@ -1625,13 +2259,16 @@ export class Game {
 
   _updateUnits(dt) {
     for (const u of this.units) {
-      u.cooldown = Math.max(0, (u.cooldown || 0) - dt);
-      u.retargetT = Math.max(0, (u.retargetT || 0) - dt);
+      if (u.dead || u.hero) { if (u.hero) { u.cooldown -= dt; u.retargetT -= dt; } } else {
+        u.cooldown -= dt;
+        u.retargetT -= dt;
+      }
       if (u.dead) continue;
 
       if (!u.hero) {
         if (this.stance === 'guard') {
           // GUARD: escort the nearest living hero, loosely fanned out by id.
+          u.route = null;
           let h = null, hd = Infinity;
           for (const hh of this.heroes) {
             if (hh.dead) continue;
@@ -1651,22 +2288,12 @@ export class Game {
             } else u.moving = false;
           }
         } else if (this.stance === 'attack') {
-          // ATTACK: creep-wave — close on the hunted target, else push the
-          // nearest hive. The army fights entirely on its own.
-          let gx = null, gz = null, stopAt = 0;
-          if (u.target && !u.target.dead) { gx = u.target.x; gz = u.target.z; stopAt = u.def.range * 0.85; }
-          else if (u.targetNest && u.targetNest.alive) { gx = u.targetNest.x; gz = u.targetNest.z; stopAt = u.def.range + 1.2; }
-          if (gx != null) {
-            const dx = gx - u.x, dz = gz - u.z;
-            const d = Math.hypot(dx, dz);
-            if (d > stopAt) {
-              this._moveActor(u, dx / d, dz / d, u.def.speed * (d > 14 ? 1.25 : 1), dt);
-              u.facing = Math.atan2(dx, dz);
-              u.moving = true;
-            } else u.moving = false;
-          } else u.moving = false;
+          // ATTACK: creep-wave. Fight what's in front of you; otherwise walk
+          // the lanes to the next thing that isn't ours yet.
+          this._pushLane(u, dt);
         } else {
           // DEFEND: drift back to the hold point if shoved away.
+          u.route = null;
           const dx = u.holdX - u.x, dz = u.holdZ - u.z;
           const d = Math.hypot(dx, dz);
           if (d > 1.4) {
@@ -1682,11 +2309,12 @@ export class Game {
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
-        // Attacking troops HUNT (see far beyond weapon range); everyone else
+        // Pushing troops HUNT (see far beyond weapon range); everyone else
         // only engages what wanders into range.
         const hunting = !u.hero && this.stance === 'attack';
         const range = u.hero ? this.heroRange(u) : u.def.range;
-        const seek = hunting ? 30 : range;
+        // A pushing squad only stops for what is actually on top of it.
+        const seek = hunting ? Math.max(range + 2, 10) : range;
         let best = null, bd = seek * seek;
         for (const zb of this.zombies) {
           if (zb.dead) continue;
@@ -1694,20 +2322,22 @@ export class Game {
           if (d < bd) { bd = d; best = zb; }
         }
         u.target = best;
-        // No dead around? The living turn their guns on the hive itself —
-        // attackers will cross the whole map to do it.
+        // Siege priority. A squad that has marched all the way to a hive must
+        // shoot the HIVE, not the endless garrison around it — otherwise the
+        // garrison is an infinite shield and the nest never takes a scratch.
+        // Anything actually in your face still comes first.
         u.targetNest = null;
-        if (!best) {
-          let bn = null, bnd = hunting ? Infinity : (range + 1.5) ** 2;
-          for (const n of this.nests) {
-            if (!n.alive) continue;
-            const d = dist2(u.x, u.z, n.x, n.z);
-            if (d < bnd) { bnd = d; bn = n; }
-          }
+        let bn = null, bnd = (range + 2.5) ** 2;
+        for (const n of this.nests) {
+          if (!n.alive) continue;
+          const d = dist2(u.x, u.z, n.x, n.z);
+          if (d < bnd) { bnd = d; bn = n; }
+        }
+        if (bn && (!best || bd > SIEGE_GUARD_R * SIEGE_GUARD_R)) {
           u.targetNest = bn;
+          u.target = null;
         }
       }
-      const chasing = !u.hero && this.stance === 'attack'; // hunters keep far targets and close in
       const rofMult = (u.hero && u.hasteT > 0 ? u.hasteMult : 1) * (u.hero ? 1 + u.mods.rof : 1);
       const attackRange = u.hero ? this.heroRange(u) : u.def.range;
       const hitDmg = () => (u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg));
@@ -1729,57 +2359,141 @@ export class Game {
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
-        } else if (!chasing) {
-          u.target = null;
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
         const n = u.targetNest;
-        if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 1.5) ** 2) {
+        if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 2.5) ** 2) {
           u.cooldown = 1 / (u.def.rof * rofMult);
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());
           const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7 });
           if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
-        } else if (!chasing) {
-          u.targetNest = null;
         }
       }
     }
+  }
+
+  // One squad's push: engage what's in front, else walk the lane to the next
+  // piece of ground that isn't ours. No micro — the player only chose a stance.
+  _pushLane(u, dt) {
+    // Something in weapon reach? Stand and fight.
+    if (u.target && !u.target.dead) {
+      const d = Math.hypot(u.target.x - u.x, u.target.z - u.z);
+      if (d > u.def.range * 0.85) {
+        this._moveActor(u, (u.target.x - u.x) / d, (u.target.z - u.z) / d, u.def.speed, dt);
+        u.facing = Math.atan2(u.target.x - u.x, u.target.z - u.z);
+        u.moving = true;
+      } else u.moving = false;
+      return;
+    }
+    if (u.targetNest && u.targetNest.alive) {
+      const n = u.targetNest;
+      const dx = n.x - u.x, dz = n.z - u.z;
+      const d = Math.hypot(dx, dz) || 1;
+      if (d > u.def.range + 1.2) {
+        this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
+        u.facing = Math.atan2(dx, dz);
+        u.moving = true;
+      } else u.moving = false;
+      return;
+    }
+
+    // Re-pick a destination when we have none, or when ours went friendly.
+    const holder = this._isHolder(u);
+    const stale = u.targetGi < 0
+      || (!holder && u.targetGi < this.nodes.length && this.nodes[u.targetGi].owner === 'player' && !u.route)
+      || (u.targetGi >= this.nodes.length && u.targetGi < this.nodes.length + this.nests.length
+          && !this.nests[u.targetGi - this.nodes.length].alive);
+    u.repathT = (u.repathT || 0) - dt;
+    if (stale || (!u.route && u.repathT <= 0)) {
+      u.repathT = 1.5;
+      const gi = this._pickPushTarget(u);
+      if (gi >= 0 && gi !== u.targetGi) {
+        u.targetGi = gi;
+        u.targetNodeId = gi < this.nodes.length ? gi : null;
+        this._routeTo(u, gi);
+      } else if (gi >= 0 && !u.route) {
+        this._routeTo(u, gi);
+      }
+    }
+
+    if (u.route && this._followRoute(u, u.def.speed, dt)) { u.moving = true; return; }
+
+    // Arrived: hold the ground so the capture ticks over.
+    if (u.targetGi >= 0) {
+      const [tx, tz] = this._giPoint(u.targetGi);
+      const dx = tx - u.x, dz = tz - u.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 3.5) {
+        this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
+        u.facing = Math.atan2(dx, dz);
+        u.moving = true;
+        return;
+      }
+    }
+    u.moving = false;
   }
 
   _damageNest(n, dmg) {
     if (!n.alive) return;
     n.hp -= dmg;
     this.emit({ type: 'bhit', x: n.x, z: n.z });
+    // A hive under the knife spits defenders. Razing one is a siege you have
+    // to commit to, not a speed bump you walk over.
+    if ((n.defendT || 0) <= this.time) {
+      n.defendT = this.time + 9;
+      const w = hiveSquad(this.threat, this.diff.mult * this.level.mult);
+      this._spawnHorde(Math.max(4, Math.round(w.size * 0.8)), [n.id], w.types);
+      this.emit({ type: 'hivemuster', x: n.x, z: n.z });
+    }
     if (n.hp <= 0) {
       n.alive = false;
       n.hp = 0;
       this.stats.nests++;
+      this.threat = Math.min(THREAT.max, this.threat + THREAT.perNestRazed);
       // Razing a hive pays: a fountain of gold from the corpse-hoard.
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI * 2;
-        this._spawnCoin(n.x + Math.cos(a) * 1.8, n.z + Math.sin(a) * 1.8, 5, n.x, n.z);
+        this._spawnCoin(n.x + Math.cos(a) * 1.8, n.z + Math.sin(a) * 1.8, Math.ceil(DROPS.nestCoins / 6), n.x, n.z);
       }
-      const left = this.nests.filter((o) => o.alive).length;
+      const left = this.liveNests();
       this.emit({ type: 'nestdown', x: n.x, z: n.z });
-      this.msg(`🔥 A hive nest is razed! ${left ? `${left} remain${left === 1 ? 's' : ''}.` : 'The land holds its breath…'}`, 'info');
+      this.msg(`🔥 A hive nest is razed! ${left ? `${left} still mustering.` : 'The land holds its breath…'}`, 'info');
     }
+  }
+
+  // Tower targeting doctrine — the free tactical decision.
+  _towerPick(b) {
+    const r2 = b.def.range * b.def.range;
+    const mode = TOWER_PRIORITY[b.priority || 0].key;
+    let best = null, bd = r2, bestScore = -Infinity;
+    for (const zb of this.zombies) {
+      if (zb.dead) continue;
+      const d = dist2(b.cx, b.cz, zb.x, zb.z);
+      if (d > r2) continue;
+      if (mode === 'nearest') {
+        if (d < bd) { bd = d; best = zb; }
+        continue;
+      }
+      let score;
+      if (mode === 'strongest') score = zb.hp;
+      else if (mode === 'siege') score = (zb.def.siege || zb.boss ? 1e6 : 0) - d;
+      else score = (zb.def.ranged || zb.def.call ? 1e6 : 0) - d;
+      // Ties (and "nothing matches") fall back to nearest.
+      score -= d * 1e-3;
+      if (score > bestScore) { bestScore = score; best = zb; }
+    }
+    return best;
   }
 
   _updateTowers(dt) {
     for (const b of this.buildings) {
       if (!b.alive || b.kind !== 'tower' || !b.def.dmg) continue;
-      b.cooldown = Math.max(0, (b.cooldown || 0) - dt);
+      b.cooldown -= dt;
       if (b.stunT > 0) { b.stunT -= dt; continue; }
       if (b.cooldown > 0) continue;
-      const r2 = b.def.range * b.def.range;
-      let best = null, bd = r2;
-      for (const zb of this.zombies) {
-        if (zb.dead) continue;
-        const d = dist2(b.cx, b.cz, zb.x, zb.z);
-        if (d < bd) { bd = d; best = zb; }
-      }
+      const best = this._towerPick(b);
       if (best) {
         b.cooldown = 1 / b.def.rof;
         const tdmg = b.def.dmg * (1 + this.relicMods.towerDmg);

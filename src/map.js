@@ -132,8 +132,209 @@ export class GameMap {
       }
     }
 
+    // Lane nodes are TERRAIN, not a ring.
+    //
+    // A mineral patch being somewhere does not mean the enemy base is there —
+    // so the map decides where the ground worth holding IS, and the hive
+    // separately decides what it has claimed (see Game._claimNodes). Nodes are
+    // read out of the generated tiles: ore fields, narrow passes between water
+    // or crags, sheltered clearings, and barrow shelves under the mountains.
+    // Nothing sits on a ring, so no two maps share a skeleton.
+    this.nodeSpots = this._findNodeFeatures();
+
     // Precompute tile heights (corners get averaged later).
     this.heightOf = (t) => (t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0);
+  }
+
+  // ---- terrain reading -------------------------------------------------
+  // Everything below is a pure function of the generated tiles: same map, same
+  // features, on every machine. No RNG — lockstep peers must agree.
+
+  // Count of walkable tiles in the square of radius r around each tile, via a
+  // summed-area table. This one number tells us most of what we need: a low
+  // count is a pass, a high count is open ground.
+  _opennessField() {
+    const N = this.size;
+    const W = N + 1;
+    const sat = new Int32Array(W * W);
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const w = this.isWalkable(x, z) ? 1 : 0;
+        sat[(z + 1) * W + (x + 1)] = w + sat[z * W + (x + 1)] + sat[(z + 1) * W + x] - sat[z * W + x];
+      }
+    }
+    return (x, z, r) => {
+      const x0 = clamp(x - r, 0, N), z0 = clamp(z - r, 0, N);
+      const x1 = clamp(x + r + 1, 0, N), z1 = clamp(z + r + 1, 0, N);
+      return sat[z1 * W + x1] - sat[z0 * W + x1] - sat[z1 * W + x0] + sat[z0 * W + x0];
+    };
+  }
+
+  // Grid clustering over tiles matching `match` — used for ore fields.
+  _tileClusters(match, minSize) {
+    const N = this.size;
+    const seen = new Uint8Array(N * N);
+    const out = [];
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const i = z * N + x;
+        if (seen[i] || !match(this.tiles[i])) continue;
+        const stack = [i];
+        seen[i] = 1;
+        let sx = 0, sz = 0, n = 0;
+        while (stack.length) {
+          const k = stack.pop();
+          const kx = k % N, kz = (k / N) | 0;
+          sx += kx; sz += kz; n++;
+          for (let dz = -2; dz <= 2; dz++) {
+            for (let dx = -2; dx <= 2; dx++) {
+              const nx = kx + dx, nz = kz + dz;
+              if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+              const ni = nz * N + nx;
+              if (seen[ni] || !match(this.tiles[ni])) continue;
+              seen[ni] = 1;
+              stack.push(ni);
+            }
+          }
+        }
+        if (n >= minSize) out.push({ x: Math.round(sx / n), z: Math.round(sz / n), n });
+      }
+    }
+    return out;
+  }
+
+  _countNear(x, z, r, tile) {
+    let n = 0;
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (this.tileAt(x + dx, z + dz) === tile) n++;
+      }
+    }
+    return n;
+  }
+
+  // Nudge a point to the nearest walkable tile that is not inside a city
+  // footprint (the city levels its ground when founded) or on top of a hive.
+  _settleSpot(x, z) {
+    const N = this.size;
+    x = clamp(Math.round(x), 4, N - 5);
+    z = clamp(Math.round(z), 4, N - 5);
+    for (let r = 0; r < 10; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = x + dx, nz = z + dz;
+          if (nx < 4 || nz < 4 || nx > N - 5 || nz > N - 5) continue;
+          if (!this.isWalkable(nx, nz)) continue;
+          if (this.sites.some((s) => Math.hypot(nx - s.x, nz - s.z) < 20)) continue;
+          if (this.nestSpots.some(([ex, ez]) => Math.hypot(nx - ex, nz - ez) < 9)) continue;
+          return [nx, nz];
+        }
+      }
+    }
+    return null;
+  }
+
+  // Read the map and return the ground worth fighting over, tagged by what it
+  // actually is. Candidates are scored, then thinned so they stay spread out.
+  _findNodeFeatures() {
+    const N = this.size;
+    const open = this._opennessField();
+    const MAX3 = 7 * 7, MAX5 = 11 * 11;
+    const cands = [];
+
+    // Ore fields: the "mineral patch". The most valuable ground, and the most
+    // obvious — you can see it from the ridge, which is the point.
+    for (const c of this._tileClusters((t) => t === TILE.GOLDORE, 5)) {
+      cands.push({ x: c.x, z: c.z, kind: 'ore', score: c.n });
+    }
+    for (const c of this._tileClusters((t) => t === TILE.STONEORE, 7)) {
+      cands.push({ x: c.x, z: c.z, kind: 'quarry', score: c.n });
+    }
+
+    // Passes and clearings, sampled on a coarse lattice so the scan is cheap
+    // and the results are evenly spread rather than clumped on one ridge.
+    for (let z = 6; z < N - 6; z += 3) {
+      for (let x = 6; x < N - 6; x += 3) {
+        if (!this.isWalkable(x, z)) continue;
+        const o3 = open(x, z, 3);
+        const o5 = open(x, z, 5);
+        // A ford is pinched close in but opens out further away — that is what
+        // separates a real pass from a dead-end nook.
+        const pinched = o3 < MAX3 * 0.52 && o3 > MAX3 * 0.18;
+        const leadsSomewhere = o5 > MAX5 * 0.42;
+        if (pinched && leadsSomewhere) {
+          cands.push({ x, z, kind: 'ford', score: (MAX3 - o3) + (o5 - MAX5 * 0.42) * 0.35 });
+          continue;
+        }
+        // Sheltered clearing: wide open, but ringed by woods rather than being
+        // the middle of a featureless plain.
+        if (o3 >= MAX3 * 0.96 && this._countNear(x, z, 7, TILE.FOREST) > 26) {
+          cands.push({ x, z, kind: 'clearing', score: this._countNear(x, z, 7, TILE.FOREST) });
+          continue;
+        }
+        // Barrow shelf: walkable ground tucked under crags.
+        const crags = this._countNear(x, z, 4, TILE.MOUNTAIN);
+        if (crags > 22 && o3 > MAX3 * 0.35) {
+          cands.push({ x, z, kind: 'barrow', score: crags });
+        }
+      }
+    }
+
+    // Draw round-robin from each kind rather than strictly by score, so every
+    // planet gets a mix. Sorting purely by score buried the barrows and
+    // clearings under a dozen ore fields and made all five maps read the same.
+    const QUOTA = { ore: 4, ford: 4, barrow: 2, clearing: 2, quarry: 2 };
+    const ORDER = ['ore', 'ford', 'barrow', 'clearing', 'quarry'];
+    const pools = {};
+    for (const kind of ORDER) {
+      pools[kind] = cands.filter((c) => c.kind === kind)
+        .sort((p, q) => (q.score - p.score) || (p.x - q.x) || (p.z - q.z));
+    }
+
+    const NAMES = {
+      ore: ['Gilt Seam', 'Coinvein', 'The Glitter', 'Old Assay', 'Bright Cut', 'Deepcut'],
+      quarry: ['Stonecrop', 'The Quarry', 'Grey Steps', 'Breakstone'],
+      ford: ['The Crossing', 'Ashen Ford', 'The Cut', 'The Narrows', 'Broken Span', 'Thorn Gate'],
+      barrow: ['Gallows Hill', 'Weeping Rock', 'Widow Bluff', 'Hangman Reach'],
+      clearing: ['Kiln Yard', 'Rust Hollow', 'Ember Walk', 'The Moot'],
+    };
+
+    const spots = [];
+    const taken = {};
+    const MIN_SEP = 15;
+    const MAX_NODES = 12;
+    const place = (c) => {
+      const settled = this._settleSpot(c.x, c.z);
+      if (!settled) return false;
+      const [x, z] = settled;
+      if (spots.some((sp) => Math.hypot(x - sp.x, z - sp.z) < MIN_SEP)) return false;
+      taken[c.kind] = taken[c.kind] || 0;
+      const list = NAMES[c.kind];
+      spots.push({ x, z, kind: c.kind, name: list[taken[c.kind] % list.length] });
+      taken[c.kind]++;
+      return true;
+    };
+
+    for (let round = 0; round < 6 && spots.length < MAX_NODES; round++) {
+      for (const kind of ORDER) {
+        if (spots.length >= MAX_NODES) break;
+        if ((taken[kind] || 0) >= QUOTA[kind]) continue;
+        const pool = pools[kind];
+        while (pool.length) {
+          if (place(pool.shift())) break;
+        }
+      }
+    }
+    // Still thin (a map with almost no features)? Top up from whatever is left.
+    if (spots.length < 7) {
+      const rest = ORDER.flatMap((k) => pools[k]);
+      for (const c of rest) {
+        if (spots.length >= MAX_NODES) break;
+        place(c);
+      }
+    }
+    return spots;
   }
 
   _orePatches(oreTile, count) {

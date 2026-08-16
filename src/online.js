@@ -513,21 +513,21 @@ export class OnlineLobby {
 
 // The lobby is also a place to read about the world.
 export const LORE = [
-  ['The Long Dusk', 'Nobody agrees on when the plague began — only that the bells stopped ringing one by one, west to east, until the maps went quiet. What was left of the Marches learned a simple arithmetic: the dead do not sleep, but they do wait. They gather in the dark between the pines, and every sunset they remember you.'],
-  ['The Keeps', 'The old kingdoms built their keeps on ley-crossings — plazas ringed by housing, mills at the treelines, gold veins within riding distance. That is why every ruin you reclaim feels planned: it was. You are not building a city. You are waking one up.'],
+  ['The Long Dusk', 'Nobody agrees on when the plague began — only that the frontier stopped answering, west to east, until the maps went quiet. What was left of the Marches learned a simple arithmetic: the dead do not sleep. They gather where the hives feed, and every league of ground you take makes them answer.'],
+  ['The Keeps', 'The old kingdoms built their keeps on ley-crossings — plazas ringed by housing, mills at the treelines, gold veins within riding distance. That is why every ruin you reclaim feels planned: it was. You are not building a city. You are waking one up and pushing its roads back into the dark.'],
   ['The Three', 'Scott English walks slow because everything near him does — space thickens around that man, and his shotgun ends arguments the gravity started. Alexander Thomas kills from a horizon away while a cloud of nanites stitches his troops back together; when the dead close in, the grenade goes forward and he goes backward. And Danny Donovan? The horde has never seen Danny Donovan. It only feels itself getting thinner.'],
-  ['The Bell', 'Ringing the bell is the oldest tactic in the survivor codex: choose your night, do not let it choose you. A city that hides from the dark starves; a city that greets it with ballistas eats well. Ring when ready — never before, rarely long after.'],
-  ['The Zillion', 'At the bottom of the Black Vale something wears the plague like a crown. The chronicles call it The Zillion because the scouts who counted its horde never agreed on a number, only on a magnitude. Five keeps stand between it and the last dawn. Yours is one of them.'],
+  ['The Front Line', 'Camps do not wait for orders. They muster, march, and hold what they can. Hives do the same in reverse. The war is the line between those two economies, and the best commanders move that line before it moves them.'],
+  ['The Zillion', 'At the bottom of the Black Vale something wears the plague like a crown. The chronicles call it The Zillion because the scouts who counted its horde never agreed on a number, only on a magnitude. Five keeps stand between it and the last planet. Yours is one of them.'],
 ];
 
 export const TIPS = [
   '🪙 Coins on the ground never expire — but uncollected coins are towers you don\'t have yet.',
-  '🏰 The horde beacons are visible ALL day. Spend where the arrows point.',
+  '🏰 Hive pressure is visible on the map. Spend where the front line is bending.',
   '🌪️ Hero levels grant upgrade points — choose Aura, Passive I, Passive II, or Ult Damage from the hero panel.',
   '🧱 Walls are not for stopping the horde. They are for choosing where it stands while your towers work.',
   '🎯 Ballista towers delete brutes and bosses; flame towers erase packed walkers. Mix them.',
-  '⚔️ Press 1 at the gate before the wave hits — an army standing WITH you fights twice as well.',
+  '⚔️ Press 1 when the Keep is under pressure — an army standing WITH you fights twice as well.',
   '⛏️ Gold mines pay double a manor — and the dead know it. Guard tower first, mine second.',
-  '💀 In Survival, the horde never stops growing. Every night you survive is the record you\'ll brag about.',
+  '💀 In Survival, the horde never stops growing. The Threat level you reach is the record you\'ll brag about.',
   '🔐 Private rooms use join codes. Share the code with the commanders you want in the run.',
 ];

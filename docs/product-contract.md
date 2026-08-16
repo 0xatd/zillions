@@ -5,13 +5,13 @@ systems, menus, backend code, or docs.
 
 ## Target
 
-Zillions is a sci-fi Thronefall-style conquest defense game.
+Zillions is a sci-fi planet-conquest siege game.
 
 The player signs in, enters a living frontier, chooses or joins a world, rides a
-hero, founds a fortified city, buys pre-planned plots with coins, and survives
-night attacks from hostile Xeno territory.
+hero, founds a fortified city, buys pre-planned plots with coins, and pushes the
+front line outward until the planet is taken.
 
-Use the Thronefall-style city-defense direction as the gameplay base:
+Use continuous siege on a lane graph as the gameplay base:
 
 - Unclaimed frontier maps.
 - Multiple city sites.
@@ -21,16 +21,24 @@ Use the Thronefall-style city-defense direction as the gameplay base:
 - Hold the interact key to stream coins into a plot.
 - Economy must be level-balanced against gold the player can actually collect.
   A campaign level should start with enough gold for a real opening choice, and
-  income upgrades should pay back before the 10-night level is effectively over.
-- Untimed day planning.
-- Building and upgrading can continue during wave pressure.
-- Player rings the bell when ready.
-- Hordes attack from visible hive nests.
-- Hive nests can be razed.
-- Camps raise troops automatically.
+  income upgrades should pay back inside a few minutes of siege.
+- No day, no night, no bell. Building is always available and never safe.
+- Income is credited automatically; ground coins come from combat and conquest.
+- Nothing repairs itself — damage and ruins are paid for with the same
+  hold-to-build verb.
+- Threat is the clock, and every whole level makes every hive muster at once.
+- Hordes are produced by visible hive nests, continuously.
+- Hive nests are real bases: health, defenders, and blighted ground.
+- Lane nodes are taken by presence, pay income, and unlock Forward Camps.
+- Node placement is derived from terrain, never from a ring.
+- What a node IS may be readable from the map. Who HOLDS it must not be, until
+  the player has scouted it.
+- Camps are faucets that muster squads forever.
 - No individual army micro. Squads are autonomous, but the player sets the
   global army stance: defend city, follow the hero, or hunt outward toward
   enemies and hive nests.
+- No individual squad micro. Squads are autonomous; the player sets the global
+  stance: Defend city, Follow hero, or Push the lanes.
 - Hero level-ups must be visible and player-directed. Each point can improve
   the hero aura, one of two passive paths, or ult damage. The HUD must show
   derived hero stats and whether the aura is affecting allies or enemies.
@@ -40,39 +48,25 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 
 ## Current Shipped Loop
 
-The live game still uses explicit phases:
-
 1. The player founds a city at a flagged site.
-2. The player collects coins, builds, upgrades, and razes hives. Building and
-   upgrading are available during waves.
-3. The player rings the bell at the Keep.
-4. A night wave attacks from visible hive nests.
-5. Dawn pays income, repairs ruins, and advances the run.
+2. The siege runs continuously. The player builds, upgrades, repairs and
+   rebuilds at any time, and nothing pauses while they do.
+3. Camps muster squads forever. The player sets one global stance; the army
+   pushes the lanes and takes nodes on its own.
+4. Every living hive musters squads on a timer that tightens as Threat climbs.
+   Each whole Threat level triggers a simultaneous surge from every hive.
+5. Campaign maps end when every hive is razed and the champion leading the
+   final counterattack is killed — or when the Keep falls.
 
-Campaign maps currently end when the player survives the final night or razes
-all hive nests. Survival mode currently counts nights survived.
+Survival mode is endless; the score is the Threat level reached. The backend's
+`best_day` column carries that number.
 
-## Next Gameplay Direction
+## Longer-Range Direction
 
-Alex's current direction is holdout mission waves, not day/night phases. This
-should feel closer to classic StarCraft and Warcraft defense missions.
-
-Target loop:
-
-- Waves are tied to mission and world events: hive pulse timers, lane warnings,
-  rescue or extraction moments, boss health gates, and player taunts.
-- The player can build, repair, upgrade, fight, and move at any time.
-- Building during pressure is allowed. It should be useful but risky.
-- The bell becomes optional pressure control. It can call the next wave early,
-  taunt hives, or trade higher danger for bonus gold and XP.
-- The HUD must show the next wave reason, timer, lane, and threat source.
-- Destroying hives reduces future pressure from that direction.
-- Mission goals can be hold the Keep for a duration, raze all hives, escort or
-  rescue a target, or survive a final boss counterattack.
-
-Do not do a copy-only migration. If this change starts, update the simulation,
-UI, tutorial, save summaries, stats labels, balance checks, and this contract
-together.
+`docs/design-vision.md` holds the next horizon: folklore factions as
+rule-changers, fog of war, world-placed side missions, landmarks, and the
+planet/galaxy layers. None of it is implemented. Do not present it as shipped,
+and prove the siege loop with human playtesting before building on top of it.
 
 ## Production UX Rules
 
@@ -106,8 +100,6 @@ Target shape:
 - Worlds show territory state: safe, contested, Xeno-held, player-held.
 - Xeno factions hold regions, nests, energy fields, or planets.
 - Open games are real backend rooms.
-- Friends, friend requests, and invites are real account data.
-- Global lobby chat, room chat, and in-game team chat are real Supabase rows.
 - Room players have real seats, ready state, hero picks, and chat.
 - Starting a room launches the current WebRTC match for now.
 - Match results write back to profiles, stats, saves, and history.
@@ -137,9 +129,9 @@ Supabase owns:
 - Match history.
 - Public/private rooms.
 - Room players.
-- Friendships.
-- Global lobby chat.
-- Room chat and in-game team chat.
+- Global lobby chat (`lobby_chat`).
+- Friend requests, accepted friends, and friend online state (`friendships`).
+- Room setup chat and in-game team chat (`room_chat.channel = 'room' | 'game'`).
 
 Vercel owns:
 
@@ -148,9 +140,9 @@ Vercel owns:
 - `/api/state`
 - `/api/lobby`
 
-Vercel Blob is a compatibility layer for guest smoke tests and old state mirror
-data. It is not the source of truth for accounts, presence, friends, chat, or
-rooms.
+Vercel Blob is a temporary compatibility layer for guest smoke tests and old
+state mirror data. It is not the source of truth for signed-in chat, friends,
+accounts, or rooms.
 
 WebRTC still owns match transport. The server is not authoritative yet.
 

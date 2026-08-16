@@ -9,25 +9,42 @@ Read this first. Then read:
 
 ## Product Target
 
-Zillions is a sci-fi Thronefall-style conquest defense game.
+Zillions is a sci-fi planet-conquest siege game.
 
-The current gameplay source is the Thronefall-style city-defense direction:
+The gameplay base is continuous siege on a lane graph:
 
-- Frontier maps with multiple city sites.
+- Frontier maps with multiple city sites, hive nests, and lane nodes.
 - Found a city at a flagged site.
 - Closed ramparts and gate chokepoints.
 - Pre-planned plots.
-- Hold the interact key to stream coins into plots.
+- Hold the interact key to stream coins into plots. The same verb builds,
+  upgrades, repairs damage, and rebuilds ruins.
 - Campaign economy must be balanced against collectible gold. Each level needs
   enough starting gold for a real opening build, and economy upgrades should
-  pay back inside the 10-night campaign window.
-- Untimed day planning.
-- Ring the bell to start night.
-- Hordes attack from visible hive nests.
-- Hive nests can be razed.
-- Camps raise troops automatically.
+  pay back inside a few minutes of siege.
+- No day, no night, no bell. Building is always available and never safe.
+- Income is credited automatically; physical coins drop from combat and
+  conquest only.
+- Nothing repairs itself. Damage and ruins cost gold.
+- Threat is the clock: it rises with time, with every living hive, and with
+  every node taken. Each whole level makes every hive muster at once.
+- Camps are faucets — they muster a squad every `every` seconds, forever, and
+  sustain a standing force proportional to tier.
+- Hive nests produce squads, spit defenders when attacked, blight the ground
+  around them, and can be razed.
+- Lane nodes are captured by uncontested presence, pay income, and carry
+  Forward Camp plots that only unlock on ground the player holds.
+- Node placement is READ FROM TERRAIN (`GameMap._findNodeFeatures`) — ore
+  fields, fords, clearings, barrows, quarries — never from a ring. Do not put
+  them back on a ring; identical skeletons across maps kill the mystery.
+- A node's KIND and its OWNER are separate facts. Kind is terrain and is always
+  true. Ownership is claimed at setup (`Game._claimNodes`, hive takes the far
+  ground) and is hidden behind `node.seen` until a friendly unit gets within
+  `SIEGE.scoutRadius`. Never reveal ownership the player has not scouted.
+- Campaign win: raze every hive, then kill the champion that leads the final
+  counterattack. Loss: the Keep falls.
 - No individual squad micro. Squads are autonomous, but the player sets the
-  global stance: Defend city, Follow hero, or Hunt hives.
+  global stance: Defend city, Follow hero, or Push the lanes.
 - Hero progression is player-chosen. Level-ups grant upgrade points for Aura,
   Passive I, Passive II, or Ult Damage. Do not return to hidden automatic
   special ranks.
@@ -35,18 +52,19 @@ The current gameplay source is the Thronefall-style city-defense direction:
 
 Do not turn this back into a generic RTS launcher.
 
-## Current vs Next Loop
+## Loop Status
 
-The current shipped game still uses day, bell, night, and dawn phases. Building
-and upgrading now stay available during waves.
+The day/bell/night/dawn model has been removed. The shipped loop is continuous
+siege, described above. `game.phase` is now only `found` or `live`.
 
-`docs/product-contract.md` owns the next loop. Current direction is holdout
-mission waves: waves attach to hive timers, attack-lane warnings, boss gates,
-rescues, extraction moments, or player bell taunts.
+Balance was tuned against simulated runs (see `scripts/balance-check.mjs` and
+the notes in `docs/agent-brief.md`), not against human play. Level 1 is
+validated as winnable in roughly 13 minutes; later levels still need human
+playtesting before they can be called tuned.
 
-Do not half-migrate this by changing text only. A real migration must update
-simulation, UI, tutorials, save summaries, stats labels, economy tests, and
-docs together.
+Longer-range direction — folklore factions, fog of war, world-placed side
+missions, the planet and galaxy layers — lives in `docs/design-vision.md` and is
+NOT implemented. Do not describe any of it as shipped.
 
 ## Production Rules
 
@@ -94,9 +112,12 @@ Preserve these files unless a task explicitly replaces the backend:
 - Production loads through Vercel.
 - Google/Supabase account sign-in gates the production game shell.
 - Supabase stores profiles, stats, cloud saves, match history, rooms, room
-  players, friends, global lobby chat, room chat, and in-game team chat.
-- Vercel Blob remains a compatibility layer for old state mirror and smoke-test
-  paths. It is not production social identity.
+  players, `lobby_chat`, `room_chat`, and `friendships`.
+- `room_chat.channel` separates setup-room chat (`room`) from in-game team chat
+  (`game`).
+- Vercel Blob remains a temporary compatibility layer for old state mirror data
+  and guest smoke tests. Do not route signed-in production chat or friends
+  through Blob.
 - WebRTC carries match traffic. The backend is not server-authoritative yet.
 - Static local play can remain for development fallback, but it is not the
   production identity model.
@@ -115,7 +136,7 @@ Do not implement fake conquest data as if it is live.
 
 ## Key Files
 
-- `src/config.js` - balance, heroes, plot kinds, items, waves, levels.
+- `src/config.js` - balance, heroes, plot kinds, items, siege, levels.
 - `src/plots.js` - city sites, ramparts, gates, plots.
 - `src/game.js` - simulation and Thronefall mechanics.
 - `src/main.js` - renderer, input, account gate, save sync, co-op.
@@ -148,8 +169,8 @@ Also smoke test:
 - Start campaign.
 - Found a city at a site.
 - Hold Space/B to build a plot.
-- Ring the bell.
-- First night wave.
+- Set army stance and see squads push lanes.
+- Confirm hive musters and Threat surges continue without day/night phases.
 - Lobby empty state or real rooms only.
 - `/assets.html` still works as a repo review page, but no in-game link points to
   it.

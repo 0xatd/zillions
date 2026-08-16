@@ -1,5 +1,5 @@
 import { backendEnabled } from './backend.js';
-import { DAY_LENGTH } from './config.js';
+import { THREAT_PERIOD } from './config.js';
 
 const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const USERNAME_MIN = 3;
@@ -308,7 +308,9 @@ export class AuthClient {
   async syncLatestSave(save) {
     if (!this.client || !this.user || !save?.snap) return;
     const snap = save.snap;
-    const day = Math.max(1, Math.floor(Number(snap.time || 0) / DAY_LENGTH) + 1);
+    // `day` is the schema's progress column; under continuous siege it carries
+    // the Threat level the run reached.
+    const day = Math.max(1, snap.threatLevel || Math.floor(Number(snap.time || 0) / THREAT_PERIOD) + 1);
     const { error } = await this.client.from('save_slots').upsert({
       user_id: this.user.id,
       slot_key: 'latest',
