@@ -1681,7 +1681,9 @@ class App {
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x35507a, 0.85);
+    // Warm earth bounce from below, cool sky from above — the two-tone fill
+    // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
+    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.85);
     this.scene.add(this.hemi);
     this.amb = new THREE.AmbientLight(0x33406e, 0.5);
     this.scene.add(this.amb);
@@ -2644,21 +2646,35 @@ class App {
 
     switch (b.kind) {
       case 'hq': {
-        box(3.6, 1.2, 3.6, 0xd8d4c6, 0, 0.6);
-        box(2.5, 1.1, 2.5, 0xc9c4b4, 0, 1.7);
-        cyl(0.55, 0.65, 2.2, 0xcfcaba, 1.15, 1.8, 1.15, 8);
-        cone(0.8, 0.9, 0xa8352e, 1.15, 3.3, 1.15);
-        if (tier >= 2) { cyl(0.55, 0.65, 2.2, 0xcfcaba, -1.15, 1.8, -1.15, 8); cone(0.8, 0.9, 0xa8352e, -1.15, 3.3, -1.15); }
-        if (tier >= 3) {
-          box(1.6, 1.2, 1.6, 0xd4cfc0, 0, 2.9);
-          cone(1.2, 1.1, 0xbf3f34, 0, 4.1);
-        } else {
-          cone(1.7, 1.0, 0x8f2d28, 0, 2.7, 0);
+        // The keep reads as the top of the whole hierarchy: a terraced stone
+        // mound, a great hall, corner turrets that fill in as it grows, and
+        // one tall red-capped spire you can find from anywhere on the map.
+        box(4.6, 0.5, 4.6, 0xa39a84, 0, 0.25);
+        box(3.9, 0.5, 3.9, 0xb3aa93, 0, 0.72);
+        box(3.1, 1.5, 3.1, 0xdcd6c4, 0, 1.7);
+        box(3.3, 0.28, 3.3, 0xc2b9a2, 0, 2.55);           // hall cornice
+        const turret = (x, z) => {
+          cyl(0.4, 0.5, 2.9, 0xd2cbb6, x, 1.9, z, 8);
+          cone(0.62, 0.85, 0xb03a30, x, 3.75, z, 8);
+        };
+        turret(1.35, 1.35);
+        if (tier >= 2) turret(-1.35, -1.35);
+        if (tier >= 3) { turret(1.35, -1.35); turret(-1.35, 1.35); }
+        // The spire: taller with every tier, gold finial at the top tier.
+        const spireH = 2.0 + tier * 0.5;
+        cyl(0.7, 0.9, spireH, 0xe0dac8, 0, 2.55 + spireH / 2, 0, 8);
+        cyl(0.98, 0.82, 0.34, 0xc2b9a2, 0, 2.62 + spireH, 0, 8);
+        cone(1.05, 1.3, tier >= 3 ? 0xbf3f34 : 0x8f2d28, 0, 3.4 + spireH, 0, 8);
+        if (tier >= 4) {
+          const finial = cyl(0.1, 0.1, 0.5, 0xf3c53d, 0, 4.25 + spireH, 0, 6);
+          finial.material.emissive.setHex(0xf3c53d);
+          finial.material.emissiveIntensity = 0.5;
         }
-        box(0.06, 1.8, 0.06, 0x333333, -1.1, 3.3, -1.1);
-        const flag = box(0.7, 0.4, 0.02, 0xc85a48, -0.72, 3.9, -1.1);
+        box(0.06, 1.6, 0.06, 0x4a4038, 1.35, 4.7, 1.35);
+        const flag = box(0.7, 0.4, 0.02, 0xc85a48, 0.97, 5.2, 1.35);
         g.userData.flag = flag;
-        windows(6, 1.0, 1.75);
+        windows(6, 1.5, 1.62);
+        windows(4, 2.55 + spireH * 0.5, 0.85);
         break;
       }
       case 'house': {
@@ -2715,14 +2731,22 @@ class App {
         break;
       }
       case 'tower': {
-        const h = 2.2 + tier * 0.45;
-        cyl(0.65, 0.85, h, tier >= 3 ? 0xb0b4b2 : 0xa6aaa8, 0, h / 2, 0, 8);
-        box(1.6, 0.22, 1.6, 0x3d4246, 0, h + 0.11);
-        for (const [dx, dz] of [[-0.65, -0.65], [0.65, -0.65], [-0.65, 0.65], [0.65, 0.65]]) {
-          box(0.2, 0.32, 0.2, 0x3d4246, dx, h + 0.35, dz);
+        // The medieval silhouette read: battered plinth, tapering shaft,
+        // corbelled crown wider than the shaft, merlons around the walk.
+        const h = 2.3 + tier * 0.5;
+        const stone = tier >= 3 ? 0xd8d1bc : 0xccc4ae;
+        box(1.75, 0.42, 1.75, 0xa39a84, 0, 0.21);
+        cyl(0.6, 0.8, h - 0.3, stone, 0, 0.3 + (h - 0.3) / 2, 0, 8);
+        cyl(0.92, 0.68, 0.46, 0xc2b9a2, 0, h + 0.08, 0, 8);
+        cyl(0.98, 0.98, 0.12, 0xa39a84, 0, h + 0.37, 0, 8);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + 0.26;
+          const merlon = box(0.3, 0.28, 0.18, stone, Math.cos(a) * 0.84, h + 0.57, Math.sin(a) * 0.84);
+          merlon.rotation.y = -a + Math.PI / 2;
         }
+        windows(2, h * 0.55, 0.68);
         const head = new THREE.Group();
-        head.position.y = h + 0.35;
+        head.position.y = h + 0.55;
         if (b.branch === 'flame') {
           const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
           head.add(bowl);
@@ -2760,10 +2784,10 @@ class App {
           e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
           s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
         };
-        // Barrier ladder: razorwire fence → plasteel barricade → shock/bastion.
+        // Barrier ladder: razorwire fence → stone curtain → shock/bastion.
         const shock = b.branch === 'shock';
         const bastion = b.branch === 'bastion';
-        const capCol = 0x3d4246;
+        const capCol = 0x8a8069;
         const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
         if (tier === 1 && !b.gate) {
           // Razorwire: gunmetal post + taut wire strands to each neighbor.
@@ -2781,16 +2805,18 @@ class App {
           break;
         }
         const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
-        const stone = bastion ? 0xa8aeae : tier === 1 ? 0x767c7e : 0x8f9698;
+        const stone = bastion ? 0xd8d1bc : tier === 1 ? 0xa89f8a : 0xc6bea8;
         if (b.gate) {
-          // Gatehouse: two towers flanking the passage, an arch overhead.
-          const towH = H + 0.75;
+          // Gatehouse: two red-capped towers flanking the passage, an arch
+          // overhead — the entrance should be the prettiest thing on the wall.
+          const towH = H + 0.85;
           for (const side of [-1, 1]) {
-            const px = alongX ? 0 : side * 0.38, pz = alongX ? side * 0.38 : 0;
-            box(alongX ? 0.9 : 0.34, towH, alongX ? 0.34 : 0.9, stone, px, towH / 2, pz);
-            box(alongX ? 1.0 : 0.44, 0.16, alongX ? 0.44 : 1.0, capCol, px, towH + 0.08, pz);
+            const px = alongX ? 0 : side * 0.4, pz = alongX ? side * 0.4 : 0;
+            box(alongX ? 0.9 : 0.36, towH, alongX ? 0.36 : 0.9, stone, px, towH / 2, pz);
+            box(alongX ? 1.0 : 0.46, 0.16, alongX ? 0.46 : 1.0, capCol, px, towH + 0.08, pz);
+            cone(alongX ? 0.52 : 0.34, 0.6, 0xb03a30, px, towH + 0.45, pz);
           }
-          box(alongX ? 0.9 : 0.34, 0.22, alongX ? 0.34 : 0.9, 0xe8a83c, 0, H + 0.35); // hazard-striped lintel
+          box(alongX ? 0.9 : 0.3, 0.24, alongX ? 0.3 : 0.9, stone, 0, H + 0.4); // lintel
           const ban = assetClone('banner', 0.7);
           if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
           break;
@@ -2798,6 +2824,7 @@ class App {
         // Center pier, slightly proud of the curtains.
         box(0.56, H + 0.14, 0.56, stone, 0, (H + 0.14) / 2);
         box(0.66, 0.15, 0.66, capCol, 0, H + 0.21);
+        box(0.3, 0.22, 0.3, stone, 0, H + 0.38); // pier merlon
         // Curtain panels out to each neighboring wall tile's edge.
         const panels = [
           nb.e && [0.5, 0.36, 0.25, 0], nb.w && [0.5, 0.36, -0.25, 0],
@@ -2806,6 +2833,13 @@ class App {
         for (const [w, dep, px, pz] of panels) {
           box(w, H, dep, stone, px, H / 2, pz);
           box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
+          // Crenellation: one merlon per panel, offset along the wall's run so
+          // adjoining tiles read as a continuous toothed parapet.
+          if (!shock && tier >= 2) {
+            const mx = w === 0.5 ? px + (px >= 0 ? -0.06 : 0.06) : px;
+            const mz = dep === 0.5 ? pz + (pz >= 0 ? -0.06 : 0.06) : pz;
+            box(w === 0.5 ? 0.24 : 0.2, 0.2, dep === 0.5 ? 0.24 : 0.2, stone, mx, H + 0.24, mz);
+          }
           // Shock fence: a live plasma conduit runs the parapet — glows at night.
           if (shock) {
             const strip = box(w === 0.5 ? 0.52 : 0.1, 0.07, dep === 0.5 ? 0.52 : 0.1, 0x4dd8c8, px, H + 0.19, pz);
@@ -3610,12 +3644,13 @@ class App {
     const duskSky = new THREE.Color(0xd98a6a);
     const nightSky = new THREE.Color(0x232b4e);
 
-    this.sun.intensity = lerp(0.85, 2.6, b);
-    // Warm cream by day, ember at dusk, cool moon-blue at night.
-    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xfff0cf), b));
-    this.hemi.intensity = lerp(0.35, 0.85, b);
+    this.sun.intensity = lerp(0.85, 2.75, b);
+    // Warm gold by day, ember at dusk, cool moon-blue at night.
+    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xffeabf), b));
+    this.hemi.intensity = lerp(0.35, 0.8, b);
     this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
-    this.amb.intensity = lerp(0.85, 0.5, b);
+    this.hemi.groundColor.copy(new THREE.Color(0x2c3550).lerp(new THREE.Color(0x9a7a58), b));
+    this.amb.intensity = lerp(0.85, 0.45, b);
     this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
     const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
     this.scene.background = sky;

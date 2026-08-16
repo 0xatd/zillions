@@ -189,6 +189,92 @@ Rules covered: 3 (partially — chokes now visible), 4–5 (already had), 13, 14
 7. **Ore follows geology.** Seed ore patches near crag feet and river bends
    instead of uniform random — prospecting becomes map-reading.
 
+## Part 4 — How all of this stays procedural
+
+Thronefall's ten maps are hand-authored in Unity. Ours are not, and never
+need to be: the engine's answer to "authored quality" is that every rule a
+level designer would apply by hand is encoded as a deterministic function of
+`(seed, level descriptor)`. This section is the contract for keeping it that
+way as the beauty layer grows.
+
+### The pipeline, end to end
+
+Every map is produced by the same fixed pipeline. Each stage is a pure
+function of the seed plus the stages before it — no stage reads a file, the
+clock, or `Math.random()`:
+
+1. **Level descriptor** (`config.js LEVELS` / `galaxyLevel(id)`) — the only
+   authored input: archetype name, seed, size, palette, boss, economy. The
+   infinite galaxy recombines 5 landforms × 5 city plans with hue-shifted
+   palettes, so authored content is O(archetypes + plans), not O(maps).
+2. **Elevation field** (`terrain.js TERRAIN_SHAPES[kind].elev`) — each
+   archetype is a *pattern function*, not a noise preset: the vale is an
+   analytic sine wall with punched passes, the wastes are ridged noise raised
+   to a power. Identity comes from the pattern.
+3. **Coverage quantiles** (`_paintTiles`) — "19% of this map is crag" is
+   enforced as a quantile over the actual field, so playability survives any
+   noise roll. Pattern gives identity, quantiles give guarantees.
+4. **Sites** (`_pickSites` + `_flattenSites`) — read out of the ground
+   (flatness, dryness, prominence), then the ground is graded *to the site*,
+   preserving what made it worth choosing.
+5. **Feature reading** (`_findNodeFeatures`, `_findChokepoints`) — nodes and
+   chokepoints are *read from* the finished tiles as pure functions (no RNG:
+   lockstep peers must agree). The land is generated once, then interpreted —
+   the same way a human designer looks at terrain and says "that gap is a
+   fort."
+6. **City plan** (`plots.js`) — a silhouette function + gate angles + a
+   layout, oriented at the mean hive bearing, anchored on whatever the
+   terrain already closes. The plot graph (Thronefall rule 5) is emitted
+   from plan × ground, so no two sites produce the same base.
+7. **Presentation** (`map.js`, `main.js`) — everything visual derives from
+   what stages 1–6 already decided. This is the invariant that keeps beauty
+   procedural: **the dressing layer invents nothing; it renders decisions
+   the generator already made.** Corner colors blend the tiles; relief
+   renders the retained field; monuments stand where the feature-reader
+   found features; blight stains where nests are; scatter density follows a
+   seeded noise field so meadows clump and bare ground survives.
+
+### The determinism rules (do not break these)
+
+- Sim-visible state (tiles, walkability, plots, nodes) may use only
+  `makeRNG(seed)` streams and pure tile functions — peers regenerate
+  identical maps from the seed alone.
+- Presentation may use its own seeded streams (`makeRNG(seed * k + c)`) but
+  never the sim's, so adding/removing props can never desync a lockstep
+  match or shift a spawn.
+- Feature *reading* (nodes, chokes) uses no RNG at all.
+- `scripts/map-check.mjs` builds every level headless in Node and asserts
+  the guarantees (connectivity, site quality, distinctness). Any new
+  generative rule gets an assertion there — that validator is what lets a
+  procedural pipeline make authored-quality promises.
+
+### How to extend each layer procedurally
+
+| Want | Where | How it stays procedural |
+|---|---|---|
+| New landform | `TERRAIN_SHAPES` | Write one `elev(x,z,S)` pattern + coverage/node quotas. Everything downstream (sites, city, dressing) adapts automatically. |
+| New city plan | `CITY_PLANS` | One `radius(t,R)` silhouette + gate angles + a layout function in the local frame. Terrain anchoring, wards, streets come free. |
+| Per-level thesis (rule 7) | plan/level data | Add ratio knobs (`towers: 2.0, walls: 0.3`) consumed by `generatePlots` — data, not new code paths. |
+| New biome look | level `palette` | All ground/prop colors key off the palette; a new biome is seven hex values. |
+| New prop kit | `map.js _buildDetail` | Add a silhouette + placement *rule* (which tile/feature it belongs to), never coordinates. Feed it from `nodeSpots`/`chokeSpots`/tiles so it lands where the map means something. |
+| Building look | `main.js _makeBuildingMesh` | Meshes are constructed from parameters (tier, branch, neighbors), so one silhouette upgrade restyles every city ever generated — past and future. |
+| Wave choreography (rule 10) | `game.js` hive logic | Derive spawn-preview markers from the same nest/lane data the sim already uses; telegraphing is a render of existing state, not new state. |
+
+### What the current beauty layer does, procedurally
+
+- **Relief**: retained elevation field → `heightAt(elev, tile)`; walkable
+  band clamped above water so generated causeways/cuts always read as built
+  ground. The keep sits on a generated motte (`plots.js` grades the interior
+  and raises the plaza ~a half-tile).
+- **Color**: corner-averaged tile colors + height lift/sink + blight stain
+  near nests — all functions of tiles/elev/nests.
+- **Buildings**: battered plinths, corbelled crowns, merlons, terraced keep,
+  red-capped gatehouses — parameterized by tier/branch/wall-neighbors, so
+  the same code dresses a 3-tile fence and a 40-tile star rampart.
+- **Scatter**: a seeded meadow-noise field gates density (clumps + clean
+  ground), monuments are placed by feature kind, and every stream is
+  presentation-only RNG.
+
 ### How to check it
 
 `npm run check` runs everything (syntax, balance sim, determinism, map

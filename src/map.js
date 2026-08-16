@@ -289,17 +289,27 @@ export class GameMap extends TerrainField {
     const col = new THREE.Color();
 
     // --- broad scatter over open ground ---
+    // Density follows a noise field, not a uniform coin-flip: tufts gather in
+    // meadow patches, scree gathers where the meadow thins, and stretches of
+    // genuinely clean ground survive between them. Uniform scatter reads as
+    // static; patchy scatter reads as a place.
+    const meadow = makeNoise(makeRNG(((this.seed | 0) * 17 + 3) >>> 0));
     for (let z = 2; z < N - 2; z++) {
       for (let x = 2; x < N - 2; x++) {
         const t = this.tiles[this.idx(x, z)];
         if (t === TILE.GRASS) {
+          const m = meadow(x * 0.05, z * 0.05, 2);
+          const clump = Math.max(0, m - 0.42) * 2.0;
+          const bare = Math.max(0, 0.42 - m) * 1.6;
           const r = rng();
-          if (r < 0.08) tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.7 + rng() * 0.7, ry: rng() * Math.PI * 2 });
-          else if (r < 0.098) pebbles.push({ x: x + rng(), z: z + rng(), s: 0.55 + rng() * 0.8, ry: rng() * Math.PI * 2 });
-          else if (r < 0.1005 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
+          if (r < 0.3 * clump * clump) {
+            tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.7 + rng() * 0.7, ry: rng() * Math.PI * 2 });
+          } else if (r < 0.3 * clump * clump + 0.06 * bare) {
+            pebbles.push({ x: x + rng(), z: z + rng(), s: 0.55 + rng() * 0.8, ry: rng() * Math.PI * 2 });
+          } else if (r > 0.9975 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
             boulders.push({ x: x + 0.5, z: z + 0.5, s: 0.7 + rng() * 1.1, ry: rng() * Math.PI * 2 });
           }
-        } else if (t === TILE.SAND && rng() < 0.045) {
+        } else if (t === TILE.SAND && rng() < 0.04) {
           pebbles.push({ x: x + rng(), z: z + rng(), s: 0.5 + rng() * 0.7, ry: rng() * Math.PI * 2 });
         }
       }

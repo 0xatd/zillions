@@ -182,7 +182,11 @@ export function generatePlots(map, anchor = null, opts = {}) {
       if (keepElev != null) {
         const w = Math.min(1, Math.max(0, (edge - d) / 6)) * 0.85;
         const i = z * N + x;
-        map.elev[i] = map.elev[i] * (1 - w) + keepElev * w;
+        // The keep's motte: the plaza rises above the town on a graded mound,
+        // so the seat of the city is visibly the top of it — height is
+        // hierarchy, read at a glance from anywhere inside the walls.
+        const motte = Math.max(0, 1 - d / 9) * 0.06;
+        map.elev[i] = map.elev[i] * (1 - w) + keepElev * w + motte;
       }
     }
   }
