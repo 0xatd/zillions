@@ -1326,7 +1326,7 @@ class App {
     try {
       await this.lobby.updateRoomPlayer({ ready: !!ready });
     } catch (e) {
-      this.ui.showBanner(`Could not update ready state: ${e.message}`, 'bad', 3500);
+      this.ui.showBanner(`Could not update Ready: ${e.message || 'Server update failed.'} Retry when the connection recovers.`, 'bad', 6000);
     }
   }
 
@@ -1346,7 +1346,7 @@ class App {
       this.onlineMode = false;
       this.ui.showLobby();
     } catch (e) {
-      this.ui.showBanner(`Could not leave room: ${e.message}`, 'bad', 4000);
+      this.ui.showBanner(`Could not leave the room: ${e.message || 'Server update failed.'} Try again.`, 'bad', 6000);
     }
   }
 

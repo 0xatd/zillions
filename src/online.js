@@ -2,7 +2,7 @@
 // Supabase config is loaded from /api/auth-config. Vercel Blob stays as a
 // legacy/static compatibility path; signed-in social state lives in Supabase.
 
-const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
 const CHAT_LIMIT = 500;
@@ -34,30 +34,6 @@ function safePublicName(value) {
   const text = String(value || '').trim().slice(0, 24);
   if (!text || text.includes('@')) return 'Commander';
   return text;
-}
-
-async function loadSupabaseClient(existingClient = null) {
-  const response = await fetch('/api/auth-config', {
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-  });
-  if (!response.ok) throw new Error('account backend unavailable');
-  const config = await response.json();
-  if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) {
-    throw new Error('account backend not configured');
-  }
-  if (existingClient) return { client: existingClient, config };
-  const { createClient } = await import(SUPABASE_JS);
-  const client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    auth: {
-      storageKey: 'zillions.supabase.auth',
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      flowType: 'pkce',
-    },
-  });
-  return { client, config };
 }
 
 function chatText(value) {
@@ -127,8 +103,8 @@ export class OnlineLobby {
 
   async connect(name, existingClient = null) {
     if (this.sb) return this.me;
-    const { client, config } = await loadSupabaseClient(existingClient);
-    this.sb = client;
+    const config = await loadSupabaseConfig();
+    this.sb = existingClient || await getSupabaseClient();
     this.iceServers = Array.isArray(config.iceServers) && config.iceServers.length ? config.iceServers : null;
     const { data: sessionData, error: sessionError } = await this.sb.auth.getSession();
     if (sessionError) throw sessionError;
