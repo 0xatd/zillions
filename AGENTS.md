@@ -25,7 +25,8 @@ The gameplay base is continuous siege on a lane graph:
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; physical coins drop from combat and
   conquest only.
-- Nothing repairs itself. Damage and ruins cost gold.
+- Nothing repairs itself until the player buys support infrastructure. Auto-Workshops and final-tier Repair Bastions restore nearby damaged structures. They never rebuild ruins or choose upgrades.
+- The main base includes a physical Hero Forge. Its expensive tiers upgrade all allied heroes. Core economy, army, Keep, and Forward Camp plots have major late-game capstone tiers.
 - Threat is the clock: it rises with time, with every living hive, and with
   every node taken. Each whole level makes every hive muster at once.
 - Camps are faucets — they muster a squad every `every` seconds, forever, and

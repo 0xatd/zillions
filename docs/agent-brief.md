@@ -31,9 +31,9 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
   `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
   until the node is player-owned.
-- Forward Camps are the lane-anchor ladder. Tier 1 musters blockers at the
-  front, Tier 2 adds short-range fire, and Tier 3 becomes a tougher Lane Bastion
-  with splash support. Do not add individual unit micro to solve lane pressure.
+- Forward Camps are the lane-anchor ladder. Tier 1 musters blockers, Tier 2 adds
+  short-range fire, Tier 3 becomes a Lane Bastion, and Tier 4 becomes a Repair
+  Bastion that automatically maintains nearby structures.
 - Node placement comes from terrain analysis (`GameMap._findNodeFeatures`):
   a summed-area openness field finds fords and clearings, tile clustering finds
   ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
@@ -51,8 +51,13 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
-- Nothing auto-repairs. `plotAction()` returns `build | branch | repair |
-  rebuild`, all funded with the same hold-to-build verb.
+- Manual `plotAction()` returns `build | branch | repair | rebuild`, all funded
+  with the same hold-to-build verb. Bought Auto-Workshops and Repair Bastions
+  automatically repair nearby standing structures. They do not rebuild ruins
+  or buy upgrades.
+- The city has a physical Hero Forge. Its three expensive tiers apply large
+  damage, health, and cooldown upgrades to every allied hero. Core plots also
+  have expensive capstones so late-game income remains spendable.
 - Hives have real health, spit defenders when damaged (`defendT`), and blight
   the ground within `NEST_BLIGHT_R`. Units siege a hive even while its garrison
   swarms, unless something is inside `SIEGE_GUARD_R`.

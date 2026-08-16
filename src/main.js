@@ -1563,7 +1563,8 @@ class App {
   }
 
   _buildingHeight(kind) {
-    return { hq: 4.2, mill: 3.4, tower: 3.2, camp_militia: 2.2, camp_ranger: 2.2, camp_sniper: 2.2, outpost: 2.6, wall: 1.2 }[kind] || 2.0;
+    return { hq: 4.2, mill: 3.4, tower: 3.2, camp_militia: 2.2, camp_ranger: 2.2, camp_sniper: 2.2,
+      outpost: 3.1, workshop: 2.8, hero_forge: 3.4, wall: 1.2 }[kind] || 2.0;
   }
 
   // ---------------- plot foundations ----------------
@@ -1607,6 +1608,8 @@ class App {
       roles.push(compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`);
     }
     if (def.income) roles.push(compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`);
+    if (def.repairRate) roles.push(compact ? `${def.repairRate}/s repair` : `Automatically repairs ${def.repairRate} HP/s within ${def.repairRadius} tiles.`);
+    if (def.heroDmg) roles.push(compact ? `heroes +${Math.round(def.heroDmg * 100)}% dmg` : `All heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`);
     if (roles.length) return roles.join(compact ? ' · ' : ' ');
     if (def.zap) return compact ? 'zap wall' : `Damages and slows enemies that chew it.`;
     if (plot.kind === 'wall') return compact ? `${def.hp} HP` : `${def.hp} HP barrier. Blocks and buys time.`;
@@ -2104,6 +2107,39 @@ class App {
           g.add(head);
           g.userData.head = head;
         }
+        break;
+      }
+      case 'workshop': {
+        box(1.9, 0.25, 1.9, 0x46515a, 0, 0.12);
+        box(1.5, 1.0, 1.25, 0x65717a, 0, 0.62);
+        box(1.7, 0.16, 1.45, 0x2f3940, 0, 1.15);
+        const rotor = new THREE.Group();
+        rotor.position.set(0, 1.55, 0);
+        for (let i = 0; i < 3 + tier; i++) {
+          const a = (i / (3 + tier)) * Math.PI * 2;
+          const drone = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.42), M(0x55ddeb, 0.7));
+          drone.position.set(Math.cos(a) * (0.65 + tier * 0.12), Math.sin(a * 2) * 0.12, Math.sin(a) * (0.65 + tier * 0.12));
+          rotor.add(drone);
+        }
+        g.add(rotor);
+        g.userData.rotor = rotor;
+        break;
+      }
+      case 'hero_forge': {
+        cyl(1.0, 1.25, 0.45, 0x303944, 0, 0.22, 0, 10);
+        for (let i = 0; i < 4; i++) {
+          const a = i * Math.PI / 2;
+          box(0.22, 1.8 + tier * 0.25, 0.22, 0x596775, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
+        }
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.48 + tier * 0.1, 0), M(tier >= 3 ? 0xffd75e : 0x72cfff, 1.0));
+        core.position.y = 1.65 + tier * 0.2;
+        core.userData.window = true;
+        g.add(core);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85 + tier * 0.1, 0.08, 8, 32), M(0x72cfff, 0.8));
+        ring.position.y = core.position.y;
+        ring.rotation.x = Math.PI / 2;
+        g.add(ring);
+        g.userData.rotor = ring;
         break;
       }
       case 'camp_militia':

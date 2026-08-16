@@ -97,6 +97,7 @@ export class Game {
     this.incomeRate = 0;
     this._nodeT = 0;
     this._campT = 0;
+    this._supportT = 0;
 
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
@@ -136,7 +137,7 @@ export class Game {
       relics: [...this.relics],
       timers: {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
-        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
+        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
       },
       nests: this.nests.map((n) => [snapNum(n.hp), n.alive ? 1 : 0, snapNum(n.musterT), snapNum(n.defendT || 0)]),
       nodes: this.nodes.map((n) => [n.owner, snapNum(n.cap), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
@@ -214,6 +215,7 @@ export class Game {
     this.incomeRate = timers.incomeRate ?? 0;
     this._nodeT = timers.nodeT ?? 0;
     this._campT = timers.campT ?? 0;
+    this._supportT = timers.supportT ?? 0;
     this.bossSpawnT = timers.bossSpawnT ?? null;
     (snap.nests || []).forEach(([hp, alive, musterT, defendT], i) => {
       if (this.nests[i]) {
@@ -818,6 +820,10 @@ export class Game {
       plot.musterT = def.every;
       this._muster(plot, def);
     }
+    if (plot.kind === 'hero_forge') {
+      for (const h of this.heroes) this._refreshHeroDerived(h);
+      this.msg(`⚛️ ${def.name}: all heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`, 'info');
+    }
 
     this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
     if (!free) {
@@ -897,6 +903,26 @@ export class Game {
     }
   }
 
+  // Paid support infrastructure removes repair laps. It restores structures
+  // for free after construction, but never chooses or buys upgrades for the
+  // player. That keeps gold decisions intentional and co-op deterministic.
+  _updateSupport(dt) {
+    this._supportT -= dt;
+    if (this._supportT > 0) return;
+    const step = 0.5;
+    this._supportT = step;
+    for (const source of this.buildings) {
+      if (!source.alive || !source.def.repairRate || !source.def.repairRadius) continue;
+      const r2 = source.def.repairRadius * source.def.repairRadius;
+      const damaged = this.buildings.filter((b) => b.alive && b !== source && b.hp < b.maxHp - 0.5
+        && dist2(source.cx, source.cz, b.cx, b.cz) <= r2);
+      if (!damaged.length) continue;
+      const amount = source.def.repairRate * step / damaged.length;
+      for (const b of damaged) b.hp = Math.min(b.maxHp, b.hp + amount);
+      this.emit({ type: 'repair', x: source.cx, z: source.cz, auto: true });
+    }
+  }
+
   _muster(plot, def) {
     const kindDef = PLOT_KINDS[plot.kind];
     // Each camp sustains its own standing force, so army size scales with how
@@ -951,6 +977,7 @@ export class Game {
     }
     this.gateIds.delete(b.id);
     this.buildings = this.buildings.filter((o) => o !== b);
+    if (b.kind === 'hero_forge') for (const h of this.heroes) this._refreshHeroDerived(h);
     this.flowDirty = true;
     if (byZombie) {
       this.stats.lost++;
@@ -1414,6 +1441,10 @@ export class Game {
     const passiveMods = this._heroPassiveMods(h);
     const mods = { ...h.itemMods };
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
+    const forge = this._heroForgeMods();
+    mods.dmg = (mods.dmg || 0) + forge.dmg;
+    mods.hp = (mods.hp || 0) + forge.hp;
+    mods.cdr = (mods.cdr || 0) + forge.cdr;
     h.mods = mods;
     h.maxHp = h.def.hp + h.def.levelHp * (h.level - 1) + h.mods.hp;
     h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
@@ -1422,6 +1453,17 @@ export class Game {
     h.auraRadius = this.heroAuraRadius(h);
     if (!keepHp) h.hp = h.maxHp;
     else h.hp = Math.min(h.maxHp, previousHp + Math.max(0, h.maxHp - previousMax));
+  }
+
+  _heroForgeMods() {
+    let best = null;
+    for (const plot of this.plots || []) {
+      if (plot.kind !== 'hero_forge' || plot.tier <= 0 || plot.ruined) continue;
+      if (!this.buildings.some((b) => b.plotId === plot.id && b.alive)) continue;
+      const def = this.tierDef(plot, plot.tier);
+      if (!best || (def.heroDmg || 0) > (best.heroDmg || 0)) best = def;
+    }
+    return { dmg: best?.heroDmg || 0, hp: best?.heroHp || 0, cdr: best?.heroCdr || 0 };
   }
 
   heroRange(h) {
@@ -1931,6 +1973,7 @@ export class Game {
     if (this.over) return;
     this._updatePlots(dt);
     this._updateCamps(dt);
+    this._updateSupport(dt);
     this._updateCoins();
     this._updateFlow(dt);
     this._updateZombies(dt);

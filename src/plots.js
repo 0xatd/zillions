@@ -194,6 +194,13 @@ export function generatePlots(map, anchor = null) {
   add('mill', ...ringSpot(10.4, -Math.PI / 2 + 0.4), 2);
   add('mill', ...ringSpot(10.4, Math.PI / 2 - 0.4), 2);
 
+  // Major progression lives in-world. The Forge is the hero upgrade place;
+  // two workshops remove late-game repair laps without spending gold behind
+  // the player's back.
+  add('hero_forge', ...ringSpot(5.0, -Math.PI / 2), 2);
+  add('workshop', ...ringSpot(10.8, Math.PI), 2);
+  add('workshop', ...ringSpot(10.8, 0), 2);
+
   const campPlots = [];
   const campKinds = ['camp_militia', 'camp_ranger', 'camp_sniper'];
   campKinds.forEach((kind, i) => {

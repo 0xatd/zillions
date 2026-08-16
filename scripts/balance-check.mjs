@@ -206,6 +206,8 @@ function assertSiegeLoop(level) {
     `${level.name}: War Outpost must provide short-range lane fire`);
   assert.ok(outpost.tiers[2].dmg > outpost.tiers[1].dmg && outpost.tiers[2].hp > outpost.tiers[1].hp,
     `${level.name}: Lane Bastion must improve both firepower and durability`);
+  assert.ok(outpost.tiers[3].repairRate > 0 && outpost.tiers[3].cost >= 150,
+    `${level.name}: final Forward Camp is not a major self-maintaining gold sink`);
   const clearingNode = game.activeNodes().find((n) => n.kind === 'clearing');
   if (clearingNode && oreNode) {
     const cPlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === clearingNode.id);
@@ -255,6 +257,25 @@ function assertSiegeLoop(level) {
   assert.equal(game.unitCap(), Math.min(SUPPLY.max, SUPPLY.base + SUPPLY.perPlanet),
     `${level.name}: a fully held planet does not give the standard supply ceiling`);
   for (const n of game.activeNodes()) n.owner = 'neutral';
+
+  // Major progression lives on physical plots instead of a hidden menu.
+  const forge = game.plots.find((p) => p.kind === 'hero_forge');
+  const workshop = game.plots.find((p) => p.kind === 'workshop');
+  assert.ok(forge && workshop, `${level.name} generated no Hero Forge or Auto-Workshop`);
+  const baseHeroDamage = game.heroDmg(hero);
+  game._construct(forge, true);
+  assert.ok(game.heroDmg(hero) > baseHeroDamage, `${level.name} Hero Forge did not upgrade hero damage`);
+  game._construct(workshop, true);
+  const support = game.buildings.find((o) => o.plotId === workshop.id);
+  const repairTarget = game.buildings
+    .filter((o) => o !== support)
+    .sort((a, b) => ((a.cx - support.cx) ** 2 + (a.cz - support.cz) ** 2)
+      - ((b.cx - support.cx) ** 2 + (b.cz - support.cz) ** 2))[0];
+  assert.ok(repairTarget, `${level.name} workshop has no structure to support`);
+  repairTarget.hp = repairTarget.maxHp * 0.5;
+  const beforeAutoRepair = repairTarget.hp;
+  game._updateSupport(0.5);
+  assert.ok(repairTarget.hp > beforeAutoRepair, `${level.name} workshop did not automatically repair nearby damage`);
 
   // Damage no longer heals itself — repairing is a real gold sink. Upgrading
   // still restores health, so repair is only offered once a plot is maxed.
