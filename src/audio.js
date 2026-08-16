@@ -100,6 +100,17 @@ export class AudioSys {
     o.start(t); o.stop(t + dur + 0.05);
   }
 
+  countdown(value) {
+    this.init();
+    const launch = Number(value) <= 0;
+    this._tone(launch ? 0.32 : 0.13, {
+      freq: launch ? 880 : 440 + Math.max(0, 5 - Number(value || 5)) * 45,
+      type: launch ? 'sawtooth' : 'square',
+      gain: launch ? 0.16 : 0.1,
+      slide: launch ? 440 : 0,
+    });
+  }
+
   shoot(kind) {
     if (kind === 'ranger') {
       this._noise(0.08, { freq: 2400, q: 2, gain: 0.10, sweep: -1200 });

@@ -66,6 +66,11 @@ class App {
     this.ui = new UI(document.getElementById('ui'), {
       onStart: (d, hero) => {
         if (this.mpRole === 'guest') return; // host launches the match
+        if (this.mpRole === 'host' && this.onlineMode && this.lobby?.game && !this._launchCountdownComplete) {
+          this._beginLaunchCountdown();
+          return;
+        }
+        this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
           if (this.onlineMode && this.lobby?.game) {
@@ -135,6 +140,9 @@ class App {
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
       onRoomReady: (ready) => this._setRoomReady(ready),
       onRoomLeave: () => this._leaveOnlineRoom(),
+      onMatchLeave: () => this._leaveOnlineMatch(),
+      onRoomReconnect: (userId) => this._retryRoomConnection(userId),
+      onRoomRemovePlayer: (userId) => this._removeRoomPlayer(userId),
     });
 
     this._setupLights();
@@ -684,16 +692,23 @@ class App {
   _roomRosterFromGame(game) {
     const players = [...(game?._players || [])]
       .sort((a, b) => Number(a.seat || 99) - Number(b.seat || 99));
-    return players.map((p, i) => ({
-      seat: Number(p.seat || i + 1),
-      name: p.display_name || 'Commander',
-      hero: p.hero,
-      host: p.user_id === game.host_id,
-      you: p.user_id === this.lobby?.me?.id,
-      ready: !!p.ready,
-      state: p.connection_state || 'online',
-      unlockedLevel: Math.max(1, Number(p.unlocked_level) || 1),
-    }));
+    return players.map((p, i) => {
+      const peerIndex = this.peerUserIds?.indexOf(p.user_id) ?? -1;
+      const local = p.user_id === game.host_id || p.user_id === this.lobby?.me?.id;
+      const connected = local || (peerIndex >= 0 && !!this.peers[peerIndex]?.open);
+      const reconnecting = !!this.onlinePending?.has(p.user_id);
+      return {
+        seat: Number(p.seat || i + 1),
+        userId: p.user_id,
+        name: p.display_name || 'Commander',
+        hero: p.hero,
+        host: p.user_id === game.host_id,
+        you: p.user_id === this.lobby?.me?.id,
+        ready: !!p.ready,
+        state: connected ? 'connected' : reconnecting ? 'reconnecting' : 'disconnected',
+        unlockedLevel: Math.max(1, Number(p.unlocked_level) || 1),
+      };
+    });
   }
 
   _manualRosterPlayers() {
@@ -1000,7 +1015,16 @@ class App {
   }
 
   async _onGuestMsg(m) {
-    if (m.t === 'lobby') {
+    if (m.t === 'countdown') {
+      this.audio.init();
+      this.audio.countdown(m.count);
+      this.ui.showRoomCountdown(m.count);
+    }
+    else if (m.t === 'countdownCanceled') {
+      this.ui.showBanner('Launch canceled: a player disconnected.', 'bad', 4000);
+      if (this.lobby?.game) this._onRoomUpdate(this.lobby.game);
+    }
+    else if (m.t === 'lobby') {
       this.mpSeat = m.n;
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
     }
@@ -1247,6 +1271,7 @@ class App {
       onRoom: (game) => this._onRoomUpdate(game),
       onKnock: (sig) => this._onKnock(sig),
       onSignal: (sig) => this._onSignal(sig),
+      onRoomClosed: (reason) => this._handleRoomClosed(reason),
     });
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
@@ -1272,7 +1297,10 @@ class App {
     const compatible = eligibility.eligible;
     const { connected, expectedPlayers, pending, waiting, ready } = readiness;
     const waitingToReady = waiting?.length || 0;
+    const connectionBlockers = this._roomRosterFromGame(game).filter((player) => !player.host && player.state !== 'connected');
+    const connectionNames = connectionBlockers.map((player) => `@${player.name}`).join(', ');
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
+    this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
       isHost,
@@ -1284,7 +1312,7 @@ class App {
         ? (!compatible
           ? `Cannot start Level ${eligibility.level}: ${eligibility.blockers.map((p) => `@${p.name} has only unlocked through Level ${p.unlockedLevel}`).join('; ')}.`
           : pending
-          ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
+          ? `Waiting for ${connectionNames || `${pending} player${pending === 1 ? '' : 's'}`} to connect. Use Reconnect or Remove if this lasts more than 10 seconds.`
           : waitingToReady
           ? `${waitingToReady} player${waitingToReady === 1 ? ' has' : 's have'} not marked Ready.`
           : connected > 1 ? `The game connection is ready for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
@@ -1297,7 +1325,7 @@ class App {
         : ready
         ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
         : pending
-        ? `⏳  CONNECTING ${pending} PLAYER${pending === 1 ? '' : 'S'}`
+        ? `⏳  WAITING FOR ${connectionNames || `${pending} PLAYER${pending === 1 ? '' : 'S'}`}`
         : `⏳  WAITING FOR ${waitingToReady} READY`,
       disabled: !ready || !compatible,
       title: !compatible
@@ -1330,6 +1358,104 @@ class App {
     }
   }
 
+  async _beginLaunchCountdown() {
+    if (this._launchCountdownActive || this.mpRole !== 'host' || !this.lobby?.game) return;
+    const eligibility = roomLevelEligibility(this.lobby.game);
+    const readiness = roomLaunchReadiness(this.lobby.game, this.peers.length + 1);
+    if (!eligibility.eligible || !readiness.ready) {
+      this._onRoomUpdate(this.lobby.game);
+      return;
+    }
+    this._launchCountdownActive = true;
+    this.audio.init();
+    try {
+      for (let count = 5; count >= 1; count--) {
+        const current = roomLaunchReadiness(this.lobby.game, this.peers.length + 1);
+        if (!current.ready || !roomLevelEligibility(this.lobby.game).eligible) {
+          this.ui.showBanner('Launch canceled because a player disconnected or became ineligible.', 'bad', 5000);
+          this._broadcast({ t: 'countdownCanceled' });
+          this._onRoomUpdate(this.lobby.game);
+          return;
+        }
+        this.ui.showRoomCountdown(count);
+        this.audio.countdown(count);
+        this._broadcast({ t: 'countdown', count });
+        await this.lobby.sendRoomChat(`Battle starts in ${count}…`, 'room').catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      this.ui.showRoomCountdown(0);
+      this._broadcast({ t: 'countdown', count: 0 });
+      this._launchCountdownComplete = true;
+      this.ui.activateStart();
+    } finally {
+      this._launchCountdownActive = false;
+    }
+  }
+
+  async _retryRoomConnection(userId = null) {
+    if (!this.lobby?.game) return;
+    if (this.mpRole === 'host' && userId) {
+      const player = this._roomRosterFromGame(this.lobby.game).find((p) => p.userId === userId);
+      this.ui.onlineStatus(`🔌 Asking @${player?.name || 'player'} to reconnect…`);
+      await this.lobby.signal({ t: 'reconnectRequest', to: userId }).catch((e) => {
+        this.ui.showBanner(`Could not request reconnect: ${e.message}`, 'bad', 5000);
+      });
+      return;
+    }
+    if (this.mpRole !== 'guest') return;
+    try { if (this.net) this.net.destroy(); } catch { /* already closed */ }
+    this.net = null;
+    this.ui.onlineStatus('🔌 Reconnecting to host…');
+    await this.lobby.signal({ t: 'knock', name: this._publicName() });
+    this._armLobbyConnectionWatchdog();
+  }
+
+  async _removeRoomPlayer(userId) {
+    if (this.mpRole !== 'host' || !userId) return;
+    try {
+      await this.lobby.removeRoomPlayer(userId);
+      const idx = this.peerUserIds.indexOf(userId);
+      if (idx >= 0) {
+        try { this.peers[idx]?.destroy(); } catch { /* already closed */ }
+        this.peers.splice(idx, 1);
+        this.guestHeroes.splice(idx, 1);
+        this.guestNames.splice(idx, 1);
+        this.guestCmdQueues.splice(idx, 1);
+        this.peerUserIds.splice(idx, 1);
+      }
+      this._syncSetupRoster();
+    } catch (e) {
+      this.ui.showBanner(`Could not remove player: ${e.message}`, 'bad', 5000);
+    }
+  }
+
+  _armLobbyConnectionWatchdog() {
+    clearTimeout(this._lobbyConnectionWatchdog);
+    this._lobbyConnectionWatchdog = setTimeout(() => {
+      if (this.mpRole === 'guest' && !this.netMode && !this.net?.open && this.lobby?.game) {
+        this.ui.onlineStatus('⚠️ Host connection stalled. Use RECONNECT TO HOST.');
+        this.ui.setRoomReconnect({ visible: true, label: 'RECONNECT TO HOST' });
+      }
+    }, 10000);
+  }
+
+  _handleRoomClosed(reason = 'host_closed') {
+    if (!this.lobby?.game || this.mpRole === 'host') return;
+    clearTimeout(this._lobbyConnectionWatchdog);
+    for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
+    try { this.net?.destroy(); } catch { /* closed */ }
+    this.peers = [];
+    this.net = null;
+    this.mpRole = null;
+    this.onlineMode = false;
+    this.lobby._clearRoomState();
+    this.ui.showLobby();
+    const message = reason === 'removed' ? 'You were removed from the lobby.'
+      : reason === 'match_ended' ? 'The host ended the match.'
+      : 'The host closed the lobby.';
+    this.ui.showBanner(message, 'bad', 6000);
+  }
+
   async _leaveOnlineRoom() {
     if (!this.lobby?.game || this.netMode) {
       this.ui.showLobby();
@@ -1347,6 +1473,18 @@ class App {
       this.ui.showLobby();
     } catch (e) {
       this.ui.showBanner(`Could not leave the room: ${e.message || 'Server update failed.'} Try again.`, 'bad', 6000);
+    }
+  }
+
+  async _leaveOnlineMatch() {
+    if (!this.lobby?.game || !this.netMode) return location.reload();
+    try {
+      if (this.mpRole === 'host') {
+        try { await this.lobby.signal({ t: 'roomClosed', to: 'all', reason: 'match_ended' }); } catch { /* status update remains authoritative */ }
+      }
+      await this.lobby.endGame();
+    } finally {
+      location.reload();
     }
   }
 
@@ -1573,10 +1711,14 @@ class App {
   // Guest side: the host's offer arrived — answer it. ICE candidates trickle
   // both ways through the signaling channel afterwards.
   async _onSignal(sig) {
+    if (sig.t === 'roomClosed') return this._handleRoomClosed(sig.reason);
+    if (sig.t === 'reconnectRequest' && this.mpRole === 'guest') return this._retryRoomConnection();
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
       this.net = new NetSession(this.lobby?.iceServers);
       this._attachNetDiagnostics(this.net);
       this.net.onOpen = () => {
+        clearTimeout(this._lobbyConnectionWatchdog);
+        this.ui.setRoomReconnect({ visible: false });
         if (this.mpRole === 'guest') {
           this._reconnectTries = 0;
           if (!this.netMode) {
@@ -1681,6 +1823,7 @@ class App {
       const mySeat = (joinedRoom._players || []).find((player) => player.user_id === lobby.me?.id)?.seat || 2;
       this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Direct connection to host is establishing…`);
       this.ui.roomChatFill(await lobby.loadRoomChat(joinedRoom.id, 'room'));
+      this._armLobbyConnectionWatchdog();
     } catch (e) {
       this.mpRole = null;
       this.onlineMode = false;
@@ -3543,6 +3686,7 @@ class App {
     if (!this.game) return;
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
+    this.ui.setMatchExit(this.netMode ? this.mpRole : null);
     this.ui.showPause(this.netMode, help, this._questStatus());
   }
 
