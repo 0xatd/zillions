@@ -510,12 +510,19 @@ export class OnlineLobby {
 
   async refreshCurrentGame() {
     if (!this.game?.id) return null;
+    const gameId = this.game.id;
+    const requestId = (this._roomRefreshRequestId || 0) + 1;
+    this._roomRefreshRequestId = requestId;
     const { data, error } = await this.sb.from('rooms')
       .select(ROOM_SELECT)
-      .eq('id', this.game.id)
+      .eq('id', gameId)
       .maybeSingle();
     if (error) throw error;
     if (!data) return null;
+    // Joining produces several overlapping reads: the seat insert, realtime
+    // event, hero update and explicit refresh. An older one-player response
+    // must not arrive last and erase the newer roster from the screen.
+    if (requestId !== this._roomRefreshRequestId || this.game?.id !== gameId) return this.game;
     this.game = roomToGame(data);
     if (this.cb.onRoom) this.cb.onRoom(this.game);
     return this.game;
