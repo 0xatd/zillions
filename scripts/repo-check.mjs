@@ -65,7 +65,7 @@ assert.ok(readme.includes('GitHub repo metadata should point to the production g
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
 assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
-assert.ok(read('src/main.js').includes('s.snap.v === 4'), 'continue-save gate must accept current v4 snapshots');
+assert.ok(read('src/main.js').includes('s.snap.v === 5'), 'continue-save gate must accept current v5 snapshots');
 assert.ok(read('scripts/sim-determinism-check.mjs').includes('workerArgs.push(ticksArg)'), 'determinism harness must forward --ticks to workers');
 
 const contract = read('docs/product-contract.md');

@@ -127,11 +127,15 @@ export class Game {
     else this._setupStart();
   }
 
-  // ---------- save / restore (v4: continuous siege) ----------
+  // ---------- save / restore (v5: terrain-anchored cities + field loot) ----------
+  // Plot state restores BY ID and plot ids are positional, so any change to the
+  // order `generatePlots` lays a city out invalidates older snapshots. Bump the
+  // version when that happens — a stale save restores a house's tier onto a
+  // gate tower and looks like a corrupted city.
 
   snapshot() {
     return {
-      v: 4, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
+      v: 5, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
       phase: this.phase, finalStand: this.finalStand ? 1 : 0,
       gold: snapNum(this.gold),

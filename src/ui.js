@@ -1204,6 +1204,15 @@ export class UI {
     }
     ctx.fillStyle = '#ffd75e';
     for (const cn of game.coins) ctx.fillRect(cn.x - 0.6, cn.z - 0.6, 1.2, 1.2);
+    // Loot you have already spotted stays on the minimap — finding a cache and
+    // then losing it because a wave arrived is not interesting.
+    for (const l of game.loot || []) {
+      if (l.hidden) continue;
+      ctx.fillStyle = '#a8e6ff';
+      ctx.fillRect(l.x - 1.2, l.z - 1.2, 2.4, 2.4);
+      ctx.fillStyle = '#0b0e13';
+      ctx.fillRect(l.x - 0.4, l.z - 0.4, 0.8, 0.8);
+    }
     ctx.fillStyle = '#43d17c';
     for (const u of game.units) {
       if (u.hero) { ctx.fillStyle = '#7fd6ff'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }

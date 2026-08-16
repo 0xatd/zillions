@@ -33,6 +33,9 @@ const TAU = Math.PI * 2;
 // Ward camps are handed out cheapest-first, so a two-gate city can still afford
 // to man both entrances early.
 const CAMP_KINDS = ['camp_ranger', 'camp_militia', 'camp_sniper'];
+// Past this much free wall the site stops being a bargain and starts being a
+// bye — the founders cut another approach rather than ship an unassailable city.
+const MAX_NATURAL_SHARE = 0.72;
 
 // A square silhouette, clamped so the corners cannot run away to infinity.
 const square = (t, R) => Math.min(R * 1.33, R / Math.max(Math.abs(Math.cos(t)), Math.abs(Math.sin(t))));
@@ -153,7 +156,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   const rng = makeRNG(map.seed * 7 + 13 + (opts.siteIdx || 0) * 101);
   const R = CITY_WALL_R * plan.scale;
   const facing = cityFacing(map, cx, cz);
-  const plots = [];
+  let plots = [];
   const taken = new Set(); // tile keys reserved by already-placed plots
 
   const radiusAt = (t) => plan.radius(t, R);
@@ -181,7 +184,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     const world = t + facing;
     for (let d = -3; d <= 5; d += 0.5) {
       const r = radiusAt(t) + d;
-      for (let s = -0.17; s <= 0.171; s += 0.03) {
+      for (let s = -0.22; s <= 0.221; s += 0.03) {
         const x = Math.round(cx + Math.cos(world + s) * r);
         const z = Math.round(cz + Math.sin(world + s) * r);
         if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
@@ -258,6 +261,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   const hq = add('hq', cx - 2, cz - 2, 4);
   reserve(cx - 4, cz - 4, 8, 0); // keep the plaza clear around it
 
+  const wallIdBase = nextId;
   // --- A ring of rampart. Walk the silhouette one tile at a time so the line
   // stays 4-connected however sharply it turns, then let the terrain decide
   // which parts of it actually have to be built.
@@ -315,7 +319,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       // The gate goes on the tile nearest the plan's gate angle — but only if
       // there is enough open wall here to hang a gatehouse on.
       let gateTile = null;
-      if (open.length >= 5) {
+      if (open.length >= 4) {
         let bd = Infinity;
         for (const tile of open) {
           const d = angDiff(tile.ang, t);
@@ -341,7 +345,29 @@ export function generatePlots(map, anchor = null, opts = {}) {
     return { gates: made, natural, length: ringTiles.length };
   };
 
-  const rampart = traceRing(radiusAt, plan.gates, { role: 'rampart', useTerrain: true });
+  const gateAngles = [...plan.gates];
+  let rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: true });
+  // Ground that closes almost the whole line leaves nothing to defend and
+  // nothing to pay for. A sheltered site should be a real advantage, not a bye,
+  // so past a point the founders cut one more way in — through the rock if they
+  // have to. That is another gate to hold as well as another way out.
+  if (rampart.length && (rampart.natural / rampart.length > MAX_NATURAL_SHARE || rampart.gates.length < 2)) {
+    // Put it in the widest stretch of wall with no gate on it.
+    const sorted = [...gateAngles].map((t) => Math.atan2(Math.sin(t), Math.cos(t))).sort((a, b) => a - b);
+    let bestGap = -1, bestMid = Math.PI / 2;
+    for (let i = 0; i < sorted.length; i++) {
+      const a0 = sorted[i], a1 = sorted[(i + 1) % sorted.length] + (i + 1 === sorted.length ? TAU : 0);
+      if (a1 - a0 > bestGap) { bestGap = a1 - a0; bestMid = (a0 + a1) / 2; }
+    }
+    gateAngles.push(bestMid);
+    cutApproach(bestMid);
+    for (const p of plots.filter((pl) => pl.kind === 'wall')) {
+      for (const [x, z] of p.tiles) taken.delete(z * N + x);
+    }
+    plots = plots.filter((pl) => pl.kind !== 'wall');
+    nextId = wallIdBase;
+    rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: true });
+  }
   const gates = rampart.gates;
 
   // --- Local frame helpers: u runs toward the enemy, v runs across. Layouts

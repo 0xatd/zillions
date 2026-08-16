@@ -292,6 +292,11 @@ assert.ok(anchored >= siteStats.length * 0.4,
   `only ${anchored}/${siteStats.length} city sites let the terrain be part of the wall`);
 assert.ok(siteStats.some((s) => s.natural >= 35),
   'no site anywhere in the campaign is genuinely terrain-anchored');
+// ...and the other way: a site where the ground does nearly all the walling is
+// a bye, so `MAX_NATURAL_SHARE` has to keep cutting extra approaches.
+const walledOff = siteStats.filter((s) => s.natural > 80);
+assert.equal(walledOff.length, 0,
+  `${walledOff.length} city sites are ${walledOff.map((s) => s.natural).join('/')}% natural — nothing left to defend`);
 assert.ok(siteStats.every((s) => s.outer >= 1),
   'a site was offered no outer chokepoint works at all');
 

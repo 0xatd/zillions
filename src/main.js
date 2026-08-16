@@ -580,7 +580,7 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 4 ? s : null;
+      return s && s.snap && s.snap.v === 5 ? s : null;
     } catch { return null; }
   }
 
