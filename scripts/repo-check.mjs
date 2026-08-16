@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HEROES, HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, PLOT_KINDS } from '../src/config.js';
+import { FrameGuard, recoverableRestore } from '../src/runtime-guard.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -138,3 +139,27 @@ const oldAutoRankCopy = /special ranks up automatically|levels 4 and 7/i;
 for (const rel of ['README.md', 'src/ui.js', 'src/online.js', 'docs/agent-brief.md', 'docs/product-contract.md']) {
   assert.ok(!oldAutoRankCopy.test(read(rel)), `${rel} still describes hidden automatic hero ranks`);
 }
+
+let frames = 0;
+let reported = null;
+const guard = new FrameGuard((error) => { reported = error; });
+const frameFailure = new Error('render failure');
+assert.equal(guard.run(() => { frames++; throw frameFailure; }), false);
+assert.equal(reported, frameFailure, 'the frame error must be reported');
+assert.equal(guard.run(() => { frames++; }), false);
+assert.equal(frames, 1, 'later animation callbacks must not repeat the crashing frame');
+
+let discarded = null;
+const corruptSave = new Error('corrupt save');
+assert.equal(await recoverableRestore(
+  async () => { throw corruptSave; },
+  async (error) => { discarded = error; },
+), false, 'a failed restore must report failure');
+assert.equal(discarded, corruptSave, 'a failed restore must run recovery with the original error');
+assert.equal(await recoverableRestore(async () => {}, async () => assert.fail('valid restore recovered')), true);
+
+const mainSource = read('src/main.js');
+assert.match(mainSource, /setAnimationLoop\(\(\) => this\.frameGuard\.run/, 'Three.js must run through the frame guard');
+assert.match(mainSource, /await recoverableRestore\(/, 'Continue must await recoverable save restoration');
+assert.match(mainSource, /localStorage\.removeItem\('zillions_save'\)/, 'corrupt local saves must be removed');
+assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be removed from the menu');

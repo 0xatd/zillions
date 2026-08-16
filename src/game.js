@@ -911,8 +911,10 @@ export class Game {
   }
 
   _construct(plot, free = false) {
-    plot.tier++;
-    const def = this.tierDef(plot, plot.tier);
+    const nextTier = plot.tier + 1;
+    const def = this.tierDef(plot, nextTier);
+    if (!def) return false;
+    plot.tier = nextTier;
     if (!free) this.stats.built++;
 
     if (plot.kind === 'wall') {
@@ -955,6 +957,7 @@ export class Game {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
       }
     }
+    return true;
   }
 
   // Structure HP through the civilization's relics (Masonry Codex et al).
