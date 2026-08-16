@@ -1,7 +1,7 @@
 import { backendEnabled } from './backend.js';
 import { THREAT_PERIOD } from './config.js';
+import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 
-const SUPABASE_JS = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const USERNAME_MIN = 3;
 const USERNAME_MAX = 18;
 const USERNAME_RE = /^[a-z0-9_]+$/;
@@ -92,36 +92,17 @@ export class AuthClient {
       return this.status({ enabled: false, reason: 'static' });
     }
 
-    const response = await fetch('/api/auth-config', {
-      headers: { accept: 'application/json' },
-      cache: 'no-store',
-    });
-    if (!response.ok) {
+    let config;
+    try {
+      config = await loadSupabaseConfig();
+    } catch {
       this.ready = true;
       this.error = 'Cloud profile config is unavailable.';
       this.enabled = false;
       this.reason = 'config_error';
       return this.status({ enabled: false });
     }
-
-    const config = await response.json();
-    if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) {
-      this.ready = true;
-      this.enabled = false;
-      this.reason = 'not_configured';
-      return this.status({ enabled: false, reason: 'not_configured' });
-    }
-
-    const { createClient } = await import(SUPABASE_JS);
-    this.client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      auth: {
-        storageKey: 'zillions.supabase.auth',
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        flowType: 'pkce',
-      },
-    });
+    this.client = await getSupabaseClient();
     this.enabled = true;
     this.reason = null;
 
