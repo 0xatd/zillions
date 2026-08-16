@@ -67,8 +67,8 @@ assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check
 assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
 
 const contract = read('docs/product-contract.md');
-assert.ok(contract.includes('holdout mission waves'), 'product contract must own the holdout-wave direction');
-assert.ok(contract.includes('bell becomes optional pressure control'), 'product contract must keep bell as optional pressure control');
+assert.ok(contract.includes('Use continuous siege on a lane graph'), 'product contract must own the continuous-siege direction');
+assert.ok(contract.includes('No day, no night, no bell'), 'product contract must keep day/night/bell removed from the shipped loop');
 assert.ok(read('src/ui.js').includes('assets/heroes/portraits/'), 'runtime hero UI must use small portrait assets');
 
 const schema = read('supabase/schema.sql');

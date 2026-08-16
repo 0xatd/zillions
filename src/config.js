@@ -1,19 +1,90 @@
-// Game balance & static definitions — Thronefall-style build-by-plots economy.
+// Game balance & static definitions — continuous-siege conquest.
+// The planet is a lane graph: your camps emit squads that walk out and take
+// nodes, the hives emit squads that walk in. There is no day, no night, and
+// no bell — pressure is produced by both sides and the front line is wherever
+// the two flows meet.
 
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
-export const UNIT_CAP = 60;
+// Supply comes from TERRITORY. A commander who has taken half the planet can
+// field more than one penned into a city — and without this the player's power
+// is flat while Threat rises forever, which leaves them sitting on a pile of
+// gold with nothing to buy and no way to crack the last hive.
+// Measured as a SHARE of the planet, not a count of nodes. Counting nodes made
+// bigger maps easier — more nodes meant more supply meant a bigger army — which
+// is why the five-hive map used to finish faster than the three-hive one.
+// Holding the whole planet is worth the same army whatever size the planet is.
+export const SUPPLY = {
+  base: 42,        // what the city alone can sustain
+  perPlanet: 72,   // added at 100% of the planet's lane nodes held
+  max: 130,        // absolute ceiling, for the simulation's sake
+};
+export const UNIT_CAP = SUPPLY.max;   // hard ceiling; the live cap is Game.unitCap()
 
-export const DAY_TIME = 65;            // legacy save-summary period; live day is untimed
-export const NIGHT_MAX = 150;          // safety: a night never lasts longer than this
-export const FINAL_NIGHT = 10;         // survive this many nights to win
-export const DAY_LENGTH = DAY_TIME;     // compatibility for account save summaries
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
+
+// ---------- Siege: the constants that replaced day and night ----------
+export const SIEGE = {
+  incomeTick: 4.0,        // seconds between automatic income payouts
+  incomePeriod: 40,       // a building's `income` is paid out over this many seconds
+  repairHpPerGold: 45,    // structure HP restored per gold when repairing
+  rebuildDiscount: 0.5,   // fraction of tier cost to raise a ruin again
+  captureRadius: 7.0,     // presence radius around a lane node
+  captureTime: 6.0,       // seconds of uncontested presence to flip a node
+  nodeIncome: 14,         // income a held node contributes, same period as buildings
+  laneMaxDist: 46,        // longest lane the graph will connect
+  laneNeighbors: 3,       // lanes out of each node
+  raiderShare: 0.35,      // fraction of hive output that raids nodes, not the Keep
+  hiveClaim: 0.42,        // share of the map's nodes the hive already holds
+  scoutRadius: 17,        // survey a node by getting this close to it
+};
+
+// ---------- Nodes: the ground is terrain, the owner is a separate question ----------
+// A node's KIND is a fact about the map — an ore field is an ore field, and you
+// can read it off the land. Who holds it is a different fact, and you do not
+// know it until you go and look. Kinds differ in what they pay and in what a
+// Forward Camp built on them becomes, so which ground you take is a real choice.
+
+export const NODE_KINDS = {
+  ore: {
+    name: 'Ore Field', icon: '⛏️', income: 2.0,
+    blurb: 'Rich ground. Pays double while you hold it.',
+  },
+  quarry: {
+    name: 'Quarry', icon: '🪨', income: 1.0, outpostHp: 0.5,
+    blurb: 'Stone at hand — a Forward Camp here is half again as tough.',
+  },
+  ford: {
+    name: 'Ford', icon: '🌉', income: 0.8, outpostHp: 0.35, garrison: 1.5,
+    blurb: 'A pinch in the land. Whoever holds it holds the road — and it is always guarded.',
+  },
+  clearing: {
+    name: 'Clearing', icon: '🌾', income: 1.0, outpostCount: 1,
+    blurb: 'Room to muster — a Forward Camp here fields an extra trooper.',
+  },
+  barrow: {
+    name: 'Barrow', icon: '⚰️', income: 0.9, firstClaim: { gold: 50, xp: 280 },
+    blurb: 'Old graves under the crags. Something is buried here.',
+  },
+};
+
+export const NODE_UNKNOWN = { name: 'Unsurveyed', icon: '❔', income: 1.0, blurb: 'Nobody has been close enough to see what is there.' };
+
+// The clock. Threat rises with time, with every hive left standing, and with
+// your own aggression — so the player can always see what they did to earn it.
+export const THREAT = {
+  perSecond: 1 / 190,
+  perNest: 1 / 520,        // per living nest, per second
+  perCapture: 0.12,        // one-off bump when you take a node
+  perNestRazed: 0.35,      // one-off bump when you raze a hive
+  max: 24,
+};
+export const THREAT_PERIOD = 190;      // seconds per threat level at base rate
 
 export const TILE = {
   GRASS: 0, FOREST: 1, WATER: 2, MOUNTAIN: 3, SAND: 4, GOLDORE: 5, STONEORE: 6, PATH: 7,
@@ -33,7 +104,8 @@ export const TILE_INFO = {
 
 // ---------- Plots: the city is pre-designed; you buy it to life ----------
 // Every plot kind has tiers. Building/upgrading = standing next to the plot
-// while your gold streams into it. `income` pays out as coins at dawn.
+// while your gold streams into it. `income` pays out on the siege income tick.
+// Camps carry `count` + `every`: a squad of `count` every `every` seconds.
 
 export const PLOT_KINDS = {
   hq: {
@@ -52,7 +124,7 @@ export const PLOT_KINDS = {
       { name: 'House', cost: 18, hp: 420, income: 13 },
       { name: 'Manor', cost: 34, hp: 560, income: 24 },
     ],
-    desc: 'Home to taxpaying settlers. Pays coins every dawn.',
+    desc: 'Home to taxpaying settlers. Pays coins on every income tick.',
   },
   farm: {
     name: 'Farm', icon: '🌾',
@@ -93,7 +165,7 @@ export const PLOT_KINDS = {
         },
       },
     ],
-    desc: 'Automated defense. At the top tier, choose ballista or flame.',
+    desc: 'Automated defense. Press T beside one to change what it shoots first.',
   },
   wall: {
     name: 'Barrier', icon: '🧱',
@@ -117,28 +189,38 @@ export const PLOT_KINDS = {
     name: 'Militia Camp', icon: '⚔️',
     unit: 'soldier',
     tiers: [
-      { name: 'Militia Camp', cost: 24, hp: 460, count: 3 },
-      { name: 'War Camp', cost: 44, hp: 600, count: 5 },
+      { name: 'Militia Camp', cost: 24, hp: 460, count: 2, every: 26 },
+      { name: 'War Camp', cost: 44, hp: 600, count: 3, every: 20 },
     ],
-    desc: 'Sturdy troopers. The fallen are replaced free at every dawn.',
+    desc: 'Sturdy troopers. Musters a fresh squad on a timer, forever.',
   },
   camp_ranger: {
     name: 'Ranger Camp', icon: '🏹',
     unit: 'ranger',
     tiers: [
-      { name: 'Ranger Camp', cost: 18, hp: 420, count: 3 },
-      { name: 'Ranger Lodge', cost: 34, hp: 540, count: 5 },
+      { name: 'Ranger Camp', cost: 18, hp: 420, count: 2, every: 22 },
+      { name: 'Ranger Lodge', cost: 34, hp: 540, count: 3, every: 17 },
     ],
-    desc: 'Fast, quiet scouts. Great early screen for your walls.',
+    desc: 'Fast, quiet scouts. The cheapest steady pressure you can buy.',
   },
   camp_sniper: {
     name: 'Sniper Nest', icon: '🎯',
     unit: 'sniper',
     tiers: [
-      { name: 'Sniper Nest', cost: 34, hp: 420, count: 2 },
-      { name: 'Marksman Hall', cost: 56, hp: 540, count: 3 },
+      { name: 'Sniper Nest', cost: 34, hp: 420, count: 1, every: 30 },
+      { name: 'Marksman Hall', cost: 56, hp: 540, count: 2, every: 26 },
     ],
     desc: 'Massive damage at extreme range — every shot echoes.',
+  },
+  outpost: {
+    name: 'Forward Camp', icon: '⛺',
+    unit: 'soldier',
+    onNode: true, // only fundable on a lane node you already hold
+    tiers: [
+      { name: 'Forward Camp', cost: 34, hp: 620, count: 2, every: 24, income: 6 },
+      { name: 'War Outpost', cost: 58, hp: 900, count: 3, every: 19, income: 12 },
+    ],
+    desc: 'Raise it on ground you hold. Squads muster at the front instead of walking there, and it pays its own keep.',
   },
 };
 
@@ -159,26 +241,72 @@ export const UNITS = {
   },
 };
 
-// Plague-glow palette: sickly greens, jaundiced runners, bruised-purple brutes.
+// ---------- The horde: roles, not stat blocks ----------
+// Every entry asks the player a DIFFERENT question. `ranged` outranges walls,
+// `burrow` walks through them, `siege` ignores your army entirely, and `call`
+// makes everything nearby worse until you kill it.
 export const ZOMBIES = {
-  walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x86c24e, scale: 1.0, score: 1 },
+  walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x86c24e, scale: 1.0,  score: 1 },
   runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xd0c052, scale: 0.92, score: 2 },
   brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8 },
+  spitter: {
+    hp: 42, dmg: 11, speed: 1.05, chase: 1.95, color: 0xc9d84e, scale: 1.05, score: 3,
+    ranged: 8.5, rof: 0.5,
+    desc: 'Spits acid from beyond your wall. You cannot turtle it out.',
+  },
+  burrower: {
+    hp: 58, dmg: 12, speed: 1.2, chase: 2.5, color: 0x8a6ad0, scale: 0.98, score: 4,
+    burrow: true,
+    desc: 'Tunnels under barriers and surfaces inside the rampart.',
+  },
+  sieger: {
+    hp: 320, dmg: 36, speed: 0.8, chase: 1.5, color: 0xd0762e, scale: 1.6, score: 7,
+    siege: true,
+    desc: 'Walks past your army and eats your buildings. Intercept it.',
+  },
+  caller: {
+    hp: 96, dmg: 6, speed: 1.25, chase: 2.4, color: 0x4ec9a8, scale: 1.18, score: 6,
+    call: { radius: 8.5, dmg: 0.4, speed: 0.3 },
+    desc: 'Goads everything nearby into a frenzy. Kill it first.',
+  },
 };
 
-// A wave EVERY night, Thronefall-style, growing to a final-night crescendo.
-export function waveForNight(night, mult) {
-  const size = Math.min(520, Math.round(8 * Math.pow(1.42, night - 1) * mult));
-  const brute = night >= 5 ? Math.min(0.07, 0.015 * (night - 4)) : 0;
-  const runner = night >= 3 ? Math.min(0.28, 0.07 * (night - 2)) : 0;
-  const types = { walker: 1 - brute - runner, runner, brute };
-  const edges = night >= 9 ? 3 : night >= 5 ? 2 : 1;
-  return { size, types, edges, final: night === FINAL_NIGHT };
+// Tower targeting doctrine — the free tactical toggle (press T beside a tower).
+export const TOWER_PRIORITY = [
+  { key: 'nearest', name: 'Nearest', icon: '🎯', desc: 'Shoots whatever is closest.' },
+  { key: 'strongest', name: 'Strongest', icon: '💀', desc: 'Shoots the biggest health pool in range.' },
+  { key: 'siege', name: 'Siege first', icon: '🏚️', desc: 'Prioritises building-killers, then the nearest.' },
+  { key: 'ranged', name: 'Ranged first', icon: '🧪', desc: 'Prioritises spitters and callers, then the nearest.' },
+];
+
+// ---------- Hive production: the enemy's economy ----------
+// A living nest musters a squad on a timer. Both the timer and the squad get
+// worse as Threat climbs, so the pressure curve is a consequence, not a script.
+
+export function hiveInterval(threat) {
+  return Math.max(11, 30 - threat);
 }
 
+export function hiveSquad(threat, mult) {
+  const size = Math.max(2, Math.round((2.5 + threat * 0.9) * mult));
+  const runner   = threat >= 2 ? Math.min(0.26, 0.060 * (threat - 1)) : 0;
+  const spitter  = threat >= 3 ? Math.min(0.15, 0.035 * (threat - 2)) : 0;
+  const caller   = threat >= 4 ? Math.min(0.06, 0.015 * (threat - 3)) : 0;
+  const brute    = threat >= 5 ? Math.min(0.09, 0.018 * (threat - 4)) : 0;
+  const sieger   = threat >= 6 ? Math.min(0.10, 0.020 * (threat - 5)) : 0;
+  const burrower = threat >= 7 ? Math.min(0.09, 0.020 * (threat - 6)) : 0;
+  const rest = runner + spitter + caller + brute + sieger + burrower;
+  const walker = Math.max(0.12, 1 - rest);
+  return { size, types: { walker, runner, spitter, caller, brute, sieger, burrower } };
+}
+
+// Every whole Threat level, every hive musters at once. This is the drumbeat
+// that replaced nightfall.
+export const SURGE_MULT = 2.0;
+
 // ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
-// The whole kit, Thronefall-simple: you steer, your weapon fires itself, an
-// aura hums around you, and SPACE/Q fire the special when not funding a plot.
+// The whole kit stays Thronefall-simple: you steer, your weapon fires itself,
+// an aura hums around you, and SPACE/Q fires the special.
 // Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
 export const HERO_MAX_LEVEL = 10;
@@ -274,15 +402,13 @@ export const HEROES = {
   },
 };
 
-// Coin drops from kills (Thronefall-style loot).
+// Coin drops. Coins are no longer paid by the calendar — income is credited
+// automatically and physical coins fall from combat and conquest only.
 export const DROPS = {
-  smallChance: 0.05, bruteCoins: 4, bossCoins: 20,
+  smallChance: 0.14, smallCoins: 2, bruteCoins: 5, bossCoins: 20, nodeCoins: 18, nestCoins: 40,
 };
 
 // ---------- Items: WC3-style persistent gear ----------
-// Hero gear rides with a hero across the whole campaign; town relics belong
-// to the civilization and empower every city you found. All passive — the
-// kit stays auto-attack + aura + one special; items just make it meaner.
 
 export const ITEMS = {
   // Hero gear (quest rewards)
@@ -304,7 +430,7 @@ export const ITEMS = {
   zillion_eye: { name: "The Zillion's Eye", icon: '👁️', kind: 'hero', cdr: 0.3, dmg: 0.1, desc: 'Special -30% cooldown, +10% damage.' },
   // Town relics (the civilization's treasures — help every city you found)
   masonry_codex: { name: 'Masonry Codex', icon: '📜', kind: 'relic', buildingHp: 0.25, desc: 'All structures +25% HP.' },
-  tithe_ledger: { name: 'Tithe Ledger', icon: '📒', kind: 'relic', income: 0.2, desc: 'Dawn income +20%.' },
+  tithe_ledger: { name: 'Tithe Ledger', icon: '📒', kind: 'relic', income: 0.2, desc: 'Income +20%.' },
   banner_keep: { name: 'Banner of the Keep', icon: '🚩', kind: 'relic', troopDmg: 0.2, desc: 'Troops +20% damage.' },
   ballistics_manual: { name: 'Ballistics Manual', icon: '📘', kind: 'relic', towerDmg: 0.2, desc: 'Towers +20% damage.' },
   warlord_crest: { name: "Warlord's Crest", icon: '🏵️', kind: 'relic', troopDmg: 0.15, towerDmg: 0.15, desc: 'Troops and towers +15% damage.' },
@@ -326,22 +452,25 @@ export function itemMods(items) {
 
 // ---------- Campaign: 5 levels, 5 maps, 5 bosses ----------
 // Fixed seeds mean every player fights on the same battlegrounds.
-// Castle-defense shape: each map is a big frontier with hive nests (the
-// enemy's bases — nightly waves march out of them, and they can be razed)
-// and 3 candidate city sites. Ride out, pick your ground, found the city.
-// Each map also carries 3 side quests; rewards are items and relics that
-// persist across the campaign (WC3-style).
+// Each map is a frontier lane graph: hive nests (the enemy's producing bases),
+// neutral lane nodes to take, and 3 candidate city sites.
+// Win by razing every hive and breaking the counterattack the last one calls.
+
+// How much of a hive's health comes from the level's difficulty multiplier.
+// Kept explicit because it is the main lever on campaign pacing.
+export const NEST_HP_BASE = 9000;
+export const NEST_HP_LEVEL_SHARE = 0.8;   // hp = base * (1 - share + share * level.mult)
 
 export const LEVELS = [
   {
     id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8, size: 160, nests: 3,
-    economy: { startGold: 58, income: 1.0, wave: 0.9, nightMax: 105 },
+    economy: { startGold: 58, income: 1.0, pressure: 0.9 },
     quests: [
       { id: 'l1q1', name: 'First Blood', desc: 'Slay 150 of the dead', reward: 'targeting_optic', check: (g) => g.stats.kills >= 150 },
       { id: 'l1q2', name: 'Not One Stone', desc: 'Win without losing a single building', reward: 'masonry_codex', check: (g) => g.stats.lost === 0 },
-      { id: 'l1q3', name: 'Burn the Nest', desc: 'Raze a hive nest', reward: 'blast_padding', check: (g) => g.stats.nests >= 1 },
+      { id: 'l1q3', name: 'Ground Held', desc: 'Hold 4 lane nodes at once', reward: 'blast_padding', check: (g) => g.stats.bestHeld >= 4 },
     ],
-    blurb: 'Rolling moorland and black pines. Learn to hold a line.',
+    blurb: 'Rolling moorland and black pines. Learn to hold a line — then move it.',
     theme: { water: 0.33, mountain: 0.74, forest: 0.55,
       palette: { grass: 0x5a8a52, forest: 0x35603c, water: 0x3fa0a8, mountain: 0xb8b4a6, sand: 0xb8a878, path: 0x8a7a5e, sky: 0x9cc4b0 } },
     boss: { name: 'The Butcher', icon: '🔪', hp: 2600, dmg: 60, speed: 1.1, chase: 2.1, scale: 3.0,
@@ -350,7 +479,7 @@ export const LEVELS = [
   },
   {
     id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 160, nests: 3,
-    economy: { startGold: 64, income: 1.04, wave: 0.96, nightMax: 115 },
+    economy: { startGold: 64, income: 1.04, pressure: 0.96 },
     quests: [
       { id: 'l2q1', name: 'Drain the Fen', desc: 'Raze 2 hive nests', reward: 'tithe_ledger', check: (g) => g.stats.nests >= 2 },
       { id: 'l2q2', name: 'Untouchable', desc: 'Win without your hero falling', reward: 'servo_legs', check: (g) => g.stats.heroDeaths === 0 },
@@ -365,7 +494,7 @@ export const LEVELS = [
   },
   {
     id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 160, nests: 4,
-    economy: { startGold: 72, income: 1.08, wave: 1.0, nightMax: 125 },
+    economy: { startGold: 72, income: 1.08, pressure: 1.0 },
     quests: [
       { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
       { id: 'l3q2', name: 'High Keep', desc: 'Upgrade the Keep to its final tier', reward: 'banner_keep', check: (g) => { const hq = g.plots.find((p) => p.kind === 'hq'); return hq && hq.tier >= 3; } },
@@ -380,7 +509,7 @@ export const LEVELS = [
   },
   {
     id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 160, nests: 4,
-    economy: { startGold: 82, income: 1.12, wave: 1.04, nightMax: 135 },
+    economy: { startGold: 82, income: 1.12, pressure: 1.04 },
     quests: [
       { id: 'l4q1', name: 'Tomb Raider', desc: 'Raze 3 hive nests', reward: 'ballistics_manual', check: (g) => g.stats.nests >= 3 },
       { id: 'l4q2', name: 'Deathless', desc: 'Win without your hero falling', reward: 'aura_amp', check: (g) => g.stats.heroDeaths === 0 },
@@ -395,10 +524,10 @@ export const LEVELS = [
   },
   {
     id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 160, nests: 5,
-    economy: { startGold: 96, income: 1.16, wave: 1.08, nightMax: 145 },
+    economy: { startGold: 96, income: 1.16, pressure: 1.08 },
     quests: [
       { id: 'l5q1', name: 'Blind the Eye', desc: 'Kill The Zillion within 120s', reward: 'void_shard', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 120 },
-      { id: 'l5q2', name: 'Scour the Vale', desc: 'Raze every hive nest', reward: 'warlord_crest', check: (g) => g.nests.length > 0 && g.nests.every((n) => !n.alive) },
+      { id: 'l5q2', name: 'Total Occupation', desc: 'Hold 7 lane nodes at once', reward: 'warlord_crest', check: (g) => g.stats.bestHeld >= 7 },
       { id: 'l5q3', name: 'Legend', desc: 'Slay 1500 of the dead', reward: 'chrono_loop', check: (g) => g.stats.kills >= 1500 },
     ],
     blurb: 'Where the plague began. Everything ends here.',

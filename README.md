@@ -1,21 +1,21 @@
 # ZILLIONS
 
-Zillions is a browser-based zombie survival game in the spirit of **Thronefall**:
-you are the hero, riding through a pre-designed city that you bring to life with
-gold while hostile hive territory closes in around the map.
+Zillions is a browser-based planet-conquest game: you are the hero, riding a
+contested frontier, raising a city out of the ground with gold, and pushing the
+front line outward until every hive on the map is ash.
 
-- Thronefall-style build-by-standing economy with one resource: gold.
-- A wave every night; you decide when night falls by ringing the bell.
+- Build-by-standing economy with one resource: gold.
+- **Continuous siege.** No day, no night, no bell. Both sides run an economy:
+  your camps muster squads on a timer and push them out along a lane graph to
+  take nodes; every living hive musters its own squads and sends them back.
+- **Threat** is the clock — it rises with time, with every hive still standing,
+  and with your own conquests, and every whole level makes every hive muster at
+  once.
 - Direct hero control (WASD) with auto-attack, visible hero stats, and one
   signature ability each.
 - Grimdark space-marine heroes, procedural hordes, flow-field pathfinding.
 - Campaign (5 maps, 5 bosses) and endless Survival mode.
 - Production account gate, Supabase-backed profiles/stats/saves, and public/private rooms.
-
-The current live build still uses a day, bell, night, and dawn loop. The next
-loop is defined in `docs/product-contract.md`: holdout mission waves tied to
-hive timers, attack lanes, boss gates, rescues, extraction moments, or player
-bell taunts. Building should stay available during pressure.
 
 The production game runs on Vercel at `https://zillions.taborlin.co`. Static
 local play remains as a development fallback, but production identity is
@@ -33,25 +33,24 @@ GitHub repo metadata should point to the production game, not the Vercel
 fallback. The default branch is `main`. GitHub Pages is useful for static review
 and asset review only; Vercel is the production host.
 
-## Current State And Next Direction
+## Current State
 
 Read `docs/agent-brief.md` before review or implementation work.
 
-Current shipped loop:
+The shipped loop is continuous siege:
 
 - Found a city at a flagged site.
-- Build and upgrade by standing near plots and holding Space/B. This now works
-  during waves too.
-- Ring the bell at the Keep when ready.
-- Fight the wave.
-- Collect dawn income and repair.
-- Win campaign maps by surviving the final night or razing every hive nest.
+- Build, upgrade and repair at any time by standing near plots and holding
+  Space/B. Nothing pauses while you do it — that is the risk.
+- Camps muster squads forever. Set the army stance and it pushes the lanes on
+  its own, taking nodes as the front line moves.
+- Every living hive musters its own squads on a timer that tightens as Threat
+  climbs.
+- Win a campaign map by razing every hive nest, then breaking the counterattack
+  its champion leads. Lose it if the Keep falls.
 
-Next intended loop lives in `docs/product-contract.md`. In short: keep waves,
-attach them to mission/world events, and make the objective read like a holdout
-defense mission. Do not ship a partial migration that only changes copy. The
-simulation, UI, tutorials, stats labels, save summaries, balance checks, and
-docs must move together.
+`docs/design-vision.md` holds the longer-range direction (folklore factions, fog
+and landmarks, the planet and galaxy layers). Those are not implemented.
 
 Serve the repo locally for static development:
 
@@ -66,9 +65,10 @@ Then open:
 
 ## How It Plays
 
-Each map is a big castle-defense frontier (WC3 *Castle Defense* DNA): hive
-nests — the enemy's bases — ring the wilds, and three flagged **city sites**
-offer different ground to defend. You start un-founded: ride the frontier,
+Each map is a contested planet. Hive nests — the enemy's producing bases — ring
+the wilds, a graph of **lane nodes** covers the ground between, and three
+flagged **city sites** offer different ground to defend. You start un-founded:
+ride the frontier,
 pick your site, press Space, and the city plan appears there — the ground
 inside the rampart is levelled clean, dirt lanes run from each gate to the
 plaza, a ring of house plots surrounds the Keep, farm and mill lanes sit
@@ -76,17 +76,26 @@ behind them, gold mines wait on the ore veins, and a fully **closed** rampart
 circles it all. The only ways in are the four gates, each flanked by a pair
 of tower plots. Chokepoints, by design.
 
-- **Build under pressure.** Collect the coins your buildings paid out at dawn,
-  then walk to a glowing foundation and **hold Space or B**. Coins arc out of
-  your purse one by one into the coin slots above the plot while a ghost
-  shows the building to come. Partial payments persist. Hold beside a built
-  structure to upgrade it. Top-tier towers make you
-  choose a doctrine: ballista (single-target sniper) or flame (splash).
-- **Ring the bell** (Space) when ready — night falls, and the horde marches
-  out of its hive nests (red-beaconed all day). Night ends when the wave dies.
-- **Raze the hives.** Nests are guarded but destroyable. Destroy one and it
-  never spawns again. Raze every nest on a campaign map and the land is won
-  outright, boss or no boss.
+- **Build whenever you like — and it is never safe.** Walk to a glowing
+  foundation and **hold Space**: coins arc out of your purse one by one into
+  the coin slots above the plot while a ghost shows the building to come
+  (partial payments persist). Hold Space beside a built structure to upgrade
+  it. Top-tier towers make you choose a doctrine: ballista (single-target
+  sniper) or flame (splash), and **T** beside a tower changes what it shoots
+  first — nearest, strongest, siege-first or ranged-first.
+- **Income is automatic; coins are earned.** Buildings and held nodes credit
+  gold continuously. Physical coins now drop only from kills, captured nodes
+  and razed hives — so the coin-hoover is a reward for fighting, not a chore
+  at sunrise.
+- **Nothing repairs itself.** Hold Space on a damaged building to repair it for
+  gold, or on a ruin to rebuild it at half price. Damage is a bill.
+- **Threat is the clock.** It climbs on its own, faster while hives stand, and
+  a little every time you take ground. Every whole Threat level, every hive
+  musters at once.
+- **Raze the hives.** Each nest musters squads forever until it is destroyed,
+  spits defenders when attacked, and poisons the ground around it. Raze them
+  all and the survivors call one last counterattack led by the map's champion —
+  kill it and the planet is yours.
 - **Barriers are bought whole.** Each rampart segment is ONE purchase at its
   gate — pay once and the entire stretch rises, never piece by piece.
   Upgrade the same way: Razorwire Fence → Plasteel Barricade → then choose
@@ -94,13 +103,32 @@ of tower plots. Chokepoints, by design.
   chews it) or **Bastion Wall** (double armor).
 - **Ruins rebuild free at dawn** — losing a building costs you its function for
   the night and its dawn payout, not the building itself.
-- **Camps field troops** that respawn each dawn. Army control is blended:
-  squads fight on their own, but you set the plan. **1 Defend** holds the city,
-  **2 Follow** escorts your hero, and **3 Hunt** sends them outward to kill
-  enemies and push hive nests.
-- **Campaign**: survive 10 nights (or raze every hive); a unique boss leads
-  the final horde on each of the 5 maps. **Survival**: endless nights, a boss
-  every fifth — your record is the number of nights you lasted.
+- **Supply comes from territory.** Your army ceiling is what the city can
+  sustain plus what the ground you hold adds. When you are rich and stuck, the
+  answer is always to go and take something.
+- **Camps are faucets, not garrisons.** Every camp musters a fresh squad on a
+  timer, forever, and sustains a standing force proportional to its tier — so
+  buying more camps buys more army. Army control is blended: squads fight on
+  their own, but you set the plan. **1 Defend** holds the city, **2 Follow**
+  escorts your hero, and **3 Push** sends them out along the lanes.
+- **Take and hold lane nodes.** Stand on a node with no enemies nearby and it
+  flips to you. Held nodes pay income, and you can raise a **Forward Camp** on
+  one so squads muster at the front instead of walking there. Lose the node and
+  you lose what you built on it.
+- **The ground is terrain; the owner is a separate question.** Nodes are read
+  out of the map itself — ore fields, fords pinched between water and crags,
+  sheltered clearings, barrow shelves — so no two planets share a skeleton. What
+  each one *is* you can read off the land. **Who holds it you cannot.** The hive
+  already holds some of the best ground, some is merely guarded, and some is
+  empty; a node stays *unsurveyed* on the map until one of your people gets
+  close enough to look. An ore field being over there does not mean a hive is.
+- **Ground has character.** An Ore Field pays double. A Quarry makes the Forward
+  Camp built on it half again as tough. A Clearing lets it muster an extra
+  trooper. A Ford is always well guarded, because whoever holds the pinch holds
+  the road. A Barrow has something buried under it, once.
+- **Campaign**: raze every hive on each of the 5 maps, then break the
+  counterattack its unique champion leads. **Survival**: endless siege, a boss
+  every fifth Threat level — your record is the Threat you drove it to.
 
 ## Side Quests, Items & Campaign Persistence (WC3-style)
 
@@ -141,10 +169,11 @@ hero revives at the Keep.
 | W / S | Move north/up · south/down on the minimap |
 | A / D | Move west/left · east/right on the minimap |
 | Shift | Gallop (full health only, like Thronefall) |
-| Space | THE interact key: found the city at a site · HOLD at a foundation to build · ring the bell at the Keep · cast your special at night |
-| B (hold) | Build / upgrade (alias for holding Space) |
+| Space | THE interact key: found the city at a site · HOLD at a foundation to build, upgrade, repair or rebuild · cast your special anywhere else |
+| B (hold) | Build / upgrade / repair (alias for holding Space) |
 | Q | Cast your special |
-| 1 / 2 / 3 | Army stance: Defend city / Follow hero / Hunt enemies and hives |
+| T | Cycle the targeting doctrine of the nearest tower |
+| 1 / 2 / 3 | Army stance: Defend city / Follow hero / Push the lanes |
 | Hero upgrade buttons | Spend level-up points on Aura, Passive I, Passive II, or Ult Damage |
 | Mouse wheel | Zoom |
 | P | Pause (solo) |
@@ -159,16 +188,9 @@ not the email address or Google account name. Stats, cloud save, match history,
 and rooms are owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
 **Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
-presence, global lobby chat, friends, and real public rooms. Public/private
-room records come from Supabase `rooms` and `room_players`. Lobby chat uses
-Supabase `lobby_chat`. Friend requests and accepted friends use Supabase
-`friendships`. Empty room lists show an empty state. Do not seed fake games or
-fake players.
-
-**Room and in-game chat**: each account-backed room has room chat during setup.
-When the match starts, Enter opens the in-game team chat. Room chat and in-game
-chat share Supabase `room_chat`, separated by `channel = 'room'` and
-`channel = 'game'`.
+presence, global lobby chat, and real public rooms. Public/private room records
+come from Supabase `rooms` and `room_players`. Empty room lists show an empty
+state. Do not seed fake games or fake players.
 
 The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
 hero each). The backend stores identity, rooms, saves, stats, and results. It
@@ -178,21 +200,27 @@ does not run the combat simulation yet.
 fallback — trade invite/reply codes over any chat channel, no lobby backend
 needed.
 
-**Solo and co-op play the same game.** Same fixed-seed map and pre-planned
-city per level, one shared gold purse (anyone's coins, anyone's hold-B), one
-shared horde and boss. Each player brings their own hero with its own aura,
-special, XP, levels, and upgrade choices — auras stack, so a good comp covers
-slow + heal + drain. Waves grow +40% per extra player, any player may ring the bell, and
-the deterministic lockstep sim means every command (move, build, cast, rally)
-runs identically on every machine.
+**Solo and co-op play the same game.** Same fixed-seed map, lane graph and
+pre-planned city per level, one shared gold purse (anyone's coins, anyone's
+hold-B), one shared horde and boss. Each player brings their own hero with its
+own aura, special, XP, levels, and upgrade choices — auras stack, so a good comp
+covers slow + heal + drain. Hive output grows +40% per extra player, and the
+deterministic lockstep sim means every command (move, build, cast, stance) runs
+identically on every machine.
 
 ## Profiles And Saved Games
 
 - **Zillions account**: Google/Supabase identity is the production profile. The
   visible player name is the claimed public username tied to that account.
-- **Stats**: games, wins, kills, best day, favorite hero, and match history sync
-  to Supabase.
+- **Stats**: games, wins, kills, best Threat reached, favorite hero, and match
+  history sync to Supabase. The backend's `best_day` column now carries the
+  Threat level a run reached.
 - **Cloud save**: the latest solo/host save syncs to Supabase `save_slots`.
+- **Lobby chat and friends**: signed-in global chat uses Supabase
+  `lobby_chat`. Friend requests, accepted friends, online state, and
+  friend-to-room invites use Supabase `friendships`.
+- **Room and game chat**: setup-room chat and in-game team chat share
+  `room_chat`, separated by `channel = 'room'` and `channel = 'game'`.
 - **Static fallback**: localStorage remains for local development and offline
   smoke tests. Do not present it as a production profile.
 - **Autosave**: every run autosaves every 20 seconds and on tab close.
@@ -246,14 +274,15 @@ assets-page.css         Asset browser styles
 assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
-src/config.js           Balance, heroes, buildings, units, waves
+src/config.js           Balance, heroes, buildings, units, siege
 src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
 src/map.js              Procedural map
 src/flowfield.js        Horde pathfinding
+src/lanes.js            Lane graph: capture nodes, lanes, and squad routing
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
-src/online.js           Supabase room, chat, friends, invites, and presence adapter
+src/online.js           Supabase room, lobby chat, friends, and game chat adapter
 src/auth.js             Supabase auth/profile/save/stat sync
 src/backend.js          Vercel API helpers
 api/                    Vercel backend routes
@@ -261,14 +290,12 @@ supabase/schema.sql     Zillions Supabase schema and RLS
 src/utils.js            Shared helpers
 vendor/three.module.js  Vendored Three.js
 assets/heroes/          Generated hero portraits and cinematic clips
-assets/heroes/portraits Small runtime hero portraits for fast first load
 assets/audio/           Generated audio assets and manifests
 docs/product-contract.md Product source of truth for agents
 docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
-scripts/sim-determinism-check.mjs  Headless deterministic sim replay check
 ```
 
 ## Tech Notes
@@ -276,10 +303,11 @@ scripts/sim-determinism-check.mjs  Headless deterministic sim replay check
 - Three.js r160 is vendored in `vendor/`.
 - The terrain is a custom flat-shaded mesh with per-tile vertex colors.
 - Zombies are instanced meshes. This keeps large hordes fast.
-- Zombies use a multi-source Dijkstra flow field. Player squads steer through
-  stance goals and local movement.
+- Zombies use a multi-source Dijkstra flow field. Player units use A*.
 - The game uses GPU particles for blood, dust, muzzle flashes, and smoke.
-- Lighting uses soft shadows, ACES tone mapping, and a day/night cycle.
+- Lighting uses soft shadows and ACES tone mapping. There is no day/night
+  cycle: the light bleeds out of the sky as Threat climbs, so a late siege
+  looks like one without gating the player on a clock.
 - The simulation runs at a fixed 30 Hz step. Rendering is separate.
 - Game speed supports 1x, 2x, and 4x in solo mode. Co-op locks to 1x.
 - Seeded RNG is used throughout the simulation. This supports lockstep co-op.
@@ -298,7 +326,7 @@ When reviewing or changing gameplay, check:
 - Production is account-gated on Vercel.
 - Static local development still works as fallback.
 - The hero picker works.
-- City founding, plot build, bell, and first night wave work.
+- City founding, plot build, repair/rebuild, node capture, and hive musters work.
 - Lobby shows real rooms or a clean empty state.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.
