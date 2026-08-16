@@ -31,7 +31,16 @@ Alex and Ted will play the five campaign missions together. Ted will use a diffe
 
 ### Live campaign findings
 
-No findings yet.
+#### QA-001 — Host connection gate does not identify the blocked player
+
+- Status: Confirmed
+- Severity: Medium usability issue; blocks launch until manually recovered
+- Room: `A2F6F9`, Greenfall Marches, three players
+- Evidence: The host showed `CONNECTING 1 PLAYER` while all three roster rows showed `ready`. Ted's guest view independently showed a green direct connection to the host. Therefore the missing direct peer was Lyra, but the host UI did not identify that player.
+- Cause: Readiness is durable room state. Direct WebRTC connectivity is host-local state. The room roster displays readiness but does not map each host peer connection back to its username.
+- Immediate recovery: The affected guest must leave and rejoin, then mark Ready again.
+- Recommendation: Show a separate connection badge on every roster row (`Connected`, `Connecting`, `Disconnected`). Change the launch gate to name the blocked player, for example `WAITING FOR @lyra TO CONNECT`. Add a host-side retry or remove-seat action for a stalled handshake.
+- Console note: `ObjectMultiplex - orphaned data` came from a browser wallet extension and is unrelated to Zillions. Zillions reported normal host-route RTT samples.
 
 ## Final review
 
