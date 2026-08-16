@@ -15,6 +15,14 @@ export class GameMap extends TerrainField {
   colorOf(t) {
     if (this.theme && this.theme.palette) {
       const p = this.theme.palette;
+      // Streets read as pale graded roadbed, not dark stamps across the city:
+      // lift the authored path tone toward the biome's sand tone.
+      if (t === TILE.PATH && p.path !== undefined) {
+        if (this._pathBlend === undefined) {
+          this._pathBlend = new THREE.Color(p.path).lerp(new THREE.Color(p.sand ?? p.grass), 0.45).getHex();
+        }
+        return this._pathBlend;
+      }
       const map = {
         [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
         [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,

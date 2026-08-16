@@ -268,9 +268,34 @@ clock, or `Math.random()`:
   and raises the plaza ~a half-tile).
 - **Color**: corner-averaged tile colors + height lift/sink + blight stain
   near nests — all functions of tiles/elev/nests.
-- **Buildings**: battered plinths, corbelled crowns, merlons, terraced keep,
-  red-capped gatehouses — parameterized by tier/branch/wall-neighbors, so
-  the same code dresses a 3-tile fence and a 40-tile star rampart.
+- **Buildings**: the *colony kit* (see style guide below) — parameterized by
+  tier/branch/wall-neighbors, so the same code dresses a 3-tile fence and a
+  40-tile star rampart.
+
+### Style guide: space frontier, not medieval
+
+Zillions is a sci-fi colony game. We borrow Thronefall's *silhouette
+discipline* — battered bases, shafts that taper, crowns wider than the
+shaft, one tall landmark at the center of the hierarchy — but draw it in the
+expedition's own materials. The kit (constants in `_makeBuildingMesh`):
+
+- **HULL/HULL2** warm white prefab plate — every structure's body.
+- **PAD** poured-pad concrete — terraces, plinths, muster pads, the plaza.
+- **TRIM** colony amber — door lights, marker lights, gate lintels, holo
+  banners. The perimeter at a glance is a string of amber marker lights.
+- **SOLAR** panel blue — hab roofs, always tilted the same way.
+- **GLOW** teal — sensor bands, ops glass, hydroponic rims (the game's
+  existing tech color).
+
+Anchors: the HQ is Colony Command (terraced landing terrace, ops hall with
+a lit band, comms dish, beacon spire); towers are defense pylons (flared
+gun deck, sensor band, railing, muzzle marker); walls are hull-plate
+curtains with amber perimeter lights and bright-lit gates; houses are hab
+units with tilted solar roofs; mills are wind turbines; camps are quonset
+bays with a doctrine-colored light stripe. Nothing gets crenellations, red
+cones, or any material the expedition couldn't have printed. One kit, one
+trim color — that consistency, not detail count, is what makes a generated
+city read designed.
 - **Scatter**: a seeded meadow-noise field gates density (clumps + clean
   ground), monuments are placed by feature kind, and every stream is
   presentation-only RNG.

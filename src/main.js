@@ -332,13 +332,16 @@ class App {
   // plan: a square fort gets a square plaza, a crescent gets two lanes, not
   // four. Falls back to a plain ring if the plan is not known yet.
   _buildPlaza(cx, cz) {
+    // The colony's landing terrace: light poured-pad concrete with an amber
+    // guide ring, and paved walkways out to the gates a shade lighter than
+    // the ground — markings on a pad, not dark bars stamped across the city.
     const g = new THREE.Group();
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
     const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
       squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
-      new THREE.MeshLambertMaterial({ color: 0x565149 }),
+      new THREE.MeshLambertMaterial({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
@@ -346,15 +349,29 @@ class App {
     disc.position.set(cx, plazaY + 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
-    const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
+    const ringGeo = new THREE.RingGeometry(5.6, 5.85, 48);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
+    }));
+    ring.position.set(cx, plazaY + 0.03, cz);
+    g.add(ring);
+    const laneMat = new THREE.MeshLambertMaterial({ color: 0xb3ad9e });
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
     for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
       lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.receiveShadow = true;
       g.add(lane);
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len), stripeMat);
+      stripe.rotation.copy(lane.rotation);
+      stripe.position.copy(lane.position);
+      stripe.position.y = plazaY + 0.022;
+      g.add(stripe);
     }
     return g;
   }
@@ -2631,6 +2648,17 @@ class App {
       m.castShadow = true;
       g.add(m); return m;
     };
+    // Always-lit accent: marker lights, sensor bands, holo panels.
+    const lit = (w, h, dep, color, x = 0, y = 0, z = 0, i = 0.7) => {
+      const m = box(w, h, dep, color, x, y, z);
+      m.material.emissive.setHex(color);
+      m.material.emissiveIntensity = i;
+      m.castShadow = false;
+      return m;
+    };
+    // The colony kit: one hull family + one trim so every structure on the
+    // planet reads as the same expedition's prefab, never a random block.
+    const HULL = 0xe6e0d0, HULL2 = 0xcfc9b8, PAD = 0x9c968a, TRIM = 0xe8843c, SOLAR = 0x31506b, GLOW = 0x5fd8c8;
     const windows = (n, y, r, color = 0xffca6e) => {
       // Emissive windows that glow at night (renderer toggles intensity).
       for (let i = 0; i < n; i++) {
@@ -2646,71 +2674,94 @@ class App {
 
     switch (b.kind) {
       case 'hq': {
-        // The keep reads as the top of the whole hierarchy: a terraced stone
-        // mound, a great hall, corner turrets that fill in as it grows, and
-        // one tall red-capped spire you can find from anywhere on the map.
-        box(4.6, 0.5, 4.6, 0xa39a84, 0, 0.25);
-        box(3.9, 0.5, 3.9, 0xb3aa93, 0, 0.72);
-        box(3.1, 1.5, 3.1, 0xdcd6c4, 0, 1.7);
-        box(3.3, 0.28, 3.3, 0xc2b9a2, 0, 2.55);           // hall cornice
-        const turret = (x, z) => {
-          cyl(0.4, 0.5, 2.9, 0xd2cbb6, x, 1.9, z, 8);
-          cone(0.62, 0.85, 0xb03a30, x, 3.75, z, 8);
+        // Colony Command: a terraced landing terrace, the operations hall
+        // with a lit sensor band, comm pylons that fill in as it grows, and
+        // one tall control spire with a dish and a beacon you can find from
+        // anywhere on the planet.
+        box(4.6, 0.4, 4.6, PAD, 0, 0.2);
+        box(3.9, 0.4, 3.9, 0xaba593, 0, 0.6);
+        lit(3.92, 0.06, 3.92, TRIM, 0, 0.82, 0, 0.4);      // terrace edge light
+        box(3.1, 1.5, 3.1, HULL, 0, 1.55);
+        box(3.3, 0.24, 3.3, HULL2, 0, 2.4);                // hall cornice
+        lit(3.14, 0.14, 3.14, GLOW, 0, 1.95, 0, 0.35);     // ops glass band
+        const pylon = (x, z) => {
+          cyl(0.3, 0.4, 2.7, HULL2, x, 1.8, z, 8);
+          lit(0.24, 0.24, 0.24, TRIM, x, 3.25, z, 0.8);
         };
-        turret(1.35, 1.35);
-        if (tier >= 2) turret(-1.35, -1.35);
-        if (tier >= 3) { turret(1.35, -1.35); turret(-1.35, 1.35); }
-        // The spire: taller with every tier, gold finial at the top tier.
-        const spireH = 2.0 + tier * 0.5;
-        cyl(0.7, 0.9, spireH, 0xe0dac8, 0, 2.55 + spireH / 2, 0, 8);
-        cyl(0.98, 0.82, 0.34, 0xc2b9a2, 0, 2.62 + spireH, 0, 8);
-        cone(1.05, 1.3, tier >= 3 ? 0xbf3f34 : 0x8f2d28, 0, 3.4 + spireH, 0, 8);
-        if (tier >= 4) {
-          const finial = cyl(0.1, 0.1, 0.5, 0xf3c53d, 0, 4.25 + spireH, 0, 6);
-          finial.material.emissive.setHex(0xf3c53d);
-          finial.material.emissiveIntensity = 0.5;
-        }
-        box(0.06, 1.6, 0.06, 0x4a4038, 1.35, 4.7, 1.35);
-        const flag = box(0.7, 0.4, 0.02, 0xc85a48, 0.97, 5.2, 1.35);
+        pylon(1.35, 1.35);
+        if (tier >= 2) pylon(-1.35, -1.35);
+        if (tier >= 3) { pylon(1.35, -1.35); pylon(-1.35, 1.35); }
+        // The spire: taller with every tier.
+        const spireH = 2.2 + tier * 0.5;
+        cyl(0.68, 0.9, spireH, HULL, 0, 2.4 + spireH / 2, 0, 8);
+        lit(1.5, 0.12, 1.5, GLOW, 0, 2.4 + spireH * 0.62, 0, 0.3); // control ring
+        cyl(0.95, 0.72, 0.3, HULL2, 0, 2.5 + spireH, 0, 8);        // crown deck
+        // Comms dish, aimed at the sky.
+        const dish = cyl(0.55, 0.08, 0.3, 0xd8d2c2, 0.45, 2.85 + spireH, 0.35, 10);
+        dish.rotation.x = -0.7; dish.rotation.z = -0.35;
+        box(0.07, 1.4, 0.07, 0x4a5058, -0.3, 3.15 + spireH, -0.25);
+        const beacon = lit(0.2, 0.2, 0.2, tier >= 4 ? 0xf3c53d : TRIM, -0.3, 3.95 + spireH, -0.25, 1.0);
+        // Holo-banner off the crown: the expedition's colors.
+        const flag = lit(0.7, 0.4, 0.03, TRIM, 0.65, 2.9 + spireH, -0.2, 0.5);
+        flag.material.transparent = true; flag.material.opacity = 0.85;
         g.userData.flag = flag;
-        windows(6, 1.5, 1.62);
-        windows(4, 2.55 + spireH * 0.5, 0.85);
+        windows(6, 1.55, 1.62);
+        windows(4, 2.4 + spireH * 0.4, 0.84);
         break;
       }
       case 'house': {
+        // Hab unit: white prefab hull, tilted solar roof, lit door. Bigger
+        // tiers stack a second module instead of growing a random block.
         if (tier === 1) {
-          box(1.3, 0.7, 1.1, 0xd8d4c6, 0, 0.35);
-          cone(1.0, 0.7, 0xa8352e, 0, 1.05);
+          box(1.3, 0.7, 1.1, HULL, 0, 0.35);
+          const roof = box(1.36, 0.08, 1.16, SOLAR, 0, 0.78);
+          roof.rotation.z = 0.07;
+          lit(0.3, 0.44, 0.04, TRIM, 0, 0.24, 0.56, 0.4);
         } else if (tier === 2) {
-          box(1.5, 1.0, 1.3, 0xdcd8ca, 0, 0.5);
-          cone(1.15, 0.8, 0xa8352e, 0, 1.4);
-          box(0.35, 0.5, 0.06, 0x565c60, 0, 0.25, 0.68);
+          box(1.5, 1.0, 1.3, HULL, 0, 0.5);
+          const roof = box(1.56, 0.09, 1.36, SOLAR, 0, 1.08);
+          roof.rotation.z = 0.07;
+          lit(0.32, 0.5, 0.04, TRIM, 0, 0.27, 0.66, 0.4);
+          box(0.05, 0.7, 0.05, 0x4a5058, -0.55, 1.4, -0.4); // antenna
         } else {
-          box(1.6, 1.5, 1.4, 0xe0dccd, 0, 0.75);
-          box(1.0, 0.8, 1.0, 0xbfbaaa, 0.5, 1.9, 0.3);
-          cone(1.25, 0.9, 0x8f2d28, 0, 2.0);
-          cone(0.8, 0.7, 0x8f2d28, 0.5, 2.6, 0.3);
+          box(1.6, 1.4, 1.4, HULL, 0, 0.7);
+          box(1.0, 0.8, 1.0, HULL2, 0.45, 1.8, 0.25);
+          const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45, 2.26, 0.25);
+          roof.rotation.z = 0.07;
+          box(1.1, 0.1, 1.3, 0x6da06a, -0.4, 1.48, 0);      // roof garden
+          lit(0.32, 0.52, 0.04, TRIM, 0, 0.28, 0.72, 0.4);
         }
         windows(tier + 1, tier >= 3 ? 0.8 : 0.4, 0.72);
         break;
       }
       case 'farm': {
-        box(1.9, 0.1, 1.9, 0x6e5a40, 0, 0.05);
-        for (let r = 0; r < 3; r++) box(1.7, 0.16, 0.34, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.14, -0.6 + r * 0.6);
-        if (tier >= 2) { box(0.6, 0.55, 0.6, 0xd8d4c6, 0.65, 0.32, 0.65); cone(0.55, 0.45, 0xa8352e, 0.65, 0.82, 0.65); }
+        // Hydroponic beds under a white frame, glowing faintly at the rims.
+        box(1.9, 0.14, 1.9, HULL2, 0, 0.07);
+        for (let r = 0; r < 3; r++) {
+          box(1.7, 0.18, 0.36, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.2, -0.6 + r * 0.6);
+          lit(1.72, 0.03, 0.38, GLOW, 0, 0.31, -0.6 + r * 0.6, 0.25);
+        }
+        if (tier >= 2) {
+          cyl(0.28, 0.32, 0.6, HULL, 0.72, 0.44, 0.72, 8);  // nutrient tank
+          lit(0.3, 0.05, 0.3, TRIM, 0.72, 0.77, 0.72, 0.5);
+        }
         break;
       }
       case 'mill': {
-        cyl(0.5, 0.7, tier >= 2 ? 2.8 : 2.2, 0xd4cfc0, 0, tier >= 2 ? 1.4 : 1.1, 0, 8);
-        cone(0.66, 0.7, 0xa8352e, 0, tier >= 2 ? 3.15 : 2.5, 0, 8);
+        // Wind turbine: slender pylon, nacelle, three long blades.
+        const h = tier >= 2 ? 3.1 : 2.5;
+        box(1.0, 0.16, 1.0, PAD, 0, 0.08);
+        cyl(0.13, 0.24, h, HULL, 0, h / 2, 0, 8);
+        box(0.42, 0.3, 0.7, HULL2, 0, h + 0.1, 0.05);
+        lit(0.1, 0.1, 0.1, TRIM, 0, h + 0.1, 0.42, 0.8);
         const rotor = new THREE.Group();
-        rotor.position.set(0, tier >= 2 ? 2.7 : 2.1, 0.58);
-        for (let i = 0; i < 4; i++) {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0xd9d2ba));
-          blade.position.y = 0.8;
+        rotor.position.set(0, h + 0.1, 0.42);
+        for (let i = 0; i < 3; i++) {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.7, 0.03), M(0xe9e3d4));
+          blade.position.y = 0.88;
           blade.castShadow = true;
           const pivot = new THREE.Group();
-          pivot.rotation.z = (i * Math.PI) / 2;
+          pivot.rotation.z = (i * Math.PI * 2) / 3;
           pivot.add(blade);
           rotor.add(pivot);
         }
@@ -2719,34 +2770,38 @@ class App {
         break;
       }
       case 'mine': {
-        box(1.9, 0.22, 1.9, 0x8a9094, 0, 0.11);
-        box(0.8, 0.8, 0.8, 0x565c60, 0, 0.62);
-        box(0.12, 1.8, 0.12, 0x4a4440, -0.45, 1.1, -0.45);
-        box(0.12, 1.8, 0.12, 0x4a4440, 0.45, 1.1, -0.45);
-        box(1.2, 0.14, 0.5, 0x4a4440, 0, 2.0, -0.45);
+        box(1.9, 0.22, 1.9, PAD, 0, 0.11);
+        box(0.8, 0.8, 0.8, HULL2, 0, 0.62);
+        box(0.12, 1.8, 0.12, HULL, -0.45, 1.1, -0.45);
+        box(0.12, 1.8, 0.12, HULL, 0.45, 1.1, -0.45);
+        box(1.2, 0.14, 0.5, HULL2, 0, 2.0, -0.45);
         const wheel = cyl(0.34, 0.34, 0.16, 0xf3c53d, 0, 2.0, -0.45, 12);
         wheel.rotation.x = Math.PI / 2;
         g.userData.rotor = wheel;
-        if (tier >= 2) box(1.0, 0.5, 0.7, 0x6e7478, 0.55, 0.25, 0.6);
+        if (tier >= 2) box(1.0, 0.5, 0.7, HULL, 0.55, 0.25, 0.6);
         break;
       }
       case 'tower': {
-        // The medieval silhouette read: battered plinth, tapering shaft,
-        // corbelled crown wider than the shaft, merlons around the walk.
+        // Defense pylon: the tower silhouette kept (base plinth, tapering
+        // shaft, flared gun deck wider than the shaft) but drawn in hull
+        // plate with a sensor band and deck railing — not castle stone.
         const h = 2.3 + tier * 0.5;
-        const stone = tier >= 3 ? 0xd8d1bc : 0xccc4ae;
-        box(1.75, 0.42, 1.75, 0xa39a84, 0, 0.21);
-        cyl(0.6, 0.8, h - 0.3, stone, 0, 0.3 + (h - 0.3) / 2, 0, 8);
-        cyl(0.92, 0.68, 0.46, 0xc2b9a2, 0, h + 0.08, 0, 8);
-        cyl(0.98, 0.98, 0.12, 0xa39a84, 0, h + 0.37, 0, 8);
-        for (let i = 0; i < 6; i++) {
+        const hull = tier >= 3 ? 0xece6d6 : HULL;
+        box(1.75, 0.36, 1.75, PAD, 0, 0.18);
+        cyl(0.58, 0.78, h - 0.3, hull, 0, 0.3 + (h - 0.3) / 2, 0, 8);
+        const band = cyl(0.63, 0.72, 0.16, GLOW, 0, h * 0.45, 0, 8);
+        band.material.emissive.setHex(GLOW);
+        band.material.emissiveIntensity = 0.5;
+        cyl(0.92, 0.66, 0.42, HULL2, 0, h + 0.06, 0, 8);   // flared gun deck
+        cyl(0.98, 0.98, 0.1, PAD, 0, h + 0.32, 0, 8);      // deck plate
+        for (let i = 0; i < 6; i++) {                       // deck railing
           const a = (i / 6) * Math.PI * 2 + 0.26;
-          const merlon = box(0.3, 0.28, 0.18, stone, Math.cos(a) * 0.84, h + 0.57, Math.sin(a) * 0.84);
-          merlon.rotation.y = -a + Math.PI / 2;
+          box(0.06, 0.3, 0.06, 0x4a5058, Math.cos(a) * 0.86, h + 0.5, Math.sin(a) * 0.86);
         }
-        windows(2, h * 0.55, 0.68);
+        lit(0.14, 0.14, 0.14, TRIM, 0, h + 0.32, 0.86, 0.9); // muzzle marker
+        windows(2, h * 0.62, 0.68);
         const head = new THREE.Group();
-        head.position.y = h + 0.55;
+        head.position.y = h + 0.52;
         if (b.branch === 'flame') {
           const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
           head.add(bowl);
@@ -2784,7 +2839,7 @@ class App {
           e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
           s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
         };
-        // Barrier ladder: razorwire fence → stone curtain → shock/bastion.
+        // Barrier ladder: razorwire fence → hull-plate curtain → shock/bastion.
         const shock = b.branch === 'shock';
         const bastion = b.branch === 'bastion';
         const capCol = 0x8a8069;
@@ -2805,41 +2860,34 @@ class App {
           break;
         }
         const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
-        const stone = bastion ? 0xd8d1bc : tier === 1 ? 0xa89f8a : 0xc6bea8;
+        const hull = bastion ? 0xece6d6 : tier === 1 ? 0xb9b19c : HULL;
         if (b.gate) {
-          // Gatehouse: two red-capped towers flanking the passage, an arch
-          // overhead — the entrance should be the prettiest thing on the wall.
+          // Gate: two hull pylons flanking the passage, amber caps and a lit
+          // lintel — the entrance is the brightest thing on the perimeter.
           const towH = H + 0.85;
           for (const side of [-1, 1]) {
             const px = alongX ? 0 : side * 0.4, pz = alongX ? side * 0.4 : 0;
-            box(alongX ? 0.9 : 0.36, towH, alongX ? 0.36 : 0.9, stone, px, towH / 2, pz);
+            box(alongX ? 0.9 : 0.36, towH, alongX ? 0.36 : 0.9, hull, px, towH / 2, pz);
             box(alongX ? 1.0 : 0.46, 0.16, alongX ? 0.46 : 1.0, capCol, px, towH + 0.08, pz);
-            cone(alongX ? 0.52 : 0.34, 0.6, 0xb03a30, px, towH + 0.45, pz);
+            lit(alongX ? 0.5 : 0.24, 0.14, alongX ? 0.24 : 0.5, TRIM, px, towH + 0.24, pz, 0.7);
           }
-          box(alongX ? 0.9 : 0.3, 0.24, alongX ? 0.3 : 0.9, stone, 0, H + 0.4); // lintel
+          lit(alongX ? 0.9 : 0.16, 0.14, alongX ? 0.16 : 0.9, TRIM, 0, H + 0.42, 0, 0.55); // holo lintel
           const ban = assetClone('banner', 0.7);
           if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
           break;
         }
         // Center pier, slightly proud of the curtains.
-        box(0.56, H + 0.14, 0.56, stone, 0, (H + 0.14) / 2);
+        box(0.56, H + 0.14, 0.56, hull, 0, (H + 0.14) / 2);
         box(0.66, 0.15, 0.66, capCol, 0, H + 0.21);
-        box(0.3, 0.22, 0.3, stone, 0, H + 0.38); // pier merlon
+        lit(0.16, 0.1, 0.16, TRIM, 0, H + 0.34, 0, 0.8); // perimeter marker light
         // Curtain panels out to each neighboring wall tile's edge.
         const panels = [
           nb.e && [0.5, 0.36, 0.25, 0], nb.w && [0.5, 0.36, -0.25, 0],
           nb.s && [0.36, 0.5, 0, 0.25], nb.n && [0.36, 0.5, 0, -0.25],
         ].filter(Boolean);
         for (const [w, dep, px, pz] of panels) {
-          box(w, H, dep, stone, px, H / 2, pz);
+          box(w, H, dep, hull, px, H / 2, pz);
           box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
-          // Crenellation: one merlon per panel, offset along the wall's run so
-          // adjoining tiles read as a continuous toothed parapet.
-          if (!shock && tier >= 2) {
-            const mx = w === 0.5 ? px + (px >= 0 ? -0.06 : 0.06) : px;
-            const mz = dep === 0.5 ? pz + (pz >= 0 ? -0.06 : 0.06) : pz;
-            box(w === 0.5 ? 0.24 : 0.2, 0.2, dep === 0.5 ? 0.24 : 0.2, stone, mx, H + 0.24, mz);
-          }
           // Shock fence: a live plasma conduit runs the parapet — glows at night.
           if (shock) {
             const strip = box(w === 0.5 ? 0.52 : 0.1, 0.07, dep === 0.5 ? 0.52 : 0.1, 0x4dd8c8, px, H + 0.19, pz);
@@ -2852,21 +2900,21 @@ class App {
           core.material.emissive.setHex(0x4dd8c8);
           core.material.emissiveIntensity = 1.0;
         }
-        if (!panels.length) box(0.9, H, 0.9, stone, 0, H / 2); // stranded stub (shouldn't happen)
+        if (!panels.length) box(0.9, H, 0.9, hull, 0, H / 2); // stranded stub (shouldn't happen)
         break;
       }
       case 'outpost': {
-        // A staked claim: palisade stubs, a muster tent and a tall banner you
-        // can pick out from across the map.
-        box(1.9, 0.28, 1.9, 0x6b6152, 0, 0.14);
-        cone(0.95, 1.05, 0xcfc7b4, -0.35, 0.55, -0.25);
-        box(0.9, 0.6, 0.7, 0x5c6470, 0.55, 0.3, 0.5);
-        box(0.08, 3.4, 0.08, 0x2f2a24, 0.85, 1.7, -0.7);
-        box(0.7, 0.45, 0.03, 0x59b06e, 0.52, 3.15, -0.7);
+        // A staked claim: drop-pad, field dome, and a tall relay mast you can
+        // pick out from across the map.
+        box(1.9, 0.24, 1.9, PAD, 0, 0.12);
+        cone(0.95, 1.05, HULL, -0.35, 0.55, -0.25, 8);
+        box(0.9, 0.6, 0.7, HULL2, 0.55, 0.3, 0.5);
+        box(0.08, 3.4, 0.08, 0x4a5058, 0.85, 1.7, -0.7);
+        lit(0.6, 0.4, 0.03, 0x59b06e, 0.5, 3.1, -0.7, 0.5);
         if (tier >= 2) {
-          box(0.75, 0.85, 0.75, 0x4d5560, -0.7, 0.42, 0.75);
-          box(0.08, 3.4, 0.08, 0x2f2a24, -0.85, 1.7, -0.7);
-          box(0.7, 0.45, 0.03, 0x59b06e, -0.52, 3.15, -0.7);
+          box(0.75, 0.85, 0.75, HULL2, -0.7, 0.42, 0.75);
+          box(0.08, 3.4, 0.08, 0x4a5058, -0.85, 1.7, -0.7);
+          lit(0.6, 0.4, 0.03, 0x59b06e, -0.5, 3.1, -0.7, 0.5);
           const head = new THREE.Group();
           head.position.set(0.25, 1.65, -0.15);
           const gun = new THREE.Mesh(new THREE.BoxGeometry(tier >= 3 ? 0.34 : 0.24, 0.2, tier >= 3 ? 1.25 : 0.78), M(tier >= 3 ? 0x4a4440 : 0x2f3a44));
@@ -2886,9 +2934,10 @@ class App {
         break;
       }
       case 'workshop': {
-        box(1.9, 0.25, 1.9, 0x46515a, 0, 0.12);
-        box(1.5, 1.0, 1.25, 0x65717a, 0, 0.62);
-        box(1.7, 0.16, 1.45, 0x2f3940, 0, 1.15);
+        box(1.9, 0.25, 1.9, PAD, 0, 0.12);
+        box(1.5, 1.0, 1.25, HULL, 0, 0.62);
+        box(1.7, 0.16, 1.45, HULL2, 0, 1.15);
+        lit(1.52, 0.07, 1.27, GLOW, 0, 1.06, 0, 0.3);
         const rotor = new THREE.Group();
         rotor.position.set(0, 1.55, 0);
         for (let i = 0; i < 3 + tier; i++) {
@@ -2902,10 +2951,10 @@ class App {
         break;
       }
       case 'hero_forge': {
-        cyl(1.0, 1.25, 0.45, 0x303944, 0, 0.22, 0, 10);
+        cyl(1.0, 1.25, 0.45, PAD, 0, 0.22, 0, 10);
         for (let i = 0; i < 4; i++) {
           const a = i * Math.PI / 2;
-          box(0.22, 1.8 + tier * 0.25, 0.22, 0x596775, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
+          box(0.22, 1.8 + tier * 0.25, 0.22, HULL2, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
         }
         const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.48 + tier * 0.1, 0), M(tier >= 3 ? 0xffd75e : 0x72cfff, 1.0));
         core.position.y = 1.65 + tier * 0.2;
@@ -2921,12 +2970,17 @@ class App {
       case 'camp_militia':
       case 'camp_ranger':
       case 'camp_sniper': {
-        const col = b.kind === 'camp_militia' ? 0x3a566e : b.kind === 'camp_ranger' ? 0x4a6e3a : 0x5c4a72;
-        cone(1.0, 1.0, 0xd8d4c6, -0.4, 0.5, -0.3);
-        box(1.1, 0.7, 0.8, 0x6e7478, 0.5, 0.35, 0.5);
-        box(0.06, 1.7, 0.06, 0x333333, 0.9, 1.1, -0.6);
-        box(0.55, 0.35, 0.02, col, 0.62, 1.7, -0.6);
-        if (tier >= 2) { box(0.8, 0.5, 0.6, 0x3d4246, -0.6, 0.25, 0.7); }
+        // Muster bay: a quonset prefab with a doctrine-colored light stripe,
+        // so the three camp kinds read apart at a glance without clutter.
+        const col = b.kind === 'camp_militia' ? 0x5f9ccf : b.kind === 'camp_ranger' ? 0x74c96a : 0xb98fe0;
+        const hut = cyl(0.62, 0.62, 1.5, HULL, -0.25, 0.5, 0.05, 10);
+        hut.rotation.z = Math.PI / 2;
+        box(0.06, 1.24, 1.24, HULL2, 0.52, 0.5, 0.05); // end wall
+        lit(1.52, 0.06, 0.1, col, -0.25, 0.98, 0.05, 0.7); // doctrine stripe
+        box(1.5, 0.1, 1.9, PAD, -0.2, 0.05, 0);        // muster pad
+        box(0.06, 1.7, 0.06, 0x4a5058, 0.85, 0.9, -0.7);
+        lit(0.5, 0.3, 0.03, col, 0.58, 1.55, -0.7, 0.55); // holo banner
+        if (tier >= 2) box(0.7, 0.5, 0.6, HULL2, -0.6, 0.3, 0.75);
         break;
       }
     }
