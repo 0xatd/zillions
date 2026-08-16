@@ -252,6 +252,11 @@ Build mode and Fight mode. Q always casts intentionally. You steer.
 | Tiger Reyes | Melee bruiser — highest single-target damage and top speed | Hunter's Instinct — nearby troops deal bonus damage | Pack Tactics — temporary reduced-stat copies of himself fight at his side |
 | Aaron Whitlock | Long-range support caster — low personal damage, high utility | Warding Field — heals and hastens nearby allies at once | Astral Sentinel — summons a temporary ally; recasting replaces it |
 
+This table is the canonical public roster. `src/config.js` is the code source
+of truth. Scott, Alexander, and Danny have dedicated portrait and voice assets.
+Turtle, John, Tiger, and Aaron currently use emoji portrait fallbacks and the
+shared procedural sound effects.
+
 Heroes earn XP from kills within 14 tiles and can reach level 100. Levels 2–10
 grant nine upgrade points. The player spends each point on Aura, Passive I,
 Passive II, or Ult Damage. Later levels add tapered stat growth without adding

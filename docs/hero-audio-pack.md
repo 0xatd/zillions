@@ -2,6 +2,9 @@
 
 These are saved and partially wired runtime assets for Zillions. They are short
 Warcraft III / Dota-style click barks and first-pass generated audio samples.
+This pack covers Scott English, Alexander Thomas, and Danny Donovan only.
+Turtle Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock currently use the
+shared procedural sound effects and do not have voice barks.
 
 The game still uses procedural WebAudio for core SFX and music fallback. Hero
 click barks are wired through `src/audio.js` and load from
@@ -12,7 +15,7 @@ click barks are wired through `src/audio.js` and load from
 The full generated click-pack is in `assets/audio/click-pack/`.
 
 - `assets/audio/click-pack/index.json` lists every line and file.
-- Each hero has 20 individual MP3 barks.
+- Each covered hero has 20 individual MP3 barks.
 - Categories are `selection`, `repeated`, `move`, and `attack`.
 - File names use the format `hero_category_number_slug.mp3`.
 

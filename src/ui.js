@@ -1,7 +1,7 @@
-// DOM HUD & menus. Menu flow: WC3-style main menu (buttons over the live 3D
-// battlefield) → SC2-style setup screen (level / hero / difficulty / START).
-// In-game: Thronefall HUD — gold, current siege state, and one big contextual
-// action button.
+// DOM HUD and menus. The outer shell is multiplayer-first: Play Online leads
+// to the lobby, while Play Solo contains Story Campaign and Survival. Both
+// paths reuse the same battle setup screen. In-game, the compact action bar
+// owns hero state, abilities, building actions, and army stance.
 const PORTRAITS = {
   alexander: 'assets/heroes/portraits/alexander_256.webp',
   scott: 'assets/heroes/portraits/scott_256.webp',
