@@ -18,8 +18,17 @@ Use continuous siege on a lane graph as the gameplay base:
 - Multiple city sites, each with a different character, named and explained to
   the player before they commit.
 - Found the city at a flagged site.
-- Closed ramparts with gate chokepoints. Each level raises a different city
-  plan — silhouette, gate count, street pattern — and no two levels share one.
+- A closed defensive boundary with gate chokepoints. Each level raises a
+  different city plan — silhouette, gate count, street pattern — and no two
+  levels share one.
+- The ground is part of the fortification. Crag, water and deep wood along the
+  wall line are wall; the player only builds and pays for the gaps. Terrain
+  decides how many entrances a site has, and the site survey tells the player
+  how much of the wall line that ground closes before they commit.
+- Every entrance is a ward: towers covering the gate and a muster camp inside
+  it, so defending a gate and pushing a lane out of it start in the same place.
+- The land's own chokepoints are buildable: a cheap fence across a natural gap,
+  with a tower behind it, out on the approaches.
 - Pre-planned house, farm, mill, mine, camp, tower, and wall plots.
 - Hold the interact key to stream coins into a plot.
 - Economy must be level-balanced against gold the player can actually collect.

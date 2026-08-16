@@ -5,7 +5,7 @@ import {
   ITEMS, BOSS_DROPS, UNITS,
 } from './config.js';
 import { GameMap } from './map.js';
-import { CITY_PLANS } from './plots.js';
+import { surveySite } from './plots.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
@@ -320,10 +320,18 @@ class App {
       if (this._surveyed.has(i)) return;
       if ((h.x - s.x) ** 2 + (h.z - s.z) ** 2 > 10 * 10) return;
       this._surveyed.add(i);
-      const plan = CITY_PLANS[(this.map.theme && this.map.theme.city)] || null;
-      const city = plan ? `A ${plan.label} would stand here — ${plan.blurb} · ` : '';
-      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${s.hint || ''}`,
-        `${city}SPACE to found the city here`, 5200);
+      // Survey the ground the way a real siege engineer would: how much of the
+      // wall line does the land itself already close?
+      const survey = surveySite(this.map, s, { levelId: this.game.levelId, siteIdx: i });
+      const pct = Math.round(survey.natural * 100);
+      const wall = pct >= 45 ? `The land itself closes ${pct}% of the wall line — you build the gaps.`
+        : pct >= 18 ? `Crag and wood close ${pct}% of the wall line; the rest you build.`
+          : 'Open on nearly every side: you will be building the whole wall.';
+      // The survey is the authoritative claim about this ground, so drop the
+      // generic "open on every side" flavour when the wall line says otherwise.
+      const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
+      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
+        `A ${survey.plan.label} would stand here · SPACE to found the city`, 5600);
     });
   }
 
@@ -402,7 +410,8 @@ class App {
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
       [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
-      [24, '⚔️ Camps muster a squad every few seconds, forever. Press 3 and they push out along the lanes on their own.'],
+      [24, '⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press 3 and those squads push out along the lanes on their own.'],
+      [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
       [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
@@ -1661,7 +1670,8 @@ class App {
   _makePlotGroup(plot) {
     const g = new THREE.Group();
     const kind = PLOT_KINDS[plot.kind];
-    const [mx, mz] = plot.kind === 'wall' ? [plot.gate[0] + 0.5, plot.gate[1] + 0.5] : [plot.cx, plot.cz];
+    const anchor = plot.anchor || plot.gate;
+    const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
     const beacon = this._makeBeacon(mx, mz);
     g.add(beacon);
     g.userData.beacon = beacon;

@@ -45,6 +45,7 @@ function flood(map, sx, sz) {
 }
 
 const signatures = new Map();
+const siteStats = [];
 
 for (const level of LEVELS) {
   const label = `${level.name} (level ${level.id})`;
@@ -106,28 +107,29 @@ for (const level of LEVELS) {
     assert.ok(hq, `${label} site ${i} has no Keep`);
     assert.equal(hq.plan.key, planKey, `${label} site ${i} did not build its level's city plan`);
     assert.ok(plots.length >= 44, `${label} site ${i} laid out only ${plots.length} plots`);
-    assert.equal(walls.length, hq.plan.gates.length,
-      `${label} site ${i} has ${walls.length} wall segments for ${hq.plan.gates.length} gates`);
-    assert.equal(plots.filter((p) => p.kind.startsWith('camp_')).length, 3,
-      `${label} site ${i} is missing a muster camp`);
+    assert.ok(hq.plan.entrances >= 2,
+      `${label} site ${i} has ${hq.plan.entrances} entrances — a city needs somewhere to sortie from`);
+    assert.equal(hq.plan.entrances, hq.plan.gates.length,
+      `${label} site ${i} reports ${hq.plan.gates.length} gates for ${hq.plan.entrances} entrances`);
+    for (const kind of ['camp_militia', 'camp_ranger', 'camp_sniper']) {
+      assert.ok(plots.some((p) => p.kind === kind),
+        `${label} site ${i} has no ${kind} — all three doctrines must be buildable`);
+    }
     assert.ok(plots.filter((p) => p.kind === 'tower').length >= 6,
       `${label} site ${i} has too few tower plots to defend a wall`);
+    assert.equal(!!hq.plan.inner, !!CITY_PLANS[planKey].inner,
+      `${label} site ${i} did not raise the inner ward its plan calls for`);
 
-    // The rampart must be CLOSED: every wall tile 4-connected to another, and
-    // the ring has to actually separate inside from outside.
-    const wallSet = new Set();
-    for (const w of walls) for (const [x, z] of w.tiles) wallSet.add(z * scratch.size + x);
-    for (const w of walls) {
-      for (const [x, z] of w.tiles) {
-        const n = [[1, 0], [-1, 0], [0, 1], [0, -1]]
-          .filter(([dx, dz]) => wallSet.has((z + dz) * scratch.size + (x + dx))).length;
-        assert.ok(n >= 2, `${label} site ${i} rampart breaks at ${x},${z}`);
-      }
-    }
-    // Walk out from the Keep with the rampart solid. Nothing may reach open
-    // ground: if anything does, the ring has a hole in it and the gates are
-    // decoration.
+    // The boundary must have NO holes — but the wall is only half of it now.
+    // Crag, water and deep wood are the other half, so the test is: walk out
+    // from the Keep with built wall AND impassable ground both solid, and see
+    // whether anything reaches open country.
     const S = scratch.size;
+    const wallSet = new Set();
+    for (const w of walls) {
+      if (w.role === 'outer') continue;   // outer works are optional, not the boundary
+      for (const [x, z] of w.tiles) wallSet.add(z * S + x);
+    }
     const seen = new Uint8Array(S * S);
     const start = Math.round(hq.cz) * S + Math.round(hq.cx);
     const stack = [start];
@@ -141,22 +143,44 @@ for (const level of LEVELS) {
         const nx = x + dx, nz = z + dz;
         const ni = nz * S + nx;
         if (nx < 0 || nz < 0 || nx >= S || nz >= S || seen[ni]) continue;
-        if (wallSet.has(ni)) continue;
+        if (wallSet.has(ni) || !scratch.isWalkable(nx, nz)) continue;
         seen[ni] = 1;
         stack.push(ni);
       }
     }
-    assert.ok(!escaped, `${label} site ${i}: the rampart has a hole — the gates are decoration`);
+    assert.ok(!escaped, `${label} site ${i}: the boundary has a hole — the gates are decoration`);
 
-    // Every gate needs towers covering it, or the chokepoint is decoration.
+    // Every entrance is a ward: towers covering the gate, and a camp inside it
+    // so the squads that hold this gate — and push out of it — start here.
     for (const w of walls) {
-      const near = plots.filter((p) => p.kind === 'tower'
+      if (!w.gate || w.role === 'outer') continue;
+      const towers = plots.filter((p) => p.kind === 'tower'
         && Math.hypot(p.cx - w.gate[0], p.cz - w.gate[1]) < 9).length;
-      assert.ok(near >= 1, `${label} site ${i}: ${w.name} gate has no tower covering it`);
+      assert.ok(towers >= 1, `${label} site ${i}: ${w.name} has no tower covering it`);
+      if (w.role === 'inner') continue;
+      const camps = plots.filter((p) => p.kind.startsWith('camp_')
+        && Math.hypot(p.cx - w.gate[0], p.cz - w.gate[1]) < 14).length;
+      assert.ok(camps >= 1, `${label} site ${i}: ${w.name} has no muster camp to hold or push from`);
     }
-    perSite.push({ plots: plots.length, walls: walls.length, towers: plots.filter((p) => p.kind === 'tower').length });
+
+    // Outer works, where the land offered a gap: a fence plus a tower behind it.
+    for (const w of walls.filter((p) => p.role === 'outer')) {
+      assert.ok(w.tiles.length >= 2, `${label} site ${i}: ${w.name} spans nothing`);
+      const towers = plots.filter((p) => p.kind === 'tower'
+        && Math.hypot(p.cx - w.cx, p.cz - w.cz) < 8).length;
+      assert.ok(towers >= 1, `${label} site ${i}: ${w.name} has no tower behind it`);
+    }
+    siteStats.push({ natural: (hq.plan.naturalShare * 100) | 0, outer: hq.plan.outerWorks });
+    perSite.push({
+      plots: plots.length, entrances: hq.plan.entrances,
+      natural: (hq.plan.naturalShare * 100) | 0,
+      inner: hq.plan.inner ? 1 : 0,
+      outer: hq.plan.outerWorks,
+      towers: plots.filter((p) => p.kind === 'tower').length,
+    });
   });
 
+  let sortie = null;
   // --- and it has to actually run ------------------------------------------
   // The balance harness plays on flat test ground. This plays the real map:
   // found the city, run two minutes of siege, and check the systems that
@@ -166,10 +190,19 @@ for (const level of LEVELS) {
     const live = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
     const game = new Game(live, 'normal', 'alexander', null, level.id, 'campaign');
     game.foundCity(0, 0);
+    const hqReach = game.plots.find((p) => p.kind === 'hq').plan.reach;
     assert.ok(game.laneGraph && game.laneGraph.size > 0, `${label} built no lane graph on its real terrain`);
     const nodes = game.activeNodes();
     assert.ok(nodes.length >= 6, `${label} left only ${nodes.length} reachable lane nodes`);
     assert.ok(game.nests.every((n) => n.alive), `${label} shipped a hive that can never be razed`);
+
+    // Man the wards and order the push. This is the other half of the promise:
+    // a city whose gates the terrain closed is a city whose army cannot get
+    // out, and a base that cannot sortie cannot take a lane.
+    for (const plot of game.plots) {
+      if (plot.kind.startsWith('camp_')) game._construct(plot, true);
+    }
+    game.stance = 'attack';
 
     for (let i = 0; i < 120 * 30; i++) game.update(1 / 30);
     assert.ok(!game.over, `${label} ended on its own inside two minutes`);
@@ -177,6 +210,11 @@ for (const level of LEVELS) {
     assert.ok(game.threat > 0, `${label}: threat never rose`);
     const nearCity = game.zombies.filter((z) => Math.hypot(z.x - game.hq.cx, z.z - game.hq.cz) < 46).length;
     assert.ok(nearCity > 0, `${label}: no attacker can find a way to the city`);
+
+    assert.ok(game.units.length > 0, `${label}: the wards mustered nobody`);
+    const out = game.units.filter((u) => Math.hypot(u.x - game.hq.cx, u.z - game.hq.cz) > hqReach + 6).length;
+    assert.ok(out >= 3, `${label}: only ${out} squads got out of the city — the gates do not work`);
+    sortie = { units: game.units.length, out, zombies: game.zombies.length, threat: +game.threat.toFixed(1) };
   }
 
   // --- no two planets may read the same ------------------------------------
@@ -194,9 +232,22 @@ for (const level of LEVELS) {
     console.log(`  sites   ${map.sites.map((s) => `${s.name} [${s.kind}]`).join(' | ')}`);
     console.log(`  hives   ${map.nestSpots.map(([x, z]) => `${x},${z}`).join(' ')}`);
     console.log(`  nodes   ${map.nodeSpots.length}: ${[...kinds].join(', ')}`);
-    console.log(`  city    ${perSite.map((p) => `${p.plots} plots/${p.walls} walls/${p.towers} towers`).join(' | ')}`);
+    console.log(`  city    ${perSite.map((p) => `${p.plots}plots ${p.entrances}gates ${p.natural}% natural ${p.outer}outer${p.inner ? ' +ward' : ''}`).join(' | ')}`);
+    console.log(`  siege   ${sortie.units} troops (${sortie.out} pushed out), ${sortie.zombies} dead afoot, threat ${sortie.threat} after 2min`);
+    console.log(`  chokes  ${map.chokeSpots.length} natural gaps: ${map.chokeSpots.slice(0, 5).map((c) => `${c.name} (${c.width} wide)`).join(', ')}`);
   }
 }
+
+// The whole point of anchoring on terrain is that the ground changes the base.
+// If almost no site is using its landform as wall, the feature has regressed to
+// "a ring, everywhere, again".
+const anchored = siteStats.filter((s) => s.natural >= 10).length;
+assert.ok(anchored >= siteStats.length * 0.4,
+  `only ${anchored}/${siteStats.length} city sites let the terrain be part of the wall`);
+assert.ok(siteStats.some((s) => s.natural >= 35),
+  'no site anywhere in the campaign is genuinely terrain-anchored');
+assert.ok(siteStats.every((s) => s.outer >= 1),
+  'a site was offered no outer chokepoint works at all');
 
 // Every archetype and every city plan has to be in the campaign — an unused
 // one is an untested one.

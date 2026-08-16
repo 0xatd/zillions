@@ -105,7 +105,14 @@ function assertCampRoadAccess(level) {
   const map = fakeMap(level);
   const plots = generatePlots(map, map.sites[0]);
   const camps = plots.filter((p) => p.kind.startsWith('camp_'));
-  assert.equal(camps.length, 3, `${level.name} must generate all three city camps`);
+  // Every entrance is a ward with its own barracks, so the count follows the
+  // number of gates the terrain left open. What must always hold is that all
+  // three doctrines are buildable and every camp sits on a road.
+  for (const kind of ['camp_militia', 'camp_ranger', 'camp_sniper']) {
+    assert.ok(camps.some((c) => c.kind === kind), `${level.name} cannot build a ${kind}`);
+  }
+  assert.ok(camps.length >= 3 && camps.length <= 6,
+    `${level.name} generated ${camps.length} city camps`);
 
   for (const camp of camps) {
     let hasPathEdge = false;

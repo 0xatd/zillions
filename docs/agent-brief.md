@@ -72,6 +72,22 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   4-connected. Gate-flanking towers are placed from the gate tile
   (`gateFlank`), never by angle offset — an angle offset lands outside the wall
   on a star or a throat.
+- Founding levels the INTERIOR only (`d < radius - 2.2`). The rampart band is
+  left as the land made it, and ring tiles that are impassable become free,
+  indestructible wall. A wall plot's `tiles` are only the open tiles of its
+  side, so barriers (which cost per tile) get cheaper on good ground. A plot
+  may now have `gate: null` — use `plot.anchor` for build targeting and UI, and
+  guard `plot.gate` before dereferencing it.
+- Every gate gets two towers and a ward camp in `generatePlots`, not in the
+  per-plan layouts; layouts only place districts and their signature towers.
+  `map-check` asserts the ward kit, and asserts squads actually get OUT of the
+  city under the attack stance — friendly units only pass buildings in
+  `gateIds`, so a city whose gates the terrain closed would trap its own army.
+- `TerrainField._findChokepoints` finds gaps 2-9 tiles wide pinched between
+  impassable masses; `pickOuterWorks` turns the best three near the city into
+  fence + watchtower plots. Outer works always carry a gate.
+- The historical reasoning behind all of the above is in
+  `docs/fortress-inspiration.md`. Read it before redesigning any of it.
 - The check plays two real minutes of siege on every level's real terrain
   (lane graph, hive musters, the horde's walk to the walls). If you change map
   generation, run `node scripts/map-check.mjs --report` and read the numbers.

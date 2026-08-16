@@ -6,11 +6,22 @@
 // to build on, and the number of ways in all change with the plan, so no two
 // campaign levels feel like the same base with a different colour.
 //
+// And the plan is only half of it: the GROUND finishes the design. Where the
+// rampart line crosses crag, deep water or thick wood, nothing is built there —
+// the land is already a wall. Walls are raised across the gaps between those
+// anchors, and only the gaps can hold a gate. That is how real fortification
+// has always worked: a promontory fort walls the neck and lets the cliffs do
+// the rest, Dún Aonghasa runs its wall cliff to cliff, Great Zimbabwe spans
+// between granite boulders, and field armies anchored their lines on a marsh
+// or a ridge and built across what was left. See docs/fortress-inspiration.md.
+//
 // What every plan guarantees, because the game depends on it:
 //   - a Keep at the centre, on levelled ground
-//   - a CLOSED rampart whose only openings are its gates
-//   - towers covering every gate
-//   - all three muster camps, each on a road
+//   - a boundary with NO holes: every tile of it is wall, crag, water or wood
+//   - at least two entrances, each a ward — flanking towers and its own
+//     muster camp, so the troops that hold a gate and the troops that push out
+//     of it start at the gate
+//   - all three camp kinds somewhere in the city
 //   - enough plots for a full build-out
 //
 // Deterministic from the map, the site and the level alone, so every peer in a
@@ -19,7 +30,9 @@ import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
 
 const TAU = Math.PI * 2;
-const CAMP_KINDS = ['camp_militia', 'camp_ranger', 'camp_sniper'];
+// Ward camps are handed out cheapest-first, so a two-gate city can still afford
+// to man both entrances early.
+const CAMP_KINDS = ['camp_ranger', 'camp_militia', 'camp_sniper'];
 
 // A square silhouette, clamped so the corners cannot run away to infinity.
 const square = (t, R) => Math.min(R * 1.33, R / Math.max(Math.abs(Math.cos(t)), Math.abs(Math.sin(t))));
@@ -29,7 +42,9 @@ const square = (t, R) => Math.min(R * 1.33, R / Math.max(Math.abs(Math.cos(t)), 
 // ---------------------------------------------------------------------------
 // `radius(t, R)` is the rampart silhouette in the city's own frame, where t=0
 // points at the enemy. `gates` are angles in that same frame, so a plan always
-// turns its face toward the hives.
+// turns its face toward the hives. `inner` adds a second, concentric ward
+// around the Keep — the last chokepoint, the way Krak des Chevaliers and a
+// Japanese honmaru put another wall between the enemy and the lord.
 export const CITY_PLANS = {
   // Four gates, one ring. The readable one — open on every side, defended
   // everywhere or nowhere. The teaching base.
@@ -43,14 +58,15 @@ export const CITY_PLANS = {
     layout: layoutBastion,
   },
   // A square fort with bastion corners and a solid back wall: three ways in,
-  // gridded streets, and the whole rear of the town safe to build in.
+  // gridded streets, and an inner bailey around the Keep.
   fort: {
     key: 'fort',
     label: 'square fort',
-    blurb: 'Bastioned corners, a solid back wall and three gates. Build behind the line.',
+    blurb: 'Bastioned corners, gridded streets and an inner bailey. Three ways in.',
     scale: 0.95,
     gates: [0, Math.PI / 2, -Math.PI / 2],
     radius: square,
+    inner: { radius: 7.8 },
     layout: layoutFort,
   },
   // Five spurs, each carrying a tower, gates sunk into the valleys between
@@ -80,18 +96,19 @@ export const CITY_PLANS = {
     },
     layout: layoutCrescent,
   },
-  // A tight body with a long walled throat jutting at the enemy. Everything
-  // that wants in walks the throat, and the throat is lined with towers.
+  // A tight body with a long walled throat jutting at the enemy, and an inner
+  // ward behind it. Everything that wants in walks the throat.
   keyhole: {
     key: 'keyhole',
     label: 'throat keep',
-    blurb: 'A walled throat and a postern. They come up the corridor, or not at all.',
+    blurb: 'A walled throat, a postern, and an inner ward. They come up the corridor or not at all.',
     scale: 0.95,
     gates: [0, Math.PI],
     radius: (t, R) => {
       const a = Math.atan2(Math.sin(t), Math.cos(t));
       return R * (0.74 + 0.68 * Math.exp(-((a / 0.22) ** 2)));
     },
+    inner: { radius: 7.4 },
     layout: layoutKeyhole,
   },
 };
@@ -123,6 +140,10 @@ function cityFacing(map, cx, cz) {
 
 const COMPASS = ['East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest', 'North', 'Northeast'];
 const compassName = (ang) => COMPASS[Math.round((((ang % TAU) + TAU) % TAU) / (Math.PI / 4)) % 8];
+const angDiff = (a, b) => {
+  const d = Math.abs(a - b) % TAU;
+  return d > Math.PI ? TAU - d : d;
+};
 
 export function generatePlots(map, anchor = null, opts = {}) {
   const N = map.size;
@@ -139,19 +160,39 @@ export function generatePlots(map, anchor = null, opts = {}) {
   let reach = 0;
   for (let i = 0; i < 64; i++) reach = Math.max(reach, radiusAt((i / 64) * TAU));
 
-  // --- Found the city: level everything inside the rampart to clean ground.
-  // Ore veins survive (money), everything else becomes buildable grass. This
-  // is what guarantees a CLOSED wall and a tidy town on any ground.
+  // --- Found the city: level the INTERIOR to clean ground. The rampart band
+  // itself is left exactly as the land made it — that band is where crag,
+  // water and wood get to be the wall.
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const dx = x + 0.5 - cx, dz = z + 0.5 - cz;
       const d = Math.hypot(dx, dz);
-      if (d > reach + 2.5) continue;
-      if (d > radiusAt(Math.atan2(dz, dx) - facing) + 2.5) continue;
+      if (d > reach) continue;
+      if (d > radiusAt(Math.atan2(dz, dx) - facing) - 2.2) continue;
       const t = map.tiles[z * N + x];
       if (t !== TILE.GOLDORE && t !== TILE.STONEORE) map.tiles[z * N + x] = TILE.GRASS;
     }
   }
+
+  // --- The founders cut their own way in. The plan's two principal gates are
+  // always opened through whatever the land put there, so a site can never be
+  // sealed in with no way to sortie — everything else is left to the ground.
+  const cutApproach = (t) => {
+    const world = t + facing;
+    for (let d = -3; d <= 5; d += 0.5) {
+      const r = radiusAt(t) + d;
+      for (let s = -0.17; s <= 0.171; s += 0.03) {
+        const x = Math.round(cx + Math.cos(world + s) * r);
+        const z = Math.round(cz + Math.sin(world + s) * r);
+        if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
+        const k = z * N + x;
+        const tile = map.tiles[k];
+        if (tile === TILE.WATER) map.tiles[k] = TILE.SAND;       // a causeway
+        else if (tile === TILE.MOUNTAIN || tile === TILE.FOREST) map.tiles[k] = TILE.GRASS;
+      }
+    }
+  };
+  plan.gates.slice(0, 2).forEach(cutApproach);
 
   const reserve = (x, z, size, pad = 1) => {
     for (let dz = -pad; dz < size + pad; dz++) {
@@ -217,13 +258,12 @@ export function generatePlots(map, anchor = null, opts = {}) {
   const hq = add('hq', cx - 2, cz - 2, 4);
   reserve(cx - 4, cz - 4, 8, 0); // keep the plaza clear around it
 
-  // --- Wall FIRST: a closed, 4-connected ring — every tile shares an edge
-  // with the next, so the rendered rampart is one continuous wall with the
-  // only ways in being the gates. Corner steps get a filler tile.
-  const ringTiles = [];
-  {
+  // --- A ring of rampart. Walk the silhouette one tile at a time so the line
+  // stays 4-connected however sharply it turns, then let the terrain decide
+  // which parts of it actually have to be built.
+  const traceRing = (radiusFn, gateAngles, { role, useTerrain, ox = cx, oz = cz }) => {
+    const ringTiles = [];
     const seen = new Set();
-    const steps = 2400;
     let last = null;
     const put = (x, z, ang) => {
       const k = z * N + x;
@@ -231,9 +271,6 @@ export function generatePlots(map, anchor = null, opts = {}) {
       seen.add(k);
       ringTiles.push({ x, z, ang });
     };
-    // Step from the previous tile to the next one axis at a time, so the ring
-    // stays 4-connected however sharply the silhouette turns — a star spur or
-    // the throat of a keyhole moves several tiles between samples.
     const walkTo = (x, z, ang) => {
       if (!last) { put(x, z, ang); last = [x, z]; return; }
       let [lx, lz] = last;
@@ -245,56 +282,67 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
       last = [x, z];
     };
+    const steps = 2400;
     for (let s = 0; s < steps; s++) {
       const t = (s / steps) * TAU - Math.PI;
-      const ang = t + facing;
-      const r = radiusAt(t);
-      walkTo(Math.round(cx + Math.cos(ang) * r), Math.round(cz + Math.sin(ang) * r), t);
+      const world = t + facing;
+      const r = radiusFn(t);
+      walkTo(Math.round(ox + Math.cos(world) * r), Math.round(oz + Math.sin(world) * r), t);
     }
-    // Close the loop back onto the first tile.
-    const first = ringTiles[0];
-    if (first) walkTo(first.x, first.z, first.ang);
-  }
+    if (ringTiles[0]) walkTo(ringTiles[0].x, ringTiles[0].z, ringTiles[0].ang);
 
-  // Each gate owns the stretch of rampart nearest to it, so the wall splits
-  // into one repairable segment per gate however many gates the plan has.
-  const angDiff = (a, b) => {
-    let d = Math.abs(a - b) % TAU;
-    return d > Math.PI ? TAU - d : d;
-  };
-  const gateAngles = plan.gates;
-  const segTiles = gateAngles.map(() => []);
-  for (const tile of ringTiles) {
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < gateAngles.length; i++) {
-      const d = angDiff(tile.ang, gateAngles[i]);
-      if (d < bd) { bd = d; best = i; }
+    // Each gate angle owns the stretch of ring nearest to it.
+    const groups = gateAngles.map(() => []);
+    for (const tile of ringTiles) {
+      let best = 0, bd = Infinity;
+      gateAngles.forEach((g, i) => {
+        const d = angDiff(tile.ang, g);
+        if (d < bd) { bd = d; best = i; }
+      });
+      groups[best].push(tile);
     }
-    segTiles[best].push([tile.x, tile.z]);
-  }
 
-  const gates = [];
-  gateAngles.forEach((t, i) => {
-    const tiles = segTiles[i];
-    if (tiles.length < 6) return;
-    const world = t + facing;
-    const gr = radiusAt(t);
-    const gx = cx + Math.cos(world) * gr, gz = cz + Math.sin(world) * gr;
-    let gate = tiles[0], gd = Infinity;
-    for (const tile of tiles) {
-      const d = (tile[0] - gx) ** 2 + (tile[1] - gz) ** 2;
-      if (d < gd) { gd = d; gate = tile; }
-    }
-    gates.push({ gate, ang: world, t });
-    plots.push({
-      id: nextId++, kind: 'wall',
-      name: `${compassName(world)} Wall`,
-      x: tiles[0][0], z: tiles[0][1], size: 1,
-      cx: gx, cz: gz,
-      tiles, gate, tier: 0, paid: 0, branch: null,
+    const made = [];
+    let natural = 0;
+    gateAngles.forEach((t, i) => {
+      const group = groups[i];
+      if (!group.length) return;
+      // Where the land is already impassable there is nothing to build. What is
+      // left is the gap, and the gap is what a wall is for.
+      const open = useTerrain ? group.filter((tile) => map.isWalkable(tile.x, tile.z)) : group;
+      natural += group.length - open.length;
+      if (!open.length) return;   // this whole side is cliff, lake or deep wood
+      // The gate goes on the tile nearest the plan's gate angle — but only if
+      // there is enough open wall here to hang a gatehouse on.
+      let gateTile = null;
+      if (open.length >= 5) {
+        let bd = Infinity;
+        for (const tile of open) {
+          const d = angDiff(tile.ang, t);
+          if (d < bd) { bd = d; gateTile = tile; }
+        }
+      }
+      const mid = gateTile || open[open.length >> 1];
+      const world = mid.ang + facing;
+      const p = {
+        id: nextId++, kind: 'wall', role,
+        name: `${compassName(world)} ${role === 'inner' ? 'Ward' : gateTile ? 'Gate' : 'Wall'}`,
+        x: open[0].x, z: open[0].z, size: 1,
+        cx: mid.x + 0.5, cz: mid.z + 0.5,
+        tiles: open.map((tile) => [tile.x, tile.z]),
+        gate: gateTile ? [gateTile.x, gateTile.z] : null,
+        anchor: [mid.x, mid.z],
+        tier: 0, paid: 0, branch: null,
+      };
+      for (const [x, z] of p.tiles) taken.add(z * N + x);
+      plots.push(p);
+      if (gateTile) made.push({ gate: p.gate, ang: world, t: mid.ang, plot: p });
     });
-    for (const [x, z] of tiles) taken.add(z * N + x);
-  });
+    return { gates: made, natural, length: ringTiles.length };
+  };
+
+  const rampart = traceRing(radiusAt, plan.gates, { role: 'rampart', useTerrain: true });
+  const gates = rampart.gates;
 
   // --- Local frame helpers: u runs toward the enemy, v runs across. Layouts
   // are written in this frame, so a plan reads the same whichever way the city
@@ -322,27 +370,79 @@ export function generatePlots(map, anchor = null, opts = {}) {
     ];
   };
 
-  // --- Roads from every gate to the plaza, before anything is built, so the
-  // streets are streets and not the gaps between buildings.
+  // --- The inner ward, for the plans that keep one: a second wall around the
+  // Keep with its own gates, so losing the outer line is not losing the city.
+  let inner = null;
+  if (plan.inner) {
+    const ir = plan.inner.radius;
+    inner = traceRing(() => ir, [plan.gates[0], plan.gates[0] + Math.PI],
+      { role: 'inner', useTerrain: false });
+    // Towers stand OUTSIDE the inner gates, in the yard between the two walls:
+    // whatever gets through the outer line has to cross that yard under fire.
+    for (const g of inner.gates) {
+      for (const side of [-1, 1]) add('tower', ...gateFlank(g, side, -2.2, 2.2), 2);
+    }
+  }
+
+  // --- Streets: from every gate to the plaza, before anything is built, so the
+  // streets are streets and not the gaps between buildings. Where there is an
+  // inner ward the road bends to its gate first — the bent approach that Krak
+  // des Chevaliers made famous, and a longer walk under the towers.
   for (const g of gates) {
     const dx = -Math.cos(g.ang), dz = -Math.sin(g.ang);
-    const inward = Math.max(2, radiusAt(g.t) - 5.4);
+    const stop = inner ? plan.inner.radius + 2.0 : Math.max(2, radiusAt(g.t) - 5.4);
+    const inward = Math.max(2, radiusAt(g.t) - stop);
+    let px = g.gate[0], pz = g.gate[1];
     for (let d = 1; d <= inward; d += 0.5) {
-      markPathTile(Math.round(g.gate[0] + dx * d), Math.round(g.gate[1] + dz * d));
+      px = Math.round(g.gate[0] + dx * d); pz = Math.round(g.gate[1] + dz * d);
+      markPathTile(px, pz);
+    }
+    if (inner) {
+      let best = null, bd = Infinity;
+      for (const ig of inner.gates) {
+        const d = Math.hypot(ig.gate[0] - px, ig.gate[1] - pz);
+        if (d < bd) { bd = d; best = ig; }
+      }
+      if (best) {
+        markPathLine(px, pz, best.gate[0], best.gate[1]);
+        markPathLine(best.gate[0], best.gate[1], cx, cz);
+      }
     }
   }
 
   const campPlots = [];
-  const addCamps = (spots) => {
-    CAMP_KINDS.forEach((kind, i) => {
-      const s = spots[Math.min(i, spots.length - 1)];
-      const camp = add(kind, s[0], s[1], 2);
-      if (camp) campPlots.push(camp);
-    });
+  const addCamp = (kind, x, z, maxR = 6) => {
+    const camp = add(kind, x, z, 2, {}, maxR);
+    if (camp) campPlots.push(camp);
+    return camp;
   };
 
-  const C = { map, N, cx, cz, R, plan, facing, rng, gates, radiusAt, add, at, spot, road, gateFlank, addCamps };
+  // --- Every entrance is a WARD. Towers flanking the gate, and a muster camp
+  // inside it: the squads that hold this gate and the squads that push out of
+  // it start here, not on the other side of town. Mycenae's gate bastion, a
+  // hillfort's guarded passage, a bailey's barracks — same idea, same reason.
+  gates.forEach((g, i) => {
+    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side), 2);
+    const camp = addCamp(CAMP_KINDS[i % CAMP_KINDS.length], ...gateFlank(g, i % 2 ? 1 : -1, 6.5, 4.2));
+    if (camp) { g.camp = camp; g.plot.ward = camp.kind; }
+  });
+
+  const C = {
+    map, N, cx, cz, R, plan, facing, rng, gates, radiusAt,
+    add, at, spot, road, gateFlank, addCamp, inner,
+  };
   plan.layout(C);
+
+  // --- Whatever camp kinds the entrances did not cover get a home behind the
+  // Keep, so the player always has all three doctrines available.
+  CAMP_KINDS.forEach((kind, i) => {
+    if (campPlots.some((c) => c.kind === kind)) return;
+    for (const [r, t] of [[9.4, Math.PI + (i - 1) * 0.55], [11.5, Math.PI + (i - 1) * 0.9],
+      [8.0, Math.PI / 2 + i], [12.5, -Math.PI / 2 - i * 0.6]]) {
+      if (addCamp(kind, ...spot(r, t))) return;
+    }
+    addCamp(kind, ...spot(10.5, Math.PI), 10);
+  });
 
   // --- Gold mines on real ore veins (the risky money), with a guard tower ---
   const clusters = oreClusters(map, cx, cz);
@@ -350,6 +450,34 @@ export function generatePlots(map, anchor = null, opts = {}) {
     const mine = add('mine', cl.x - 1, cl.z - 1, 2);
     if (mine) add('tower', mine.x + 3, mine.z, 2);
   }
+
+  // --- Outer works: the land's own chokepoints, out on the approaches. A fence
+  // between two crags is cheap (a barrier costs by the tile) and it turns a gap
+  // into a gate you own. A tower behind it makes the gap a killing ground.
+  const outer = pickOuterWorks(map, cx, cz, facing, reach);
+  outer.forEach((c, i) => {
+    const usable = c.tiles.filter(([x, z]) => map.isBuildable(x, z) && !taken.has(z * N + x));
+    if (usable.length < 2) return;
+    const mid = usable[usable.length >> 1];
+    const p = {
+      id: nextId++, kind: 'wall', role: 'outer', wild: true,
+      name: `${c.name} Palisade`,
+      x: usable[0][0], z: usable[0][1], size: 1,
+      cx: mid[0] + 0.5, cz: mid[1] + 0.5,
+      // Always a gate: your own squads have to be able to march out through
+      // your own fence, and a gate is where the horde funnels — under the
+      // tower behind it. A fence with no way through is a wall you built
+      // against yourself.
+      tiles: usable, gate: mid,
+      anchor: [mid[0], mid[1]],
+      tier: 0, paid: 0, branch: null,
+    };
+    for (const [x, z] of usable) taken.add(z * N + x);
+    plots.push(p);
+    // A watchtower behind the fence, on the city side of the gap.
+    const toCity = Math.atan2(cz - mid[1], cx - mid[0]);
+    add('tower', Math.round(mid[0] + Math.cos(toCity) * 3 - 1), Math.round(mid[1] + Math.sin(toCity) * 3 - 1), 2, {}, 4);
+  });
 
   // --- Top up: a plan may lose plots to bad ground, and a half-empty city is
   // not a city. Fill the remaining interior with housing and fields.
@@ -365,6 +493,11 @@ export function generatePlots(map, anchor = null, opts = {}) {
     hq.plan = {
       key: plan.key, label: plan.label, blurb: plan.blurb,
       facing, reach, gates: gates.map((g) => g.ang),
+      entrances: gates.length,
+      natural: rampart.natural,
+      naturalShare: rampart.length ? rampart.natural / rampart.length : 0,
+      inner: !!inner,
+      outerWorks: plots.filter((p) => p.role === 'outer').length,
     };
   }
 
@@ -403,83 +536,112 @@ export function generatePlots(map, anchor = null, opts = {}) {
   return plots;
 }
 
+// What the ground at a candidate site would do for the city raised on it:
+// how much of the rampart line the land already closes, before a coin is spent.
+// The player rides up to a flag and gets told this, because "half your wall is
+// already there" is the whole reason to prefer one site over another.
+export function surveySite(map, site, opts = {}) {
+  const plan = pickPlan(map, opts);
+  const R = CITY_WALL_R * plan.scale;
+  const facing = cityFacing(map, site.x, site.z);
+  const cut = plan.gates.slice(0, 2); // the two gates the founders always cut open
+  let total = 0, natural = 0;
+  for (let i = 0; i < 240; i++) {
+    const t = (i / 240) * TAU - Math.PI;
+    if (cut.some((g) => angDiff(t, g) < 0.19)) continue;
+    const world = t + facing;
+    const r = plan.radius(t, R);
+    const x = Math.round(site.x + Math.cos(world) * r);
+    const z = Math.round(site.z + Math.sin(world) * r);
+    total++;
+    if (!map.isWalkable(x, z)) natural++;
+  }
+  return { plan, natural: total ? natural / total : 0 };
+}
+
+// Which of the land's chokepoints are worth offering the player: close enough
+// to the city to matter, out on the side the horde comes from, and spread out
+// so they are three separate decisions rather than one wall in three pieces.
+function pickOuterWorks(map, cx, cz, facing, reach) {
+  const spots = map.chokeSpots || [];
+  if (!spots.length) return [];
+  const scored = [];
+  for (const c of spots) {
+    const d = Math.hypot(c.x - cx, c.z - cz);
+    if (d < reach + 7 || d > 46) continue;
+    const toward = Math.atan2(c.z - cz, c.x - cx);
+    const facingAlign = Math.cos(toward - facing); // 1 = square on the war road
+    scored.push({ ...c, d, score: c.score + facingAlign * 9 - d * 0.22 });
+  }
+  scored.sort((a, b) => (b.score - a.score) || (a.x - b.x) || (a.z - b.z));
+  const kept = [];
+  for (const c of scored) {
+    if (kept.length >= 3) break;
+    if (kept.some((k) => Math.hypot(k.x - c.x, k.z - c.z) < 16)) continue;
+    kept.push(c);
+  }
+  return kept;
+}
+
 // ---------------------------------------------------------------------------
 // Layouts — one per plan. All of them work in the city's local frame, where
-// +u is the direction the horde comes from.
+// +u is the direction the horde comes from. Gate towers and ward camps are
+// placed for every plan by `generatePlots`; a layout only lays out the
+// districts and the towers that are its own idea.
 // ---------------------------------------------------------------------------
 
 // Concentric and even-handed: houses around the plaza, farms and mills on the
-// diagonals, towers flanking every gate and a second tower ring behind them.
+// diagonals, and a second tower ring behind the wall.
 function layoutBastion(C) {
-  const { add, spot, R, gates, gateFlank } = C;
-  for (const g of gates) {
-    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side), 2);
-  }
+  const { add, spot, R } = C;
   for (let i = 0; i < 8; i++) add('house', ...spot(6.8, (i / 8) * TAU + Math.PI / 8), 2);
   for (let i = 0; i < 4; i++) add('farm', ...spot(10.4, (i / 4) * TAU + Math.PI / 4), 2);
   add('mill', ...spot(10.4, -Math.PI / 2 + 0.4), 2);
   add('mill', ...spot(10.4, Math.PI / 2 - 0.4), 2);
-  C.addCamps([spot(8.6, Math.PI - 0.6), spot(8.6, Math.PI), spot(8.6, Math.PI + 0.6)]);
   for (let i = 0; i < 4; i++) add('tower', ...spot(13.0, (i / 4) * TAU + Math.PI / 4), 2);
   // Two far fields for greedy players, outside the wall entirely.
   for (let i = 0; i < 2; i++) add('farm', ...spot(R + 4 + C.rng() * 3, C.rng() * TAU), 2);
 }
 
-// Gridded streets inside a bastioned square. The back wall has no gate, so the
-// whole rear of the town is safe ground to build economy on.
+// Gridded streets inside a bastioned square, with the economy in the quarter
+// behind the Keep — the ground the back wall protects.
 function layoutFort(C) {
-  const { add, at, road, R, gates, gateFlank } = C;
+  const { add, at, road, R } = C;
   const S = R * 0.92;
-  road(S, 0, -S * 0.5, 0);          // the avenue, front gate to plaza
-  road(0, -S, 0, S);                // the cross street between the side gates
+  road(0, -S, 0, S);                 // the cross street between the side gates
   road(-6, -S * 0.75, -6, S * 0.75); // a back lane behind the Keep
-
-  for (const g of gates) {
-    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side), 2);
-  }
   // Corner bastions: the square's whole point.
   for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
     add('tower', ...at(su * (S - 3.6), sv * (S - 3.6)), 2);
   }
-  // Housing blocks either side of the cross street.
   for (const u of [3.5, -3.5]) {
     for (const v of [-10, -5.5, 5.5, 10]) add('house', ...at(u, v), 2);
   }
-  // Economy in the safe rear quarter.
   for (const v of [-9.5, -4.5, 4.5, 9.5]) add('farm', ...at(-9.5, v), 2);
   add('mill', ...at(-13, -4), 2);
   add('mill', ...at(-13, 4), 2);
-  // Barracks yard by the front gate — the muster is where the fighting is.
-  C.addCamps([at(8.5, -6.5), at(8.5, 6.5), at(12, 0)]);
 }
 
-// Five towered spurs. Gates sit in the valleys between them, so anything
-// chewing a gate is shot from two sides. The farms live outside the wall.
+// Five towered spurs. The wall has no room behind it, so the farms live
+// outside — a real bargain, not a free lunch.
 function layoutStar(C) {
-  const { add, spot, R, gates, gateFlank } = C;
+  const { add, spot, R } = C;
   for (let i = 0; i < 5; i++) add('tower', ...spot(R * 1.17 - 2.8, (i / 5) * TAU), 2);
-  for (const g of gates) add('tower', ...gateFlank(g, 0, 3.2, 0), 2);
   for (let i = 0; i < 7; i++) add('house', ...spot(6.6, (i / 7) * TAU + 0.3), 2);
   add('mill', ...spot(9.6, 0.9), 2);
   add('mill', ...spot(9.6, -0.9), 2);
   for (let i = 0; i < 3; i++) add('tower', ...spot(11.0, Math.PI + (i - 1) * 0.9), 2);
-  C.addCamps([spot(9.8, Math.PI - 0.35), spot(12.2, Math.PI), spot(9.8, Math.PI + 0.35)]);
-  // Outside the wall, at your own risk — a star fort has no room to farm.
   for (const t of [Math.PI - 0.9, Math.PI - 0.35, Math.PI + 0.35, Math.PI + 0.9]) {
     add('farm', ...spot(R * 1.42, t), 2);
   }
 }
 
 // One street from the heavy front gate to the postern at the back, houses
-// lining it, and every tower stacked on the arc that faces the horde.
+// lining it, and every spare tower stacked on the arc that faces the horde.
 function layoutCrescent(C) {
-  const { add, at, spot, road, R, gates, gateFlank, radiusAt } = C;
+  const { add, at, spot, road, R, radiusAt } = C;
   road(R * 1.0, 0, -R * 0.5, 0);
   road(3, -9, 3, 9);
-  for (const g of gates) {
-    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side), 2);
-  }
-  // The front arc carries the weight.
   for (const t of [-0.95, -0.5, 0.5, 0.95]) add('tower', ...spot(radiusAt(t) - 2.8, t), 2);
   for (const t of [-1.5, 1.5]) add('tower', ...spot(R * 0.78, t), 2);
   for (const v of [-4, 4]) {
@@ -491,30 +653,22 @@ function layoutCrescent(C) {
   }
   add('farm', ...at(-12.5, -3), 2);
   add('farm', ...at(-12.5, 3), 2);
-  C.addCamps([at(7.5, -8), at(11.5, 0), at(7.5, 8)]);
 }
 
-// A tight keep with a walled throat thrown forward. The throat is the whole
-// design: four towers line it, and there is one postern out the back.
+// The throat is the whole design: towers down its length and a pair covering
+// its mouth, so the corridor is under fire from end to end.
 function layoutKeyhole(C) {
-  const { add, at, road, R, gates, gateFlank } = C;
+  const { add, at, road, R } = C;
   road(R * 1.3, 0, -R * 0.55, 0);
   road(-5, -R * 0.5, -5, R * 0.5);
-  // The kill corridor: towers down the length of the throat and a pair
-  // covering its mouth, so the whole corridor is under fire.
   for (const v of [-2.6, 2.6]) add('tower', ...at(R * 1.12, v), 2);
   for (const v of [-5.0, 5.0]) add('tower', ...at(R * 0.66, v), 2);
-  for (const g of gates) {
-    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side, 3.0, 2.0), 2);
-  }
-  // Dense blocks packed into the body.
   for (const u of [-1, -5.5]) {
     for (const v of [-9, -5, 5, 9]) add('house', ...at(u, v), 2);
   }
   for (const v of [-8, -3, 3, 8]) add('farm', ...at(-10, v), 2);
   add('mill', ...at(-13.5, -3.5), 2);
   add('mill', ...at(-13.5, 3.5), 2);
-  C.addCamps([at(4, -8.5), at(4, 8.5), at(8.5, -5)]);
 }
 
 // Find clusters of gold-ore tiles, nearest-to-the-city first.

@@ -44,8 +44,20 @@ The gameplay base is continuous siege on a lane graph:
   plan (`CITY_PLANS` in `src/plots.js`: bastion, fort, star, crescent,
   keyhole). One generic round base on every map is the failure state this
   replaced — do not collapse it back.
-- Ramparts stay CLOSED whatever the silhouette, every gate keeps towers
-  covering it, and every plan still lays out all three muster camps on roads.
+- The BOUNDARY stays closed whatever the silhouette — but the wall is only
+  half of it. Where the rampart line crosses crag, water or deep wood, no wall
+  is built and the land is the wall; walls are raised across the gaps, and only
+  a gap can carry a gate. Do not go back to levelling the rampart band and
+  stamping a full ring: identical bases on different ground is the failure
+  state this replaced. See `docs/fortress-inspiration.md`.
+- Every entrance is a WARD: flanking towers plus its own muster camp, so the
+  squads that hold a gate and the squads that push a lane out of it start at
+  the gate. Every city keeps all three camp doctrines buildable and every camp
+  on a road. At least two entrances always exist — the plan's two principal
+  gates are cut open through whatever the ground put there.
+- Outer works are the land's own chokepoints: a fence across a natural gap plus
+  a tower behind it. They always carry a gate, because the player's own squads
+  have to march out through their own fence.
 - The three city sites on a map must stay meaningfully different, named, and
   described to the player before they commit the run to one.
 - A node's KIND and its OWNER are separate facts. Kind is terrain and is always
@@ -159,6 +171,8 @@ Do not implement fake conquest data as if it is live.
 - `docs/product-contract.md` - product source of truth.
 - `docs/agent-brief.md` - quick current-state and pitfall brief.
 - `docs/backend.md` - backend source of truth.
+- `docs/fortress-inspiration.md` - the historical fortification rules the city
+  generator implements, and why.
 
 ## Validation
 

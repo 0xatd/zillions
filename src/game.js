@@ -636,7 +636,12 @@ export class Game {
   // Where you stand to fund a plot. With a hero, measure reach against the
   // whole footprint so upgrades work from every side and corner.
   payPoint(plot, h = null) {
-    if (plot.kind === 'wall') return [plot.gate[0] + 0.5, plot.gate[1] + 0.5];
+    // A barrier is paid for at its gate — or, on a stretch of wall the ground
+    // left with no gate, at the middle of the stretch.
+    if (plot.kind === 'wall') {
+      const [ax, az] = plot.anchor || plot.gate;
+      return [ax + 0.5, az + 0.5];
+    }
     if (h) {
       return [
         clamp(h.x, plot.x, plot.x + plot.size),
@@ -744,7 +749,7 @@ export class Game {
     if (plot.kind === 'wall') {
       for (const [x, z] of plot.tiles) {
         if (this.occ[z * this.map.size + x] === 0) {
-          this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
+          this._addBuilding(plot, x, z, def, !!plot.gate && x === plot.gate[0] && z === plot.gate[1]);
           this.emit({ type: 'build', kind: 'wall', plotId: plot.id, tier: plot.tier, x: x + 0.5, z: z + 0.5, quiet: true });
         }
       }
@@ -766,7 +771,7 @@ export class Game {
       // One building per rampart tile; the gate tile lets friendlies through.
       if (plot.tier === 1) {
         for (const [x, z] of plot.tiles) {
-          this._addBuilding(plot, x, z, def, x === plot.gate[0] && z === plot.gate[1]);
+          this._addBuilding(plot, x, z, def, !!plot.gate && x === plot.gate[0] && z === plot.gate[1]);
         }
       } else {
         for (const b of this.buildings) {

@@ -94,10 +94,43 @@ to face the hives:
 | Barrow Hills | **crescent hold** | A broad front arc and a dead-straight back wall. One heavy gate, one postern, one street between them. |
 | The Black Vale | **throat keep** | A long walled throat jutting at the horde, lined with towers, plus a postern. They come up the corridor or not at all. |
 
-Whichever plan it is, the ground inside is levelled clean, dirt lanes run from
-each gate to the plaza, gold mines wait on the ore veins, and the rampart is
-fully **closed**: the only ways in are its gates, and every gate is covered by
-towers. Chokepoints, by design.
+### The ground builds half your fortress
+
+You never wall what the land already walls. Where the rampart line crosses
+crag, deep water or thick wood, nothing is built there — that stretch is free,
+permanent wall. You pay only for the **gaps**, and since a barrier costs by the
+tile, a site whose crags close half the line costs about half as much to
+fortify. Across the campaign's fifteen city sites, the ground closes anywhere
+from 2% to 77% of the wall line, so the same plan comes out a different
+fortress on different ground. Ride up to a flagged site and the survey tells you
+which kind of site it is before you commit.
+
+Only an open stretch can carry a gate, so the terrain also decides **how many
+ways in** your city has — two to four. Whatever it decides, the plan's two
+principal gates are always cut open, so you can always sortie.
+
+### Every entrance is a ward
+
+Each gate gets the same kit: two flanking towers and its own muster camp, with a
+road spur to the plaza. Defending a gate and pushing a lane out of it start in
+the same place, so ordering **3 Push** sends squads out of the gate nearest the
+front instead of marching them across town. Two plans (the square fort and the
+throat keep) add an **inner ward** — a second wall around the Keep with towers
+in the yard between the walls, and gate roads that bend through it.
+
+### Fence the passes
+
+Out on the approaches the map has its own chokepoints: a gap two to nine tiles
+wide pinched between crags, woods or water. The three best of them near your
+city come with a **palisade** plot and a watchtower behind it. A three-tile
+fence costs almost nothing, always carries a gate for your own squads, and
+turns a pass into a killing ground you own.
+
+This is how fortification actually worked — promontory forts walling only the
+neck, Great Zimbabwe running its walls between granite boulders, Krak des
+Chevaliers' concentric wards and bent entrance, Maiden Castle's staggered gate,
+an abatis thrown across a gap. `docs/fortress-inspiration.md` has the sources
+and the mapping.
 
 - **Build whenever you like — and it is never safe.** Walk to a glowing
   foundation and **hold Space in Build mode** or **hold B anytime**: coins arc
@@ -326,6 +359,7 @@ assets/audio/           Generated audio assets and manifests
 docs/product-contract.md Product source of truth for agents
 docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
+docs/fortress-inspiration.md  Historical fortification rules the city generator implements
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
 scripts/map-check.mjs   Builds every level's map and city and checks it plays

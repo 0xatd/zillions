@@ -166,6 +166,7 @@ export class TerrainField {
     this._carveWarRoads();
     this._connectFrontier();
     this.nodeSpots = this._findNodeFeatures();
+    this.chokeSpots = this._findChokepoints();
     this._nameSites();
   }
 
@@ -783,6 +784,80 @@ export class TerrainField {
       }
     }
     return spots;
+  }
+
+  // Natural chokepoints: a short run of open ground pinched between two masses
+  // of crag, water or deep wood, with room to walk on both sides of it.
+  //
+  // This is the oldest trick in fortification. A promontory fort walls the neck
+  // and lets the cliffs do the rest; Dún Aonghasa runs its wall cliff to cliff;
+  // Great Zimbabwe's walls simply span between the granite boulders; every
+  // field army since has anchored its line on a marsh or a ridge and only built
+  // across what was left. So the map hands the player the same offer: here is
+  // the gap, a fence across it is cheap, and a tower beside it makes it a wall.
+  //
+  // Pure function of the tiles — no RNG, because lockstep peers must agree.
+  _findChokepoints() {
+    const N = this.size;
+    const MAX_W = 9;    // wider than this is a field, not a gap
+    const LOOK = 10;    // how far to look for the anchor on each side
+    const dirs = [[0, 1], [1, 0]]; // a fence runs north-south or east-west
+    const cands = [];
+
+    const anchorAt = (x, z, dx, dz) => {
+      for (let i = 1; i <= LOOK; i++) {
+        const nx = x + dx * i, nz = z + dz * i;
+        if (!this.inBounds(nx, nz)) return -1;
+        if (!this.isWalkable(nx, nz)) return i;
+      }
+      return -1;
+    };
+
+    for (let z = 8; z < N - 8; z += 2) {
+      for (let x = 8; x < N - 8; x += 2) {
+        if (!this.isWalkable(x, z)) continue;
+        for (const [ax, az] of dirs) {
+          const a = anchorAt(x, z, ax, az);
+          const b = anchorAt(x, z, -ax, -az);
+          if (a < 0 || b < 0) continue;
+          const width = a + b - 1;
+          if (width < 2 || width > MAX_W) continue;
+          // Traffic runs across the fence line, so both approaches to the gap
+          // have to be open ground — otherwise this is a dead-end nook.
+          const px = az, pz = ax;
+          let openA = 0, openB = 0;
+          for (let i = 2; i <= 6; i++) {
+            if (this.isWalkable(x + px * i, z + pz * i)) openA++;
+            if (this.isWalkable(x - px * i, z - pz * i)) openB++;
+          }
+          if (openA < 4 || openB < 4) continue;
+          const tiles = [];
+          for (let i = -(b - 1); i <= a - 1; i++) tiles.push([x + ax * i, z + az * i]);
+          const mid = tiles[tiles.length >> 1];
+          cands.push({
+            x: mid[0], z: mid[1], width, tiles,
+            axis: ax ? 'x' : 'z',
+            score: (MAX_W - width) * 2 + openA + openB,
+          });
+        }
+      }
+    }
+
+    cands.sort((p, q) => (q.score - p.score) || (p.x - q.x) || (p.z - q.z));
+    const NAMES = [
+      'The Neck', 'Hollow Way', 'Stone Gate', 'The Pinch', 'Dead Mans Gap',
+      'Split Rock', 'The Sluice', 'Wolf Step', 'Cold Gap', 'The Throat',
+    ];
+    const kept = [];
+    for (const c of cands) {
+      if (kept.length >= 16) break;
+      if (kept.some((k) => Math.hypot(k.x - c.x, k.z - c.z) < 12)) continue;
+      if (this.sites.some((s) => Math.hypot(c.x - s.x, c.z - s.z) < 12)) continue;
+      if (this.nestSpots.some(([x, z]) => Math.hypot(c.x - x, c.z - z) < 11)) continue;
+      c.name = NAMES[kept.length % NAMES.length];
+      kept.push(c);
+    }
+    return kept;
   }
 
   _orePatches(oreTile, count) {
