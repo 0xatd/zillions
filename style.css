@@ -787,6 +787,9 @@ body::after {
 .gamerow.active .gamestate { color: #ff756c; }
 .gamerow .ginfo { opacity: 0.7; font-size: 12px; }
 .gamerow .gjoin { margin-left: auto; }
+.gamerow .glive { color: #ff6a5e; font-weight: 700; animation: livepulse 1.6s ease-in-out infinite; }
+.gamerow .glive-note { margin-left: auto; opacity: 0.55; font-style: italic; }
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .loreentry { margin-bottom: 14px; line-height: 1.6; font-size: 13.5px; }
 .loreentry b { color: var(--gold); display: block; margin-bottom: 3px; font-size: 15px; }
 .loreentry p { opacity: 0.85; }

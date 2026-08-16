@@ -8,6 +8,10 @@ import { TerrainField } from './terrain.js';
 import { makeRNG, makeNoise } from './utils.js';
 
 export class GameMap extends TerrainField {
+  isLava() {
+    return this.theme?.liquid === 'lava';
+  }
+
   colorOf(t) {
     if (this.theme && this.theme.palette) {
       const p = this.theme.palette;
@@ -73,6 +77,7 @@ export class GameMap extends TerrainField {
     const waterMat = new THREE.MeshLambertMaterial({
       color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
       transparent: true, opacity: 0.85,
+      ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
