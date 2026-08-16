@@ -292,7 +292,21 @@ a lit band, comms dish, beacon spire); towers are defense pylons (flared
 gun deck, sensor band, railing, muzzle marker); walls are hull-plate
 curtains with amber perimeter lights and bright-lit gates; houses are hab
 units with tilted solar roofs; mills are wind turbines; camps are quonset
-bays with a doctrine-colored light stripe. Nothing gets crenellations, red
+bays with a doctrine-colored light stripe.
+
+Two rules that keep the perimeter pretty, both purely presentational:
+
+- **Walls render as a smoothed polyline, never a tile staircase.** Each wall
+  tile chamfers its pier toward the average of its wall neighbors and hangs
+  rotated curtain panels to the midpoints it shares with them; adjacent
+  tiles meet exactly at those midpoints, so curved rings read as curves and
+  diagonal runs as one straight wall. The sim's occupancy grid stays plain
+  tiles — smoothing lives entirely in the mesh builder, so it applies to
+  every plan and every seed with no pathing change.
+- **Gates outrank the wall.** The opening gets low lit wing-walls, two tall
+  pylons astride the passage, a bright portal arch spanning them, and an
+  amber threshold glowing on the ground — the entrance must be findable
+  from across the map, because the gate is where the game happens. Nothing gets crenellations, red
 cones, or any material the expedition couldn't have printed. One kit, one
 trim color — that consistency, not detail count, is what makes a generated
 city read designed.

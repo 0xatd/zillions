@@ -2825,9 +2825,13 @@ class App {
         break;
       }
       case 'wall': {
-        // Connected rampart: each tile grows curtain panels toward every
-        // neighboring wall tile, so the whole ring reads as ONE wall — no
-        // corner gaps, no floating cubes. Gates become real gatehouses.
+        // The rampart is drawn as a SMOOTHED POLYLINE, not a stack of
+        // axis-aligned blocks. Each tile pulls its pier toward the average of
+        // its wall neighbors — an L-corner chamfers into a 45° cut — and
+        // hangs a rotated curtain panel out to the midpoint it shares with
+        // each neighbor. Adjacent tiles meet exactly at those midpoints, so a
+        // curving ring reads as a curve and a diagonal run as one straight
+        // wall, while the sim keeps its plain tile occupancy untouched.
         const N = this.game.map.size;
         if (!this._wallTiles) {
           this._wallTiles = new Set();
@@ -2835,72 +2839,97 @@ class App {
             if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
           }
         }
-        const nb = {
-          e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
-          s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
+        const nbs = [];
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (this._wallTiles.has((b.z + dz) * N + (b.x + dx))) nbs.push([dx, dz]);
+        }
+        // Chamfered pier position (local to the tile center).
+        let scx = 0, scz = 0;
+        for (const [dx, dz] of nbs) { scx += dx * 0.26; scz += dz * 0.26; }
+        // One segment per neighbor: pier → shared midpoint on the tile edge.
+        const segs = nbs.map(([dx, dz]) => {
+          const ex = dx * 0.5, ez = dz * 0.5;
+          return {
+            mx: (scx + ex) / 2, mz: (scz + ez) / 2,
+            len: Math.hypot(ex - scx, ez - scz) + 0.12,
+            yaw: Math.atan2(ez - scz, ex - scx),
+          };
+        });
+        const panel = (s, len, h, thick, color, y) => {
+          const m = box(len, h, thick, color, s.mx, y, s.mz);
+          m.rotation.y = -s.yaw;
+          return m;
         };
+        // Wall run direction (for orienting the gate) and its perpendicular.
+        const run = nbs.length === 2
+          ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
+          : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
+        const pvx = -Math.sin(run), pvz = Math.cos(run);
+        const passYaw = Math.atan2(pvz, pvx);
         // Barrier ladder: razorwire fence → hull-plate curtain → shock/bastion.
         const shock = b.branch === 'shock';
         const bastion = b.branch === 'bastion';
         const capCol = 0x8a8069;
-        const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
         if (tier === 1 && !b.gate) {
-          // Razorwire: gunmetal post + taut wire strands to each neighbor.
-          box(0.16, 0.78, 0.16, 0x565c60, 0, 0.39);
-          box(0.2, 0.06, 0.2, 0xe8a83c, 0, 0.81); // hazard cap
-          const wires = [
-            nb.e && [0.5, 0.25, 0], nb.w && [0.5, -0.25, 0],
-            nb.s && [0, 0, 0.25], nb.n && [0, 0, -0.25],
-          ].filter(Boolean);
-          for (const [wx, px, pz] of wires) {
-            for (const wy of [0.3, 0.6]) {
-              box(wx ? 0.5 : 0.045, 0.045, wx ? 0.045 : 0.5, 0x9aa0a2, px, wy, pz);
-            }
+          // Razorwire: gunmetal post + taut wire strands along each segment.
+          box(0.16, 0.78, 0.16, 0x565c60, scx, 0.39, scz);
+          box(0.2, 0.06, 0.2, 0xe8a83c, scx, 0.81, scz); // hazard cap
+          for (const s of segs) {
+            for (const wy of [0.3, 0.6]) panel(s, s.len, 0.045, 0.045, 0x9aa0a2, wy);
           }
           break;
         }
         const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
         const hull = bastion ? 0xece6d6 : tier === 1 ? 0xb9b19c : HULL;
         if (b.gate) {
-          // Gate: two hull pylons flanking the passage, amber caps and a lit
-          // lintel — the entrance is the brightest thing on the perimeter.
-          const towH = H + 0.85;
-          for (const side of [-1, 1]) {
-            const px = alongX ? 0 : side * 0.4, pz = alongX ? side * 0.4 : 0;
-            box(alongX ? 0.9 : 0.36, towH, alongX ? 0.36 : 0.9, hull, px, towH / 2, pz);
-            box(alongX ? 1.0 : 0.46, 0.16, alongX ? 0.46 : 1.0, capCol, px, towH + 0.08, pz);
-            lit(alongX ? 0.5 : 0.24, 0.14, alongX ? 0.24 : 0.5, TRIM, px, towH + 0.24, pz, 0.7);
+          // The gate is UNMISTAKABLE: low lit wing-walls tie into the
+          // rampart, two tall pylons stand astride the passage, a bright
+          // portal arch spans them, and an amber threshold glows on the
+          // ground through the opening — readable from across the map.
+          for (const s of segs) {
+            panel(s, s.len, H * 0.55, 0.32, hull, H * 0.275);
+            panel(s, s.len + 0.05, 0.12, 0.38, capCol, H * 0.55 + 0.06);
           }
-          lit(alongX ? 0.9 : 0.16, 0.14, alongX ? 0.16 : 0.9, TRIM, 0, H + 0.42, 0, 0.55); // holo lintel
+          const towH = H + 1.25;
+          for (const side of [-1, 1]) {
+            const px = pvx * side * 0.46, pz = pvz * side * 0.46;
+            const pyl = box(0.44, towH, 0.44, hull, px, towH / 2, pz);
+            pyl.rotation.y = -run;
+            const cap = box(0.52, 0.14, 0.52, capCol, px, towH + 0.07, pz);
+            cap.rotation.y = -run;
+            const light = lit(0.56, 0.16, 0.56, TRIM, px, towH + 0.24, pz, 0.9);
+            light.rotation.y = -run;
+          }
+          const arch = lit(1.06, 0.2, 0.2, TRIM, 0, towH - 0.2, 0, 0.75);
+          arch.rotation.y = -passYaw;
+          const threshold = lit(1.6, 0.05, 0.56, TRIM, 0, 0.05, 0, 0.45);
+          threshold.rotation.y = -passYaw;
+          threshold.material.transparent = true;
+          threshold.material.opacity = 0.75;
           const ban = assetClone('banner', 0.7);
-          if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
+          if (ban) { ban.position.set(pvx * -0.9, 0, pvz * -0.9); g.add(ban); }
           break;
         }
-        // Center pier, slightly proud of the curtains.
-        box(0.56, H + 0.14, 0.56, hull, 0, (H + 0.14) / 2);
-        box(0.66, 0.15, 0.66, capCol, 0, H + 0.21);
-        lit(0.16, 0.1, 0.16, TRIM, 0, H + 0.34, 0, 0.8); // perimeter marker light
-        // Curtain panels out to each neighboring wall tile's edge.
-        const panels = [
-          nb.e && [0.5, 0.36, 0.25, 0], nb.w && [0.5, 0.36, -0.25, 0],
-          nb.s && [0.36, 0.5, 0, 0.25], nb.n && [0.36, 0.5, 0, -0.25],
-        ].filter(Boolean);
-        for (const [w, dep, px, pz] of panels) {
-          box(w, H, dep, hull, px, H / 2, pz);
-          box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
-          // Shock fence: a live plasma conduit runs the parapet — glows at night.
+        // Rounded pier at the chamfered point, slightly proud of the curtains.
+        cyl(0.3, 0.34, H + 0.14, hull, scx, (H + 0.14) / 2, scz, 8);
+        cyl(0.37, 0.37, 0.12, capCol, scx, H + 0.2, scz, 8);
+        lit(0.16, 0.1, 0.16, TRIM, scx, H + 0.32, scz, 0.8); // perimeter marker light
+        for (const s of segs) {
+          panel(s, s.len, H, 0.34, hull, H / 2);
+          panel(s, s.len + 0.05, 0.14, 0.42, capCol, H + 0.07);
+          // Shock fence: a live plasma conduit runs the parapet.
           if (shock) {
-            const strip = box(w === 0.5 ? 0.52 : 0.1, 0.07, dep === 0.5 ? 0.52 : 0.1, 0x4dd8c8, px, H + 0.19, pz);
+            const strip = panel(s, s.len, 0.07, 0.1, 0x4dd8c8, H + 0.19);
             strip.material.emissive.setHex(0x4dd8c8);
             strip.material.emissiveIntensity = 0.9;
           }
         }
         if (shock) {
-          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, 0, H + 0.34);
+          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, scx, H + 0.42, scz);
           core.material.emissive.setHex(0x4dd8c8);
           core.material.emissiveIntensity = 1.0;
         }
-        if (!panels.length) box(0.9, H, 0.9, hull, 0, H / 2); // stranded stub (shouldn't happen)
+        if (!segs.length) box(0.9, H, 0.9, hull, 0, H / 2); // stranded stub (shouldn't happen)
         break;
       }
       case 'outpost': {
