@@ -342,7 +342,8 @@ class App {
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
-    disc.position.set(cx, 0.015, cz);
+    const plazaY = this.map.groundY(cx, cz);
+    disc.position.set(cx, plazaY + 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
     const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
@@ -352,7 +353,7 @@ class App {
       const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
       g.add(lane);
     }
     return g;
@@ -382,6 +383,7 @@ class App {
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
+      gr.position.y = this.map.groundY(s.x, s.z);
       this.scene.add(gr);
       this.siteMarkers.push(gr);
     }
@@ -445,7 +447,7 @@ class App {
       blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
       g.add(blob);
     }
-    g.position.set(n.x, 0, n.z);
+    g.position.set(n.x, this.map.groundY(n.x, n.z), n.z);
     return g;
   }
 
@@ -494,11 +496,12 @@ class App {
         label.position.y = 1.5;
         label.scale.set(2.2, 1.1, 1);
         mesh.add(label);
-        mesh.position.set(l.x, 0, l.z);
+        mesh.userData.gy = this.map.groundY(l.x, l.z);
+        mesh.position.set(l.x, mesh.userData.gy, l.z);
         this.scene.add(mesh);
         this.lootMeshes.set(l.id, mesh);
       }
-      mesh.position.set(l.x, 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
+      mesh.position.set(l.x, mesh.userData.gy + 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
       mesh.userData.gem.rotation.y = t * 1.4 + l.id;
     }
     for (const [id, mesh] of this.lootMeshes) {
@@ -1863,7 +1866,7 @@ class App {
     }
     return {
       x: fx + v.sx * forward + v.rx * side,
-      y,
+      y: y + this.map.groundY(fx, fz),
       z: fz + v.sz * forward + v.rz * side,
     };
   }
@@ -1877,7 +1880,7 @@ class App {
       else if (e.targetKind === 'building') y = 1.0;
       else y = kind === 'ballista' ? 0.75 : Math.max(0.52, 0.62 * (e.targetScale || 1));
     }
-    return { x: tx, y, z: tz };
+    return { x: tx, y: y + this.map.groundY(tx, tz), z: tz };
   }
 
   _spawnProjectile(e, extra = {}) {
@@ -1988,7 +1991,7 @@ class App {
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
-      this.burst(x + Math.cos(a) * radius, 0.18, z + Math.sin(a) * radius,
+      this.burst(x + Math.cos(a) * radius, this.map.groundY(x, z) + 0.18, z + Math.sin(a) * radius,
         { count: 1, color, speed: 0.45, life, size, spread: 0.02, up: 0.2 });
     }
   }
@@ -2001,7 +2004,7 @@ class App {
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 0.11, z);
+    mesh.position.set(x, this.map.groundY(x, z) + 0.11, z);
     this.scene.add(mesh);
     this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
   }
@@ -2091,7 +2094,7 @@ class App {
     const d = this._zdummy, c = this._zcolor;
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
-      const bob = Math.sin(t * 7 + zb.phase) * 0.05;
+      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
@@ -2159,7 +2162,7 @@ class App {
       // Pop out of the building with a little bounce, then hover and spin.
       const bounce = age < 0.5 ? Math.abs(Math.sin(age * Math.PI * 2)) * (0.5 - age) * 2.2 : 0;
       const big = cn.v >= 4 ? 1.5 : 1;
-      d.position.set(cn.x, 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
+      d.position.set(cn.x, this.map.groundY(cn.x, cn.z) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
       d.rotation.set(Math.PI / 2 + 0.35, 0, t * 2.2 + cn.id);
       d.scale.setScalar(big);
       d.updateMatrix();
@@ -2195,7 +2198,8 @@ class App {
     const f = e.force || 1;
     const sp = 2.5 * f + Math.random() * 2;
     this.corpses.push({
-      x: e.x, y: 0.5, z: e.z,
+      x: e.x, y: this.map.groundY(e.x, e.z) + 0.5, z: e.z,
+      gy: this.map.groundY(e.x, e.z),
       vx: (e.dx || 0) * sp + (Math.random() - 0.5), vy: 2.2 + 3.2 * f * Math.random(), vz: (e.dz || 0) * sp + (Math.random() - 0.5),
       rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
       wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
@@ -2210,14 +2214,15 @@ class App {
     for (const p of this.corpses) {
       p.life -= dt;
       if (p.life <= 0) continue;
-      if (p.y > 0.16 || Math.abs(p.vy) > 0.5) {
+      const floor = (p.gy || 0) + 0.16;
+      if (p.y > floor || Math.abs(p.vy) > 0.5) {
         p.vy -= 22 * dt;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
         p.rx += p.wx * dt; p.ry += p.wy * dt;
-        if (p.y < 0.16) { p.y = 0.16; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
+        if (p.y < floor) { p.y = floor; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
       } else {
         p.rx = Math.PI / 2; // settled flat
-        if (p.life < 1.5) p.y = 0.16 - (1.5 - p.life) * 0.2; // sink away
+        if (p.life < 1.5) p.y = floor - (1.5 - p.life) * 0.2; // sink away
       }
       d.position.set(p.x, p.y, p.z);
       d.rotation.set(p.rx, p.ry, p.rz);
@@ -2276,17 +2281,18 @@ class App {
       i++;
     };
 
+    const gy = (x, z) => this.map.groundY(x, z);
     for (const b of g.buildings) {
-      if (b.hp < b.maxHp) add(b.cx, this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
+      if (b.hp < b.maxHp) add(b.cx, gy(b.cx, b.cz) + this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
     }
     for (const n of g.nests) {
-      if (n.alive && n.hp < n.maxHp) add(n.x, 2.6, n.z, n.hp / n.maxHp, 2.2);
+      if (n.alive && n.hp < n.maxHp) add(n.x, gy(n.x, n.z) + 2.6, n.z, n.hp / n.maxHp, 2.2);
     }
     for (const u of g.units) {
-      if (u.hp < u.maxHp) add(u.x, 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
+      if (u.hp < u.maxHp) add(u.x, gy(u.x, u.z) + 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
     for (const zb of g.zombies) {
-      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
+      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
     }
     this.barBg.count = this.barFg.count = i;
     this.barBg.instanceMatrix.needsUpdate = true;
@@ -2469,6 +2475,9 @@ class App {
     g.userData.prog = prog;
     g.userData.progFrac = 0;
     g.userData.payPoint = [px, pz];
+    // The whole plot group rides the ground once: every child (beacon, ghost,
+    // rings, labels) keeps its old relative height.
+    g.position.y = this.map.groundY(mx, mz);
     return g;
   }
 
@@ -2929,7 +2938,7 @@ class App {
         b.plotTier = plot ? plot.tier : 1;
         b.branch = plot ? plot.branch : null;
         const mesh = this._makeBuildingMesh(b);
-        mesh.position.set(b.cx, 0, b.cz);
+        mesh.position.set(b.cx, this.map.groundY(b.cx, b.cz), b.cz);
         this.scene.add(mesh);
         rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime };
         this.buildingMeshes.set(b.id, rec);
@@ -3096,7 +3105,7 @@ class App {
         rec = { mesh, u };
         this.unitMeshes.set(u.id, rec);
       }
-      rec.mesh.position.set(u.x, 0, u.z);
+      rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
       let attackPulse = 0;
       let attackKind = '';
@@ -3234,6 +3243,7 @@ class App {
       ring.position.set(x, 0.06, z);
       gr.add(ring);
       gr.userData.ring = ring;
+      gr.position.y = this.map.groundY(x, z);
       this.scene.add(gr);
       this.waveMarkers.push(gr);
     }
@@ -3307,6 +3317,7 @@ class App {
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
         gr.userData = { ring, flag, label, node };
+        gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
       }
@@ -3560,6 +3571,12 @@ class App {
     const edgePad = 1.2;
     this.focus.x = clamp(this.focus.x, edgePad, mapSize - edgePad);
     this.focus.z = clamp(this.focus.z, edgePad, mapSize - edgePad);
+    // Ride the relief: the focus point tracks the ground under it (softly, so
+    // cresting a hill tilts the view instead of jolting it).
+    if (this.map) {
+      const gy = Math.max(0, this.map.groundY(this.focus.x, this.focus.z));
+      this.focus.y += (gy - this.focus.y) * (1 - Math.exp(-4 * dt));
+    }
 
     const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
@@ -3571,10 +3588,10 @@ class App {
     }
     this.camera.position.set(
       this.focus.x + Math.sin(this.camYaw) * hx + sx,
-      hy,
+      this.focus.y + hy,
       this.focus.z + Math.cos(this.camYaw) * hx + sz,
     );
-    this.camera.lookAt(this.focus.x + sx, 0, this.focus.z + sz);
+    this.camera.lookAt(this.focus.x + sx, this.focus.y, this.focus.z + sz);
 
     this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
     this.sun.target.position.set(this.focus.x, 0, this.focus.z);

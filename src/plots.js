@@ -165,15 +165,25 @@ export function generatePlots(map, anchor = null, opts = {}) {
 
   // --- Found the city: level the INTERIOR to clean ground. The rampart band
   // itself is left exactly as the land made it — that band is where crag,
-  // water and wood get to be the wall.
+  // water and wood get to be the wall. The founders grade the earth too:
+  // interior elevation is pulled toward the keep's ground, hard at the plaza
+  // and fading toward the wall, so districts sit on terraced ground while the
+  // rampart keeps the hill it was raised on.
+  const keepElev = map.elev ? map.elev[Math.round(cz) * N + Math.round(cx)] : null;
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const dx = x + 0.5 - cx, dz = z + 0.5 - cz;
       const d = Math.hypot(dx, dz);
       if (d > reach) continue;
-      if (d > radiusAt(Math.atan2(dz, dx) - facing) - 2.2) continue;
+      const edge = radiusAt(Math.atan2(dz, dx) - facing) - 2.2;
+      if (d > edge) continue;
       const t = map.tiles[z * N + x];
       if (t !== TILE.GOLDORE && t !== TILE.STONEORE) map.tiles[z * N + x] = TILE.GRASS;
+      if (keepElev != null) {
+        const w = Math.min(1, Math.max(0, (edge - d) / 6)) * 0.85;
+        const i = z * N + x;
+        map.elev[i] = map.elev[i] * (1 - w) + keepElev * w;
+      }
     }
   }
 
@@ -614,6 +624,17 @@ function pickOuterWorks(map, cx, cz, facing, reach) {
     const toward = Math.atan2(c.z - cz, c.x - cx);
     const facingAlign = Math.cos(toward - facing); // 1 = square on the war road
     scored.push({ ...c, d, score: c.score + facingAlign * 9 - d * 0.22 });
+  }
+  // A site with no pinch in easy reach still gets offered the nearest one on
+  // the planet — a longer ride to the works, never a site with no works at all.
+  if (!scored.length) {
+    let best = null, bd = Infinity;
+    for (const c of spots) {
+      const d = Math.hypot(c.x - cx, c.z - cz);
+      if (d < reach + 7 || d >= bd) continue;
+      bd = d; best = { ...c, d, score: c.score };
+    }
+    if (best) scored.push(best);
   }
   scored.sort((a, b) => (b.score - a.score) || (a.x - b.x) || (a.z - b.z));
   const kept = [];
