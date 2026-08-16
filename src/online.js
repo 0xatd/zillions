@@ -5,6 +5,10 @@
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
+// Increment this only when two browser builds cannot safely share a room.
+// Rooms carry the value in metadata so stale tabs fail before taking a seat.
+export const LOBBY_PROTOCOL_VERSION = 3;
+export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
 const SIGNAL_ATTEMPTS = 3;
@@ -63,6 +67,9 @@ function roomToGame(row) {
     mode: metadata.mode || 'campaign',
     rules: row.rules,
     metadata,
+    protocol_version: Number(metadata.protocolVersion || 0),
+    client_version: String(metadata.clientVersion || 'legacy'),
+    protocol_compatible: Number(metadata.protocolVersion || 0) === LOBBY_PROTOCOL_VERSION,
     difficulty: row.difficulty || 'normal',
     // A selected roster is authoritative. metadata.players is only a legacy
     // fallback for rows fetched without the nested relation.
@@ -72,6 +79,24 @@ function roomToGame(row) {
     updated_at: row.updated_at || row.last_seen_at,
     _players: players,
   };
+}
+
+export function roomCompatibility(game) {
+  const protocol = Number(game?.protocol_version ?? game?.metadata?.protocolVersion ?? 0);
+  return {
+    compatible: protocol === LOBBY_PROTOCOL_VERSION,
+    expected: LOBBY_PROTOCOL_VERSION,
+    actual: protocol,
+    reason: protocol
+      ? `This room uses multiplayer protocol ${protocol}; your game uses ${LOBBY_PROTOCOL_VERSION}. Refresh both players and create a new room.`
+      : 'This room was created by an older game build. Refresh both players and create a new room.',
+  };
+}
+
+export function assertRoomCompatibility(game) {
+  const result = roomCompatibility(game);
+  if (!result.compatible) throw new Error(result.reason);
+  return result;
 }
 
 export function canRejoinRoom(game, userId) {
@@ -435,7 +460,14 @@ export class OnlineLobby {
   }
 
   async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1 } = {}) {
-    const metadata = { level, mode, hostName: this.me.name, players: 1 };
+    const metadata = {
+      level,
+      mode,
+      hostName: this.me.name,
+      players: 1,
+      protocolVersion: LOBBY_PROTOCOL_VERSION,
+      clientVersion: CLIENT_VERSION,
+    };
     const { data, error } = await this.sb.from('rooms').insert({
       name: `${this.me.name}'s frontier`,
       host_user_id: this.me.id,
@@ -516,6 +548,16 @@ export class OnlineLobby {
     if (fields.difficulty) patch.difficulty = fields.difficulty;
     const { error } = await this.sb.from('rooms').update(patch).eq('id', this.game.id);
     if (error) throw new Error(error.message);
+    const setupChanged = fields.level || fields.mode || fields.difficulty;
+    if (setupChanged) {
+      // A Ready vote is consent to one exact setup. Changing any host-owned
+      // setting invalidates every guest vote, as in modern competitive lobbies.
+      const { error: readyError } = await this.sb.from('room_players')
+        .update({ ready: false })
+        .eq('room_id', this.game.id)
+        .neq('user_id', this.me.id);
+      if (readyError) throw new Error(`Room updated, but Ready reset failed: ${readyError.message}`);
+    }
     this.game = {
       ...this.game,
       metadata,
@@ -722,6 +764,7 @@ export class OnlineLobby {
   }
 
   async joinGame(game, unlockedLevel = 1) {
+    assertRoomCompatibility(game);
     this.game = game;
     const used = new Set((game._players || []).map((p) => Number(p.seat || 0)));
     let seat = 2;
@@ -755,6 +798,7 @@ export class OnlineLobby {
   }
 
   async watchGame(game) {
+    assertRoomCompatibility(game);
     this.game = game;
     await this._joinGameChannel(game.id, false);
     await this.signal({ t: 'knock', role: 'spectator', name: this.me.name });
