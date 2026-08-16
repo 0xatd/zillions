@@ -66,6 +66,11 @@ class App {
     this.ui = new UI(document.getElementById('ui'), {
       onStart: (d, hero) => {
         if (this.mpRole === 'guest') return; // host launches the match
+        if (this.mpRole === 'host' && this.onlineMode && this.lobby?.game && !this._launchCountdownComplete) {
+          this._beginLaunchCountdown();
+          return;
+        }
+        this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
           if (this.onlineMode && this.lobby?.game) {
@@ -135,6 +140,7 @@ class App {
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
       onRoomReady: (ready) => this._setRoomReady(ready),
       onRoomLeave: () => this._leaveOnlineRoom(),
+      onMatchLeave: () => this._leaveOnlineMatch(),
       onRoomReconnect: (userId) => this._retryRoomConnection(userId),
       onRoomRemovePlayer: (userId) => this._removeRoomPlayer(userId),
     });
@@ -1009,7 +1015,16 @@ class App {
   }
 
   async _onGuestMsg(m) {
-    if (m.t === 'lobby') {
+    if (m.t === 'countdown') {
+      this.audio.init();
+      this.audio.countdown(m.count);
+      this.ui.showRoomCountdown(m.count);
+    }
+    else if (m.t === 'countdownCanceled') {
+      this.ui.showBanner('Launch canceled: a player disconnected.', 'bad', 4000);
+      if (this.lobby?.game) this._onRoomUpdate(this.lobby.game);
+    }
+    else if (m.t === 'lobby') {
       this.mpSeat = m.n;
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
     }
@@ -1285,6 +1300,7 @@ class App {
     const connectionBlockers = this._roomRosterFromGame(game).filter((player) => !player.host && player.state !== 'connected');
     const connectionNames = connectionBlockers.map((player) => `@${player.name}`).join(', ');
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
+    this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
       isHost,
@@ -1339,6 +1355,40 @@ class App {
       await this.lobby.updateRoomPlayer({ ready: !!ready });
     } catch (e) {
       this.ui.showBanner(`Could not update Ready: ${e.message || 'Server update failed.'} Retry when the connection recovers.`, 'bad', 6000);
+    }
+  }
+
+  async _beginLaunchCountdown() {
+    if (this._launchCountdownActive || this.mpRole !== 'host' || !this.lobby?.game) return;
+    const eligibility = roomLevelEligibility(this.lobby.game);
+    const readiness = roomLaunchReadiness(this.lobby.game, this.peers.length + 1);
+    if (!eligibility.eligible || !readiness.ready) {
+      this._onRoomUpdate(this.lobby.game);
+      return;
+    }
+    this._launchCountdownActive = true;
+    this.audio.init();
+    try {
+      for (let count = 5; count >= 1; count--) {
+        const current = roomLaunchReadiness(this.lobby.game, this.peers.length + 1);
+        if (!current.ready || !roomLevelEligibility(this.lobby.game).eligible) {
+          this.ui.showBanner('Launch canceled because a player disconnected or became ineligible.', 'bad', 5000);
+          this._broadcast({ t: 'countdownCanceled' });
+          this._onRoomUpdate(this.lobby.game);
+          return;
+        }
+        this.ui.showRoomCountdown(count);
+        this.audio.countdown(count);
+        this._broadcast({ t: 'countdown', count });
+        await this.lobby.sendRoomChat(`Battle starts in ${count}…`, 'room').catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      this.ui.showRoomCountdown(0);
+      this._broadcast({ t: 'countdown', count: 0 });
+      this._launchCountdownComplete = true;
+      this.ui.activateStart();
+    } finally {
+      this._launchCountdownActive = false;
     }
   }
 
@@ -1400,7 +1450,10 @@ class App {
     this.onlineMode = false;
     this.lobby._clearRoomState();
     this.ui.showLobby();
-    this.ui.showBanner(reason === 'removed' ? 'You were removed from the lobby.' : 'The host closed the lobby.', 'bad', 6000);
+    const message = reason === 'removed' ? 'You were removed from the lobby.'
+      : reason === 'match_ended' ? 'The host ended the match.'
+      : 'The host closed the lobby.';
+    this.ui.showBanner(message, 'bad', 6000);
   }
 
   async _leaveOnlineRoom() {
@@ -1420,6 +1473,18 @@ class App {
       this.ui.showLobby();
     } catch (e) {
       this.ui.showBanner(`Could not leave the room: ${e.message || 'Server update failed.'} Try again.`, 'bad', 6000);
+    }
+  }
+
+  async _leaveOnlineMatch() {
+    if (!this.lobby?.game || !this.netMode) return location.reload();
+    try {
+      if (this.mpRole === 'host') {
+        try { await this.lobby.signal({ t: 'roomClosed', to: 'all', reason: 'match_ended' }); } catch { /* status update remains authoritative */ }
+      }
+      await this.lobby.endGame();
+    } finally {
+      location.reload();
     }
   }
 
@@ -3621,6 +3686,7 @@ class App {
     if (!this.game) return;
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
+    this.ui.setMatchExit(this.netMode ? this.mpRole : null);
     this.ui.showPause(this.netMode, help, this._questStatus());
   }
 

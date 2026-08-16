@@ -156,7 +156,7 @@ export class UI {
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
-            <button class="tbtn" id="s-back">← Back</button>
+            <button class="tbtn roomexit" id="s-back">← Back</button>
             <h2 id="s-title">Choose your battle</h2>
           </div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
@@ -245,6 +245,17 @@ export class UI {
           </div>
           <div id="p-note" class="gamesub"></div>
         </div>
+        <div id="room-confirm" class="roomconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="room-confirm-title">
+          <div class="roomconfirmcard">
+            <span class="roomeyebrow">Multiplayer room</span>
+            <h2 id="room-confirm-title">Leave lobby?</h2>
+            <p id="room-confirm-copy"></p>
+            <div class="roomconfirmactions">
+              <button class="tbtn" id="room-confirm-cancel">STAY IN LOBBY</button>
+              <button class="tbtn danger" id="room-confirm-leave">LEAVE LOBBY</button>
+            </div>
+          </div>
+        </div>
       </div>`;
 
     // ----- main menu -----
@@ -263,8 +274,15 @@ export class UI {
     q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#s-back').onclick = () => {
-      if (this._fromLobby && this.cb.onRoomLeave) this.cb.onRoomLeave();
+      if (this._fromLobby) this._confirmRoomExit();
       else this._showScreen('main');
+    };
+    q('#room-confirm-cancel').onclick = () => q('#room-confirm').classList.add('hidden');
+    q('#room-confirm-leave').onclick = () => {
+      q('#room-confirm').classList.add('hidden');
+      if (this._confirmContext === 'match') {
+        if (this.cb.onMatchLeave) this.cb.onMatchLeave();
+      } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
     };
     q('#l-back').onclick = () => this._showScreen('main');
 
@@ -304,7 +322,7 @@ export class UI {
     q('#p-resume').onclick = () => this.cb.onResume();
     q('#p-help').onclick = () => this._showScreen('help');
     q('#p-restart').onclick = () => this.cb.onRestart();
-    q('#p-quit').onclick = () => this.cb.onQuit();
+    q('#p-quit').onclick = () => this._confirmMatchExit();
 
     // ----- setup: hero cards -----
     this.selectedHero = 'alexander';
@@ -415,6 +433,61 @@ export class UI {
     if (!button) return;
     button.classList.toggle('hidden', !visible);
     button.textContent = label;
+  }
+
+  setRoomExit({ isHost = false } = {}) {
+    this._roomExitHost = !!isHost;
+    const button = this.root.querySelector('#s-back');
+    if (!button || !this._fromLobby) return;
+    button.textContent = isHost ? '✕ CLOSE LOBBY' : '← LEAVE LOBBY';
+    button.classList.toggle('danger', isHost);
+  }
+
+  _confirmRoomExit() {
+    const host = !!this._roomExitHost;
+    this._confirmContext = 'room';
+    const dialog = this.root.querySelector('#room-confirm');
+    dialog.querySelector('#room-confirm-title').textContent = host ? 'Close lobby for everyone?' : 'Leave this lobby?';
+    dialog.querySelector('#room-confirm-copy').textContent = host
+      ? 'This removes every player and permanently closes the room.'
+      : 'Your seat will be released so another player can join.';
+    dialog.querySelector('#room-confirm-leave').textContent = host ? 'CLOSE LOBBY' : 'LEAVE LOBBY';
+    dialog.classList.remove('hidden');
+  }
+
+  setMatchExit(role = null) {
+    this._matchExitRole = role;
+    const button = this.root.querySelector('#p-quit');
+    if (!button) return;
+    button.textContent = role === 'host' ? '⛔  END MATCH FOR EVERYONE' : role === 'guest' ? '🚪  LEAVE MATCH' : '🚪  QUIT TO MENU';
+  }
+
+  _confirmMatchExit() {
+    if (!this._matchExitRole) {
+      if (this.cb.onQuit) this.cb.onQuit();
+      return;
+    }
+    const host = this._matchExitRole === 'host';
+    this._confirmContext = 'match';
+    const dialog = this.root.querySelector('#room-confirm');
+    dialog.querySelector('#room-confirm-title').textContent = host ? 'End match for everyone?' : 'Leave this match?';
+    dialog.querySelector('#room-confirm-copy').textContent = host
+      ? 'The shared battle ends immediately for every player.'
+      : 'Your hero will remain under simulation control. You can rejoin while the room is active.';
+    dialog.querySelector('#room-confirm-leave').textContent = host ? 'END MATCH' : 'LEAVE MATCH';
+    dialog.classList.remove('hidden');
+  }
+
+  showRoomCountdown(value) {
+    const button = this.root.querySelector('#s-start');
+    if (!button) return;
+    button.textContent = Number(value) > 0 ? `⚔️  BATTLE STARTS IN ${value}` : '⚔️  LAUNCHING…';
+    button.disabled = true;
+    button.classList.add('disabled');
+  }
+
+  activateStart() {
+    this.root.querySelector('#s-start')?.click();
   }
 
   showLobby() {
