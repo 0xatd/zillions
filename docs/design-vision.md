@@ -16,9 +16,10 @@ difficulty ordering is inverted for reasons that are routing-related rather than
 balance-related. See the Balance Status section of `docs/agent-brief.md` before
 touching any knob.
 
-**Phases 4-6 are NOT implemented** and remain design intent: the folklore
-factions (§7), world-placed side missions (§8), fog of war and landmarks (§9),
-and the planet and galaxy layers (§10).
+**Phases 4, 5, and 6B are NOT implemented** and remain design intent: folklore
+factions (§7), world-placed missions (§8), fog of war and landmarks (§9), and
+the strategic planet and galaxy simulation (§10). Procedural frontier worlds
+in phase 6A are shipped.
 
 ---
 
@@ -121,10 +122,10 @@ reveal, no map filling in as you take it.
 in the pause menu. They're achievements wearing a quest costume. Nothing about
 them is a *mission*.
 
-**11. Hero builds converge.**
-Level 10 grants 9 points across 4 tracks capped at 3 each (12 possible). By the
-end you have nearly everything. There is no build identity and little replay
-variance.
+**11. Hero build choice ends at level 10.**
+Levels 2–10 grant 9 points across 4 tracks capped at 3 each (12 possible).
+Heroes can reach level 100, but later levels add tapered stats only. The player
+must still leave one upgrade track incomplete.
 
 ---
 
@@ -507,8 +508,13 @@ Prove the faction template on one before authoring five.
 **Phase 5 — Fog, landmarks, world-placed quests** — not started
 The "vast" pass. Also where the map stops being noise.
 
-**Phase 6 — Planet view → galaxy layer** — not started
-The frame goes on last, once there's a picture worth framing.
+**Phase 6A — Procedural frontier worlds** — **SHIPPED**
+The five-map Earth campaign opens deterministic frontier worlds without end.
+Cleared worlds persist on the profile.
+
+**Phase 6B — Strategic galaxy simulation** — not started
+Planet ownership, Hive expansion, garrisons, retaking worlds, and interplanetary
+faction state are still future work.
 
 ---
 

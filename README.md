@@ -37,6 +37,18 @@ and asset review only; Vercel is the production host.
 
 Read `docs/agent-brief.md` before review or implementation work.
 
+Use this source order when documents disagree:
+
+1. Current code and `supabase/schema.sql`.
+2. Automated checks in `scripts/`.
+3. `docs/product-contract.md` for product boundaries.
+4. `docs/agent-brief.md` for shipped systems and known pitfalls.
+5. `docs/backend.md` for storage and service boundaries.
+6. `docs/design-vision.md` for future direction only.
+
+For a pull request, diff the full head against the pull request base. Run the
+checks on the exact head. Do not use an old branch report as proof for `main`.
+
 The shipped loop is continuous siege:
 
 - Found a city at a flagged site.
@@ -52,8 +64,9 @@ The shipped loop is continuous siege:
 - Win a campaign map by razing every hive nest, then breaking the counterattack
   its champion leads. Lose it if the Keep falls.
 
-`docs/design-vision.md` holds the longer-range direction (folklore factions, fog
-and landmarks, the planet and galaxy layers). Those are not implemented.
+`docs/design-vision.md` holds the longer-range direction. Folklore factions,
+fog, landmarks, and a strategic galaxy simulation are not implemented. The
+shipped campaign already opens an endless procedural galaxy after level 5.
 
 Serve the repo locally for static development:
 
@@ -139,7 +152,8 @@ and the mapping.
   beside a built structure to upgrade it. Top-tier towers make you choose a
   doctrine: ballista (single-target sniper) or flame (splash), and **T** beside
   a tower changes what it shoots first — nearest, strongest, siege-first or
-  ranged-first.
+  ranged-first. Building upgrades accept 50 gold each second, so expensive
+  tiers do not require long stationary holds.
 - **Camps connect to the roads.** The militia, ranger and sniper camps sit off
   the main plaza, but each has dirt road apron/spur tiles touching the building
   footprint so army production reads as part of the city network.
@@ -234,11 +248,12 @@ Build mode and Fight mode. Q always casts intentionally. You steer.
 | Alexander Thomas | Long-range marksman | Nanite Swarm — heals nearby troops & heroes | Concussion Grenade — blast ahead flings the dead back, he hops backward |
 | Danny Donovan | Long-range sniper | Nutrient Siphon — drains nearby dead, feeds the health back to him | The Weave — invisible and fast, walks through the horde cutting everything touched |
 
-Heroes earn XP from kills within 14 tiles and level 1–10. Each level grants an
-upgrade point that the player spends on Aura, Passive I, Passive II, or Ult
-Damage. The in-game hero plate shows damage, attack speed, range, speed, regen,
-aura radius, and how many allies/enemies are affected by the aura. A fallen
-hero revives at the Keep.
+Heroes earn XP from kills within 14 tiles and can reach level 100. Levels 2–10
+grant nine upgrade points. The player spends each point on Aura, Passive I,
+Passive II, or Ult Damage. Later levels add tapered stat growth without adding
+more upgrade points. The in-game hero plate shows damage, attack speed, range,
+speed, regeneration, aura radius, and affected allies or enemies. A fallen hero
+revives at the Keep.
 
 ## Controls
 
@@ -267,14 +282,29 @@ public username before the game shell opens. Other players see that username,
 not the email address or Google account name. Stats, cloud save, match history,
 and rooms are owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
-**Online lobby** (main menu → Online Lobby): commanders can see signed-in lobby
-presence, global lobby chat, and real public rooms. Public/private room records
-come from Supabase `rooms` and `room_players`. Empty room lists show an empty
-state. Do not seed fake games or fake players.
+**Online lobby** (main menu → Online Lobby): players can see signed-in usernames,
+global lobby chat, and real public rooms. Each room shows its players and the
+host's mode, map, difficulty, hero, and player limit. The browser separates open
+rooms from games in progress. A player can join an open room, rejoin a previous
+seat, or watch an active game without taking a seat. Watch mode is read-only.
+Public/private room records come from Supabase `rooms` and `room_players`.
+Empty room lists show an empty state. Do not seed fake games or fake players.
 
-The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
-hero each). The backend stores identity, rooms, saves, stats, and results. It
-does not run the combat simulation yet.
+The actual match uses peer-to-peer WebRTC lockstep for up to three players.
+Each player controls one hero. The backend stores identity, rooms, saves, stats,
+and results. The backend does not run the combat simulation.
+
+The host cannot start until every listed player has a direct game connection.
+Campaign rooms also require every player to unlock the selected level. After
+the host starts, each guest loads the battlefield and sends `startReady`. The
+host starts lockstep window 0 only after all guests are ready.
+
+The host sequences one command window about every 66 ms. Each packet repeats
+four recent windows. The host keeps 64 windows for repair requests. Guests hold
+an adaptive buffer of 3–10 consecutive windows based on measured latency and
+jitter. If a window is missing, the guest requests that exact window. The HUD
+shows route, round-trip time, jitter, buffered windows, and device frame rate.
+This data separates network catch-up from local rendering stalls.
 
 **Manual invite codes** (lobby → "Manual invite codes"): the serverless
 fallback — trade invite/reply codes over any chat channel, no lobby backend
@@ -296,6 +326,7 @@ identically on every machine.
   history sync to Supabase. The backend's `best_day` column now carries the
   Threat level a run reached.
 - **Cloud save**: the latest solo/host save syncs to Supabase `save_slots`.
+  If restore fails, the game removes the corrupt save and returns to the menu.
 - **Lobby chat and friends**: signed-in global chat uses Supabase
   `lobby_chat`. Friend requests, accepted friends, online state, and
   friend-to-room invites use Supabase `friendships`.
@@ -304,6 +335,8 @@ identically on every machine.
 - **Static fallback**: localStorage remains for local development and offline
   smoke tests. Do not present it as a production profile.
 - **Autosave**: every run autosaves every 20 seconds and on tab close.
+- **Runtime guard**: an uncaught frame error stops the battlefield and shows a
+  reload message. The game does not continue in a partially updated state.
 
 ## Deploying
 
@@ -354,6 +387,7 @@ assets-page.css         Asset browser styles
 assets-page.js          Asset browser renderer
 src/main.js             Bootstraps renderer, UI, and game loop
 src/game.js             Main simulation and rules
+src/runtime-guard.js    Save recovery and frame-loop failure guard
 src/config.js           Balance, heroes, buildings, units, siege
 src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
@@ -364,6 +398,7 @@ src/flowfield.js        Horde pathfinding
 src/lanes.js            Lane graph: capture nodes, lanes, and squad routing
 src/assets.js           GLB and hero media loader
 src/net.js              Co-op WebRTC and lockstep networking
+src/multiplayer-*.js    Room readiness, level eligibility, and jitter helpers
 src/online.js           Supabase room, lobby chat, friends, and game chat adapter
 src/auth.js             Supabase auth/profile/save/stat sync
 src/backend.js          Vercel API helpers
@@ -380,6 +415,7 @@ docs/fortress-inspiration.md  Historical fortification rules the city generator 
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
 scripts/map-check.mjs   Builds every level's map and city and checks it plays
+scripts/multiplayer-*.mjs  Multiplayer start, eligibility, pacing, and repair checks
 ```
 
 ## Tech Notes
@@ -411,7 +447,12 @@ When reviewing or changing gameplay, check:
 - Static local development still works as fallback.
 - The hero picker works.
 - City founding, plot build, repair/rebuild, node capture, and hive musters work.
-- Lobby shows real rooms or a clean empty state.
+- Lobby shows real usernames and rooms, or a clean empty state.
+- Room settings, roster, start readiness, and level eligibility stay visible.
+- Active games allow read-only Watch without adding a player seat.
+- Multiplayer startup waits for every guest to load.
+- Network catch-up shows diagnostics and repairs missing windows.
+- Corrupt saves return to the menu. Frame errors show a recovery message.
 - Audio changes do not break mute or browser autoplay behavior.
 - Large assets are intentional and documented.
 
@@ -425,7 +466,7 @@ python3 -m http.server 8000
 
 Then open the game and asset browser in a real browser.
 
-Useful checks:
+Required repository checks:
 
 ```bash
 npm run check
@@ -434,4 +475,13 @@ jq empty assets/audio/manifest.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
+```
+
+`npm run check` runs syntax, balance, determinism, map, signaling, multiplayer,
+room-refresh, and repository checks. Run a real browser smoke for UI, graphics,
+auth, or multiplayer changes. Do not call a branch deployable until the local
+production build also passes. For the Vercel project, use:
+
+```bash
+npx vercel build --prod
 ```

@@ -119,9 +119,9 @@ Defined in `supabase/schema.sql`:
   'latest'`.
 - `match_history`: completed run summaries. Records are private by default,
   with optional public visibility for future leaderboards.
-- `rooms`: planned multiplayer room browser records.
-- `room_players`: planned room seats, ready state, hero pick, and connection
-  state.
+- `rooms`: live multiplayer room browser records and host game setup.
+- `room_players`: live room seats, usernames, hero picks, connection state, and
+  highest unlocked campaign level.
 - `lobby_chat`: global signed-in lobby chat.
 - `friendships`: friend requests and accepted friend pairs.
 - `room_chat`: room-scoped chat and in-game team chat. `channel = 'room'`
@@ -166,10 +166,14 @@ RLS policy intent:
 4. Supabase `friendships` provides friend requests, accepted friends, and
    friend room invites.
 5. Supabase `rooms`, `room_players`, and `room_chat` provide public/private
-   room rows and room chat.
-6. Host co-op still uses WebRTC signaling and lockstep for the match.
-7. In-game team chat writes to `room_chat` with `channel = 'game'`.
-8. The match simulation is peer-to-peer and host-sequenced.
+   rooms, visible rosters, host setup, and room chat.
+6. The lobby separates open rooms from active games.
+7. A player can Join an open room, Rejoin a prior seat, or Watch an active game.
+8. Campaign rooms block maps that any seated player has not unlocked.
+9. Host co-op uses WebRTC signaling and host-sequenced lockstep.
+10. The host waits for each guest to connect and load before window 0 starts.
+11. In-game team chat writes to `room_chat` with `channel = 'game'`.
+12. The match simulation is peer-to-peer. Watch mode is read-only.
 
 ### Multiplayer Target
 
@@ -200,7 +204,8 @@ The next backend step is to make the Multiplayer hub feel like a conquest map:
 
 ## Known Limits
 
-- Room browser data is real Supabase data, but the room UI is still early.
+- Room browser data, player rosters, and host setup are real Supabase data.
+- Mid-game Join as a new controlling player is not supported. Use Watch.
 - Vercel Blob lobby data is legacy compatibility, not production social state.
 - Server-authoritative multiplayer is not implemented.
 - There is no anti-cheat.
