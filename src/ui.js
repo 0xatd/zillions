@@ -563,7 +563,7 @@ export class UI {
 
       this._updateUpgradePanel(game, h);
 
-      // The one big contextual button: found the city, call a wave, or cast.
+      // The one big contextual button: found the city, cast, or show cooldown.
       const big = q('#bigaction');
       const ab = h.def.ability;
       if (game.phase === 'found') {

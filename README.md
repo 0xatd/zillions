@@ -101,8 +101,8 @@ of tower plots. Chokepoints, by design.
   Upgrade the same way: Razorwire Fence → Plasteel Barricade → then choose
   its final form: **Shock Fence** (electrified, zaps and slows whatever
   chews it) or **Bastion Wall** (double armor).
-- **Ruins rebuild free at dawn** — losing a building costs you its function for
-  the night and its dawn payout, not the building itself.
+- **Ruins are paid decisions.** Losing a building costs its function now, and
+  rebuilding it spends gold that could have gone into the front line.
 - **Supply comes from territory.** Your army ceiling is what the city can
   sustain plus what the ground you hold adds. When you are rich and stuck, the
   answer is always to go and take something.
@@ -148,7 +148,7 @@ everyone's relics pool for the shared city.
 
 The kit is Thronefall-simple with Dota-style readability: heroes auto-attack on
 their own, a passive aura hums around them, two passive upgrade paths shape
-their stats, and Space at night fires the one special. You steer.
+their stats, and Space/Q fires the one special. You steer.
 
 | Hero | Style | Aura (passive) | Special (Space/Q) |
 | --- | --- | --- | --- |

@@ -192,7 +192,10 @@ function runWorker() {
 }
 
 function runChild(args = []) {
-  const child = spawnSync(process.execPath, [scriptPath, '--worker', ...args], {
+  const workerArgs = [scriptPath, '--worker'];
+  if (ticksArg) workerArgs.push(ticksArg);
+  workerArgs.push(...args);
+  const child = spawnSync(process.execPath, workerArgs, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
