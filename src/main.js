@@ -1074,6 +1074,8 @@ class App {
       ranger: { color: 0x9dff8a, trail: 0xd8ffd0, speed: 17, size: 0.2, tail: 0.14, arc: 0.35 },
       sniper: { color: 0xd9b7ff, trail: 0xffffff, speed: 25, size: 0.18, tail: 0.18, arc: 0.18 },
       tower: { color: 0xffd75e, trail: 0xfff2b0, speed: 18, size: 0.24, tail: 0.16, arc: 0.32 },
+      outpost: { color: 0x8fd8ff, trail: 0xd8f3ff, speed: 17, size: 0.22, tail: 0.14, arc: 0.18 },
+      outpostSiege: { color: 0xffd75e, trail: 0xfff2b0, speed: 14, size: 0.3, tail: 0.18, arc: 0.42 },
       ballista: { color: 0xffffff, trail: 0xffd75e, speed: 16, size: 0.34, tail: 0.22, arc: 0.55 },
       flame: { color: 0xff7a2e, trail: 0xffd75e, speed: 11, size: 0.3, tail: 0.16, arc: 0.12 },
       shotgun: { color: 0xfff2b0, trail: 0xffd75e, speed: 18, size: 0.18, tail: 0.1, arc: 0.08 },
@@ -1096,7 +1098,7 @@ class App {
     if (fx == null || fz == null) return { x: 0, y: extra.fy ?? e.fy ?? 0.7, z: 0 };
     const v = this._shotVector({ ...e, fx, fz, tx: extra.tx ?? e.tx, tz: extra.tz ?? e.tz });
     let side = 0, forward = 0.35, y = extra.fy ?? e.fy ?? 0.72;
-    if (kind === 'tower' || kind === 'ballista' || kind === 'flame') {
+    if (kind === 'tower' || kind === 'ballista' || kind === 'flame' || kind === 'outpost' || kind === 'outpostSiege') {
       forward = kind === 'ballista' ? 0.85 : 0.68;
       y = extra.fy ?? e.fy ?? 3.1;
     } else if (kind === 'spit') {
@@ -1549,18 +1551,20 @@ class App {
     if (!nt || nt.branch) return compact ? 'choose' : 'Choose its final upgrade.';
     const def = nt.def;
     const kind = PLOT_KINDS[plot.kind];
+    const roles = [];
     if (kind.unit) {
       const u = UNITS[kind.unit];
       const count = def.count || 0;
-      return compact
+      roles.push(compact
         ? `${count} ${u.icon}/${def.every}s`
-        : `Musters ${count} ${u.name}${count === 1 ? '' : 's'} every ${def.every}s, forever.`;
+        : `Musters ${count} ${u.name}${count === 1 ? '' : 's'} every ${def.every}s, forever.`);
     }
-    if (def.income) return compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`;
     if (def.dmg) {
       const splash = def.splash ? ' splash' : '';
-      return compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`;
+      roles.push(compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`);
     }
+    if (def.income) roles.push(compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`);
+    if (roles.length) return roles.join(compact ? ' · ' : ' ');
     if (def.zap) return compact ? 'zap wall' : `Damages and slows enemies that chew it.`;
     if (plot.kind === 'wall') return compact ? `${def.hp} HP` : `${def.hp} HP barrier. Blocks and buys time.`;
     return compact ? `${def.hp} HP` : `${def.hp} HP structure.`;
@@ -2041,6 +2045,21 @@ class App {
           box(0.75, 0.85, 0.75, 0x4d5560, -0.7, 0.42, 0.75);
           box(0.08, 3.4, 0.08, 0x2f2a24, -0.85, 1.7, -0.7);
           box(0.7, 0.45, 0.03, 0x59b06e, -0.52, 3.15, -0.7);
+          const head = new THREE.Group();
+          head.position.set(0.25, 1.65, -0.15);
+          const gun = new THREE.Mesh(new THREE.BoxGeometry(tier >= 3 ? 0.34 : 0.24, 0.2, tier >= 3 ? 1.25 : 0.78), M(tier >= 3 ? 0x4a4440 : 0x2f3a44));
+          gun.position.z = 0.25;
+          gun.castShadow = true;
+          head.add(gun);
+          if (tier >= 3) {
+            const shield = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.62, 0.12), M(0x6b6152));
+            shield.position.set(0, -0.05, -0.18);
+            shield.castShadow = true;
+            head.add(shield);
+            box(1.8, 0.45, 0.28, 0x4d5560, 0, 0.8, -0.9);
+          }
+          g.add(head);
+          g.userData.head = head;
         }
         break;
       }
@@ -2683,7 +2702,7 @@ class App {
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
             break;
           }
-          this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' ? 'sniper' : e.kind);
+          this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' || e.kind === 'outpostSiege' ? 'sniper' : e.kind === 'outpost' ? 'tower' : e.kind);
           this._spawnProjectile(e, {
             ty: e.kind === 'ballista' ? 0.8 : undefined,
             impact: {
@@ -2707,7 +2726,7 @@ class App {
             this.burst(lerp(muzzle.x, hit.x, t), lerp(muzzle.y, hit.y, t), lerp(muzzle.z, hit.z, t),
               { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.14, size: 0.38, spread: 0.02, up: 0 });
           }
-          if (e.kind === 'tower' || e.kind === 'ballista') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+          if (e.kind === 'tower' || e.kind === 'ballista' || e.kind === 'outpost' || e.kind === 'outpostSiege') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
           break;
         }
         case 'zdeath':
@@ -2967,7 +2986,7 @@ class App {
   // Kick the nearest tower head toward its target with a little recoil.
   _towerRecoil(fx, fz, tx, tz) {
     for (const rec of this.buildingMeshes.values()) {
-      if (rec.b.kind !== 'tower') continue;
+      if (rec.b.kind !== 'tower' && rec.b.kind !== 'outpost') continue;
       if (Math.abs(rec.b.cx - fx) < 0.6 && Math.abs(rec.b.cz - fz) < 0.6) {
         const head = rec.mesh.userData.head;
         if (head) {

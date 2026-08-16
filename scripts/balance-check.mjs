@@ -119,6 +119,19 @@ function assertCampRoadAccess(level) {
   }
 }
 
+function assertLaneWaypointsAreSteppable(game, label) {
+  for (const [key, path] of game.laneGraph.lanes.entries()) {
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      assert.ok(len <= Math.SQRT2 + 0.06,
+        `${label}: lane ${key} has compressed waypoint ${i}->${i + 1} (${len.toFixed(2)} tiles)`);
+      assert.ok(game.map.isWalkable(a[0] | 0, a[1] | 0), `${label}: lane ${key} waypoint ${i} is not walkable`);
+      assert.ok(game.map.isWalkable(b[0] | 0, b[1] | 0), `${label}: lane ${key} waypoint ${i + 1} is not walkable`);
+    }
+  }
+}
+
 // The siege must actually run: hives muster, camps muster, nodes flip, and
 // repairing a damaged structure has to cost gold and restore health.
 function assertSiegeLoop(level) {
@@ -128,6 +141,7 @@ function assertSiegeLoop(level) {
   assert.equal(game.phase, 'live', `${level.name} did not enter the live siege after founding`);
   assert.ok(game.laneGraph && game.laneGraph.size > 0, `${level.name} built no lane graph`);
   assert.ok(game.nodes.length > 0, `${level.name} generated no lane nodes`);
+  assertLaneWaypointsAreSteppable(game, level.name);
   assert.ok(
     game.plots.some((p) => p.kind === 'outpost'),
     `${level.name} generated no Forward Camp plots on its nodes`,
@@ -186,6 +200,12 @@ function assertSiegeLoop(level) {
         `${level.name}: a Forward Camp on a quarry is not tougher than one on open ore`);
     }
   }
+  const outpost = PLOT_KINDS.outpost;
+  assert.ok(outpost.tiers.length >= 3, `${level.name}: Forward Camps must upgrade into lane anchors`);
+  assert.ok(outpost.tiers[1].dmg > 0 && outpost.tiers[1].range <= 7,
+    `${level.name}: War Outpost must provide short-range lane fire`);
+  assert.ok(outpost.tiers[2].dmg > outpost.tiers[1].dmg && outpost.tiers[2].hp > outpost.tiers[1].hp,
+    `${level.name}: Lane Bastion must improve both firepower and durability`);
   const clearingNode = game.activeNodes().find((n) => n.kind === 'clearing');
   if (clearingNode && oreNode) {
     const cPlot = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === clearingNode.id);

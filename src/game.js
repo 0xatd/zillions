@@ -789,7 +789,8 @@ export class Game {
     if (!free) {
       if (unitKey) {
         const unit = UNITS[unitKey];
-        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s. 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
+        const guard = def.dmg ? ` Short-range guns add ${def.dmg} damage at ${def.range} tiles.` : '';
+        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s.${guard} 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
       } else {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
       }
@@ -2489,7 +2490,7 @@ export class Game {
 
   _updateTowers(dt) {
     for (const b of this.buildings) {
-      if (!b.alive || b.kind !== 'tower' || !b.def.dmg) continue;
+      if (!b.alive || !b.def.dmg || !b.def.range || !b.def.rof) continue;
       b.cooldown -= dt;
       if (b.stunT > 0) { b.stunT -= dt; continue; }
       if (b.cooldown > 0) continue;
@@ -2497,22 +2498,25 @@ export class Game {
       if (best) {
         b.cooldown = 1 / b.def.rof;
         const tdmg = b.def.dmg * (1 + this.relicMods.towerDmg);
+        const plot = this.plots.find((p) => p.id === b.plotId);
+        const shotY = b.kind === 'outpost'
+          ? 1.75 + (((plot && plot.tier) || 1) - 1) * 0.28
+          : 2.2 + ((plot && plot.tier) || 1) * 0.45 + 0.48;
+        const shotKind = b.kind === 'outpost'
+          ? (b.def.splash ? 'outpostSiege' : 'outpost')
+          : (b.def.branch === 'ballista' ? 'ballista' : 'tower');
         if (b.def.splash) {
           const s2 = b.def.splash * b.def.splash;
           for (const zb of this.zombies) {
             if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, tdmg, b.cx, b.cz);
           }
-          const plot = this.plots.find((p) => p.id === b.plotId);
-          const towerY = 2.2 + ((plot && plot.tier) || 1) * 0.45 + 0.48;
-          this.emit({ type: 'shot', kind: 'flame', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: towerY, targetScale: best.def.scale });
+          this.emit({ type: 'shot', kind: b.kind === 'outpost' ? shotKind : 'flame', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale });
         } else {
           this.damageZombie(best, tdmg, b.cx, b.cz);
-          const plot = this.plots.find((p) => p.id === b.plotId);
-          const towerY = 2.2 + ((plot && plot.tier) || 1) * 0.45 + 0.48;
-          this.emit({ type: 'shot', kind: b.def.branch === 'ballista' ? 'ballista' : 'tower', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: towerY, targetScale: best.def.scale });
+          this.emit({ type: 'shot', kind: shotKind, buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale });
         }
         b.lastTx = best.x; b.lastTz = best.z;
-        this.wakeZombies(b.cx, b.cz, 9);
+        this.wakeZombies(b.cx, b.cz, b.kind === 'outpost' ? 7 : 9);
       }
     }
   }

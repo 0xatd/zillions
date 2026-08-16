@@ -121,8 +121,9 @@ of tower plots. Chokepoints, by design.
   escorts your hero, and **3 Push** sends them out along the lanes.
 - **Take and hold lane nodes.** Stand on a node with no enemies nearby and it
   flips to you. Held nodes pay income, and you can raise a **Forward Camp** on
-  one so squads muster at the front instead of walking there. Lose the node and
-  you lose what you built on it.
+  one so squads muster at the front instead of walking there. Upgrade it into a
+  **War Outpost** and then **Lane Bastion** to add short-range lane fire and a
+  tough anchor for that road. Lose the node and you lose what you built on it.
 - **The ground is terrain; the owner is a separate question.** Nodes are read
   out of the map itself — ore fields, fords pinched between water and crags,
   sheltered clearings, barrow shelves — so no two planets share a skeleton. What
@@ -133,7 +134,9 @@ of tower plots. Chokepoints, by design.
 - **Ground has character.** An Ore Field pays double. A Quarry makes the Forward
   Camp built on it half again as tough. A Clearing lets it muster an extra
   trooper. A Ford is always well guarded, because whoever holds the pinch holds
-  the road. A Barrow has something buried under it, once.
+  the road. Upgraded camps are the melee/ranged/siege lane support layer: blockers
+  muster there, short-range guns cover the fight, and the top tier splashes packed
+  pressure. A Barrow has something buried under it, once.
 - **Campaign**: raze every hive on each of the 5 maps, then break the
   counterattack its unique champion leads. **Survival**: endless siege, a boss
   every fifth Threat level — your record is the Threat you drove it to.

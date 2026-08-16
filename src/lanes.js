@@ -72,11 +72,12 @@ function extractPath(map, field, tx, tz) {
 }
 
 // Keep every `step`-th waypoint plus both ends. Squads steer STRAIGHT from one
-// waypoint to the next, so the step has to stay small enough that the straight
-// line between two waypoints is itself walkable — otherwise a squad aims at a
-// point on the far side of a headland and grinds against the coast forever.
-function downsample(path, step = 3) {
+// waypoint to the next, so the default is intentionally every tile. Compressing
+// these paths made valid flood routes cut across forests, water and crags, which
+// pinned units against terrain and then dropped them into direct-move fallback.
+function downsample(path, step = 1) {
   if (!path || path.length <= 2) return path;
+  if (step <= 1) return path;
   const out = [path[0]];
   for (let i = step; i < path.length - 1; i += step) out.push(path[i]);
   out.push(path[path.length - 1]);

@@ -30,6 +30,8 @@ Use continuous siege on a lane graph as the gameplay base:
 - Hordes are produced by visible hive nests, continuously.
 - Hive nests are real bases: health, defenders, and blighted ground.
 - Lane nodes are taken by presence, pay income, and unlock Forward Camps.
+  Forward Camps upgrade into short-range lane anchors: blockers, local fire, and
+  a final bastion/siege tier on the road the player chooses to hold.
 - Node placement is derived from terrain, never from a ring.
 - What a node IS may be readable from the map. Who HOLDS it must not be, until
   the player has scouted it.

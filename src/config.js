@@ -218,9 +218,10 @@ export const PLOT_KINDS = {
     onNode: true, // only fundable on a lane node you already hold
     tiers: [
       { name: 'Forward Camp', cost: 34, hp: 620, count: 2, every: 24, income: 6 },
-      { name: 'War Outpost', cost: 58, hp: 900, count: 3, every: 19, income: 12 },
+      { name: 'War Outpost', cost: 58, hp: 900, count: 3, every: 19, income: 12, dmg: 16, rof: 1.0, range: 6.2 },
+      { name: 'Lane Bastion', cost: 86, hp: 1250, count: 4, every: 16, income: 16, dmg: 28, rof: 0.9, range: 6.8, splash: 1.1 },
     ],
-    desc: 'Raise it on ground you hold. Squads muster at the front instead of walking there, and it pays its own keep.',
+    desc: 'Raise it on ground you hold. Upgrades turn each lane into a short-range guard post that musters blockers and shoots nearby pressure.',
   },
 };
 

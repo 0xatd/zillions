@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HEROES, HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX } from '../src/config.js';
+import { HEROES, HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, PLOT_KINDS } from '../src/config.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -103,6 +103,12 @@ for (const [key, hero] of Object.entries(HEROES)) {
   assert.ok(hero.aura, `${key} must keep an aura upgrade path`);
   assert.ok(hero.ability, `${key} must keep an ult damage upgrade path`);
 }
+
+const outpost = PLOT_KINDS.outpost;
+assert.equal(outpost.onNode, true, 'Forward Camps must stay tied to captured lane nodes');
+assert.ok(outpost.tiers.length >= 3, 'Forward Camps must upgrade into a lane-anchor tier');
+assert.ok(outpost.tiers[1].dmg > 0 && outpost.tiers[1].range <= 7, 'War Outpost must be short-range lane support');
+assert.ok(outpost.tiers[2].dmg > outpost.tiers[1].dmg && outpost.tiers[2].splash > 0, 'Lane Bastion must add siege/splash support');
 
 const oldAutoRankCopy = /special ranks up automatically|levels 4 and 7/i;
 for (const rel of ['README.md', 'src/ui.js', 'src/online.js', 'docs/agent-brief.md', 'docs/product-contract.md']) {

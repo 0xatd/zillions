@@ -31,6 +31,9 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
   `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
   until the node is player-owned.
+- Forward Camps are the lane-anchor ladder. Tier 1 musters blockers at the
+  front, Tier 2 adds short-range fire, and Tier 3 becomes a tougher Lane Bastion
+  with splash support. Do not add individual unit micro to solve lane pressure.
 - Node placement comes from terrain analysis (`GameMap._findNodeFeatures`):
   a summed-area openness field finds fords and clearings, tile clustering finds
   ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
@@ -145,6 +148,9 @@ Do not describe any of it as shipped.
 - Upgrades must work from all sides of a building footprint.
 - City camps/barracks must stay visually road-connected. The balance check
   verifies all three city camps exist and each has a dirt road edge.
+- Lane routes must stay tile-steppable. Squads steer straight between waypoints,
+  so compressed lane paths can cut across terrain and pin units. `balance-check`
+  asserts every lane segment is at most one tile/diagonal step.
 - Army control is blended: squads fight automatically, but the player sets the
   global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
   and `3 Push` walks the lanes. Do not add individual unit micro.

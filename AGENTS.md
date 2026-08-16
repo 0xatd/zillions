@@ -34,6 +34,8 @@ The gameplay base is continuous siege on a lane graph:
   around them, and can be razed.
 - Lane nodes are captured by uncontested presence, pay income, and carry
   Forward Camp plots that only unlock on ground the player holds.
+- Forward Camps are lane anchors. Their upgrades must add local holding power:
+  front-line blockers, short-range fire, and a final bastion/siege tier.
 - Node placement is READ FROM TERRAIN (`GameMap._findNodeFeatures`) — ore
   fields, fords, clearings, barrows, quarries — never from a ring. Do not put
   them back on a ring; identical skeletons across maps kill the mystery.
