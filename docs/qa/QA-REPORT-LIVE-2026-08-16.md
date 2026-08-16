@@ -330,6 +330,19 @@ In room. Turtle kit panel looks good (Bulwark / Reactive Plating / Iron Will / L
 
 **Root cause guess:** the room screen reuses the campaign-select component for both roles. Split it: `RoomSetupHost` vs `RoomSummaryGuest` sharing one summary card. That one refactor removes bugs NOTE-2/3/4 *and* most of this note.
 
+#### Visual reference — Warcraft III custom-game lobby
+
+Use Alex's Warcraft III lobby screenshots as the information-hierarchy reference for this redesign. Do not copy the ornamental chrome; copy what the screen makes obvious:
+
+- **Roster first.** Seats, teams, player names, hero picks, ready state, and empty slots own the main panel. A player should understand who is in the war without scrolling.
+- **One authoritative match setup.** The host's map, mode, and difficulty appear once in a compact map/match card. Guests never see a second, contradictory campaign picker.
+- **Clear ownership.** Host-editable controls look editable. Guest views look intentionally read-only. Do not render disabled host controls as if they belong to the guest.
+- **Pinned social layer.** Room chat and connection state stay visible while players wait; they are not buried below setup controls.
+- **One unmistakable action.** Guest `READY` and host `LAUNCH N/N READY` stay pinned in the lower action area. They never fall below the fold.
+- **Dense, not noisy.** Use the available width for a compact seat table and map preview rather than tall hero/map cards. Keep Zillions' sci-fi visual language and replace emoji-carried status with real state styling.
+
+Suggested desktop composition: compact match/map card on the left, seat/hero roster in the center, chat on the right or directly below the roster, and a fixed Ready/Launch action row. On narrow screens, keep the order match summary → roster → chat → pinned action.
+
 ### NOTE-6 — Back abandons the room without closing it
 
 **Player observation (Alex):** after leaving the room with Back, the lobby still showed `atd's war` as an open 1/3 game. The online list also still showed `@ted` after Ted's browser had been fully stopped.
