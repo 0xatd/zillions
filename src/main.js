@@ -18,6 +18,7 @@ import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
+import { consecutiveWindowCount, hasConsecutiveWindowBuffer } from './multiplayer-pacing.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -1082,7 +1083,11 @@ class App {
             break;
           }
           if (!this.netPrimed) {
-            const hasBuffer = this.inbox.has(w + NET_GUEST_BUFFER - 1) || this.inbox.size >= NET_GUEST_BUFFER;
+            // The window channel is intentionally unordered. A large inbox is
+            // not necessarily a usable buffer: [w, w+2] still has a hole at
+            // w+1 and would restart for one tick, freeze, then repeat. Resume
+            // only behind a consecutive run of windows.
+            const hasBuffer = hasConsecutiveWindowBuffer(this.inbox, w, NET_GUEST_BUFFER);
             if (!hasBuffer) { stalled = true; break; }
             this.netPrimed = true;
           }
@@ -1108,9 +1113,7 @@ class App {
   // Consecutive windows banked ahead of the guest's next lockstep boundary.
   _windowsBuffered() {
     const w = Math.ceil(this.simFrame / NET_STEP);
-    let n = 0;
-    while (n < 32 && this.inbox.has(w + n)) n++;
-    return n;
+    return consecutiveWindowCount(this.inbox, w);
   }
 
   _broadcastFast(msg) {
