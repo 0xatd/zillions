@@ -473,6 +473,16 @@ export class OnlineLobby {
       last_seen_at: new Date().toISOString(),
     }, { onConflict: 'room_id,user_id' });
     if (seatError) throw new Error(seatError.message);
+    this._seatedRoomId = data.id;
+    this._localRoomPlayer = {
+      room_id: data.id,
+      user_id: this.me.id,
+      seat: 1,
+      display_name: this.me.name,
+      hero: this.me.hero,
+      ready: false,
+      connection_state: 'online',
+    };
     this.game = roomToGame({ ...data, room_players: [{ user_id: this.me.id, display_name: this.me.name, hero: this.me.hero }] });
     await this._joinGameChannel(data.id, true);
     // Heartbeat so the listing stays fresh; stops when the page dies.
@@ -545,6 +555,18 @@ export class OnlineLobby {
     // event, hero update and explicit refresh. An older one-player response
     // must not arrive last and erase the newer roster from the screen.
     if (requestId !== this._roomRefreshRequestId || this.game?.id !== gameId) return this.game;
+    // A successful seat write is stronger evidence than an occasionally
+    // incomplete nested room_players read. Keep this client's verified seat
+    // visible until it explicitly leaves; watchers never set _seatedRoomId,
+    // so this cannot manufacture a spectator seat.
+    if (this._seatedRoomId === gameId && this.me?.id) {
+      const players = [...(data.room_players || [])];
+      if (!players.some((player) => player.user_id === this.me.id)) {
+        const local = (this.game?._players || []).find((player) => player.user_id === this.me.id)
+          || this._localRoomPlayer;
+        if (local) data.room_players = [...players, local];
+      }
+    }
     this.game = roomToGame(data);
     if (this.cb.onRoom) this.cb.onRoom(this.game);
     return this.game;
@@ -571,6 +593,8 @@ export class OnlineLobby {
     if (!this.game) return;
     clearInterval(this._beat);
     try { await this.sb.from('rooms').update({ status: 'finished' }).eq('id', this.game.id); } catch { /* closing */ }
+    this._seatedRoomId = null;
+    this._localRoomPlayer = null;
     this.game = null;
   }
 
@@ -629,7 +653,7 @@ export class OnlineLobby {
     const used = new Set((game._players || []).map((p) => Number(p.seat || 0)));
     let seat = 2;
     while (used.has(seat) && seat <= 3) seat++;
-    const { error } = await this.sb.from('room_players').upsert({
+    const localPlayer = {
       room_id: game.id,
       user_id: this.me.id,
       seat: Math.min(seat, 3),
@@ -638,8 +662,18 @@ export class OnlineLobby {
       ready: false,
       connection_state: 'online',
       last_seen_at: new Date().toISOString(),
-    }, { onConflict: 'room_id,user_id' });
+    };
+    const { error } = await this.sb.from('room_players').upsert(localPlayer, { onConflict: 'room_id,user_id' });
     if (error) throw new Error(error.message);
+    this._seatedRoomId = game.id;
+    this._localRoomPlayer = localPlayer;
+    this.game = roomToGame({
+      ...game,
+      room_players: [
+        ...(game._players || []).filter((player) => player.user_id !== this.me.id),
+        localPlayer,
+      ],
+    });
     await this._joinGameChannel(game.id, false);
     await this.refreshCurrentGame();
     await this.signal({ t: 'knock', name: this.me.name });
