@@ -377,3 +377,32 @@ This is real backend state, not just stale lobby rendering:
 **Expected:** Back from an online room must explicitly leave it. A host should close/cancel an unstarted room; a guest should remove or mark its seat offline. The client must clear room channels, heartbeat timers, local room state, pending peers, and refresh the lobby immediately. Page close should be a fallback, not the primary cleanup path. Stale presence and abandoned rooms also need a bounded server-side expiry so crashes cannot leave ghosts indefinitely.
 
 **Severity:** P1. The lobby advertises games nobody is hosting and people who are no longer online, so players cannot trust either list.
+
+
+---
+
+## Mission 1 (take 2) — room `B86244` — TEAM-WIDE SPAWN BUG
+
+**~20:58–21:02 UTC.** Alex hosted again (Alexander), @ted (Scott), me guest (Tiger). 3 players. Different seed than 2C7EC1.
+
+### BUG-SOLO/MP-6 — All three heroes spawned boxed inside impassable crag (P0, blocks all play)
+
+**Player quote (Alex, host):** *"i am stuck in the terrain i spawned in. how about you"*
+
+**Hard data (guest side):**
+- All 3 heroes at exact spawn line — (79, 83.5) / (81, 83.5) / (83, 83.5) — **zero displacement over 70+ seconds** of 500ms position sampling across all three heroes.
+- Movement probe, cardinal directions, 1.2s each, input verified reaching the sim (hero mx/mz set): **0.0 units moved in all four directions.**
+- Diagonal probe: same, 0.0.
+- The game's own hint banner fired: *"⛰️ Sheer crags — impassable. Follow the bright rim to find a way around."* — there is no rim to follow when spawn itself is enclosed.
+- Sim healthy the whole time: simT running (0→281), lockstep frames advancing, no desync flag, no console errors, zombies idling at 186. This is **not** a netcode stall — it's spawn placement.
+
+**Severity: P0.** Second spawn-terrain bug today (B48083: guest in trees). Worse this time: host AND both guests, whole map unplayable, no in-game recovery (rejoin won't help — terrain is seed-deterministic in lockstep, same room = same boxed spawn).
+
+**Fix directions:**
+1. Spawn validation: after seeding spawn positions, run a flood-fill walkability check from each spawn tile; if a hero can't reach ANY city site, re-roll spawn placement (not the map) before game start.
+2. The `_carveWarRoads`/`_connectFrontier` reachability machinery guarantees hive↔site connectivity — **extend the same guarantee to spawn tiles**. Nothing may be marooned, including players.
+3. Cheap guard: on `phase === 'found'`, if no hero has moved >1 unit in the first 60 sim-seconds while holding a direction, auto-offer "regenerate spawn" to the host.
+4. The "follow the bright rim" hint needs a fallback when no walkable neighbor exists from spawn.
+
+**Play impact:** game is dead on arrival for this room. Recommend: host ends room, creates a new game (new seed). Screenshot: `coop-b86244-stuck.png`.
+
