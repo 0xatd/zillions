@@ -938,8 +938,11 @@ export class TerrainField {
       return -0.35 - depth * 0.45;
     }
     if (t === TILE.MOUNTAIN) {
+      // Tall and steep on purpose: over the single transition tile the ground
+      // jumps a full body height, so crag reads as a wall, not a hillock you
+      // could stroll up.
       const up = clamp((e - L.mountT) / Math.max(0.001, 1 - L.mountT), 0, 1);
-      return 1.1 + up * 1.5;
+      return 1.5 + up * 1.8;
     }
     // Everything walkable (and forest floor): a gentle roll. Ground that was
     // reclaimed from water or crag (causeways, cut approaches) clamps into the

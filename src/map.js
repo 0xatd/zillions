@@ -23,6 +23,15 @@ export class GameMap extends TerrainField {
         }
         return this._pathBlend;
       }
+      // Impassable crag must never share a color family with walkable ground
+      // (the wastes' light mesa tone read as strollable rock): pull it toward
+      // dark slate so "can't walk there" is legible from the palette alone.
+      if (t === TILE.MOUNTAIN && p.mountain !== undefined) {
+        if (this._cragBlend === undefined) {
+          this._cragBlend = new THREE.Color(p.mountain).lerp(new THREE.Color(0x4e463f), 0.38).getHex();
+        }
+        return this._cragBlend;
+      }
       const map = {
         [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
         [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
@@ -54,10 +63,17 @@ export class GameMap extends TerrainField {
     const varNoise = makeNoise(makeRNG(1234));
     let p = 0;
 
-    // Corner colors and heights are shared by up to four tiles; cache them once.
+    // Corner colors and heights are shared by up to four tiles; cache them
+    // once. Heights first, then colors — the color pass reads the finished
+    // height grid to shade slopes.
     const cw = N + 1;
     const cornerCol = new Float32Array(cw * cw * 3);
     const cornerH = new Float32Array(cw * cw);
+    for (let z = 0; z <= N; z++) {
+      for (let x = 0; x <= N; x++) {
+        cornerH[z * cw + x] = this.cornerHeight(x, z);
+      }
+    }
     for (let z = 0; z <= N; z++) {
       for (let x = 0; x <= N; x++) {
         let r = 0, g = 0, b = 0, n = 0;
@@ -72,11 +88,20 @@ export class GameMap extends TerrainField {
         col.setRGB(r / Math.max(1, n), g / Math.max(1, n), b / Math.max(1, n));
         // Sunlit relief, baked in: high ground lifts toward light, hollows and
         // basins sink — so the landform reads even under flat Lambert shading.
-        const h = this.cornerHeight(x, z);
-        cornerH[z * cw + x] = h;
+        const h = cornerH[z * cw + x];
         const lift = h >= 0 ? Math.min(0.06, h * 0.045) : Math.max(-0.055, h * 0.09);
         const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.05;
         col.offsetHSL(0, 0, v + lift);
+        // Cliff shading: steep faces darken hard, so the crag boundary reads
+        // as a wall you cannot walk up, while gentle walkable rolls (small
+        // corner-to-corner drops) stay untouched.
+        let drop = 0;
+        if (x > 0) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x - 1)]));
+        if (x < N) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x + 1)]));
+        if (z > 0) drop = Math.max(drop, Math.abs(h - cornerH[(z - 1) * cw + x]));
+        if (z < N) drop = Math.max(drop, Math.abs(h - cornerH[(z + 1) * cw + x]));
+        const cliff = Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
+        if (cliff > 0) col.multiplyScalar(1 - cliff);
         // Blighted ground around every hive lair: the stain reads from across
         // the map, so a lair is a place, not a prop dropped on clean grass.
         for (const [nx, nz] of this.nestSpots || []) {
@@ -227,25 +252,70 @@ export class GameMap extends TerrainField {
   }
 
   _buildRocks() {
-    const spots = this._scatter(TILE.MOUNTAIN, (rng) => (rng() < 0.4 ? 1 : 0));
-    const geo = new THREE.DodecahedronGeometry(0.4, 0);
-    const mat = new THREE.MeshLambertMaterial({
-      color: this.theme && this.theme.palette ? this.theme.palette.mountain : 0xe9e2cd,
-    });
-    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
-    mesh.castShadow = true;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
-    for (let i = 0; i < spots.length; i++) {
-      const s = spots[i];
-      q.setFromAxisAngle(up, s.r);
-      sc.set(s.s, s.s * 0.8, s.s);
-      pos.set(s.x, this.groundY(s.x, s.z) + 0.15, s.z);
-      m.compose(pos, q, sc);
-      mesh.setMatrixAt(i, m);
+    // Crag dressing exists to say "you cannot walk here". Jagged rock teeth
+    // crowd the RIM — every crag tile that touches walkable ground grows a
+    // spike or two, so the boundary reads as a fence of stone — while the
+    // interior plateaus get sparser boulders.
+    const N = this.size;
+    const g = new THREE.Group();
+    const rng = makeRNG(888);
+    const teeth = [], boulders = [];
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) continue;
+        const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) =>
+          this.isWalkable(x + dx, z + dz));
+        if (rim) {
+          const n = 1 + (rng() < 0.55 ? 1 : 0);
+          for (let i = 0; i < n; i++) {
+            teeth.push({
+              x: x + 0.2 + rng() * 0.6, z: z + 0.2 + rng() * 0.6,
+              s: 0.8 + rng() * 0.8, r: rng() * Math.PI * 2, tilt: (rng() - 0.5) * 0.3,
+            });
+          }
+        } else if (rng() < 0.35) {
+          boulders.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.75 + rng() * 0.55, r: rng() * Math.PI * 2 });
+        }
+      }
     }
-    mesh.count = spots.length;
-    return mesh;
+    const cragCol = this.colorOf(TILE.MOUNTAIN);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    const eul = new THREE.Euler();
+    if (teeth.length) {
+      const mesh = new THREE.InstancedMesh(
+        new THREE.ConeGeometry(0.4, 1.5, 5),
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(cragCol).multiplyScalar(0.82).getHex() }),
+        teeth.length,
+      );
+      mesh.castShadow = true;
+      teeth.forEach((s, i) => {
+        eul.set(s.tilt, s.r, s.tilt * 0.7);
+        q.setFromEuler(eul);
+        sc.set(s.s, s.s * (0.9 + (i % 3) * 0.25), s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.55 * s.s, s.z);
+        m.compose(pos, q, sc);
+        mesh.setMatrixAt(i, m);
+      });
+      g.add(mesh);
+    }
+    if (boulders.length) {
+      const mesh = new THREE.InstancedMesh(
+        new THREE.DodecahedronGeometry(0.4, 0),
+        new THREE.MeshLambertMaterial({ color: cragCol }),
+        boulders.length,
+      );
+      mesh.castShadow = true;
+      boulders.forEach((s, i) => {
+        eul.set(0, s.r, 0);
+        q.setFromEuler(eul);
+        sc.set(s.s, s.s * 0.8, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.15, s.z);
+        m.compose(pos, q, sc);
+        mesh.setMatrixAt(i, m);
+      });
+      g.add(mesh);
+    }
+    return g;
   }
 
   _buildOre() {
