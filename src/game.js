@@ -13,6 +13,7 @@ import {
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
+  ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
 } from './config.js';
@@ -23,6 +24,8 @@ import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
 const OUTPOST_PLOT_BASE = 5000;   // outpost plot ids never collide with city plots
+const NODE_TOWER_PLOT_BASE = 6000; // the watchtower on a node
+const NODE_WALL_PLOT_BASE = 7000;  // the palisade across the node's pinch
 const CAMP_STANDING = 5;          // a camp sustains count x this many living troops
 const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
 const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
@@ -50,6 +53,7 @@ export class Game {
 
     this.gold = this.economy.startGold;
     this.coins = [];             // physical coins on the ground
+    this.loot = [];              // items lying on the frontier, most of them hidden
     this.site = -1;              // chosen city site index (-1 = not founded yet)
     this.plots = [];             // generated when the city is founded
     this.buildings = [];
@@ -174,8 +178,10 @@ export class Game {
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
         items: [...(h.items || [])],
+        pack: [...(h.pack || [])],
         upgrades: { ...h.upgrades },
       })),
+      loot: this.loot.map((l) => [l.key, snapNum(l.x), snapNum(l.z), l.hidden ? 1 : 0, snapNum(l.cool || 0)]),
       zombies: this.zombies.map((z) => [z.type, snapNum(z.x), snapNum(z.z), snapNum(z.hp), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0, {
         id: z.id, dx: snapNum(z.dirX || 0), dz: snapNum(z.dirZ || 0),
         timer: snapNum(z.timer || 0), atk: snapNum(z.atkT || 0),
@@ -234,6 +240,9 @@ export class Game {
       n.looted = !!looted;
     });
     this.stats = { nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0, ...snap.stats };
+    this.loot = (snap.loot || []).map(([key, x, z, hidden, cool]) => ({
+      id: nextId++, key, x, z, hidden: !!hidden, cool: cool || 0,
+    }));
 
     for (const ps of snap.plots) {
       const p = this.plots.find((o) => o.id === ps.id);
@@ -285,7 +294,9 @@ export class Game {
       pendingActorTargets.push([u, us]);
     }
     for (const hs of snap.heroes) {
-      const h = this._spawnHero(hs.k, hs.x, hs.z, { level: hs.level, xp: hs.xp, items: hs.items || [], upgrades: hs.upgrades || {} });
+      const h = this._spawnHero(hs.k, hs.x, hs.z, {
+        level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
+      });
       if (hs.id) h.id = hs.id;
       h.hp = hs.hp;
       h.abilCd = hs.cd || 0;
@@ -371,6 +382,7 @@ export class Game {
     const c = this.map.size / 2;
     this.heroSetups.forEach((e, i) => this._spawnHero(e.k, c - 1 + i * 2, c + 3.5, e.camp));
     this._scatterCreeps();
+    this._scatterLoot();
     this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and press SPACE to found your city.', 'info');
   }
 
@@ -428,34 +440,87 @@ export class Game {
 
     for (const node of this.nodes) {
       if (node.offMap) continue;
-      if (this.plots.some((pl) => pl.kind === 'outpost' && pl.nodeId === node.id)) continue;
-      const spot = this._outpostSpot(node);
-      if (!spot) continue;
-      this.plots.push({
-        id: OUTPOST_PLOT_BASE + node.id, kind: 'outpost', nodeId: node.id,
-        x: spot[0], z: spot[1], size: 2,
-        cx: spot[0] + 1, cz: spot[1] + 1,
-        tier: 0, paid: 0, branch: null, ruined: false,
-      });
+      if (this.plots.some((pl) => pl.nodeId === node.id)) continue;
+      this._buildNodeWorks(node);
     }
   }
 
-  // A clear 2x2 footprint beside a node, never on top of its centre so the
-  // hero can always stand in the capture ring.
-  _outpostSpot(node) {
+  // Ground you take is ground you can fortify. A held node is not just a
+  // Forward Camp any more — it is a small frontier fort: the camp, a watchtower
+  // covering it, and where the land pinches nearby, a palisade across the gap.
+  // Everything here is locked until the node is actually yours, and ruins
+  // together the moment you lose it.
+  _buildNodeWorks(node) {
+    const used = [];
+    const camp = this._nodeWorkSpot(node, used, 2);
+    if (camp) {
+      this.plots.push({
+        id: OUTPOST_PLOT_BASE + node.id, kind: 'outpost', nodeId: node.id,
+        x: camp[0], z: camp[1], size: 2,
+        cx: camp[0] + 1, cz: camp[1] + 1,
+        tier: 0, paid: 0, branch: null, ruined: false,
+      });
+    }
+    const tower = this._nodeWorkSpot(node, used, 2);
+    if (tower) {
+      this.plots.push({
+        id: NODE_TOWER_PLOT_BASE + node.id, kind: 'tower', nodeId: node.id,
+        x: tower[0], z: tower[1], size: 2,
+        cx: tower[0] + 1, cz: tower[1] + 1,
+        tier: 0, paid: 0, branch: null, ruined: false,
+      });
+    }
+    // The land's own chokepoint, if it left one within reach of this node.
+    const choke = this._nodeChoke(node);
+    if (choke) {
+      const tiles = choke.tiles.filter(([x, z]) => this.map.isBuildable(x, z)
+        && !this.plots.some((pl) => pl.nodeId === node.id && pl.kind !== 'wall'
+          && x >= pl.x && x < pl.x + pl.size && z >= pl.z && z < pl.z + pl.size));
+      if (tiles.length >= 2) {
+        const mid = tiles[tiles.length >> 1];
+        this.plots.push({
+          id: NODE_WALL_PLOT_BASE + node.id, kind: 'wall', nodeId: node.id,
+          role: 'outer', wild: true, name: `${choke.name} Palisade`,
+          x: tiles[0][0], z: tiles[0][1], size: 1,
+          cx: mid[0] + 0.5, cz: mid[1] + 0.5,
+          tiles, gate: mid, anchor: mid,
+          tier: 0, paid: 0, branch: null, ruined: false,
+        });
+      }
+    }
+  }
+
+  // The nearest natural pinch to a node, close enough that holding the node and
+  // holding the gap are the same job.
+  _nodeChoke(node) {
+    let best = null, bd = 13 * 13;
+    for (const c of this.map.chokeSpots || []) {
+      const d = dist2(c.x, c.z, node.x, node.z);
+      if (d > bd) continue;
+      if (this.plots.some((pl) => pl.kind === 'wall' && pl.tiles
+        && pl.tiles.some(([x, z]) => Math.abs(x - c.x) < 3 && Math.abs(z - c.z) < 3))) continue;
+      bd = d; best = c;
+    }
+    return best;
+  }
+
+  // A clear footprint beside a node, never on top of its centre so the hero can
+  // always stand in the capture ring, and never on top of an earlier work.
+  _nodeWorkSpot(node, used, size = 2) {
     const bx = (node.x | 0) - 1, bz = (node.z | 0) - 1;
-    for (let r = 1; r <= 5; r++) {
+    for (let r = 1; r <= 6; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
           const x = bx + dx, z = bz + dz;
           let ok = true;
-          for (let sz = 0; sz < 2 && ok; sz++) {
-            for (let sx = 0; sx < 2; sx++) {
+          for (let sz = 0; sz < size && ok; sz++) {
+            for (let sx = 0; sx < size; sx++) {
               if (!this.map.isBuildable(x + sx, z + sz)) { ok = false; break; }
             }
           }
-          if (ok) return [x, z];
+          if (ok && used.some(([ux, uz]) => Math.abs(ux - x) < size + 1 && Math.abs(uz - z) < size + 1)) ok = false;
+          if (ok) { used.push([x, z]); return [x, z]; }
         }
       }
     }
@@ -616,8 +681,10 @@ export class Game {
   }
 
   // A Forward Camp only exists on ground you actually hold.
+  // Anything raised on a lane node — camp, tower or palisade — only exists on
+  // ground you actually hold.
   plotLocked(plot) {
-    if (plot.kind !== 'outpost') return false;
+    if (plot.nodeId == null) return false;
     const node = this.nodes[plot.nodeId];
     return !node || node.owner !== 'player';
   }
@@ -1136,9 +1203,8 @@ export class Game {
       this.msg(`🚩 ${node.name} is yours. It pays, it spawns, and you can raise a Forward Camp on it.`, 'info');
       this.emit({ type: 'nodetaken', x: node.x, z: node.z, id: node.id });
     } else {
-      // Losing a node also ruins whatever you built on it.
-      const plot = this.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id);
-      if (plot && plot.tier > 0) {
+      // Losing a node also ruins the whole fort you built on it.
+      for (const plot of this.plots.filter((p) => p.nodeId === node.id && p.tier > 0)) {
         for (const b of this.buildings.filter((b) => b.plotId === plot.id)) this._destroyBuilding(b, true);
       }
       if (was === 'player') {
@@ -1295,6 +1361,145 @@ export class Game {
     this.emit({ type: 'coinspawn', x, z, fx, fz, v });
   }
 
+  // ---------- field loot ----------
+
+  // What the frontier is hiding. Barrows have something under them, a hive
+  // hoards what it took off the people it ate, and a pass is where travellers
+  // die with their packs still on. Seeded, so lockstep peers agree.
+  _scatterLoot() {
+    const pick = (rare) => {
+      const pool = rare ? FIELD_LOOT.rare : FIELD_LOOT.common;
+      return pool[Math.floor(this.rng() * pool.length)];
+    };
+    const place = (x, z, key, hidden = true) => {
+      const spot = this._lootSpot(x, z);
+      if (!spot) return;
+      this.loot.push({ id: nextId++, key, x: spot[0], z: spot[1], hidden, cool: 0 });
+    };
+    // Under the barrows, and in the deep places the map named.
+    for (const node of this.nodes) {
+      if (node.offMap) continue;
+      if (node.kind === 'barrow') place(node.x, node.z, pick(this.rng() < 0.55));
+      else if (node.kind === 'clearing' || node.kind === 'quarry') {
+        if (this.rng() < 0.6) place(node.x, node.z, pick(this.rng() < 0.12));
+      } else if (this.rng() < 0.35) place(node.x, node.z, pick(false));
+    }
+    // Every hive sits on a hoard.
+    for (const nest of this.nests) {
+      if (nest.offMap) continue;
+      place(nest.x, nest.z, pick(this.rng() < 0.45));
+    }
+    // And somebody always dies in the pass.
+    for (const c of (this.map.chokeSpots || []).slice(0, 8)) {
+      if (this.rng() < 0.6) place(c.x, c.z, pick(this.rng() < 0.2));
+    }
+    // Plus a few packs out in the open country, for players who ride wide.
+    const N = this.map.size;
+    for (let i = 0, guard = 0; i < 4 && guard < 200; guard++) {
+      const x = 6 + this.rng() * (N - 12), z = 6 + this.rng() * (N - 12);
+      if (this.map.sites.some((s) => Math.hypot(x - s.x, z - s.z) < 26)) continue;
+      if (!this.map.isWalkable(x | 0, z | 0)) continue;
+      place(x, z, pick(this.rng() < 0.15));
+      i++;
+    }
+  }
+
+  // Loot has to lie on ground a hero can actually stand on, and not inside a
+  // building footprint.
+  _lootSpot(x, z) {
+    for (let r = 0; r < 7; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = Math.round(x + dx), nz = Math.round(z + dz);
+          if (!this.map.isWalkable(nx, nz)) continue;
+          if (this.occ[nz * this.map.size + nx] > 0) continue;
+          if (this.loot.some((l) => Math.abs(l.x - nx) < 2 && Math.abs(l.z - nz) < 2)) continue;
+          return [nx + 0.5, nz + 0.5];
+        }
+      }
+    }
+    return null;
+  }
+
+  // Drop an item on the ground where something died — the only loot the player
+  // sees coming.
+  dropLoot(x, z, key) {
+    const spot = this._lootSpot(x, z);
+    if (!spot) return;
+    const l = { id: nextId++, key, x: spot[0], z: spot[1], hidden: false, cool: LOOT_DROP_COOLDOWN };
+    this.loot.push(l);
+    this.emit({ type: 'lootdrop', x: l.x, z: l.z, key, id: l.id });
+  }
+
+  // Walk over it and it is yours. A full pack is the only thing that stops you,
+  // and then the game tells you which key empties a slot.
+  _updateLoot(dt) {
+    if (!this.loot.length) return;
+    let taken = false;
+    for (const l of this.loot) {
+      if (l.cool > 0) l.cool -= dt;
+      for (const h of this.heroes) {
+        if (h.dead) continue;
+        const d2 = dist2(h.x, h.z, l.x, l.z);
+        if (l.hidden) {
+          if (d2 > LOOT_REVEAL_RADIUS * LOOT_REVEAL_RADIUS) continue;
+          l.hidden = false;
+          const it = ITEMS[l.key];
+          this.msg(`${it ? it.icon : '📦'} You spot something half-buried — ${it ? it.name : 'a cache'}.`, 'info');
+          this.emit({ type: 'lootseen', x: l.x, z: l.z, key: l.key, id: l.id });
+          continue;
+        }
+        if (l.cool > 0) continue;
+        if (d2 > LOOT_PICKUP_RADIUS * LOOT_PICKUP_RADIUS) continue;
+        if ((h.pack || []).length >= PACK_SLOTS) {
+          if (this.time - (h._packFullT || -99) > 6) {
+            h._packFullT = this.time;
+            this.msg(`🎒 Your pack is full — press G to drop something.`, 'bad');
+          }
+          continue;
+        }
+        this.giveItem(h, l.key);
+        l.gone = true;
+        taken = true;
+        break;
+      }
+    }
+    if (taken) this.loot = this.loot.filter((l) => !l.gone);
+  }
+
+  // Into the pack, and into the hero's stats immediately — a find you cannot
+  // feel until the next level is not a find.
+  giveItem(h, key) {
+    const it = ITEMS[key];
+    if (!it) return false;
+    h.pack = h.pack || [];
+    if (h.pack.length >= PACK_SLOTS) return false;
+    h.pack.push(key);
+    this._refreshPackMods(h);
+    this.msg(`${it.icon} ${h.def.name} takes the ${it.name} — ${it.desc}`, 'good');
+    this.emit({ type: 'loot', x: h.x, z: h.z, key });
+    return true;
+  }
+
+  // Drop the newest thing in the pack. Lockstep-safe: the index comes over the
+  // wire, and an out-of-range index is simply ignored.
+  dropItem(p = 0, index = -1) {
+    const h = this.heroes[p];
+    if (!h || h.dead || !h.pack || !h.pack.length) return;
+    const i = index >= 0 && index < h.pack.length ? index : h.pack.length - 1;
+    const [key] = h.pack.splice(i, 1);
+    this._refreshPackMods(h);
+    this.dropLoot(h.x, h.z, key);
+    const it = ITEMS[key];
+    this.msg(`${it ? it.icon : '📦'} Dropped the ${it ? it.name : 'find'}.`, 'info');
+  }
+
+  _refreshPackMods(h) {
+    h.itemMods = itemMods([...(h.items || []), ...(h.pack || [])]);
+    this._refreshHeroDerived(h);
+  }
+
   _updateCoins() {
     if (!this.coins.length) return;
     let collected = false;
@@ -1349,7 +1554,11 @@ export class Game {
   _spawnHero(key, x, z, camp = null) {
     const d = HEROES[key];
     const items = camp && camp.items ? [...camp.items] : [];
-    const itemModsOnly = itemMods(items);
+    // The pack is what this hero picked up in THIS run. It counts toward their
+    // stats the moment it goes in, and it is the only gear that grows during a
+    // survival run.
+    const pack = camp && camp.pack ? [...camp.pack] : [];
+    const itemModsOnly = itemMods([...items, ...pack]);
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
     const h = {
@@ -1358,7 +1567,7 @@ export class Game {
       mx: 0, mz: 0, sprint: false,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
-      items, itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
+      items, pack, itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
       reviveT: 0, hasteT: 0, hasteMult: 1,
     };
     this._refreshHeroDerived(h, false);
@@ -1496,6 +1705,7 @@ export class Game {
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
+      case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
     }
   }
 
@@ -1848,6 +2058,13 @@ export class Game {
       // Combat pays now that dawn doesn't.
       if (zb.type === 'brute' || zb.type === 'sieger') this._spawnCoin(zb.x, zb.z, DROPS.bruteCoins, zb.x, zb.z);
       else if (this.rng() < DROPS.smallChance) this._spawnCoin(zb.x, zb.z, DROPS.smallCoins, zb.x, zb.z);
+      // Some of them are carrying something. A boss always is — which is what
+      // keeps a survival run growing wave after wave.
+      if (zb.boss) {
+        this.dropLoot(zb.x, zb.z, FIELD_LOOT.rare[Math.floor(this.rng() * FIELD_LOOT.rare.length)]);
+      } else if ((zb.type === 'brute' || zb.type === 'sieger') && this.rng() < 0.06) {
+        this.dropLoot(zb.x, zb.z, FIELD_LOOT.common[Math.floor(this.rng() * FIELD_LOOT.common.length)]);
+      }
     }
   }
 
@@ -1902,6 +2119,7 @@ export class Game {
     this._updatePlots(dt);
     this._updateCamps(dt);
     this._updateCoins();
+    this._updateLoot(dt);
     this._updateFlow(dt);
     this._updateZombies(dt);
     this._updateAuras(dt);
@@ -2464,6 +2682,13 @@ export class Game {
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI * 2;
         this._spawnCoin(n.x + Math.cos(a) * 1.8, n.z + Math.sin(a) * 1.8, Math.ceil(DROPS.nestCoins / 6), n.x, n.z);
+      }
+      // The hoard the hive was sitting on is out in the open now.
+      for (const l of this.loot) {
+        if (l.hidden && dist2(l.x, l.z, n.x, n.z) < 100) {
+          l.hidden = false;
+          this.emit({ type: 'lootseen', x: l.x, z: l.z, key: l.key, id: l.id });
+        }
       }
       const left = this.liveNests();
       this.emit({ type: 'nestdown', x: n.x, z: n.z });

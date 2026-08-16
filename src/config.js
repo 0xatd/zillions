@@ -428,6 +428,21 @@ export const ITEMS = {
   shrieker_lung: { name: "Shrieker's Lung", icon: '🫁', kind: 'hero', auraR: 0.5, desc: '+50% aura radius.' },
   gravelord_plate: { name: "Gravelord's Plate", icon: '🛡️', kind: 'hero', hp: 200, desc: '+200 max HP.' },
   zillion_eye: { name: "The Zillion's Eye", icon: '👁️', kind: 'hero', cdr: 0.3, dmg: 0.1, desc: 'Special -30% cooldown, +10% damage.' },
+  // Field finds — what the frontier itself is hiding. Weaker than quest gear,
+  // but you can be carrying it ten seconds into a run, and it is the only gear
+  // that grows during a survival run.
+  worn_scope: { name: 'Worn Scope', icon: '🔭', kind: 'field', dmg: 0.10, desc: '+10% attack damage.' },
+  flak_vest: { name: 'Flak Vest', icon: '🦺', kind: 'field', hp: 70, desc: '+70 max HP.' },
+  runner_boots: { name: 'Runner Boots', icon: '👢', kind: 'field', speed: 0.07, desc: '+7% move speed.' },
+  coin_lure: { name: 'Coin Lure', icon: '🧲', kind: 'field', magnet: 1, desc: 'Coins leap to you from 1 tile further.' },
+  field_stim: { name: 'Field Stim', icon: '💊', kind: 'field', rof: 0.10, desc: '+10% attack rate.' },
+  bandage_roll: { name: 'Bandage Roll', icon: '🩹', kind: 'field', regen: 1.5, desc: '+1.5 HP/s regeneration.' },
+  ration_tin: { name: 'Ration Tin', icon: '🥫', kind: 'field', hp: 45, regen: 0.8, desc: '+45 max HP, +0.8 HP/s.' },
+  oath_blade: { name: 'Oath Blade', icon: '🗡️', kind: 'field', dmg: 0.22, desc: '+22% attack damage. Someone swore on it.' },
+  pilgrim_plate: { name: 'Pilgrim Plate', icon: '🛡️', kind: 'field', hp: 160, desc: '+160 max HP. Dented all over.' },
+  quickfire_rig: { name: 'Quickfire Rig', icon: '⚙️', kind: 'field', rof: 0.16, cdr: 0.10, desc: '+16% attack rate, special recharges 10% faster.' },
+  lodestone: { name: 'Lodestone', icon: '🧭', kind: 'field', magnet: 2, speed: 0.05, desc: 'Coins leap 2 tiles further, +5% move speed.' },
+  war_horn: { name: 'War Horn', icon: '📯', kind: 'field', auraR: 0.3, troopDmg: 0.1, desc: '+30% aura radius, troops +10% damage.' },
   // Town relics (the civilization's treasures — help every city you found)
   masonry_codex: { name: 'Masonry Codex', icon: '📜', kind: 'relic', buildingHp: 0.25, desc: 'All structures +25% HP.' },
   tithe_ledger: { name: 'Tithe Ledger', icon: '📒', kind: 'relic', income: 0.2, desc: 'Income +20%.' },
@@ -437,6 +452,16 @@ export const ITEMS = {
 };
 
 export const BOSS_DROPS = { 1: 'butchers_cleaver', 2: 'broodmother_heart', 3: 'shrieker_lung', 4: 'gravelord_plate', 5: 'zillion_eye' };
+
+// What the map hides, and what the hero can carry off it.
+export const FIELD_LOOT = {
+  common: ['worn_scope', 'flak_vest', 'runner_boots', 'coin_lure', 'field_stim', 'bandage_roll', 'ration_tin'],
+  rare: ['oath_blade', 'pilgrim_plate', 'quickfire_rig', 'lodestone', 'war_horn'],
+};
+export const PACK_SLOTS = 4;          // how much a hero can carry off the field
+export const LOOT_PICKUP_RADIUS = 1.6; // walk over it and it is yours
+export const LOOT_REVEAL_RADIUS = 7;   // how close before you spot a hidden cache
+export const LOOT_DROP_COOLDOWN = 2.5; // seconds before a dropped item can be picked up again
 
 const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'range', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
 export function itemMods(items) {

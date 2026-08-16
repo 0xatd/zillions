@@ -41,7 +41,11 @@ Use continuous siege on a lane graph as the gameplay base:
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
 - Hive nests are real bases: health, defenders, and blighted ground.
-- Lane nodes are taken by presence, pay income, and unlock Forward Camps.
+- Lane nodes are taken by presence, pay income, and unlock a real expansion
+  fort: Forward Camp, watchtower, and a palisade where the ground pinches.
+- The map hides items worth going to look for. Heroes pick them up by walking
+  over them, carry a limited pack, can drop what they do not want, and keep
+  what they carry out — in survival as well as campaign.
 - Node, hive and city-site placement are derived from terrain, never from a ring.
 - What a node IS may be readable from the map. Who HOLDS it must not be, until
   the player has scouted it.

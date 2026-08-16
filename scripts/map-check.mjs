@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
-import { LEVELS, TILE, TILE_INFO } from '../src/config.js';
+import { LEVELS, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
 
@@ -181,6 +181,8 @@ for (const level of LEVELS) {
   });
 
   let sortie = null;
+  let nodeForts = null;
+  let lootStats = null;
   // --- and it has to actually run ------------------------------------------
   // The balance harness plays on flat test ground. This plays the real map:
   // found the city, run two minutes of siege, and check the systems that
@@ -192,6 +194,48 @@ for (const level of LEVELS) {
     game.foundCity(0, 0);
     const hqReach = game.plots.find((p) => p.kind === 'hq').plan.reach;
     assert.ok(game.laneGraph && game.laneGraph.size > 0, `${label} built no lane graph on its real terrain`);
+    // Ground you take is ground you can fortify: every reachable node carries a
+    // Forward Camp and a watchtower, and every work on it is locked until the
+    // node is yours.
+    for (const node of game.activeNodes()) {
+      const works = game.plots.filter((p) => p.nodeId === node.id);
+      assert.ok(works.some((p) => p.kind === 'outpost'), `${label}: ${node.name} has no Forward Camp plot`);
+      assert.ok(works.some((p) => p.kind === 'tower'), `${label}: ${node.name} has no watchtower plot`);
+      for (const w of works) {
+        assert.ok(game.plotLocked(w), `${label}: ${node.name} works are buildable before you hold it`);
+      }
+    }
+    // --- what the frontier is hiding -------------------------------------
+    assert.ok(live.chokeSpots.length > 0, `${label} found no natural chokepoints`);
+    assert.ok(game.loot.length >= 6, `${label} hid only ${game.loot.length} caches on a whole planet`);
+    for (const l of game.loot) {
+      assert.ok(live.isWalkable(l.x | 0, l.z | 0), `${label}: a cache is lying on unwalkable ground`);
+      assert.ok(ITEMS[l.key], `${label}: a cache holds an unknown item "${l.key}"`);
+      assert.ok(l.hidden, `${label}: a cache is visible before anyone has been near it`);
+    }
+    // Walk a hero onto four caches: the first fill the pack, the last is
+    // refused, and dropping frees the slot again.
+    {
+      const hero = game.heroes[0];
+      hero.pack.length = 0;
+      game._refreshPackMods(hero);
+      for (const l of game.loot.slice(0, PACK_SLOTS + 1)) {
+        hero.x = l.x; hero.z = l.z;
+        for (let k = 0; k < 3; k++) game.update(1 / 30);  // spot it, then take it
+      }
+      assert.equal(hero.pack.length, PACK_SLOTS,
+        `${label}: the pack holds ${hero.pack.length} of ${PACK_SLOTS} after walking over ${PACK_SLOTS + 1} caches`);
+      const carried = game.loot.length;
+      game.exec({ t: 'drop', p: 0 });
+      assert.equal(hero.pack.length, PACK_SLOTS - 1, `${label}: G did not empty a pack slot`);
+      assert.equal(game.loot.length, carried + 1, `${label}: the dropped item did not land on the ground`);
+      lootStats = { caches: carried + 1, pack: hero.pack.length };
+    }
+
+    nodeForts = {
+      nodes: game.activeNodes().length,
+      palisades: game.plots.filter((p) => p.nodeId != null && p.kind === 'wall').length,
+    };
     const nodes = game.activeNodes();
     assert.ok(nodes.length >= 6, `${label} left only ${nodes.length} reachable lane nodes`);
     assert.ok(game.nests.every((n) => n.alive), `${label} shipped a hive that can never be razed`);
@@ -233,6 +277,8 @@ for (const level of LEVELS) {
     console.log(`  hives   ${map.nestSpots.map(([x, z]) => `${x},${z}`).join(' ')}`);
     console.log(`  nodes   ${map.nodeSpots.length}: ${[...kinds].join(', ')}`);
     console.log(`  city    ${perSite.map((p) => `${p.plots}plots ${p.entrances}gates ${p.natural}% natural ${p.outer}outer${p.inner ? ' +ward' : ''}`).join(' | ')}`);
+    console.log(`  loot    ${lootStats.caches} hidden caches, pack holds ${PACK_SLOTS}`);
+    console.log(`  forts   ${nodeForts.nodes} expansion sites, ${nodeForts.palisades} with a natural pinch to fence`);
     console.log(`  siege   ${sortie.units} troops (${sortie.out} pushed out), ${sortie.zombies} dead afoot, threat ${sortie.threat} after 2min`);
     console.log(`  chokes  ${map.chokeSpots.length} natural gaps: ${map.chokeSpots.slice(0, 5).map((c) => `${c.name} (${c.width} wide)`).join(', ')}`);
   }

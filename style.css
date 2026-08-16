@@ -581,6 +581,14 @@ body::after {
 .levelcard .lvnum { font-size: 15px; font-weight: 800; color: var(--gold); }
 .levelcard b { font-size: 11px; }
 .levelcard small { font-size: 9px; opacity: 0.6; line-height: 1.25; }
+.packrow { display: flex; gap: 3px; align-items: center; margin-top: 3px; }
+.packrow .pslot {
+  width: 15px; height: 15px; line-height: 15px; text-align: center; font-size: 10px;
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 3px; background: rgba(0,0,0,0.28);
+}
+.packrow .pslot.has { border-color: var(--gold); background: rgba(255,215,94,0.14); }
+.packrow .pkey { font-size: 8px; opacity: 0.5; margin-left: 3px; letter-spacing: 0.04em; }
+.packrow .pkey.urgent { opacity: 1; color: #ffb4a2; }
 .levelcard .lvland { font-size: 9px; color: #b9d6c2; opacity: 0.85; }
 .levelcard .lvboss { font-size: 9.5px; color: #ff9a8f; }
 

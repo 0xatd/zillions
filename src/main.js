@@ -215,6 +215,7 @@ class App {
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
     this._clearSiteMarkers();
     this._clearNestMeshes();
+    this._clearLootMeshes();
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -381,6 +382,49 @@ class App {
         mesh.userData.mound.scale.set(beat, 0.55 * beat, beat);
       }
     }
+  }
+
+  // Field loot: a small floating find with its own icon over it. Hidden caches
+  // are not drawn at all — you have to walk near them to spot them.
+  _syncLoot(t) {
+    if (!this.game) return;
+    this.lootMeshes = this.lootMeshes || new Map();
+    const live = new Set();
+    for (const l of this.game.loot) {
+      if (l.hidden) continue;
+      live.add(l.id);
+      let mesh = this.lootMeshes.get(l.id);
+      if (!mesh) {
+        const it = ITEMS[l.key];
+        mesh = new THREE.Group();
+        const gem = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.34, 0),
+          new THREE.MeshLambertMaterial({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+        );
+        gem.castShadow = true;
+        mesh.add(gem);
+        mesh.userData.gem = gem;
+        const label = this._makeLabelSprite(it ? it.icon : '📦', '');
+        label.position.y = 1.5;
+        label.scale.set(2.2, 1.1, 1);
+        mesh.add(label);
+        mesh.position.set(l.x, 0, l.z);
+        this.scene.add(mesh);
+        this.lootMeshes.set(l.id, mesh);
+      }
+      mesh.position.set(l.x, 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
+      mesh.userData.gem.rotation.y = t * 1.4 + l.id;
+    }
+    for (const [id, mesh] of this.lootMeshes) {
+      if (live.has(id)) continue;
+      this.scene.remove(mesh);
+      this.lootMeshes.delete(id);
+    }
+  }
+
+  _clearLootMeshes() {
+    for (const m of (this.lootMeshes || new Map()).values()) this.scene.remove(m);
+    this.lootMeshes = new Map();
   }
 
   _clearNestMeshes() {
@@ -569,37 +613,48 @@ class App {
     // and quest/boss rewards granted here await them on the next map.
     this._endExtras = null;
     const h = this.game.heroes[this.myPlayer];
-    if (h && this.game.mode === 'campaign') {
+    if (h) {
       p.campaignHeroes = p.campaignHeroes || {};
       p.relics = p.relics || [];
       p.questsDone = p.questsDone || {};
       const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [], upgrades: {} });
-      if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
-        cur.level = h.level;
-        cur.xp = Math.round(h.xp);
-      }
-      cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
-      cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
       const grants = [];
-      for (const q of this.game.questResults || []) {
-        if (!q.done || p.questsDone[q.id]) continue;
-        p.questsDone[q.id] = true;
-        const it = ITEMS[q.reward];
-        if (!it) continue;
-        if (it.kind === 'relic') {
-          if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
-        } else if (!cur.items.includes(q.reward)) {
-          cur.items.push(q.reward);
-          grants.push(q.reward);
-        }
+      // Whatever the hero was still carrying off the field is theirs to keep —
+      // in survival too. Waves are the only progression a survival run has, so
+      // the finds have to survive the run.
+      const finds = [...new Set(h.pack || [])].filter((k) => ITEMS[k] && !(cur.items || []).includes(k));
+      if (finds.length) {
+        cur.items = [...(cur.items || []), ...finds];
+        grants.push(...finds);
       }
-      if (won) {
-        const drop = BOSS_DROPS[this.game.levelId];
-        if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+      // Levels, career gear and quest/boss rewards are the campaign's ladder.
+      if (this.game.mode === 'campaign') {
+        if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
+          cur.level = h.level;
+          cur.xp = Math.round(h.xp);
+        }
+        cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
+        cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
+        for (const q of this.game.questResults || []) {
+          if (!q.done || p.questsDone[q.id]) continue;
+          p.questsDone[q.id] = true;
+          const it = ITEMS[q.reward];
+          if (!it) continue;
+          if (it.kind === 'relic') {
+            if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
+          } else if (!cur.items.includes(q.reward)) {
+            cur.items.push(q.reward);
+            grants.push(q.reward);
+          }
+        }
+        if (won) {
+          const drop = BOSS_DROPS[this.game.levelId];
+          if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+        }
       }
       this._endExtras = {
         heroKey: h.key, heroName: h.def.name, level: cur.level, grants,
-        quests: this.game.questResults || [],
+        quests: this.game.mode === 'campaign' ? (this.game.questResults || []) : [],
       };
       this.ui.refreshHeroBadges(p);
     }
@@ -2479,6 +2534,7 @@ class App {
       else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
       else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
+      else if (k === 'g') this.issue({ t: 'drop', p: this.myPlayer, i: -1 });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();
@@ -2788,6 +2844,20 @@ class App {
           this.stream(e.x, 0.4, e.z, e.hx, 0.9, e.hz, { count: 3, color: 0xffd75e, size: 0.42, life: 0.25 });
           this.burst(e.hx, 0.9, e.hz, { count: 3, color: 0xfff2b0, speed: 0.8, life: 0.25, size: 0.4, up: 1 });
           break;
+        case 'lootseen':
+          this.audio.click();
+          this.burst(e.x, 0.6, e.z, { count: 12, color: 0xa8e6ff, speed: 1.4, life: 0.7, size: 0.4, up: 1.6 });
+          break;
+        case 'lootdrop':
+          this.burst(e.x, 0.6, e.z, { count: 6, color: 0xcfd8dc, speed: 1.0, life: 0.5, size: 0.35, up: 1.2 });
+          break;
+        case 'loot': {
+          this.audio.build();
+          this.burst(e.x, 1.0, e.z, { count: 18, color: 0xffe38a, speed: 2.0, life: 0.8, size: 0.5, up: 2.2 });
+          const it = ITEMS[e.key];
+          if (it) this.ui.showBanner(`${it.icon} ${it.name}`, it.desc, 2600);
+          break;
+        }
         case 'income':
           this.audio.coin();
           this.burst(e.x, 2.6, e.z, { count: 4, color: 0xffd75e, speed: 1.1, life: 0.5, size: 0.45, up: 1.8 });
@@ -3089,6 +3159,7 @@ class App {
       this._syncBuildings();
       this._syncUnits(t, dt);
       this._syncNests(t);
+      this._syncLoot(t);
       this._syncPlots(t);
 
       // Site flags ripple until the city is founded.

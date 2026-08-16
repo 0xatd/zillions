@@ -71,6 +71,15 @@ The gameplay base is continuous siege on a lane graph:
 - Hero progression is player-chosen. Level-ups grant upgrade points for Aura,
   Passive I, Passive II, or Ult Damage. Do not return to hidden automatic
   special ranks.
+- Ground you hold is ground you can fortify: every lane node carries a Forward
+  Camp, a watchtower and — where the land pinches — a palisade. Everything on a
+  node is locked until the node is yours and ruins when you lose it.
+- The map hides field loot in barrows, hive hoards, passes and boss corpses.
+  Caches are invisible until a hero is close, pickup is automatic by walking
+  over them into a PACK_SLOTS-sized pack, and G drops the newest find. Field
+  finds apply to hero stats immediately and carry over to the persistent hero
+  at the end of a run in BOTH campaign and survival — survival has no other
+  progression, so do not take that away.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn this back into a generic RTS launcher.

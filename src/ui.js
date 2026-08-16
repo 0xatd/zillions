@@ -8,7 +8,7 @@ const PORTRAITS = {
   danny: 'assets/heroes/portraits/danny_256.webp',
 };
 import {
-  PLOT_KINDS, DIFFICULTY, LEVELS, ITEMS,
+  PLOT_KINDS, DIFFICULTY, LEVELS, ITEMS, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
 } from './config.js';
 import { formatTime } from './utils.js';
@@ -68,6 +68,7 @@ export class UI {
               <div class="hpbar herohp"><div class="hpfill" id="a-hp"></div></div>
               <div class="hpbar heroxp"><div class="xpfill" id="a-xp"></div></div>
               <div id="a-items"></div>
+              <div id="a-pack" class="packrow" title="Field finds — walk over loot to pick it up, G to drop"></div>
             </div>
           </div>
           <div id="herostats" class="herostats"></div>
@@ -583,6 +584,24 @@ export class UI {
         q('#a-items').innerHTML = (h.items || [])
           .map((k) => (ITEMS[k] ? `<span class="hitem" title="${ITEMS[k].name} — ${ITEMS[k].desc}">${ITEMS[k].icon}</span>` : ''))
           .join('');
+      }
+
+      // Pack: what this hero has picked up off the field, and how much room is
+      // left. Walking over loot fills it; G empties the newest slot.
+      const packKey = (h.pack || []).join(',');
+      if (this._packKey !== packKey) {
+        this._packKey = packKey;
+        const slots = [];
+        for (let i = 0; i < PACK_SLOTS; i++) {
+          const key = (h.pack || [])[i];
+          const it = key ? ITEMS[key] : null;
+          slots.push(it
+            ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
+            : '<span class="pslot"></span>');
+        }
+        const full = (h.pack || []).length >= PACK_SLOTS;
+        q('#a-pack').innerHTML = slots.join('')
+          + `<span class="pkey${full ? ' urgent' : ''}">${full ? 'FULL · G drops' : 'G drops'}</span>`;
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;

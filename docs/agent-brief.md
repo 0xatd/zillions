@@ -50,6 +50,15 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
+- Node works (`Game._buildNodeWorks`) are created in `_buildLaneSystems`, which
+  runs on BOTH found and restore — keep it a pure function of map + node, never
+  `this.rng`, or lockstep peers desync. Plot ids come from fixed bases so they
+  survive a reload. `plotLocked` gates anything with a `nodeId`.
+- Field loot lives in `game.loot`, is scattered once in `_setupStart` (seeded),
+  and round-trips through the snapshot. Pickup and drop are sim-side, so the
+  drop key goes over the wire as a `drop` command like every other input. A
+  hero's `pack` is separate from career `items`; mods are the sum of both, via
+  `_refreshPackMods`.
 
 ## Maps and Cities
 

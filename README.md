@@ -173,9 +173,10 @@ and the mapping.
   their own, but you set the plan. **1 Defend** holds the city, **2 Follow**
   escorts your hero, and **3 Push** sends them out along the lanes.
 - **Take and hold lane nodes.** Stand on a node with no enemies nearby and it
-  flips to you. Held nodes pay income, and you can raise a **Forward Camp** on
-  one so squads muster at the front instead of walking there. Lose the node and
-  you lose what you built on it.
+  flips to you. Held ground is ground you can fortify: every node carries a
+  **Forward Camp**, a **watchtower**, and — where the land pinches nearby — a
+  **palisade** across the gap. None of it is buildable until the node is
+  actually yours, and losing the node ruins the whole fort with it.
 - **The ground is terrain; the owner is a separate question.** Nodes are read
   out of the map itself — ore fields, fords pinched between water and crags,
   sheltered clearings, barrow shelves — so no two planets share a skeleton. What
@@ -183,6 +184,14 @@ and the mapping.
   already holds some of the best ground, some is merely guarded, and some is
   empty; a node stays *unsurveyed* on the map until one of your people gets
   close enough to look. An ore field being over there does not mean a hive is.
+- **The frontier is hiding things.** Barrows have something under them, every
+  hive sits on a hoard, travellers die in the passes with their packs on, and
+  bosses always drop something. Caches stay invisible until a hero gets close,
+  then you **walk over loot to pick it up** — straight into a 4-slot pack, felt
+  immediately in your stats. Full pack? **G** drops the newest find on the
+  ground. Whatever you are still carrying at the end of a run is yours to keep,
+  in survival as well as campaign — which is the only way a survival run gets
+  stronger wave after wave.
 - **Ground has character.** An Ore Field pays double. A Quarry makes the Forward
   Camp built on it half again as tough. A Clearing lets it muster an extra
   trooper. A Ford is always well guarded, because whoever holds the pinch holds
@@ -236,6 +245,7 @@ hero revives at the Keep.
 | B (hold) | Build / upgrade / repair in either mode |
 | Q | Cast your special |
 | T | Cycle the targeting doctrine of the nearest tower |
+| G | Drop the newest field find out of your pack |
 | 1 / 2 / 3 | Army stance: Defend city / Follow hero / Push the lanes |
 | Hero upgrade buttons | Spend level-up points on Aura, Passive I, Passive II, or Ult Damage |
 | Mouse wheel | Zoom |
