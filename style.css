@@ -569,9 +569,12 @@ body::after {
 .herocard .hface + .hicon { display: none; }
 
 /* campaign level picker */
-.levelrow { display: flex; gap: 7px; }
+.warstatus { margin-left: 10px; font-size: 11px; color: #a8e6ff; letter-spacing: 0.02em; text-transform: none; }
+.levelrow { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; }
+.levelrow::-webkit-scrollbar { height: 6px; }
+.levelrow::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
 .levelcard {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: center;
+  flex: 1; min-width: 96px; display: flex; flex-direction: column; gap: 2px; align-items: center;
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--panel-border);
   border-radius: 10px; padding: 8px 5px; color: #e8e6df; cursor: pointer;
   transition: all 0.12s; font-family: inherit;
@@ -579,9 +582,26 @@ body::after {
 .levelcard:hover:not(.locked) { background: rgba(255, 255, 255, 0.12); transform: translateY(-2px); }
 .levelcard.sel { border-color: var(--danger); background: rgba(255, 93, 82, 0.12); }
 .levelcard.locked { opacity: 0.4; cursor: not-allowed; }
+.levelcard .lvmap {
+  width: 80px; height: 80px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.35);
+  image-rendering: pixelated;
+}
+.levelcard.galaxy { border-style: dashed; border-color: rgba(168, 230, 255, 0.35); }
+.levelcard.galaxy .lvnum { color: #a8e6ff; }
 .levelcard .lvnum { font-size: 15px; font-weight: 800; color: var(--gold); }
 .levelcard b { font-size: 11px; }
 .levelcard small { font-size: 9px; opacity: 0.6; line-height: 1.25; }
+.packrow { display: flex; gap: 3px; align-items: center; margin-top: 3px; }
+.packrow .pslot {
+  width: 15px; height: 15px; line-height: 15px; text-align: center; font-size: 10px;
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 3px; background: rgba(0,0,0,0.28);
+}
+.packrow .pslot.has { border-color: var(--gold); background: rgba(255,215,94,0.14); }
+.packrow .pkey { font-size: 8px; opacity: 0.5; margin-left: 3px; letter-spacing: 0.04em; }
+.packrow .pkey.urgent { opacity: 1; color: #ffb4a2; }
+.levelcard .lvland { font-size: 9px; color: #b9d6c2; opacity: 0.85; }
 .levelcard .lvboss { font-size: 9.5px; color: #ff9a8f; }
 
 /* profile */
@@ -767,6 +787,9 @@ body::after {
 .gamerow.active .gamestate { color: #ff756c; }
 .gamerow .ginfo { opacity: 0.7; font-size: 12px; }
 .gamerow .gjoin { margin-left: auto; }
+.gamerow .glive { color: #ff6a5e; font-weight: 700; animation: livepulse 1.6s ease-in-out infinite; }
+.gamerow .glive-note { margin-left: auto; opacity: 0.55; font-style: italic; }
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .loreentry { margin-bottom: 14px; line-height: 1.6; font-size: 13.5px; }
 .loreentry b { color: var(--gold); display: block; margin-bottom: 3px; font-size: 15px; }
 .loreentry p { opacity: 0.85; }

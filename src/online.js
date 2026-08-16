@@ -47,7 +47,7 @@ async function loadSupabaseClient() {
     throw new Error('account backend not configured');
   }
   const { createClient } = await import(SUPABASE_JS);
-  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+  const client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
     auth: {
       storageKey: 'zillions.supabase.auth',
       persistSession: true,
@@ -56,6 +56,7 @@ async function loadSupabaseClient() {
       flowType: 'pkce',
     },
   });
+  return { client, config };
 }
 
 function chatText(value) {
@@ -93,6 +94,11 @@ function roomToGame(row) {
   };
 }
 
+export function canRejoinRoom(game, userId) {
+  return !!game && game.status === 'in_game' && !!userId && game.host_id !== userId
+    && (game._players || []).some((player) => player.user_id === userId);
+}
+
 export class OnlineLobby {
   constructor(cb = {}) {
     this.cb = cb; // {onChat, onRoomChat, onGames, onOnline, onFriends, onInvite, onKnock, onSignal, onError}
@@ -104,11 +110,22 @@ export class OnlineLobby {
     this.roomChatChan = null;
     this.connected = false;
     this.profileCache = new Map();
+    this.iceServers = null;   // optional TURN/STUN list from /api/auth-config
+    this.matchActive = false; // true while a lockstep match runs — quiesce lobby churn
+  }
+
+  // While a match is running, the lobby stops doing main-thread work the game
+  // doesn't need (feed refreshes, friend reloads, presence list queries). The
+  // signaling channel and room heartbeats stay live for reconnects.
+  setMatchActive(active) {
+    this.matchActive = !!active;
   }
 
   async connect(name) {
     if (this.sb) return this.me;
-    this.sb = await loadSupabaseClient();
+    const { client, config } = await loadSupabaseClient();
+    this.sb = client;
+    this.iceServers = Array.isArray(config.iceServers) && config.iceServers.length ? config.iceServers : null;
     const { data: sessionData, error: sessionError } = await this.sb.auth.getSession();
     if (sessionError) throw sessionError;
     const user = sessionData?.session?.user;
@@ -131,12 +148,17 @@ export class OnlineLobby {
     this.connected = true;
     await this.refreshOnline();
     this._presenceBeat = setInterval(() => {
+      if (this.matchActive) {
+        // Keep presence/room rows fresh, skip the who's-online query + UI work.
+        this._touchPresence().catch(() => {});
+        return;
+      }
       this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
     }, 15 * 1000);
 
     this.sb.channel('zl-rooms-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => this.refreshGames())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, () => this.refreshGames())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { if (!this.matchActive) this.refreshGames(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, () => { if (!this.matchActive) this.refreshGames(); })
       .subscribe();
 
     this.sb.channel('zl-lobby-chat')
@@ -146,7 +168,7 @@ export class OnlineLobby {
       .subscribe();
 
     this.sb.channel('zl-friends-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => this.loadFriends().catch(() => {}))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => { if (!this.matchActive) this.loadFriends().catch(() => {}); })
       .subscribe();
 
     this.userChan = this.sb.channel('zl-user-' + this.me.id)
@@ -409,6 +431,8 @@ export class OnlineLobby {
 
   // ---------- games ----------
 
+  // Open rooms you can join, plus in-progress games: the world should see wars
+  // being fought, and players who dropped can find their game and rejoin it.
   async refreshGames() {
     const since = new Date(Date.now() - FRESH_MS).toISOString();
     const { data, error } = await this.sb.from('rooms')
@@ -419,7 +443,9 @@ export class OnlineLobby {
       .order('created_at', { ascending: false })
       .limit(20);
     if (error) throw error;
-    const games = (data || []).map(roomToGame);
+    const games = (data || [])
+      .map(roomToGame)
+      .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1));
     if (this.cb.onGames) this.cb.onGames(games);
     return games;
   }
@@ -471,6 +497,17 @@ export class OnlineLobby {
     await this._touchPresence();
   }
 
+  // Room-row churn (heartbeats, reconnect upserts) fires postgres events
+  // constantly; mid-match the full re-select matters little and costs main
+  // thread + network, so it gets throttled hard while a match runs.
+  _refreshCurrentThrottled() {
+    const gapMs = this.matchActive ? 12000 : 0;
+    const now = Date.now();
+    if (now - (this._lastRoomRefresh || 0) < gapMs) return;
+    this._lastRoomRefresh = now;
+    this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
+  }
+
   async refreshCurrentGame() {
     if (!this.game?.id) return null;
     const { data, error } = await this.sb.from('rooms')
@@ -512,7 +549,7 @@ export class OnlineLobby {
     const { data } = await this.sb.from('rooms')
       .select(ROOM_SELECT)
       .eq('code', String(code).trim().toUpperCase())
-      .eq('status', 'open')
+      .in('status', ['open', 'in_game'])
       .limit(1);
     return data?.[0] ? roomToGame(data[0]) : null;
   }
@@ -530,10 +567,10 @@ export class OnlineLobby {
         else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${gameId}` }, () => {
-        this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
+        this._refreshCurrentThrottled();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${gameId}` }, () => {
-        this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
+        this._refreshCurrentThrottled();
       });
     await waitForSubscription(this.gameChan);
     this.roomChatChan = this.sb.channel('zl-room-chat-' + gameId)

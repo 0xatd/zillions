@@ -37,20 +37,59 @@ The gameplay base is continuous siege on a lane graph:
   Forward Camp plots that only unlock on ground the player holds.
 - Forward Camps are lane anchors. Their upgrades must add local holding power:
   front-line blockers, short-range fire, and a final bastion/siege tier.
-- Node placement is READ FROM TERRAIN (`GameMap._findNodeFeatures`) — ore
+- Node placement is READ FROM TERRAIN (`TerrainField._findNodeFeatures`) — ore
   fields, fords, clearings, barrows, quarries — never from a ring. Do not put
-  them back on a ring; identical skeletons across maps kill the mystery.
+  them back on a ring; identical skeletons across maps kill the mystery. Hive
+  lairs and city sites are read from terrain too, for the same reason.
+- Every level owns a LANDFORM and a CITY PLAN, and no two levels may share
+  either. `theme.terrain` picks the landform (`TERRAIN_SHAPES` in
+  `src/terrain.js`: moor, fen, wastes, hills, vale) and `theme.city` picks the
+  plan (`CITY_PLANS` in `src/plots.js`: bastion, fort, star, crescent,
+  keyhole). One generic round base on every map is the failure state this
+  replaced — do not collapse it back.
+- The BOUNDARY stays closed whatever the silhouette — but the wall is only
+  half of it. Where the rampart line crosses crag, water or deep wood, no wall
+  is built and the land is the wall; walls are raised across the gaps, and only
+  a gap can carry a gate. Do not go back to levelling the rampart band and
+  stamping a full ring: identical bases on different ground is the failure
+  state this replaced. See `docs/fortress-inspiration.md`.
+- Every entrance is a WARD: flanking towers plus its own muster camp, so the
+  squads that hold a gate and the squads that push a lane out of it start at
+  the gate. Every city keeps all three camp doctrines buildable and every camp
+  on a road. At least two entrances always exist — the plan's two principal
+  gates are cut open through whatever the ground put there.
+- Outer works are the land's own chokepoints: a fence across a natural gap plus
+  a tower behind it. They always carry a gate, because the player's own squads
+  have to march out through their own fence.
+- The three city sites on a map must stay meaningfully different, named, and
+  described to the player before they commit the run to one.
 - A node's KIND and its OWNER are separate facts. Kind is terrain and is always
   true. Ownership is claimed at setup (`Game._claimNodes`, hive takes the far
   ground) and is hidden behind `node.seen` until a friendly unit gets within
   `SIEGE.scoutRadius`. Never reveal ownership the player has not scouted.
 - Campaign win: raze every hive, then kill the champion that leads the final
   counterattack. Loss: the Keep falls.
+- The campaign is the war for EARTH (the five authored levels), and Earth is
+  one star in a procedural galaxy. `levelById(n)` in `src/config.js` is the ONE
+  level lookup: 1-5 are authored, 6+ are generated deterministically from the
+  planet number (landform x plan combo walk, hue-shifted palette, scaled
+  economy and elder-boss variants, maps growing to 220). Never index LEVELS
+  directly for a level id. Cleared worlds persist via `profile.campaign` —
+  liberation must stay sticky.
 - No individual squad micro. Squads are autonomous, but the player sets the
   global stance: Defend city, Follow hero, or Push the lanes.
 - Hero progression is player-chosen. Level-ups grant upgrade points for Aura,
   Passive I, Passive II, or Ult Damage. Do not return to hidden automatic
   special ranks.
+- Ground you hold is ground you can fortify: every lane node carries a Forward
+  Camp, a watchtower and — where the land pinches — a palisade. Everything on a
+  node is locked until the node is yours and ruins when you lose it.
+- The map hides field loot in barrows, hive hoards, passes and boss corpses.
+  Caches are invisible until a hero is close, pickup is automatic by walking
+  over them into a PACK_SLOTS-sized pack, and G drops the newest find. Field
+  finds apply to hero stats immediately and carry over to the persistent hero
+  at the end of a run in BOTH campaign and survival — survival has no other
+  progression, so do not take that away.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
 
 Do not turn this back into a generic RTS launcher.
@@ -151,6 +190,8 @@ Do not implement fake conquest data as if it is live.
 - `docs/product-contract.md` - product source of truth.
 - `docs/agent-brief.md` - quick current-state and pitfall brief.
 - `docs/backend.md` - backend source of truth.
+- `docs/fortress-inspiration.md` - the historical fortification rules the city
+  generator implements, and why.
 
 ## Validation
 

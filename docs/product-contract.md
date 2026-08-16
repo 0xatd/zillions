@@ -13,33 +13,40 @@ front line outward until the planet is taken.
 
 Use continuous siege on a lane graph as the gameplay base:
 
-- Unclaimed frontier maps.
-- Multiple city sites.
+- Unclaimed frontier maps, each with its own landform. Two levels must never
+  share a landform, and a level's terrain must shape play, not just palette.
+- Multiple city sites, each with a different character, named and explained to
+  the player before they commit.
 - Found the city at a flagged site.
-- Closed ramparts with gate chokepoints.
+- A closed defensive boundary with gate chokepoints. Each level raises a
+  different city plan — silhouette, gate count, street pattern — and no two
+  levels share one.
+- The ground is part of the fortification. Crag, water and deep wood along the
+  wall line are wall; the player only builds and pays for the gaps. Terrain
+  decides how many entrances a site has, and the site survey tells the player
+  how much of the wall line that ground closes before they commit.
+- Every entrance is a ward: towers covering the gate and a muster camp inside
+  it, so defending a gate and pushing a lane out of it start in the same place.
+- The land's own chokepoints are buildable: a cheap fence across a natural gap,
+  with a tower behind it, out on the approaches.
 - Pre-planned house, farm, mill, mine, camp, tower, and wall plots.
 - Hold the interact key to stream coins into a plot.
-- An incomplete build or upgrade refunds its committed coins when the player
-  releases the key, walks away, or cannot pay the full cost. Show the coins
-  flying back to the hero.
 - Economy must be level-balanced against gold the player can actually collect.
   A campaign level should start with enough gold for a real opening choice, and
   income upgrades should pay back inside a few minutes of siege.
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; ground coins come from combat and conquest.
-  Every enemy drops at least one coin.
-- Damage and ruins use the hold-to-build verb. Bought Auto-Workshops and final
-  Repair Bastions automatically repair nearby standing structures, but never
-  rebuild ruins or choose upgrades.
-- The main base has a physical Hero Forge with three major shared hero tiers.
-  Core economy, army, Keep, and Forward Camp plots have expensive capstones.
+- Nothing repairs itself — damage and ruins are paid for with the same
+  hold-to-build verb.
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
 - Hive nests are real bases: health, defenders, and blighted ground.
-- Lane nodes are taken by presence, pay income, and unlock Forward Camps.
-  Forward Camps upgrade into short-range lane anchors: blockers, local fire, and
-  a final bastion/siege tier on the road the player chooses to hold.
-- Node placement is derived from terrain, never from a ring.
+- Lane nodes are taken by presence, pay income, and unlock a real expansion
+  fort: Forward Camp, watchtower, and a palisade where the ground pinches.
+- The map hides items worth going to look for. Heroes pick them up by walking
+  over them, carry a limited pack, can drop what they do not want, and keep
+  what they carry out — in survival as well as campaign.
+- Node, hive and city-site placement are derived from terrain, never from a ring.
 - What a node IS may be readable from the map. Who HOLDS it must not be, until
   the player has scouted it.
 - Camps are faucets that muster squads forever.
@@ -66,6 +73,10 @@ Do not turn Survival back into a generic RTS or a debug launcher.
    Each whole Threat level triggers a simultaneous surge from every hive.
 5. Campaign maps end when every hive is razed and the champion leading the
    final counterattack is killed — or when the Keep falls.
+6. The campaign is the war for Earth (five authored fronts). Past it the
+   galaxy is procedural and endless: frontier worlds are deterministic from
+   their number, get larger and harder with depth, and stay liberated on the
+   player's profile once cleared.
 
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.

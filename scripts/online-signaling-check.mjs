@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { OnlineLobby } from '../src/online.js';
+import { OnlineLobby, canRejoinRoom } from '../src/online.js';
 
 class FakeChannel {
   constructor(statuses = ['SUBSCRIBED'], sends = ['ok']) {
@@ -61,5 +61,14 @@ await watcher.watchGame(watched);
 assert.equal(watcher.game, watched, 'watching must retain the active game without taking a player seat');
 assert.deepEqual(subscribedRoom, { roomId: 'room-live', asHost: false }, 'watching must subscribe as a non-host');
 assert.deepEqual(spectatorSignal, { t: 'knock', role: 'spectator', name: 'Observer' }, 'watching must identify a read-only spectator to the host');
+
+const liveRoom = {
+  status: 'in_game', host_id: 'host-1',
+  _players: [{ user_id: 'host-1' }, { user_id: 'guest-1' }],
+};
+assert.equal(canRejoinRoom(liveRoom, 'guest-1'), true, 'a seated guest must be allowed to rejoin');
+assert.equal(canRejoinRoom(liveRoom, 'host-1'), false, 'the host must not be offered guest rejoin');
+assert.equal(canRejoinRoom(liveRoom, 'stranger-1'), false, 'a spectator must not create a phantom seat');
+assert.equal(canRejoinRoom({ ...liveRoom, status: 'open' }, 'guest-1'), false, 'rejoin only applies to an active war');
 
 console.log('Online signaling check passed.');

@@ -68,16 +68,69 @@ Then open:
 
 ## How It Plays
 
-Each map is a contested planet. Hive nests — the enemy's producing bases — ring
-the wilds, a graph of **lane nodes** covers the ground between, and three
-flagged **city sites** offer different ground to defend. You start un-founded:
-ride the frontier,
-pick your site, press Space, and the city plan appears there — the ground
-inside the rampart is levelled clean, dirt lanes run from each gate to the
-plaza, a ring of house plots surrounds the Keep, farm and mill lanes sit
-behind them, gold mines wait on the ore veins, and a fully **closed** rampart
-circles it all. The only ways in are the four gates, each flanked by a pair
-of tower plots. Chokepoints, by design.
+Each map is a contested planet with its own **landform**. Greenfall is open
+rolling moorland; Rotmire is a drowned fen of causeways and fords; the Cinder
+Wastes are ash plains cut by long crag canyons; Barrow Hills is a field of
+grave mounds and hollows; the Black Vale is split by one great mountain rift
+with three passes through it. The landform decides how much water, crag and
+wood there is and where it sits, so the ground plays differently — not just
+looks different — on every level.
+
+Hive nests — the enemy's producing bases — lair in the ugly ground far from
+you, a graph of **lane nodes** covers the ground between, and three flagged
+**city sites** offer genuinely different ground to defend: a shore with fewer
+ways in, a crag shelf, ore inside the walls. Ride up to a site and it tells you
+what it is.
+
+You start un-founded: ride the frontier, pick your site, press Space, and the
+**city plan** rises there. Every level builds a different plan, always turned
+to face the hives:
+
+| Level | Plan | What it changes |
+| --- | --- | --- |
+| Greenfall Marches | **ringed bastion** | A round ring, four gates. Open on every side. |
+| Rotmire | **square fort** | Bastioned corners, gridded streets, a solid back wall — three gates, and a safe rear quarter to build economy in. |
+| Cinder Wastes | **star fort** | Five towered spurs, gates sunk in the valleys between them. No room inside: the farms go outside the wall. |
+| Barrow Hills | **crescent hold** | A broad front arc and a dead-straight back wall. One heavy gate, one postern, one street between them. |
+| The Black Vale | **throat keep** | A long walled throat jutting at the horde, lined with towers, plus a postern. They come up the corridor or not at all. |
+
+### The ground builds half your fortress
+
+You never wall what the land already walls. Where the rampart line crosses
+crag, deep water or thick wood, nothing is built there — that stretch is free,
+permanent wall. You pay only for the **gaps**, and since a barrier costs by the
+tile, a site whose crags close half the line costs about half as much to
+fortify. Across the campaign's fifteen city sites, the ground closes anywhere
+from 2% to 77% of the wall line, so the same plan comes out a different
+fortress on different ground. Ride up to a flagged site and the survey tells you
+which kind of site it is before you commit.
+
+Only an open stretch can carry a gate, so the terrain also decides **how many
+ways in** your city has — two to four. Whatever it decides, the plan's two
+principal gates are always cut open, so you can always sortie.
+
+### Every entrance is a ward
+
+Each gate gets the same kit: two flanking towers and its own muster camp, with a
+road spur to the plaza. Defending a gate and pushing a lane out of it start in
+the same place, so ordering **3 Push** sends squads out of the gate nearest the
+front instead of marching them across town. Two plans (the square fort and the
+throat keep) add an **inner ward** — a second wall around the Keep with towers
+in the yard between the walls, and gate roads that bend through it.
+
+### Fence the passes
+
+Out on the approaches the map has its own chokepoints: a gap two to nine tiles
+wide pinched between crags, woods or water. The three best of them near your
+city come with a **palisade** plot and a watchtower behind it. A three-tile
+fence costs almost nothing, always carries a gate for your own squads, and
+turns a pass into a killing ground you own.
+
+This is how fortification actually worked — promontory forts walling only the
+neck, Great Zimbabwe running its walls between granite boulders, Krak des
+Chevaliers' concentric wards and bent entrance, Maiden Castle's staggered gate,
+an abatis thrown across a gap. `docs/fortress-inspiration.md` has the sources
+and the mapping.
 
 - **Build whenever you like — and it is never safe.** Walk to a glowing
   foundation and **hold Space in Build mode** or **hold B anytime**: coins arc
@@ -94,13 +147,9 @@ of tower plots. Chokepoints, by design.
   gold continuously. Physical coins now drop only from kills, captured nodes
   and razed hives — so the coin-hoover is a reward for fighting, not a chore
   at sunrise.
-- **Repairs can be automated.** Hold Space in Build mode, or B anytime, on a
+- **Nothing repairs itself.** Hold Space in Build mode, or B anytime, on a
   damaged building to repair it for gold, or on a ruin to rebuild it at half
-  price. Auto-Workshops and final-tier Repair Bastions maintain nearby standing
-  structures. They never rebuild ruins or choose upgrades.
-- **Major progression lives in the city.** Build the Hero Forge beside the Keep
-  for large shared hero upgrades. Core plots have expensive capstone tiers for
-  late-game income.
+  price. Damage is a bill.
 - **Threat is the clock.** It climbs on its own, faster while hives stand, and
   a little every time you take ground. Every whole Threat level, every hive
   musters at once.
@@ -124,10 +173,10 @@ of tower plots. Chokepoints, by design.
   their own, but you set the plan. **1 Defend** holds the city, **2 Follow**
   escorts your hero, and **3 Push** sends them out along the lanes.
 - **Take and hold lane nodes.** Stand on a node with no enemies nearby and it
-  flips to you. Held nodes pay income, and you can raise a **Forward Camp** on
-  one so squads muster at the front instead of walking there. Upgrade it into a
-  **War Outpost** and then **Lane Bastion** to add short-range lane fire and a
-  tough anchor for that road. Lose the node and you lose what you built on it.
+  flips to you. Held ground is ground you can fortify: every node carries a
+  **Forward Camp**, a **watchtower**, and — where the land pinches nearby — a
+  **palisade** across the gap. None of it is buildable until the node is
+  actually yours, and losing the node ruins the whole fort with it.
 - **The ground is terrain; the owner is a separate question.** Nodes are read
   out of the map itself — ore fields, fords pinched between water and crags,
   sheltered clearings, barrow shelves — so no two planets share a skeleton. What
@@ -135,15 +184,28 @@ of tower plots. Chokepoints, by design.
   already holds some of the best ground, some is merely guarded, and some is
   empty; a node stays *unsurveyed* on the map until one of your people gets
   close enough to look. An ore field being over there does not mean a hive is.
+- **The frontier is hiding things.** Barrows have something under them, every
+  hive sits on a hoard, travellers die in the passes with their packs on, and
+  bosses always drop something. Caches stay invisible until a hero gets close,
+  then you **walk over loot to pick it up** — straight into a 4-slot pack, felt
+  immediately in your stats. Full pack? **G** drops the newest find on the
+  ground. Whatever you are still carrying at the end of a run is yours to keep,
+  in survival as well as campaign — which is the only way a survival run gets
+  stronger wave after wave.
 - **Ground has character.** An Ore Field pays double. A Quarry makes the Forward
   Camp built on it half again as tough. A Clearing lets it muster an extra
   trooper. A Ford is always well guarded, because whoever holds the pinch holds
-  the road. Upgraded camps are the melee/ranged/siege lane support layer: blockers
-  muster there, short-range guns cover the fight, and the top tier splashes packed
-  pressure. A Barrow has something buried under it, once.
-- **Campaign**: raze every hive on each of the 5 maps, then break the
-  counterattack its unique champion leads. **Survival**: endless siege, a boss
-  every fifth Threat level — your record is the Threat you drove it to.
+  the road. A Barrow has something buried under it, once.
+- **Campaign — the war for Earth, then the stars.** Raze every hive on each of
+  Earth's 5 fronts, then break the counterattack its unique champion leads.
+  Win all five and Earth is retaken — and turns out to be one star among many:
+  the **procedural galaxy** opens. Frontier worlds are generated from their
+  number alone (same galaxy for every player), recombining the landforms and
+  city plans on bigger and bigger maps with harder hives and renamed elder
+  bosses, without end. Every world you clear stays liberated on your profile —
+  the level select is a map of the war, each planet drawn from its real
+  terrain. **Survival**: endless siege, a boss every fifth Threat level — your
+  record is the Threat you drove it to.
 
 ## Side Quests, Items & Campaign Persistence (WC3-style)
 
@@ -190,20 +252,13 @@ hero revives at the Keep.
 | B (hold) | Build / upgrade / repair in either mode |
 | Q | Cast your special |
 | T | Cycle the targeting doctrine of the nearest tower |
+| G | Drop the newest field find out of your pack |
 | 1 / 2 / 3 | Army stance: Defend city / Follow hero / Push the lanes |
 | Hero upgrade buttons | Spend level-up points on Aura, Passive I, Passive II, or Ult Damage |
 | Mouse wheel | Zoom |
 | P | Pause (solo) |
 | Esc | Menu |
 | M | Mute |
-
-The sparkle button in the top bar switches graphics quality. High quality uses
-vendored Three.js postprocessing for tactical outlines, restrained high-threshold
-bloom, and SMAA. Low quality uses direct rendering at a lower pixel ratio and
-disables shadows. The choice is stored on the device and does not affect the
-simulation or multiplayer lockstep. Co-op starts in low graphics by default
-because weaker laptops and video calls can turn high-quality postprocessing into
-visible lag.
 
 ## Playing Together
 
@@ -219,9 +274,7 @@ state. Do not seed fake games or fake players.
 
 The actual match still uses peer-to-peer WebRTC lockstep (up to 3 players, one
 hero each). The backend stores identity, rooms, saves, stats, and results. It
-does not run the combat simulation yet. Guest clients keep a tiny command-window
-buffer so normal WebRTC jitter causes catch-up pauses instead of constant
-micro-stutters.
+does not run the combat simulation yet.
 
 **Manual invite codes** (lobby → "Manual invite codes"): the serverless
 fallback — trade invite/reply codes over any chat channel, no lobby backend
@@ -304,7 +357,9 @@ src/game.js             Main simulation and rules
 src/config.js           Balance, heroes, buildings, units, siege
 src/audio.js            Runtime WebAudio synth
 src/ui.js               DOM HUD, panels, picker, minimap
-src/map.js              Procedural map
+src/terrain.js          Landform archetypes, city sites, hive lairs, node features
+src/map.js              Map rendering: terrain mesh, foliage, minimap
+src/plots.js            City plans: rampart silhouettes, gates, districts
 src/flowfield.js        Horde pathfinding
 src/lanes.js            Lane graph: capture nodes, lanes, and squad routing
 src/assets.js           GLB and hero media loader
@@ -321,8 +376,10 @@ assets/audio/           Generated audio assets and manifests
 docs/product-contract.md Product source of truth for agents
 docs/agent-brief.md    Quick current-state and pitfall brief
 docs/backend.md         Backend source of truth
+docs/fortress-inspiration.md  Historical fortification rules the city generator implements
 AGENTS.md               Agent handoff and review instructions
 scripts/repo-check.mjs  Repo hygiene checks for stale rules/backend drift
+scripts/map-check.mjs   Builds every level's map and city and checks it plays
 ```
 
 ## Tech Notes

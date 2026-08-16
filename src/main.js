@@ -1,24 +1,28 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import {
-  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS,
+  PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
+  ITEMS, BOSS_DROPS, UNITS, TILE,
 } from './config.js';
 import { GameMap } from './map.js';
+import { surveySite } from './plots.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone } from './assets.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS } from './online.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness } from './multiplayer-readiness.js';
 
 const ZMAX = 1700;
-const NET_STEP = 3;          // one lockstep command window every 3 sim ticks
-const NET_GUEST_BUFFER = 2;  // keep guests slightly behind to absorb jitter
+const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
+const NET_GUEST_BUFFER = 2;  // windows a guest keeps banked before it will run
+const NET_REDUNDANCY = 3;    // past windows repeated in every window packet
+const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
+const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 
 class App {
   constructor() {
@@ -137,11 +141,19 @@ class App {
     this.guestHeroes = [];
     this.guestNames = [];
     this.guestCmdQueues = [];
+    this.peerUserIds = [];    // online rooms: account id per peer slot, for reconnects
     this.netMode = false;
     this.outbox = [];
     this.simFrame = 0;
     this.inbox = new Map();
     this.hashes = { local: new Map() };
+    this._recentWindows = []; // host: last few windows, resent for redundancy
+
+    // Terrain readability: pulses + one-time warnings when a hero shoves
+    // against impassable ground (lava, deep water, woods, crags).
+    this.blockFx = [];
+    this._blockT = 0;
+    this._blockWarned = {};
     this.desynced = false;
     this.netPrimed = false;
     this.netStallT = 0;
@@ -184,7 +196,7 @@ class App {
 
   showMenuBackdrop(levelId) {
     if (this.game) return;
-    const level = LEVELS[(levelId || 1) - 1] || LEVELS[0];
+    const level = levelById(levelId || 1);
     if (this.menuLevelId === level.id) return;
     this.menuLevelId = level.id;
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; }
@@ -205,7 +217,7 @@ class App {
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
-    const level = LEVELS[levelId - 1] || LEVELS[0];
+    const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
@@ -224,6 +236,7 @@ class App {
     if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
+    this._netPumpStop();
     if (this.netMode) {
       this.mpRole = mp.role;
       this.simFrame = 0;
@@ -233,16 +246,26 @@ class App {
       this.netPrimed = false;
       this.netStallT = 0;
       this.speed = 1;
-      if (this.tacticalVisuals.quality === 'high') {
-        this.ui.setQualityUI(this.tacticalVisuals.applyQuality('low', false));
-      }
+      this.desynced = false;
+      this._recentWindows = [];
+      this._netClockLast = performance.now();
+      // Co-op keeps the graphics the player chose. The sim pump below keeps
+      // windows flowing even when the render loop hitches, so guests no
+      // longer pay for the host's frame drops.
+      this._netPumpStart();
+      if (this.onlineMode && this.lobby) this.lobby.setMatchActive(true);
     }
+    for (const f of this.blockFx) this.scene.remove(f.mesh);
+    this.blockFx = [];
+    this._blockT = 0;
+    this._blockWarned = {};
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     // The plaza and city appear where (and when) the city is founded.
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
     this._clearSiteMarkers();
     this._clearNestMeshes();
+    this._clearLootMeshes();
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -269,25 +292,32 @@ class App {
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
   }
 
-  // A cobbled plaza + lanes radiating to the districts — the city looks
-  // designed even before anything is built.
+  // A cobbled plaza + a lane out to every gate this city actually has — the
+  // city looks designed even before anything is built, and it looks like ITS
+  // plan: a square fort gets a square plaza, a crescent gets two lanes, not
+  // four. Falls back to a plain ring if the plan is not known yet.
   _buildPlaza(cx, cz) {
     const g = new THREE.Group();
+    const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
+    const plan = hq && hq.plan;
+    const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(7.2, 40),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
       new THREE.MeshLambertMaterial({ color: 0x565149 }),
     );
     disc.rotation.x = -Math.PI / 2;
+    if (squarePlaza) disc.rotation.z = -plan.facing;
     disc.position.set(cx, 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
     const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 10.5), laneMat);
+    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
+    for (const a of lanes) {
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * 10.5, 0.012, cz + Math.sin(a) * 10.5);
+      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), 0.012, cz + Math.sin(a) * (len / 2 + 4));
       g.add(lane);
     }
     return g;
@@ -313,7 +343,7 @@ class App {
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
-      const label = this._makeLabelSprite('🏳️', `SITE ${i + 1}`);
+      const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
@@ -325,6 +355,35 @@ class App {
   _clearSiteMarkers() {
     for (const m of this.siteMarkers || []) this.scene.remove(m);
     this.siteMarkers = [];
+    this._surveyed = null;
+  }
+
+  // Ride up to a flagged site and the ground tells you what it is. The three
+  // sites on a map are different bargains — a shore with fewer ways in, a
+  // crag shelf, ore inside the walls — so the player needs to be told which is
+  // which before they commit the run to one.
+  _surveySites() {
+    if (!this.game || this.game.phase !== 'found') return;
+    const h = this.myHero();
+    if (!h || h.dead) return;
+    this._surveyed = this._surveyed || new Set();
+    this.map.sites.forEach((s, i) => {
+      if (this._surveyed.has(i)) return;
+      if ((h.x - s.x) ** 2 + (h.z - s.z) ** 2 > 10 * 10) return;
+      this._surveyed.add(i);
+      // Survey the ground the way a real siege engineer would: how much of the
+      // wall line does the land itself already close?
+      const survey = surveySite(this.map, s, { levelId: this.game.levelId, siteIdx: i });
+      const pct = Math.round(survey.natural * 100);
+      const wall = pct >= 45 ? `The land itself closes ${pct}% of the wall line — you build the gaps.`
+        : pct >= 18 ? `Crag and wood close ${pct}% of the wall line; the rest you build.`
+          : 'Open on nearly every side: you will be building the whole wall.';
+      // The survey is the authoritative claim about this ground, so drop the
+      // generic "open on every side" flavour when the wall line says otherwise.
+      const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
+      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
+        `A ${survey.plan.label} would stand here · SPACE to found the city`, 5600);
+    });
   }
 
   _makeNestMesh(n) {
@@ -375,6 +434,49 @@ class App {
     }
   }
 
+  // Field loot: a small floating find with its own icon over it. Hidden caches
+  // are not drawn at all — you have to walk near them to spot them.
+  _syncLoot(t) {
+    if (!this.game) return;
+    this.lootMeshes = this.lootMeshes || new Map();
+    const live = new Set();
+    for (const l of this.game.loot) {
+      if (l.hidden) continue;
+      live.add(l.id);
+      let mesh = this.lootMeshes.get(l.id);
+      if (!mesh) {
+        const it = ITEMS[l.key];
+        mesh = new THREE.Group();
+        const gem = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.34, 0),
+          new THREE.MeshLambertMaterial({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+        );
+        gem.castShadow = true;
+        mesh.add(gem);
+        mesh.userData.gem = gem;
+        const label = this._makeLabelSprite(it ? it.icon : '📦', '');
+        label.position.y = 1.5;
+        label.scale.set(2.2, 1.1, 1);
+        mesh.add(label);
+        mesh.position.set(l.x, 0, l.z);
+        this.scene.add(mesh);
+        this.lootMeshes.set(l.id, mesh);
+      }
+      mesh.position.set(l.x, 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
+      mesh.userData.gem.rotation.y = t * 1.4 + l.id;
+    }
+    for (const [id, mesh] of this.lootMeshes) {
+      if (live.has(id)) continue;
+      this.scene.remove(mesh);
+      this.lootMeshes.delete(id);
+    }
+  }
+
+  _clearLootMeshes() {
+    for (const m of (this.lootMeshes || new Map()).values()) this.scene.remove(m);
+    this.lootMeshes = new Map();
+  }
+
   _clearNestMeshes() {
     for (const m of (this.nestMeshes || new Map()).values()) this.scene.remove(m);
     this.nestMeshes = new Map();
@@ -402,7 +504,8 @@ class App {
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
       [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
       [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
-      [24, '⚔️ Camps muster a squad every few seconds, forever. Press 3 and they push out along the lanes on their own.'],
+      [24, '⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press 3 and those squads push out along the lanes on their own.'],
+      [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
       [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
@@ -599,19 +702,29 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 4 ? s : null;
+      return s && s.snap && s.snap.v === 5 ? s : null;
     } catch { return null; }
   }
 
   // Guests never autosave — the host owns the co-op save.
+  // The snapshot is taken synchronously (it must reflect one exact sim tick),
+  // but serializing + persisting it is deferred to idle time: in co-op every
+  // host frame hitch becomes a stall broadcast to all guests, and stringify +
+  // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
     if (!this.game || this.game.over || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
-      localStorage.setItem('zillions_save', JSON.stringify(save));
-      if (this.auth?.isSignedIn()) this.auth.syncLatestSave(save).catch((err) => console.warn('save sync failed', err));
-    } catch { /* storage full */ }
+      const persist = () => {
+        try {
+          localStorage.setItem('zillions_save', JSON.stringify(save));
+          if (this.auth?.isSignedIn()) this.auth.syncLatestSave(save).catch((err) => console.warn('save sync failed', err));
+        } catch { /* storage full */ }
+      };
+      if (!force && typeof requestIdleCallback === 'function') requestIdleCallback(persist, { timeout: 4000 });
+      else persist();
+    } catch { /* snapshot failed */ }
   }
 
   _recordGameEnd(won) {
@@ -633,37 +746,48 @@ class App {
     // and quest/boss rewards granted here await them on the next map.
     this._endExtras = null;
     const h = this.game.heroes[this.myPlayer];
-    if (h && this.game.mode === 'campaign') {
+    if (h) {
       p.campaignHeroes = p.campaignHeroes || {};
       p.relics = p.relics || [];
       p.questsDone = p.questsDone || {};
       const cur = (p.campaignHeroes[h.key] = p.campaignHeroes[h.key] || { level: 1, xp: 0, items: [], upgrades: {} });
-      if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
-        cur.level = h.level;
-        cur.xp = Math.round(h.xp);
-      }
-      cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
-      cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
       const grants = [];
-      for (const q of this.game.questResults || []) {
-        if (!q.done || p.questsDone[q.id]) continue;
-        p.questsDone[q.id] = true;
-        const it = ITEMS[q.reward];
-        if (!it) continue;
-        if (it.kind === 'relic') {
-          if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
-        } else if (!cur.items.includes(q.reward)) {
-          cur.items.push(q.reward);
-          grants.push(q.reward);
-        }
+      // Whatever the hero was still carrying off the field is theirs to keep —
+      // in survival too. Waves are the only progression a survival run has, so
+      // the finds have to survive the run.
+      const finds = [...new Set(h.pack || [])].filter((k) => ITEMS[k] && !(cur.items || []).includes(k));
+      if (finds.length) {
+        cur.items = [...(cur.items || []), ...finds];
+        grants.push(...finds);
       }
-      if (won) {
-        const drop = BOSS_DROPS[this.game.levelId];
-        if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+      // Levels, career gear and quest/boss rewards are the campaign's ladder.
+      if (this.game.mode === 'campaign') {
+        if (h.level > cur.level || (h.level === cur.level && h.xp > (cur.xp || 0))) {
+          cur.level = h.level;
+          cur.xp = Math.round(h.xp);
+        }
+        cur.items = [...new Set([...(cur.items || []), ...(h.items || [])])];
+        cur.upgrades = { ...(cur.upgrades || {}), ...(h.upgrades || {}) };
+        for (const q of this.game.questResults || []) {
+          if (!q.done || p.questsDone[q.id]) continue;
+          p.questsDone[q.id] = true;
+          const it = ITEMS[q.reward];
+          if (!it) continue;
+          if (it.kind === 'relic') {
+            if (!p.relics.includes(q.reward)) { p.relics.push(q.reward); grants.push(q.reward); }
+          } else if (!cur.items.includes(q.reward)) {
+            cur.items.push(q.reward);
+            grants.push(q.reward);
+          }
+        }
+        if (won) {
+          const drop = BOSS_DROPS[this.game.levelId];
+          if (drop && !cur.items.includes(drop)) { cur.items.push(drop); grants.push(drop); }
+        }
       }
       this._endExtras = {
         heroKey: h.key, heroName: h.def.name, level: cur.level, grants,
-        quests: this.game.questResults || [],
+        quests: this.game.mode === 'campaign' ? (this.game.questResults || []) : [],
       };
       this.ui.refreshHeroBadges(p);
     }
@@ -682,6 +806,8 @@ class App {
         level: this.game.levelId,
       }).catch((err) => console.warn('match history sync failed', err));
     }
+    this._netPumpStop();
+    if (this.lobby) this.lobby.setMatchActive(false);
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
@@ -716,6 +842,7 @@ class App {
       this.guestHeroes.push(null);
       this.guestNames.push(null);
       this.guestCmdQueues.push([]);
+      this.peerUserIds.push(null); // manual invites have no account id — no auto-reconnect
       this.pendingPeer = null;
       const players = this._manualRosterPlayers();
       peer.send({ t: 'lobby', n: this.peers.length + 1, players });
@@ -738,8 +865,9 @@ class App {
 
   _onHostMsg(idx, m) {
     if (m.t === 'hero') {
-      this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       this.guestNames[idx] = m.name || this.guestNames[idx] || `Player ${idx + 2}`;
+      if (this.netMode) return; // reconnecting player mid-game — roster is locked
+      this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       const players = this._manualRosterPlayers();
       this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
@@ -795,7 +923,18 @@ class App {
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
     }
     else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: this.ui.selectedMode || 'campaign' });
-    else if (m.t === 'w') this.inbox.set(m.w, m.c);
+    else if (m.t === 'w') {
+      // While a resync snapshot is being rebuilt, bank every window on the
+      // side — the fresh sim needs the ones sent since the snapshot froze.
+      const box = this._resyncing ? this._resyncBuffer : this.inbox;
+      const next = this._resyncing ? 0 : this.game ? Math.ceil(this.simFrame / NET_STEP) : 0;
+      if (m.w >= next) box.set(m.w, m.c);
+      // Redundant copies of recent windows ride along in every packet, so a
+      // late or lost packet no longer stalls the sim — a later one fills it.
+      for (const [pw, pc] of m.p || []) {
+        if (pw >= next && !box.has(pw)) box.set(pw, pc);
+      }
+    }
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
       else this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
@@ -806,6 +945,28 @@ class App {
       this.netPrimed = false;
       this.net.send({ t: 'spectateReady' });
       this.ui.showBanner('Watching live — camera controls work, battle controls are read-only.', '', 5000);
+    }
+    else if (m.t === 'resync') {
+      // Mid-game rejoin: the host froze one sim tick into a snapshot; rebuild
+      // from it, then pick up lockstep at the host's frame counter using the
+      // windows banked while the sim was rebuilding.
+      this._resyncing = true;
+      this._resyncBuffer = new Map();
+      this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap)
+        .then(() => {
+          const buf = this._resyncBuffer || new Map();
+          const next = Math.ceil(m.frame / NET_STEP);
+          for (const k of [...buf.keys()]) { if (k < next) buf.delete(k); }
+          this.simFrame = m.frame;
+          this.inbox = buf;
+          this.netPrimed = false;
+          this._reconnectTries = 0;
+          clearTimeout(this._reconnectT);
+          this.ui.setWaiting(false);
+          this.ui.showBanner('🔌 Reconnected — back in the war.', '', 3500);
+        })
+        .catch(() => {})
+        .finally(() => { this._resyncing = false; this._resyncBuffer = null; });
     }
     else if (m.t === 'desync' && !this.desynced) {
       this.desynced = true;
@@ -830,6 +991,111 @@ class App {
     return h;
   }
 
+  // ---------------- lockstep engine ----------------
+
+  // Host-sequenced lockstep: the host merges every player's commands into
+  // numbered windows and broadcasts them; guests advance only as windows
+  // arrive, so all sims stay in step. Driven by BOTH the render loop and the
+  // pump (a worker timer) off one shared wall clock, so the host keeps
+  // emitting windows even when rendering hitches or the tab is hidden.
+  _advanceNetSim() {
+    if (!this.netMode || !this.game || this.paused || this.game.over) return;
+    const now = performance.now();
+    let dt = Math.min((now - (this._netClockLast ?? now)) / 1000, 0.25);
+    this._netClockLast = now;
+
+    // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
+    // rate a few percent to hold NET_GUEST_BUFFER windows in the bank.
+    // Network jitter then shows up as imperceptible speed drift, not freezes.
+    if (this.mpRole === 'guest') {
+      const banked = this._windowsBuffered();
+      if (banked < NET_GUEST_BUFFER) dt *= NET_PACE_SLOW;
+      else if (banked >= NET_GUEST_BUFFER + 2) dt *= NET_PACE_FAST;
+    }
+
+    this.acc += dt;
+    let steps = 0;
+    let stalled = false;
+    while (this.acc >= SIM_DT && steps < 10) {
+      if (this.simFrame % NET_STEP === 0) {
+        const w = this.simFrame / NET_STEP;
+        let bundle;
+        if (this.mpRole === 'host') {
+          bundle = [...this.outbox];
+          this.outbox = [];
+          for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
+          // Each packet repeats the last few windows: on the unordered
+          // channel a late/lost packet is healed by the next one instead of
+          // freezing every guest.
+          this._broadcastFast({ t: 'w', w, c: bundle, p: this._recentWindows.slice() });
+          this._recentWindows.push([w, bundle]);
+          if (this._recentWindows.length > NET_REDUNDANCY) this._recentWindows.shift();
+        } else {
+          bundle = this.inbox.get(w);
+          if (!bundle) {
+            // A real gap. Re-arm the buffer so we come back with margin
+            // instead of running window-to-window and stuttering forever.
+            stalled = true;
+            this.netPrimed = false;
+            break;
+          }
+          if (!this.netPrimed) {
+            const hasBuffer = this.inbox.has(w + NET_GUEST_BUFFER - 1) || this.inbox.size >= NET_GUEST_BUFFER;
+            if (!hasBuffer) { stalled = true; break; }
+            this.netPrimed = true;
+          }
+          this.inbox.delete(w);
+        }
+        for (const c of bundle) this.game.exec(c);
+        if (w > 0 && w % 30 === 0) {
+          const hsh = this._stateHash();
+          if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
+          else this.net.send({ t: 'h', w, h: hsh });
+        }
+      }
+      this.game.update(SIM_DT);
+      this.simFrame++;
+      this.acc -= SIM_DT;
+      steps++;
+    }
+    if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
+    this.netStallT = stalled ? this.netStallT + dt : 0;
+    this.ui.setWaiting(stalled && this.netStallT > 0.25, this.netStallT > 1.2 ? '⏳ Network catch-up…' : '⏳ Syncing co-op…');
+  }
+
+  // Consecutive windows banked ahead of the guest's next lockstep boundary.
+  _windowsBuffered() {
+    const w = Math.ceil(this.simFrame / NET_STEP);
+    let n = 0;
+    while (n < 32 && this.inbox.has(w + n)) n++;
+    return n;
+  }
+
+  _broadcastFast(msg) {
+    for (const p of this.peers) p.sendFast(msg);
+  }
+
+  // The pump: a heartbeat that keeps the lockstep clock ticking when
+  // requestAnimationFrame doesn't — heavy frames, GC pauses, hidden tabs.
+  // Worker timers keep firing in backgrounded tabs where window timers are
+  // throttled, so guests no longer freeze because the host alt-tabbed.
+  _netPumpStart() {
+    const periodMs = Math.round(SIM_DT * NET_STEP * 1000);
+    const tick = () => this._advanceNetSim();
+    try {
+      const src = `setInterval(() => postMessage(0), ${periodMs});`;
+      this._netWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this._netWorker.onmessage = tick;
+    } catch {
+      this._netPumpTimer = setInterval(tick, periodMs);
+    }
+  }
+
+  _netPumpStop() {
+    if (this._netWorker) { try { this._netWorker.terminate(); } catch { /* gone */ } this._netWorker = null; }
+    if (this._netPumpTimer) { clearInterval(this._netPumpTimer); this._netPumpTimer = null; }
+  }
+
   // ---------------- scene setup ----------------
 
   // ---------------- online lobby ----------------
@@ -845,7 +1111,7 @@ class App {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row)),
+      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id),
       onOnline: (map) => { this.ui.lobbyOnline(map); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
@@ -1003,37 +1269,64 @@ class App {
   }
 
   // Host side of the automatic handshake: a guest knocked — offer them a
-  // WebRTC session through the signaling channel.
+  // WebRTC session through the signaling channel. Mid-game, a knock from a
+  // player who already holds a seat is a reconnect: rebuild the link and
+  // resync them from a live snapshot.
   async _onKnock(sig) {
     if (sig.role === 'spectator') return this._acceptSpectator(sig);
-    if (this.peers.length >= 2 || this.netMode || !this.onlinePending) return;
+    if (!this.onlinePending) return;
+    const rejoinIdx = this.peerUserIds.indexOf(sig.from);
+    const rejoining = this.netMode && this.game && !this.game.over && rejoinIdx >= 0;
+    if (this.netMode && !rejoining) return;           // mid-game seats are not open to strangers
+    if (!this.netMode && this.peers.length >= 2) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession();
-    const idx = this.peers.length;
+    const peer = new NetSession(this.lobby?.iceServers);
+    const idx = rejoining ? rejoinIdx : this.peers.length;
     peer.onOpen = () => {
-      this.peers.push(peer);
-      this.guestHeroes.push(null);
-      this.guestNames.push(sig.name || null);
-      this.guestCmdQueues.push([]);
       this.onlinePending.delete(sig.from);
-      peer.send({ t: 'lobby', n: this.peers.length + 1, players: this._roomRosterFromGame(this.lobby.game) });
-      this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
-      this._syncSetupRoster();
-      if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
+      if (rejoining) {
+        const old = this.peers[idx];
+        try { if (old) old.destroy(); } catch { /* already dead */ }
+        this.peers[idx] = peer;
+        this.guestCmdQueues[idx] = [];
+        // One live tick, frozen and shipped: the guest rebuilds from it and
+        // rejoins lockstep at our frame counter.
+        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame });
+        this.game.msg(`⚔️ ${this.guestNames[idx] || `Player ${idx + 2}`} reconnected — their hero fights again.`, 'good');
+      } else {
+        this.peers.push(peer);
+        this.guestHeroes.push(null);
+        this.guestNames.push(sig.name || null);
+        this.guestCmdQueues.push([]);
+        this.peerUserIds.push(sig.from);
+        peer.send({ t: 'lobby', n: this.peers.length + 1, players: this._roomRosterFromGame(this.lobby.game) });
+        this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
+        this._syncSetupRoster();
+        if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
+      }
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
     peer.onClose = () => {
-      if (this.netMode && this.game && !this.game.over) {
-        this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on alone.`, 'warn');
+      if (this.netMode && this.game && !this.game.over && this.peers[idx] === peer) {
+        this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on until they return.`, 'warn');
       }
     };
     this.onlinePending.set(sig.from, peer);
+    // An abandoned handshake must not squat the pending slot forever — that
+    // would silently eat every later knock (and reconnect) from this player.
+    setTimeout(() => {
+      if (this.onlinePending?.get(sig.from) === peer && !peer.open) {
+        this.onlinePending.delete(sig.from);
+        peer.destroy();
+      }
+    }, 20000);
     try {
-      const code = await peer.host();
+      peer.onIce = (cand) => { this.lobby.signal({ t: 'ice', to: sig.from, cand }).catch(() => {}); };
+      const code = await peer.hostTrickle();
       await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
     } catch (e) {
       this.onlinePending.delete(sig.from);
-      this.ui.onlineStatus('❌ Could not reach the joining player. Ask them to try JOIN again.');
+      if (!rejoining) this.ui.onlineStatus('❌ Could not reach the joining player. Ask them to try JOIN again.');
     }
   }
 
@@ -1067,35 +1360,86 @@ class App {
     }
   }
 
-  // Guest side: the host's offer arrived — answer it.
+  // Guest side: the host's offer arrived — answer it. ICE candidates trickle
+  // both ways through the signaling channel afterwards.
   async _onSignal(sig) {
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
-      this.net = new NetSession();
+      this.net = new NetSession(this.lobby?.iceServers);
       this.net.onOpen = () => {
         if (this.mpRole === 'guest') {
-          this.net.send(this._heroPayload());
-          this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
+          this._reconnectTries = 0;
+          if (!this.netMode) {
+            this.net.send(this._heroPayload());
+            this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
+          }
         } else {
           this.ui.onlineStatus('🟢 Connected to the host. Loading the live battle…');
         }
       };
       this.net.onMessage = (m) => this._onGuestMsg(m);
-      this.net.onClose = () => {
-        if (this.netMode && this.game && !this.game.over) {
-          this.pause();
-          this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
-        }
-      };
+      this.net.onClose = () => this._onHostLinkLost();
       try {
-        const reply = await this.net.join(sig.sdp);
+        this.net.onIce = (cand) => { this.lobby.signal({ t: 'ice', to: sig.from, cand }).catch(() => {}); };
+        const reply = await this.net.joinTrickle(sig.sdp);
         await this.lobby.signal({ t: 'answer', to: sig.from, sdp: reply });
       } catch (e) {
-        this.ui.onlineStatus(`❌ Handshake failed: ${e.message}. Try JOIN again.`);
+        if (wasInGame) this._scheduleReconnect();
+        else this.ui.onlineStatus(`❌ Handshake failed: ${e.message}. Try JOIN again.`);
       }
     } else if (sig.t === 'answer' && this.mpRole === 'host' && this.onlinePending) {
       const peer = this.onlinePending.get(sig.from);
       if (peer) peer.acceptReply(sig.sdp).catch(() => {});
+    } else if (sig.t === 'ice') {
+      // Trickled candidate: route to whichever session speaks to that player.
+      if (this.mpRole === 'host') {
+        const peer = this.onlinePending?.get(sig.from)
+          || (this.peerUserIds.indexOf(sig.from) >= 0 ? this.peers[this.peerUserIds.indexOf(sig.from)] : null);
+        if (peer) peer.addIce(sig.cand);
+      } else if (this.net) {
+        this.net.addIce(sig.cand);
+      }
     }
+  }
+
+  // The host link dropped mid-game. If this is a lobby (signaled) match, the
+  // room is still alive in Supabase — knock again and the host will offer a
+  // fresh session plus a resync snapshot. Manual invite-code games can't
+  // re-signal, so they keep the old pause-and-banner behavior.
+  _onHostLinkLost() {
+    if (!this.netMode || !this.game || this.game.over) return;
+    if (this.onlineMode && this.lobby?.game && this.lobby.connected) {
+      this._reconnectTries = 0;
+      this._scheduleReconnect(0);
+    } else {
+      this.pause();
+      this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
+    }
+  }
+
+  _scheduleReconnect(delayMs = null) {
+    if (!this.netMode || !this.game || this.game.over) return;
+    this._reconnectTries = (this._reconnectTries || 0) + 1;
+    if (this._reconnectTries > 8) {
+      this.pause();
+      this.ui.setWaiting(false);
+      this.ui.showBanner('⚠️ Could not reach the host again. The room may have ended.', 'bad', 8000);
+      return;
+    }
+    const wait = delayMs != null ? delayMs : Math.min(8000, 500 * 2 ** (this._reconnectTries - 1));
+    this.ui.setWaiting(true, '🔌 Reconnecting…');
+    clearTimeout(this._reconnectT);
+    this._reconnectT = setTimeout(() => {
+      if (!this.netMode || !this.game || this.game.over || this.net?.open) return;
+      this.lobby.signal({ t: 'knock', name: this._publicName() })
+        .catch(() => {})
+        .finally(() => {
+          // If the host's offer doesn't land, try again with backoff.
+          clearTimeout(this._reconnectT);
+          this._reconnectT = setTimeout(() => {
+            if (this.netMode && this.game && !this.game.over && !this.net?.open) this._scheduleReconnect();
+          }, 6000);
+        });
+    }, wait);
   }
 
   async joinOnlineGame(row) {
@@ -1104,12 +1448,19 @@ class App {
     this.audio.init();
     this.mpRole = 'guest';
     this.onlineMode = true;
+    const rejoining = row.status === 'in_game';
+    if (rejoining && !canRejoinRoom(row, lobby.me?.id)) {
+      this.mpRole = null;
+      this.onlineMode = false;
+      this.ui.showBanner('This war is already in progress. Use Watch unless you already hold a player seat.', 'bad', 5000);
+      return;
+    }
     this.ui.showSetup({ online: row, mode: row.mode });
-    this.ui.onlineStatus('🔗 Knocking on the host\'s gate…');
+    this.ui.onlineStatus(rejoining ? '🔌 War in progress — rejoining…' : '🔗 Knocking on the host\'s gate…');
     this.ui.setStartButton({
-      text: '⏳  WAITING FOR HOST TO START',
+      text: rejoining ? '🔌  REJOINING THE WAR…' : '⏳  WAITING FOR HOST TO START',
       disabled: true,
-      title: 'Only the host can launch this room.',
+      title: rejoining ? 'Reconnecting you to the running match.' : 'Only the host can launch this room.',
     });
     try {
       await lobby.joinGame(row);
@@ -1906,7 +2257,8 @@ class App {
   _makePlotGroup(plot) {
     const g = new THREE.Group();
     const kind = PLOT_KINDS[plot.kind];
-    const [mx, mz] = plot.kind === 'wall' ? [plot.gate[0] + 0.5, plot.gate[1] + 0.5] : [plot.cx, plot.cz];
+    const anchor = plot.anchor || plot.gate;
+    const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
     const beacon = this._makeBeacon(mx, mz);
     g.add(beacon);
     g.userData.beacon = beacon;
@@ -2822,6 +3174,7 @@ class App {
       else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
       else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
+      else if (k === 'g') this.issue({ t: 'drop', p: this.myPlayer, i: -1 });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();
@@ -2869,6 +3222,64 @@ class App {
 
   myHero() { return this.game ? this.game.heroes[this.myPlayer] : null; }
 
+  // ---------------- terrain readability ----------------
+
+  // When the player keeps pushing into impassable ground, say so — loudly the
+  // first time (named banner: "Molten rock — impassable"), and with a red
+  // pulse on the exact blocking tile every time. Nobody should die wondering
+  // why their hero won't cross an orange river.
+  _updateBlockedHint(dt) {
+    const h = this.myHero();
+    const ld = this.lastDir;
+    if (this.paused || !h || h.dead || (!ld.x && !ld.z) || h.moving) {
+      this._blockT = Math.max(0, this._blockT - dt * 3);
+      return;
+    }
+    this._blockT += dt;
+    if (this._blockT < 0.25) return;
+    const len = Math.hypot(ld.x, ld.z) || 1;
+    const tx = Math.floor(h.x + (ld.x / len) * 0.8);
+    const tz = Math.floor(h.z + (ld.z / len) * 0.8);
+    const t = this.map.tileAt(tx, tz);
+    const label = this.map.terrainLabel(t);
+    if (!label) { this._blockT = 0; return; } // blocked by a building, not terrain
+    if (!this._blockPulseT || this.clock.elapsedTime - this._blockPulseT > 0.45) {
+      this._blockPulseT = this.clock.elapsedTime;
+      this._spawnBlockFx(tx, tz);
+    }
+    if (!this._blockWarned[t]) {
+      this._blockWarned[t] = true;
+      const icon = t === TILE.WATER ? (this.map.isLava() ? '🌋' : '🌊') : t === TILE.FOREST ? '🌲' : '⛰️';
+      this.ui.showBanner(`${icon} ${label} — impassable. Follow the bright rim to find a way around.`, 'bad', 4500);
+      this.audio.deny();
+    }
+  }
+
+  _spawnBlockFx(tx, tz) {
+    const geo = new THREE.PlaneGeometry(1.04, 1.04);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff5a4a, transparent: true, opacity: 0.55, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(tx + 0.5, Math.max(this.map.groundY(tx + 0.5, tz + 0.5), -0.08) + 0.1, tz + 0.5);
+    this.scene.add(mesh);
+    this.blockFx.push({ mesh, life: 0.55 });
+  }
+
+  _updateBlockFx(dt) {
+    for (let i = this.blockFx.length - 1; i >= 0; i--) {
+      const f = this.blockFx[i];
+      f.life -= dt;
+      f.mesh.material.opacity = Math.max(0, f.life) * 1.0;
+      f.mesh.scale.setScalar(1 + (0.55 - f.life) * 0.6);
+      if (f.life <= 0) {
+        this.scene.remove(f.mesh);
+        f.mesh.geometry.dispose();
+        f.mesh.material.dispose();
+        this.blockFx.splice(i, 1);
+      }
+    }
+  }
+
   toggleControlMode() {
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
@@ -2899,7 +3310,7 @@ class App {
   // Live side-quest status for the pause menu (campaign only).
   _questStatus() {
     if (!this.game || this.game.mode !== 'campaign') return null;
-    const lv = LEVELS[this.game.levelId - 1];
+    const lv = levelById(this.game.levelId);
     return (lv.quests || []).map((q) => ({
       name: q.name, desc: q.desc, reward: q.reward,
       claimed: !!(this.profile.questsDone || {})[q.id],
@@ -3024,6 +3435,10 @@ class App {
 
   _consumeEvents() {
     const g = this.game;
+    // The sim can run many ticks per frame (catch-up after a hidden tab, the
+    // co-op pump). Replaying hundreds of stale FX events in one frame is a
+    // hitch and an air-raid of sounds — keep only the freshest burst.
+    if (g.events.length > 90) g.events.splice(0, g.events.length - 30);
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
@@ -3137,6 +3552,20 @@ class App {
           this.stream(e.x, 0.4, e.z, e.hx, 0.9, e.hz, { count: 3, color: 0xffd75e, size: 0.42, life: 0.25 });
           this.burst(e.hx, 0.9, e.hz, { count: 3, color: 0xfff2b0, speed: 0.8, life: 0.25, size: 0.4, up: 1 });
           break;
+        case 'lootseen':
+          this.audio.click();
+          this.burst(e.x, 0.6, e.z, { count: 12, color: 0xa8e6ff, speed: 1.4, life: 0.7, size: 0.4, up: 1.6 });
+          break;
+        case 'lootdrop':
+          this.burst(e.x, 0.6, e.z, { count: 6, color: 0xcfd8dc, speed: 1.0, life: 0.5, size: 0.35, up: 1.2 });
+          break;
+        case 'loot': {
+          this.audio.build();
+          this.burst(e.x, 1.0, e.z, { count: 18, color: 0xffe38a, speed: 2.0, life: 0.8, size: 0.5, up: 2.2 });
+          const it = ITEMS[e.key];
+          if (it) this.ui.showBanner(`${it.icon} ${it.name}`, it.desc, 2600);
+          break;
+        }
         case 'income':
           this.audio.coin();
           this.burst(e.x, 2.6, e.z, { count: 4, color: 0xffd75e, speed: 1.1, life: 0.5, size: 0.45, up: 1.8 });
@@ -3408,55 +3837,7 @@ class App {
       this._updateHeroInput();
       if (!this.paused && !this.game.over) {
         if (this.netMode) {
-          // Host-sequenced lockstep: the host merges every player's commands
-          // into numbered windows and broadcasts them; guests advance only
-          // as windows arrive, so all sims stay in step.
-          this.acc += dt;
-          let steps = 0;
-          let stalled = false;
-          while (this.acc >= SIM_DT && steps < 10) {
-            if (this.simFrame % NET_STEP === 0) {
-              const w = this.simFrame / NET_STEP;
-              let bundle;
-              if (this.mpRole === 'host') {
-                bundle = [...this.outbox];
-                this.outbox = [];
-                for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
-                for (const rec of this.pendingSpectators) {
-                  if (!rec.started) {
-                    rec.peer.send({ t: 'spectateStart', snap: this.game.snapshot(), frame: this.simFrame });
-                    rec.started = true;
-                  }
-                }
-                const packet = { t: 'w', w, c: bundle };
-                this._broadcast(packet);
-                this._broadcastSpectators(packet);
-                for (const rec of this.pendingSpectators) if (rec.started) rec.buffer.push(packet);
-              } else {
-                bundle = this.inbox.get(w);
-                if (!bundle) { stalled = true; break; }
-                if (!this.netPrimed) {
-                  const hasBuffer = this.inbox.has(w + NET_GUEST_BUFFER - 1) || this.inbox.size >= NET_GUEST_BUFFER;
-                  if (!hasBuffer) { stalled = true; break; }
-                  this.netPrimed = true;
-                }
-                this.inbox.delete(w);
-              }
-              for (const c of bundle) this.game.exec(c);
-              if (w > 0 && w % 30 === 0) {
-                const hsh = this._stateHash();
-                if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
-                else if (this.mpRole !== 'spectator') this.net.send({ t: 'h', w, h: hsh });
-              }
-            }
-            this.game.update(SIM_DT);
-            this.simFrame++;
-            this.acc -= SIM_DT;
-            steps++;
-          }
-          if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
-          this.netStallT = stalled ? this.netStallT + dt : 0;
-          this.ui.setWaiting(stalled, this.netStallT > 0.6 ? '⏳ Network catch-up…' : '⏳ Syncing co-op…');
+          this._advanceNetSim();
         } else {
           this.acc += dt * this.speed;
           let steps = 0;
@@ -3473,6 +3854,7 @@ class App {
       this._syncBuildings();
       this._syncUnits(t, dt);
       this._syncNests(t);
+      this._syncLoot(t);
       this._syncPlots(t);
       this._updateTacticalSelection();
 
@@ -3483,6 +3865,9 @@ class App {
         m.userData.ring.scale.setScalar(1 + ph * 0.25);
         m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
+      this._surveySites();
+      this._updateBlockedHint(dt);
+      this._updateBlockFx(dt);
       this._updateCoins(t);
       this._updateZombieMeshes(t, dt);
       this._updateBars();

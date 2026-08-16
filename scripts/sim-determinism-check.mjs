@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Game } from '../src/game.js';
 import {
-  LEVELS, SIM_DT, TILE,
+  LEVELS, levelById, SIM_DT, TILE,
 } from '../src/config.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -42,7 +42,7 @@ function fakeMap(level) {
 }
 
 function makeGame(snap = null) {
-  const level = LEVELS[(snap?.level || 1) - 1] || LEVELS[0];
+  const level = levelById(snap?.level || 1);
   const map = fakeMap(level);
   return new Game(map, snap?.diff || 'normal', snap?.heroKeys || 'alexander', snap, level.id || 1, snap?.mode || 'campaign');
 }
