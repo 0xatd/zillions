@@ -268,3 +268,41 @@ Re-run B48083-style co-op on the current live SHA after the net fixes. If guest 
 | otherPos | 68.1, 93.8 |
 | net | host, rtt 7ms, peers 1 |
 | freeze | no |
+
+---
+
+# Campaign playthrough — live notes (session 2)
+
+**Started:** 2026-08-16 ~19:37 UTC  
+**Protocol:** Alex hosts public rooms. Lyra (@lyra) joins as guest. New hero each mission. Stop → note → push PR #27 → resume.  
+**Live build:** `main` @ `38059c4` (PR #24 four heroes + PR #25 multiplayer-first menu now on prod).  
+**PR:** https://github.com/0xatd/zillions/pull/27
+
+## Mission 1 — room `2C7EC1` (in lobby / waiting to start)
+
+| | |
+|---|---|
+| Host | @atd · Alexander Thomas |
+| Guest | @lyra · **Turtle Voss** (first new-hero pick) |
+| Host setup (after settle) | Campaign · **The Black Vale** · Normal · 2/3 |
+| Status | guest seated, "WAITING FOR HOST TO START", P2P "🟢 Connected" |
+
+### NOTE-1 — Public game list is late (again)
+Lobby first painted with **zero** open games while Alex already had a room up. ~8s later: `OPEN GAMES · 1` / `atd's war` / Campaign · The Black Vale · 1/3. Same class as BUG-MP-4. Still not instant.
+
+### NOTE-2 — Lobby card vs room disagree on the map
+- Lobby list: **The Black Vale**
+- First paint after Join: host setup said **Greenfall Marches**, and the guest map picker highlighted L1 Greenfall with maps 2–5 🔒 locked
+- Seconds later, host-setup strip flipped to **The Black Vale**
+Guest map cards never flipped — Black Vale stayed locked on my picker even after the setup strip said that's the map. I cannot visually confirm the host's map from the picker. Confusing as hell if you're joining a friend's "endgame" room and the UI is still selling tutorial moorland.
+
+### NOTE-3 — Guest hero click is flaky
+A11y/ref click on Turtle did **not** change my seat (stayed Scott English). Direct `button.click()` did. Seat then: `Turtle Voss · in room · 🔒 unlocked through Level 1`.
+The lock badge on a hero I just successfully selected is nonsense. Either hide it once selected, or don't let me pick locked heroes.
+
+### NOTE-4 — Guest still sees L1-only unlocks in a host-owned room
+Host is on The Black Vale. Guest profile is 0/5 fronts. Guest UI still greys Rotmire→Vale. Fine if the *host* owns the map pick — but then **don't show the guest a locked-looking map grid that contradicts the setup strip.** Show the host's map as the locked-in battlefield, not a fake campaign select.
+
+### Ready
+In room. Turtle kit panel looks good (Bulwark / Reactive Plating / Iron Will / Last Stand 12s). Waiting for start. Pathing + replication + spawn are the watch items once we're in.
+
