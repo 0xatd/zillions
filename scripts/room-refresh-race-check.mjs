@@ -63,6 +63,19 @@ await refresh;
 
 assert.deepEqual(seated.game._players.map((p) => p.user_id).sort(), ['guest', 'host'], 'a verified local seat must survive an incomplete newest snapshot');
 assert.deepEqual(selfRenders, [['host', 'guest']], 'the room renderer must keep the joined player visible');
+
+// A stalled database read must not stall the WebRTC lobby handshake. Return
+// the cached roster after the deadline; the outstanding read may still heal
+// the room later if the network recovers.
+const stalled = deferred();
+const bounded = new OnlineLobby({});
+bounded.game = { id: 'room-1', players: 2 };
+bounded.sb = { from: () => stalled.query };
+const startedAt = Date.now();
+const fallback = await bounded.refreshCurrentGameBounded(20);
+assert.equal(fallback, bounded.game, 'a timed-out refresh must return the cached room');
+assert.ok(Date.now() - startedAt < 250, 'a stalled refresh must respect the handshake deadline');
+
 console.log('Room refresh race check passed.');
 
 function roomToGameForTest(row) {

@@ -546,6 +546,23 @@ export class OnlineLobby {
     this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
   }
 
+  // A room refresh improves the first roster sent to a guest, but it must not
+  // hold the WebRTC handshake open when Supabase is slow or unreachable.
+  async refreshCurrentGameBounded(timeoutMs = 1500) {
+    let timeoutId;
+    const timeout = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve(this.game), Math.max(0, timeoutMs));
+    });
+    try {
+      return await Promise.race([
+        this.refreshCurrentGame().catch(() => this.game),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   async refreshCurrentGame() {
     if (!this.game?.id) return null;
     const gameId = this.game.id;
