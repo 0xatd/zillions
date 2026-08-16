@@ -166,6 +166,9 @@ Do not describe any of it as shipped.
 
 - `src/game.js`: simulation, siege, economy, combat, save snapshots.
 - `src/main.js`: renderer, input, camera, event FX, app orchestration.
+- `src/tactical-visuals.js`: postprocessing, actionable outlines, tactical
+  ground pulses, and the local high/low graphics setting. It is presentation
+  state only. Do not put it into snapshots or lockstep hashes.
 - `src/ui.js`: account gate, menus, HUD, lobby, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, siege.
 - `src/plots.js`: city layout, ramparts, gates, build plots.

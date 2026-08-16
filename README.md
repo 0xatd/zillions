@@ -193,6 +193,12 @@ hero revives at the Keep.
 | Esc | Menu |
 | M | Mute |
 
+The sparkle button in the top bar switches graphics quality. High quality uses
+vendored Three.js postprocessing for tactical outlines, restrained high-threshold
+bloom, and SMAA. Low quality uses direct rendering at a lower pixel ratio and
+disables shadows. The choice is stored on the device and does not affect the
+simulation or multiplayer lockstep.
+
 ## Playing Together
 
 Production play is account-gated. A player signs in with Google, then claims a
