@@ -35,6 +35,18 @@ export class GameMap {
   isWalkable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].walk; }
   isBuildable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].build; }
 
+  // Themes can reskin the liquid layer — Cinder Wastes runs lava, not water.
+  isLava() { return this.theme?.liquid === 'lava'; }
+
+  // Human-readable name for impassable ground, themed per planet. Returns
+  // null for walkable tiles — used by the "you can't walk there" warnings.
+  terrainLabel(t) {
+    if (t === TILE.WATER) return this.theme?.liquidName || 'Deep water';
+    if (t === TILE.FOREST) return 'Dense woods';
+    if (t === TILE.MOUNTAIN) return 'High crags';
+    return null;
+  }
+
   generate() {
     const N = this.size;
     const elevNoise = makeNoise(this.rng);
@@ -437,17 +449,22 @@ export class GameMap {
     terrain.name = 'terrain';
     group.add(terrain);
 
-    // Water plane above sunken tiles.
+    // Liquid plane above sunken tiles. Lava is unlit so it GLOWS against the
+    // terrain day and night — molten channels must never read as ground.
     const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = new THREE.MeshLambertMaterial({
-      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
-      transparent: true, opacity: 0.85,
-    });
+    const liquidColor = this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0;
+    const waterMat = this.isLava()
+      ? new THREE.MeshBasicMaterial({
+        color: new THREE.Color(liquidColor).offsetHSL(0, 0.12, 0.08),
+        transparent: true, opacity: 0.94,
+      })
+      : new THREE.MeshLambertMaterial({ color: liquidColor, transparent: true, opacity: 0.85 });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(N / 2, -0.22, N / 2);
     group.add(water);
 
+    group.add(this._buildImpassableRims());
     group.add(this._buildRipples());
     group.add(this._buildTrees());
     group.add(this._buildRocks());
@@ -455,8 +472,76 @@ export class GameMap {
     return group;
   }
 
+  // A painted rim everywhere walkable ground meets impassable ground — the
+  // single strongest passability cue in the scene. If ground has a rim you
+  // cannot cross it: lava channels, deep water, woods, and crags all read
+  // the same way at a glance. (The sim already agrees: FlowField marks these
+  // tiles Infinity, so what players see is exactly what the AI paths around.)
+  _buildImpassableRims() {
+    const N = this.size;
+    const INSET = 0.18;
+    const lava = this.isLava();
+    const positions = [];
+    const colors = [];
+    const col = new THREE.Color();
+    const rimY = (x, z) => Math.max(this.cornerHeight(x, z), -0.1) + 0.045;
+
+    const pushQuad = (verts) => {
+      const [a, b, c2, d] = verts; // a,b = edge corners; c2,d = inset corners
+      for (const [vx, vy, vz] of [a, c2, b, b, c2, d]) {
+        positions.push(vx, vy, vz);
+        colors.push(col.r, col.g, col.b);
+      }
+    };
+
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        if (!this.isWalkable(x, z)) continue;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nt = this.tileAt(x + dx, z + dz);
+          if (TILE_INFO[nt].walk) continue;
+          // Rim color: glowing crust against lava, dark ink elsewhere —
+          // always themed off the blocking tile so every palette works.
+          if (nt === TILE.WATER && lava) col.setHex(0xffb545);
+          else { col.setHex(this.colorOf(nt)); col.multiplyScalar(0.42); }
+          if (dx === 1) {
+            pushQuad([
+              [x + 1, rimY(x + 1, z), z], [x + 1, rimY(x + 1, z + 1), z + 1],
+              [x + 1 - INSET, rimY(x + 1, z), z], [x + 1 - INSET, rimY(x + 1, z + 1), z + 1],
+            ]);
+          } else if (dx === -1) {
+            pushQuad([
+              [x, rimY(x, z), z], [x, rimY(x, z + 1), z + 1],
+              [x + INSET, rimY(x, z), z], [x + INSET, rimY(x, z + 1), z + 1],
+            ]);
+          } else if (dz === 1) {
+            pushQuad([
+              [x, rimY(x, z + 1), z + 1], [x + 1, rimY(x + 1, z + 1), z + 1],
+              [x, rimY(x, z + 1), z + 1 - INSET], [x + 1, rimY(x + 1, z + 1), z + 1 - INSET],
+            ]);
+          } else {
+            pushQuad([
+              [x, rimY(x, z), z], [x + 1, rimY(x + 1, z), z],
+              [x, rimY(x, z), z + INSET], [x + 1, rimY(x + 1, z), z + INSET],
+            ]);
+          }
+        }
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.9,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    return new THREE.Mesh(geo, mat);
+  }
+
   // White foam dashes: a bright ring hugging every shoreline plus sparse
   // open-water ripples — the hand-inked water read from the reference.
+  // On lava planets the same pass paints ember crust instead of foam.
   _buildRipples() {
     const N = this.size;
     const rng = makeRNG(555);
@@ -469,12 +554,14 @@ export class GameMap {
           return t !== TILE.WATER;
         });
         if (shore) spots.push({ x: x + 0.5, z: z + 0.5, w: 0.55 + rng() * 0.25, r: 0 });
-        else if (rng() < 0.055) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
+        else if (rng() < (this.isLava() ? 0.11 : 0.055)) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
       }
     }
     const geo = new THREE.PlaneGeometry(1, 0.1);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
+    const mat = this.isLava()
+      ? new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+      : new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     spots.forEach((s, i) => {
@@ -593,9 +680,16 @@ export class GameMap {
     const c = new THREE.Color();
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        c.setHex(this.colorOf(this.tiles[this.idx(x, z)]));
+        const t = this.tiles[this.idx(x, z)];
+        c.setHex(this.colorOf(t));
+        // Passability contrast: impassable ground darkens, walkable ground
+        // lifts — corridors and fords pop on the minimap at a glance.
+        const f = TILE_INFO[t].walk ? 1.08 : 0.6;
         const o = (z * N + x) * 4;
-        img.data[o] = c.r * 255; img.data[o + 1] = c.g * 255; img.data[o + 2] = c.b * 255; img.data[o + 3] = 255;
+        img.data[o] = Math.min(255, c.r * 255 * f);
+        img.data[o + 1] = Math.min(255, c.g * 255 * f);
+        img.data[o + 2] = Math.min(255, c.b * 255 * f);
+        img.data[o + 3] = 255;
       }
     }
     ctx.putImageData(img, 0, 0);

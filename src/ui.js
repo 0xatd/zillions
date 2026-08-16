@@ -1253,7 +1253,7 @@ export class UI {
     log.scrollTop = log.scrollHeight;
   }
 
-  lobbyGames(games, onJoin) {
+  lobbyGames(games, onJoin, myId = null) {
     const box = this.root.querySelector('#l-games');
     if (!box) return;
     if (!games.length) {
@@ -1265,12 +1265,21 @@ export class UI {
       const row = document.createElement('div');
       row.className = 'gamerow';
       const lv = LEVELS[(g.level || 1) - 1];
+      const live = g.status === 'in_game';
+      const mine = !!myId && (g._players || []).some((p) => p.user_id === myId);
+      const info = `${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/3`;
+      // Live wars are visible to everyone; only a player holding a seat in
+      // that war can drop back into it.
+      const btn = live
+        ? (mine ? '<button class="tbtn gjoin">🔌 Rejoin</button>' : '<span class="ginfo glive-note">in battle</span>')
+        : '<button class="tbtn gjoin">Join</button>';
       row.innerHTML = `
         <span class="gname"></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/3</span>
-        <button class="tbtn gjoin">Join</button>`;
+        <span class="ginfo">${live ? '<span class="glive">🔴 LIVE</span> · ' : ''}${info}</span>
+        ${btn}`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
-      row.querySelector('.gjoin').onclick = () => onJoin(g);
+      const joinBtn = row.querySelector('.gjoin');
+      if (joinBtn) joinBtn.onclick = () => onJoin(g);
       box.appendChild(row);
     }
   }
