@@ -1,0 +1,270 @@
+# Live QA Report — zillions.taborlin.co
+
+**Date:** 2026-08-16  
+**Build:** production `https://zillions.taborlin.co`  
+**Code at test start:** `main` @ `c2a9f40` (SHA-256 of live static assets matched that commit)  
+**Later main (not re-tested live):** `38059c4` (PRs #24 four heroes + #25 multiplayer-first menu merged after this session)  
+**Testers:** Lyra (`@lyra`, host, Google sign-in via lyra@taborlin.co) + Alex (`@atd`, guest, human)  
+**Session:** public room **B48083** — Campaign · Greenfall Marches · Normal · Scott English  
+**Audience:** main agent. Fix the multiplayer bugs first. The rest is human-voice polish.
+
+This is a playtest report, not a code audit. Written as a player who sat down with a friend and tried to have a war.
+
+---
+
+## Verdict
+
+Solo campaign is playable and the economy/threat loop works.  
+**Co-op is not a co-op game yet.**
+
+The lobby connects. The room starts. Rejoin works. Gold and threat tick.  
+Then your friend says: *"I don't see your guy moving at all."*
+
+That is the report.
+
+---
+
+## How we tested
+
+- Host signed in with the real Lyra Google account. No throwaway emails.
+- Guest was a real second human (`@atd`), not a second bot.
+- Played like people: lobby → create public room → wait for friend → launch 2 players → found city → try to build → run around → quit/rejoin → keep playing.
+- Host also ran a full solo L1 to death first (Greenfall, Normal, Scott).
+- Screenshots live in the tester workspace (`zillions-qa/`). Key ones: `lobby-connected.png`, `room-b48083-host.png`, `game-started.png`, `coop-stuck.png`, `coop-founded.png`, `coop-play.png`, `coop-desync-test.png`, `city-fell.png`.
+
+Not fully tested this pass: Watch mode, private rooms, Brutal, maps 2–5, victory, 3-player, post-#24/#25 live build.
+
+---
+
+## What actually works
+
+- Google sign-in + `@lyra` username claim.
+- Lobby connects in ~6s. Real presence (`@lyra` / `@atd`). Real chat with timestamps.
+- Empty lobby copy is honest: "No public wars right now — start one..."
+- Create public room is instant for the host. Code `B48083` appeared in OPEN GAMES as 1/3.
+- Room seats, host setup summary, room chat, "LAUNCH N PLAYERS" all make sense.
+- Game start did **not** freeze. `mpRole=host`, `peers=1`, `netMode=true`, phase `found` then `live`.
+- Host net was healthy the whole time: **rtt 7–9ms**, peers stayed at 1.
+- Guest **quit + rejoin worked**. That is the one multiplayer feature that felt finished.
+- Host could see the guest position updating (`otherPos` ~68.1, 93.8).
+- Economy ticked. Gold recovered after spends (62 → 4 → 220 → 510). Threat climbed 0.19 → 5.25. Zombies sat ~185–225. No host crash, no silent freeze.
+- Solo L1 ran to a real defeat ("THE CITY HAS FALLEN") with clean stats. Zero JS errors on host through the whole solo run.
+
+---
+
+## P0 — Co-op is one-way
+
+### BUG-MP-1 — Host hero does not replicate to guest
+
+**Player quote:** *"i dont see yoru guy moving at all"*
+
+**What happened:**  
+Host ran, sprinted, cast Q, funded plots. Guest never saw the host hero move. Host *could* see the guest.
+
+**Why this kills the game:**  
+You cannot play together if only one person can see the other. You cannot rally, cover a gate, or even know if your friend is dead.
+
+**Repro:**
+1. Host creates public room, guest joins, launch 2 players.
+2. Host runs around in view of guest.
+3. Guest: host is missing or frozen.
+
+**Asymmetry:** guest → host works. host → guest does not.  
+Rejoin did **not** fix it.
+
+**Fix direction:** host outbound hero snapshot / lockstep unit id for the host avatar. Guest is applying peer heroes and skipping the host, or host never broadcasts its own unit the same way guests do.
+
+---
+
+### BUG-MP-2 — Guest movement feels nothing like solo
+
+**Player quote:** *"all of a sudden i got transported to town and could move but it is super laggy and not smooth walking around like it normally is in campaign solo"*  
+**After rejoin:** *"i quit and could rejoin, but it still isnt smooth movemnt ... when i run around"*
+
+**What happened:**  
+Same map, same hero family, same ~8ms rtt — guest walk is stuttery. Solo is fine. This is not "my wifi."
+
+**Why it matters:**  
+Movement is the whole verb. If WASD feels like remote desktop, people leave.
+
+**Fix direction:** client-side prediction + reconcile for the local hero. Do not wait on lockstep snapshots to place your own feet. Interpolation is for *other* people.
+
+---
+
+## P1 — First 30 seconds of a friend's game
+
+### BUG-MP-3 — Guest spawns inside impassable trees
+
+**Evidence:** guest screenshot / `coop-stuck.png`. First impression is "I can't move."
+
+Eventually the guest got yanked to town. Until then the session was dead.
+
+**Fix:** spawn on a walkable tile next to the found site / keep. Reject tree/water/crag. If a spawn is impassable, snap immediately and say so — don't wait for a mystery teleport.
+
+---
+
+### BUG-MP-4 — Room list takes ~20s to show the person who just joined
+
+**Player quote:** *"strange it takes so long to show atd in the spot (like 20s)"*
+
+Host already had the room. Guest had joined. The roster still said 1/3 long enough that it felt broken. Then it flipped to 2/3 and START became "LAUNCH 2 PLAYERS."
+
+**Fix:** optimistic local insert on join ack + realtime roster, not a slow poll. If #21 / #16 were supposed to kill this, they didn't on live during this session.
+
+---
+
+### BUG-MP-5 — "Found the city" is a proximity lottery
+
+Host started on the site and the button still did not appear until the hero was force-teleported onto the flag. Prompt only showed when *exactly* on it: `🏳️ Found the city HERE SPACE`.
+
+In solo it was merely tight. In co-op it felt broken.
+
+**Fix:** bigger found radius. Always-visible world flag. Persistent HUD button while `phase === 'found'`. Don't hide the only verb that starts the game.
+
+---
+
+## P2 — Solo is playable, but the game is hard to *see*
+
+### BUG-SOLO-1 — Build targeting is "pay the nearest yellow ring"
+
+76 identical thin rings. Hold Space. The farm at d=2.9 beat the house at d=3.1. Three tries to fund one house; two accidental spends (keep + farm).
+
+No preview. No name. No highlight before gold leaves.
+
+**Fix:** brighten the *current* target, put its name + cost over it, ignore plots behind the camera / outside a 30° facing cone, or click-to-lock a plot.
+
+---
+
+### BUG-SOLO-2 — Combat is green dots until something dies
+
+No damage numbers. No zombie HP bars. Units are tiny. Attack animations / projectiles vanish at default zoom. You feel the economy more than the fight.
+
+**Fix (cheap):** floating damage, enemy HP on the unit you're hitting, a slightly larger hero, a camera that doesn't treat the player like a pebble.
+
+---
+
+### BUG-SOLO-3 — Tutorial / first minute is directionless
+
+Copy says "Ride to a flagged site" with no flag in the starting view. Objectives stay gray until a city exists. Tutorial text is duplicated center + bottom-right and the bottom box sits on the Build button.
+
+Keep upgrade prompt ("56") fights the "build your first buildings" lesson. Actual charge was 42 — either pro-rate or stop lying about the number.
+
+Threat ticks while you read. Fine for veterans. First launch should pause or dim threat until the city is founded.
+
+---
+
+### BUG-SOLO-4 — Defeat screen hides the retry
+
+"THE CITY HAS FALLEN" is clear. Stats are good (64 slain, 198 coins, 5 structures razed, side quests including failed "Not One Stone").  
+**"Try again" is below the fold.** After a loss you get a wall of text and a scrollbar.
+
+Post-defeat return to menu took ~15s of "Checking account…". Fresh reload is ~4s. Not a hang. Still feels dead.
+
+**Fix:** pin Restart / Menu. Don't make the player scroll to keep playing.
+
+---
+
+### BUG-SOLO-5 — START on the setup screen ate an accessibility click
+
+Agent-browser a11y click on the enabled START button reported success and did nothing. A raw DOM `.click()` launched immediately. Overlay / canvas is probably sitting on the button.
+
+Humans with real pointers may never see this. Anyone whose click lands on the canvas will swear the button is broken.
+
+**Fix:** check `elementFromPoint` at the button center; `pointer-events` on the canvas vs the setup overlay.
+
+---
+
+## Console / engineering noise
+
+| Signal | Severity | Notes |
+|---|---|---|
+| `Multiple GoTrueClient instances detected` | Medium | Fires on room / game enter. `auth.js` + `online.js` both construct clients. Supabase says this can corrupt the shared storage key. |
+| `ObjectMultiplex - orphaned data` for `app-init-liveness` / `background-liveness` | Ignore as game bug | `contentscript.js` — wallet/extension, guest browser. Ugly in a playtest console. Not yours. |
+| Host JS errors during solo | None | Clean run. |
+| Host freeze | None this session | Start, play, rejoin all stayed alive on host. |
+
+**Fix the GoTrue double client.** One shared client. The warning is not cosmetic.
+
+---
+
+## Human complaints (as if we queued with a buddy)
+
+- "Took 20 seconds for you to even show up in the room. Feels broken."
+- "Spawned me in trees I couldn't walk out of."
+- "I don't see your guy moving at all."
+- "Walking here is nothing like solo. Super laggy, even after I rejoin."
+- "The found-city button never came up until I was standing on the pixel."
+- "I keep pouring gold into the wrong building because every ring looks the same."
+- "I can't tell if I'm killing anything."
+- "I lost and couldn't find Try again without scrolling."
+- "Why does going back to the menu take 15 seconds?"
+
+And the honest good lines:
+
+- "Rejoin actually worked."
+- "Ping is fine. This isn't a net problem."
+- "Once the city existed, gold and zombies and threat all did something."
+
+---
+
+## Easy wins (do these after the P0/P1 net bugs)
+
+1. **Safe spawns.** Walkable tile, always. Unstick in <1s if you get it wrong.
+2. **Instant roster.** When someone joins, they are in the list *now*.
+3. **Found-city HUD button** the entire `found` phase, plus a world flag you can see from the spawn camera.
+4. **Target lock for build.** Highlight + name the plot Space will pay.
+5. **Damage numbers + HP on the current target.**
+6. **One GoTrue client.**
+7. **Defeat: Restart pinned.**
+8. **Nameplates over allied heroes.** Even when replication works, two tiny units in trees are unreadable.
+9. **Don't start threat until the city exists** on first-ever run.
+10. **Plot rings need types.** House / farm / tower should not be the same yellow doughnut.
+
+---
+
+## Suggested fix order for the main agent
+
+1. Host → guest hero replication (BUG-MP-1). If this is still broken, stop shipping lobby features.
+2. Local movement prediction for guests (BUG-MP-2).
+3. Walkable spawn + unstick (BUG-MP-3).
+4. Roster freshness (BUG-MP-4).
+5. Found-city radius / always-on button (BUG-MP-5).
+6. Shared Supabase client.
+7. Build-target highlight.
+8. Combat readability.
+9. Defeat CTA above the fold.
+
+Do not add more heroes, more menu chrome, or more lobby copy until two people can see each other run.
+
+---
+
+## Scope holes (don't pretend we tested these)
+
+- Watch / spectator
+- Private rooms / codes typed by a third person
+- 3-player
+- Brutal / Casual pacing
+- Rotmire, Cinder Wastes, Barrow Hills, The Black Vale
+- Victory
+- The four extra heroes and the multiplayer-first menu that landed on `main` *after* this live session (`38059c4`)
+
+Re-run B48083-style co-op on the current live SHA after the net fixes. If guest can see host sprint, the report is stale in the right way.
+
+---
+
+## Appendix — host end state, room B48083
+
+| Field | Value |
+|---|---|
+| phase | live |
+| time | 584s+ |
+| threat | 5.25 |
+| gold | 510 |
+| zombies | 225 |
+| nearZ | 2 |
+| plots | 76 |
+| keep | yes |
+| completed buildings in poll | 0 (partial funding / poll filter — gold *did* leave on a house) |
+| otherPos | 68.1, 93.8 |
+| net | host, rtt 7ms, peers 1 |
+| freeze | no |
