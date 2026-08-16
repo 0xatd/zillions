@@ -334,6 +334,14 @@ export class Game {
         level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
       });
       if (hs.id) h.id = hs.id;
+      // Old saves can restore heroes into crag/water or inside fresh
+      // footprints — reseat to the nearest safe tile, frontier fallback if
+      // the whole area is sealed. Same guarantee the launch path has.
+      {
+        const seat = this._reseat(h.x, h.z);
+        if (seat) { h.x = seat[0]; h.z = seat[1]; }
+        else { const [fx, fz] = this._frontierSpawnPoints(1)[0]; h.x = fx; h.z = fz; }
+      }
       h.hp = hs.hp;
       h.abilCd = hs.cd || 0;
       h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
@@ -482,7 +490,14 @@ export class Game {
     this.hq = this.buildings.find((b) => b.kind === 'hq');
     this._buildLaneSystems(site);
     this.heroes.forEach((h, i) => {
-      if (!h.dead) { h.x = this.hq.cx - 1 + i * 2; h.z = this.hq.cz + 3.5; }
+      if (h.dead) return;
+      // Founding formation prefers the classic line south of the Keep, but
+      // each hero falls back to the first free ring tile if their slot is
+      // unwalkable (fen/crag at the site edge) or already footprinted.
+      const fx = this.hq.cx - 1 + i * 2, fz = this.hq.cz + 3.5;
+      if (this.map.isWalkable(fx | 0, fz | 0) && this.occ[(fz | 0) * this.map.size + (fx | 0)] === 0) {
+        h.x = fx; h.z = fz;
+      } else { h.x = this.hq.cx; h.z = this.hq.cz; this._ejectActor(h, this.hq); }
     });
     this.phase = 'live';
     this.flowDirty = true;
@@ -1081,6 +1096,31 @@ export class Game {
         }
       }
     }
+  }
+
+  _safeTile(x, z) {
+    const id = this.occ[(z | 0) * this.map.size + (x | 0)];
+    return this.map.isWalkable(x | 0, z | 0) && (id === 0 || id === undefined || this.gateIds.has(id));
+  }
+
+  // Deterministic nearest-safe-tile scan: expanding square rings, the
+  // _ejectActor pattern generalized. Validates positions coming back from
+  // old saves and guarantees stance fallbacks never land inside a footprint
+  // or on unwalkable terrain. Returns null if nothing safe within maxR.
+  _reseat(x, z, maxR = 12) {
+    if (this._safeTile(x, z)) return [x, z];
+    const N = this.map.size;
+    for (let r = 1; r <= maxR; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = (x | 0) + dx + 0.5, nz = (z | 0) + dz + 0.5;
+          if (nx < 1 || nz < 1 || nx >= N - 1 || nz >= N - 1) continue;
+          if (this._safeTile(nx, nz)) return [nx, nz];
+        }
+      }
+    }
+    return null;
   }
 
   // Camps and outposts muster a fresh squad on their own timer — this is the
@@ -1744,7 +1784,8 @@ export class Game {
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       if (this.map.isWalkable(x | 0, z | 0) && (id === 0 || id === undefined || this.gateIds.has(id))) return [x, z];
     }
-    return [this.hq.cx, this.hq.cz];
+    const seat = this._reseat(this.hq.cx, this.hq.cz);
+    return seat || [u.x, u.z];
   }
 
   setStance(st, p = 0) {
@@ -2180,8 +2221,12 @@ export class Game {
       if (h.reviveT <= 0) {
         h.dead = false;
         h.hp = h.maxHp;
-        h.x = (this.hq ? this.hq.cx : this.map.size / 2) + 2.5;
-        h.z = (this.hq ? this.hq.cz : this.map.size / 2) + 2.5;
+        // Revive on guaranteed ground: first free ring tile around the Keep
+        // (falling back to a validated frontier tile pre-founding). A fixed
+        // +2.5 offset can land a returning hero in crag/water or a fresh
+        // wall — the same sealed-spawn class as the launch bug.
+        if (this.hq) { h.x = this.hq.cx; h.z = this.hq.cz; this._ejectActor(h, this.hq); }
+        else { const [sx, sz] = this._frontierSpawnPoints(1)[0]; h.x = sx; h.z = sz; }
         this.units.push(h);
         this.emit({ type: 'revive', x: h.x, z: h.z });
         this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
