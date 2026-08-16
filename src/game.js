@@ -514,7 +514,35 @@ export class Game {
   // always stand in the capture ring, and never on top of an earlier work.
   _nodeWorkSpot(node, used, size = 2) {
     const bx = (node.x | 0) - 1, bz = (node.z | 0) - 1;
-    for (let r = 1; r <= 6; r++) {
+    const candidates = [];
+    const ordinal = used.length;
+    const preferred = (((node.id || 0) * 2.399963229728653) + ordinal * Math.PI) % (Math.PI * 2);
+    const localReach = (footprints) => {
+      const blocked = new Set();
+      for (const [ux, uz] of footprints) {
+        for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
+          blocked.add((uz + dz) * this.map.size + ux + dx);
+        }
+      }
+      const sx = node.x | 0, sz = node.z | 0, N = this.map.size;
+      const queue = [[sx, sz]];
+      const seen = new Set([sz * N + sx]);
+      let farthest = 0;
+      while (queue.length) {
+        const [x, z] = queue.shift();
+        farthest = Math.max(farthest, Math.hypot(x - node.x, z - node.z));
+        if (farthest >= 10) return farthest;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz, key = nz * N + nx;
+          if (seen.has(key) || blocked.has(key) || !this.map.isWalkable(nx, nz)) continue;
+          seen.add(key); queue.push([nx, nz]);
+        }
+      }
+      return farthest;
+    };
+    const naturalReach = localReach([]);
+    const leavesExit = (px, pz) => localReach([...used, [px, pz]]) >= Math.min(6, naturalReach) - 0.25;
+    for (let r = 5; r <= 9; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
@@ -525,10 +553,22 @@ export class Game {
               if (!this.map.isBuildable(x + sx, z + sz)) { ok = false; break; }
             }
           }
-          if (ok && used.some(([ux, uz]) => Math.abs(ux - x) < size + 1 && Math.abs(uz - z) < size + 1)) ok = false;
-          if (ok) { used.push([x, z]); return [x, z]; }
+          if (ok && used.some(([ux, uz]) => Math.hypot(ux - x, uz - z) < size + 4)) ok = false;
+          if (!ok || !leavesExit(x, z)) continue;
+          const angle = Math.atan2(z + size / 2 - node.z, x + size / 2 - node.x);
+          const angleCost = Math.abs(Math.atan2(Math.sin(angle - preferred), Math.cos(angle - preferred)));
+          const spread = used.length
+            ? Math.min(...used.map(([ux, uz]) => Math.hypot(ux - x, uz - z)))
+            : 0;
+          candidates.push({ x, z, score: spread * 20 - angleCost * 4 - r * 0.2 });
         }
       }
+    }
+    candidates.sort((a, b) => (b.score - a.score) || (a.x - b.x) || (a.z - b.z));
+    if (candidates.length) {
+      const best = candidates[0];
+      used.push([best.x, best.z]);
+      return [best.x, best.z];
     }
     return null;
   }

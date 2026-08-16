@@ -201,9 +201,55 @@ for (const level of LEVELS) {
       const works = game.plots.filter((p) => p.nodeId === node.id);
       assert.ok(works.some((p) => p.kind === 'outpost'), `${label}: ${node.name} has no Forward Camp plot`);
       assert.ok(works.some((p) => p.kind === 'tower'), `${label}: ${node.name} has no watchtower plot`);
+      const structures = works.filter((p) => p.kind !== 'wall');
+      for (const work of structures) {
+        assert.ok(Math.hypot(work.cx - node.x, work.cz - node.z) >= 4,
+          `${label}: ${node.name} ${work.kind} crowds the capture point`);
+      }
+      for (let i = 0; i < structures.length; i++) {
+        for (let j = i + 1; j < structures.length; j++) {
+          assert.ok(Math.hypot(structures[i].cx - structures[j].cx, structures[i].cz - structures[j].cz) >= 6,
+            `${label}: ${node.name} structures are packed into one collision pocket`);
+        }
+      }
       for (const w of works) {
         assert.ok(game.plotLocked(w), `${label}: ${node.name} works are buildable before you hold it`);
       }
+      // Build the two structures in the test occupancy grid, then prove the
+      // capture point still has a route out of the fort instead of becoming a
+      // pocket between foundations.
+      node.owner = 'player';
+      const localReach = () => {
+        const startX = node.x | 0, startZ = node.z | 0, N = game.map.size;
+        const queue = [[startX, startZ]];
+        const seen = new Set([startZ * N + startX]);
+        let farthest = 0;
+        while (queue.length) {
+          const [x, z] = queue.shift();
+          farthest = Math.max(farthest, Math.hypot(x - node.x, z - node.z));
+          if (farthest >= 10) return farthest;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx, nz = z + dz, key = nz * N + nx;
+            if (seen.has(key) || !game.map.isWalkable(nx, nz) || game.occ[key] !== 0) continue;
+            seen.add(key); queue.push([nx, nz]);
+          }
+        }
+        return farthest;
+      };
+      const naturalReach = localReach();
+      for (const work of structures) game._construct(work, true);
+      const builtReach = localReach();
+      assert.ok(builtReach >= Math.min(6, naturalReach) - 0.25,
+        `${label}: ${node.name} structures reduce its route clearance from ${naturalReach.toFixed(1)} to ${builtReach.toFixed(1)}`);
+      const workIds = new Set(structures.map((work) => work.id));
+      for (const building of game.buildings.filter((b) => workIds.has(b.plotId))) {
+        for (let dz = 0; dz < building.size; dz++) {
+          for (let dx = 0; dx < building.size; dx++) game.occ[(building.z + dz) * game.map.size + building.x + dx] = 0;
+        }
+      }
+      game.buildings = game.buildings.filter((b) => !workIds.has(b.plotId));
+      for (const work of structures) { work.tier = 0; work.ruined = false; }
+      node.owner = 'neutral';
     }
     // --- what the frontier is hiding -------------------------------------
     assert.ok(live.chokeSpots.length > 0, `${label} found no natural chokepoints`);
