@@ -20,6 +20,7 @@ import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
+import { MenuVignette } from './menu-vignette.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -237,11 +238,40 @@ class App {
     if (this.game) return;
     const level = levelById(levelId || 1);
     if (this.menuLevelId === level.id) return;
+    this._clearMenuBackdrop();
     this.menuLevelId = level.id;
-    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; }
     const map = new GameMap(level.seed, level.theme);
+    this.menuMap = map;
     this.menuTerrain = map.buildTerrain();
     this.scene.add(this.menuTerrain);
+    // The backdrop is not a screensaver: doomed patrols play out last stands
+    // against the horde, using the game's own meshes on the game's own ground.
+    if (!this._menuProjV) this._menuProjV = new THREE.Vector3();
+    this.menuShow = new MenuVignette({
+      scene: this.scene,
+      map,
+      makeUnitMesh: (u) => this._makeUnitMesh(u),
+      zombieMeshes: { body: this.zBody, head: this.zHead, arm: this.zArm, eyes: this.zEyes },
+      burst: (x, y, z, o) => this.burst(x, y, z, o),
+      stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
+      addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
+      dispose3D: (obj) => this._disposeObject3D(obj),
+      light: new THREE.PointLight(0xffd9a2, 0, 34, 1.8),
+      dummy: new THREE.Object3D(),
+      color: new THREE.Color(),
+      project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
+    });
+  }
+
+  _clearMenuBackdrop() {
+    if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
+    if (this.menuTerrain) {
+      this.scene.remove(this.menuTerrain);
+      this._disposeObject3D(this.menuTerrain);
+      this.menuTerrain = null;
+    }
+    this.menuMap = null;
+    this.menuLevelId = null;
   }
 
   // ---------------- game start ----------------
@@ -257,7 +287,7 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
-    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
+    this._clearMenuBackdrop();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
@@ -4388,7 +4418,11 @@ class App {
   }
 
   _autoTuneQuality(dt) {
-    if (!this.game || this.paused || this.tacticalVisuals.quality !== 'high') {
+    // Watch the game while it runs, and the menu while the attract show does —
+    // the vignettes put real load on the backdrop, so the menu gets the same
+    // safety net a live siege has.
+    const active = this.game ? !this.paused : !!this.menuShow;
+    if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
     }
@@ -4548,6 +4582,8 @@ class App {
         this.ui.drawMinimap(this.game, this.focus, viewSize);
       }
     }
+
+    if (!this.game && this.menuShow) this.menuShow.update(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);
