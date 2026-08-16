@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "for f in api/*.js src/*.js assets-page.js scripts/*.mjs; do node --check \"$f\"; done && node scripts/balance-check.mjs && node scripts/sim-determinism-check.mjs && node scripts/map-check.mjs && node scripts/online-signaling-check.mjs && node scripts/multiplayer-readiness-check.mjs && node scripts/multiplayer-start-check.mjs && node scripts/repo-check.mjs"
+    "check": "for f in api/*.js src/*.js assets-page.js scripts/*.mjs; do node --check \"$f\"; done && node scripts/balance-check.mjs && node scripts/sim-determinism-check.mjs && node scripts/map-check.mjs && node scripts/online-signaling-check.mjs && node scripts/multiplayer-readiness-check.mjs && node scripts/multiplayer-start-check.mjs && node scripts/room-refresh-race-check.mjs && node scripts/repo-check.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0"
