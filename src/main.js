@@ -115,7 +115,8 @@ class App {
       onInviteFriend: (userId) => this._inviteFriend(userId),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
-      onLevelPick: (id) => this.showMenuBackdrop(id),
+      onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
+      onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
     });
 
     this._setupLights();
@@ -1145,11 +1146,14 @@ class App {
     const isSpectator = this.mpRole === 'spectator';
     const readiness = roomConnectionReadiness(game, this.peers.length + 1);
     const { connected, expectedPlayers, pending, ready } = readiness;
+    this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
       isHost,
       code: game.join_code,
       mode: game.mode || this.ui.selectedMode || 'campaign',
+      level: game.level || 1,
+      difficulty: game.difficulty || 'normal',
       launchText: isHost
         ? (!ready
           ? `${pending} player${pending === 1 ? ' is' : 's are'} in the room but still establishing the game connection.`
@@ -1181,6 +1185,14 @@ class App {
     } catch (e) {
       this.ui.showBanner('❌ Lobby chat failed: ' + e.message, 'bad', 4000);
     }
+  }
+
+  _updateRoomSettings(fields) {
+    if (this.mpRole !== 'host' || !this.lobby?.game) return;
+    this.lobby.updateGameSettings(fields).catch((e) => {
+      console.warn('room settings update failed', e);
+      this.ui.showBanner('Could not update the host game setup.', 'bad', 3000);
+    });
   }
 
   async _sendRoomChat(text, channel = 'room') {
@@ -1260,7 +1272,12 @@ class App {
     this.onlineMode = true;
     this.onlinePending = new Map();
     try {
-      const game = await lobby.createGame({ visibility, level: this.ui.selectedLevel || 1, mode: this.ui.selectedMode || 'campaign' });
+      const game = await lobby.createGame({
+        visibility,
+        level: this.ui.selectedLevel || 1,
+        mode: this.ui.selectedMode || 'campaign',
+        difficulty: this.ui.selectedDiff || 'normal',
+      });
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
       const room = lobby.game || game;
       this.ui.showSetup({ online: room, mode: room.mode });

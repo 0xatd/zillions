@@ -450,14 +450,14 @@ export class OnlineLobby {
     return games;
   }
 
-  async createGame({ visibility = 'public', level = 1, mode = 'campaign' } = {}) {
+  async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal' } = {}) {
     const metadata = { level, mode, hostName: this.me.name, players: 1 };
     const { data, error } = await this.sb.from('rooms').insert({
       name: `${this.me.name}'s frontier`,
       host_user_id: this.me.id,
       visibility,
       rules: CURRENT_RULES,
-      difficulty: 'normal',
+      difficulty,
       metadata,
       last_seen_at: new Date().toISOString(),
     }).select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at').single();
@@ -495,6 +495,28 @@ export class OnlineLobby {
       })
       .eq('id', this.game.id);
     await this._touchPresence();
+  }
+
+  async updateGameSettings(fields = {}) {
+    if (!this.game || this.game.host_id !== this.me?.id) return this.game;
+    const metadata = {
+      ...(this.game.metadata || {}),
+      ...(fields.level ? { level: fields.level } : {}),
+      ...(fields.mode ? { mode: fields.mode } : {}),
+    };
+    const patch = { metadata, last_seen_at: new Date().toISOString() };
+    if (fields.difficulty) patch.difficulty = fields.difficulty;
+    const { error } = await this.sb.from('rooms').update(patch).eq('id', this.game.id);
+    if (error) throw new Error(error.message);
+    this.game = {
+      ...this.game,
+      metadata,
+      level: metadata.level || this.game.level,
+      mode: metadata.mode || this.game.mode,
+      difficulty: fields.difficulty || this.game.difficulty,
+    };
+    if (this.cb.onRoom) this.cb.onRoom(this.game);
+    return this.game;
   }
 
   // Room-row churn (heartbeats, reconnect upserts) fires postgres events
