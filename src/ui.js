@@ -1605,14 +1605,17 @@ export class UI {
       const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       const canRejoin = activeGame && myId && g.host_id !== myId
         && (g._players || []).some((p) => p.user_id === myId);
+      const incompatible = g.protocol_compatible === false;
       row.innerHTML = `
-        <span class="gamestate">${activeGame ? 'LIVE' : 'OPEN'}</span>
+        <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
         <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
-        <button class="tbtn gjoin">${canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
+        <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
-      row.querySelector('.gplayers').textContent = names || `@${g.host_name}`;
-      row.querySelector('.gjoin').onclick = () => canRejoin || !activeGame ? onJoin(g) : onWatch(g);
+      row.querySelector('.gplayers').textContent = incompatible
+        ? 'Created by an incompatible game build'
+        : (names || `@${g.host_name}`);
+      if (!incompatible) row.querySelector('.gjoin').onclick = () => canRejoin || !activeGame ? onJoin(g) : onWatch(g);
       box.appendChild(row);
       }
     };

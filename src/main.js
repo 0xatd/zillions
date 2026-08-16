@@ -11,7 +11,7 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone } from './assets.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom } from './online.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
@@ -1818,6 +1818,11 @@ class App {
   async joinOnlineGame(row) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || this.netMode) return;
+    const compatibility = roomCompatibility(row);
+    if (!compatibility.compatible) {
+      this.ui.showBanner(compatibility.reason, 'bad', 7000);
+      return;
+    }
     this.audio.init();
     this.mpRole = 'guest';
     this.onlineMode = true;
@@ -1854,6 +1859,11 @@ class App {
   async watchOnlineGame(row) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || this.netMode) return;
+    const compatibility = roomCompatibility(row);
+    if (!compatibility.compatible) {
+      this.ui.showBanner(compatibility.reason, 'bad', 7000);
+      return;
+    }
     this.audio.init();
     this.mpRole = 'spectator';
     this.onlineMode = true;

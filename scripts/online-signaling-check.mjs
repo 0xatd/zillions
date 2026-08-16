@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { OnlineLobby, canRejoinRoom } from '../src/online.js';
+import {
+  OnlineLobby, canRejoinRoom, LOBBY_PROTOCOL_VERSION, roomCompatibility,
+} from '../src/online.js';
 
 class FakeChannel {
   constructor(statuses = ['SUBSCRIBED'], sends = ['ok']) {
@@ -46,7 +48,10 @@ await assert.rejects(
   'signaling must report a failed delivery instead of silently hanging',
 );
 
-const watched = { id: 'room-live', status: 'in_game', host_id: 'host-1' };
+const watched = {
+  id: 'room-live', status: 'in_game', host_id: 'host-1',
+  protocol_version: LOBBY_PROTOCOL_VERSION,
+};
 const watcher = new OnlineLobby();
 watcher.me = { id: 'watcher-1', name: 'Observer' };
 let subscribedRoom = null;
@@ -61,6 +66,15 @@ await watcher.watchGame(watched);
 assert.equal(watcher.game, watched, 'watching must retain the active game without taking a player seat');
 assert.deepEqual(subscribedRoom, { roomId: 'room-live', asHost: false }, 'watching must subscribe as a non-host');
 assert.deepEqual(spectatorSignal, { t: 'knock', role: 'spectator', name: 'Observer' }, 'watching must identify a read-only spectator to the host');
+
+assert.equal(roomCompatibility(watched).compatible, true, 'matching multiplayer protocols must connect');
+assert.equal(roomCompatibility({ ...watched, protocol_version: LOBBY_PROTOCOL_VERSION - 1 }).compatible, false,
+  'stale multiplayer protocols must be rejected before connection');
+await assert.rejects(
+  () => watcher.watchGame({ ...watched, protocol_version: 0 }),
+  /older game build/,
+  'legacy rooms must explain that every player needs a fresh build',
+);
 
 const liveRoom = {
   status: 'in_game', host_id: 'host-1',
