@@ -344,28 +344,46 @@ class App {
   // plan: a square fort gets a square plaza, a crescent gets two lanes, not
   // four. Falls back to a plain ring if the plan is not known yet.
   _buildPlaza(cx, cz) {
+    // The colony's landing terrace: light poured-pad concrete with an amber
+    // guide ring, and paved walkways out to the gates a shade lighter than
+    // the ground — markings on a pad, not dark bars stamped across the city.
     const g = new THREE.Group();
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
     const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
       squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
-      new THREE.MeshLambertMaterial({ color: 0x565149 }),
+      new THREE.MeshLambertMaterial({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
-    disc.position.set(cx, 0.015, cz);
+    const plazaY = this.map.groundY(cx, cz);
+    disc.position.set(cx, plazaY + 0.015, cz);
     disc.receiveShadow = true;
     g.add(disc);
-    const laneMat = new THREE.MeshLambertMaterial({ color: 0x51504a });
+    const ringGeo = new THREE.RingGeometry(5.6, 5.85, 48);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
+    }));
+    ring.position.set(cx, plazaY + 0.03, cz);
+    g.add(ring);
+    const laneMat = new THREE.MeshLambertMaterial({ color: 0xb3ad9e });
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
     for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, len), laneMat);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.receiveShadow = true;
       g.add(lane);
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len), stripeMat);
+      stripe.rotation.copy(lane.rotation);
+      stripe.position.copy(lane.position);
+      stripe.position.y = plazaY + 0.022;
+      g.add(stripe);
     }
     return g;
   }
@@ -394,6 +412,7 @@ class App {
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
+      gr.position.y = this.map.groundY(s.x, s.z);
       this.scene.add(gr);
       this.siteMarkers.push(gr);
     }
@@ -457,7 +476,7 @@ class App {
       blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
       g.add(blob);
     }
-    g.position.set(n.x, 0, n.z);
+    g.position.set(n.x, this.map.groundY(n.x, n.z), n.z);
     return g;
   }
 
@@ -506,11 +525,12 @@ class App {
         label.position.y = 1.5;
         label.scale.set(2.2, 1.1, 1);
         mesh.add(label);
-        mesh.position.set(l.x, 0, l.z);
+        mesh.userData.gy = this.map.groundY(l.x, l.z);
+        mesh.position.set(l.x, mesh.userData.gy, l.z);
         this.scene.add(mesh);
         this.lootMeshes.set(l.id, mesh);
       }
-      mesh.position.set(l.x, 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
+      mesh.position.set(l.x, mesh.userData.gy + 0.55 + Math.sin(t * 2.4 + l.id) * 0.12, l.z);
       mesh.userData.gem.rotation.y = t * 1.4 + l.id;
     }
     for (const [id, mesh] of this.lootMeshes) {
@@ -1877,7 +1897,9 @@ class App {
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x35507a, 0.85);
+    // Warm earth bounce from below, cool sky from above — the two-tone fill
+    // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
+    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.85);
     this.scene.add(this.hemi);
     this.amb = new THREE.AmbientLight(0x33406e, 0.5);
     this.scene.add(this.amb);
@@ -2062,7 +2084,7 @@ class App {
     }
     return {
       x: fx + v.sx * forward + v.rx * side,
-      y,
+      y: y + this.map.groundY(fx, fz),
       z: fz + v.sz * forward + v.rz * side,
     };
   }
@@ -2076,7 +2098,7 @@ class App {
       else if (e.targetKind === 'building') y = 1.0;
       else y = kind === 'ballista' ? 0.75 : Math.max(0.52, 0.62 * (e.targetScale || 1));
     }
-    return { x: tx, y, z: tz };
+    return { x: tx, y: y + this.map.groundY(tx, tz), z: tz };
   }
 
   _spawnProjectile(e, extra = {}) {
@@ -2187,7 +2209,7 @@ class App {
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
-      this.burst(x + Math.cos(a) * radius, 0.18, z + Math.sin(a) * radius,
+      this.burst(x + Math.cos(a) * radius, this.map.groundY(x, z) + 0.18, z + Math.sin(a) * radius,
         { count: 1, color, speed: 0.45, life, size, spread: 0.02, up: 0.2 });
     }
   }
@@ -2200,7 +2222,7 @@ class App {
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 0.11, z);
+    mesh.position.set(x, this.map.groundY(x, z) + 0.11, z);
     this.scene.add(mesh);
     this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
   }
@@ -2290,7 +2312,7 @@ class App {
     const d = this._zdummy, c = this._zcolor;
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
-      const bob = Math.sin(t * 7 + zb.phase) * 0.05;
+      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
@@ -2358,7 +2380,7 @@ class App {
       // Pop out of the building with a little bounce, then hover and spin.
       const bounce = age < 0.5 ? Math.abs(Math.sin(age * Math.PI * 2)) * (0.5 - age) * 2.2 : 0;
       const big = cn.v >= 4 ? 1.5 : 1;
-      d.position.set(cn.x, 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
+      d.position.set(cn.x, this.map.groundY(cn.x, cn.z) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
       d.rotation.set(Math.PI / 2 + 0.35, 0, t * 2.2 + cn.id);
       d.scale.setScalar(big);
       d.updateMatrix();
@@ -2394,7 +2416,8 @@ class App {
     const f = e.force || 1;
     const sp = 2.5 * f + Math.random() * 2;
     this.corpses.push({
-      x: e.x, y: 0.5, z: e.z,
+      x: e.x, y: this.map.groundY(e.x, e.z) + 0.5, z: e.z,
+      gy: this.map.groundY(e.x, e.z),
       vx: (e.dx || 0) * sp + (Math.random() - 0.5), vy: 2.2 + 3.2 * f * Math.random(), vz: (e.dz || 0) * sp + (Math.random() - 0.5),
       rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
       wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
@@ -2409,14 +2432,15 @@ class App {
     for (const p of this.corpses) {
       p.life -= dt;
       if (p.life <= 0) continue;
-      if (p.y > 0.16 || Math.abs(p.vy) > 0.5) {
+      const floor = (p.gy || 0) + 0.16;
+      if (p.y > floor || Math.abs(p.vy) > 0.5) {
         p.vy -= 22 * dt;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
         p.rx += p.wx * dt; p.ry += p.wy * dt;
-        if (p.y < 0.16) { p.y = 0.16; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
+        if (p.y < floor) { p.y = floor; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
       } else {
         p.rx = Math.PI / 2; // settled flat
-        if (p.life < 1.5) p.y = 0.16 - (1.5 - p.life) * 0.2; // sink away
+        if (p.life < 1.5) p.y = floor - (1.5 - p.life) * 0.2; // sink away
       }
       d.position.set(p.x, p.y, p.z);
       d.rotation.set(p.rx, p.ry, p.rz);
@@ -2475,17 +2499,18 @@ class App {
       i++;
     };
 
+    const gy = (x, z) => this.map.groundY(x, z);
     for (const b of g.buildings) {
-      if (b.hp < b.maxHp) add(b.cx, this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
+      if (b.hp < b.maxHp) add(b.cx, gy(b.cx, b.cz) + this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
     }
     for (const n of g.nests) {
-      if (n.alive && n.hp < n.maxHp) add(n.x, 2.6, n.z, n.hp / n.maxHp, 2.2);
+      if (n.alive && n.hp < n.maxHp) add(n.x, gy(n.x, n.z) + 2.6, n.z, n.hp / n.maxHp, 2.2);
     }
     for (const u of g.units) {
-      if (u.hp < u.maxHp) add(u.x, 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
+      if (u.hp < u.maxHp) add(u.x, gy(u.x, u.z) + 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
     for (const zb of g.zombies) {
-      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
+      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
     }
     this.barBg.count = this.barFg.count = i;
     this.barBg.instanceMatrix.needsUpdate = true;
@@ -2668,6 +2693,9 @@ class App {
     g.userData.prog = prog;
     g.userData.progFrac = 0;
     g.userData.payPoint = [px, pz];
+    // The whole plot group rides the ground once: every child (beacon, ghost,
+    // rings, labels) keeps its old relative height.
+    g.position.y = this.map.groundY(mx, mz);
     return g;
   }
 
@@ -2819,6 +2847,17 @@ class App {
       m.castShadow = true;
       g.add(m); return m;
     };
+    // Always-lit accent: marker lights, sensor bands, holo panels.
+    const lit = (w, h, dep, color, x = 0, y = 0, z = 0, i = 0.7) => {
+      const m = box(w, h, dep, color, x, y, z);
+      m.material.emissive.setHex(color);
+      m.material.emissiveIntensity = i;
+      m.castShadow = false;
+      return m;
+    };
+    // The colony kit: one hull family + one trim so every structure on the
+    // planet reads as the same expedition's prefab, never a random block.
+    const HULL = 0xe6e0d0, HULL2 = 0xcfc9b8, PAD = 0x9c968a, TRIM = 0xe8843c, SOLAR = 0x31506b, GLOW = 0x5fd8c8;
     const windows = (n, y, r, color = 0xffca6e) => {
       // Emissive windows that glow at night (renderer toggles intensity).
       for (let i = 0; i < n; i++) {
@@ -2834,57 +2873,104 @@ class App {
 
     switch (b.kind) {
       case 'hq': {
-        box(3.6, 1.2, 3.6, 0xd8d4c6, 0, 0.6);
-        box(2.5, 1.1, 2.5, 0xc9c4b4, 0, 1.7);
-        cyl(0.55, 0.65, 2.2, 0xcfcaba, 1.15, 1.8, 1.15, 8);
-        cone(0.8, 0.9, 0xa8352e, 1.15, 3.3, 1.15);
-        if (tier >= 2) { cyl(0.55, 0.65, 2.2, 0xcfcaba, -1.15, 1.8, -1.15, 8); cone(0.8, 0.9, 0xa8352e, -1.15, 3.3, -1.15); }
-        if (tier >= 3) {
-          box(1.6, 1.2, 1.6, 0xd4cfc0, 0, 2.9);
-          cone(1.2, 1.1, 0xbf3f34, 0, 4.1);
-        } else {
-          cone(1.7, 1.0, 0x8f2d28, 0, 2.7, 0);
-        }
-        box(0.06, 1.8, 0.06, 0x333333, -1.1, 3.3, -1.1);
-        const flag = box(0.7, 0.4, 0.02, 0xc85a48, -0.72, 3.9, -1.1);
+        // Colony Command: a terraced landing terrace, the operations hall
+        // with a lit sensor band, comm pylons that fill in as it grows, and
+        // one tall control spire with a dish and a beacon you can find from
+        // anywhere on the planet.
+        box(4.6, 0.4, 4.6, PAD, 0, 0.2);
+        box(3.9, 0.4, 3.9, 0xaba593, 0, 0.6);
+        lit(3.92, 0.06, 3.92, TRIM, 0, 0.82, 0, 0.4);      // terrace edge light
+        box(3.1, 1.5, 3.1, HULL, 0, 1.55);
+        box(3.3, 0.24, 3.3, HULL2, 0, 2.4);                // hall cornice
+        lit(3.14, 0.14, 3.14, GLOW, 0, 1.95, 0, 0.35);     // ops glass band
+        const pylon = (x, z) => {
+          cyl(0.3, 0.4, 2.7, HULL2, x, 1.8, z, 8);
+          lit(0.24, 0.24, 0.24, TRIM, x, 3.25, z, 0.8);
+        };
+        pylon(1.35, 1.35);
+        if (tier >= 2) pylon(-1.35, -1.35);
+        if (tier >= 3) { pylon(1.35, -1.35); pylon(-1.35, 1.35); }
+        // The spire: taller with every tier.
+        const spireH = 2.2 + tier * 0.5;
+        cyl(0.68, 0.9, spireH, HULL, 0, 2.4 + spireH / 2, 0, 12);
+        lit(1.5, 0.12, 1.5, GLOW, 0, 2.4 + spireH * 0.62, 0, 0.3); // control ring
+        cyl(0.95, 0.72, 0.3, HULL2, 0, 2.5 + spireH, 0, 12);        // crown deck
+        // Comms dish, aimed at the sky.
+        const dish = cyl(0.55, 0.08, 0.3, 0xd8d2c2, 0.45, 2.85 + spireH, 0.35, 10);
+        dish.rotation.x = -0.7; dish.rotation.z = -0.35;
+        box(0.07, 1.4, 0.07, 0x4a5058, -0.3, 3.15 + spireH, -0.25);
+        const beacon = lit(0.2, 0.2, 0.2, tier >= 4 ? 0xf3c53d : TRIM, -0.3, 3.95 + spireH, -0.25, 1.0);
+        // Holo-banner off the crown: the expedition's colors.
+        const flag = lit(0.7, 0.4, 0.03, TRIM, 0.65, 2.9 + spireH, -0.2, 0.5);
+        flag.material.transparent = true; flag.material.opacity = 0.85;
         g.userData.flag = flag;
-        windows(6, 1.0, 1.75);
+        windows(6, 1.55, 1.62);
+        windows(4, 2.4 + spireH * 0.4, 0.84);
         break;
       }
       case 'house': {
+        // Hab unit: white prefab hull, tilted solar roof, lit door. Bigger
+        // tiers stack a second module instead of growing a random block.
+        // Variation is keyed off the plot id — deterministic, so peers and
+        // rebuilds agree — and flips the roof pitch, door side and antenna,
+        // so a street of habs reads as a neighborhood, not a print run.
+        const vid = b.plotId || b.id || 0;
+        const flip = vid % 2 ? 1 : -1;
+        const hullVar = new THREE.Color(HULL).offsetHSL(0, 0.004 * (vid % 3), ((vid % 5) - 2) * 0.012).getHex();
         if (tier === 1) {
-          box(1.3, 0.7, 1.1, 0xd8d4c6, 0, 0.35);
-          cone(1.0, 0.7, 0xa8352e, 0, 1.05);
+          box(1.5, 0.1, 1.3, PAD, 0, 0.05);                 // foundation skirt
+          box(1.3, 0.7, 1.1, hullVar, 0, 0.4);
+          const roof = box(1.36, 0.08, 1.16, SOLAR, 0, 0.83);
+          roof.rotation.z = 0.07 * flip;
+          lit(0.3, 0.44, 0.04, TRIM, 0.3 * flip, 0.29, 0.56, 0.4);
+          if (vid % 3 === 0) box(0.04, 0.5, 0.04, 0x4a5058, -0.5 * flip, 1.0, -0.35);
         } else if (tier === 2) {
-          box(1.5, 1.0, 1.3, 0xdcd8ca, 0, 0.5);
-          cone(1.15, 0.8, 0xa8352e, 0, 1.4);
-          box(0.35, 0.5, 0.06, 0x565c60, 0, 0.25, 0.68);
+          box(1.7, 0.1, 1.5, PAD, 0, 0.05);
+          box(1.5, 1.0, 1.3, hullVar, 0, 0.55);
+          const roof = box(1.56, 0.09, 1.36, SOLAR, 0, 1.13);
+          roof.rotation.z = 0.07 * flip;
+          lit(0.32, 0.5, 0.04, TRIM, 0.32 * flip, 0.32, 0.66, 0.4);
+          box(0.05, 0.7, 0.05, 0x4a5058, -0.55 * flip, 1.45, -0.4); // antenna
         } else {
-          box(1.6, 1.5, 1.4, 0xe0dccd, 0, 0.75);
-          box(1.0, 0.8, 1.0, 0xbfbaaa, 0.5, 1.9, 0.3);
-          cone(1.25, 0.9, 0x8f2d28, 0, 2.0);
-          cone(0.8, 0.7, 0x8f2d28, 0.5, 2.6, 0.3);
+          box(1.8, 0.1, 1.6, PAD, 0, 0.05);
+          box(1.6, 1.4, 1.4, hullVar, 0, 0.75);
+          box(1.0, 0.8, 1.0, HULL2, 0.45 * flip, 1.85, 0.25);
+          const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45 * flip, 2.31, 0.25);
+          roof.rotation.z = 0.07 * flip;
+          box(1.1, 0.1, 1.3, 0x6da06a, -0.4 * flip, 1.53, 0);      // roof garden
+          lit(0.32, 0.52, 0.04, TRIM, 0.3 * flip, 0.33, 0.72, 0.4);
         }
-        windows(tier + 1, tier >= 3 ? 0.8 : 0.4, 0.72);
+        windows(tier + 1, tier >= 3 ? 0.85 : 0.45, 0.72);
         break;
       }
       case 'farm': {
-        box(1.9, 0.1, 1.9, 0x6e5a40, 0, 0.05);
-        for (let r = 0; r < 3; r++) box(1.7, 0.16, 0.34, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.14, -0.6 + r * 0.6);
-        if (tier >= 2) { box(0.6, 0.55, 0.6, 0xd8d4c6, 0.65, 0.32, 0.65); cone(0.55, 0.45, 0xa8352e, 0.65, 0.82, 0.65); }
+        // Hydroponic beds under a white frame, glowing faintly at the rims.
+        box(1.9, 0.14, 1.9, HULL2, 0, 0.07);
+        for (let r = 0; r < 3; r++) {
+          box(1.7, 0.18, 0.36, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.2, -0.6 + r * 0.6);
+          lit(1.72, 0.03, 0.38, GLOW, 0, 0.31, -0.6 + r * 0.6, 0.25);
+        }
+        if (tier >= 2) {
+          cyl(0.28, 0.32, 0.6, HULL, 0.72, 0.44, 0.72, 8);  // nutrient tank
+          lit(0.3, 0.05, 0.3, TRIM, 0.72, 0.77, 0.72, 0.5);
+        }
         break;
       }
       case 'mill': {
-        cyl(0.5, 0.7, tier >= 2 ? 2.8 : 2.2, 0xd4cfc0, 0, tier >= 2 ? 1.4 : 1.1, 0, 8);
-        cone(0.66, 0.7, 0xa8352e, 0, tier >= 2 ? 3.15 : 2.5, 0, 8);
+        // Wind turbine: slender pylon, nacelle, three long blades.
+        const h = tier >= 2 ? 3.1 : 2.5;
+        box(1.0, 0.16, 1.0, PAD, 0, 0.08);
+        cyl(0.13, 0.24, h, HULL, 0, h / 2, 0, 8);
+        box(0.42, 0.3, 0.7, HULL2, 0, h + 0.1, 0.05);
+        lit(0.1, 0.1, 0.1, TRIM, 0, h + 0.1, 0.42, 0.8);
         const rotor = new THREE.Group();
-        rotor.position.set(0, tier >= 2 ? 2.7 : 2.1, 0.58);
-        for (let i = 0; i < 4; i++) {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.04), M(0xd9d2ba));
-          blade.position.y = 0.8;
+        rotor.position.set(0, h + 0.1, 0.42);
+        for (let i = 0; i < 3; i++) {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.7, 0.03), M(0xe9e3d4));
+          blade.position.y = 0.88;
           blade.castShadow = true;
           const pivot = new THREE.Group();
-          pivot.rotation.z = (i * Math.PI) / 2;
+          pivot.rotation.z = (i * Math.PI * 2) / 3;
           pivot.add(blade);
           rotor.add(pivot);
         }
@@ -2893,26 +2979,38 @@ class App {
         break;
       }
       case 'mine': {
-        box(1.9, 0.22, 1.9, 0x8a9094, 0, 0.11);
-        box(0.8, 0.8, 0.8, 0x565c60, 0, 0.62);
-        box(0.12, 1.8, 0.12, 0x4a4440, -0.45, 1.1, -0.45);
-        box(0.12, 1.8, 0.12, 0x4a4440, 0.45, 1.1, -0.45);
-        box(1.2, 0.14, 0.5, 0x4a4440, 0, 2.0, -0.45);
+        box(1.9, 0.22, 1.9, PAD, 0, 0.11);
+        box(0.8, 0.8, 0.8, HULL2, 0, 0.62);
+        box(0.12, 1.8, 0.12, HULL, -0.45, 1.1, -0.45);
+        box(0.12, 1.8, 0.12, HULL, 0.45, 1.1, -0.45);
+        box(1.2, 0.14, 0.5, HULL2, 0, 2.0, -0.45);
         const wheel = cyl(0.34, 0.34, 0.16, 0xf3c53d, 0, 2.0, -0.45, 12);
         wheel.rotation.x = Math.PI / 2;
         g.userData.rotor = wheel;
-        if (tier >= 2) box(1.0, 0.5, 0.7, 0x6e7478, 0.55, 0.25, 0.6);
+        if (tier >= 2) box(1.0, 0.5, 0.7, HULL, 0.55, 0.25, 0.6);
         break;
       }
       case 'tower': {
-        const h = 2.2 + tier * 0.45;
-        cyl(0.65, 0.85, h, tier >= 3 ? 0xb0b4b2 : 0xa6aaa8, 0, h / 2, 0, 8);
-        box(1.6, 0.22, 1.6, 0x3d4246, 0, h + 0.11);
-        for (const [dx, dz] of [[-0.65, -0.65], [0.65, -0.65], [-0.65, 0.65], [0.65, 0.65]]) {
-          box(0.2, 0.32, 0.2, 0x3d4246, dx, h + 0.35, dz);
+        // Defense pylon: the tower silhouette kept (base plinth, tapering
+        // shaft, flared gun deck wider than the shaft) but drawn in hull
+        // plate with a sensor band and deck railing — not castle stone.
+        const h = 2.3 + tier * 0.5;
+        const hull = tier >= 3 ? 0xece6d6 : HULL;
+        box(1.75, 0.36, 1.75, PAD, 0, 0.18);
+        cyl(0.58, 0.78, h - 0.3, hull, 0, 0.3 + (h - 0.3) / 2, 0, 12);
+        const band = cyl(0.63, 0.72, 0.16, GLOW, 0, h * 0.45, 0, 12);
+        band.material.emissive.setHex(GLOW);
+        band.material.emissiveIntensity = 0.5;
+        cyl(0.92, 0.66, 0.42, HULL2, 0, h + 0.06, 0, 12);   // flared gun deck
+        cyl(0.98, 0.98, 0.1, PAD, 0, h + 0.32, 0, 12);      // deck plate
+        for (let i = 0; i < 6; i++) {                       // deck railing
+          const a = (i / 6) * Math.PI * 2 + 0.26;
+          box(0.06, 0.3, 0.06, 0x4a5058, Math.cos(a) * 0.86, h + 0.5, Math.sin(a) * 0.86);
         }
+        lit(0.14, 0.14, 0.14, TRIM, 0, h + 0.32, 0.86, 0.9); // muzzle marker
+        windows(2, h * 0.62, 0.68);
         const head = new THREE.Group();
-        head.position.y = h + 0.35;
+        head.position.y = h + 0.52;
         if (b.branch === 'flame') {
           const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
           head.add(bowl);
@@ -2936,9 +3034,13 @@ class App {
         break;
       }
       case 'wall': {
-        // Connected rampart: each tile grows curtain panels toward every
-        // neighboring wall tile, so the whole ring reads as ONE wall — no
-        // corner gaps, no floating cubes. Gates become real gatehouses.
+        // The rampart is drawn as a SMOOTHED POLYLINE, not a stack of
+        // axis-aligned blocks. Each tile pulls its pier toward the average of
+        // its wall neighbors — an L-corner chamfers into a 45° cut — and
+        // hangs a rotated curtain panel out to the midpoint it shares with
+        // each neighbor. Adjacent tiles meet exactly at those midpoints, so a
+        // curving ring reads as a curve and a diagonal run as one straight
+        // wall, while the sim keeps its plain tile occupancy untouched.
         const N = this.game.map.size;
         if (!this._wallTiles) {
           this._wallTiles = new Set();
@@ -2946,83 +3048,111 @@ class App {
             if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
           }
         }
-        const nb = {
-          e: this._wallTiles.has(b.z * N + b.x + 1), w: this._wallTiles.has(b.z * N + b.x - 1),
-          s: this._wallTiles.has((b.z + 1) * N + b.x), n: this._wallTiles.has((b.z - 1) * N + b.x),
+        const nbs = [];
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (this._wallTiles.has((b.z + dz) * N + (b.x + dx))) nbs.push([dx, dz]);
+        }
+        // Chamfered pier position (local to the tile center).
+        let scx = 0, scz = 0;
+        for (const [dx, dz] of nbs) { scx += dx * 0.26; scz += dz * 0.26; }
+        // One segment per neighbor: pier → shared midpoint on the tile edge.
+        const segs = nbs.map(([dx, dz]) => {
+          const ex = dx * 0.5, ez = dz * 0.5;
+          return {
+            mx: (scx + ex) / 2, mz: (scz + ez) / 2,
+            len: Math.hypot(ex - scx, ez - scz) + 0.12,
+            yaw: Math.atan2(ez - scz, ex - scx),
+          };
+        });
+        const panel = (s, len, h, thick, color, y) => {
+          const m = box(len, h, thick, color, s.mx, y, s.mz);
+          m.rotation.y = -s.yaw;
+          return m;
         };
-        // Barrier ladder: razorwire fence → plasteel barricade → shock/bastion.
+        // Wall run direction (for orienting the gate) and its perpendicular.
+        const run = nbs.length === 2
+          ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
+          : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
+        const pvx = -Math.sin(run), pvz = Math.cos(run);
+        const passYaw = Math.atan2(pvz, pvx);
+        // Barrier ladder: razorwire fence → hull-plate curtain → shock/bastion.
         const shock = b.branch === 'shock';
         const bastion = b.branch === 'bastion';
-        const capCol = 0x3d4246;
-        const alongX = nb.e || nb.w; // wall runs east-west → passage runs north-south
+        const capCol = 0x8a8069;
         if (tier === 1 && !b.gate) {
-          // Razorwire: gunmetal post + taut wire strands to each neighbor.
-          box(0.16, 0.78, 0.16, 0x565c60, 0, 0.39);
-          box(0.2, 0.06, 0.2, 0xe8a83c, 0, 0.81); // hazard cap
-          const wires = [
-            nb.e && [0.5, 0.25, 0], nb.w && [0.5, -0.25, 0],
-            nb.s && [0, 0, 0.25], nb.n && [0, 0, -0.25],
-          ].filter(Boolean);
-          for (const [wx, px, pz] of wires) {
-            for (const wy of [0.3, 0.6]) {
-              box(wx ? 0.5 : 0.045, 0.045, wx ? 0.045 : 0.5, 0x9aa0a2, px, wy, pz);
-            }
+          // Razorwire: gunmetal post + taut wire strands along each segment.
+          box(0.16, 0.78, 0.16, 0x565c60, scx, 0.39, scz);
+          box(0.2, 0.06, 0.2, 0xe8a83c, scx, 0.81, scz); // hazard cap
+          for (const s of segs) {
+            for (const wy of [0.3, 0.6]) panel(s, s.len, 0.045, 0.045, 0x9aa0a2, wy);
           }
           break;
         }
         const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
-        const stone = bastion ? 0xa8aeae : tier === 1 ? 0x767c7e : 0x8f9698;
+        const hull = bastion ? 0xece6d6 : tier === 1 ? 0xb9b19c : HULL;
         if (b.gate) {
-          // Gatehouse: two towers flanking the passage, an arch overhead.
-          const towH = H + 0.75;
-          for (const side of [-1, 1]) {
-            const px = alongX ? 0 : side * 0.38, pz = alongX ? side * 0.38 : 0;
-            box(alongX ? 0.9 : 0.34, towH, alongX ? 0.34 : 0.9, stone, px, towH / 2, pz);
-            box(alongX ? 1.0 : 0.44, 0.16, alongX ? 0.44 : 1.0, capCol, px, towH + 0.08, pz);
+          // The gate is UNMISTAKABLE: low lit wing-walls tie into the
+          // rampart, two tall pylons stand astride the passage, a bright
+          // portal arch spans them, and an amber threshold glows on the
+          // ground through the opening — readable from across the map.
+          for (const s of segs) {
+            panel(s, s.len, H * 0.55, 0.32, hull, H * 0.275);
+            panel(s, s.len + 0.05, 0.12, 0.38, capCol, H * 0.55 + 0.06);
           }
-          box(alongX ? 0.9 : 0.34, 0.22, alongX ? 0.34 : 0.9, 0xe8a83c, 0, H + 0.35); // hazard-striped lintel
+          const towH = H + 1.25;
+          for (const side of [-1, 1]) {
+            const px = pvx * side * 0.46, pz = pvz * side * 0.46;
+            const pyl = box(0.44, towH, 0.44, hull, px, towH / 2, pz);
+            pyl.rotation.y = -run;
+            const cap = box(0.52, 0.14, 0.52, capCol, px, towH + 0.07, pz);
+            cap.rotation.y = -run;
+            const light = lit(0.56, 0.16, 0.56, TRIM, px, towH + 0.24, pz, 0.9);
+            light.rotation.y = -run;
+          }
+          const arch = lit(1.06, 0.2, 0.2, TRIM, 0, towH - 0.2, 0, 0.75);
+          arch.rotation.y = -passYaw;
+          const threshold = lit(1.6, 0.05, 0.56, TRIM, 0, 0.05, 0, 0.45);
+          threshold.rotation.y = -passYaw;
+          threshold.material.transparent = true;
+          threshold.material.opacity = 0.75;
           const ban = assetClone('banner', 0.7);
-          if (ban) { ban.position.set(alongX ? 0.05 : 0.45, 0, alongX ? 0.45 : 0.05); g.add(ban); }
+          if (ban) { ban.position.set(pvx * -0.9, 0, pvz * -0.9); g.add(ban); }
           break;
         }
-        // Center pier, slightly proud of the curtains.
-        box(0.56, H + 0.14, 0.56, stone, 0, (H + 0.14) / 2);
-        box(0.66, 0.15, 0.66, capCol, 0, H + 0.21);
-        // Curtain panels out to each neighboring wall tile's edge.
-        const panels = [
-          nb.e && [0.5, 0.36, 0.25, 0], nb.w && [0.5, 0.36, -0.25, 0],
-          nb.s && [0.36, 0.5, 0, 0.25], nb.n && [0.36, 0.5, 0, -0.25],
-        ].filter(Boolean);
-        for (const [w, dep, px, pz] of panels) {
-          box(w, H, dep, stone, px, H / 2, pz);
-          box(w === 0.5 ? 0.52 : 0.44, 0.14, dep === 0.5 ? 0.52 : 0.44, capCol, px, H + 0.07, pz);
-          // Shock fence: a live plasma conduit runs the parapet — glows at night.
+        // Rounded pier at the chamfered point, slightly proud of the curtains.
+        cyl(0.3, 0.34, H + 0.14, hull, scx, (H + 0.14) / 2, scz, 8);
+        cyl(0.37, 0.37, 0.12, capCol, scx, H + 0.2, scz, 8);
+        lit(0.16, 0.1, 0.16, TRIM, scx, H + 0.32, scz, 0.8); // perimeter marker light
+        for (const s of segs) {
+          panel(s, s.len, H, 0.34, hull, H / 2);
+          panel(s, s.len + 0.05, 0.14, 0.42, capCol, H + 0.07);
+          // Shock fence: a live plasma conduit runs the parapet.
           if (shock) {
-            const strip = box(w === 0.5 ? 0.52 : 0.1, 0.07, dep === 0.5 ? 0.52 : 0.1, 0x4dd8c8, px, H + 0.19, pz);
+            const strip = panel(s, s.len, 0.07, 0.1, 0x4dd8c8, H + 0.19);
             strip.material.emissive.setHex(0x4dd8c8);
             strip.material.emissiveIntensity = 0.9;
           }
         }
         if (shock) {
-          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, 0, H + 0.34);
+          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, scx, H + 0.42, scz);
           core.material.emissive.setHex(0x4dd8c8);
           core.material.emissiveIntensity = 1.0;
         }
-        if (!panels.length) box(0.9, H, 0.9, stone, 0, H / 2); // stranded stub (shouldn't happen)
+        if (!segs.length) box(0.9, H, 0.9, hull, 0, H / 2); // stranded stub (shouldn't happen)
         break;
       }
       case 'outpost': {
-        // A staked claim: palisade stubs, a muster tent and a tall banner you
-        // can pick out from across the map.
-        box(1.9, 0.28, 1.9, 0x6b6152, 0, 0.14);
-        cone(0.95, 1.05, 0xcfc7b4, -0.35, 0.55, -0.25);
-        box(0.9, 0.6, 0.7, 0x5c6470, 0.55, 0.3, 0.5);
-        box(0.08, 3.4, 0.08, 0x2f2a24, 0.85, 1.7, -0.7);
-        box(0.7, 0.45, 0.03, 0x59b06e, 0.52, 3.15, -0.7);
+        // A staked claim: drop-pad, field dome, and a tall relay mast you can
+        // pick out from across the map.
+        box(1.9, 0.24, 1.9, PAD, 0, 0.12);
+        cone(0.95, 1.05, HULL, -0.35, 0.55, -0.25, 8);
+        box(0.9, 0.6, 0.7, HULL2, 0.55, 0.3, 0.5);
+        box(0.08, 3.4, 0.08, 0x4a5058, 0.85, 1.7, -0.7);
+        lit(0.6, 0.4, 0.03, 0x59b06e, 0.5, 3.1, -0.7, 0.5);
         if (tier >= 2) {
-          box(0.75, 0.85, 0.75, 0x4d5560, -0.7, 0.42, 0.75);
-          box(0.08, 3.4, 0.08, 0x2f2a24, -0.85, 1.7, -0.7);
-          box(0.7, 0.45, 0.03, 0x59b06e, -0.52, 3.15, -0.7);
+          box(0.75, 0.85, 0.75, HULL2, -0.7, 0.42, 0.75);
+          box(0.08, 3.4, 0.08, 0x4a5058, -0.85, 1.7, -0.7);
+          lit(0.6, 0.4, 0.03, 0x59b06e, -0.5, 3.1, -0.7, 0.5);
           const head = new THREE.Group();
           head.position.set(0.25, 1.65, -0.15);
           const gun = new THREE.Mesh(new THREE.BoxGeometry(tier >= 3 ? 0.34 : 0.24, 0.2, tier >= 3 ? 1.25 : 0.78), M(tier >= 3 ? 0x4a4440 : 0x2f3a44));
@@ -3042,9 +3172,10 @@ class App {
         break;
       }
       case 'workshop': {
-        box(1.9, 0.25, 1.9, 0x46515a, 0, 0.12);
-        box(1.5, 1.0, 1.25, 0x65717a, 0, 0.62);
-        box(1.7, 0.16, 1.45, 0x2f3940, 0, 1.15);
+        box(1.9, 0.25, 1.9, PAD, 0, 0.12);
+        box(1.5, 1.0, 1.25, HULL, 0, 0.62);
+        box(1.7, 0.16, 1.45, HULL2, 0, 1.15);
+        lit(1.52, 0.07, 1.27, GLOW, 0, 1.06, 0, 0.3);
         const rotor = new THREE.Group();
         rotor.position.set(0, 1.55, 0);
         for (let i = 0; i < 3 + tier; i++) {
@@ -3058,10 +3189,10 @@ class App {
         break;
       }
       case 'hero_forge': {
-        cyl(1.0, 1.25, 0.45, 0x303944, 0, 0.22, 0, 10);
+        cyl(1.0, 1.25, 0.45, PAD, 0, 0.22, 0, 10);
         for (let i = 0; i < 4; i++) {
           const a = i * Math.PI / 2;
-          box(0.22, 1.8 + tier * 0.25, 0.22, 0x596775, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
+          box(0.22, 1.8 + tier * 0.25, 0.22, HULL2, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
         }
         const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.48 + tier * 0.1, 0), M(tier >= 3 ? 0xffd75e : 0x72cfff, 1.0));
         core.position.y = 1.65 + tier * 0.2;
@@ -3077,12 +3208,17 @@ class App {
       case 'camp_militia':
       case 'camp_ranger':
       case 'camp_sniper': {
-        const col = b.kind === 'camp_militia' ? 0x3a566e : b.kind === 'camp_ranger' ? 0x4a6e3a : 0x5c4a72;
-        cone(1.0, 1.0, 0xd8d4c6, -0.4, 0.5, -0.3);
-        box(1.1, 0.7, 0.8, 0x6e7478, 0.5, 0.35, 0.5);
-        box(0.06, 1.7, 0.06, 0x333333, 0.9, 1.1, -0.6);
-        box(0.55, 0.35, 0.02, col, 0.62, 1.7, -0.6);
-        if (tier >= 2) { box(0.8, 0.5, 0.6, 0x3d4246, -0.6, 0.25, 0.7); }
+        // Muster bay: a quonset prefab with a doctrine-colored light stripe,
+        // so the three camp kinds read apart at a glance without clutter.
+        const col = b.kind === 'camp_militia' ? 0x5f9ccf : b.kind === 'camp_ranger' ? 0x74c96a : 0xb98fe0;
+        const hut = cyl(0.62, 0.62, 1.5, HULL, -0.25, 0.5, 0.05, 10);
+        hut.rotation.z = Math.PI / 2;
+        box(0.06, 1.24, 1.24, HULL2, 0.52, 0.5, 0.05); // end wall
+        lit(1.52, 0.06, 0.1, col, -0.25, 0.98, 0.05, 0.7); // doctrine stripe
+        box(1.5, 0.1, 1.9, PAD, -0.2, 0.05, 0);        // muster pad
+        box(0.06, 1.7, 0.06, 0x4a5058, 0.85, 0.9, -0.7);
+        lit(0.5, 0.3, 0.03, col, 0.58, 1.55, -0.7, 0.55); // holo banner
+        if (tier >= 2) box(0.7, 0.5, 0.6, HULL2, -0.6, 0.3, 0.75);
         break;
       }
     }
@@ -3128,7 +3264,7 @@ class App {
         b.plotTier = plot ? plot.tier : 1;
         b.branch = plot ? plot.branch : null;
         const mesh = this._makeBuildingMesh(b);
-        mesh.position.set(b.cx, 0, b.cz);
+        mesh.position.set(b.cx, this.map.groundY(b.cx, b.cz), b.cz);
         this.scene.add(mesh);
         rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime };
         this.buildingMeshes.set(b.id, rec);
@@ -3265,12 +3401,22 @@ class App {
       }
       g.scale.setScalar(1.18);
     } else {
-      // Guardsman-style trooper.
+      // Colony marine: a sealed suit — nobody walks this planet bare-headed.
+      // A slimmer cut of the hero kit (legs, doctrine-colored torso, white
+      // helmet with glow visor, pauldrons, life-support pack) so the army
+      // reads as one corps, with doctrine color doing the telling-apart.
       const d = u.def;
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.62, 8), M(d.color)), 0, 0.45, 0);
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), M(0xc4a37e)), 0, 0.92, 0);
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.12, 8), M(d.color)), 0, 1.02, 0);
-      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.68), M(0x232426)), 0.2, 0.62, 0.18));
+      const armor = M(d.color);
+      const shell = M(0xd9d3c3);
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.2), M(0x26282c)), 0, 0.16, 0);          // legs
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.26), armor), 0, 0.52, 0);                 // torso
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), shell), 0, 0.58, 0.145);              // chest plate
+      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), -0.24, 0.7, 0);                // pauldron L
+      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), 0.24, 0.7, 0);                 // pauldron R
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.19, 0.19), shell), 0, 0.86, 0);                 // helmet
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.03), M(0x35ff70, 0.9)), 0, 0.87, 0.105); // visor glow
+      addB(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.13), M(0x4a4d52)), 0, 0.56, -0.2);        // life-support pack
+      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.62), M(0x232426)), 0.2, 0.56, 0.18));
     }
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
     affectedGeo.rotateX(-Math.PI / 2);
@@ -3295,7 +3441,7 @@ class App {
         rec = { mesh, u };
         this.unitMeshes.set(u.id, rec);
       }
-      rec.mesh.position.set(u.x, 0, u.z);
+      rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
       let attackPulse = 0;
       let attackKind = '';
@@ -3433,6 +3579,7 @@ class App {
       ring.position.set(x, 0.06, z);
       gr.add(ring);
       gr.userData.ring = ring;
+      gr.position.y = this.map.groundY(x, z);
       this.scene.add(gr);
       this.waveMarkers.push(gr);
     }
@@ -3506,6 +3653,7 @@ class App {
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
         gr.userData = { ring, flag, label, node };
+        gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
       }
@@ -3760,6 +3908,12 @@ class App {
     const edgePad = 1.2;
     this.focus.x = clamp(this.focus.x, edgePad, mapSize - edgePad);
     this.focus.z = clamp(this.focus.z, edgePad, mapSize - edgePad);
+    // Ride the relief: the focus point tracks the ground under it (softly, so
+    // cresting a hill tilts the view instead of jolting it).
+    if (this.map) {
+      const gy = Math.max(0, this.map.groundY(this.focus.x, this.focus.z));
+      this.focus.y += (gy - this.focus.y) * (1 - Math.exp(-4 * dt));
+    }
 
     const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
@@ -3771,10 +3925,10 @@ class App {
     }
     this.camera.position.set(
       this.focus.x + Math.sin(this.camYaw) * hx + sx,
-      hy,
+      this.focus.y + hy,
       this.focus.z + Math.cos(this.camYaw) * hx + sz,
     );
-    this.camera.lookAt(this.focus.x + sx, 0, this.focus.z + sz);
+    this.camera.lookAt(this.focus.x + sx, this.focus.y, this.focus.z + sz);
 
     this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
     this.sun.target.position.set(this.focus.x, 0, this.focus.z);
@@ -3793,12 +3947,13 @@ class App {
     const duskSky = new THREE.Color(0xd98a6a);
     const nightSky = new THREE.Color(0x232b4e);
 
-    this.sun.intensity = lerp(0.85, 2.6, b);
-    // Warm cream by day, ember at dusk, cool moon-blue at night.
-    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xfff0cf), b));
-    this.hemi.intensity = lerp(0.35, 0.85, b);
+    this.sun.intensity = lerp(0.85, 2.75, b);
+    // Warm gold by day, ember at dusk, cool moon-blue at night.
+    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xffeabf), b));
+    this.hemi.intensity = lerp(0.35, 0.8, b);
     this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
-    this.amb.intensity = lerp(0.85, 0.5, b);
+    this.hemi.groundColor.copy(new THREE.Color(0x2c3550).lerp(new THREE.Color(0x9a7a58), b));
+    this.amb.intensity = lerp(0.85, 0.45, b);
     this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
     const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
     this.scene.background = sky;

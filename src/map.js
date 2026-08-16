@@ -15,6 +15,23 @@ export class GameMap extends TerrainField {
   colorOf(t) {
     if (this.theme && this.theme.palette) {
       const p = this.theme.palette;
+      // Streets read as pale graded roadbed, not dark stamps across the city:
+      // lift the authored path tone toward the biome's sand tone.
+      if (t === TILE.PATH && p.path !== undefined) {
+        if (this._pathBlend === undefined) {
+          this._pathBlend = new THREE.Color(p.path).lerp(new THREE.Color(p.sand ?? p.grass), 0.45).getHex();
+        }
+        return this._pathBlend;
+      }
+      // Impassable crag must never share a color family with walkable ground
+      // (the wastes' light mesa tone read as strollable rock): pull it toward
+      // dark slate so "can't walk there" is legible from the palette alone.
+      if (t === TILE.MOUNTAIN && p.mountain !== undefined) {
+        if (this._cragBlend === undefined) {
+          this._cragBlend = new THREE.Color(p.mountain).lerp(new THREE.Color(0x4e463f), 0.38).getHex();
+        }
+        return this._cragBlend;
+      }
       const map = {
         [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
         [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
@@ -29,26 +46,83 @@ export class GameMap extends TerrainField {
   buildTerrain() {
     const N = this.size;
     const group = new THREE.Group();
+    this._cornerH = null; // invalidate: recompute against the current tiles
 
     // Terrain: 2 triangles per tile. Cel look: large SMOOTH fields of color —
     // variation is low-frequency noise, never per-tile jitter (no checkering).
+    //
+    // Color lives on the CORNERS, not the tiles: each corner averages the four
+    // tiles that meet at it, the same way cornerHeight averages their heights.
+    // Biome interiors stay one clean field of color, but every boundary —
+    // shore, treeline, crag foot, path edge — becomes a one-tile gradient
+    // instead of an axis-aligned staircase between two flat hexes.
     const positions = new Float32Array(N * N * 6 * 3);
     const colors = new Float32Array(N * N * 6 * 3);
     const col = new THREE.Color();
+    const blightCol = new THREE.Color(0x3c2547);
     const varNoise = makeNoise(makeRNG(1234));
     let p = 0;
 
+    // Corner colors and heights are shared by up to four tiles; cache them
+    // once. Heights first, then colors — the color pass reads the finished
+    // height grid to shade slopes.
+    const cw = N + 1;
+    const cornerCol = new Float32Array(cw * cw * 3);
+    const cornerH = new Float32Array(cw * cw);
+    for (let z = 0; z <= N; z++) {
+      for (let x = 0; x <= N; x++) {
+        cornerH[z * cw + x] = this.cornerHeight(x, z);
+      }
+    }
+    for (let z = 0; z <= N; z++) {
+      for (let x = 0; x <= N; x++) {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dz = -1; dz <= 0; dz++) {
+          for (let dx = -1; dx <= 0; dx++) {
+            const tx = x + dx, tz = z + dz;
+            if (!this.inBounds(tx, tz)) continue;
+            col.setHex(this.colorOf(this.tiles[this.idx(tx, tz)]));
+            r += col.r; g += col.g; b += col.b; n++;
+          }
+        }
+        col.setRGB(r / Math.max(1, n), g / Math.max(1, n), b / Math.max(1, n));
+        // Sunlit relief, baked in: high ground lifts toward light, hollows and
+        // basins sink — so the landform reads even under flat Lambert shading.
+        const h = cornerH[z * cw + x];
+        const lift = h >= 0 ? Math.min(0.06, h * 0.045) : Math.max(-0.055, h * 0.09);
+        const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.05;
+        col.offsetHSL(0, 0, v + lift);
+        // Cliff shading: steep faces darken hard, so the crag boundary reads
+        // as a wall you cannot walk up, while gentle walkable rolls (small
+        // corner-to-corner drops) stay untouched.
+        let drop = 0;
+        if (x > 0) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x - 1)]));
+        if (x < N) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x + 1)]));
+        if (z > 0) drop = Math.max(drop, Math.abs(h - cornerH[(z - 1) * cw + x]));
+        if (z < N) drop = Math.max(drop, Math.abs(h - cornerH[(z + 1) * cw + x]));
+        const cliff = Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
+        if (cliff > 0) col.multiplyScalar(1 - cliff);
+        // Blighted ground around every hive lair: the stain reads from across
+        // the map, so a lair is a place, not a prop dropped on clean grass.
+        for (const [nx, nz] of this.nestSpots || []) {
+          const nd = Math.hypot(x - nx, z - nz);
+          if (nd < 5.5) col.lerp(blightCol, (1 - nd / 5.5) * 0.55);
+        }
+        const o = (z * cw + x) * 3;
+        cornerCol[o] = col.r; cornerCol[o + 1] = col.g; cornerCol[o + 2] = col.b;
+      }
+    }
+    // Cache for groundY: units, zombies and effects sample the ground every
+    // frame, and the corner grid only changes when the terrain mesh does.
+    this._cornerH = cornerH;
+    this._cornerW = cw;
+
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        const t = this.tiles[this.idx(x, z)];
-        col.setHex(this.colorOf(t));
-        const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.05;
-        col.offsetHSL(0, 0, v);
-
-        const h00 = this.cornerHeight(x, z);
-        const h10 = this.cornerHeight(x + 1, z);
-        const h01 = this.cornerHeight(x, z + 1);
-        const h11 = this.cornerHeight(x + 1, z + 1);
+        const h00 = cornerH[z * cw + x];
+        const h10 = cornerH[z * cw + (x + 1)];
+        const h01 = cornerH[(z + 1) * cw + x];
+        const h11 = cornerH[(z + 1) * cw + (x + 1)];
 
         const verts = [
           [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
@@ -56,7 +130,8 @@ export class GameMap extends TerrainField {
         ];
         for (const [vx, vy, vz] of verts) {
           positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
-          colors[p] = col.r; colors[p + 1] = col.g; colors[p + 2] = col.b;
+          const o = (vz * cw + vx) * 3;
+          colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
           p += 3;
         }
       }
@@ -88,6 +163,7 @@ export class GameMap extends TerrainField {
     group.add(this._buildTrees());
     group.add(this._buildRocks());
     group.add(this._buildOre());
+    group.add(this._buildDetail());
     return group;
   }
 
@@ -159,10 +235,11 @@ export class GameMap extends TerrainField {
       const s = spots[i];
       q.setFromAxisAngle(up, s.r);
       sc.set(s.s, s.s, s.s);
-      pos.set(s.x, 0.25 * s.s, s.z);
+      const gy = this.groundY(s.x, s.z);
+      pos.set(s.x, gy + 0.25 * s.s, s.z);
       m.compose(pos, q, sc);
       trunks.setMatrixAt(i, m);
-      pos.y = (0.5 + 0.45) * s.s;
+      pos.y = gy + (0.5 + 0.45) * s.s;
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
       // Canopies key off the map's forest color — one hue family per map.
@@ -175,25 +252,70 @@ export class GameMap extends TerrainField {
   }
 
   _buildRocks() {
-    const spots = this._scatter(TILE.MOUNTAIN, (rng) => (rng() < 0.4 ? 1 : 0));
-    const geo = new THREE.DodecahedronGeometry(0.4, 0);
-    const mat = new THREE.MeshLambertMaterial({
-      color: this.theme && this.theme.palette ? this.theme.palette.mountain : 0xe9e2cd,
-    });
-    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
-    mesh.castShadow = true;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
-    for (let i = 0; i < spots.length; i++) {
-      const s = spots[i];
-      q.setFromAxisAngle(up, s.r);
-      sc.set(s.s, s.s * 0.8, s.s);
-      pos.set(s.x, 1.5 + 0.15, s.z);
-      m.compose(pos, q, sc);
-      mesh.setMatrixAt(i, m);
+    // Crag dressing exists to say "you cannot walk here". Jagged rock teeth
+    // crowd the RIM — every crag tile that touches walkable ground grows a
+    // spike or two, so the boundary reads as a fence of stone — while the
+    // interior plateaus get sparser boulders.
+    const N = this.size;
+    const g = new THREE.Group();
+    const rng = makeRNG(888);
+    const teeth = [], boulders = [];
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) continue;
+        const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) =>
+          this.isWalkable(x + dx, z + dz));
+        if (rim) {
+          const n = 1 + (rng() < 0.55 ? 1 : 0);
+          for (let i = 0; i < n; i++) {
+            teeth.push({
+              x: x + 0.2 + rng() * 0.6, z: z + 0.2 + rng() * 0.6,
+              s: 0.8 + rng() * 0.8, r: rng() * Math.PI * 2, tilt: (rng() - 0.5) * 0.3,
+            });
+          }
+        } else if (rng() < 0.35) {
+          boulders.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.75 + rng() * 0.55, r: rng() * Math.PI * 2 });
+        }
+      }
     }
-    mesh.count = spots.length;
-    return mesh;
+    const cragCol = this.colorOf(TILE.MOUNTAIN);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    const eul = new THREE.Euler();
+    if (teeth.length) {
+      const mesh = new THREE.InstancedMesh(
+        new THREE.ConeGeometry(0.4, 1.5, 5),
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(cragCol).multiplyScalar(0.82).getHex() }),
+        teeth.length,
+      );
+      mesh.castShadow = true;
+      teeth.forEach((s, i) => {
+        eul.set(s.tilt, s.r, s.tilt * 0.7);
+        q.setFromEuler(eul);
+        sc.set(s.s, s.s * (0.9 + (i % 3) * 0.25), s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.55 * s.s, s.z);
+        m.compose(pos, q, sc);
+        mesh.setMatrixAt(i, m);
+      });
+      g.add(mesh);
+    }
+    if (boulders.length) {
+      const mesh = new THREE.InstancedMesh(
+        new THREE.DodecahedronGeometry(0.4, 0),
+        new THREE.MeshLambertMaterial({ color: cragCol }),
+        boulders.length,
+      );
+      mesh.castShadow = true;
+      boulders.forEach((s, i) => {
+        eul.set(0, s.r, 0);
+        q.setFromEuler(eul);
+        sc.set(s.s, s.s * 0.8, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.15, s.z);
+        m.compose(pos, q, sc);
+        mesh.setMatrixAt(i, m);
+      });
+      g.add(mesh);
+    }
+    return g;
   }
 
   _buildOre() {
@@ -211,12 +333,194 @@ export class GameMap extends TerrainField {
         const s = spots[i];
         q.setFromAxisAngle(up, s.r);
         sc.set(s.s, s.s * 1.6, s.s);
-        pos.set(s.x, 0.12, s.z);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.12, s.z);
         m.compose(pos, q, sc);
         mesh.setMatrixAt(i, m);
       }
       g.add(mesh);
     }
+    return g;
+  }
+
+  // Set dressing for the open world — the ground the war is actually fought
+  // on, which used to be completely bare. Everything is deterministic from the
+  // map seed and the tiles, so peers and rebuilds dress the planet identically.
+  //
+  // Five instanced meshes, one per silhouette:
+  //   tufts    — grass blades over open meadow
+  //   pebbles  — scree on grass and sand
+  //   boulders — rare big stones on open ground, clear of the city sites
+  //   slabs    — standing stones: ruin rings on empty ground, monoliths
+  //              flanking every named chokepoint, cairns on barrows, cut
+  //              blocks at quarries, moot stones at clearings
+  //   posts    — weathered timber: ford markers and clearing stakes
+  // Named ground now LOOKS like what the HUD calls it.
+  _buildDetail() {
+    const N = this.size;
+    const g = new THREE.Group();
+    const rng = makeRNG(((this.seed | 0) * 31 + 7) >>> 0);
+    const nearSite = (x, z, r) => this.sites.some((s) => Math.hypot(x - s.x, z - s.z) < r);
+    const nearNest = (x, z, r) => (this.nestSpots || []).some(([nx, nz]) => Math.hypot(x - nx, z - nz) < r);
+    const stoneHex = this.theme?.palette?.mountain ?? 0xb8b4a6;
+
+    const tufts = [], pebbles = [], boulders = [], slabs = [], posts = [];
+    const col = new THREE.Color();
+
+    // --- broad scatter over open ground ---
+    // Density follows a noise field, not a uniform coin-flip: tufts gather in
+    // meadow patches, scree gathers where the meadow thins, and stretches of
+    // genuinely clean ground survive between them. Uniform scatter reads as
+    // static; patchy scatter reads as a place.
+    const meadow = makeNoise(makeRNG(((this.seed | 0) * 17 + 3) >>> 0));
+    for (let z = 2; z < N - 2; z++) {
+      for (let x = 2; x < N - 2; x++) {
+        const t = this.tiles[this.idx(x, z)];
+        if (t === TILE.GRASS) {
+          const m = meadow(x * 0.05, z * 0.05, 2);
+          const clump = Math.max(0, m - 0.42) * 2.0;
+          const bare = Math.max(0, 0.42 - m) * 1.6;
+          const r = rng();
+          if (r < 0.3 * clump * clump) {
+            tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.7 + rng() * 0.7, ry: rng() * Math.PI * 2 });
+          } else if (r < 0.3 * clump * clump + 0.06 * bare) {
+            pebbles.push({ x: x + rng(), z: z + rng(), s: 0.55 + rng() * 0.8, ry: rng() * Math.PI * 2 });
+          } else if (r > 0.9975 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
+            boulders.push({ x: x + 0.5, z: z + 0.5, s: 0.7 + rng() * 1.1, ry: rng() * Math.PI * 2 });
+          }
+        } else if (t === TILE.SAND && rng() < 0.04) {
+          pebbles.push({ x: x + rng(), z: z + rng(), s: 0.5 + rng() * 0.7, ry: rng() * Math.PI * 2 });
+        }
+      }
+    }
+
+    // --- ruin rings: a handful of old stone circles out on the frontier, so
+    // riding through empty country occasionally finds SOMETHING ---
+    const ruinCount = 4 + Math.floor(rng() * 3);
+    let guard = 0;
+    for (let placed = 0; placed < ruinCount && guard++ < 400; ) {
+      const x = 10 + rng() * (N - 20), z = 10 + rng() * (N - 20);
+      if (!this.isWalkable(x | 0, z | 0) || nearSite(x, z, 26) || nearNest(x, z, 12)) continue;
+      const stones = 4 + Math.floor(rng() * 3);
+      const radius = 1.4 + rng() * 0.9;
+      for (let i = 0; i < stones; i++) {
+        if (rng() < 0.18) continue; // a fallen gap — ruins, not new masonry
+        const a = (i / stones) * Math.PI * 2 + rng() * 0.3;
+        slabs.push({
+          x: x + Math.cos(a) * radius, z: z + Math.sin(a) * radius,
+          sx: 0.34, sy: 0.9 + rng() * 0.7, sz: 0.26,
+          ry: a + rng() * 0.4, tilt: (rng() - 0.5) * 0.22, weather: 0.75 + rng() * 0.2,
+        });
+      }
+      placed++;
+    }
+
+    // --- every named chokepoint gets its pair of monoliths, so "The Neck" is
+    // findable on the ground and not only on the HUD ---
+    for (const c of this.chokeSpots || []) {
+      const t0 = c.tiles[0], t1 = c.tiles[c.tiles.length - 1];
+      for (const [tx, tz] of [t0, t1]) {
+        slabs.push({
+          x: tx + 0.5, z: tz + 0.5,
+          sx: 0.5, sy: 1.6 + rng() * 0.5, sz: 0.4,
+          ry: c.axis === 'x' ? 0 : Math.PI / 2, tilt: (rng() - 0.5) * 0.14, weather: 0.9,
+        });
+      }
+    }
+
+    // --- node monuments: each kind of ground worth holding gets a silhouette ---
+    for (const n of this.nodeSpots || []) {
+      if (n.kind === 'ford') {
+        // Crossing markers: two pairs of leaning timber posts.
+        for (const [ox, oz] of [[-1.4, -0.8], [1.3, -0.6], [-1.2, 1.0], [1.5, 0.9]]) {
+          posts.push({ x: n.x + ox, z: n.z + oz, s: 0.8 + rng() * 0.35, tilt: (rng() - 0.5) * 0.3, ry: rng() * Math.PI });
+        }
+      } else if (n.kind === 'barrow') {
+        // A cairn: three stacked stones, biggest at the bottom.
+        for (let i = 0; i < 3; i++) {
+          slabs.push({
+            x: n.x + (rng() - 0.5) * 0.3, z: n.z + (rng() - 0.5) * 0.3, lift: i * 0.34,
+            sx: 0.9 - i * 0.24, sy: 0.4, sz: 0.8 - i * 0.22,
+            ry: rng() * Math.PI, tilt: 0, weather: 0.8,
+          });
+        }
+      } else if (n.kind === 'clearing') {
+        // The moot: a ring of low seat-stones.
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2 + 0.5;
+          slabs.push({
+            x: n.x + Math.cos(a) * 1.5, z: n.z + Math.sin(a) * 1.5,
+            sx: 0.5, sy: 0.34, sz: 0.42, ry: a, tilt: 0, weather: 0.85,
+          });
+        }
+      } else if (n.kind === 'quarry') {
+        // Cut blocks left mid-haul.
+        for (const [ox, oz, s] of [[-1.2, 0.4, 0.7], [0.9, -0.9, 0.55], [1.1, 1.0, 0.45]]) {
+          slabs.push({ x: n.x + ox, z: n.z + oz, sx: s, sy: s * 0.8, sz: s * 0.9, ry: rng() * Math.PI, tilt: 0, weather: 1.0 });
+        }
+      }
+      // ore: the glowing crystals are already the monument.
+    }
+
+    // --- bake the five instanced meshes ---
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    const eul = new THREE.Euler();
+    const bake = (spots, geo, mat, place) => {
+      if (!spots.length) return;
+      const mesh = new THREE.InstancedMesh(geo, mat, spots.length);
+      mesh.castShadow = true;
+      spots.forEach((s, i) => { place(s); m.compose(pos, q, sc); mesh.setMatrixAt(i, m); });
+      g.add(mesh);
+      return mesh;
+    };
+
+    // Tufts: a squat 4-sided cone reads as a grass clump in the cel style.
+    const tuftMesh = bake(tufts, new THREE.ConeGeometry(0.16, 0.34, 4),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }), (s) => {
+        eul.set(0, s.ry, 0); q.setFromEuler(eul);
+        sc.set(s.s, s.s, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.15 * s.s, s.z);
+      });
+    if (tuftMesh) {
+      const base = new THREE.Color(this.colorOf(TILE.GRASS));
+      tufts.forEach((s, i) => {
+        col.copy(base).offsetHSL(0, 0.06, 0.03 + (((i * 2654435761) >>> 16 & 255) / 255 - 0.5) * 0.07);
+        tuftMesh.setColorAt(i, col);
+      });
+      tuftMesh.castShadow = false; // thousands of blades: not worth the shadow pass
+    }
+
+    bake(pebbles, new THREE.DodecahedronGeometry(0.09, 0),
+      new THREE.MeshLambertMaterial({ color: stoneHex }), (s) => {
+        eul.set(0, s.ry, 0); q.setFromEuler(eul);
+        sc.set(s.s, s.s * 0.7, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.04, s.z);
+      });
+
+    bake(boulders, new THREE.DodecahedronGeometry(0.5, 0),
+      new THREE.MeshLambertMaterial({ color: stoneHex }), (s) => {
+        eul.set(0, s.ry, 0); q.setFromEuler(eul);
+        sc.set(s.s, s.s * 0.75, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.2 * s.s, s.z);
+      });
+
+    const slabMesh = bake(slabs, new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }), (s) => {
+        eul.set(s.tilt || 0, s.ry, 0); q.setFromEuler(eul);
+        sc.set(s.sx, s.sy, s.sz);
+        pos.set(s.x, this.groundY(s.x, s.z) + s.sy / 2 + (s.lift || 0), s.z);
+      });
+    if (slabMesh) {
+      const stone = new THREE.Color(stoneHex);
+      slabs.forEach((s, i) => { col.copy(stone).multiplyScalar(s.weather || 1); slabMesh.setColorAt(i, col); });
+    }
+
+    bake(posts, new THREE.CylinderGeometry(0.07, 0.1, 1.0, 5),
+      new THREE.MeshLambertMaterial({ color: 0x6b5a44 }), (s) => {
+        eul.set(s.tilt || 0, s.ry, (s.tilt || 0) * 0.6); q.setFromEuler(eul);
+        sc.set(s.s, s.s, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.45 * s.s, s.z);
+      });
+
     return g;
   }
 

@@ -149,7 +149,6 @@ export class TerrainField {
   tileAt(x, z) { return this.inBounds(x, z) ? this.tiles[this.idx(x, z)] : TILE.WATER; }
   isWalkable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].walk; }
   isBuildable(x, z) { return this.inBounds(x, z) && TILE_INFO[this.tiles[this.idx(x, z)]].build; }
-  heightOf(t) { return t === TILE.WATER ? -0.55 : t === TILE.MOUNTAIN ? 1.5 : 0; }
 
   // Name for impassable terrain, for the blocked-movement banner. Walkable
   // ground returns null: a block there came from a building, not the land.
@@ -163,6 +162,10 @@ export class TerrainField {
   generate() {
     const shape = this.shape;
     const elev = this._elevationField(shape);
+    // The elevation field survives generation: tiles decide walkability, but
+    // the field decides the SILHOUETTE — rolling ground, real peaks, deep
+    // basins. Rendering and unit placement read it through heightAt/groundY.
+    this.elev = elev;
     this.sites = this._pickSites(elev);
     this._flattenSites(elev);
     this._paintTiles(elev, shape);
@@ -208,19 +211,30 @@ export class TerrainField {
   }
 
   // Sites sit on ground the city can actually be raised on, so pull the
-  // elevation around each one toward mid-height before classifying tiles.
+  // elevation around each one toward the SITE'S OWN level before classifying
+  // tiles. Flattening to the site (not to global mid-height) keeps the site's
+  // identity: a Craghold really does stand on a shelf above the plain, a
+  // lakeshore city really is down by the water — the Thronefall rule that
+  // elevation is hierarchy, with the keep visibly above or below the war.
   _flattenSites(elev) {
     const N = this.size;
+    const targets = this.sites.map((s) => {
+      // The site's level, softened toward mid so no city ends up in a pit or
+      // painted onto a summit the tile classifier would turn to crag.
+      const e = elev[Math.round(s.z) * N + Math.round(s.x)];
+      return e * 0.6 + 0.5 * 0.4;
+    });
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        let near = 0;
-        for (const s of this.sites) {
-          near = Math.max(near, clamp(1 - Math.hypot(x - s.x, z - s.z) / 26, 0, 1));
-        }
+        let near = 0, target = 0.5;
+        this.sites.forEach((s, i) => {
+          const w = clamp(1 - Math.hypot(x - s.x, z - s.z) / 26, 0, 1);
+          if (w > near) { near = w; target = targets[i]; }
+        });
         if (!near) continue;
         const i = z * N + x;
         const w = near * 0.7;
-        elev[i] = elev[i] * (1 - w) + 0.5 * w;
+        elev[i] = elev[i] * (1 - w) + target * w;
       }
     }
   }
@@ -246,6 +260,8 @@ export class TerrainField {
     const waterT = this._quantile(elev, cover.water);
     const sandT = this._quantile(elev, Math.min(0.98, cover.water + 0.025));
     const mountT = this._quantile(elev, 1 - cover.mountain);
+    // heightAt() needs these to turn the raw field into world-space relief.
+    this._levels = { waterT, sandT, mountT };
     const moist = this._moistNoise;
 
     // Forest is moisture-led, but only on the land that is left over, so the
@@ -358,7 +374,16 @@ export class TerrainField {
         }
         if (wet > n * 0.25) continue;             // half-drowned: not a city
         const flat = 1 - clamp((hi - lo) * 2.5, 0, 1);
-        cands.push({ x, z, score: flat + this.rng() * 0.25 });
+        // Prominence: ground a little above its surroundings makes a keep that
+        // overlooks the approaches — height is hierarchy, so favor it.
+        let ring = 0, rn = 0;
+        for (let a = 0; a < 8; a++) {
+          const rx = x + Math.round(Math.cos(a * 0.785) * 14);
+          const rz = z + Math.round(Math.sin(a * 0.785) * 14);
+          if (rx >= 0 && rz >= 0 && rx < N && rz < N) { ring += elev[rz * N + rx]; rn++; }
+        }
+        const prom = rn ? clamp((e - ring / rn) * 3, -0.35, 0.45) : 0;
+        cands.push({ x, z, score: flat + prom + this.rng() * 0.25 });
       }
     }
     cands.sort((a, b) => b.score - a.score);
@@ -893,21 +918,66 @@ export class TerrainField {
     }
   }
 
+  // World-space height of a tile. Tiles stay the authority on walkability and
+  // the sim never reads height — this is the silhouette of the land, derived
+  // fresh from (elev, tile) every call so causeways, leveled city ground and
+  // war roads carved after generation are always up to date.
+  //
+  // Walkable ground rolls gently and never dips below the waterline; crag
+  // climbs with the field so ranges have real peaks instead of a uniform mesa;
+  // water deepens with the basin.
+  heightAt(x, z) {
+    if (!this.inBounds(x, z)) return -0.7;
+    const i = this.idx(x, z);
+    const t = this.tiles[i];
+    const L = this._levels || { waterT: 0.2, sandT: 0.23, mountT: 0.75 };
+    const e = this.elev ? this.elev[i] : (L.waterT + L.mountT) / 2;
+    const span = Math.max(0.001, L.mountT - L.waterT);
+    if (t === TILE.WATER) {
+      const depth = clamp((L.waterT - e) / span, 0, 1);
+      return -0.35 - depth * 0.45;
+    }
+    if (t === TILE.MOUNTAIN) {
+      // Tall and steep on purpose: over the single transition tile the ground
+      // jumps a full body height, so crag reads as a wall, not a hillock you
+      // could stroll up.
+      const up = clamp((e - L.mountT) / Math.max(0.001, 1 - L.mountT), 0, 1);
+      return 1.5 + up * 1.8;
+    }
+    // Everything walkable (and forest floor): a gentle roll. Ground that was
+    // reclaimed from water or crag (causeways, cut approaches) clamps into the
+    // same band, so it reads as built-up ground instead of a hole.
+    const g = clamp((e - L.waterT) / span, 0, 1);
+    return 0.05 + g * 0.85;
+  }
+
   // Corner height = average of the 4 adjacent tiles' heights, for smooth slopes.
+  // GameMap caches the grid at mesh-build time; the fallback path computes it
+  // fresh (map-check and other renderer-free consumers land here).
   cornerHeight(x, z) {
+    if (this._cornerH && x >= 0 && z >= 0 && x < this._cornerW && z < this._cornerW) {
+      return this._cornerH[z * this._cornerW + x];
+    }
     let sum = 0, n = 0;
     for (let dz = -1; dz <= 0; dz++) {
       for (let dx = -1; dx <= 0; dx++) {
         const tx = x + dx, tz = z + dz;
-        if (this.inBounds(tx, tz)) { sum += this.heightOf(this.tiles[this.idx(tx, tz)]); n++; }
+        if (this.inBounds(tx, tz)) { sum += this.heightAt(tx, tz); n++; }
       }
     }
     return n ? sum / n : 0;
   }
 
+  // Smooth ground height at a world position: bilinear over the tile's four
+  // corner heights, so a unit walking a slope glides instead of stair-stepping.
   groundY(x, z) {
-    // Approximate ground height at a world position (tile units).
-    return this.heightOf(this.tileAt(Math.floor(x), Math.floor(z)));
+    const tx = Math.floor(x), tz = Math.floor(z);
+    const fx = clamp(x - tx, 0, 1), fz = clamp(z - tz, 0, 1);
+    const h00 = this.cornerHeight(tx, tz);
+    const h10 = this.cornerHeight(tx + 1, tz);
+    const h01 = this.cornerHeight(tx, tz + 1);
+    const h11 = this.cornerHeight(tx + 1, tz + 1);
+    return (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
   }
 
   countNearby(x0, z0, radius, tile) {
