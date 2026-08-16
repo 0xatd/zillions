@@ -1487,9 +1487,11 @@ class App {
     try {
       await lobby.joinGame(row);
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
-      this._onRoomUpdate(lobby.game || row);
-      this.ui.onlineStatus('🔗 Host found. Establishing the game connection…');
-      this.ui.roomChatFill(await lobby.loadRoomChat((lobby.game || row).id, 'room'));
+      const joinedRoom = lobby.game || row;
+      this._onRoomUpdate(joinedRoom);
+      const mySeat = (joinedRoom._players || []).find((player) => player.user_id === lobby.me?.id)?.seat || 2;
+      this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Direct connection to host is establishing…`);
+      this.ui.roomChatFill(await lobby.loadRoomChat(joinedRoom.id, 'room'));
     } catch (e) {
       this.mpRole = null;
       this.onlineMode = false;

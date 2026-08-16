@@ -1138,6 +1138,7 @@ export class UI {
     const levelDef = levelById(level || 1);
     const difficultyDef = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     const host = players.find((p) => p.host);
+    const self = players.find((p) => p.you);
     const hostHero = HEROES[typeof host?.hero === 'object' ? host.hero.k : host?.hero];
     const safeCode = String(code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
     const slots = [];
@@ -1166,6 +1167,7 @@ export class UI {
       }
     }
     box.innerHTML = `
+      ${self ? '<div class="roomself"><span>✓ YOU ARE IN THIS ROOM</span><b></b><small>Your seat is locked in. The host starts the game.</small></div>' : ''}
       <div class="roomlaunch ${isHost ? 'host' : 'guest'}">
         <div>
           <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
@@ -1175,6 +1177,8 @@ export class UI {
         </div>
       </div>
       <div class="roomslots">${slots.join('')}</div>`;
+    const selfName = box.querySelector('.roomself b');
+    if (selfName) selfName.textContent = `PLAYER ${Math.max(1, Number(self.seat || 1))} · @${self.name || 'you'}`;
     const names = box.querySelectorAll('.roomslot:not(.open) b');
     let i = 0;
     for (let seat = 1; seat <= maxPlayers; seat++) {
