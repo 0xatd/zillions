@@ -330,3 +330,17 @@ In room. Turtle kit panel looks good (Bulwark / Reactive Plating / Iron Will / L
 
 **Root cause guess:** the room screen reuses the campaign-select component for both roles. Split it: `RoomSetupHost` vs `RoomSummaryGuest` sharing one summary card. That one refactor removes bugs NOTE-2/3/4 *and* most of this note.
 
+### NOTE-6 — Back abandons the room without closing it
+
+**Player observation (Alex):** after leaving the room with Back, the lobby still showed `atd's war` as an open 1/3 game. The online list also still showed `@ted` after Ted's browser had been fully stopped.
+
+This is real backend state, not just stale lobby rendering:
+
+- `#s-back` only changes the visible screen. It does not leave the current room.
+- The host room remains `open`, and the host seat remains in `room_players`.
+- `beforeunload` calls async `endGame()`, but browsers do not guarantee that the Supabase update completes while the page is closing.
+- Lobby presence is freshness-based, so a browser that disappears without an explicit disconnect remains online until `last_seen_at` ages out.
+
+**Expected:** Back from an online room must explicitly leave it. A host should close/cancel an unstarted room; a guest should remove or mark its seat offline. The client must clear room channels, heartbeat timers, local room state, pending peers, and refresh the lobby immediately. Page close should be a fallback, not the primary cleanup path. Stale presence and abandoned rooms also need a bounded server-side expiry so crashes cannot leave ghosts indefinitely.
+
+**Severity:** P1. The lobby advertises games nobody is hosting and people who are no longer online, so players cannot trust either list.
