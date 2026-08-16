@@ -306,3 +306,27 @@ Host is on The Black Vale. Guest profile is 0/5 fronts. Guest UI still greys Rot
 ### Ready
 In room. Turtle kit panel looks good (Bulwark / Reactive Plating / Iron Will / Last Stand 12s). Waiting for start. Pathing + replication + spawn are the watch items once we're in.
 
+
+### NOTE-5 — The room screen is a solo menu cosplaying as a lobby (host + guest UX)
+
+**Player quote (Alex, waiting in 2C7EC1):** *"what do you think of this screen we are on now... the game lobby... i really dont like it"*
+
+**Agreed. It's the weakest screen in the game.** Guest view, itemized:
+
+1. **80% of the guest's screen is controls the guest cannot use.** Full map grid (locked to *guest's* campaign), difficulty selector (host-only), 8 hero cards. The things a guest needs — seats, host setup, start status, chat — are below two screens of readonly scroll. Priority is inverted: the most important info is the smallest.
+2. **The screen contradicts itself three ways.** Host-setup strip: The Black Vale. Guest map grid: Greenfall highlighted, 2–5 locked. Selected hero: Turtle Voss with a 🔒 "unlocked through Level 1" badge *after* picking him successfully. Locks on things you just used destroy trust.
+3. **Whose meta is it?** "The war for Earth: 0/5 fronts won" in a host-owned room. Does playing the host's Black Vale progress MY campaign? The screen never says. Guest can't even confirm which map launches from their own picker.
+4. **No ready check.** Guests have no "ready" signal; host launches on faith. This is the root of the "wait for every guest before lockstep" class of bug — a ready toggle is the communication fix, not just a netcode fix.
+5. **Chat buried** at the very bottom of the scroll. In a waiting room, chat *is* the room.
+6. **Emoji density.** 🗺️🏰🔪🪖🐢🐼🐯🔮⏳🔗🔗 — reads prototype. Fine for now, but it's carrying semantics (lock, status, connection) that real UI states should carry.
+
+**Redesign sketch (do this when net bugs are fixed):**
+- Guest room = **match card**: big host-map banner (name, boss, terrain), host setup summary line, seat list with heroes, READY button, chat docked and always visible. No map grid, no difficulty control, no fake campaign select.
+- Host keeps the full setup screen; publish a compact read-only card to guests.
+- Kill lock badges on anything selectable/selected. Hide locked maps entirely in guest room context — show only the host's pick.
+- Add guest ready checks; host LAUNCH shows `n/n ready`.
+- Pin "WAITING FOR HOST TO START" / "LAUNCH" — never below the fold.
+- Hero picker → compact carousel with the kit panel (the kit panel content itself is good — keep it).
+
+**Root cause guess:** the room screen reuses the campaign-select component for both roles. Split it: `RoomSetupHost` vs `RoomSummaryGuest` sharing one summary card. That one refactor removes bugs NOTE-2/3/4 *and* most of this note.
+
