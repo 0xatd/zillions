@@ -2144,21 +2144,55 @@ export class Game {
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
       route: null, routeI: 0, targetNodeId: null, targetGi: -1,
     };
+    // Born during a DEFEND order: take a slot on the Keep ring, not a freeze
+    // at the barracks door.
+    if (this.stance === 'defend') {
+      let n = 0;
+      for (const o of this.units) if (!o.hero && !o.dead) n++;
+      [u.holdX, u.holdZ] = this._defendSlot(u, n + 1, n);
+    }
     this.units.push(u);
     return u;
   }
 
   // Army stance — one order for the whole army, no unit micro. DEFEND holds
-  // the line, GUARD escorts the heroes, ATTACK walks the lanes and takes ground.
+  // the line AT THE KEEP (a deterministic ring — the toast has meant this
+  // since the beginning), GUARD escorts the heroes, ATTACK walks the lanes.
+  // Re-pressing DEFEND re-anchors the ring (guests spawn, walls go up, the
+  // line should move) — the other stances stay no-ops on repeat presses.
+  _defendSlot(u, n, i) {
+    if (!this.hq || !this.hq.alive) return [u.x, u.z];
+    const base = n ? (i / n) * Math.PI * 2 : 0;
+    for (let k = 0; k < 12; k++) {
+      const a = base + (k / 12) * Math.PI * 2;
+      const x = this.hq.cx + Math.cos(a) * 5.5, z = this.hq.cz + Math.sin(a) * 5.5;
+      const id = this.occ[(z | 0) * this.map.size + (x | 0)];
+      if (this.map.isWalkable(x | 0, z | 0) && (id === 0 || id === undefined || this.gateIds.has(id))) return [x, z];
+    }
+    return [this.hq.cx, this.hq.cz];
+  }
+
   setStance(st, p = 0) {
-    if (!['defend', 'guard', 'attack'].includes(st) || st === this.stance) return;
-    this.stance = st;
-    if (st === 'defend') for (const u of this.units) if (!u.hero && !u.dead) { u.holdX = u.x; u.holdZ = u.z; }
-    if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; }
+    if (!['defend', 'guard', 'attack'].includes(st)) return;
     const h = this.heroes[p];
-    this.msg(st === 'defend' ? '🛡️ The army falls back to hold the line.'
-      : st === 'guard' ? `🚩 The army forms up around ${h ? h.def.name : 'the heroes'}.`
-      : '⚔️ The army pushes the lanes — take the nodes, then the hives!', 'info');
+    if (st === this.stance && st !== 'defend') return;
+    this.stance = st;
+    if (st === 'defend') {
+      let n = 0;
+      for (const u of this.units) if (!u.hero && !u.dead) n++;
+      let i = 0;
+      for (const u of this.units) {
+        if (u.hero || u.dead) continue;
+        [u.holdX, u.holdZ] = this._defendSlot(u, n, i++);
+      }
+    }
+    if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; }
+    const who = h && h.def ? h.def.name.split(' ')[0] : null;
+    this.msg(st === 'defend'
+      ? `🛡️ ${who ? who + ' anchors the defense' : 'The army falls back'} — hold the line at the Keep.`
+      : st === 'guard'
+      ? `🚩 ${who ? who + ' forms the army around ' + h.def.name : 'The army forms up around the heroes'}.`
+      : `⚔️ ${who ? who + ' pushes' : 'The army pushes'} the lanes — take the nodes, then the hives!`, 'info');
     this.emit({ type: st === 'defend' ? 'hold' : 'rally', x: h ? h.x : 0, z: h ? h.z : 0 });
   }
 
