@@ -3,7 +3,7 @@ import { Game } from '../src/game.js';
 import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
-  LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE,
+  LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, UPGRADE_PAY_RATE,
   START_GOLD, SUPPLY, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
 } from '../src/config.js';
 
@@ -62,6 +62,7 @@ const openingCost =
 // siege rather than in dawns. A level runs many minutes; anything that takes
 // longer than three minutes to pay for itself is a trap.
 const MAX_PAYBACK_SECONDS = 180;
+assert.ok(UPGRADE_PAY_RATE >= 50, 'building upgrades must not require long stationary holds');
 const paybacks = [
   ['farm t2', tierCost('farm', 1), PLOT_KINDS.farm.tiers[1].income - PLOT_KINDS.farm.tiers[0].income],
   ['house t2', tierCost('house', 1), PLOT_KINDS.house.tiers[1].income - PLOT_KINDS.house.tiers[0].income],

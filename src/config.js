@@ -28,6 +28,7 @@ export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
+export const UPGRADE_PAY_RATE = 50;    // upgrades finish quickly; the cost, not a long hold, is the commitment
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
 
 // ---------- Siege: the constants that replaced day and night ----------

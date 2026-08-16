@@ -11,7 +11,7 @@
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
-  START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE,
+  START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
   ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
@@ -827,7 +827,8 @@ export class Game {
         plot.refundHero = this.heroes.indexOf(h);
       }
       const need = act.cost - (act.mode === 'build' || act.mode === 'rebuild' ? plot.paid : 0);
-      const pay = Math.min(PAY_RATE * dt, this.gold, need);
+      const rate = act.mode === 'build' && plot.tier > 0 ? UPGRADE_PAY_RATE : PAY_RATE;
+      const pay = Math.min(rate * dt, this.gold, need);
       if (pay <= 0) continue;
       this.gold -= pay;
       const [px, pz] = target.payPoint || this.payPoint(plot, h);
