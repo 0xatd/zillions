@@ -306,6 +306,7 @@ export class UI {
       b.onclick = () => {
         this.selectedDiff = key;
         for (const c of seg.children) c.classList.toggle('sel', c === b);
+        if (this.cb.onDifficultyPick) this.cb.onDifficultyPick(key);
       };
       seg.appendChild(b);
     }
@@ -369,6 +370,23 @@ export class UI {
     btn.disabled = !!disabled;
     btn.classList.toggle('disabled', !!disabled);
     btn.title = title || '';
+  }
+
+  setRoomSettings({ level = 1, difficulty = 'normal', isHost = false } = {}) {
+    this.selectedLevel = Number(level) || 1;
+    this.selectedDiff = difficulty;
+    for (const card of this.root.querySelectorAll('#levelrow .levelcard')) {
+      card.classList.toggle('sel', Number(card.dataset.level) === this.selectedLevel);
+      card.disabled = isHost ? card.classList.contains('locked') : true;
+      if (!isHost) card.title = 'The host controls the battlefield.';
+    }
+    for (const button of this.root.querySelectorAll('#diffseg .diffbtn')) {
+      const key = [...this.root.querySelectorAll('#diffseg .diffbtn')].indexOf(button);
+      const diffKey = Object.keys(DIFFICULTY)[key];
+      button.classList.toggle('sel', diffKey === difficulty);
+      button.disabled = !isHost;
+      if (!isHost) button.title = 'The host controls difficulty.';
+    }
   }
 
   _showScreen(name) {
@@ -1100,6 +1118,8 @@ export class UI {
     isHost = false,
     code = '',
     mode = 'campaign',
+    level = 1,
+    difficulty = 'normal',
     launchText = '',
   } = {}) {
     const box = this.root.querySelector('#room-roster');
@@ -1115,6 +1135,10 @@ export class UI {
       ? 'Use the gold START button below to launch this room for everyone.'
       : 'Pick your hero here. The host starts the match when the room is ready.');
     const modeCopy = mode === 'survival' ? 'Survival' : 'Campaign';
+    const levelDef = levelById(level || 1);
+    const difficultyDef = DIFFICULTY[difficulty] || DIFFICULTY.normal;
+    const host = players.find((p) => p.host);
+    const hostHero = HEROES[typeof host?.hero === 'object' ? host.hero.k : host?.hero];
     const safeCode = String(code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
     const slots = [];
     for (let seat = 1; seat <= maxPlayers; seat++) {
@@ -1144,8 +1168,9 @@ export class UI {
     box.innerHTML = `
       <div class="roomlaunch ${isHost ? 'host' : 'guest'}">
         <div>
-          <span class="roomeyebrow">${modeCopy} room${safeCode ? ` · ${safeCode}` : ''}</span>
-          <b>${filled}/${maxPlayers} players in lobby</b>
+          <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
+          <b>${modeCopy} · ${levelDef.name}</b>
+          <span class="roomsettings">${difficultyDef.label} · ${hostHero ? hostHero.name : 'Hero pending'} · ${filled}/${maxPlayers} players</span>
           <small>${launchCopy}</small>
         </div>
       </div>

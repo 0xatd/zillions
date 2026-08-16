@@ -650,6 +650,7 @@ body::after {
   letter-spacing: 1.3px; text-transform: uppercase;
 }
 .roomlaunch b { font-size: 16px; color: #fff2bd; line-height: 1.15; }
+.roomsettings { color: #9fd6ff; font-size: 12px; font-weight: 800; line-height: 1.25; }
 .roomlaunch small { font-size: 11px; line-height: 1.35; color: #d8ecff; opacity: 0.76; }
 .roomslots {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px;
