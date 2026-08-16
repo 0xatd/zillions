@@ -412,3 +412,44 @@ now selects the nearest connected walkable patch deterministically and places
 the full party on distinct tiles with exits. The map suite constructs a
 three-hero party on every campaign map and rejects impassable, overlapping, or
 sealed spawns.
+
+---
+
+## Solo playthrough addendum — Tiger Reyes, Greenfall (`38059c4` build)
+
+Full run was interrupted when the host launched room B86244; logging what the
+interrupted run still proved before it died:
+
+- **BUG-SOLO-5 re-confirmed on the new build (START click-eating):** a11y click
+  on `▶ START — TAKE THE PLANET` reported success and did nothing, twice. Raw
+  DOM `.click()` launched instantly. Still present after the four-heroes +
+  multiplayer-first-menu merges.
+- **Easy-win #9 is already fixed — confirmed live:** threat stayed pinned at
+  0.00 through ~20 minutes of pre-founding sim time (simT 0→1200+). Code
+  agrees: `_updateSiege` gates on `phase !== 'live'`. Threat no longer punishes
+  the tutorial reading phase. Good.
+- **AFK leveling observed:** hero hit Lv 2 off auto-attacks near spawn with
+  zero player input. Minor balance note — border-kill XP with no founding means
+  you can level while stuck.
+- Still untested solo: mid/late-game combat pacing, node pushes, victory.
+  Tonight's data cut short by the B86244 spawn bug (above).
+
+## Audit notes on the lobby fix pass (pre-merge review)
+
+Verified before merge:
+
+- `roomLaunchReadiness`: host implicitly ready, every connected guest must mark
+  Ready, hero change clears guest Ready — matches the documented contract.
+- `leaveRoom()`: host deletes room → FK `on delete cascade` removes
+  `room_players` + `room_chat`; `rooms_delete_host` policy exists in
+  `supabase/schema.sql`. Guest deletes only own seat. `_clearRoomState` removes
+  channels, heartbeat, and the pagehide listener.
+- Shared Supabase client: `connect(name, this.auth?.client)` reuses the auth
+  client → kills the double-GoTrue warning at the source.
+- `npm run check` fully green (12 checks) on the PR head.
+- Docs updated (`agent-brief.md`) to match the new room contract.
+
+Edge for a follow-up (not a merge blocker): a guest whose browser dies keeps
+their seat row with `ready=true`; connection readiness still counts that seat,
+so START stays locked until the stale seat is cleared. Seat-offline marking on
+pagehide narrows the window; a bounded server-side seat expiry would close it.
