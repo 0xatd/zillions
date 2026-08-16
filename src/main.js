@@ -276,7 +276,7 @@ class App {
       this._netPumpStart();
       if (this.onlineMode && this.lobby) this.lobby.setMatchActive(true);
     }
-    for (const f of this.blockFx) this.scene.remove(f.mesh);
+    for (const f of this.blockFx) { this.scene.remove(f.mesh); this._disposeObject3D(f.mesh); }
     this.blockFx = [];
     this._blockT = 0;
     this._blockWarned = {};
@@ -446,6 +446,7 @@ class App {
         this.nestMeshes.set(n.id, mesh);
       } else if (!n.alive && mesh) {
         this.scene.remove(mesh);
+        this._disposeObject3D(mesh);
         this.nestMeshes.delete(n.id);
       }
       if (mesh) {
@@ -489,17 +490,18 @@ class App {
     for (const [id, mesh] of this.lootMeshes) {
       if (live.has(id)) continue;
       this.scene.remove(mesh);
+      this._disposeObject3D(mesh);
       this.lootMeshes.delete(id);
     }
   }
 
   _clearLootMeshes() {
-    for (const m of (this.lootMeshes || new Map()).values()) this.scene.remove(m);
+    for (const m of (this.lootMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
     this.lootMeshes = new Map();
   }
 
   _clearNestMeshes() {
-    for (const m of (this.nestMeshes || new Map()).values()) this.scene.remove(m);
+    for (const m of (this.nestMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
     this.nestMeshes = new Map();
   }
 
@@ -2860,6 +2862,23 @@ class App {
 
   // ---------------- units ----------------
 
+  // scene.remove() only detaches an object from the render graph — it does
+  // NOT free the GPU geometry/material/texture buffers three.js allocated
+  // for it. Every despawn path that drops a dynamically-built mesh (unit,
+  // loot, nest) must dispose it explicitly or those buffers leak for the
+  // rest of the session.
+  _disposeObject3D(obj) {
+    if (!obj) return;
+    obj.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+      for (const mat of mats) {
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      }
+    });
+  }
+
   _makeUnitMesh(u) {
     const g = new THREE.Group();
     const M = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
@@ -3101,7 +3120,11 @@ class App {
       }
     }
     for (const [id, rec] of this.unitMeshes) {
-      if (!seen.has(id)) { this.scene.remove(rec.mesh); this.unitMeshes.delete(id); }
+      if (!seen.has(id)) {
+        this.scene.remove(rec.mesh);
+        this._disposeObject3D(rec.mesh);
+        this.unitMeshes.delete(id);
+      }
     }
   }
 
