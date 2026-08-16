@@ -462,7 +462,7 @@ class OutlinePass extends Pass {
 						worldPosition = instanceMatrix * worldPosition;
 
 					#endif
-					
+
 					worldPosition = modelMatrix * worldPosition;
 
 					projTexCoord = textureMatrix * worldPosition;

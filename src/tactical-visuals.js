@@ -50,7 +50,9 @@ export class TacticalVisuals {
   applyQuality(quality, persist = true) {
     this.quality = quality === 'low' ? 'low' : 'high';
     const high = this.quality === 'high';
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, high ? 1.5 : 1));
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, high ? 1.5 : 1);
+    this.renderer.setPixelRatio(pixelRatio);
+    this.composer.setPixelRatio(pixelRatio);
     this.renderer.shadowMap.enabled = high;
     if (persist) {
       try { localStorage.setItem(QUALITY_KEY, this.quality); } catch { /* storage can be blocked */ }
@@ -98,9 +100,7 @@ export class TacticalVisuals {
   }
 
   resize(width, height) {
-    const ratio = this.renderer.getPixelRatio();
     this.composer.setSize(width, height);
-    this.smaa.setSize(width * ratio, height * ratio);
   }
 
   render() {
