@@ -172,3 +172,12 @@ assert.match(mainSource, /setAnimationLoop\(\(\) => this\.frameGuard\.run/, 'Thr
 assert.match(mainSource, /await recoverableRestore\(/, 'Continue must await recoverable save restoration');
 assert.match(mainSource, /localStorage\.removeItem\('zillions_save'\)/, 'corrupt local saves must be removed');
 assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be removed from the menu');
+
+const uiSource = read('src/ui.js');
+assert.match(uiSource, /id="m-online"[\s\S]*PLAY ONLINE/, 'the home screen must lead with online play');
+assert.match(uiSource, /id="m-solo"[\s\S]*PLAY SOLO/, 'the home screen must group solo modes');
+assert.match(uiSource, /id="screen-solo"/, 'solo play must have its own mode screen');
+assert.match(uiSource, /id="solo-campaign-resume"/, 'campaign resumes must stay inside Story Campaign');
+assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
+assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
+assert.doesNotMatch(uiSource, /id="m-play"/, 'Campaign must not return as the primary home-screen action');

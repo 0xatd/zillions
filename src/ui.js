@@ -110,17 +110,47 @@ export class UI {
 
         <div id="screen-main" class="mainmenu">
           <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Raise a city. Push the lanes. Take the planet.</p>
-          <div class="menustack">
-            <button class="menubtn primary" id="m-play">⚔️ &nbsp;Campaign</button>
-            <div id="m-continuerow"></div>
-            <button class="menubtn" id="m-survival">💀 &nbsp;Survival <small>endless siege</small></button>
-            <button class="menubtn" id="m-online">🌐 &nbsp;Online Lobby <small>games · chat · friends</small></button>
-            <button class="menubtn" id="m-help">📜 &nbsp;How to play</button>
+          <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
+          <div class="menustack homeactions">
+            <button class="menubtn primary playonline" id="m-online">
+              <span class="menuicon">🌐</span>
+              <span><b>PLAY ONLINE</b><small>create · join · browse · watch</small></span>
+              <span class="menuarrow">›</span>
+            </button>
+            <button class="menubtn" id="m-solo">
+              <span class="menuicon">⚔️</span>
+              <span><b>PLAY SOLO</b><small>story campaign · endless survival</small></span>
+              <span class="menuarrow">›</span>
+            </button>
+            <div class="menuutilities">
+              <button class="utilitybtn" id="m-help">📜 How to play</button>
+            </div>
           </div>
           <div class="profilerow">
             <span id="prof-name-display">Signed in</span>
             <span id="prof-stats"></span>
+          </div>
+        </div>
+
+        <div id="screen-solo" class="mainmenu solomenu hidden">
+          <button class="tbtn menuback" id="solo-back">← Main menu</button>
+          <h1 class="gametitle small">PLAY SOLO</h1>
+          <p class="gamesub">Choose a war. Saved runs stay with their mode.</p>
+          <div class="solomodes">
+            <section class="modecard">
+              <div class="modeeyebrow">STORY</div>
+              <h2>⚔️ Story Campaign</h2>
+              <p>Retake Earth across five authored fronts, then push into the procedural galaxy.</p>
+              <div id="solo-campaign-resume" class="moderesume"></div>
+              <button class="menubtn modeprimary" id="solo-campaign">Choose mission <span class="menuarrow">›</span></button>
+            </section>
+            <section class="modecard">
+              <div class="modeeyebrow">REPLAYABLE</div>
+              <h2>💀 Survival</h2>
+              <p>Build one city against an endless siege. Your highest Threat is the score.</p>
+              <div id="solo-survival-resume" class="moderesume"></div>
+              <button class="menubtn modeprimary" id="solo-survival">Start a run <span class="menuarrow">›</span></button>
+            </section>
           </div>
         </div>
 
@@ -226,10 +256,12 @@ export class UI {
       const input = q('#a-username');
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
-    q('#m-play').onclick = () => this.showSetup({ mode: 'campaign' });
-    q('#m-survival').onclick = () => this.showSetup({ mode: 'survival' });
+    q('#m-solo').onclick = () => this._showScreen('solo');
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
+    q('#solo-back').onclick = () => this._showScreen('main');
+    q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
+    q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#s-back').onclick = () => this._showScreen(this._fromLobby ? 'lobby' : 'main');
     q('#l-back').onclick = () => this._showScreen('main');
 
@@ -393,7 +425,7 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['account', 'main', 'setup', 'help', 'pause', 'lobby']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -996,11 +1028,15 @@ export class UI {
   }
 
   setContinue(snap) {
-    const row = this.root.querySelector('#m-continuerow');
+    for (const row of this.root.querySelectorAll('.moderesume')) row.innerHTML = '';
+    if (!snap) return;
+    const mode = snap.mode === 'survival' ? 'survival' : 'campaign';
+    const row = this.root.querySelector(`#solo-${mode}-resume`);
     if (!row) return;
-    if (!snap) { row.innerHTML = ''; return; }
-    const players = snap.heroKeys.length;
-    row.innerHTML = `<button class="menubtn" id="b-continue">📂 &nbsp;Continue <small>Threat ${snap.threatLevel || 1}, ${snap.diff}${players > 1 ? `, ${players} players` : ''}</small></button>`;
+    const players = Array.isArray(snap.heroKeys) ? snap.heroKeys.length : 1;
+    const label = mode === 'survival' ? 'Resume survival run' : `Resume Level ${snap.levelId || 1}`;
+    const detail = `Threat ${snap.threatLevel || 1} · ${snap.diff || 'normal'}${players > 1 ? ` · ${players} players` : ''}`;
+    row.innerHTML = `<button class="resumebtn" id="b-continue"><span>▶</span><span><b>${label}</b><small>${detail}</small></span></button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 

@@ -282,7 +282,7 @@ public username before the game shell opens. Other players see that username,
 not the email address or Google account name. Stats, cloud save, match history,
 and rooms are owned by the Zillions Supabase project (`skqggyvkblqtyggtcxbc`).
 
-**Online lobby** (main menu → Online Lobby): players can see signed-in usernames,
+**Online lobby** (main menu → Play Online): players can see signed-in usernames,
 global lobby chat, and real public rooms. Each room shows its players and the
 host's mode, map, difficulty, hero, and player limit. The browser separates open
 rooms from games in progress. A player can join an open room, rejoin a previous
