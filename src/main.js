@@ -46,6 +46,7 @@ class App {
     this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
     this.projectiles = [];      // visible bullets/bolts/globs, slower than damage
+    this.abilityFx = [];        // presentation-only hero ability telegraphs/shockwaves
     this.zombieAttacks = new Map();
     this.payTickT = 0;
 
@@ -1260,6 +1261,37 @@ class App {
     }
   }
 
+  _spawnAbilityRing(x, z, { color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0 } = {}) {
+    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0, depthWrite: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.11, z);
+    this.scene.add(mesh);
+    this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
+  }
+
+  _updateAbilityFx(dt) {
+    for (let i = this.abilityFx.length - 1; i >= 0; i--) {
+      const fx = this.abilityFx[i];
+      fx.t += dt;
+      if (fx.t < 0) continue;
+      const p = Math.min(1, fx.t / fx.life);
+      const scale = (fx.from + (fx.to - fx.from) * p) / fx.from;
+      fx.mesh.scale.setScalar(scale);
+      fx.mesh.material.opacity = fx.opacity * Math.sin(p * Math.PI);
+      if (p >= 1) {
+        this.scene.remove(fx.mesh);
+        fx.mesh.geometry.dispose();
+        fx.mesh.material.dispose();
+        this.abilityFx.splice(i, 1);
+      }
+    }
+  }
+
   _updateParticles(dt) {
     let n = this.pcount;
     for (let i = 0; i < n; i++) {
@@ -2222,6 +2254,25 @@ class App {
         g.userData.auraFill = auraFill;
         g.userData.auraPulse = pulse;
       }
+      if (u.key === 'danny') {
+        // The Weave must remain readable for its full duration. Three broken,
+        // counter-rotating rings make a moving tear in the world instead of
+        // relying on Daniel becoming faint and easy to lose in the horde.
+        const weave = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+          const geo = new THREE.RingGeometry(0.72 + i * 0.18, 0.82 + i * 0.18, 32, 1, i * 0.7, Math.PI * 1.35);
+          geo.rotateX(-Math.PI / 2);
+          const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+            color: i === 1 ? 0x72cfff : 0x7dffb2, transparent: true,
+            opacity: 0.82 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
+          }));
+          ring.position.y = 0.12 + i * 0.05;
+          weave.add(ring);
+        }
+        weave.visible = false;
+        g.add(weave);
+        g.userData.weave = weave;
+      }
       g.scale.setScalar(1.18);
     } else {
       // Guardsman-style trooper.
@@ -2337,6 +2388,26 @@ class App {
             pulse.rotation.z = t * (0.28 + rank * 0.04);
             pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
           }
+        }
+        const weave = rec.mesh.userData.weave;
+        if (weave) {
+          weave.visible = u.weaveT > 0 && !u.dead;
+          if (weave.visible) {
+            weave.children.forEach((ring, i) => {
+              ring.rotation.z = t * (i % 2 ? -4.8 : 4.2) + i * 1.7;
+              ring.material.opacity = 0.58 + Math.sin(t * 8 + i) * 0.22;
+            });
+            const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
+            last.t -= dt;
+            if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
+              this.stream(last.x, 0.35, last.z, u.x, 0.35, u.z,
+                { count: 7, color: 0x72cfff, size: 0.55, life: 0.42 });
+              this.burst(u.x, 0.35, u.z,
+                { count: 5, color: 0x7dffb2, speed: 0.35, life: 0.48, size: 0.58, up: 0.35, spread: 0.55 });
+              last.x = u.x; last.z = u.z; last.t = 0.055;
+            }
+            rec.weaveTrail = last;
+          } else rec.weaveTrail = null;
         }
       }
       const affected = rec.mesh.userData.affected;
@@ -2919,6 +2990,12 @@ class App {
               { count: 1, color: col, speed: 0.5, life: 0.45, size: 0.55, spread: 0.15, up: 1.4 });
           }
           this.burst(e.x, 0.4, e.z, { count: 14, color: col, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
+          if (e.key === 'hammer') {
+            this._spawnAbilityRing(e.x, e.z, { color: 0xeaf2ff, radius: 0.45, to: R, life: 0.34, opacity: 0.95, width: 0.2 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x7a9cf0, radius: 0.7, to: R * 1.18, life: 0.48, opacity: 0.72, width: 0.28, delay: 0.06 });
+          } else if (e.key === 'weave') {
+            this._spawnAbilityRing(e.x, e.z, { color: 0x72cfff, radius: 0.5, to: 2.3, life: 0.38, opacity: 0.85, width: 0.16 });
+          }
           this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : 0.18);
           break;
         }
@@ -2931,10 +3008,10 @@ class App {
           break;
         case 'grenade': {
           // Lobbed concussion grenade: arc trail, then a dirty knockback blast.
-          this._spawnProjectile(e, { kind: 'grenade', fy: 1.0, ty: 0.45, dur: 0.52 });
+          this._spawnAbilityRing(e.tx, e.tz, { color: 0xffc45e, radius: e.r || 4, to: 0.35, life: 0.52, opacity: 0.68, width: 0.18 });
+          this._spawnProjectile(e, { kind: 'grenade', fy: 1.0, ty: 0.45, dur: 0.52,
+            impact: { kind: 'grenade', color: 0xffc45e, radius: e.r || 4, count: 30, burst: 22, speed: 3.0, life: 0.42, size: 0.54, up: 2.0, spread: 0.9 } });
           this.stream(e.fx, 1.0, e.fz, e.tx, 0.3, e.tz, { count: 8, color: 0xd8b45e, size: 0.4, life: 0.3 });
-          this.burst(e.tx, 0.4, e.tz, { count: 26, color: 0xffb84d, speed: 3.2, life: 0.5, size: 0.65, up: 2.2, spread: 0.8 });
-          this.burst(e.tx, 0.4, e.tz, { count: 16, color: 0x6a6153, speed: 2.4, life: 0.7, size: 0.7, up: 2.6, spread: 1.2 });
           this.shake = Math.max(this.shake, 0.3);
           break;
         }
@@ -3226,6 +3303,7 @@ class App {
     this._updateCorpses(dt);
     this._updatePayCoins(dt);
     this._updateProjectiles(dt);
+    this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
     this.tacticalVisuals.render();
   }
