@@ -357,6 +357,15 @@ export class UI {
     if (el) el.innerHTML = text;
   }
 
+  setStartButton({ text, disabled = false, title = '' } = {}) {
+    const btn = this.root.querySelector('#s-start');
+    if (!btn) return;
+    if (text) btn.textContent = text;
+    btn.disabled = !!disabled;
+    btn.classList.toggle('disabled', !!disabled);
+    btn.title = title || '';
+  }
+
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -384,15 +393,20 @@ export class UI {
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
     this._buildLevelRow(this._campaignCleared || 0, mode === 'survival');
-    this.root.querySelector('#s-start').textContent = mode === 'survival'
-      ? '▶  START — SURVIVE AS LONG AS YOU CAN'
-      : '▶  START — TAKE THE PLANET';
+    this.setStartButton({
+      text: mode === 'survival'
+        ? '▶  START — SURVIVE AS LONG AS YOU CAN'
+        : '▶  START — TAKE THE PLANET',
+      disabled: false,
+      title: '',
+    });
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
       mp.dataset.init = '1';
       mp.innerHTML = `
         <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
+        <div id="room-roster" class="roomroster"></div>
         <div id="mp-sub"></div>
         <div class="roomchat">
           <div class="roomchatlog" id="roomchat-log"></div>
@@ -401,12 +415,19 @@ export class UI {
             <button class="tbtn" id="roomchat-send">Send</button>
           </div>
         </div>`;
+      this.roomRoster(this._playersFromOnlineGame(online), {
+        maxPlayers: online.max_players || 3,
+        isHost: false,
+        code: online.join_code,
+        mode: online.mode || mode,
+      });
       this._wireRoomChat();
       return;
     }
     if (coop && !mp.dataset.init) {
       mp.dataset.init = '1';
       mp.innerHTML = `
+        <div id="room-roster" class="roomroster hidden"></div>
         <div class="mprow">
           <button class="diffbtn" id="mp-host">🌐 Host — create invite</button>
           <button class="diffbtn" id="mp-join">🔗 Join — paste invite</button>
@@ -890,11 +911,20 @@ export class UI {
     p.querySelector('#mp-accept').onclick = () => this.cb.onHostAccept(p.querySelector('#mp-reply').value);
   }
 
-  mpLobby(peerCount, canAddMore) {
+  mpLobby(peerCount, canAddMore, players = null, options = {}) {
     const p = this._mpPanel();
     p.innerHTML = `
       <div class="mpstatus ok">🟢 ${peerCount + 1} players connected. Pick hero & level, then press START to launch for everyone.</div>
       ${canAddMore ? '<button class="diffbtn" id="mp-add">➕ Invite a third player</button>' : ''}`;
+    this.roomRoster(players || [
+      { seat: 1, name: 'Host', host: true, hero: this.selectedHero, state: 'connected' },
+      ...Array.from({ length: peerCount }, (_, i) => ({ seat: i + 2, name: `Player ${i + 2}`, hero: null, state: 'connected' })),
+    ], { isHost: true, ...options });
+    this.setStartButton({
+      text: `▶  START ROOM — LAUNCH ${peerCount + 1} PLAYER${peerCount ? 'S' : ''}`,
+      disabled: false,
+      title: 'The host launches the match for everyone in the room.',
+    });
     const add = p.querySelector('#mp-add');
     if (add) add.onclick = () => this.cb.onAddPeer();
   }
@@ -921,10 +951,103 @@ export class UI {
     };
   }
 
-  mpConnected(isHost, playerNum = 2) {
+  mpConnected(isHost, playerNum = 2, players = null) {
     const p = this._mpPanel();
     p.innerHTML = `<div class="mpstatus ok">🟢 Connected — you are player ${playerNum}. Pick your hero; the host starts the game.</div>`;
-    if (!isHost) this.root.querySelector('#s-start').classList.add('disabled');
+    this.roomRoster(players || [
+      { seat: 1, name: 'Host', host: true, state: 'connected' },
+      { seat: playerNum, name: 'You', you: true, hero: this.selectedHero, state: 'connected' },
+    ], { isHost });
+    if (!isHost) {
+      this.setStartButton({
+        text: '⏳  WAITING FOR HOST TO START',
+        disabled: true,
+        title: 'Only the host can launch this room.',
+      });
+    }
+  }
+
+  _heroName(hero) {
+    const key = typeof hero === 'string' ? hero : hero?.k;
+    return HEROES[key]?.name || 'Choosing hero';
+  }
+
+  _playersFromOnlineGame(game) {
+    const rows = [...(game?._players || [])].sort((a, b) => Number(a.seat || 99) - Number(b.seat || 99));
+    return rows.map((p, i) => ({
+      seat: Number(p.seat || i + 1),
+      name: p.display_name || 'Commander',
+      hero: p.hero,
+      host: p.user_id === game.host_id,
+      state: p.connection_state || 'online',
+      ready: !!p.ready,
+    }));
+  }
+
+  roomRoster(players = [], {
+    maxPlayers = 3,
+    isHost = false,
+    code = '',
+    mode = 'campaign',
+    launchText = '',
+  } = {}) {
+    const box = this.root.querySelector('#room-roster');
+    if (!box) return;
+    box.classList.remove('hidden');
+    const bySeat = new Map();
+    for (const p of players) {
+      const seat = Math.max(1, Math.min(maxPlayers, Number(p.seat || bySeat.size + 1)));
+      if (!bySeat.has(seat)) bySeat.set(seat, p);
+    }
+    const filled = [...bySeat.values()].filter((p) => p && !p.open).length;
+    const launchCopy = launchText || (isHost
+      ? 'Use the gold START button below to launch this room for everyone.'
+      : 'Pick your hero here. The host starts the match when the room is ready.');
+    const modeCopy = mode === 'survival' ? 'Survival' : 'Campaign';
+    const safeCode = String(code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+    const slots = [];
+    for (let seat = 1; seat <= maxPlayers; seat++) {
+      const p = bySeat.get(seat);
+      if (p) {
+        const label = p.host ? 'HOST' : `P${seat}`;
+        const hero = this._heroName(p.hero);
+        const state = p.ready ? 'ready'
+          : p.state === 'connected' || p.state === 'online' ? 'in room'
+          : p.state === 'offline' ? 'offline'
+          : 'joining';
+        slots.push(`
+          <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''}">
+            <span class="roomseat">${label}</span>
+            <b></b>
+            <small>${hero} · ${state}</small>
+          </div>`);
+      } else {
+        slots.push(`
+          <div class="roomslot open">
+            <span class="roomseat">OPEN</span>
+            <b>Empty seat</b>
+            <small>${isHost ? 'Invite or share the room code' : 'Waiting for another commander'}</small>
+          </div>`);
+      }
+    }
+    box.innerHTML = `
+      <div class="roomlaunch ${isHost ? 'host' : 'guest'}">
+        <div>
+          <span class="roomeyebrow">${modeCopy} room${safeCode ? ` · ${safeCode}` : ''}</span>
+          <b>${filled}/${maxPlayers} players in lobby</b>
+          <small>${launchCopy}</small>
+        </div>
+      </div>
+      <div class="roomslots">${slots.join('')}</div>`;
+    const names = box.querySelectorAll('.roomslot:not(.open) b');
+    let i = 0;
+    for (let seat = 1; seat <= maxPlayers; seat++) {
+      const p = bySeat.get(seat);
+      if (p && names[i]) {
+        names[i].textContent = p.you ? `${p.name || 'You'} (you)` : (p.name || `Player ${seat}`);
+        i++;
+      }
+    }
   }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }

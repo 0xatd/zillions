@@ -92,6 +92,10 @@ assert.ok(online.includes("from('friendships')"), 'online lobby must read/write 
 const ui = read('src/ui.js');
 assert.ok(ui.includes('id="gamechat"'), 'UI must expose in-game team chat');
 assert.ok(ui.includes('id="l-friends"'), 'UI must expose friends list');
+assert.ok(ui.includes('roomRoster'), 'setup room UI must render a real player roster');
+assert.ok(ui.includes('START ROOM'), 'setup room UI must make the host launch action explicit');
+assert.ok(online.includes('refreshCurrentGame'), 'online rooms must refresh current room/player state');
+assert.ok(online.includes('updateRoomPlayer'), 'online rooms must persist hero/ready room player updates');
 
 const heroPalettes = {
   alexander: { color: 0x2f8f46, trim: 0xf3c53d },

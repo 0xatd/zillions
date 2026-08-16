@@ -79,7 +79,7 @@ class App {
       onJoin: (code) => this.joinGame(code),
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
-      onHeroPick: (k) => { if (this.mpRole === 'guest' && this.net && this.net.open) this.net.send({ t: 'hero', k, camp: this.campFor(k) }); },
+      onHeroPick: (k) => this._pickHero(k),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
@@ -124,6 +124,7 @@ class App {
     this.peers = [];
     this.pendingPeer = null;
     this.guestHeroes = [];
+    this.guestNames = [];
     this.guestCmdQueues = [];
     this.netMode = false;
     this.outbox = [];
@@ -505,6 +506,77 @@ class App {
     };
   }
 
+  _publicName() {
+    return this.lobby?.me?.name || this.profile.username || this.profile.name || 'Commander';
+  }
+
+  _heroPayload(key = this.ui.selectedHero) {
+    return { t: 'hero', k: key, camp: this.campFor(key), name: this._publicName() };
+  }
+
+  _pickHero(key) {
+    const msg = this._heroPayload(key);
+    if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
+    if (this.mpRole === 'host') this._syncSetupRoster();
+    if (this.lobby?.game) {
+      this.lobby.updateRoomPlayer({ hero: key }).catch((e) => {
+        console.warn('room hero update failed', e);
+      });
+    }
+  }
+
+  _roomRosterFromGame(game) {
+    const players = [...(game?._players || [])]
+      .sort((a, b) => Number(a.seat || 99) - Number(b.seat || 99));
+    return players.map((p, i) => ({
+      seat: Number(p.seat || i + 1),
+      name: p.display_name || 'Commander',
+      hero: p.hero,
+      host: p.user_id === game.host_id,
+      you: p.user_id === this.lobby?.me?.id,
+      ready: !!p.ready,
+      state: p.connection_state || 'online',
+    }));
+  }
+
+  _manualRosterPlayers() {
+    return [
+      { seat: 1, name: this.mpRole === 'host' ? this._publicName() : 'Host', hero: this.mpRole === 'host' ? this.ui.selectedHero : null, host: true, you: this.mpRole === 'host', state: 'connected' },
+      ...this.peers.map((_, i) => ({
+        seat: i + 2,
+        name: this.guestNames[i] || `Player ${i + 2}`,
+        hero: this.guestHeroes[i],
+        host: false,
+        you: false,
+        state: 'connected',
+      })),
+    ];
+  }
+
+  _guestRoster(players = [], mySeat = 2) {
+    return (players || []).map((p) => ({
+      ...p,
+      host: Number(p.seat || 0) === 1 || !!p.host,
+      you: Number(p.seat || 0) === Number(mySeat || 2),
+      hero: Number(p.seat || 0) === Number(mySeat || 2) ? (p.hero || this.ui.selectedHero) : p.hero,
+    }));
+  }
+
+  _syncSetupRoster() {
+    if (this.lobby?.game) return this._onRoomUpdate(this.lobby.game);
+    if (this.mpRole !== 'host' && this.mpRole !== 'guest') return;
+    const players = this._manualRosterPlayers();
+    this.ui.roomRoster(players, {
+      maxPlayers: 3,
+      isHost: this.mpRole === 'host',
+      mode: this.ui.selectedMode || 'campaign',
+    });
+    if (this.mpRole === 'host' && this.peers.length) {
+      this._broadcast({ t: 'lobbyRoster', n: players.length, players });
+    }
+    return players;
+  }
+
   _saveProfile() {
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
     if (this.auth?.isSignedIn()) {
@@ -629,10 +701,13 @@ class App {
     peer.onOpen = () => {
       this.peers.push(peer);
       this.guestHeroes.push(null);
+      this.guestNames.push(null);
       this.guestCmdQueues.push([]);
       this.pendingPeer = null;
-      peer.send({ t: 'lobby', n: this.peers.length + 1 });
-      this.ui.mpLobby(this.peers.length, this.peers.length < 2);
+      const players = this._manualRosterPlayers();
+      peer.send({ t: 'lobby', n: this.peers.length + 1, players });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this._syncSetupRoster();
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
     peer.onClose = () => {
@@ -649,7 +724,13 @@ class App {
   }
 
   _onHostMsg(idx, m) {
-    if (m.t === 'hero') { this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k; this.ui.mpLobby(this.peers.length, this.peers.length < 2); }
+    if (m.t === 'hero') {
+      this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
+      this.guestNames[idx] = m.name || this.guestNames[idx] || `Player ${idx + 2}`;
+      const players = this._manualRosterPlayers();
+      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this._syncSetupRoster();
+    }
     else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
@@ -675,7 +756,7 @@ class App {
     this.audio.init();
     this.mpRole = 'guest';
     this.net = new NetSession();
-    this.net.onOpen = () => this.net.send({ t: 'hero', k: this.ui.selectedHero });
+    this.net.onOpen = () => this.net.send(this._heroPayload());
     this.net.onMessage = (m) => this._onGuestMsg(m);
     this.net.onClose = () => {
       if (this.netMode && this.game && !this.game.over) {
@@ -692,7 +773,11 @@ class App {
   }
 
   _onGuestMsg(m) {
-    if (m.t === 'lobby') this.ui.mpConnected(false, m.n);
+    if (m.t === 'lobby') {
+      this.mpSeat = m.n;
+      this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
+    }
+    else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: this.ui.selectedMode || 'campaign' });
     else if (m.t === 'w') this.inbox.set(m.w, m.c);
     else if (m.t === 'start') {
       if (m.snap) this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
@@ -740,6 +825,7 @@ class App {
       onOnline: (map) => { this.ui.lobbyOnline(map.size); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
+      onRoom: (game) => this._onRoomUpdate(game),
       onKnock: (sig) => this._onKnock(sig),
       onSignal: (sig) => this._onSignal(sig),
     });
@@ -756,6 +842,30 @@ class App {
       this.ui.showBanner('❌ Lobby unreachable — solo and manual invite codes still work.', 'bad', 6000);
     }
     return this.lobby;
+  }
+
+  _onRoomUpdate(game) {
+    if (!game) return;
+    const isHost = this.mpRole === 'host';
+    const connected = this.peers.length + 1;
+    this.ui.roomRoster(this._roomRosterFromGame(game), {
+      maxPlayers: game.max_players || 3,
+      isHost,
+      code: game.join_code,
+      mode: game.mode || this.ui.selectedMode || 'campaign',
+      launchText: isHost
+        ? (connected > 1 ? `WebRTC is connected for ${connected} players. Use START to launch everyone.` : 'Share the room code. You can start now, or wait for more players.')
+        : 'You are in the room. Pick your hero and wait for the host to press START.',
+    });
+    this.ui.setStartButton(isHost ? {
+      text: `▶  START ROOM — LAUNCH ${Math.max(connected, game.players || 1)} PLAYER${Math.max(connected, game.players || 1) === 1 ? '' : 'S'}`,
+      disabled: false,
+      title: 'The host launches the match for everyone connected.',
+    } : {
+      text: '⏳  WAITING FOR HOST TO START',
+      disabled: true,
+      title: 'Only the host can launch this room.',
+    });
   }
 
   async _sendLobbyChat(text) {
@@ -845,8 +955,11 @@ class App {
     this.onlinePending = new Map();
     try {
       const game = await lobby.createGame({ visibility, level: this.ui.selectedLevel || 1, mode: this.ui.selectedMode || 'campaign' });
-      this.ui.showSetup({ online: game, mode: game.mode });
-      this.ui.roomChatFill(await lobby.loadRoomChat(game.id, 'room'));
+      await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
+      const room = lobby.game || game;
+      this.ui.showSetup({ online: room, mode: room.mode });
+      this._onRoomUpdate(room);
+      this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
     } catch (e) {
       this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
       this.mpRole = null;
@@ -864,10 +977,12 @@ class App {
     peer.onOpen = () => {
       this.peers.push(peer);
       this.guestHeroes.push(null);
+      this.guestNames.push(sig.name || null);
       this.guestCmdQueues.push([]);
       this.onlinePending.delete(sig.from);
-      peer.send({ t: 'lobby', n: this.peers.length + 1 });
+      peer.send({ t: 'lobby', n: this.peers.length + 1, players: this._roomRosterFromGame(this.lobby.game) });
       this.ui.onlineStatus(`🟢 ${this.peers.length + 1} players connected. START when ready.`);
+      this._syncSetupRoster();
       if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
@@ -891,7 +1006,7 @@ class App {
     if (sig.t === 'offer' && this.mpRole === 'guest') {
       this.net = new NetSession();
       this.net.onOpen = () => {
-        this.net.send({ t: 'hero', k: this.ui.selectedHero });
+        this.net.send(this._heroPayload());
         this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
       };
       this.net.onMessage = (m) => this._onGuestMsg(m);
@@ -921,11 +1036,17 @@ class App {
     this.onlineMode = true;
     this.ui.showSetup({ online: row, mode: row.mode });
     this.ui.onlineStatus('🔗 Knocking on the host\'s gate…');
-    this.ui.root.querySelector('#s-start').classList.add('disabled');
+    this.ui.setStartButton({
+      text: '⏳  WAITING FOR HOST TO START',
+      disabled: true,
+      title: 'Only the host can launch this room.',
+    });
     try {
       await lobby.joinGame(row);
+      await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
+      this._onRoomUpdate(lobby.game || row);
       this.ui.onlineStatus('🔗 Host found. Establishing the game connection…');
-      this.ui.roomChatFill(await lobby.loadRoomChat(row.id, 'room'));
+      this.ui.roomChatFill(await lobby.loadRoomChat((lobby.game || row).id, 'room'));
     } catch (e) {
       this.mpRole = null;
       this.onlineMode = false;

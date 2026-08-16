@@ -9,6 +9,7 @@ const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
 const SIGNAL_ATTEMPTS = 3;
 const SIGNAL_RETRY_MS = 350;
+const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -411,7 +412,7 @@ export class OnlineLobby {
   async refreshGames() {
     const since = new Date(Date.now() - FRESH_MS).toISOString();
     const { data, error } = await this.sb.from('rooms')
-      .select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)')
+      .select(ROOM_SELECT)
       .eq('visibility', 'public')
       .eq('status', 'open')
       .gt('last_seen_at', since)
@@ -451,6 +452,7 @@ export class OnlineLobby {
     // Heartbeat so the listing stays fresh; stops when the page dies.
     this._beat = setInterval(() => this.touchGame({}), 45 * 1000);
     window.addEventListener('beforeunload', () => this.endGame());
+    await this.refreshCurrentGame();
     await this.refreshGames();
     return this.game;
   }
@@ -469,6 +471,36 @@ export class OnlineLobby {
     await this._touchPresence();
   }
 
+  async refreshCurrentGame() {
+    if (!this.game?.id) return null;
+    const { data, error } = await this.sb.from('rooms')
+      .select(ROOM_SELECT)
+      .eq('id', this.game.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    this.game = roomToGame(data);
+    if (this.cb.onRoom) this.cb.onRoom(this.game);
+    return this.game;
+  }
+
+  async updateRoomPlayer(fields = {}) {
+    if (!this.game?.id || !this.me?.id) return null;
+    const patch = { last_seen_at: new Date().toISOString() };
+    if (fields.hero) {
+      patch.hero = fields.hero;
+      this.me.hero = fields.hero;
+    }
+    if (typeof fields.ready === 'boolean') patch.ready = fields.ready;
+    if (fields.connection_state) patch.connection_state = fields.connection_state;
+    const { error } = await this.sb.from('room_players')
+      .update(patch)
+      .eq('room_id', this.game.id)
+      .eq('user_id', this.me.id);
+    if (error) throw new Error(error.message);
+    return this.refreshCurrentGame();
+  }
+
   async endGame() {
     if (!this.game) return;
     clearInterval(this._beat);
@@ -478,7 +510,7 @@ export class OnlineLobby {
 
   async findByCode(code) {
     const { data } = await this.sb.from('rooms')
-      .select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state)')
+      .select(ROOM_SELECT)
       .eq('code', String(code).trim().toUpperCase())
       .eq('status', 'open')
       .limit(1);
@@ -497,6 +529,12 @@ export class OnlineLobby {
         if (asHost && s.t === 'knock' && this.cb.onKnock) this.cb.onKnock(s);
         else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${gameId}` }, () => {
+        this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${gameId}` }, () => {
+        this.refreshCurrentGame().catch((e) => this.cb.onError && this.cb.onError(e));
+      });
     await waitForSubscription(this.gameChan);
     this.roomChatChan = this.sb.channel('zl-room-chat-' + gameId)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_chat', filter: `room_id=eq.${gameId}` }, (m) => {
@@ -537,6 +575,7 @@ export class OnlineLobby {
     }, { onConflict: 'room_id,user_id' });
     if (error) throw new Error(error.message);
     await this._joinGameChannel(game.id, false);
+    await this.refreshCurrentGame();
     await this.signal({ t: 'knock', name: this.me.name });
   }
 
