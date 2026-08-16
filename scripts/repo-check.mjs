@@ -69,6 +69,15 @@ assert.ok(read('src/main.js').includes('this.tacticalVisuals.render()'), 'main r
 const readme = read('README.md');
 assert.ok(readme.includes('GitHub repository: https://github.com/0xatd/zillions'), 'README must link the GitHub repo');
 assert.ok(readme.includes('GitHub repo metadata should point to the production game'), 'README must document GitHub repo metadata expectations');
+assert.ok(readme.includes('can reach level 100'), 'README must document the live hero level cap');
+assert.ok(readme.includes('adaptive buffer of 3–10 consecutive windows'), 'README must document adaptive multiplayer buffering');
+assert.ok(readme.includes('watch an active game without taking a seat'), 'README must document read-only Watch mode');
+assert.ok(!/Heroes earn XP[^\n]*level 1[–-]10/i.test(readme), 'README must not describe level 10 as the hero cap');
+
+for (const rel of ['AGENTS.md', 'README.md', 'docs/agent-brief.md', 'docs/product-contract.md']) {
+  const text = read(rel);
+  assert.ok(!/planet(?:\/| and )galaxy layers[^\n]*not implemented/i.test(text), `${rel} must not describe the shipped procedural galaxy as unimplemented`);
+}
 
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');

@@ -110,44 +110,30 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 
 ## Balance Status
 
-Tuned against **simulated** runs, not human play. Treat the numbers as a
-starting point, not a verdict.
+Do not claim current completion times from the automated suite. The repository
+does not run an end-to-end victory bot today.
 
-Where it stands:
+Current automated guarantees:
 
-- **Greenfall Marches (level 1) completes in ~17 minutes** and **The Black Vale
-  (level 5) in ~12**, both by razing every hive and breaking the counterattack.
-- **Cinder Wastes (level 3) does not complete** — the bot razes 2 of 4 hives and
-  stalls. It is the outlier; the other two levels win. Investigate its lane
-  topology before assuming the systems are at fault.
-- Pure turtling and pure blitzing both lose, which is the intended shape.
-- The scaling chain works end to end: survey ground -> take nodes -> Forward
-  Camps -> supply ceiling rises -> bigger army -> siege the next hive.
+- `scripts/balance-check.mjs` checks opening economy, upgrade payback, upgrade
+  access, structure repair, construction refunds, supply, Threat, and campaign
+  scaling invariants.
+- `scripts/map-check.mjs` checks all five authored maps, early procedural
+  planets, route reachability, city closure, gates, troop exits, expansion-fort
+  spacing, loot, and two minutes of siege.
+- Each authored level has a unique landform and city plan.
+- Nest health and campaign multipliers rise across the authored campaign.
+- Human playtesting is still the source of truth for difficulty and completion
+  time.
 
-Known inversion, diagnosed but NOT fixed — and it is not a balance knob:
+Historical routing lesson:
 
-- Level 5 still finishes faster than level 1 (~9 min vs ~15). One real cause was
-  found and fixed: supply used to be counted per node, so bigger maps handed the
-  player a bigger army. It is now a share of the planet, so a fully held map is
-  worth the same army whatever its size.
-- The symptom survived that fix, and the throughput numbers say why. The Black
-  Vale carries **3.6x the total hive health and 3x the hive pressure** of
-  Greenfall, and the player still destroys **5.8x more hive health per minute**
-  there (8,900/min vs 1,500/min). Pressure is not the binding constraint — the
-  army handles any of it at 95-114 troops. What binds is **how much of the army
-  actually reaches a hive**, which is a function of that map's lane topology.
-- So: do NOT try to fix the campaign ordering by tuning nest health, pressure or
-  Threat. Those knobs are not what is deciding it. Investigate routing and lane
-  topology per map — Cinder Wastes, which never completes, is the worst case and
-  the best place to look. A useful measure is hive-health-destroyed-per-minute
-  rather than win time.
-- Related: nest health now scales with `NEST_HP_LEVEL_SHARE` and balance-check
-  asserts both per-nest and total hive health rise across the campaign, so the
-  intended difficulty curve is at least encoded even though play does not yet
-  follow it.
-- The hive captures undefended neutral nodes, and hive-held nodes stage ~40% of
-  its musters, so ignoring the map compounds against the player. That may be
-  good pressure or a runaway; only human play will tell.
+- An older bot showed later maps finishing faster than level 1. The useful
+  signal was hive-health damage per minute, not raw win time.
+- Do not tune nest health, pressure, or Threat before you inspect lane topology
+  and the number of troops that reach each hive.
+- Hive capture of neutral nodes can compound pressure. Validate that behavior
+  with human multiplayer tests before increasing it.
 
 History worth keeping, so old mistakes are not repeated:
 
@@ -165,11 +151,56 @@ History worth keeping, so old mistakes are not repeated:
   outrank the chase, and narrowing the transit `seek` radius. Both caused squads
   to walk past everything and raze nothing.
 
+## Multiplayer Runtime
+
+- Supabase owns usernames, presence, rooms, room seats, chat, and invites.
+  WebRTC carries match traffic. The backend does not run the simulation.
+- The lobby shows signed-in usernames. It separates open rooms from active
+  games. Open rooms support Join. Active games support Rejoin or read-only
+  Watch.
+- The room screen shows the host's mode, map, difficulty, hero, and player
+  limit. Guests can select their own hero. Only the host changes match setup.
+- The host cannot start until each listed player has a direct connection.
+  Campaign rooms also block levels that any seated player has not unlocked.
+- Match startup uses a load barrier. Each guest sends `startReady` after the
+  battlefield loads. The host starts window 0 after all guests are ready.
+- The host sends a lockstep window about every 66 ms. Packets repeat four
+  recent windows. The host stores 64 windows for exact repair requests.
+- A guest buffers 3–10 consecutive windows. The target uses measured round-trip
+  time and jitter. A guest requests a missing window every 180 ms until it
+  arrives.
+- The diagnostics chip shows route, round-trip time, jitter, buffer state, and
+  device frame time. Use it to separate network catch-up from device stalls.
+- Mid-game Rejoin is only for a previously seated guest. A stranger cannot
+  create a seat after the match starts. A watcher never creates a seat.
+
+Key multiplayer files:
+
+- `src/net.js`: WebRTC channels and connection diagnostics.
+- `src/main.js`: host sequencing, startup barrier, repair, rejoin, and Watch.
+- `src/online.js`: Supabase rooms, seats, roster refresh, and signaling.
+- `src/multiplayer-readiness.js`: direct-connection readiness.
+- `src/multiplayer-start.js`: guest load-barrier readiness.
+- `src/multiplayer-eligibility.js`: campaign unlock checks.
+- `src/multiplayer-pacing.js`: adaptive buffer and window history helpers.
+
+Do not replace measured buffering with a fixed two-window buffer. Do not count
+nonconsecutive windows as ready. Both changes cause repeated guest freezes.
+
+## Failure Recovery
+
+- `recoverableRestore()` catches a failed save restore. The UI removes the
+  corrupt save and returns to the menu.
+- `FrameGuard` catches an uncaught frame-loop error. The battlefield stops and
+  shows a reload message. Do not hide the error and continue a damaged sim.
+- `_construct()` validates the next tier before it changes plot state. Keep the
+  operation transactional.
+
 ## Not Implemented
 
 `docs/design-vision.md` describes folklore factions, fog of war, world-placed
-side missions, landmarks, and the planet/galaxy layers. None of that is built.
-Do not describe any of it as shipped.
+missions, landmarks, and a strategic galaxy simulation. Those systems are not
+built. The endless procedural frontier worlds are built and shipped.
 
 ## Product Boundaries
 
@@ -212,6 +243,7 @@ Do not describe any of it as shipped.
 
 - `src/game.js`: simulation, siege, economy, combat, save snapshots.
 - `src/main.js`: renderer, input, camera, event FX, app orchestration.
+- `src/runtime-guard.js`: corrupt-save recovery and frame-loop failure guard.
 - `src/ui.js`: account gate, menus, HUD, lobby, minimap.
 - `src/config.js`: heroes, buildings, items, levels, economy, siege.
 - `src/terrain.js`: landform archetypes, city sites, hive lairs, node features.
@@ -221,6 +253,7 @@ Do not describe any of it as shipped.
 - `src/lanes.js`: lane graph, node routing, squad waypoints.
 - `src/auth.js`: Supabase auth, username, profile/save/stat sync.
 - `src/online.js`: account-backed room, lobby chat, friends, and game chat adapter.
+- `src/multiplayer-*.js`: readiness, eligibility, startup, and pacing helpers.
 - `api/`: Vercel routes.
 - `supabase/schema.sql`: schema and RLS source of truth.
 
@@ -245,4 +278,6 @@ jq empty assets/audio/sfx-pack/index.json
 For gameplay work, also run a browser smoke on local and production when
 practical. Cover account gate, username display, city founding, building,
 upgrade from all sides, camera edge follow, attack visibility, lane pushes,
-hive musters, and lobby empty/real-room behavior.
+hive musters, and lobby empty/real-room behavior. For multiplayer work, use two
+real browser sessions. Verify roster stability, setup visibility, start gating,
+guest loading, Watch, Rejoin, catch-up diagnostics, and simulation progress.

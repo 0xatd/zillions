@@ -99,14 +99,15 @@ Do not turn this back into a generic RTS launcher.
 The day/bell/night/dawn model has been removed. The shipped loop is continuous
 siege, described above. `game.phase` is now only `found` or `live`.
 
-Balance was tuned against simulated runs (see `scripts/balance-check.mjs` and
-the notes in `docs/agent-brief.md`), not against human play. Level 1 is
-validated as winnable in roughly 13 minutes; later levels still need human
-playtesting before they can be called tuned.
+Balance has automated invariant checks, not a current win-time guarantee. The
+checks cover economy payback, upgrade access, progression, map reachability,
+and two minutes of siege on each authored map. Human playtesting is still
+required before any level can be called tuned.
 
-Longer-range direction — folklore factions, fog of war, world-placed side
-missions, the planet and galaxy layers — lives in `docs/design-vision.md` and is
-NOT implemented. Do not describe any of it as shipped.
+Longer-range direction lives in `docs/design-vision.md`. Folklore factions,
+fog of war, world-placed missions, landmarks, and a strategic galaxy simulation
+are not implemented. The deterministic frontier-world generator and galaxy
+level picker are shipped. Do not describe those shipped systems as future work.
 
 ## Production Rules
 

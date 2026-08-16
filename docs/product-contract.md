@@ -84,9 +84,10 @@ Survival mode is endless; the score is the Threat level reached. The backend's
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as
-rule-changers, fog of war, world-placed side missions, landmarks, and the
-planet/galaxy layers. None of it is implemented. Do not present it as shipped,
-and prove the siege loop with human playtesting before building on top of it.
+rule-changers, fog of war, world-placed missions, landmarks, and a strategic
+galaxy simulation. Those systems are not implemented. The endless procedural
+frontier worlds are implemented. Prove the siege loop with human playtesting
+before you add more strategic systems.
 
 ## Production UX Rules
 
@@ -121,6 +122,9 @@ Target shape:
 - Xeno factions hold regions, nests, energy fields, or planets.
 - Open games are real backend rooms.
 - Room players have real seats, ready state, hero picks, and chat.
+- Active games support read-only Watch. Previous guests can Rejoin their seat.
+- The room blocks Start until every guest connects and loads the battlefield.
+- Campaign Start blocks a level that any seated player has not unlocked.
 - Starting a room launches the current WebRTC match for now.
 - Match results write back to profiles, stats, saves, and history.
 
