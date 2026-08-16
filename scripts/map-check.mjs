@@ -190,6 +190,16 @@ for (const level of LEVELS) {
   // the walls — all still work on this landform.
   {
     const live = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
+    const spawnGame = new Game(live, 'normal', ['scott', 'alexander', 'danny'], null, level.id, 'campaign');
+    const spawnTiles = new Set();
+    for (const hero of spawnGame.heroes) {
+      const x = hero.x | 0, z = hero.z | 0;
+      assert.ok(live.isWalkable(x, z), `${label}: ${hero.def.name} spawned on impassable terrain`);
+      assert.ok(!spawnTiles.has(`${x},${z}`), `${label}: two heroes spawned on the same tile`);
+      spawnTiles.add(`${x},${z}`);
+      assert.ok([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => live.isWalkable(x + dx, z + dz)),
+        `${label}: ${hero.def.name} spawned without a walkable exit`);
+    }
     const game = new Game(live, 'normal', 'alexander', null, level.id, 'campaign');
     game.foundCity(0, 0);
     const hqReach = game.plots.find((p) => p.kind === 'hq').plan.reach;

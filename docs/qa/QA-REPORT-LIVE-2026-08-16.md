@@ -378,7 +378,6 @@ This is real backend state, not just stale lobby rendering:
 
 **Severity:** P1. The lobby advertises games nobody is hosting and people who are no longer online, so players cannot trust either list.
 
-
 ---
 
 ## Mission 1 (take 2) — room `B86244` — TEAM-WIDE SPAWN BUG
@@ -406,3 +405,10 @@ This is real backend state, not just stale lobby rendering:
 
 **Play impact:** game is dead on arrival for this room. Recommend: host ends room, creates a new game (new seed). Screenshot: `coop-b86244-stuck.png`.
 
+**Confirmed root cause and fix:** Ted's Rejoin also succeeded, and instrumentation
+proved W/A/S/D traveled guest → host → lockstep → simulation. Map seed `20505`
+placed all three fixed centre spawns inside one impassable terrain block. The fix
+now selects the nearest connected walkable patch deterministically and places
+the full party on distinct tiles with exits. The map suite constructs a
+three-hero party on every campaign map and rejects impassable, overlapping, or
+sealed spawns.
