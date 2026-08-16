@@ -410,6 +410,13 @@ export class UI {
     button.textContent = ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE';
   }
 
+  setRoomReconnect({ visible = false, label = 'RECONNECT' } = {}) {
+    const button = this.root.querySelector('#room-reconnect');
+    if (!button) return;
+    button.classList.toggle('hidden', !visible);
+    button.textContent = label;
+  }
+
   showLobby() {
     this._showScreen('lobby');
   }
@@ -488,6 +495,7 @@ export class UI {
         <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
         <div id="room-roster" class="roomroster"></div>
         <button class="diffbtn roomready hidden" id="room-ready">READY FOR BATTLE</button>
+        <button class="diffbtn hidden" id="room-reconnect">RECONNECT TO HOST</button>
         <div id="mp-sub"></div>
         <div class="roomchat">
           <div class="roomchatlog" id="roomchat-log"></div>
@@ -504,6 +512,8 @@ export class UI {
       });
       this._wireRoomChat();
       this._wireRoomReady();
+      const reconnect = this.root.querySelector('#room-reconnect');
+      if (reconnect) reconnect.onclick = () => this.cb.onRoomReconnect && this.cb.onRoomReconnect();
       return;
     }
     if (coop && !mp.dataset.init) {
@@ -1223,18 +1233,20 @@ export class UI {
       if (p) {
         const label = p.host ? 'HOST' : `P${seat}`;
         const hero = this._heroName(p.hero);
-        const state = p.ready ? 'ready'
-          : p.state === 'connected' || p.state === 'online' ? 'in room'
+        const state = p.state === 'connected' ? (p.ready ? 'ready · connected' : 'connected')
+          : p.state === 'reconnecting' ? 'reconnecting'
           : p.state === 'offline' ? 'offline'
-          : 'joining';
+          : p.state === 'disconnected' ? 'disconnected'
+          : 'connecting';
         const unlock = mode === 'campaign' && Number(p.unlockedLevel || 1) < Number(level || 1)
           ? ` · 🔒 unlocked through Level ${Math.max(1, Number(p.unlockedLevel) || 1)}`
           : '';
         slots.push(`
-          <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''}">
+          <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''} state-${p.state || 'connecting'}">
             <span class="roomseat">${label}</span>
             <b></b>
             <small>${hero} · ${state}${unlock}</small>
+            ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
         slots.push(`
@@ -1267,6 +1279,8 @@ export class UI {
         i++;
       }
     }
+    for (const button of box.querySelectorAll('.room-retry')) button.onclick = () => this.cb.onRoomReconnect && this.cb.onRoomReconnect(button.dataset.user);
+    for (const button of box.querySelectorAll('.room-remove')) button.onclick = () => this.cb.onRoomRemovePlayer && this.cb.onRoomRemovePlayer(button.dataset.user);
   }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }

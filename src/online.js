@@ -81,7 +81,7 @@ export function canRejoinRoom(game, userId) {
 
 export class OnlineLobby {
   constructor(cb = {}) {
-    this.cb = cb; // {onChat, onRoomChat, onGames, onOnline, onFriends, onInvite, onKnock, onSignal, onError}
+    this.cb = cb; // {onChat, onRoomChat, onGames, onOnline, onFriends, onInvite, onKnock, onSignal, onRoomClosed, onError}
     this.sb = null;
     this.me = null;          // {id, code, name}
     this.online = new Map(); // playerId -> name (lobby presence)
@@ -625,6 +625,7 @@ export class OnlineLobby {
     const game = this.game;
     const isHost = game.host_id === this.me.id;
     if (isHost) {
+      try { await this.signal({ t: 'roomClosed', to: 'all', reason: 'host_closed' }); } catch { /* database deletion is authoritative */ }
       const { error } = await this.sb.from('rooms').delete().eq('id', game.id);
       if (error) throw new Error(error.message);
     } else if (this._seatedRoomId === game.id) {
@@ -636,6 +637,17 @@ export class OnlineLobby {
     }
     this._clearRoomState();
     await this.refreshGames();
+  }
+
+  async removeRoomPlayer(userId) {
+    if (!this.game || this.game.host_id !== this.me?.id || !userId || userId === this.me.id) return;
+    try { await this.signal({ t: 'roomClosed', to: userId, reason: 'removed' }); } catch { /* seat deletion is authoritative */ }
+    const { error } = await this.sb.from('room_players')
+      .delete()
+      .eq('room_id', this.game.id)
+      .eq('user_id', userId);
+    if (error) throw new Error(error.message);
+    await this.refreshCurrentGame();
   }
 
   async endGame() {
@@ -676,13 +688,15 @@ export class OnlineLobby {
           // so the roster shows them even if no postgres_changes event fires.
           this._refreshCurrentThrottled();
           if (this.cb.onKnock) this.cb.onKnock(s);
-        } else if (s.to === this.me.id && this.cb.onSignal) this.cb.onSignal(s);
+        } else if ((s.to === this.me.id || s.to === 'all') && this.cb.onSignal) this.cb.onSignal(s);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${gameId}` }, () => {
         this._refreshCurrentThrottled();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${gameId}` }, () => {
-        this._refreshCurrentThrottled();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${gameId}` }, (event) => {
+        if (event.eventType === 'DELETE') {
+          if (this.cb.onRoomClosed) this.cb.onRoomClosed('host_closed');
+        } else this._refreshCurrentThrottled();
       });
     await waitForSubscription(this.gameChan);
     this.roomChatChan = this.sb.channel('zl-room-chat-' + gameId)
