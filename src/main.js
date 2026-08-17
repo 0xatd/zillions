@@ -335,6 +335,7 @@ class App {
       light: new THREE.PointLight(0xffd39a, 0, 34, 1.8),
       dummy: new THREE.Object3D(), color: new THREE.Color(),
       project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
+      initialCount: Number.parseInt(localStorage.getItem('zillions-title-stands') || '0', 10) || 0,
     });
     this._buildTitleSpace();
   }
@@ -4098,18 +4099,28 @@ class App {
       return;
     }
     if (!this.game) {
-      // Title: a low orbital-horizon angle keeps the live last stand in the
-      // foreground while the atmosphere, moon and fleet own the upper frame.
+      // Starship director: orbit until a distress light is acquired, dive to
+      // the active stand, then pull back when the signal dies.
       this.menuYaw += dt * 0.018;
-      this.focus.set(MAP_SIZE / 2, 2.5, MAP_SIZE / 2 - 8);
-      const dist = 72;
-      const elev = 0.43;
+      const shot = this.menuShow?.cameraState();
+      const dive = shot?.phase === 'run' ? shot.progress : 0;
+      const tx = shot?.x ?? MAP_SIZE / 2;
+      const tz = shot?.z ?? MAP_SIZE / 2;
+      const k = 1 - Math.exp(-1.35 * dt);
+      this.focus.x += (lerp(MAP_SIZE / 2, tx, dive) - this.focus.x) * k;
+      this.focus.z += (lerp(MAP_SIZE / 2 - 8, tz, dive) - this.focus.z) * k;
+      this.focus.y += (lerp(2.5, this.menuMap?.groundY(tx, tz) || 0, dive) - this.focus.y) * k;
+      const dist = lerp(105, 28, dive);
+      const elev = lerp(0.58, 0.72, dive);
       this.camera.position.set(
         this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
         Math.sin(elev) * dist,
         this.focus.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
       );
       this.camera.lookAt(this.focus);
+      const telemetry = document.querySelector('#title-telemetry');
+      if (telemetry && shot) telemetry.innerHTML = `<b>${shot.scenario}</b><span>SIGNAL ${String(shot.observed).padStart(4, '0')} · ${shot.phase === 'run' ? `${shot.survivors} SURVIVORS` : 'SEARCHING'}</span>`;
+      if (shot?.observed) localStorage.setItem('zillions-title-stands', String(shot.observed));
       return;
     }
 

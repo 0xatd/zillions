@@ -99,6 +99,7 @@ export class UI {
             <h1 class="gametitle">ZILLIONS</h1>
             <p class="gamesub">Every world is a battlefield.</p>
           </div>
+          <div id="title-telemetry" class="title-telemetry"><b>ORBITAL WATCH</b><span>SEARCHING FOR DISTRESS SIGNAL</span></div>
           <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
             <button class="menubtn primary hidden" id="a-enter">ENTER WORLD</button>
@@ -121,7 +122,7 @@ export class UI {
             <button id="a-settings">SETTINGS</button>
             <button id="a-quit">QUIT</button>
           </nav>
-          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · ONLINE <small>BUILD 0.1</small></div>
+          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · STARSHIP ONLINE <small>BUILD 0.1</small></div>
         </div>
 
         <div id="screen-main" class="mainmenu character-select">

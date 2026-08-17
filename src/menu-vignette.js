@@ -22,9 +22,17 @@ import { clamp, lerp } from './utils.js';
 const MOB_CAP = 150;         // far below the shared instanced-pool capacity
 const STAGE_R = 26;          // vignettes live where the orbiting camera can see
 const FLOW_PERIOD = 0.45;    // horde pathing recompute cadence (seconds)
+const SCENARIOS = [
+  { id: 'runner', name: 'LONE SIGNAL', squad: [1, 1], hold: false, ramp: 1.35 },
+  { id: 'checkpoint', name: 'BROKEN CHECKPOINT', squad: [3, 4], hold: true, ramp: 1.05 },
+  { id: 'palisade', name: 'PALISADE BREACH', squad: [4, 5], hold: true, ramp: 1.15 },
+  { id: 'evac', name: 'EVACUATION LINE', squad: [3, 4], hold: true, ramp: 1.28 },
+  { id: 'dropship', name: 'CRASHED DROPSHIP', squad: [2, 4], hold: true, ramp: 1.18 },
+  { id: 'keep', name: 'FINAL KEEP', squad: [5, 6], hold: true, ramp: 1.38 },
+];
 
 export class MenuVignette {
-  constructor({ scene, map, makeUnitMesh, horde, burst, stream, addCorpse, dispose3D, light, dummy, color, project }) {
+  constructor({ scene, map, makeUnitMesh, horde, burst, stream, addCorpse, dispose3D, light, dummy, color, project, initialCount = 0 }) {
     this.scene = scene;
     this.map = map;
     this.makeUnitMesh = makeUnitMesh;
@@ -46,6 +54,10 @@ export class MenuVignette {
     this.phaseT = 1.2;        // short beat before the first squad arrives
     this.elapsed = 0;
     this.spawnAcc = 0;
+    this.observed = initialCount;
+    this.scenario = SCENARIOS[0];
+    this.outcome = 'pending';
+    this.anchor = { x: map.size / 2, z: map.size / 2 };
 
     // The doomed squad's lamp — the light that "comes in" with each vignette
     // and dies with it.
@@ -76,6 +88,10 @@ export class MenuVignette {
         this.phase = 'dark';
         this.phaseT = 3.2;
       }
+      if (this.outcome === 'victory') {
+        this.phaseT -= dt;
+        if (this.phaseT <= 0) { this.phase = 'dark'; this.phaseT = 3.2; }
+      }
     }
     this._updateLight(dt);
     this._updateFallen(dt);
@@ -105,9 +121,15 @@ export class MenuVignette {
       this.dispose3D(tr.mesh);
     }
 
+    this.observed++;
+    this.scenario = SCENARIOS[(this.observed - 1) % SCENARIOS.length];
+    this.outcome = this.observed % 100 === 0 ? 'victory' : 'pending';
+    this.phaseT = this.outcome === 'victory' ? 999 : 0;
+    this.anchor = anchor;
     // Never quite the same story: squad size, corps, entry heading, and how
     // fast the planet's hunger ramps all reroll every time.
-    const squadSize = Math.random() < 0.55 ? 1 : Math.random() < 0.75 ? 2 : 3;
+    const [lo, hi] = this.scenario.squad;
+    const squadSize = lo + ((Math.random() * (hi - lo + 1)) | 0);
     const kinds = ['soldier', 'soldier', 'ranger', 'sniper'];
     const kind = kinds[(Math.random() * kinds.length) | 0];
     const heading = Math.random() * Math.PI * 2;
@@ -129,7 +151,7 @@ export class MenuVignette {
         fireT: Math.random() * 0.3,
         steerT: 0,
         attackT: 0,
-        cornered: false,
+        cornered: this.scenario.hold,
         dead: false,
         fallT: -1,
         seed: Math.random() * 1000,
@@ -142,7 +164,7 @@ export class MenuVignette {
     this.flowT = 0;
     this.flowReady = false;
     // Growth reroll: how quickly this world's zillions close the noose.
-    this.mobRamp = 0.9 + Math.random() * 0.7;
+    this.mobRamp = this.scenario.ramp * (0.9 + Math.random() * 0.25);
     this.hungerRamp = 0.016 + Math.random() * 0.012;
     this.phase = 'run';
     // The horde comes in mostly from behind the squad's heading, with a wide
@@ -196,7 +218,7 @@ export class MenuVignette {
       tr.steerT -= dt;
       if (tr.steerT <= 0) {
         tr.steerT = 0.35;
-        const dir = this._pickFleeDir(tr);
+        const dir = this.scenario.hold ? null : this._pickFleeDir(tr);
         if (dir) { tr.dirX = dir[0]; tr.dirZ = dir[1]; tr.cornered = false; }
         else tr.cornered = true;
       }
@@ -228,7 +250,7 @@ export class MenuVignette {
         if (d2 < 1.15) {
           biting++;
           zb.lungeT = 0.32;
-          tr.hp -= zb.def.dmg * 0.9 * dt;
+          if (this.outcome !== 'victory') tr.hp -= zb.def.dmg * 0.9 * dt;
         }
       }
       if (tr.hp <= 0) {
@@ -333,6 +355,10 @@ export class MenuVignette {
   _spawnMob(dt) {
     // The trickle becomes a flood: spawn rate ramps for the whole vignette,
     // so kiting buys time but never safety.
+    if (this.outcome === 'victory' && this.elapsed > 18) {
+      if (!this.zombies.length && this.phase === 'run') this.phaseT = Math.min(this.phaseT, 4.5);
+      return;
+    }
     const rate = Math.min(24, (3 + this.elapsed * this.mobRamp) * 1.1);
     this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1 && this.zombies.length < MOB_CAP) {
@@ -410,6 +436,9 @@ export class MenuVignette {
       zb.dirX = dx; zb.dirZ = dz;
     }
     this.zombies = this.zombies.filter((zb) => !zb.dead);
+    if (this.outcome === 'victory' && this.elapsed > 18) {
+      for (const zb of this.zombies) zb.hp = Math.min(zb.hp, 1);
+    }
   }
 
   // Between vignettes the leftover mob loses interest: it drifts off the
@@ -440,6 +469,20 @@ export class MenuVignette {
     // dark lands as a beat instead of a cut.
     const rate = this.lightTarget > this.light.intensity ? 2.2 : 1.4;
     this.light.intensity += (this.lightTarget - this.light.intensity) * (1 - Math.exp(-rate * dt));
+  }
+
+  cameraState() {
+    const lead = this.troopers.find((tr) => !tr.dead) || this.troopers[0];
+    return {
+      phase: this.phase,
+      progress: this.phase === 'run' ? clamp(this.elapsed / 4.5, 0, 1) : 0,
+      x: lead?.x ?? this.anchor.x,
+      z: lead?.z ?? this.anchor.z,
+      scenario: this.scenario.name,
+      observed: this.observed,
+      outcome: this.outcome,
+      survivors: this.troopers.filter((tr) => !tr.dead).length,
+    };
   }
 
   // Fallen troopers keel over where they died and settle into the ground.
