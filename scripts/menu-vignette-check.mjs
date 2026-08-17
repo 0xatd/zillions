@@ -117,3 +117,25 @@ assert.equal(disposed, meshesMade, `minted ${meshesMade} trooper meshes but disp
 assert.ok(!sceneObjects.has(show.light), 'squad lamp left in the scene on dispose');
 
 console.log(`menu vignette check passed: ${vignettesEnded} last stands over ${SIM_SECONDS}s, peak mob ${peakMob}, ${corpses} corpses`);
+
+// Signal 100 is the promised rare exception: the squad survives, clears the
+// horde, holds for the victory beat, and only then returns the camera to orbit.
+const victory = new MenuVignette({
+  scene, map, makeUnitMesh: stubUnitMesh, horde: stubHorde(), burst: () => {}, stream: () => {},
+  addCorpse: () => {}, dispose3D: () => {}, light: { position: stubVec(), intensity: 0 },
+  dummy: show._dummy, color: show._color, project: () => ({ x: 0, y: 0 }), initialCount: 99,
+});
+let sawHundred = false;
+let victoryReturnedToOrbit = false;
+for (let i = 0; i < Math.round(90 / DT); i++) {
+  victory.update(DT, i * DT);
+  if (victory.observed === 100 && victory.phase === 'run') {
+    sawHundred = true;
+    assert.equal(victory.outcome, 'victory');
+    assert.ok(victory.troopers.some((tr) => !tr.dead), 'signal 100 lost every survivor');
+  }
+  if (sawHundred && victory.phase === 'dark') { victoryReturnedToOrbit = true; break; }
+}
+assert.ok(sawHundred, 'the deterministic 100th-signal victory never began');
+assert.ok(victoryReturnedToOrbit, 'the victory never returned the camera to orbit');
+victory.dispose();
