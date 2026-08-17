@@ -58,6 +58,7 @@ export class GameMap extends TerrainField {
     // instead of an axis-aligned staircase between two flat hexes.
     const positions = new Float32Array(N * N * 6 * 3);
     const colors = new Float32Array(N * N * 6 * 3);
+    const uvs = new Float32Array(N * N * 6 * 2);
     const col = new THREE.Color();
     const scratch = new THREE.Color();
     const blightCol = new THREE.Color(0x3c2547);
@@ -192,6 +193,8 @@ export class GameMap extends TerrainField {
           positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
           const o = (vz * cw + vx) * 3;
           colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
+          const up = (p / 3) * 2;
+          uvs[up] = vx * 0.21; uvs[up + 1] = vz * 0.21; // world-scale grain tiling
           p += 3;
         }
       }
@@ -200,8 +203,20 @@ export class GameMap extends TerrainField {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Ground grain: a generated near-neutral mottle multiplying the painted
+    // corner colors, so open ground has soil-and-scrub surface detail instead
+    // of reading as one airbrushed fill. Browser-only; headless map tooling
+    // never touches the texture path.
+    let grainTex = null;
+    if (typeof document !== 'undefined') {
+      grainTex = new THREE.TextureLoader().load('assets/textures/terrain-grain.png');
+      grainTex.wrapS = grainTex.wrapT = THREE.RepeatWrapping;
+      grainTex.colorSpace = THREE.SRGBColorSpace;
+      grainTex.anisotropy = 4;
+    }
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grainTex });
     const terrain = new THREE.Mesh(geo, mat);
     terrain.receiveShadow = true;
     terrain.name = 'terrain';

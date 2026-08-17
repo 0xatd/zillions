@@ -34,10 +34,41 @@ const _col = new THREE.Color();
 
 const shade = (hex, f) => _col.setHex(hex).multiplyScalar(f).getHex();
 
+// ---------------- the material atlas ----------------
+// A generated painted-style atlas (assets/textures/colony-atlas.png, built by
+// tools' gen_textures) multiplies under the vertex colors: panel seams,
+// rivets, grime streaks, brushed steel, cracked concrete — and an edge-AO
+// vignette on every tile, so every mapped face gets contact shadows at its
+// corners. Near-neutral luminance keeps the whole palette intact.
+const ATLAS_TILE = { plate: 0, steel: 1, concrete: 2, solar: 3 };
+const STEEL_HEXES = new Set([0x4a5058, 0x2e3136, 0x3d4246, 0x2b2e33, 0x2f3338,
+  0x565c60, 0x4a4440, 0x35363a, 0x1e1f21, 0x6b6152, 0x2f4a48, 0x9aa0a2, 0x4d5560]);
+const CONCRETE_HEXES = new Set([0x9c968a, 0x8f897d, 0x8a8069, 0x6a655a, 0xaba593, 0x8a7a5e]);
+function atlasTileFor(hex) {
+  if (hex === 0x31506b) return ATLAS_TILE.solar;
+  if (STEEL_HEXES.has(hex)) return ATLAS_TILE.steel;
+  if (CONCRETE_HEXES.has(hex)) return ATLAS_TILE.concrete;
+  // fallback by luminance: dark parts read as machined steel
+  _col.setHex(hex);
+  const lum = 0.2126 * _col.r + 0.7152 * _col.g + 0.0722 * _col.b;
+  return lum < 0.14 ? ATLAS_TILE.steel : ATLAS_TILE.plate;
+}
+
+let _atlasTex = null;
+export function colonyAtlas() {
+  // Browser only — headless tooling keeps working without the texture.
+  if (!_atlasTex && typeof document !== 'undefined') {
+    _atlasTex = new THREE.TextureLoader().load('assets/textures/colony-atlas.png');
+    _atlasTex.colorSpace = THREE.SRGBColorSpace;
+    _atlasTex.anisotropy = 4;
+  }
+  return _atlasTex;
+}
+
 // ---------------- merged-geometry builder ----------------
 
 function merger() {
-  const pos = [], nrm = [], col = [];
+  const pos = [], nrm = [], col = [], uvs = [];
   const add = (geo, hex, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => {
     const g = geo.index ? geo.toNonIndexed() : geo;
     // YXZ: pitch/roll first, THEN yaw — so a part tilted toward its face
@@ -48,11 +79,17 @@ function merger() {
     g.applyMatrix4(_mat);
     const p = g.getAttribute('position');
     const n = g.getAttribute('normal');
+    const u = g.getAttribute('uv');
+    const tile = atlasTileFor(hex);
+    const tu = (tile % 4) * 0.25, tv = 0.75 - ((tile / 4) | 0) * 0.25;
     _col.setHex(hex);
     for (let i = 0; i < p.count; i++) {
       pos.push(p.getX(i), p.getY(i), p.getZ(i));
       nrm.push(n.getX(i), n.getY(i), n.getZ(i));
       col.push(_col.r, _col.g, _col.b);
+      const uu = u ? Math.min(1, Math.max(0, u.getX(i))) : 0.5;
+      const vv = u ? Math.min(1, Math.max(0, u.getY(i))) : 0.5;
+      uvs.push(tu + uu * 0.25, tv + vv * 0.25);
     }
     if (g !== geo) g.dispose();
     geo.dispose();
@@ -75,11 +112,27 @@ function merger() {
       geo.rotateY(Math.PI / 4);
       add(geo, hex, x, y, z, 0, ry, 0, w, h, d);
     },
-    build: (material) => {
+    build: (material, bakeAO = false) => {
+      if (bakeAO && pos.length) {
+        // The Dota value-structure trick, baked per building: dark at the
+        // footing, bright at the crown, with a whisper of positional grime so
+        // large faces never read as one flat fill.
+        let maxY = 0.001;
+        for (let i = 1; i < pos.length; i += 3) maxY = Math.max(maxY, pos[i]);
+        for (let i = 0; i < pos.length; i += 3) {
+          const t = Math.min(1, Math.max(0, pos[i + 1] / maxY));
+          const ramp = 0.78 + 0.3 * Math.pow(t, 0.7);
+          const gr = Math.sin(pos[i] * 12.9898 + pos[i + 2] * 78.233 + pos[i + 1] * 37.719);
+          const f = Math.min(1.06, ramp) * (1 + gr * 0.035);
+          const o = i;
+          col[o] *= f; col[o + 1] *= f; col[o + 2] *= f;
+        }
+      }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       const mesh = new THREE.Mesh(g, material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -835,7 +888,9 @@ export function buildBuildingMesh(b, ctx = {}) {
   }
 
   // Merged output: body (shadowed hull), glow (always-lit), windows (night).
-  if (!B.empty()) g.add(B.build(new THREE.MeshLambertMaterial({ vertexColors: true })));
+  if (!B.empty()) {
+    g.add(B.build(new THREE.MeshLambertMaterial({ vertexColors: true, map: colonyAtlas() }), true));
+  }
   if (!G.empty()) {
     const glow = G.build(new THREE.MeshBasicMaterial({ vertexColors: true }));
     glow.castShadow = false;
