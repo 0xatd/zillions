@@ -359,8 +359,8 @@ class App {
     group.add(atmosphere);
 
     const starGeo = new THREE.BufferGeometry();
-    const stars = new Float32Array(750 * 3);
-    for (let i = 0; i < 750; i++) {
+    const stars = new Float32Array(1100 * 3);
+    for (let i = 0; i < 1100; i++) {
       const a = Math.random() * Math.PI * 2;
       const r = 170 + Math.random() * 220;
       stars[i * 3] = MAP_SIZE / 2 + Math.sin(a) * r;
@@ -371,17 +371,49 @@ class App {
     const starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xdbeaff, size: 0.95, transparent: true, opacity: 0.9, depthWrite: false, fog: false }));
     group.add(starField);
 
-    const moon = new THREE.Mesh(new THREE.SphereGeometry(12, 32, 20), new THREE.MeshLambertMaterial({ color: 0x6f8194, emissive: 0x17293d, emissiveIntensity: 0.6, fog: false }));
-    moon.position.set(MAP_SIZE / 2 - 38, 62, MAP_SIZE / 2 - 72);
-    group.add(moon);
-    const moonRing = new THREE.Mesh(
-      new THREE.TorusGeometry(18, 0.9, 8, 64),
-      new THREE.MeshBasicMaterial({ color: 0x8aa7bd, transparent: true, opacity: 0.5, depthWrite: false, fog: false }),
+    // Sparse starship navigation overlays replace the old ringed moon. Keep
+    // them faint: the besieged world must remain the only large celestial body.
+    const constellationGeo = new THREE.BufferGeometry();
+    constellationGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+      -92,45,-150, -78,59,-151, -78,59,-151, -61,50,-152, -61,50,-152, -45,67,-153,
+       55,61,-156,  70,47,-155,  70,47,-155,  87,58,-157,  87,58,-157, 101,43,-158,
+       -8,82,-162,   7,72,-161,   7,72,-161,  21,88,-163,  21,88,-163,  36,79,-162,
+    ], 3));
+    const constellations = new THREE.LineSegments(
+      constellationGeo,
+      new THREE.LineBasicMaterial({ color: 0x7799b8, transparent: true, opacity: 0.18, depthWrite: false, fog: false }),
     );
-    group.add(moonRing);
+    group.add(constellations);
+
+    // A deterministic low-resolution surface makes the orbit shot read as a
+    // world at a glance. Ground combat lighting is controlled elsewhere and
+    // stays deliberately dark around the troops.
+    const texW = 256, texH = 128;
+    const globePixels = new Uint8Array(texW * texH * 4);
+    for (let y = 0; y < texH; y++) {
+      const lat = (y / (texH - 1) - 0.5) * Math.PI;
+      for (let x = 0; x < texW; x++) {
+        const lon = (x / texW) * Math.PI * 2;
+        const landNoise = Math.sin(lon * 2.15 + Math.sin(lat * 3.1) * 1.7)
+          + Math.sin(lon * 4.7 - lat * 2.3) * 0.48
+          + Math.cos(lon * 7.3 + lat * 5.1) * 0.2;
+        const polar = Math.abs(lat) > 1.18;
+        const land = landNoise > 0.48 && !polar;
+        const daylight = 0.72 + 0.22 * Math.cos(lon + 0.65) * Math.cos(lat);
+        const base = polar ? [170, 199, 213] : land ? [48, 93, 73] : [21, 69, 111];
+        const i = (y * texW + x) * 4;
+        globePixels[i] = Math.round(base[0] * daylight);
+        globePixels[i + 1] = Math.round(base[1] * daylight);
+        globePixels[i + 2] = Math.round(base[2] * daylight);
+        globePixels[i + 3] = 255;
+      }
+    }
+    const globeTexture = new THREE.DataTexture(globePixels, texW, texH, THREE.RGBAFormat);
+    globeTexture.colorSpace = THREE.SRGBColorSpace;
+    globeTexture.needsUpdate = true;
     const orbitalGlobe = new THREE.Mesh(
       new THREE.SphereGeometry(105, 48, 28),
-      new THREE.MeshLambertMaterial({ color: 0x06101a, emissive: 0x02060b, emissiveIntensity: 0.8, fog: false }),
+      new THREE.MeshBasicMaterial({ map: globeTexture, color: 0xa9cfe0, fog: false }),
     );
     group.add(orbitalGlobe);
     const signalGeo = new THREE.BufferGeometry();
@@ -399,7 +431,7 @@ class App {
     orbitalGlobe.add(signals);
     const orbitalGlow = new THREE.Mesh(
       new THREE.SphereGeometry(108, 48, 28),
-      new THREE.MeshBasicMaterial({ color: 0x2686c0, transparent: true, opacity: 0.2, side: THREE.BackSide, depthWrite: false, fog: false }),
+      new THREE.MeshBasicMaterial({ color: 0x58bdf2, transparent: true, opacity: 0.34, side: THREE.BackSide, depthWrite: false, fog: false }),
     );
     group.add(orbitalGlow);
 
@@ -435,7 +467,7 @@ class App {
     group.add(heroPedestal);
     const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
     group.add(heroLight);
-    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
+    group.userData = { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -445,15 +477,11 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
+    const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
-    moon.rotation.y = t * 0.015;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
-    moon.position.copy(cameraLocal(-42, 27, -125));
-    moonRing.position.copy(moon.position);
-    moonRing.quaternion.copy(this.camera.quaternion);
-    moonRing.rotateX(1.08);
-    moonRing.rotateZ(-0.28);
+    constellations.position.copy(cameraLocal(0, 0, 0));
+    constellations.quaternion.copy(this.camera.quaternion);
     orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
