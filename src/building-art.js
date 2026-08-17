@@ -33,6 +33,8 @@ const _vec = new THREE.Vector3();
 const _col = new THREE.Color();
 
 const shade = (hex, f) => _col.setHex(hex).multiplyScalar(f).getHex();
+const _mix = new THREE.Color();
+const mix = (a, b, t) => _col.setHex(a).lerp(_mix.setHex(b), t).getHex();
 
 // ---------------- the material atlas ----------------
 // A generated painted-style atlas (assets/textures/colony-atlas.png, built by
@@ -429,12 +431,14 @@ export function buildBuildingMesh(b, ctx = {}) {
         }
       }
       // The vault: arched ribs + ridge beam + glass shell (separate mesh).
+      // Frames carry a faint greenhouse verdigris so farms read "grown".
+      const FRAME = mix(HULL, 0x5fd889, 0.14);
       for (const hx of [-0.85, -0.28, 0.28, 0.85]) {
-        B.cyl(HULL, 0.045, 0.045, 1.05, hx, 0.5, -0.89, 7, 0.5, 0, 0);
-        B.cyl(HULL, 0.045, 0.045, 1.05, hx, 0.5, 0.89, 7, -0.5, 0, 0);
-        B.cyl(HULL, 0.04, 0.04, 0.9, hx, 0.98, 0, 7, Math.PI / 2, 0, 0);
+        B.cyl(FRAME, 0.045, 0.045, 1.05, hx, 0.5, -0.89, 7, 0.5, 0, 0);
+        B.cyl(FRAME, 0.045, 0.045, 1.05, hx, 0.5, 0.89, 7, -0.5, 0, 0);
+        B.cyl(FRAME, 0.04, 0.04, 0.9, hx, 0.98, 0, 7, Math.PI / 2, 0, 0);
       }
-      B.box(HULL, 1.9, 0.06, 0.08, 0, 1.02, 0);
+      B.box(FRAME, 1.9, 0.06, 0.08, 0, 1.02, 0);
       const glassGeo = new THREE.CylinderGeometry(0.95, 0.95, 1.8, 12, 1, true, 0, Math.PI);
       glassGeo.rotateZ(Math.PI / 2); // vault axis along the crop rows
       const glass = new THREE.Mesh(glassGeo, new THREE.MeshLambertMaterial({
@@ -546,11 +550,13 @@ export function buildBuildingMesh(b, ctx = {}) {
       }
       G.box(GLOW, 1.28, 0.12, 1.28, 0, h * 0.46, 0);          // sensor band
       pipes(B, STEEL, [[0.55, 0.6, 0.3], [0.6, h * 0.8, 0.2], [0.35, h - 0.1, 0.1]], 0.035);
-      B.cyl(shade(hull, 0.94), 0.9, 0.62, 0.42, 0, h + 0.02, 0, 12); // flared deck
-      B.cyl(PAD, 0.97, 0.97, 0.1, 0, h + 0.3, 0, 12);
+      // Gun deck in slate: the war-fighting crown reads as machined hardware
+      // against the bone hull, so towers pop out of the eco skyline.
+      B.cyl(mix(hull, GUN, 0.45), 0.9, 0.62, 0.42, 0, h + 0.02, 0, 12); // flared deck
+      B.cyl(mix(PAD, GUN, 0.35), 0.97, 0.97, 0.1, 0, h + 0.3, 0, 12);
       for (let i = 0; i < 8; i++) {                             // crenel plates
         const a = (i / 8) * Math.PI * 2 + 0.2;
-        B.box(shade(hull, 0.9), 0.34, 0.3, 0.07, Math.cos(a) * 0.9, h + 0.5, Math.sin(a) * 0.9, 0, -a - Math.PI / 2, 0);
+        B.box(mix(hull, GUN, 0.55), 0.34, 0.3, 0.07, Math.cos(a) * 0.9, h + 0.5, Math.sin(a) * 0.9, 0, -a - Math.PI / 2, 0);
       }
       G.box(TRIM, 0.13, 0.13, 0.13, 0, h + 0.32, 0.88);        // muzzle marker
       floodlight(B, G, -0.75, -0.75, h + 0.15, 2.4);
@@ -860,12 +866,15 @@ export function buildBuildingMesh(b, ctx = {}) {
       // MUSTER BAY: a ribbed quonset with blast-door end wall and doctrine
       // stripe, muster pad with painted lanes, kit crates, comms, floodlight.
       const col = b.kind === 'camp_militia' ? 0x5f9ccf : b.kind === 'camp_ranger' ? 0x74c96a : 0xb98fe0;
-      B.cyl(HULL, 0.62, 0.62, 1.5, -0.25, 0.5, 0.05, 12, 0, 0, Math.PI / 2);
+      // Doctrine washes over the bay itself — ribs and end wall carry the
+      // corps color, so the three camp kinds read apart from strategy zoom,
+      // not only from the stripe.
+      B.cyl(mix(HULL, col, 0.16), 0.62, 0.62, 1.5, -0.25, 0.5, 0.05, 12, 0, 0, Math.PI / 2);
       for (const rx of [-0.85, -0.5, -0.15, 0.2, 0.45]) {              // hull ribs
-        B.cyl(HULL2, 0.65, 0.65, 0.07, rx, 0.5, 0.05, 12, 0, 0, Math.PI / 2);
+        B.cyl(mix(HULL2, col, 0.35), 0.65, 0.65, 0.07, rx, 0.5, 0.05, 12, 0, 0, Math.PI / 2);
       }
       B.cyl(shade(HULL, 0.9), 0.64, 0.64, 0.05, 0.51, 0.5, 0.05, 12, 0, 0, Math.PI / 2); // end ring
-      B.box(HULL2, 0.06, 1.24, 1.24, 0.53, 0.5, 0.05);                 // end wall
+      B.box(mix(HULL2, col, 0.28), 0.06, 1.24, 1.24, 0.53, 0.5, 0.05); // end wall
       B.box(DARK, 0.05, 0.7, 0.5, 0.56, 0.4, 0.05);                    // blast door
       G.box(col, 0.03, 0.6, 0.05, 0.58, 0.4, 0.34);
       G.box(col, 1.52, 0.05, 0.09, -0.25, 0.99, 0.05);                 // doctrine stripe
