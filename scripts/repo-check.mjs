@@ -210,6 +210,8 @@ assert.match(mainSource, /this\.showMenuBackdrop\(this\.ui\.selectedLevel \|\| 1
 assert.doesNotMatch(mainSource, /Boot straight onto the overworld/, 'startup must not bypass the first menu');
 assert.match(mainSource, /name = 'planet-edge-title'/, 'title scene must identify its planet-edge orbital layer');
 assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live last-stand simulation');
+assert.match(mainSource, /!this\.game && k === 'c' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'C must toggle the character screen from the persistent world');
+assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
 
 const architecture = read('docs/architecture.md');
 for (const rel of [

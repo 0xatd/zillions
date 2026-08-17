@@ -125,7 +125,7 @@ export class UI {
         </div>
 
         <div id="screen-main" class="mainmenu character-select">
-          <div class="character-heading"><span>EARTH FRONT</span><h1>SELECT YOUR HERO</h1><small>Choose who enters the persistent world.</small></div>
+          <div class="character-heading"><span>EARTH FRONT</span><h1>SELECT YOUR HERO</h1><small>Choose who enters the persistent world. Press C in the world to open this character screen.</small></div>
           <div id="character-stage" class="character-stage">
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
@@ -770,6 +770,13 @@ export class UI {
     // are one click from its buttons, and the walk is the point.
     if (this.overlayHidden()) this._showScreen('main');
     else this.hideOverlay();
+  }
+
+  toggleCharacterScreen() {
+    const screen = this.root.querySelector('#screen-main');
+    const characterOpen = !this.overlayHidden() && screen && !screen.classList.contains('hidden');
+    if (characterOpen) this.hideOverlay();
+    else this._showScreen('main');
   }
 
   // ----- hero library (Dota Tab-screen grammar) -----
