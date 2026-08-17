@@ -63,11 +63,12 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 ## Maps and Cities
 
 - The Labyrinth is one fixed authored dungeon in every game. It starts at the
-  Last Lantern, branches through six brood chambers and an optional vault,
-  reconverges at Crown Gate, and ends at the Sunless Throne. A separate
+  Last Lantern, offers two mutually exclusive choices across six bespoke room
+  contracts, reconverges at Crown Gate, and ends at the Sunless Throne. A separate
   Pursuit Clock sends escalating packs from the entrance until they become a
   sustained flood. Clearing every required chamber opens the final boss fight;
-  killing that boss is the only victory condition.
+  killing that boss is the only victory condition. Active room fights and
+  blessing choices pause the Pursuit Clock.
 
 - Every level names a landform (`theme.terrain`) and a city plan
   (`theme.city`). Both must stay unique per level — `scripts/map-check.mjs`

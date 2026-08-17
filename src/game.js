@@ -38,6 +38,7 @@ const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, 
 let nextId = 1000;
 const getNextId = () => nextId;
 const setNextId = (v) => { nextId = v; };
+const LABYRINTH_DOOR_ID = 2000000000;
 const snapNum = (v) => (Number.isFinite(v) ? v : 0);
 const snapRoute = (route) => Array.isArray(route) ? route.map(([x, z]) => [snapNum(x), snapNum(z)]) : null;
 
@@ -135,6 +136,8 @@ export class Game {
     this.pursuitTime = 0;
     this.pursuitStage = 0;
     this.pursuitSpawnT = 120;
+    this.labyrinthChoices = {};
+    this.labyrinthEncounters = [];
 
     if (snap) this._restore(snap);
     else if (this.mode === 'labyrinth') this._setupLabyrinth();
@@ -162,6 +165,8 @@ export class Game {
       checkpoint: this.checkpoint ? { x: snapNum(this.checkpoint.x), z: snapNum(this.checkpoint.z) } : null,
       blessingOffers: this.blessingOffers.map((o) => (o ? [...o] : null)),
       pursuit: [snapNum(this.pursuitTime), this.pursuitStage, snapNum(this.pursuitSpawnT)],
+      labyrinthChoices: { ...this.labyrinthChoices },
+      labyrinthEncounters: this.labyrinthEncounters.map((e) => ({ ...e })),
       flowSeeds: this.mode === 'labyrinth' ? [...(this._flowSeeds || [])] : null,
       flowT: snapNum(this.flowTimer),
       timers: {
@@ -238,7 +243,7 @@ export class Game {
         routeBest: Number.isFinite(z.routeBest) ? snapNum(z.routeBest) : null, repathT: snapNum(z.repathT || 0),
         frenzy: snapNum(z.frenzy || 0), speedMul: snapNum(z.speedMul || 1), raider: !!z.raider,
         armor: snapNum(z.armor || 0), maxHp: snapNum(z.maxHp || 0),
-        spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0),
+        spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0), bossPhase: z.bossPhase || 0,
       }]),
     };
   }
@@ -263,6 +268,13 @@ export class Game {
     this.checkpoint = snap.checkpoint ? { x: snap.checkpoint.x, z: snap.checkpoint.z } : null;
     this.blessingOffers = (snap.blessingOffers || []).map((o) => (o ? [...o] : null));
     [this.pursuitTime, this.pursuitStage, this.pursuitSpawnT] = snap.pursuit || [0, 0, 120];
+    this.labyrinthChoices = { ...(snap.labyrinthChoices || {}) };
+    this.labyrinthEncounters = (snap.labyrinthEncounters || []).map((e) => ({ ...e }));
+    if (this.mode === 'labyrinth' && !this.labyrinthEncounters.length) {
+      this.labyrinthEncounters = (this.map.labyrinthLayout?.encounters || []).map((e) => ({
+        key: e.key, nest: e.nest, status: 'waiting', wave: 0, waveT: 0,
+      }));
+    }
     if (this.mode === 'labyrinth' && this.checkpoint) {
       // offMap is not snapshotted; it is a pure function of the map and any
       // point inside the corridor, and the checkpoint always is one — so the
@@ -427,6 +439,7 @@ export class Game {
       if (meta.armor) zb.armor = meta.armor;
       if (meta.spawnT != null) zb.spawnT = meta.spawnT;
       if (meta.roarT != null) zb.roarT = meta.roarT;
+      zb.bossPhase = meta.bossPhase || 0;
       if (enraged) {
         zb.enraged = true;
         zb.def = { ...zb.def, speed: zb.def.speed * 1.5, chase: zb.def.chase * 1.5, dmg: Math.round(zb.def.dmg * 1.3) };
@@ -455,6 +468,7 @@ export class Game {
       // and desync a restored peer from an uninterrupted one. Empty seeds
       // (every hero down, revives pending) still compute: that fills the
       // field with Infinity, matching the live game's state at that moment.
+      this._restoreLabyrinthDoors();
       this._flowSeeds = [...snap.flowSeeds];
       this.flow.compute(this.occ, this._flowSeeds, this.gateIds);
       this.flowDirty = false;
@@ -496,6 +510,10 @@ export class Game {
     this.heroSetups.forEach((e, i) => this._spawnHero(e.k, spawns[i][0], spawns[i][1], e.camp));
     this._scatterCreeps();
     this._scatterLoot();
+    this.labyrinthChoices = {};
+    this.labyrinthEncounters = (this.map.labyrinthLayout?.encounters || []).map((e) => ({
+      key: e.key, nest: e.nest, status: 'waiting', wave: 0, waveT: 0,
+    }));
     const chambers = this.liveNests();
     this.msg(`🌀 The labyrinth opens. ${chambers} brood chambers stand between you and its champion — raze each one, take its blessing, and keep moving. ${this.lives} lives.`, 'info');
   }
@@ -1433,6 +1451,7 @@ export class Game {
     this._updateHives(dt);
     this._updateNodeBlight(dt);
     this._updateNodes(dt);
+    if (this.mode === 'labyrinth') this._updateLabyrinthEncounters(dt);
     if (this.mode === 'labyrinth' && !this.finalStand) this._updatePursuit(dt);
 
     // Campaign: raze every hive and the survivors call one last counterattack.
@@ -1456,10 +1475,126 @@ export class Game {
     }
   }
 
+  _updateLabyrinthEncounters(dt) {
+    const layout = this.map.labyrinthLayout;
+    if (!layout) return;
+    for (const def of layout.encounters || []) {
+      const state = this.labyrinthEncounters.find((e) => e.key === def.key);
+      const room = layout.rooms[def.room];
+      const nest = this.nests[def.nest];
+      if (!state || !room || !nest || state.status === 'sealed' || state.status === 'cleared') continue;
+      if (def.choice && this.labyrinthChoices[def.choice] && this.labyrinthChoices[def.choice] !== def.key) {
+        state.status = 'sealed';
+        nest.offMap = true; nest.alive = false; nest.hp = 0;
+        continue;
+      }
+      const entered = this.heroes.some((h) => !h.dead && dist2(h.x, h.z, room.x, room.z) < 100);
+      if (state.status === 'waiting' && entered) {
+        if (def.choice && !this.labyrinthChoices[def.choice]) {
+          this.labyrinthChoices[def.choice] = def.key;
+          for (const other of layout.encounters) {
+            if (other.choice !== def.choice || other.key === def.key) continue;
+            const otherState = this.labyrinthEncounters.find((e) => e.key === other.key);
+            const otherNest = this.nests[other.nest];
+            if (otherState) otherState.status = 'sealed';
+            if (otherNest) { otherNest.offMap = true; otherNest.alive = false; otherNest.hp = 0; }
+            this._setLabyrinthDoors(other, true);
+          }
+          this.msg(`🚪 ${room.label} chosen. The other route seals behind stone.`, 'info');
+        }
+        state.status = 'active';
+        this._setLabyrinthDoors(def, true);
+        state.waveT = 0;
+        this.emit({ type: 'roomstart', key: def.key, x: room.x, z: room.z });
+        this.msg(`⚔️ ${room.label} — ${this._labyrinthObjective(def.kind)}`, 'bad');
+      }
+      if (state.status !== 'active') continue;
+      if (!nest.alive) {
+        state.status = 'cleared';
+        this._setLabyrinthDoors(def, false);
+        this.emit({ type: 'roomclear', key: def.key, x: room.x, z: room.z });
+        this.msg(`✨ ${room.label} is clear. Choose your blessing, then move.`, 'info');
+        continue;
+      }
+      state.waveT -= dt;
+      if (state.wave < def.waves && state.waveT <= 0) {
+        state.wave++;
+        state.waveT = def.kind === 'holdout' ? 9 : 13;
+        this._spawnLabyrinthRoomWave(room, def.kind, state.wave);
+      }
+    }
+  }
+
+  _setLabyrinthDoors(def, closed) {
+    const rooms = this.map.labyrinthLayout?.rooms;
+    const room = rooms?.[def.room];
+    if (!room) return;
+    for (const fromIndex of def.from || []) {
+      const from = rooms[fromIndex];
+      if (!from) continue;
+      const dx = from.x - room.x, dz = from.z - room.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const ux = dx / d, uz = dz / d, px = -uz, pz = ux;
+      const cx = room.x + ux * 9, cz = room.z + uz * 9;
+      for (let i = -4; i <= 4; i++) {
+        const x = Math.round(cx + px * i), z = Math.round(cz + pz * i);
+        if (!this.map.inBounds(x, z) || !this.map.isWalkable(x, z)) continue;
+        const at = z * this.map.size + x;
+        if (closed && this.occ[at] === 0) this.occ[at] = LABYRINTH_DOOR_ID;
+        else if (!closed && this.occ[at] === LABYRINTH_DOOR_ID) this.occ[at] = 0;
+      }
+    }
+    this.flowDirty = true;
+  }
+
+  _restoreLabyrinthDoors() {
+    if (this.mode !== 'labyrinth') return;
+    for (const def of this.map.labyrinthLayout?.encounters || []) {
+      const state = this.labyrinthEncounters.find((e) => e.key === def.key);
+      if (state?.status === 'sealed') {
+        const nest = this.nests[def.nest];
+        if (nest) nest.offMap = true;
+      }
+      if (state?.status === 'active' || state?.status === 'sealed') this._setLabyrinthDoors(def, true);
+    }
+  }
+
+  _labyrinthObjective(kind) {
+    return ({
+      bridge: 'hold the bridge and break the brood heart.',
+      seals: 'survive the rotunda ambush and shatter its heart.',
+      ambush: 'crypts are opening on every side.',
+      causeway: 'stay on the causeways; the cells are flooding.',
+      crypts: 'side crypts open behind the team. Keep the corridor clear.',
+      holdout: 'survive four waves while Crown Gate unlocks.',
+    })[kind] || 'clear the chamber.';
+  }
+
+  _spawnLabyrinthRoomWave(room, kind, wave) {
+    const base = kind === 'holdout' ? 5 + wave * 2 : 4 + wave * 2;
+    const count = Math.round(base * this.diff.mult * Math.min(1.35, this.level.mult));
+    const types = kind === 'bridge' ? ['walker', 'runner']
+      : kind === 'causeway' ? ['runner', 'spitter']
+        : kind === 'crypts' ? ['walker', 'brute']
+          : kind === 'holdout' ? ['walker', 'runner', 'brute']
+            : ['walker', 'runner', 'spitter'];
+    let spawned = 0, guard = 0;
+    while (spawned < count && guard++ < count * 20) {
+      const a = this.rng() * Math.PI * 2, r = 5 + this.rng() * 4;
+      const x = room.x + Math.cos(a) * r, z = room.z + Math.sin(a) * r;
+      if (!this.map.isWalkable(x | 0, z | 0)) continue;
+      if (this._spawnZombie(types[(this.rng() * types.length) | 0], x, z, true, true)) spawned++;
+    }
+    this.emit({ type: 'roomwave', x: room.x, z: room.z, wave });
+  }
+
   // The rear horde always enters through the authored starting sanctuary.
   // It escalates from scouts to a sustained flood, but never spawns ahead of
   // the party or replaces the final-boss objective.
   _updatePursuit(dt) {
+    const roomFight = this.labyrinthEncounters.some((e) => e.status === 'active');
+    const choosing = this.blessingOffers.some((o) => o && o.length);
+    if (roomFight || choosing) return;
     this.pursuitTime += dt;
     const stage = this.pursuitTime < 120 ? 0 : this.pursuitTime < 240 ? 1
       : this.pursuitTime < 360 ? 2 : 3;
@@ -2572,6 +2707,21 @@ export class Game {
 
   _updateBoss(zb, dt) {
     const B = zb.cfg || this.level.boss;
+    if (this.mode === 'labyrinth') {
+      const ratio = zb.hp / Math.max(1, zb.maxHp);
+      const phase = ratio <= 0.33 ? 3 : ratio <= 0.66 ? 2 : 1;
+      if (phase > (zb.bossPhase || 0)) {
+        zb.bossPhase = phase;
+        if (phase > 1) {
+          const room = this.map.labyrinthLayout?.boss || { x: zb.x, z: zb.z };
+          this._spawnLabyrinthRoomWave(room, phase === 2 ? 'ambush' : 'holdout', phase + 1);
+          this.msg(phase === 2
+            ? `👑 ${B.name} breaks the outer seal — the throne wakes.`
+            : `💀 ${B.name} enters its final phase. No retreat.`, 'bad');
+          this.emit({ type: 'bossphase', x: zb.x, z: zb.z, phase });
+        }
+      }
+    }
     // Bosses shrug off most crowd control.
     if (zb.stunT > 0.8) zb.stunT = 0.8;
     if (zb.slowT > 0 && zb.slowMul < 0.75) zb.slowMul = 0.75;
@@ -3436,6 +3586,14 @@ export class Game {
 
   _damageNest(n, dmg) {
     if (!n.alive) return;
+    if (this.mode === 'labyrinth') {
+      const def = this.map.labyrinthLayout?.encounters?.find((e) => e.nest === n.id);
+      const state = def && this.labyrinthEncounters.find((e) => e.key === def.key);
+      if (def?.kind === 'holdout' && state && state.wave < def.waves) {
+        this.emit({ type: 'shieldhit', x: n.x, z: n.z });
+        return;
+      }
+    }
     n.hp -= dmg;
     this.emit({ type: 'bhit', x: n.x, z: n.z });
     // A hive under the knife spits defenders. Razing one is a siege you have

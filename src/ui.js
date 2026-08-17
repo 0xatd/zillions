@@ -900,9 +900,14 @@ export class UI {
       }
     }
     if (labyrinth) {
-      q('#army-status').innerHTML = game.lives > 0
-        ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · the fallen return at the last razed chamber`
-        : '❤️ <b>No lives left</b> — the next fall is final.';
+      const active = game.labyrinthEncounters?.find((e) => e.status === 'active');
+      const def = active && game.map.labyrinthLayout?.encounters?.find((e) => e.key === active.key);
+      const room = def && game.map.labyrinthLayout?.rooms?.[def.room];
+      q('#army-status').innerHTML = active && room
+        ? `⚔️ <b>${room.label}</b> · wave ${Math.max(1, active.wave)}/${def.waves} · doors sealed during combat`
+        : game.lives > 0
+          ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · choose a marked route and reach the Sunless Throne`
+          : '❤️ <b>No lives left</b> — the next fall is final.';
     } else {
       const army = game.units.filter((u) => !u.hero && !u.dead).length;
       const stanceText = {

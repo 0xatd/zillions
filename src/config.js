@@ -806,7 +806,7 @@ export const LABYRINTH_LEVELS = [
     labyrinth: true,
     economy: { startGold: 0, income: 0, pressure: 0.9 },
     quests: [],
-    blurb: 'Six brood chambers guard the road to the Butcher. Keep moving.',
+    blurb: 'Choose a route through four of six chambers, then face the Butcher.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Black water',
       palette: { grass: 0x6a7a58, forest: 0x3c5240, water: 0x2f5a6a, mountain: 0x8a8296, sand: 0x9a8e6e, path: 0x7a6e56, sky: 0x6a7a88 } },
     boss: { name: 'The Butcher Below', icon: '🔪', hp: 3000, dmg: 55, speed: 1.1, chase: 2.2, scale: 3.0,

@@ -228,7 +228,7 @@ export class TerrainField {
     const rooms = [
       point(0.50, 0.91, 'start', 'The Last Lantern'),
       point(0.50, 0.78, 'junction', 'Fork of Teeth'),
-      point(0.27, 0.68, 'brood', 'The Ash Chapel'),
+      point(0.27, 0.68, 'brood', 'The Ash Bridge'),
       point(0.73, 0.67, 'brood', 'The Red Reliquary'),
       point(0.50, 0.56, 'brood', 'The Blood Cross'),
       point(0.25, 0.43, 'brood', 'The Drowned Cells'),
@@ -264,7 +264,31 @@ export class TerrainField {
     rooms.forEach((room) => carveDisc(room.x, room.z,
       room.kind === 'start' ? 8 : room.kind === 'junction' ? 6 : 9));
 
-    // Small landmark islands keep junctions recognizable at gameplay zoom.
+    // Each combat room has its own silhouette and floor language. These are
+    // authored set pieces, not renamed copies of one circular arena.
+    const carveBox = (cx, cz, rx, rz, tile = TILE.GRASS) => {
+      for (let z = cz - rz; z <= cz + rz; z++) for (let x = cx - rx; x <= cx + rx; x++) {
+        if (this.inBounds(x, z)) this.tiles[this.idx(x, z)] = tile;
+      }
+    };
+    carveBox(rooms[2].x, rooms[2].z, 12, 4, TILE.PATH); // narrow bridge defense
+    carveDisc(rooms[3].x, rooms[3].z, 11, TILE.SAND);   // reliquary rotunda
+    carveBox(rooms[4].x, rooms[4].z, 10, 10, TILE.PATH);
+    carveBox(rooms[4].x, rooms[4].z, 3, 12, TILE.PATH); // blood-cross transepts
+    carveBox(rooms[4].x, rooms[4].z, 12, 3, TILE.PATH);
+    carveBox(rooms[5].x, rooms[5].z, 11, 7, TILE.SAND); // drowned causeway hall
+    carveBox(rooms[6].x, rooms[6].z, 14, 5, TILE.STONEORE); // long bone gallery
+    carveBox(rooms[7].x, rooms[7].z, 12, 7, TILE.PATH); // crown gate holdout
+    carveDisc(rooms[8].x, rooms[8].z, 14, TILE.STONEORE); // final throne amphitheatre
+
+    // Environmental hazards and landmarks leave wide co-op lanes intact.
+    for (const dx of [-8, 8]) for (const dz of [-4, 4]) {
+      carveDisc(rooms[5].x + dx, rooms[5].z + dz, 2.6, TILE.WATER);
+    }
+    for (const dx of [-8, 8]) carveDisc(rooms[3].x + dx, rooms[3].z, 1.8, TILE.GOLDORE);
+    for (const dx of [-9, 9]) carveDisc(rooms[8].x + dx, rooms[8].z + 2, 2.3, TILE.MOUNTAIN);
+
+    // Small landmark inlays keep side rooms recognizable at gameplay zoom.
     carveDisc(rooms[3].x, rooms[3].z, 2.2, TILE.GOLDORE);
     carveDisc(rooms[9].x, rooms[9].z, 2.2, TILE.STONEORE);
 
@@ -273,7 +297,15 @@ export class TerrainField {
     this.sites = [{ ...rooms[0], name: rooms[0].label, hint: 'The only safe ground behind you.' }];
     this.nodeSpots = [];
     this.chokeSpots = [];
-    this.labyrinthLayout = { rooms, edges, start: rooms[0], boss: rooms[8], reward: rooms[9] };
+    const encounters = [
+      { room: 2, from: [1], nest: 0, key: 'ash_bridge', kind: 'bridge', choice: 'first', waves: 2 },
+      { room: 3, from: [1], nest: 1, key: 'red_reliquary', kind: 'seals', choice: 'first', waves: 2 },
+      { room: 4, from: [2, 3], nest: 2, key: 'blood_cross', kind: 'ambush', waves: 3 },
+      { room: 5, from: [4], nest: 3, key: 'drowned_cells', kind: 'causeway', choice: 'second', waves: 2 },
+      { room: 6, from: [4], nest: 4, key: 'bone_gallery', kind: 'crypts', choice: 'second', waves: 3 },
+      { room: 7, from: [5, 6], nest: 5, key: 'crown_gate', kind: 'holdout', waves: 4 },
+    ];
+    this.labyrinthLayout = { rooms, edges, encounters, start: rooms[0], boss: rooms[8], reward: rooms[9] };
 
     // Match the rendered relief to the carved floor. High tiles stay crag;
     // walkable rooms and corridors sit in a readable lower plane.
