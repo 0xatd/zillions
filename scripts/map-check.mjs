@@ -90,6 +90,51 @@ for (const level of LEVELS) {
     }
   }
 
+  // --- reachability: lane nodes and buildable pockets --------------------
+  // The frontier connector bridges hives and sites; nodes and pockets are on
+  // it too now. A regression here means marooned objectives (a barrow nobody
+  // can ride to) or promised build ground with no road (an outpost inside
+  // unmovable terrain) — the exact classes of bug this check exists to kill.
+  {
+    const reach = flood(map, Math.round(map.sites[0].x), Math.round(map.sites[0].z));
+    for (const nd of map.nodeSpots) {
+      // A node is "there" if it or any tile within 3 of it is reached — the
+      // node anchor itself may sit on the feature (a ford mid-water).
+      let ok = false;
+      for (let dz = -3; dz <= 3 && !ok; dz++) {
+        for (let dx = -3; dx <= 3 && !ok; dx++) {
+          const x = Math.round(nd.x) + dx, z = Math.round(nd.z) + dz;
+          if (x < 0 || z < 0 || x >= N || z >= N) continue;
+          if (reach[z * N + x]) ok = true;
+        }
+      }
+      assert.ok(ok, `${label}: lane node ${nd.kind} at ${nd.x | 0},${nd.z | 0} is unreachable from ${map.sites[0].name}`);
+    }
+    // Buildable pockets outside the main flood must be scenery-sized (<6 tiles).
+    const claimed = new Uint8Array(N * N);
+    for (let i = 0; i < N * N; i++) {
+      if (claimed[i] || reach[i] || !TILE_INFO[map.tiles[i]].build) continue;
+      let size = 0;
+      const stack = [i];
+      claimed[i] = 1;
+      while (stack.length) {
+        const j = stack.pop();
+        size++;
+        const x = j % N, z = (j / N) | 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+          const ni = nz * N + nx;
+          if (claimed[ni] || reach[ni] || !TILE_INFO[map.tiles[ni]].build) continue;
+          claimed[ni] = 1;
+          stack.push(ni);
+        }
+      }
+      assert.ok(size < 6,
+        `${label}: a buildable pocket of ${size} tiles is unreachable from ${map.sites[0].name} — outpost with no road`);
+    }
+  }
+
   // --- lane nodes: enough of them, and a mix of kinds ---------------------
   assert.ok(map.nodeSpots.length >= 7, `${label} found only ${map.nodeSpots.length} lane nodes`);
   const kinds = new Set(map.nodeSpots.map((n) => n.kind));
