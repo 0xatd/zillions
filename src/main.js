@@ -27,7 +27,7 @@ import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import {
   stitchOverworld, Overworld, gateState,
-  earthWorldDescriptor, overworldChannel,
+  earthWorldDescriptor, galaxyWorldDescriptor, galaxyDestinations, overworldChannel,
   OVERWORLD_SIZE, OVERWORLD_GHOSTS,
 } from './overworld.js';
 import {
@@ -50,10 +50,10 @@ const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // through GameMap's cel terrain pipeline. Each region wears its own level's
 // palette, so the planet reads as the campaign itself.
 class OverworldMap extends GameMap {
-  constructor(campaign = 0) {
+  constructor(campaign = 0, worldId = 'earth') {
     // The planet is a descriptor: Earth today, other servers' universes
     // tomorrow — same stitch, same renderer, different data.
-    const world = earthWorldDescriptor(campaign);
+    const world = galaxyWorldDescriptor(worldId, campaign);
     super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
     this._owWorld = world;
     // super() stitched with a zero-campaign descriptor (the ladder is not
@@ -186,6 +186,8 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._enterOverworld(),
+      onGalaxyOpen: () => this._openGalaxyMap(),
+      onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
       onSignIn: () => this._signIn(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
@@ -489,11 +491,12 @@ class App {
   // walked by the player's selected hero. Entering a front's gate starts the
   // run through the same onStart path the setup screen uses.
 
-  _enterOverworld() {
+  _enterOverworld(worldId = null) {
     if (this.game || this.ow) return;
+    worldId = worldId || this.profile.lastWorld || 'earth';
     this._clearMenuBackdrop();
     this.ui.setOverworldMode(true);
-    const map = new OverworldMap(this.profile.campaign || 0);
+    const map = new OverworldMap(this.profile.campaign || 0, worldId);
     const sky = map.overworldWorld.regions[0]?.palette?.sky || 0x7eaeb5;
     this.scene.background = new THREE.Color(sky);
     this.scene.fog.color.setHex(sky);
@@ -507,8 +510,32 @@ class App {
       this.owGates.push(this._makeOverworldGate(gate));
     }
     this._makeOverworldHero();
+    this.profile.lastWorld = map.overworldWorld.id;
+    this._saveProfile();
     this.ui.hideOverlay();
-    this.ui.showBanner('🚶 WASD or arrows to walk · click to set a course · ESC for the war council', '', 6000);
+    this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
+  }
+
+  _openGalaxyMap() {
+    const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
+    this.ui.showGalaxy(galaxyDestinations(this.profile.campaign || 0), currentWorld);
+  }
+
+  _travelToWorld(worldId) {
+    const destination = galaxyDestinations(this.profile.campaign || 0, 12)
+      .find((world) => world.id === worldId);
+    if (!destination || !destination.unlocked) {
+      this.audio.deny();
+      this.ui.showBanner('🔒 That route is beyond the current frontier.', 'bad', 2600);
+      return;
+    }
+    if (this.ow?.world?.id === worldId) {
+      this.ui.hideOverlay();
+      return;
+    }
+    this._clearOverworld();
+    this.ui.setOverworldMode(false);
+    this._enterOverworld(worldId);
   }
 
   _clearOverworld() {
@@ -559,9 +586,11 @@ class App {
     ring.position.y = 0.06;
     gr.add(ring);
     gr.userData.ring = ring;
-    const icon = gate.cave ? '🌀' : gate.boss.icon;
+    const icon = gate.cave ? '🌀' : gate.portal ? '🚀' : gate.boss.icon;
     const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
-    const sub = gate.cave ? 'the trials below' : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
+    const sub = gate.cave ? 'the trials below'
+      : gate.portal ? 'starship navigation'
+      : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
     const label = this._makeLabelSprite(icon, name);
     label.position.y = 5.6;
     label.scale.set(5.2, 2.6, 1);
@@ -646,7 +675,7 @@ class App {
     }
     this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
     if (ev.gate.portal) {
-      this.ui.showBanner('🌀 A way off-world — the stars open in a future build.', '', 3200);
+      this._openGalaxyMap();
       return;
     }
     this.ui.showGateConfirm({

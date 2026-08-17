@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import {
   OverworldField, Overworld, overworldReachable, overworldLayout,
   gateState, overworldChannel, earthWorldDescriptor,
+  frontierWorldDescriptor, galaxyDestinations, galaxyWorldDescriptor,
   OVERWORLD_SEED, OVERWORLD_GHOSTS,
 } from '../src/overworld.js';
 import { LEVELS, LABYRINTH_LEVELS } from '../src/config.js';
@@ -16,9 +17,9 @@ import { LEVELS, LABYRINTH_LEVELS } from '../src/config.js';
 const tileHash = (f) =>
   crypto.createHash('sha256').update(Buffer.from(f.tiles)).digest('hex');
 
-// 1. Deterministic: the same descriptor stitches the same planet, byte for
-// byte — and the descriptor refactor kept Earth exactly where it stood.
-const EARTH_HASH = '631edb03d73dc0811b4032f1c7936c56d1ba3616dea3f680ee1900a077f30937';
+// 1. Deterministic: the same descriptor stitches the same planet byte for
+// byte. The reference includes Earth's authored Orbital Lift terrace.
+const EARTH_HASH = 'ee5defcfc1c992f03fe31df4b43a0979a3e4509e7bf8030beff2ca00f95c447e';
 const a = new OverworldField(earthWorldDescriptor(0));
 const b = new OverworldField(earthWorldDescriptor(0));
 assert.equal(tileHash(a), EARTH_HASH, 'Earth tiles are byte-stable across the descriptor refactor');
@@ -34,8 +35,9 @@ assert.notDeepEqual([...a.tiles], [...c.tiles], 'overworld must consume its rng'
 
 // 2. Gates: all five fronts plus the labyrinth mouth, in march order.
 const layout = overworldLayout(earthWorldDescriptor(0));
-assert.equal(layout.gates.length, LEVELS.length, 'one gate per campaign front');
-assert.deepEqual(layout.gates.map((g) => g.levelId), LEVELS.map((l) => l.id), 'gates map to level ids in order');
+assert.equal(layout.gates.length, LEVELS.length + 1, 'one gate per campaign front plus the Orbital Lift');
+assert.deepEqual(layout.gates.filter((g) => !g.portal).map((g) => g.levelId), LEVELS.map((l) => l.id), 'gates map to level ids in order');
+assert.ok(layout.gates.at(-1).portal, 'Earth has a physical route to the galaxy map');
 assert.ok(layout.cave.cave && layout.cave.trials.length === LABYRINTH_LEVELS.length, 'the cave leads to the trials');
 
 // 3. Reachable: every gate stands on walkable ground connected to the spawn
@@ -153,5 +155,20 @@ for (const g of kLayout.gates) {
 // of the world id, so every server agrees on where the ghosts walk.
 assert.equal(overworldChannel('earth'), 'zl-overworld:earth', 'earth channel name');
 assert.equal(overworldChannel(offworld.id), 'zl-overworld:kepler442b', 'descriptor worldId reaches the ghost channel');
+
+// Galaxy navigation is real state, not a level-picker skin. Earth is always
+// reachable, the first frontier route opens after the authored fronts, and a
+// destination resolves to a persistent planet with a mission and return lift.
+const freshGalaxy = galaxyDestinations(0);
+assert.equal(freshGalaxy[0].id, 'earth', 'Earth is the starting destination');
+assert.ok(freshGalaxy.slice(1).every((world) => !world.unlocked), 'frontier routes stay locked before Earth is cleared');
+const openGalaxy = galaxyDestinations(LEVELS.length);
+assert.equal(openGalaxy[1].unlocked, true, 'clearing Earth opens the first frontier route');
+assert.equal(openGalaxy[2].unlocked, false, 'frontier travel still follows discovered routes');
+const frontier = frontierWorldDescriptor(LEVELS.length + 1, LEVELS.length);
+assert.equal(galaxyWorldDescriptor(frontier.id, LEVELS.length).id, frontier.id, 'destination id resolves its world descriptor');
+const frontierMap = new OverworldField(frontier);
+assert.ok(frontierMap.overworldLayout.gates.some((gate) => gate.portal), 'frontier planet has an Orbital Lift home');
+assert.ok(frontierMap.overworldLayout.gates.some((gate) => gate.levelId === LEVELS.length + 1), 'frontier planet owns its current playable instance');
 
 console.log('overworld-check: descriptor worlds stitched — Earth byte-stable, second world reachable ✓');

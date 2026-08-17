@@ -157,6 +157,7 @@ export class AuthClient {
       kills: stats.total_kills || 0,
       bestDay: stats.best_day || 0,
       lastHero: profile.selected_hero || stats.favorite_hero || null,
+      lastWorld: this.user?.user_metadata?.last_world || 'earth',
       updatedAt: Date.parse(profile.updated_at || stats.updated_at || '') || 0,
     };
   }
@@ -251,7 +252,7 @@ export class AuthClient {
     const wins = Number(localProfile.wins || 0);
     const hero = localProfile.lastHero || 'alexander';
     await this.ensureProfile(localProfile);
-    const [{ error: profileError }, { error: statsError }] = await Promise.all([
+    const [{ error: profileError }, { error: statsError }, { error: userError }] = await Promise.all([
       this.client.from('profiles').update({
         selected_hero: hero,
         last_seen_at: isoNow(),
@@ -266,9 +267,11 @@ export class AuthClient {
         favorite_hero: hero,
         updated_at: isoNow(),
       }, { onConflict: 'user_id' }),
+      this.client.auth.updateUser({ data: { last_world: localProfile.lastWorld || 'earth' } }),
     ]);
     if (profileError) throw profileError;
     if (statsError) throw statsError;
+    if (userError) throw userError;
   }
 
   async loadLatestSave() {

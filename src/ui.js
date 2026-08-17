@@ -132,7 +132,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
         <div id="screen-solo" class="mainmenu solomenu hidden">
@@ -162,6 +162,13 @@ export class UI {
 
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
+
+        <div id="screen-galaxy" class="galaxy-screen hidden">
+          <div class="galaxy-head"><span>STARSHIP NAVIGATION</span><h1>THE KNOWN GALAXY</h1><p>Select a destination. Planetary zones and battle instances load inside the same persistent journey.</p></div>
+          <div id="galaxy-map" class="galaxy-map"></div>
+          <aside id="galaxy-detail" class="galaxy-detail"></aside>
+          <button class="tbtn galaxy-back" id="galaxy-back">← RETURN</button>
+        </div>
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
@@ -349,6 +356,7 @@ export class UI {
     q('#m-solo').onclick = () => this._showScreen('solo');
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
+    q('#m-galaxy').onclick = () => this.cb.onGalaxyOpen && this.cb.onGalaxyOpen();
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-custom').onclick = () => this._showScreen('solo');
     q('#m-logout').onclick = () => this._showScreen('account');
@@ -368,6 +376,7 @@ export class UI {
       } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
     };
     q('#l-back').onclick = () => this._showScreen('main');
+    q('#galaxy-back').onclick = () => this._overworldMode ? this.hideOverlay() : this._showScreen('main');
     for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._showScreen(this._accountAccepted ? 'main' : 'account');
 
     // ----- lobby -----
@@ -697,7 +706,7 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -756,6 +765,38 @@ export class UI {
     this._overworldMode = !!on;
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
+    this.root.querySelector('#m-galaxy').classList.toggle('hidden', !on);
+  }
+
+  showGalaxy(destinations, currentWorld = 'earth') {
+    const map = this.root.querySelector('#galaxy-map');
+    const detail = this.root.querySelector('#galaxy-detail');
+    map.innerHTML = '';
+    const select = (destination) => {
+      for (const node of map.querySelectorAll('.galaxy-node')) node.classList.toggle('sel', node.dataset.world === destination.id);
+      const state = destination.id === currentWorld ? 'CURRENT LOCATION'
+        : destination.cleared ? 'LIBERATED'
+        : destination.unlocked ? 'ROUTE AVAILABLE' : 'ROUTE LOCKED';
+      detail.innerHTML = `<span>${state}</span><h2>${destination.name}</h2><p>${destination.subtitle}</p>
+        ${destination.threat ? `<small>FRONTIER DEPTH ${destination.threat}</small>` : '<small>ORIGIN WORLD</small>'}
+        <button id="galaxy-travel" class="menubtn primary" ${!destination.unlocked || destination.id === currentWorld ? 'disabled' : ''}>
+          ${destination.id === currentWorld ? 'YOU ARE HERE' : destination.unlocked ? 'TRAVEL' : 'LOCKED'}
+        </button>`;
+      const travel = detail.querySelector('#galaxy-travel');
+      travel.onclick = () => this.cb.onGalaxyTravel && this.cb.onGalaxyTravel(destination.id);
+    };
+    destinations.forEach((destination, index) => {
+      const node = document.createElement('button');
+      node.className = `galaxy-node${destination.unlocked ? '' : ' locked'}${destination.cleared ? ' cleared' : ''}`;
+      node.dataset.world = destination.id;
+      node.style.setProperty('--gx', `${12 + ((index * 31) % 74)}%`);
+      node.style.setProperty('--gy', `${18 + ((index * 47) % 62)}%`);
+      node.innerHTML = `<i></i><b>${destination.name}</b><small>${destination.id === currentWorld ? 'YOU ARE HERE' : destination.cleared ? 'LIBERATED' : destination.unlocked ? 'AVAILABLE' : 'LOCKED'}</small>`;
+      node.onclick = () => select(destination);
+      map.appendChild(node);
+    });
+    this._showScreen('galaxy');
+    select(destinations.find((destination) => destination.id === currentWorld) || destinations[0]);
   }
 
   overlayHidden() {

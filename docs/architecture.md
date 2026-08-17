@@ -23,8 +23,10 @@ The startup flow is:
 index.html
   -> src/main.js
      -> account gate
-     -> main menu
-     -> solo setup or online lobby
+     -> character roster
+     -> last planetary location or starting world
+     -> Orbital Lift / galaxy map / destination world
+     -> planetary gate, custom setup, or online lobby
      -> deterministic Game instance
      -> Three.js render loop
 ```
@@ -57,7 +59,7 @@ to snapshots when the state can affect later simulation.
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
-| `src/overworld.js` | Headless walkable menu planet: stitched biomes, level gates, hero controller, ghost presence |
+| `src/overworld.js` | Headless persistent worlds: galaxy catalog, world descriptors, stitched biomes, instance gates, Orbital Lifts, hero controller, ghost presence |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
@@ -153,6 +155,19 @@ seat that the same account owned before disconnect.
 | Rooms, seats, chat, and signaling | Supabase |
 | Local development fallback | Browser local storage |
 | Legacy state mirror | Vercel Blob compatibility routes |
+| Last planetary location | Profile `lastWorld` with local mirror |
+
+## Galaxy Travel
+
+`src/overworld.js` owns the destination catalog and converts a destination ID
+into a world descriptor. Earth and each frontier planet use the same
+`Overworld` controller and renderer. An Orbital Lift opens the star map.
+Travel removes the current world scene, loads the selected descriptor, scopes
+presence to that world's channel, and stores `lastWorld` on the profile.
+
+Current Zillions battle maps are instances attached to planetary gates. The
+galaxy and world descriptors must not assume that future destinations use the
+same art, siege objectives, or encounter format.
 
 Do not move production social state back to Vercel Blob.
 
