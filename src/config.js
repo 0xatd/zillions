@@ -790,8 +790,8 @@ function shiftHue(hex, deg) {
 
 // ---------- The Labyrinth: a hero gauntlet with no colony ----------
 //
-// A separate solo mode, not part of the war for Earth. Each trial is a
-// serpentine canyon of chambers; every chamber's heart is a hive brood-node.
+// A separate solo mode, not part of the war for Earth. Every game uses one
+// authored branching dungeon; every required chamber holds a hive brood-node.
 // Raze it and the chamber offers a blessing. Raze all of them and the
 // labyrinth's champion walks. There is no founding, no gold sink, no army —
 // only the heroes, what they carry, and what the chambers grant.
@@ -802,11 +802,11 @@ export const LABYRINTH_LIVES = 3;   // shared team lives; a fall spends one
 
 export const LABYRINTH_LEVELS = [
   {
-    id: 9001, name: 'Trial of the Howling Depth', seed: 91101, mult: 1.0, size: 128, nests: 4,
+    id: 9001, name: 'Trial of the Howling Depth', seed: 91101, mult: 1.0, size: 136, nests: 6,
     labyrinth: true,
     economy: { startGold: 0, income: 0, pressure: 0.9 },
     quests: [],
-    blurb: 'Four brood chambers and the Butcher at the bottom. Learn to keep moving.',
+    blurb: 'Six brood chambers guard the road to the Butcher. Keep moving.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Black water',
       palette: { grass: 0x6a7a58, forest: 0x3c5240, water: 0x2f5a6a, mountain: 0x8a8296, sand: 0x9a8e6e, path: 0x7a6e56, sky: 0x6a7a88 } },
     boss: { name: 'The Butcher Below', icon: '🔪', hp: 3000, dmg: 55, speed: 1.1, chase: 2.2, scale: 3.0,
@@ -814,11 +814,11 @@ export const LABYRINTH_LEVELS = [
       desc: 'A mountain of meat and cleavers, fattened in the dark. Enrages at half health.' },
   },
   {
-    id: 9002, name: 'Trial of the Drowned Vault', seed: 92202, mult: 1.35, size: 132, nests: 5,
+    id: 9002, name: 'Trial of the Drowned Vault', seed: 92202, mult: 1.35, size: 136, nests: 6,
     labyrinth: true,
     economy: { startGold: 0, income: 0, pressure: 1.0 },
     quests: [],
-    blurb: 'Five chambers, colder and tighter. The broodmother has been busy down here.',
+    blurb: 'The same descent, under fiercer pursuit. The broodmother waits at the end.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Grave water',
       palette: { grass: 0x4e6a6a, forest: 0x2f4a4e, water: 0x3a6a8a, mountain: 0x7a8aa0, sand: 0x76806e, path: 0x5e6a62, sky: 0x58707e } },
     boss: { name: 'Vault Mother', icon: '🪳', hp: 4200, dmg: 42, speed: 0.95, chase: 1.8, scale: 3.2,

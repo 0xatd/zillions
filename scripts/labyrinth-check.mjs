@@ -28,6 +28,19 @@ assert.ok(isLabyrinthLevel(9001) && !isLabyrinthLevel(6), 'labyrinth id band bro
 assert.equal(levelById(9001).id, 9001, 'levelById must resolve labyrinth trials');
 assert.ok(levelById(6).galaxy, 'galaxy ids past the war must still resolve to galaxy planets');
 
+// The first release is one authored map, not a seeded maze. Every trial must
+// have identical topology, landmarks, chamber positions, and boss endpoint.
+const authoredMaps = LABYRINTH_LEVELS.map((lv) => new TerrainField(
+  lv.seed, lv.theme, { size: lv.size, nests: lv.nests },
+));
+const topology = (map) => hash({
+  size: map.size, tiles: [...map.tiles], nests: map.nestSpots,
+  rooms: map.labyrinthLayout?.rooms, edges: map.labyrinthLayout?.edges,
+});
+assert.equal(new Set(authoredMaps.map(topology)).size, 1,
+  'every Labyrinth game must use the same authored map');
+assert.ok(authoredMaps[0].labyrinthLayout?.boss, 'authored map needs an explicit final boss room');
+
 for (const lv of LABYRINTH_LEVELS) {
   const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
   let g = new Game(map, 'normal', 'scott', null, lv.id, 'labyrinth');
@@ -52,6 +65,17 @@ for (const lv of LABYRINTH_LEVELS) {
   const nest = live[0];
   assert.ok(g.flow.distAt(nest.x | 0, nest.z | 0) < Infinity,
     `${lv.name}: chamber ${nest.id} cannot reach the hero through the corridor`);
+
+  // -- Pursuit Clock: quiet opening, then deterministic rear pressure --
+  h.x = map.labyrinthLayout.boss.x;
+  h.z = map.labyrinthLayout.boss.z;
+  g.pursuitTime = 119.9;
+  g.pursuitSpawnT = 0;
+  const beforePursuit = g.zombies.length;
+  g.update(0.2);
+  assert.equal(g.pursuitStage, 1, `${lv.name}: pursuit did not enter scout stage`);
+  assert.ok(g.zombies.length > beforePursuit, `${lv.name}: rear pursuit spawned no scouts`);
+  for (let i = 0; i < 30; i++) g.update(SIM_DT); // settle the hero-seeded flow before snapshot
 
   // -- snapshot/restore determinism with labyrinth state in flight --
   // Sequential, not interleaved: the sim's id counter is module-global (reset
@@ -99,6 +123,8 @@ for (const lv of LABYRINTH_LEVELS) {
   for (let i = 0; i < 30; i++) g.update(SIM_DT);
   assert.ok(g.finalStand, `${lv.name}: finale did not trigger`);
   assert.ok(g.boss, `${lv.name}: champion did not rise`);
+  assert.ok(Math.hypot(g.boss.x - map.labyrinthLayout.boss.x, g.boss.z - map.labyrinthLayout.boss.z) < 3,
+    `${lv.name}: champion did not rise in the Sunless Throne`);
   g.damageZombie(g.boss, g.boss.maxHp * 20); // enough to punch through boss armor
   assert.ok(g.over && g.won, `${lv.name}: killing the champion must clear the trial`);
 }

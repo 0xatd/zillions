@@ -872,7 +872,9 @@ export class UI {
       ? '🏳️ <b>Claim your ground</b>'
       : game.finalStand
         ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
-        : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+        : labyrinth
+          ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
+          : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
     // In the labyrinth the front is chambers and lives, not nodes and camps.
     if (labyrinth) {

@@ -132,6 +132,9 @@ export class Game {
     this.lives = 0;              // shared team lives; a hero's fall spends one
     this.checkpoint = null;      // where the fallen return: start, then each razed chamber
     this.blessingOffers = [];    // per-player [key,key,key] while a choice is open
+    this.pursuitTime = 0;
+    this.pursuitStage = 0;
+    this.pursuitSpawnT = 120;
 
     if (snap) this._restore(snap);
     else if (this.mode === 'labyrinth') this._setupLabyrinth();
@@ -158,6 +161,7 @@ export class Game {
       lives: this.lives,
       checkpoint: this.checkpoint ? { x: snapNum(this.checkpoint.x), z: snapNum(this.checkpoint.z) } : null,
       blessingOffers: this.blessingOffers.map((o) => (o ? [...o] : null)),
+      pursuit: [snapNum(this.pursuitTime), this.pursuitStage, snapNum(this.pursuitSpawnT)],
       flowSeeds: this.mode === 'labyrinth' ? [...(this._flowSeeds || [])] : null,
       flowT: snapNum(this.flowTimer),
       timers: {
@@ -258,6 +262,7 @@ export class Game {
     this.lives = snap.lives ?? 0;
     this.checkpoint = snap.checkpoint ? { x: snap.checkpoint.x, z: snap.checkpoint.z } : null;
     this.blessingOffers = (snap.blessingOffers || []).map((o) => (o ? [...o] : null));
+    [this.pursuitTime, this.pursuitStage, this.pursuitSpawnT] = snap.pursuit || [0, 0, 120];
     if (this.mode === 'labyrinth' && this.checkpoint) {
       // offMap is not snapshotted; it is a pure function of the map and any
       // point inside the corridor, and the checkpoint always is one — so the
@@ -1428,6 +1433,7 @@ export class Game {
     this._updateHives(dt);
     this._updateNodeBlight(dt);
     this._updateNodes(dt);
+    if (this.mode === 'labyrinth' && !this.finalStand) this._updatePursuit(dt);
 
     // Campaign: raze every hive and the survivors call one last counterattack.
     if (!this.finalStand && this.nests.length && !this.liveNests()) {
@@ -1438,7 +1444,7 @@ export class Game {
         const last = this._deepestChamber();
         this.msg('👑 Every chamber lies silent — and the labyrinth\'s champion rises from the deepest one. Kill it and walk out.', 'bad');
         this._spawnBoss(last ? last.id : null);
-        if (last) {
+        if (last && last.id != null) {
           const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
           this._spawnHorde(Math.round(18 * this.diff.mult * this.level.mult), [last.id], w.types);
         }
@@ -1450,8 +1456,49 @@ export class Game {
     }
   }
 
+  // The rear horde always enters through the authored starting sanctuary.
+  // It escalates from scouts to a sustained flood, but never spawns ahead of
+  // the party or replaces the final-boss objective.
+  _updatePursuit(dt) {
+    this.pursuitTime += dt;
+    const stage = this.pursuitTime < 120 ? 0 : this.pursuitTime < 240 ? 1
+      : this.pursuitTime < 360 ? 2 : 3;
+    if (stage !== this.pursuitStage) {
+      this.pursuitStage = stage;
+      this.emit({ type: 'pursuit', stage });
+      this.msg(stage === 1 ? '⚠️ Something is following from the Last Lantern.'
+        : stage === 2 ? '☠️ The dead are pouring into the passages behind you.'
+          : '🚨 THE FLOOD HAS BEGUN. Reach the Sunless Throne.', 'bad');
+    }
+    this.pursuitSpawnT -= dt;
+    if (stage === 0 || this.pursuitSpawnT > 0) return;
+    const start = this.map.labyrinthLayout?.start || this._labyrinthStart();
+    const living = this.heroes.filter((h) => !h.dead);
+    if (living.some((h) => dist2(h.x, h.z, start.x, start.z) < 196)) {
+      this.pursuitSpawnT = 4;
+      return;
+    }
+    const sizes = [0, 4, 8, 14];
+    const intervals = [120, 20, 11, 5];
+    const types = stage === 1 ? ['walker'] : stage === 2
+      ? ['walker', 'walker', 'runner'] : ['walker', 'runner', 'brute'];
+    let spawned = 0, guard = 0;
+    const target = Math.round(sizes[stage] * this.diff.mult);
+    while (spawned < target && guard++ < target * 20) {
+      const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 5;
+      const x = start.x + Math.cos(a) * r, z = start.z + Math.sin(a) * r;
+      if (!this.map.isWalkable(x | 0, z | 0)) continue;
+      const type = types[(this.rng() * types.length) | 0];
+      if (this._spawnZombie(type, x, z, true, true)) spawned++;
+    }
+    this.pursuitSpawnT = intervals[stage];
+    this.flowDirty = true;
+  }
+
   // The chamber farthest from the current checkpoint — the bottom of the run.
   _deepestChamber() {
+    const throne = this.map.labyrinthLayout?.boss;
+    if (throne) return { id: null, x: throne.x + 0.5, z: throne.z + 0.5 };
     const from = this.checkpoint || { x: this.map.size / 2, z: this.map.size / 2 };
     let best = null, bd = -1;
     for (const n of this.nests) {
@@ -2487,7 +2534,9 @@ export class Game {
     // The labyrinth's champion rises from a razed chamber; everywhere else a
     // dead nest cannot spawn and the boss walks in from the rim.
     const fromNest = nest && (nest.alive || this.mode === 'labyrinth');
-    let [x, z] = fromNest ? [nest.x, nest.z] : this._edgeSpawnPoint();
+    const throne = this.mode === 'labyrinth' ? this.map.labyrinthLayout?.boss : null;
+    let [x, z] = throne ? [throne.x + 0.5, throne.z + 0.5]
+      : fromNest ? [nest.x, nest.z] : this._edgeSpawnPoint();
     for (let r = 0; r < 12; r++) {
       if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
       if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }

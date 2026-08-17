@@ -64,6 +64,12 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 
 ## Current Shipped Loop
 
+Labyrinth mode uses one authored branching map for every run. Players clear
+six required brood chambers, can risk an optional reward branch, and descend
+to the final boss in the Sunless Throne. A rear Pursuit Clock escalates from
+scouts into a sustained zombie flood. The run is won only by killing the final
+boss.
+
 1. The player founds a city at a flagged site.
 2. The siege runs continuously. The player builds, upgrades, repairs and
    rebuilds at any time, and nothing pauses while they do.
