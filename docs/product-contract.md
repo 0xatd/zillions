@@ -60,6 +60,12 @@ Use continuous siege on a lane graph as the gameplay base:
   enemies and hive nests.
 - No individual squad micro. Squads are autonomous; the player sets the global
   stance: Defend city, Follow hero, or Push the lanes.
+- Each human muster is one persistent formation. Its troops keep stable slots
+  while defending, escorting, and marching. Zombies never use formation slots;
+  their identity is an irregular flood.
+- One living hive must materially outproduce one human camp. The player closes
+  that gap by capturing nodes, raising several Forward Camps, and destroying
+  the nest that feeds the lane.
 - Hero level-ups must be visible and player-directed. Each point can improve
   the hero aura, one of two passive paths, or ult damage. The HUD must show
   derived hero stats and whether the aura is affecting allies or enemies.

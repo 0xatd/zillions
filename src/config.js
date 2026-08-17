@@ -321,14 +321,14 @@ export const TOWER_PRIORITY = [
 // worse as Threat climbs, so the pressure curve is a consequence, not a script.
 
 export function hiveInterval(threat) {
-  // A nest is an enemy production building, not a scripted wave emitter.
-  // It starts at the fastest allied production cadence and accelerates with
-  // Threat. Production ends only when the nest itself is destroyed.
-  return Math.max(8, 14 - threat * 0.25);
+  // One hive must outproduce one human camp. The colony wins by taking ground,
+  // stacking several producers, and destroying nests — never by waiting for a
+  // single barracks to match the dead. Production ends only with the nest.
+  return Math.max(5, 9 - threat * 0.18);
 }
 
 export function hiveSquad(threat, mult) {
-  const size = Math.max(2, Math.round((2.5 + threat * 0.9) * mult));
+  const size = Math.max(3, Math.round((5 + threat * 0.72) * mult));
   const runner   = threat >= 2 ? Math.min(0.26, 0.060 * (threat - 1)) : 0;
   const spitter  = threat >= 3 ? Math.min(0.15, 0.035 * (threat - 2)) : 0;
   const caller   = threat >= 4 ? Math.min(0.06, 0.015 * (threat - 3)) : 0;

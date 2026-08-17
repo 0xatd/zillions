@@ -232,6 +232,11 @@ function assertSiegeLoop(level) {
   game._construct(camp, false);
   const afterBuild = game.units.filter((u) => !u.hero).length;
   assert.ok(afterBuild > 0, `${level.name} camp mustered nobody when raised`);
+  const firstSquad = game.units.filter((u) => !u.hero && u.camp === camp.id);
+  assert.ok(firstSquad.every((u) => u.squadId && u.squadSize === firstSquad.length),
+    `${level.name} human muster did not become one formation`);
+  assert.equal(new Set(firstSquad.map((u) => u.squadIndex)).size, firstSquad.length,
+    `${level.name} formation slots overlap`);
   const def = game.tierDef(camp, camp.tier);
   const cycles = 7;
   for (let i = 0; i < def.every * cycles * 2 + 2; i++) game._updateCamps(0.5);
@@ -399,7 +404,13 @@ for (const [name, cost, incomeGain] of paybacks) {
   assert.ok(THREAT.perCapture > 0 && THREAT.perCapture <= 0.15,
     'node capture Threat bump must stay a nudge, not the main clock');
   assert.ok(hiveInterval(0) > hiveInterval(THREAT.max), 'hives must muster faster as Threat climbs');
-  assert.ok(hiveInterval(THREAT.max) >= 8, 'hive muster interval must not collapse to a spam loop');
+  assert.ok(hiveInterval(THREAT.max) >= 5, 'hive muster interval must not collapse below the flood floor');
+  const fastestHumanRate = Math.max(...Object.values(PLOT_KINDS)
+    .flatMap((kind) => (kind.unit ? kind.tiers.filter((tier) => tier.count && tier.every)
+      .map((tier) => tier.count / tier.every) : [])));
+  const openingHiveRate = hiveSquad(0, 1).size / hiveInterval(0);
+  assert.ok(openingHiveRate >= fastestHumanRate * 1.5,
+    `one opening hive must materially outproduce one maxed human producer (${openingHiveRate} vs ${fastestHumanRate})`);
   let previous = 0;
   for (let threat = 0; threat <= THREAT.max; threat++) {
     const squad = hiveSquad(threat, 1);

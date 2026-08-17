@@ -31,6 +31,7 @@ const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guar
 const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
 const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, it's a sealed pocket
+const COMBAT_CELL = 8;            // broad-phase bucket width for uncapped armies
 
 let nextId = 1000;
 const getNextId = () => nextId;
@@ -38,6 +39,29 @@ const setNextId = (v) => { nextId = v; };
 const LABYRINTH_DOOR_ID = 2000000000;
 const snapNum = (v) => (Number.isFinite(v) ? v : 0);
 const snapRoute = (route) => Array.isArray(route) ? route.map(([x, z]) => [snapNum(x), snapNum(z)]) : null;
+
+export function combatBuckets(actors) {
+  const buckets = new Map();
+  for (const actor of actors) {
+    if (actor.dead) continue;
+    const key = `${Math.floor(actor.x / COMBAT_CELL)},${Math.floor(actor.z / COMBAT_CELL)}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(actor); else buckets.set(key, [actor]);
+  }
+  return buckets;
+}
+
+export function nearbyBuckets(buckets, fallback, x, z, radius) {
+  if (!buckets) return fallback;
+  const found = [];
+  const minX = Math.floor((x - radius) / COMBAT_CELL), maxX = Math.floor((x + radius) / COMBAT_CELL);
+  const minZ = Math.floor((z - radius) / COMBAT_CELL), maxZ = Math.floor((z + radius) / COMBAT_CELL);
+  for (let bz = minZ; bz <= maxZ; bz++) for (let bx = minX; bx <= maxX; bx++) {
+    const bucket = buckets.get(`${bx},${bz}`);
+    if (bucket) found.push(...bucket);
+  }
+  return found;
+}
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -181,6 +205,7 @@ export class Game {
       plots: this.plots.map((p) => ({
         id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch,
         ruined: p.ruined ? 1 : 0, musterT: p.musterT != null ? snapNum(p.musterT) : null,
+        musterSeq: p.musterSeq || 0,
       })),
       buildings: this.buildings.map((b) => ({
         id: b.id, p: b.plotId, x: b.x, z: b.z, hp: snapNum(b.hp), g: b.gate ? 1 : 0,
@@ -198,6 +223,7 @@ export class Game {
         route: snapRoute(u.route), routeI: u.routeI || 0, routeStuck: snapNum(u.routeStuck || 0),
         routeBest: Number.isFinite(u.routeBest) ? snapNum(u.routeBest) : null, repathT: snapNum(u.repathT || 0),
         shield: snapNum(u.shieldHp || 0),
+        squad: u.squadId || null, squadI: u.squadIndex ?? -1, squadN: u.squadSize || 0,
         // Temporary allies (Tiger's clones, Aaron's spirit) carry a lifespan and
         // a per-instance stat override instead of the shared UNITS[key] def.
         temp: u.temp ? 1 : 0, expire: u.expireT != null ? snapNum(u.expireT) : null,
@@ -315,6 +341,7 @@ export class Game {
         p.tier = ps.tier; p.paid = ps.paid; p.branch = ps.branch;
         p.ruined = !!ps.ruined;
         if (ps.musterT != null) p.musterT = ps.musterT;
+        p.musterSeq = ps.musterSeq || 0;
       }
     }
     for (const bs of snap.buildings) {
@@ -359,6 +386,9 @@ export class Game {
       u.routeBest = us.routeBest == null ? Infinity : us.routeBest;
       u.repathT = us.repathT || 0;
       u.shieldHp = us.shield || 0;
+      u.squadId = us.squad || null;
+      u.squadIndex = us.squadI ?? -1;
+      u.squadSize = us.squadN || 0;
       if (us.temp) {
         u.temp = true;
         u.expireT = us.expire;
@@ -1303,11 +1333,17 @@ export class Game {
     const kindDef = PLOT_KINDS[plot.kind];
     // A living producer is an uncapped faucet. It musters its full squad on
     // every cycle until the building is destroyed or the plot is ruined.
+    const squadId = `${plot.id}:${plot.musterSeq || 0}`;
+    plot.musterSeq = (plot.musterSeq || 0) + 1;
     for (let i = 0; i < def.count; i++) {
       const a = (i / Math.max(1, def.count)) * Math.PI * 2;
       const u = this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
       u.homeNodeId = plot.nodeId != null ? plot.nodeId : null;
+      u.squadId = squadId;
+      u.squadIndex = i;
+      u.squadSize = def.count;
     }
+    if (this.stance === 'defend') this._anchorDefense();
     this.emit({ type: 'muster', x: plot.cx, z: plot.cz, n: def.count, kind: plot.kind });
   }
 
@@ -1820,7 +1856,13 @@ export class Game {
   _followRoute(actor, speed, dt, zombie = false) {
     if (!actor.route || actor.routeI >= actor.route.length) { actor.route = null; return false; }
     const [wx, wz] = actor.route[actor.routeI];
-    const dx = wx - actor.x, dz = wz - actor.z;
+    let dx = wx - actor.x, dz = wz - actor.z;
+    if (!zombie && !actor.hero) {
+      const prev = actor.routeI > 0 ? actor.route[actor.routeI - 1] : [actor.x, actor.z];
+      const [ox, oz] = this._formationOffset(actor, wx - prev[0], wz - prev[1]);
+      dx = wx + ox - actor.x;
+      dz = wz + oz - actor.z;
+    }
     const d = Math.hypot(dx, dz);
     if (d < 2.4) {
       actor.routeI++;
@@ -2070,6 +2112,7 @@ export class Game {
       camp, path: null, pathI: 0, cooldown: 0, target: null,
       facing: 0, holdX: x, holdZ: z, retargetT: 0,
       route: null, routeI: 0, targetNodeId: null, targetGi: -1,
+      squadId: null, squadIndex: -1, squadSize: 0,
     };
     // Born during a DEFEND order: take a slot on the Keep ring, not a freeze
     // at the barracks door.
@@ -2100,20 +2143,39 @@ export class Game {
     return seat || [u.x, u.z];
   }
 
+  _anchorDefense() {
+    const troops = this.units.filter((u) => !u.hero && !u.dead)
+      .sort((a, b) => {
+        const as = String(a.squadId || ''), bs = String(b.squadId || '');
+        return (as < bs ? -1 : as > bs ? 1 : 0)
+          || (a.squadIndex ?? 0) - (b.squadIndex ?? 0) || a.id - b.id;
+      });
+    for (let i = 0; i < troops.length; i++) {
+      [troops[i].holdX, troops[i].holdZ] = this._defendSlot(troops[i], troops.length, i);
+    }
+  }
+
+  // Human troops keep a compact marching order. Zombies deliberately never
+  // call this helper: their silhouette remains an irregular flood.
+  _formationOffset(u, dx = 0, dz = 1, spacing = 0.95) {
+    if (u.hero || u.squadIndex == null || u.squadIndex < 0) return [0, 0];
+    const n = Math.max(1, u.squadSize || 1);
+    const cols = Math.min(3, n);
+    const col = u.squadIndex % cols;
+    const row = Math.floor(u.squadIndex / cols);
+    const side = (col - (cols - 1) / 2) * spacing;
+    const back = row * spacing;
+    const len = Math.hypot(dx, dz) || 1;
+    const fx = dx / len, fz = dz / len;
+    return [-fz * side - fx * back, fx * side - fz * back];
+  }
+
   setStance(st, p = 0) {
     if (!['defend', 'guard', 'attack'].includes(st)) return;
     const h = this.heroes[p];
     if (st === this.stance && st !== 'defend') return;
     this.stance = st;
-    if (st === 'defend') {
-      let n = 0;
-      for (const u of this.units) if (!u.hero && !u.dead) n++;
-      let i = 0;
-      for (const u of this.units) {
-        if (u.hero || u.dead) continue;
-        [u.holdX, u.holdZ] = this._defendSlot(u, n, i++);
-      }
-    }
+    if (st === 'defend') this._anchorDefense();
     if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; }
     const who = h && h.def ? h.def.name.split(' ')[0] : null;
     this.msg(st === 'defend'
@@ -2960,7 +3022,10 @@ export class Game {
     this._updateCoins();
     this._updateLoot(dt);
     this._updateFlow(dt);
+    this._unitBuckets = combatBuckets(this.units);
+    this._zombieBuckets = combatBuckets(this.zombies);
     this._updateZombies(dt);
+    this._zombieBuckets = combatBuckets(this.zombies);
     this._updateAuras(dt);
     this._updateBrews(dt);
     this._updateUnits(dt);
@@ -2988,7 +3053,7 @@ export class Game {
       h.auraAllies = 0;
       h.auraEnemies = 0;
       if (effect.dmgMult || effect.regen || effect.crit || effect.armor || effect.haste) {
-        for (const u of this.units) {
+        for (const u of nearbyBuckets(this._unitBuckets, this.units, h.x, h.z, radius)) {
           if (u.dead || u === h) continue;
           if (dist2(h.x, h.z, u.x, u.z) > r2) continue;
           h.auraAllies++;
@@ -3006,7 +3071,7 @@ export class Game {
         const applyTick = h._auraT <= 0;
         if (applyTick) h._auraT = tick;
         let drained = 0;
-        for (const zb of this.zombies) {
+        for (const zb of nearbyBuckets(this._zombieBuckets, this.zombies, h.x, h.z, radius)) {
           if (zb.dead) continue;
           if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
           h.auraEnemies++;
@@ -3024,7 +3089,7 @@ export class Game {
         }
         if (applyTick && drained > 0 && effect.leech) h.hp = Math.min(h.maxHp, h.hp + drained * effect.leech);
       } else {
-        for (const zb of this.zombies) {
+        for (const zb of nearbyBuckets(this._zombieBuckets, this.zombies, h.x, h.z, radius)) {
           if (zb.dead) continue;
           if (dist2(h.x, h.z, zb.x, zb.z) > r2) continue;
           h.auraEnemies++;
@@ -3106,7 +3171,7 @@ export class Game {
       const call = caller.def.call;
       if (!call || caller.dead) continue;
       const r2 = call.radius * call.radius;
-      for (const zb of this.zombies) {
+      for (const zb of nearbyBuckets(this._zombieBuckets, this.zombies, caller.x, caller.z, call.radius)) {
         if (zb.dead || zb === caller) continue;
         if (dist2(caller.x, caller.z, zb.x, zb.z) <= r2) zb.frenzy = Math.max(zb.frenzy, 1);
       }
@@ -3199,7 +3264,7 @@ export class Game {
       if (!zb.targetU && zb.retarget <= 0) {
         zb.retarget = 0.4 + this.rng() * 0.3;
         let best = null, bd = Math.max(100, (range + 2) * (range + 2)); // within 10 tiles, or weapon reach
-        for (const u of this.units) {
+        for (const u of nearbyBuckets(this._unitBuckets, this.units, zb.x, zb.z, Math.sqrt(bd))) {
           if (u.dead || (u.hero && u.stealth)) continue;
           const d = dist2(zb.x, zb.z, u.x, u.z);
           if (d < bd) { bd = d; best = u; }
@@ -3385,8 +3450,9 @@ export class Game {
             if (d < hd) { hd = d; h = hh; }
           }
           if (h) {
-            const a = (u.id % 8) / 8 * Math.PI * 2;
-            const tx = h.x + Math.cos(a) * 1.8, tz = h.z + Math.sin(a) * 1.8;
+            const facingX = Math.sin(h.facing || 0), facingZ = Math.cos(h.facing || 0);
+            const [ox, oz] = this._formationOffset(u, facingX, facingZ, 1.05);
+            const tx = h.x - facingX * 2.1 + ox, tz = h.z - facingZ * 2.1 + oz;
             const dx = tx - u.x, dz = tz - u.z;
             const d = Math.hypot(dx, dz);
             if (d > 1.2) {
@@ -3425,7 +3491,7 @@ export class Game {
         // A pushing squad only stops for what is actually on top of it.
         const seek = hunting ? Math.max(range + 2, 10) : range;
         let best = null, bd = seek * seek;
-        for (const zb of this.zombies) {
+        for (const zb of nearbyBuckets(this._zombieBuckets, this.zombies, u.x, u.z, seek)) {
           if (zb.dead) continue;
           const d = dist2(u.x, u.z, zb.x, zb.z);
           if (d < bd) { bd = d; best = zb; }
@@ -3472,7 +3538,7 @@ export class Game {
           // Shotgun spread: the blast mauls everything packed around the target.
           if (u.def.splash) {
             const s2 = u.def.splash * u.def.splash;
-            for (const zb2 of this.zombies) {
+            for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, u.def.splash)) {
               if (zb2 === zb || zb2.dead) continue;
               if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z);
             }
@@ -3544,7 +3610,9 @@ export class Game {
     // Arrived: hold the ground so the capture ticks over.
     if (u.targetGi >= 0) {
       const [tx, tz] = this._giPoint(u.targetGi);
-      const dx = tx - u.x, dz = tz - u.z;
+      const rawX = tx - u.x, rawZ = tz - u.z;
+      const [ox, oz] = this._formationOffset(u, rawX, rawZ);
+      const dx = tx + ox - u.x, dz = tz + oz - u.z;
       const d = Math.hypot(dx, dz);
       if (d > 3.5) {
         this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
