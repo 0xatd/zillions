@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
-import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
+import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS, SIEGE } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
 
@@ -269,61 +269,23 @@ for (const level of LEVELS) {
       assert.ok(escaped,
         `${label}: at full build nothing reaches open country — the city is a box`);
     }
-    // Ground you take is ground you can fortify: every reachable node carries a
-    // Forward Camp and a watchtower, and every work on it is locked until the
-    // node is yours.
+    // Ground you take is ground you can fortify: every reachable node carries
+    // one flag-centered Forward Camp progression. The camp itself grows the
+    // palisade and twin towers, so there are no scattered upgrade plots.
     for (const node of game.activeNodes()) {
       const works = game.plots.filter((p) => p.nodeId === node.id);
-      assert.ok(works.some((p) => p.kind === 'outpost'), `${label}: ${node.name} has no Forward Camp plot`);
-      assert.ok(works.some((p) => p.kind === 'tower'), `${label}: ${node.name} has no watchtower plot`);
-      const structures = works.filter((p) => p.kind !== 'wall');
-      for (const work of structures) {
-        assert.ok(Math.hypot(work.cx - node.x, work.cz - node.z) >= 4,
-          `${label}: ${node.name} ${work.kind} crowds the capture point`);
-      }
-      for (let i = 0; i < structures.length; i++) {
-        for (let j = i + 1; j < structures.length; j++) {
-          assert.ok(Math.hypot(structures[i].cx - structures[j].cx, structures[i].cz - structures[j].cz) >= 6,
-            `${label}: ${node.name} structures are packed into one collision pocket`);
-        }
-      }
-      for (const w of works) {
-        assert.ok(game.plotLocked(w), `${label}: ${node.name} works are buildable before you hold it`);
-      }
-      // Build the two structures in the test occupancy grid, then prove the
-      // capture point still has a route out of the fort instead of becoming a
-      // pocket between foundations.
+      assert.equal(works.length, 1, `${label}: ${node.name} has scattered node upgrade plots`);
+      const outpost = works[0];
+      assert.equal(outpost.kind, 'outpost', `${label}: ${node.name} has no Forward Camp plot`);
+      assert.ok(Math.hypot(outpost.cx - node.x, outpost.cz - node.z) < 0.1,
+        `${label}: ${node.name} Forward Camp is not anchored on its flag`);
+      assert.ok(game.plotLocked(outpost), `${label}: ${node.name} is buildable before you hold it`);
       node.owner = 'player';
-      const localReach = () => {
-        const startX = node.x | 0, startZ = node.z | 0, N = game.map.size;
-        const queue = [[startX, startZ]];
-        const seen = new Set([startZ * N + startX]);
-        let farthest = 0;
-        while (queue.length) {
-          const [x, z] = queue.shift();
-          farthest = Math.max(farthest, Math.hypot(x - node.x, z - node.z));
-          if (farthest >= 10) return farthest;
-          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = x + dx, nz = z + dz, key = nz * N + nx;
-            if (seen.has(key) || !game.map.isWalkable(nx, nz) || game.occ[key] !== 0) continue;
-            seen.add(key); queue.push([nx, nz]);
-          }
-        }
-        return farthest;
-      };
-      const naturalReach = localReach();
-      for (const work of structures) game._construct(work, true);
-      const builtReach = localReach();
-      assert.ok(builtReach >= Math.min(6, naturalReach) - 0.25,
-        `${label}: ${node.name} structures reduce its route clearance from ${naturalReach.toFixed(1)} to ${builtReach.toFixed(1)}`);
-      const workIds = new Set(structures.map((work) => work.id));
-      for (const building of game.buildings.filter((b) => workIds.has(b.plotId))) {
-        for (let dz = 0; dz < building.size; dz++) {
-          for (let dx = 0; dx < building.size; dx++) game.occ[(building.z + dz) * game.map.size + building.x + dx] = 0;
-        }
-      }
-      game.buildings = game.buildings.filter((b) => !workIds.has(b.plotId));
-      for (const work of structures) { work.tier = 0; work.ruined = false; }
+      const hero = game.heroes[0];
+      hero.x = node.x + SIEGE.captureRadius - 0.5;
+      hero.z = node.z;
+      assert.equal(game.buildTargetFor(hero)?.plot.id, outpost.id,
+        `${label}: ${node.name} cannot be upgraded from inside its territory circle`);
       node.owner = 'neutral';
     }
     // --- what the frontier is hiding -------------------------------------
@@ -355,7 +317,7 @@ for (const level of LEVELS) {
 
     nodeForts = {
       nodes: game.activeNodes().length,
-      palisades: game.plots.filter((p) => p.nodeId != null && p.kind === 'wall').length,
+      palisades: game.plots.filter((p) => p.nodeId != null && p.kind === 'outpost').length,
     };
     const nodes = game.activeNodes();
     assert.ok(nodes.length >= 6, `${label} left only ${nodes.length} reachable lane nodes`);

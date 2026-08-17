@@ -3250,14 +3250,26 @@ class App {
         break;
       }
       case 'outpost': {
-        // A staked claim: drop-pad, field dome, and a tall relay mast you can
-        // pick out from across the map.
+        // One readable frontier fort centered on the captured flag. Tier 1 is
+        // the working camp; tier 2 visibly closes a palisade and raises twin
+        // defensive towers; later tiers harden the same silhouette.
         box(1.9, 0.24, 1.9, PAD, 0, 0.12);
         cone(0.95, 1.05, HULL, -0.35, 0.55, -0.25, 8);
         box(0.9, 0.6, 0.7, HULL2, 0.55, 0.3, 0.5);
         box(0.08, 3.4, 0.08, 0x4a5058, 0.85, 1.7, -0.7);
         lit(0.6, 0.4, 0.03, 0x59b06e, 0.5, 3.1, -0.7, 0.5);
         if (tier >= 2) {
+          const fenceCol = tier >= 3 ? 0x59616b : 0x6b5842;
+          // Rear and side curtains leave a broad gate toward the lane/front.
+          box(6.8, 0.72, 0.22, fenceCol, 0, 0.38, -3.35);
+          box(0.22, 0.72, 6.8, fenceCol, -3.35, 0.38, 0);
+          box(0.22, 0.72, 6.8, fenceCol, 3.35, 0.38, 0);
+          box(2.15, 0.72, 0.22, fenceCol, -2.28, 0.38, 3.35);
+          box(2.15, 0.72, 0.22, fenceCol, 2.28, 0.38, 3.35);
+          for (const x of [-2.75, 2.75]) {
+            cyl(0.62, 0.8, tier >= 3 ? 2.8 : 2.25, HULL2, x, tier >= 3 ? 1.4 : 1.12, 2.75, 8);
+            lit(0.32, 0.16, 0.32, 0x72cfff, x, tier >= 3 ? 2.95 : 2.4, 2.75, 0.8);
+          }
           box(0.75, 0.85, 0.75, HULL2, -0.7, 0.42, 0.75);
           box(0.08, 3.4, 0.08, 0x4a5058, -0.85, 1.7, -0.7);
           lit(0.6, 0.4, 0.03, 0x59b06e, -0.5, 3.1, -0.7, 0.5);
@@ -3812,9 +3824,9 @@ class App {
       for (const node of g.nodes) {
         if (node.offMap) continue;
         const gr = new THREE.Group();
-        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
+        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.16, SIEGE.captureRadius, 64);
         ringGeo.rotateX(-Math.PI / 2);
-        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
+        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.13, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshLambertMaterial({ color: 0x39332a }));
@@ -3827,7 +3839,7 @@ class App {
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
-        gr.userData = { ring, flag, label, node };
+        gr.userData = { ring, pole, flag, label, node };
         gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
@@ -3840,10 +3852,16 @@ class App {
         : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
       gr.userData.ring.material.color.setHex(col);
       gr.userData.flag.material.color.setHex(col);
+      const outpost = g.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id);
+      const fortRaised = outpost && outpost.tier > 0 && !outpost.ruined;
+      // The fort occupies the claim marker once raised; do not leave a flag
+      // clipping through the main building.
+      gr.userData.pole.visible = !fortRaised;
+      gr.userData.flag.visible = !fortRaised;
       const contested = node.cap > 0.05;
       gr.userData.ring.material.opacity = contested
-        ? 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(t * 9))
-        : (node.owner === 'player' ? 0.34 : 0.2);
+        ? 0.16 + 0.18 * (0.5 + 0.5 * Math.sin(t * 9))
+        : (node.owner === 'player' ? 0.12 : 0.08);
       gr.userData.flag.rotation.y = Math.sin(t * 2.2 + node.id) * 0.28;
     }
   }

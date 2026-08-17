@@ -30,8 +30,10 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   nodes, hives, and the city. Squads route node-to-node. A third of the army
   (`_isHolder`, by unit id) takes and holds nodes; the rest march on hives.
 - Nodes flip on `SIEGE.captureTime` seconds of uncontested presence, pay
-  `SIEGE.nodeIncome * kind.income`, and carry an `outpost` plot that is locked
-  until the node is player-owned.
+  `SIEGE.nodeIncome * kind.income`, and carry one flag-centered `outpost` plot
+  that is locked until the node is player-owned. The player can fund it from
+  anywhere inside the capture circle. Its first tier adds income and recurring
+  troops; later tiers visibly add a palisade and twin towers.
 - Node placement comes from terrain analysis (`TerrainField._findNodeFeatures`):
   a summed-area openness field finds fords and clearings, tile clustering finds
   ore and quarries, mountain counts find barrows. Kinds are drawn round-robin
@@ -51,10 +53,12 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   runaway on the larger maps.
 - Income is credited automatically over `SIEGE.incomePeriod`. Coins on the
   ground come only from kills, node captures, and razed hives.
-- Node works (`Game._buildNodeWorks`) are created in `_buildLaneSystems`, which
+- Node forts (`Game._buildNodeWorks`) are created in `_buildLaneSystems`, which
   runs on BOTH found and restore — keep it a pure function of map + node, never
-  `this.rng`, or lockstep peers desync. Plot ids come from fixed bases so they
-  survive a reload. `plotLocked` gates anything with a `nodeId`.
+  `this.rng`, or lockstep peers desync. Each node gets one outpost at its flag;
+  its palisade and towers are tier visuals, not separate plots. Plot ids come
+  from a fixed base so they survive a reload. `plotLocked` gates anything with
+  a `nodeId`.
 - Field loot lives in `game.loot`, is scattered once in `_setupStart` (seeded),
   and round-trips through the snapshot. Pickup and drop are sim-side, so the
   drop key goes over the wire as a `drop` command like every other input. A

@@ -12,7 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  ZOMBIE_CAP, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
+  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
@@ -25,8 +25,6 @@ import { clamp, dist2, makeRNG } from './utils.js';
 
 const IDLE = 0, WANDER = 1, AGGRO = 2;
 const OUTPOST_PLOT_BASE = 5000;   // outpost plot ids never collide with city plots
-const NODE_TOWER_PLOT_BASE = 6000; // the watchtower on a node
-const NODE_WALL_PLOT_BASE = 7000;  // the palisade across the node's pinch
 const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
 const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
 const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guard first
@@ -722,126 +720,16 @@ export class Game {
     }
   }
 
-  // Ground you take is ground you can fortify. A held node is not just a
-  // Forward Camp any more — it is a small frontier fort: the camp, a watchtower
-  // covering it, and where the land pinches nearby, a palisade across the gap.
-  // Everything here is locked until the node is actually yours, and ruins
-  // together the moment you lose it.
+  // Ground you take is ground you can fortify. The flag is the single anchor:
+  // one Forward Camp grows into a fenced, twin-towered frontier fort.
   _buildNodeWorks(node) {
-    const used = [];
-    const camp = this._nodeWorkSpot(node, used, 2);
-    if (camp) {
-      this.plots.push({
-        id: OUTPOST_PLOT_BASE + node.id, kind: 'outpost', nodeId: node.id,
-        x: camp[0], z: camp[1], size: 2,
-        cx: camp[0] + 1, cz: camp[1] + 1,
-        tier: 0, paid: 0, branch: null, ruined: false,
-      });
-    }
-    const tower = this._nodeWorkSpot(node, used, 2);
-    if (tower) {
-      this.plots.push({
-        id: NODE_TOWER_PLOT_BASE + node.id, kind: 'tower', nodeId: node.id,
-        x: tower[0], z: tower[1], size: 2,
-        cx: tower[0] + 1, cz: tower[1] + 1,
-        tier: 0, paid: 0, branch: null, ruined: false,
-      });
-    }
-    // The land's own chokepoint, if it left one within reach of this node.
-    const choke = this._nodeChoke(node);
-    if (choke) {
-      const tiles = choke.tiles.filter(([x, z]) => this.map.isBuildable(x, z)
-        && !this.plots.some((pl) => pl.nodeId === node.id && pl.kind !== 'wall'
-          && x >= pl.x && x < pl.x + pl.size && z >= pl.z && z < pl.z + pl.size));
-      if (tiles.length >= 2) {
-        const mid = tiles[tiles.length >> 1];
-        this.plots.push({
-          id: NODE_WALL_PLOT_BASE + node.id, kind: 'wall', nodeId: node.id,
-          role: 'outer', wild: true, name: `${choke.name} Palisade`,
-          x: tiles[0][0], z: tiles[0][1], size: 1,
-          cx: mid[0] + 0.5, cz: mid[1] + 0.5,
-          tiles, gate: mid, anchor: mid,
-          tier: 0, paid: 0, branch: null, ruined: false,
-        });
-      }
-    }
-  }
-
-  // The nearest natural pinch to a node, close enough that holding the node and
-  // holding the gap are the same job.
-  _nodeChoke(node) {
-    let best = null, bd = 13 * 13;
-    for (const c of this.map.chokeSpots || []) {
-      const d = dist2(c.x, c.z, node.x, node.z);
-      if (d > bd) continue;
-      if (this.plots.some((pl) => pl.kind === 'wall' && pl.tiles
-        && pl.tiles.some(([x, z]) => Math.abs(x - c.x) < 3 && Math.abs(z - c.z) < 3))) continue;
-      bd = d; best = c;
-    }
-    return best;
-  }
-
-  // A clear footprint beside a node, never on top of its centre so the hero can
-  // always stand in the capture ring, and never on top of an earlier work.
-  _nodeWorkSpot(node, used, size = 2) {
-    const bx = (node.x | 0) - 1, bz = (node.z | 0) - 1;
-    const candidates = [];
-    const ordinal = used.length;
-    const preferred = (((node.id || 0) * 2.399963229728653) + ordinal * Math.PI) % (Math.PI * 2);
-    const localReach = (footprints) => {
-      const blocked = new Set();
-      for (const [ux, uz] of footprints) {
-        for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
-          blocked.add((uz + dz) * this.map.size + ux + dx);
-        }
-      }
-      const sx = node.x | 0, sz = node.z | 0, N = this.map.size;
-      const queue = [[sx, sz]];
-      const seen = new Set([sz * N + sx]);
-      let farthest = 0;
-      while (queue.length) {
-        const [x, z] = queue.shift();
-        farthest = Math.max(farthest, Math.hypot(x - node.x, z - node.z));
-        if (farthest >= 10) return farthest;
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = x + dx, nz = z + dz, key = nz * N + nx;
-          if (seen.has(key) || blocked.has(key) || !this.map.isWalkable(nx, nz)) continue;
-          seen.add(key); queue.push([nx, nz]);
-        }
-      }
-      return farthest;
-    };
-    const naturalReach = localReach([]);
-    const leavesExit = (px, pz) => localReach([...used, [px, pz]]) >= Math.min(6, naturalReach) - 0.25;
-    for (let r = 5; r <= 9; r++) {
-      for (let dz = -r; dz <= r; dz++) {
-        for (let dx = -r; dx <= r; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-          const x = bx + dx, z = bz + dz;
-          let ok = true;
-          for (let sz = 0; sz < size && ok; sz++) {
-            for (let sx = 0; sx < size; sx++) {
-              if (!this.map.isBuildable(x + sx, z + sz)) { ok = false; break; }
-            }
-          }
-          if (ok && used.some(([ux, uz]) => Math.hypot(ux - x, uz - z) < size + 4)) ok = false;
-          if (!ok || !leavesExit(x, z)) continue;
-          const angle = Math.atan2(z + size / 2 - node.z, x + size / 2 - node.x);
-          const angleCost = Math.abs(Math.atan2(Math.sin(angle - preferred), Math.cos(angle - preferred)));
-          const spread = used.length
-            ? Math.min(...used.map(([ux, uz]) => Math.hypot(ux - x, uz - z)))
-            : 0;
-          candidates.push({ x, z, score: spread * 20 - angleCost * 4 - r * 0.2 });
-        }
-      }
-    }
-    candidates.sort((a, b) => (b.score - a.score) || (a.x - b.x) || (a.z - b.z));
-    if (candidates.length) {
-      const best = candidates[0];
-      used.push([best.x, best.z]);
-      return [best.x, best.z];
-    }
-    return null;
+    const x = (node.x | 0) - 1;
+    const z = (node.z | 0) - 1;
+    this.plots.push({
+      id: OUTPOST_PLOT_BASE + node.id, kind: 'outpost', nodeId: node.id,
+      x, z, size: 2, cx: node.x, cz: node.z,
+      tier: 0, paid: 0, branch: null, ruined: false,
+    });
   }
 
   // The hive got here first. It holds some of the good ground already — but
@@ -1024,6 +912,15 @@ export class Game {
       const [ax, az] = plot.anchor || plot.gate;
       return [ax + 0.5, az + 0.5];
     }
+    // The capture boundary is the outpost's interaction area. Once the node is
+    // owned, the player can build, upgrade, repair, or rebuild its fort from
+    // anywhere inside the circle instead of hunting for a tiny pay plate.
+    if (plot.kind === 'outpost' && h) {
+      const node = this.nodes[plot.nodeId];
+      if (node && dist2(h.x, h.z, node.x, node.z) <= SIEGE.captureRadius * SIEGE.captureRadius) {
+        return [h.x, h.z];
+      }
+    }
     if (h) {
       return [
         clamp(h.x, plot.x, plot.x + plot.size),
@@ -1072,7 +969,10 @@ export class Game {
       const act = this.plotAction(plot);
       if (!act || act.mode === 'branch') continue;
       const [px, pz] = this.payPoint(plot, h);
-      const d = dist2(h.x, h.z, px, pz);
+      const node = plot.kind === 'outpost' ? this.nodes[plot.nodeId] : null;
+      const inOutpost = node
+        && dist2(h.x, h.z, node.x, node.z) <= SIEGE.captureRadius * SIEGE.captureRadius;
+      const d = inOutpost ? 0 : dist2(h.x, h.z, px, pz);
       if (d <= bd) { bd = d; best = plot; bestAct = act; bestPoint = [px, pz]; }
     }
     if (!best) return null;
@@ -2719,7 +2619,6 @@ export class Game {
   // ---------- zombies ----------
 
   _spawnZombie(type, x, z, aggro, wave = false) {
-    if (this.zombies.length >= ZOMBIE_CAP) return null;
     const d = ZOMBIES[type];
     if (!d) return null;
     const zb = {
