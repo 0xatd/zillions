@@ -45,7 +45,9 @@ belong in deterministic snapshots.
 ## Review
 
 Open `/art-slice.html`. Review each model in material and silhouette modes.
-Test at the marked gameplay camera distance.
+Use the State review control to inspect idle, run, attack, cast, hit, down,
+construction, damaged, and critical presentation states. Test at the marked
+gameplay camera distance.
 
 Do not merge an asset when it only looks good in the close inspection view.
 
@@ -60,6 +62,8 @@ The first slice proves the authored-model pipeline and the visual language.
 - The Hive drone, wall, and gate are review targets. They are not used in a
   battle yet. Hive crowds need an instanced or batched authored-model path
   before replacement. Generated ramparts need module placement integration.
-- Construction, damage, destruction, baked skeletal animation, and texture
-  atlas work remain expansion gates. The contract defines them now so later
-  assets do not drift.
+- Runtime construction, damage, critical, idle, run, attack, cast, hit, and
+  down states are connected through `src/art-state.js`. They are presentation
+  only and do not change deterministic simulation state.
+- Destroyed shells, baked skeletal clips, and texture-atlas work remain
+  expansion gates. The contract defines them now so later assets do not drift.

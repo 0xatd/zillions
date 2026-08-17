@@ -20,6 +20,7 @@ import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
+import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -2847,6 +2848,7 @@ class App {
     if (!model) return null;
     const g = new THREE.Group();
     g.add(model);
+    g.userData.authored = true;
     g.userData.head = assetPart(model, 'part_turret');
     g.userData.rotor = assetPart(model, 'part_rotor');
     g.userData.core = assetPart(model, 'part_core');
@@ -3298,7 +3300,18 @@ class App {
         const mesh = this._makeBuildingMesh(b);
         mesh.position.set(b.cx, this.map.groundY(b.cx, b.cz), b.cz);
         this.scene.add(mesh);
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime };
+        const materials = [];
+        mesh.traverse((o) => {
+          if (!o.isMesh) return;
+          for (const material of (Array.isArray(o.material) ? o.material : [o.material])) {
+            if (!material || materials.includes(material)) continue;
+            material.userData.artBaseColor = material.color?.clone() || null;
+            material.userData.artBaseEmissive = material.emissive?.clone() || null;
+            material.userData.artBaseEmissiveIntensity = material.emissiveIntensity || 0;
+            materials.push(material);
+          }
+        });
+        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -3505,9 +3518,11 @@ class App {
       if (!rec) {
         const mesh = this._makeUnitMesh(u);
         this.scene.add(mesh);
-        rec = { mesh, u };
+        rec = { mesh, u, lastHp: u.hp };
         this.unitMeshes.set(u.id, rec);
       }
+      if (u.hp < rec.lastHp && !u.dead) rec.hit = { t: 0.22, dur: 0.22 };
+      rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
       let attackPulse = 0;
@@ -3519,6 +3534,19 @@ class App {
         attackPulse = Math.sin(p * Math.PI);
         if (rec.attack.t <= 0) rec.attack = null;
       }
+      for (const cue of ['hit', 'cast']) {
+        if (!rec[cue]) continue;
+        rec[cue].t -= dt;
+        if (rec[cue].t <= 0) rec[cue] = null;
+      }
+      const cue = rec.hit || rec.cast || rec.attack;
+      const cuePulse = cue ? Math.sin(clamp(1 - cue.t / cue.dur, 0, 1) * Math.PI) : 0;
+      const artState = unitArtState(u, {
+        hitT: rec.hit?.t, castT: rec.cast?.t, attackT: rec.attack?.t,
+      });
+      const pose = unitPose(artState, t * (artState === 'run' ? 10 : 1.8) + u.id, {
+        pulse: cuePulse, melee: attackKind === 'melee',
+      });
       const weaponParts = rec.mesh.userData.weaponParts || [];
       for (const part of weaponParts) {
         const rp = part.userData.restPos;
@@ -3526,32 +3554,23 @@ class App {
         if (rp) part.position.copy(rp);
         if (rr) part.rotation.copy(rr);
       }
-      // Walk bob + a forward lean while moving; attacks add a short lunge or
-      // weapon recoil exactly when the sim fires.
+      // The renderer owns this pose state machine. Simulation state remains
+      // untouched, so animation can never affect multiplayer determinism.
       const body = rec.mesh.userData.body;
       if (body) {
         body.position.x = 0;
-        if (u.moving) {
-          body.position.y = Math.abs(Math.sin(t * 10 + u.id)) * 0.09;
-          body.rotation.x = 0.12;
-          body.rotation.z = Math.sin(t * 10 + u.id) * 0.05;
-        } else {
-          body.position.y = Math.sin(t * 1.8 + u.id) * 0.02;
-          body.rotation.x = 0;
-          body.rotation.z = 0;
-        }
-        body.position.y += attackPulse * (u.hero ? 0.08 : 0.03);
-        body.position.z = attackPulse * (attackKind === 'melee' ? 0.34 : 0.13);
-        body.rotation.x += attackPulse * (attackKind === 'melee' ? -0.75 : -0.24);
-        body.rotation.z += attackPulse * (u.hero ? (u.key === 'danny' ? -0.24 : 0.18) : 0.08);
+        body.position.y = pose.y;
+        body.position.z = pose.z;
+        body.rotation.x = pose.pitch;
+        body.rotation.z = pose.roll;
       }
       const limbs = rec.mesh.userData.limbs;
       if (limbs) {
-        const stride = u.moving ? Math.sin(t * 10 + u.id) * 0.62 : 0;
+        const stride = pose.stride;
         if (limbs.legL) limbs.legL.rotation.x = stride;
         if (limbs.legR) limbs.legR.rotation.x = -stride;
-        if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45;
-        if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65;
+        if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+        if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
       }
       if (weaponParts.length && attackPulse > 0) {
         for (const part of weaponParts) {
@@ -4267,6 +4286,7 @@ class App {
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.75, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
+          this._buildingHitCue(e.x, e.z);
           this.burst(e.x, 0.6, e.z, { count: 2, color: 0x565349, speed: 1.4, life: 0.3, size: 0.35, up: 1.2 });
           break;
         case 'bdestroyed':
@@ -4281,6 +4301,8 @@ class App {
 
         case 'deny': this.audio.deny(); break;
         case 'cast': {
+          const caster = this.unitMeshes.get(e.heroId);
+          if (caster) caster.cast = { t: 0.52, dur: 0.52, kind: e.key };
           this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
           const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
@@ -4441,6 +4463,16 @@ class App {
     }
   }
 
+  _buildingHitCue(x, z) {
+    let best = null;
+    let bestD = 4;
+    for (const rec of this.buildingMeshes.values()) {
+      const d = (rec.b.cx - x) ** 2 + (rec.b.cz - z) ** 2;
+      if (d < bestD) { best = rec; bestD = d; }
+    }
+    if (best) best.impact = { t: 0.2, dur: 0.2 };
+  }
+
   _updateTutorial(dt) {
     if (!this._tut || !this.game) return;
     this._tutT = (this._tutT || 0) + dt;
@@ -4516,14 +4548,43 @@ class App {
       this._updateDayNight(dt);
       this._updateTutorial(dt);
 
-      // Building spawn bounce: elastic overshoot on fresh meshes; recoil decay.
+      // Authored building state is presentation-only: construction reveal,
+      // impact response, and readable damaged/critical material treatment.
       for (const rec of this.buildingMeshes.values()) {
         const age = t - (rec.spawnT || 0);
-        if (age < 0.55) {
-          const k = age / 0.55;
-          const s = k < 0.7 ? 0.15 + k * 1.35 : 1.2 - (k - 0.7) * 0.667;
-          rec.mesh.scale.setScalar(Math.max(0.15, s));
-        } else if (rec.mesh.scale.x !== 1) rec.mesh.scale.setScalar(1);
+        const art = buildingArtState(rec.b, age);
+        if (art.phase === 'constructing') {
+          const k = clamp(age / 0.7, 0, 1);
+          const eased = 1 - (1 - k) ** 3;
+          rec.mesh.scale.set(0.86 + eased * 0.14, 0.08 + eased * 0.92, 0.86 + eased * 0.14);
+        } else rec.mesh.scale.setScalar(1);
+        if (rec.impact) {
+          rec.impact.t -= dt;
+          const p = Math.sin(clamp(1 - rec.impact.t / rec.impact.dur, 0, 1) * Math.PI);
+          rec.mesh.rotation.z = p * 0.045;
+          rec.mesh.scale.x *= 1 + p * 0.04;
+          rec.mesh.scale.y *= 1 - p * 0.06;
+          if (rec.impact.t <= 0) rec.impact = null;
+        } else rec.mesh.rotation.z = 0;
+        for (const material of rec.materials || []) {
+          const base = material.userData.artBaseColor;
+          if (base && material.color) {
+            const soot = art.damage * (art.phase === 'critical' ? 0.58 : 0.38);
+            material.color.setRGB(
+              base.r * (1 - soot) + 0.18 * soot,
+              base.g * (1 - soot) + 0.07 * soot,
+              base.b * (1 - soot) + 0.035 * soot,
+            );
+          }
+          const baseEmissive = material.userData.artBaseEmissive;
+          if (baseEmissive && material.emissive) material.emissive.copy(baseEmissive);
+          const baseIntensity = material.userData.artBaseEmissiveIntensity || 0;
+          const flicker = art.phase === 'critical' ? (0.28 + Math.max(0, Math.sin(t * 17 + rec.b.id)) * 0.72) : 1;
+          if (art.phase === 'critical' && material.emissive) material.emissive.lerp(new THREE.Color(0xff321f), 0.72);
+          material.emissiveIntensity = art.phase === 'critical' ? Math.max(0.5, baseIntensity) * flicker : baseIntensity;
+          material.transparent = art.phase === 'constructing';
+          material.opacity = art.phase === 'constructing' ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
+        }
         if (rec.recoil > 0) {
           rec.recoil -= dt;
           const head = rec.mesh.userData.head;

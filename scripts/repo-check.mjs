@@ -89,6 +89,8 @@ const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
 assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
 assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run check must validate production GLBs');
+assert.ok(packageJson.scripts?.check?.includes('art-state-check.mjs'), 'npm run check must validate presentation states');
+assert.ok(read('art-slice.html').includes('State review'), 'art review page must expose state inspection');
 assert.ok(read('src/main.js').includes('s.snap.v === 5'), 'continue-save gate must accept current v5 snapshots');
 assert.ok(read('scripts/sim-determinism-check.mjs').includes('workerArgs.push(ticksArg)'), 'determinism harness must forward --ticks to workers');
 
