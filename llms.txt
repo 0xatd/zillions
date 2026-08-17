@@ -13,6 +13,8 @@ Default branch: main
 - docs/agent-brief.md: implementation details and known traps
 - docs/backend.md: Supabase and Vercel data boundaries
 - docs/review-guide.md: pull request review gate
+- docs/art-direction.md: 3D shape language, scale, names, sockets, and budgets
+- docs/art-pipeline.md: Blender source, GLB export, runtime fallback, and review
 
 ## Source of truth
 
@@ -37,6 +39,7 @@ Default branch: main
 - src/net.js owns WebRTC transport and diagnostics.
 - src/auth.js owns sign-in, profiles, saves, and stats.
 - src/supabase.js provides the one shared Supabase client.
+- src/assets.js loads authored GLB assets and keeps procedural fallbacks.
 - api/ contains Vercel server routes.
 - supabase/schema.sql is the database schema source.
 
@@ -53,6 +56,8 @@ Default branch: main
 - Never show private Google identity.
 - Never commit secrets.
 - Never seed fake production activity.
+- Keep 3D presentation separate from deterministic collision and simulation.
+- Validate authored GLBs and review silhouettes at gameplay distance.
 
 ## Validation
 

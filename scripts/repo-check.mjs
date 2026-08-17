@@ -30,6 +30,8 @@ for (const rel of [
   'docs/agent-brief.md',
   'docs/architecture.md',
   'docs/backend.md',
+  'docs/art-direction.md',
+  'docs/art-pipeline.md',
   'docs/product-contract.md',
   'docs/review-guide.md',
   'supabase/schema.sql',
@@ -61,6 +63,7 @@ for (const rel of [...filesUnder('api'), ...filesUnder('src'), 'supabase/schema.
 
 const index = read('index.html');
 assert.ok(!index.includes('assets.html'), 'index.html must not expose the review-only asset browser');
+assert.ok(!index.includes('art-slice.html'), 'index.html must not expose the review-only art slice');
 assert.ok(index.includes('three/addons/'), 'index.html must map vendored Three.js addons');
 
 const tacticalVisuals = read('src/tactical-visuals.js');
@@ -85,6 +88,7 @@ for (const rel of ['AGENTS.md', 'README.md', 'docs/agent-brief.md', 'docs/produc
 const packageJson = JSON.parse(read('package.json'));
 assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check must include repo-check.mjs');
 assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
+assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run check must validate production GLBs');
 assert.ok(read('src/main.js').includes('s.snap.v === 5'), 'continue-save gate must accept current v5 snapshots');
 assert.ok(read('scripts/sim-determinism-check.mjs').includes('workerArgs.push(ticksArg)'), 'determinism harness must forward --ticks to workers');
 
@@ -216,6 +220,7 @@ for (const rel of [
 const llms = read('llms.txt');
 assert.ok(llms.includes('docs/architecture.md'), 'llms.txt must link the architecture guide');
 assert.ok(llms.includes('docs/review-guide.md'), 'llms.txt must link the review guide');
+assert.ok(llms.includes('docs/art-direction.md'), 'llms.txt must link the 3D art contract');
 assert.ok(llms.includes('Keep simulation deterministic'), 'llms.txt must state the determinism rule');
 
 const vision = read('docs/design-vision.md');

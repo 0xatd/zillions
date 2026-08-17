@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zillions Production Art Slice</title>
+  <link rel="stylesheet" href="art-slice.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }
+  </script>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Zillions production review</p>
+      <h1>Art vertical slice</h1>
+      <p>Review silhouettes and materials at gameplay distance. This page is a repository review tool, not player UI.</p>
+    </div>
+    <a href="./">Play</a>
+  </header>
+  <main>
+    <aside>
+      <label for="asset">Asset</label>
+      <select id="asset"></select>
+      <label><input id="silhouette" type="checkbox"> Silhouette review</label>
+      <label><input id="close" type="checkbox"> Close inspection</label>
+      <dl>
+        <dt>Normal view</dt><dd>Matches the battlefield camera angle.</dd>
+        <dt>Silhouette</dt><dd>Removes surface color. Identity must remain.</dd>
+        <dt>Close</dt><dd>Checks joins, clipping, and sockets.</dd>
+      </dl>
+      <div id="status" role="status">Loading...</div>
+    </aside>
+    <section class="viewport" aria-label="3D asset review viewport">
+      <canvas id="view"></canvas>
+      <div class="distance">GAMEPLAY DISTANCE</div>
+    </section>
+  </main>
+  <script type="module" src="art-slice-page.js"></script>
+</body>
+</html>

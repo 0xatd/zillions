@@ -10,7 +10,8 @@ Read these files before you change code:
 2. `docs/architecture.md`
 3. `docs/agent-brief.md`
 4. `docs/backend.md` for account, API, or data work
-5. The relevant source files and checks
+5. `docs/art-direction.md` and `docs/art-pipeline.md` for 3D asset work
+6. The relevant source files and checks
 
 Use `llms.txt` when you need a compact repository index.
 
@@ -167,6 +168,19 @@ Test the affected flow in a browser. For broad changes, also test:
 6. Verify that squads and hives continue to muster.
 7. Create, join, Ready, start, leave, and close an online room.
 8. Verify that `assets.html` still loads.
+9. Verify that `art-slice.html` loads when the change touches 3D art.
+
+## Production Art Rules
+
+- Keep the procedural fallback until an authored GLB passes gameplay QA.
+- Presentation assets must not change collision, pathfinding, combat, save
+  state, or lockstep hashes.
+- Review every asset at gameplay distance and in silhouette mode.
+- Keep each asset origin at ground center.
+- Use the node and socket names in `docs/art-direction.md`.
+- Run `scripts/art-asset-check.mjs` before a model PR is called mergeable.
+- Keep terrain-derived walls and gates assembled along the generated rampart
+  path. Do not replace them with one generic fort prefab.
 
 ## Documentation Rules
 
@@ -178,3 +192,5 @@ Test the affected flow in a browser. For broad changes, also test:
   ownership changes.
 - Update `docs/product-contract.md` when product boundaries change.
 - Update `docs/backend.md` when service or data ownership changes.
+- Update `docs/art-direction.md` when the visual language, scale, budgets, or
+  socket contract changes.
