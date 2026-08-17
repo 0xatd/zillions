@@ -11,7 +11,7 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
@@ -198,6 +198,10 @@ class App {
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
       onLobbyOpen: () => this._openLobby(),
+      onCustomOpen: () => this._openCustomGames(),
+      onCustomRefresh: () => this._openCustomGames(true),
+      onCustomCreate: (options) => this.createCustomGame(options),
+      onCustomJoin: (room) => this.joinOnlineGame(room),
       onChatSend: (text) => this._sendLobbyChat(text),
       onRoomChatSend: (text) => this._sendRoomChat(text, 'room'),
       onGameChatSend: (text) => this._sendGameChat(text),
@@ -731,6 +735,10 @@ class App {
     }
     this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
     if (ev.gate.portal) {
+      if (ev.gate.action === 'custom') {
+        this._openCustomGames();
+        return;
+      }
       this._openGalaxyMap();
       return;
     }
@@ -2029,7 +2037,12 @@ class App {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => { this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id); this.ui.hubGames(g); },
+      onGames: (g) => {
+        this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id);
+        this.ui.hubGames(g);
+        this._customGames = g;
+        if (this.ui._lastScreen === 'custom') this._renderCustomBrowser();
+      },
       onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
@@ -2350,6 +2363,44 @@ class App {
       this.ui.showBanner('⚔️ Invite sent.', '', 2200);
     } catch (e) {
       this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  _renderCustomBrowser() {
+    const games = (this._customGames || []).filter(isCustomGame);
+    this.ui.showCustomBrowser({ games, offline: !this.lobby?.connected, hostName: this._publicName() });
+  }
+
+  _openCustomGames() {
+    this.ui._showScreen('custom');
+    this._renderCustomBrowser();
+    this._openLobby().then((lobby) => {
+      if (lobby?.connected) lobby.refreshGames().catch(() => this._renderCustomBrowser());
+      else this._renderCustomBrowser();
+    }).catch(() => this._renderCustomBrowser());
+  }
+
+  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
+    const lobby = await this._openLobby();
+    if (!lobby?.connected) {
+      this.ui.showBanner('📡 The lobby is unreachable — Custom Games needs the server.', 'bad', 4500);
+      return;
+    }
+    if (lobby.game) {
+      this.ui.showBanner('Leave your current room before hosting another.', 'bad', 4000);
+      return;
+    }
+    this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
+    try {
+      const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
+      await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
+      const room = lobby.game || game;
+      this.ui.showSetup({ online: room, mode: room.mode });
+      this._onRoomUpdate(room);
+      this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
+    } catch (error) {
+      this.ui.showBanner(`❌ Could not create the game: ${error.message}`, 'bad', 5000);
+      this.mpRole = null; this.onlineMode = false;
     }
   }
 
