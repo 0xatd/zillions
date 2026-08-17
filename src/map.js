@@ -59,9 +59,38 @@ export class GameMap extends TerrainField {
     const positions = new Float32Array(N * N * 6 * 3);
     const colors = new Float32Array(N * N * 6 * 3);
     const col = new THREE.Color();
+    const scratch = new THREE.Color();
     const blightCol = new THREE.Color(0x3c2547);
     const varNoise = makeNoise(makeRNG(1234));
+    // Painterly ground: a second, broader noise drifts hue and saturation in
+    // big warm/cool patches (the hand-painted mottling that makes reference
+    // ground feel alive), independent of the fine lightness grain.
+    const patchNoise = makeNoise(makeRNG(4321));
     let p = 0;
+
+    // Tile adjacency masks for the color pass: moisture creeps out of water,
+    // shade pools under treelines, and cliff feet sit in their own shadow.
+    // Cheap box scans at build time; corners average the 4 meeting tiles.
+    const nearWater = new Float32Array(N * N);
+    const nearForest = new Uint8Array(N * N);
+    const nearCrag = new Uint8Array(N * N);
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const i = this.idx(x, z);
+        let dw = 9;
+        for (let dz = -2; dz <= 2; dz++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            if (!this.inBounds(x + dx, z + dz)) continue;
+            const t = this.tiles[this.idx(x + dx, z + dz)];
+            const d = Math.max(Math.abs(dx), Math.abs(dz));
+            if (t === TILE.WATER) dw = Math.min(dw, d);
+            if (t === TILE.FOREST && d <= 1) nearForest[i] = 1;
+            if (t === TILE.MOUNTAIN && d <= 1) nearCrag[i] = 1;
+          }
+        }
+        nearWater[i] = dw <= 2 ? 1 - dw / 3 : 0;
+      }
+    }
 
     // Corner colors and heights are shared by up to four tiles; cache them
     // once. Heights first, then colors — the color pass reads the finished
@@ -77,21 +106,52 @@ export class GameMap extends TerrainField {
     for (let z = 0; z <= N; z++) {
       for (let x = 0; x <= N; x++) {
         let r = 0, g = 0, b = 0, n = 0;
+        let wet = 0, shadeF = 0, shadeC = 0, waterN = 0;
         for (let dz = -1; dz <= 0; dz++) {
           for (let dx = -1; dx <= 0; dx++) {
             const tx = x + dx, tz = z + dz;
             if (!this.inBounds(tx, tz)) continue;
-            col.setHex(this.colorOf(this.tiles[this.idx(tx, tz)]));
+            const ti = this.idx(tx, tz);
+            const t = this.tiles[ti];
+            col.setHex(this.colorOf(t));
             r += col.r; g += col.g; b += col.b; n++;
+            wet += nearWater[ti];
+            shadeF += nearForest[ti];
+            shadeC += nearCrag[ti];
+            if (t === TILE.WATER) waterN++;
           }
         }
         col.setRGB(r / Math.max(1, n), g / Math.max(1, n), b / Math.max(1, n));
+        const nn = Math.max(1, n);
+        wet /= nn; shadeF /= nn; shadeC /= nn;
         // Sunlit relief, baked in: high ground lifts toward light, hollows and
         // basins sink — so the landform reads even under flat Lambert shading.
         const h = cornerH[z * cw + x];
         const lift = h >= 0 ? Math.min(0.06, h * 0.045) : Math.max(-0.055, h * 0.09);
         const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.05;
         col.offsetHSL(0, 0, v + lift);
+        // Painterly patchwork: broad hue/saturation drift so open ground reads
+        // as brushwork — warm patches into cool — never a flat fill.
+        const patch = patchNoise(x * 0.016, z * 0.016, 2) - 0.5;
+        col.offsetHSL(patch * 0.032, patch * 0.16 + 0.03, patch * 0.02);
+        if (waterN === 0) {
+          // Moisture gradient: ground within a couple tiles of water darkens
+          // and saturates — banks read as damp earth, not the same meadow.
+          if (wet > 0) {
+            scratch.copy(col).offsetHSL(0.01, 0.14, -0.10);
+            col.lerp(scratch, wet * 0.8);
+          }
+          // Under-canopy shade: the ground at a treeline pools dark, so
+          // forests sit IN the ground instead of standing on clean grass.
+          if (shadeF > 0) col.offsetHSL(0.004, 0.05, -0.045 * shadeF);
+          // Cliff-foot shadow: crag boundaries carry their own occlusion.
+          if (shadeC > 0) col.offsetHSL(0, 0.02, -0.05 * shadeC);
+        } else if (waterN < n) {
+          // Shoreline shallows: the drowned rim of the basin glows lighter
+          // and greener under the water plane, giving the water visible depth.
+          scratch.setHex(this.isLava() ? 0xd8742e : 0x74c8b8);
+          col.lerp(scratch, 0.4);
+        }
         // Cliff shading: steep faces darken hard, so the crag boundary reads
         // as a wall you cannot walk up, while gentle walkable rolls (small
         // corner-to-corner drops) stay untouched.
@@ -293,38 +353,75 @@ export class GameMap extends TerrainField {
   }
 
   _buildTrees() {
-    // Storybook pines: chunkier cones, pale trunks, sparser stands.
+    // Alien deepwood: leaning trunks under lobed, layered canopies — a tall
+    // crown cone with an offset understory lobe, so the treeline is a mass of
+    // overlapping rounded silhouettes instead of a picket of identical cones.
+    // A few trees carry bioluminescent spore pods that burn through the dark.
     const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
     const g = new THREE.Group();
-    const trunkGeo = new THREE.CylinderGeometry(0.09, 0.13, 0.55, 5);
+    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0xcbbfa0 });
-    const canopyGeo = new THREE.ConeGeometry(0.56, 1.35, 6);
+    const canopyGeo = new THREE.ConeGeometry(0.52, 1.3, 7);
     const canopyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const lobeGeo = new THREE.SphereGeometry(0.42, 7, 5);
+    const lobeMat = canopyMat; // same program: instance color does the varying
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
     const canopies = new THREE.InstancedMesh(canopyGeo, canopyMat, spots.length);
+    const lobes = new THREE.InstancedMesh(lobeGeo, lobeMat, spots.length);
     trunks.castShadow = canopies.castShadow = true;
+    lobes.castShadow = false; // the crown already shadows the stand
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    const eul = new THREE.Euler();
     const c = new THREE.Color();
     const rng = makeRNG(31);
-    const up = new THREE.Vector3(0, 1, 0);
+    const spores = [];
+    const base = new THREE.Color(this.colorOf(TILE.FOREST));
     for (let i = 0; i < spots.length; i++) {
       const s = spots[i];
-      q.setFromAxisAngle(up, s.r);
-      sc.set(s.s, s.s, s.s);
+      const leanX = (rng() - 0.5) * 0.16, leanZ = (rng() - 0.5) * 0.16;
+      eul.set(leanX, s.r, leanZ);
+      q.setFromEuler(eul);
+      sc.set(s.s, s.s * (0.9 + rng() * 0.35), s.s);
       const gy = this.groundY(s.x, s.z);
-      pos.set(s.x, gy + 0.25 * s.s, s.z);
+      pos.set(s.x, gy + 0.32 * s.s, s.z);
       m.compose(pos, q, sc);
       trunks.setMatrixAt(i, m);
-      pos.y = gy + (0.5 + 0.45) * s.s;
+      pos.set(s.x + leanX * 0.5, gy + (0.62 + 0.55) * s.s * (0.95 + rng() * 0.2), s.z + leanZ * 0.5);
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
-      // Canopies key off the map's forest color — one hue family per map.
-      c.setHex(this.colorOf(TILE.FOREST));
-      c.offsetHSL((rng() - 0.5) * 0.02, 0.04, (rng() - 0.5) * 0.06 - 0.02);
+      // Understory lobe: offset to one side and lower, a second rounded mass.
+      const la = rng() * Math.PI * 2, lr = 0.28 + rng() * 0.2;
+      pos.set(s.x + Math.cos(la) * lr * s.s, gy + (0.55 + rng() * 0.25) * s.s, s.z + Math.sin(la) * lr * s.s);
+      sc.set(s.s * (0.8 + rng() * 0.4), s.s * (0.65 + rng() * 0.3), s.s * (0.8 + rng() * 0.4));
+      m.compose(pos, q, sc);
+      lobes.setMatrixAt(i, m);
+      // Canopies key off the map's forest color — one hue family per map,
+      // crowns lighter than understory so the layers read.
+      c.copy(base).offsetHSL((rng() - 0.5) * 0.025, 0.05, (rng() - 0.5) * 0.07);
       canopies.setColorAt(i, c);
+      c.offsetHSL(0.006, 0.06, -0.03); // understory sits in its own shade
+      lobes.setColorAt(i, c);
+      if (rng() < 0.16) spores.push({ x: s.x + (rng() - 0.5) * 0.5, z: s.z + (rng() - 0.5) * 0.5, y: gy + (0.5 + rng() * 0.5) * s.s, s: 0.5 + rng() * 0.5 });
     }
-    g.add(trunks, canopies);
+    g.add(trunks, canopies, lobes);
+    // Spore pods: teal pinpricks hanging in the deepwood (the biome's own
+    // bioluminescence — the sci-fi answer to ember-lit fantasy forests).
+    if (spores.length) {
+      const pods = new THREE.InstancedMesh(
+        new THREE.OctahedronGeometry(0.07, 0),
+        new THREE.MeshLambertMaterial({ color: 0x5fd8c8, emissive: 0x3fb8a8, emissiveIntensity: 0.9 }),
+        spores.length,
+      );
+      q.identity();
+      spores.forEach((s, i) => {
+        sc.setScalar(s.s);
+        pos.set(s.x, s.y, s.z);
+        m.compose(pos, q, sc);
+        pods.setMatrixAt(i, m);
+      });
+      g.add(pods);
+    }
     return g;
   }
 
@@ -336,10 +433,22 @@ export class GameMap extends TerrainField {
     const N = this.size;
     const g = new THREE.Group();
     const rng = makeRNG(888);
-    const teeth = [], boulders = [];
+    const teeth = [], boulders = [], scree = [];
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) continue;
+        if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) {
+          // Rubble apron: walkable ground that touches crag catches the
+          // rockfall — the cliff foot reads weathered, not laser-cut.
+          if (this.isWalkable(x, z)
+            && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => this.inBounds(x + dx, z + dz) && this.tiles[this.idx(x + dx, z + dz)] === TILE.MOUNTAIN)
+            && rng() < 0.5) {
+            const n = 1 + (rng() < 0.4 ? 1 : 0);
+            for (let i = 0; i < n; i++) {
+              scree.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.6 + rng() * 0.9, r: rng() * Math.PI * 2 });
+            }
+          }
+          continue;
+        }
         const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) =>
           this.isWalkable(x + dx, z + dz));
         if (rim) {
@@ -348,6 +457,7 @@ export class GameMap extends TerrainField {
             teeth.push({
               x: x + 0.2 + rng() * 0.6, z: z + 0.2 + rng() * 0.6,
               s: 0.8 + rng() * 0.8, r: rng() * Math.PI * 2, tilt: (rng() - 0.5) * 0.3,
+              shade: 0.72 + rng() * 0.34,
             });
           }
         } else if (rng() < 0.35) {
@@ -358,18 +468,40 @@ export class GameMap extends TerrainField {
     const cragCol = this.colorOf(TILE.MOUNTAIN);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     const eul = new THREE.Euler();
+    const c = new THREE.Color();
     if (teeth.length) {
       const mesh = new THREE.InstancedMesh(
         new THREE.ConeGeometry(0.4, 1.5, 5),
-        new THREE.MeshLambertMaterial({ color: new THREE.Color(cragCol).multiplyScalar(0.82).getHex() }),
+        new THREE.MeshLambertMaterial({ color: 0xffffff }),
         teeth.length,
       );
       mesh.castShadow = true;
+      const toothBase = new THREE.Color(cragCol).multiplyScalar(0.82);
       teeth.forEach((s, i) => {
         eul.set(s.tilt, s.r, s.tilt * 0.7);
         q.setFromEuler(eul);
         sc.set(s.s, s.s * (0.9 + (i % 3) * 0.25), s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.55 * s.s, s.z);
+        m.compose(pos, q, sc);
+        mesh.setMatrixAt(i, m);
+        // Strata: neighbouring teeth vary light-to-dark, so the rim reads as
+        // layered rock faces instead of one repeated prop.
+        c.copy(toothBase).multiplyScalar(s.shade);
+        mesh.setColorAt(i, c);
+      });
+      g.add(mesh);
+    }
+    if (scree.length) {
+      const mesh = new THREE.InstancedMesh(
+        new THREE.DodecahedronGeometry(0.13, 0),
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex() }),
+        scree.length,
+      );
+      scree.forEach((s, i) => {
+        eul.set(0, s.r, 0);
+        q.setFromEuler(eul);
+        sc.set(s.s, s.s * 0.65, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.05, s.z);
         m.compose(pos, q, sc);
         mesh.setMatrixAt(i, m);
       });
@@ -441,7 +573,10 @@ export class GameMap extends TerrainField {
     const stoneHex = this.theme?.palette?.mountain ?? 0xb8b4a6;
 
     const tufts = [], pebbles = [], boulders = [], slabs = [], posts = [];
+    const polyps = [], pustules = [], glyphs = [];
     const col = new THREE.Color();
+    const edgeOf = (x, z, tile) => [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]
+      .some(([dx, dz]) => this.inBounds(x + dx, z + dz) && this.tiles[this.idx(x + dx, z + dz)] === tile);
 
     // --- broad scatter over open ground ---
     // Density follows a noise field, not a uniform coin-flip: tufts gather in
@@ -464,9 +599,29 @@ export class GameMap extends TerrainField {
           } else if (r > 0.9975 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
             boulders.push({ x: x + 0.5, z: z + 0.5, s: 0.7 + rng() * 1.1, ry: rng() * Math.PI * 2 });
           }
+          // Bioluminescent polyps: clusters of teal spore-lights along water
+          // banks and treelines — this planet's own light in the dark places.
+          if (rng() < 0.028 && !nearSite(x, z, 12) && (edgeOf(x, z, TILE.WATER) || edgeOf(x, z, TILE.FOREST))) {
+            const cn = 2 + Math.floor(rng() * 3);
+            for (let i = 0; i < cn; i++) {
+              polyps.push({ x: x + 0.2 + rng() * 0.6, z: z + 0.2 + rng() * 0.6, s: 0.5 + rng() * 0.8 });
+            }
+          }
         } else if (t === TILE.SAND && rng() < 0.04) {
           pebbles.push({ x: x + rng(), z: z + rng(), s: 0.5 + rng() * 0.7, ry: rng() * Math.PI * 2 });
         }
+      }
+    }
+
+    // --- blight pustules: the stain around every hive lair grows glowing
+    // nodules, so infested ground is lit by its own infection ---
+    for (const [nx, nz] of this.nestSpots || []) {
+      const cn = 7 + Math.floor(rng() * 4);
+      for (let i = 0; i < cn; i++) {
+        const a = rng() * Math.PI * 2, d = 1.8 + rng() * 3.2;
+        const px = nx + Math.cos(a) * d, pz = nz + Math.sin(a) * d;
+        if (!this.inBounds(px | 0, pz | 0) || this.tiles[this.idx(px | 0, pz | 0)] === TILE.WATER) continue;
+        pustules.push({ x: px, z: pz, s: 0.5 + rng() * 0.9 });
       }
     }
 
@@ -496,11 +651,16 @@ export class GameMap extends TerrainField {
     for (const c of this.chokeSpots || []) {
       const t0 = c.tiles[0], t1 = c.tiles[c.tiles.length - 1];
       for (const [tx, tz] of [t0, t1]) {
+        const ry = c.axis === 'x' ? 0 : Math.PI / 2;
+        const sy = 1.6 + rng() * 0.5;
         slabs.push({
           x: tx + 0.5, z: tz + 0.5,
-          sx: 0.5, sy: 1.6 + rng() * 0.5, sz: 0.4,
-          ry: c.axis === 'x' ? 0 : Math.PI / 2, tilt: (rng() - 0.5) * 0.14, weather: 0.9,
+          sx: 0.5, sy, sz: 0.4,
+          ry, tilt: (rng() - 0.5) * 0.14, weather: 0.9,
         });
+        // Precursor glyph: a live seam of light on each monolith face — whoever
+        // raised these markers wired them to something that still has power.
+        glyphs.push({ x: tx + 0.5, z: tz + 0.5, y: sy * 0.55, ry });
       }
     }
 
@@ -597,6 +757,31 @@ export class GameMap extends TerrainField {
         sc.set(s.s, s.s, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.45 * s.s, s.z);
       });
+
+    // --- the glow layer: saturated light accents in the dark places ---
+    const polypMesh = bake(polyps, new THREE.SphereGeometry(0.09, 7, 5),
+      new THREE.MeshLambertMaterial({ color: 0x5fd8c8, emissive: 0x2fa898, emissiveIntensity: 0.9 }), (s) => {
+        q.identity();
+        sc.set(s.s, s.s * 1.3, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.08 * s.s, s.z);
+      });
+    if (polypMesh) polypMesh.castShadow = false;
+
+    const pustuleMesh = bake(pustules, new THREE.SphereGeometry(0.11, 7, 5),
+      new THREE.MeshLambertMaterial({ color: 0x9a4dd8, emissive: 0x7a2db8, emissiveIntensity: 1.1 }), (s) => {
+        q.identity();
+        sc.set(s.s, s.s * 0.6, s.s);
+        pos.set(s.x, this.groundY(s.x, s.z) + 0.05 * s.s, s.z);
+      });
+    if (pustuleMesh) pustuleMesh.castShadow = false;
+
+    const glyphMesh = bake(glyphs, new THREE.BoxGeometry(0.1, 0.7, 0.44),
+      new THREE.MeshBasicMaterial({ color: 0x7fe8d8 }), (s) => {
+        eul.set(0, s.ry, 0); q.setFromEuler(eul);
+        sc.set(1, 1, 1);
+        pos.set(s.x, this.groundY(s.x, s.z) + s.y, s.z);
+      });
+    if (glyphMesh) glyphMesh.castShadow = false;
 
     return g;
   }

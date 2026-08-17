@@ -2935,6 +2935,21 @@ class App {
 
   // ---------------- building meshes ----------------
 
+  // Trampled-ground skirt: a soft dark footprint under every structure, so
+  // buildings sit IN the land instead of standing on untouched meadow.
+  // Presentation only — reads as worked earth from any zoom.
+  _groundSkirt(b) {
+    const r = Math.max(1.15, (b.size || 1.5) * 0.72);
+    const geo = new THREE.CircleGeometry(r, 18);
+    geo.rotateX(-Math.PI / 2);
+    const skirt = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      color: 0x37322b, transparent: true, opacity: 0.42, depthWrite: false,
+    }));
+    skirt.position.y = 0.03;
+    skirt.receiveShadow = true;
+    return skirt;
+  }
+
   _authoredBuildingMesh(b) {
     const tier = Math.max(1, Math.min(3, Number(b.plotTier) || 1));
     let key = null;
@@ -2947,6 +2962,7 @@ class App {
     if (!model) return null;
     const g = new THREE.Group();
     g.add(model);
+    g.add(this._groundSkirt(b));
     g.userData.authored = true;
     g.userData.head = assetPart(model, 'part_turret');
     g.userData.rotor = assetPart(model, 'part_rotor');
@@ -3489,6 +3505,7 @@ class App {
     } else if (b.kind === 'mill') {
       dress('barrel', 0.5, 0.8, 0.6);
     }
+    if (b.kind !== 'wall') g.add(this._groundSkirt(b));
     return g;
   }
 
