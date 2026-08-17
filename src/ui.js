@@ -9,7 +9,7 @@ const PORTRAITS = {
 };
 import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, PACK_SLOTS,
-  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank,
+  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
 } from './config.js';
 import { formatTime } from './utils.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
@@ -78,6 +78,7 @@ export class UI {
           <button id="bigaction" class="bigaction"></button>
         </div>
         <div id="branchpanel" class="hidden"></div>
+        <div id="blessingpanel" class="hidden"></div>
         <div id="buildhint" class="hidden"></div>
       </div>
 
@@ -119,7 +120,7 @@ export class UI {
             </button>
             <button class="menubtn" id="m-solo">
               <span class="menuicon">⚔️</span>
-              <span><b>PLAY SOLO</b><small>story campaign · endless survival</small></span>
+              <span><b>PLAY SOLO</b><small>story campaign · endless survival · the labyrinth</small></span>
               <span class="menuarrow">›</span>
             </button>
             <div class="menuutilities">
@@ -150,6 +151,13 @@ export class UI {
               <p>Build one city against an endless siege. Your highest Threat is the score.</p>
               <div id="solo-survival-resume" class="moderesume"></div>
               <button class="menubtn modeprimary" id="solo-survival">Start a run <span class="menuarrow">›</span></button>
+            </section>
+            <section class="modecard">
+              <div class="modeeyebrow">GAUNTLET</div>
+              <h2>🌀 The Labyrinth</h2>
+              <p>No colony, no army — one hero against the deep. Raze each brood chamber, take its blessing, kill the champion, walk out.</p>
+              <div id="solo-labyrinth-resume" class="moderesume"></div>
+              <button class="menubtn modeprimary" id="solo-labyrinth">Enter the trial <span class="menuarrow">›</span></button>
             </section>
           </div>
         </div>
@@ -273,6 +281,7 @@ export class UI {
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
+    q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
       if (this._fromLobby) this._confirmRoomExit();
       else this._showScreen('main');
@@ -550,12 +559,15 @@ export class UI {
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
       : coop ? 'Co-op — one city, one hero each'
       : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
+      : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
-    this._buildLevelRow(this._campaignCleared || 0, mode === 'survival');
+    this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
     this.setStartButton({
       text: mode === 'survival'
         ? '▶  START — SURVIVE AS LONG AS YOU CAN'
+        : mode === 'labyrinth'
+        ? '▶  DESCEND — CLEAR THE TRIAL'
         : '▶  START — TAKE THE PLANET',
       disabled: false,
       title: '',
@@ -604,25 +616,35 @@ export class UI {
     }
   }
 
-  _buildLevelRow(cleared, allUnlocked = false) {
+  _buildLevelRow(cleared, allUnlocked = false, mode = 'campaign') {
     this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
     row.innerHTML = '';
+    const labyrinth = mode === 'labyrinth';
     // The war, in one line: Earth first, then the stars — and every world you
-    // have taken back stays taken.
+    // have taken back stays taken. The labyrinth is its own descent.
     const status = this.root.querySelector('#warstatus');
     if (status) {
       const worlds = Math.max(0, cleared - LEVELS.length);
-      status.textContent = cleared >= LEVELS.length
+      status.textContent = labyrinth
+        ? `🌀 ${LABYRINTH_LEVELS.length} trials, each deeper than the last`
+        : cleared >= LEVELS.length
         ? `🌍 Earth retaken · ${worlds ? `${worlds} frontier world${worlds === 1 ? '' : 's'} liberated` : 'the galaxy awaits'}`
         : `🌍 The war for Earth: ${cleared}/${LEVELS.length} fronts won`;
     }
-    this.selectedLevel = allUnlocked ? 1 : cleared + 1;
     // The authored war first; once it is won, the galaxy opens — every planet
-    // you have cleared plus the next frontier world, without end.
-    const ids = LEVELS.map((l) => l.id);
-    if (allUnlocked || cleared >= LEVELS.length) {
-      for (let id = LEVELS.length + 1; id <= Math.max(cleared + 1, LEVELS.length + 1); id++) ids.push(id);
+    // you have cleared plus the next frontier world, without end. Labyrinth
+    // trials are their own roster, all open from the start.
+    let ids;
+    if (labyrinth) {
+      ids = LABYRINTH_LEVELS.map((l) => l.id);
+      this.selectedLevel = ids[0];
+    } else {
+      this.selectedLevel = allUnlocked ? 1 : cleared + 1;
+      ids = LEVELS.map((l) => l.id);
+      if (allUnlocked || cleared >= LEVELS.length) {
+        for (let id = LEVELS.length + 1; id <= Math.max(cleared + 1, LEVELS.length + 1); id++) ids.push(id);
+      }
     }
     for (const id of ids) {
       const lv = levelById(id);
@@ -632,7 +654,7 @@ export class UI {
       // the player commits twenty minutes to it.
       const land = (TERRAIN_SHAPES[lv.theme.terrain] || {}).label || 'frontier';
       const plan = CITY_PLANS[lv.theme.city];
-      const city = plan ? plan.label : 'frontier city';
+      const city = lv.labyrinth ? 'hero gauntlet — no colony' : plan ? plan.label : 'frontier city';
       const card = document.createElement('button');
       card.className = 'levelcard' + (lv.id === this.selectedLevel ? ' sel' : '')
         + (locked ? ' locked' : '') + (lv.galaxy ? ' galaxy' : '');
@@ -800,39 +822,58 @@ export class UI {
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
+    const labyrinth = game.mode === 'labyrinth';
     const held = game.heldNodes ? game.heldNodes() : 0;
     const nests = game.liveNests ? game.liveNests() : 0;
     const frac = Math.max(0, Math.min(1, (game.threat || 0) % 1));
     q('#r-day').innerHTML = game.phase === 'found'
       ? '🏳️ <b>Claim your ground</b>'
       : game.finalStand
-        ? '☠️ <b>Final counterattack</b>'
+        ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
         : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
-    const total = game.activeNodes ? game.activeNodes().length : game.nodes.length;
-    q('#r-front').innerHTML = `🚩 <b>${held}</b>/${total} · 🔥 <b>${nests}</b>`;
-    q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
+    // In the labyrinth the front is chambers and lives, not nodes and camps.
+    if (labyrinth) {
+      const chambers = game.nests.filter((n) => !n.offMap).length;
+      q('#r-front').innerHTML = `🌀 <b>${chambers - nests}</b>/${chambers} · ❤️ <b>${game.lives}</b>`;
+      q('#r-front').title = 'Brood chambers razed · shared lives left';
+      q('#r-front').classList.toggle('danger', game.lives === 0);
+    } else {
+      const total = game.activeNodes ? game.activeNodes().length : game.nodes.length;
+      q('#r-front').innerHTML = `🚩 <b>${held}</b>/${total} · 🔥 <b>${nests}</b>`;
+      q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
+    }
 
-    // Active army stance chip.
+    // Active army stance chip — hidden in the labyrinth: there is no army,
+    // and nothing to build means the ALT mode toggle is noise too.
+    q('#stancebar').classList.toggle('hidden', labyrinth);
+    q('#mode-toggle').classList.toggle('hidden', labyrinth);
+    this.showBlessings(game, p);
     if (this._stance !== game.stance) {
       this._stance = game.stance;
       for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
         chip.classList.toggle('sel', chip.dataset.st === game.stance);
       }
     }
-    const army = game.units.filter((u) => !u.hero && !u.dead).length;
-    const stanceText = {
-      defend: 'holding the city line',
-      guard: 'following your hero',
-      attack: 'pushing the lanes',
-    }[game.stance] || 'awaiting orders';
-    // Show the supply ceiling, not just the count: when it is full, the way to
-    // field more is to go and take more ground.
-    const cap = game.unitCap ? game.unitCap() : army;
-    const full = army >= cap;
-    q('#army-status').innerHTML = army
-      ? `<b>${army}</b>/${cap} supply · ${stanceText}${full ? ' · <b>take ground for more</b>' : ''}`
-      : 'Build militia, ranger, or sniper camps — they muster squads forever.';
+    if (labyrinth) {
+      q('#army-status').innerHTML = game.lives > 0
+        ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · the fallen return at the last razed chamber`
+        : '❤️ <b>No lives left</b> — the next fall is final.';
+    } else {
+      const army = game.units.filter((u) => !u.hero && !u.dead).length;
+      const stanceText = {
+        defend: 'holding the city line',
+        guard: 'following your hero',
+        attack: 'pushing the lanes',
+      }[game.stance] || 'awaiting orders';
+      // Show the supply ceiling, not just the count: when it is full, the way
+      // to field more is to go and take more ground.
+      const cap = game.unitCap ? game.unitCap() : army;
+      const full = army >= cap;
+      q('#army-status').innerHTML = army
+        ? `<b>${army}</b>/${cap} supply · ${stanceText}${full ? ' · <b>take ground for more</b>' : ''}`
+        : 'Build militia, ranger, or sniper camps — they muster squads forever.';
+    }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
 
     // Hero plate.
@@ -1009,6 +1050,35 @@ export class UI {
     panel.appendChild(row);
   }
 
+  // Labyrinth blessing picker: pick 1 of 3 while the run keeps moving — the
+  // labyrinth does not pause for you. Rebuilt only when the offer changes.
+  showBlessings(game, p = 0) {
+    const panel = this.root.querySelector('#blessingpanel');
+    const offer = game.mode === 'labyrinth' ? game.blessingOffers?.[p] : null;
+    if (!offer) {
+      if (!panel.classList.contains('hidden')) panel.classList.add('hidden');
+      this._blessKey = null;
+      return;
+    }
+    const key = offer.join(',');
+    if (this._blessKey === key) return;
+    this._blessKey = key;
+    panel.classList.remove('hidden');
+    panel.innerHTML = '<div class="blesstitle">✨ The chamber offers a blessing — choose one:</div>';
+    const row = document.createElement('div');
+    row.className = 'branchrow';
+    offer.forEach((k, i) => {
+      const it = ITEMS[k];
+      if (!it) return;
+      const b = document.createElement('button');
+      b.className = 'branchbtn blessbtn';
+      b.innerHTML = `<span class="bicon">${it.icon}</span><b>${it.name}</b><small>${it.desc}</small>`;
+      b.onclick = () => this.cb.onBlessing && this.cb.onBlessing(i);
+      row.appendChild(b);
+    });
+    panel.appendChild(row);
+  }
+
   updateBoss(game) {
     const bar = this.root.querySelector('#bossbar');
     const zb = game.boss;
@@ -1139,11 +1209,15 @@ export class UI {
   setContinue(snap) {
     for (const row of this.root.querySelectorAll('.moderesume')) row.innerHTML = '';
     if (!snap) return;
-    const mode = snap.mode === 'survival' ? 'survival' : 'campaign';
+    const mode = snap.mode === 'survival' ? 'survival' : snap.mode === 'labyrinth' ? 'labyrinth' : 'campaign';
     const row = this.root.querySelector(`#solo-${mode}-resume`);
     if (!row) return;
     const players = Array.isArray(snap.heroKeys) ? snap.heroKeys.length : 1;
-    const label = mode === 'survival' ? 'Resume survival run' : `Resume Level ${snap.levelId || 1}`;
+    // Snapshots store the level id under `level`.
+    const levelId = snap.level ?? snap.levelId ?? 1;
+    const label = mode === 'survival' ? 'Resume survival run'
+      : mode === 'labyrinth' ? `Resume ${levelById(levelId).name}`
+      : `Resume Level ${levelId}`;
     const detail = `Threat ${snap.threatLevel || 1} · ${snap.diff || 'normal'}${players > 1 ? ` · ${players} players` : ''}`;
     row.innerHTML = `<button class="resumebtn" id="b-continue"><span>▶</span><span><b>${label}</b><small>${detail}</small></span></button>`;
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
@@ -1293,7 +1367,7 @@ export class UI {
     const launchCopy = launchText || (isHost
       ? 'Use the gold START button below to launch this room for everyone.'
       : 'Pick your hero here. The host starts the match when the room is ready.');
-    const modeCopy = mode === 'survival' ? 'Survival' : 'Campaign';
+    const modeCopy = mode === 'survival' ? 'Survival' : mode === 'labyrinth' ? 'Labyrinth' : 'Campaign';
     const levelDef = levelById(level || 1);
     const difficultyDef = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     const host = players.find((p) => p.host);
@@ -1386,6 +1460,7 @@ export class UI {
     ov.classList.remove('hidden');
     const lv = levelById(levelId || 1);
     const survival = mode === 'survival';
+    const labyrinth = mode === 'labyrinth';
     const questRows = (extra && extra.quests || []).map((q) => {
       const it = ITEMS[q.reward];
       return `<div class="questrow ${q.done ? 'done' : ''}">${q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}
@@ -1394,8 +1469,13 @@ export class UI {
     const grants = (extra && extra.grants || []).map((k) => ITEMS[k]).filter(Boolean);
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
-        <h1>${survival ? `💀 THREAT ${threat}` : won ? '🏆 PLANET TAKEN' : '💀 THE CITY HAS FALLEN'}</h1>
-        <p class="tagline">${survival
+        <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
+          : survival ? `💀 THREAT ${threat}` : won ? '🏆 PLANET TAKEN' : '💀 THE CITY HAS FALLEN'}</h1>
+        <p class="tagline">${labyrinth
+          ? (won
+            ? `${lv.name} is behind you. Every chamber is silent and the champion is dead — you walked out.`
+            : `${lv.name} claimed the whole company. The chambers keep what falls in them.`)
+          : survival
           ? `The dead are endless — but you drove ${lv.name} to Threat ${threat}.${threat >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
           : won
           ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
@@ -1403,15 +1483,15 @@ export class UI {
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
-          <div>🔥 Hive nests razed: <b>${stats.nests || 0}</b></div>
-          <div>🏗️ Structures raised: <b>${stats.built}</b></div>
-          <div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>
+          <div>${labyrinth ? `🌀 Chambers razed: <b>${stats.nests || 0}</b>` : `🔥 Hive nests razed: <b>${stats.nests || 0}</b>`}</div>
+          ${labyrinth ? `<div>☠️ Heroes fallen: <b>${stats.heroDeaths || 0}</b></div>` : `<div>🏗️ Structures raised: <b>${stats.built}</b></div>`}
+          ${labyrinth ? '' : `<div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>`}
           <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
         ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${grants.length
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
-        ${!survival && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
+        ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
         <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
@@ -1609,7 +1689,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
+        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible
@@ -1633,7 +1713,7 @@ export class UI {
   showInviteToast(inv, onAccept) {
     const el = this.root.querySelector('#invitetoast');
     el.classList.remove('hidden');
-    el.innerHTML = `<b></b> invites you to their ${inv.mode === 'survival' ? 'Survival' : 'Campaign'} war! <button class="tbtn" id="inv-yes">⚔️ Join</button> <button class="tbtn" id="inv-no">✕</button>`;
+    el.innerHTML = `<b></b> invites you to their ${inv.mode === 'survival' ? 'Survival' : inv.mode === 'labyrinth' ? 'Labyrinth' : 'Campaign'} war! <button class="tbtn" id="inv-yes">⚔️ Join</button> <button class="tbtn" id="inv-no">✕</button>`;
     el.querySelector('b').textContent = inv.fromName;
     el.querySelector('#inv-yes').onclick = () => { el.classList.add('hidden'); onAccept(); };
     el.querySelector('#inv-no').onclick = () => el.classList.add('hidden');

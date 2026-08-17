@@ -27,8 +27,10 @@ Zillions is a sci-fi planet-conquest siege game. The core loop is:
 
 The loop is continuous. Do not add a day, night, dawn, or bell phase.
 
-The main menu is multiplayer-first. Story Campaign and Survival belong under
-Play Solo.
+The main menu is multiplayer-first. Story Campaign, Survival, and The
+Labyrinth belong under Play Solo. The Labyrinth is a no-building hero
+gauntlet (`mode === 'labyrinth'`, level ids 9001+): keep it free of colony,
+economy, and army systems, and never let its wins advance campaign progress.
 
 ## Hard Invariants
 

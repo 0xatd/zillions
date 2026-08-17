@@ -118,6 +118,7 @@ class App {
       onHeroPick: (k) => this._pickHero(k),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
+      onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => location.reload(),
       onQuit: () => location.reload(),
@@ -347,8 +348,12 @@ class App {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
       this.scene.add(this.plaza);
-    } else {
+    } else if (this.game.mode !== 'labyrinth') {
+      // Labyrinth runs never found a city, so "claim this ground" flags would
+      // be a lie there — sanctuaries are just rooms.
       this._makeSiteMarkers();
+      this._clearNodeMarkers();
+    } else {
       this._clearNodeMarkers();
     }
     this.map.drawMinimap(document.getElementById('minimap-base'));
@@ -361,8 +366,15 @@ class App {
     // left on the minimap. The menu can orbit, but a run must not inherit it.
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
+    // The labyrinth has nothing to build, so Space is always the special.
+    if (mode === 'labyrinth') {
+      this.controlMode = 'fight';
+      if (this.ui.setControlMode) this.ui.setControlMode('fight');
+    }
     this.ui.showBanner(mode === 'survival'
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
+      : mode === 'labyrinth'
+      ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
@@ -838,12 +850,17 @@ class App {
     if (this.mpRole === 'spectator') return;
     const p = this.profile;
     p.games++;
-    if (won && this.game.mode !== 'survival') {
-      p.wins++;
+    if (won && this.game.mode !== 'survival') p.wins++;
+    // Only campaign wins advance the war for Earth — a labyrinth trial id
+    // (9001+) written here would unlock the whole galaxy.
+    if (won && this.game.mode === 'campaign') {
       p.campaign = Math.max(p.campaign || 0, this.game.levelId);
     }
     if (this.game.mode === 'survival') {
       p.bestSurvival = Math.max(p.bestSurvival || 0, this.game.threatLevel);
+    }
+    if (won && this.game.mode === 'labyrinth') {
+      p.labyrinthClears = { ...(p.labyrinthClears || {}), [this.game.levelId]: true };
     }
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
