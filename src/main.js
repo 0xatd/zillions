@@ -11,8 +11,9 @@ import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
+import { ensureCharacters, recordCharacterResult, makeCharacter, addCharacter, deleteCharacter } from './characters.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals, applyRim } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -202,6 +203,16 @@ class App {
       onMatchLeave: () => this._leaveOnlineMatch(),
       onRoomReconnect: (userId) => this._retryRoomConnection(userId),
       onRoomRemovePlayer: (userId) => this._removeRoomPlayer(userId),
+      // ----- character select -----
+      onCharacterSelect: (c) => this._selectCharacter(c),
+      onCharacterEnter: (c) => this._enterWorldAs(c),
+      onCharacterCreate: ({ name, heroKey, banner }) => this._createCharacter(name, heroKey, banner),
+      onCharacterDelete: (id) => this._deleteCharacter(id),
+      // ----- custom games -----
+      onCustomOpen: () => this._openCustomGames(),
+      onCustomRefresh: () => this._openCustomGames(true),
+      onCustomCreate: (opts) => this.createCustomGame(opts),
+      onCustomJoin: (row) => this.joinOnlineGame(row),
     });
 
     this._setupLights();
@@ -262,6 +273,9 @@ class App {
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
     this.profile = this._loadProfile();
+    // Characters ride the profile: existing players are grandfathered one
+    // built from their current identity so the new door never locks them out.
+    ensureCharacters(this.profile);
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
 
@@ -302,11 +316,166 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // Boot straight onto the overworld: the hero stands on the first front
-    // and the whole campaign is a walk away. The hub is a keystroke away.
-    this._enterOverworld();
+    // Boot at the roster door: pick (or forge) a commander, then walk the
+    // overworld as them. The hub is a keystroke away once inside.
+    this._enterCharacterSelect();
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
+  }
+
+  // ---------------- character select ----------------
+  // The WoW/Diablo door before the overworld. The DOM screen owns the
+  // cinema chrome (cards, create panel); this half stages the REAL hero
+  // meshes on a dark terrace behind it — same _makeUnitMesh the game uses,
+  // same idle pose, so the lineup is the roster, not a picture of it.
+
+  _enterCharacterSelect() {
+    if (this.game || this.ow) return;
+    this._buildCharacterStage();
+    this.ui.showCharacterSelect({
+      characters: this.profile.characters,
+      selectedId: this.profile.characterId,
+      campaign: this.profile.campaign || 0,
+    });
+  }
+
+  _buildCharacterStage() {
+    this._clearCharacterStage();
+    const group = new THREE.Group();
+    const N = Math.max(1, this.profile.characters.length);
+    // A terrace at the world's heart: dark disc, a slow orbit of the lineup.
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(9 + N, 48),
+      new THREE.MeshLambertMaterial({ color: 0x14181f }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    group.add(disc);
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(9 + N - 0.35, 9 + N, 48),
+      new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = 0.02;
+    group.add(rim);
+    this.charStage = { group, units: [], selectedId: this.profile.characterId };
+    this._rebuildCharacterLineup();
+    group.position.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
+    this.scene.add(group);
+  }
+
+  _rebuildCharacterLineup() {
+    const stage = this.charStage;
+    if (!stage) return;
+    for (const u of stage.units) { stage.group.remove(u.mesh); this._disposeObject3D(u.mesh); }
+    stage.units = [];
+    const chars = this.profile.characters || [];
+    const spread = Math.min(4.2, 1.6 + chars.length * 0.8);
+    chars.forEach((c, i) => {
+      const def = HEROES[c.heroKey] || HEROES.alexander;
+      const mesh = this._makeUnitMesh({ hero: true, key: c.heroKey, def, auraRadius: 1.1 });
+      const a = chars.length === 1 ? 0 : (i / (chars.length - 1) - 0.5) * spread;
+      mesh.position.set(a, 0, 0);
+      mesh.rotation.y = Math.PI; // face the camera as it swings past
+      const label = this._makeLabelSprite(
+        (HEROES[c.heroKey] || HEROES.alexander).icon, c.name,
+      );
+      label.position.y = 2.6;
+      label.scale.set(3.0, 1.5, 1);
+      mesh.add(label);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.75, 0.95, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.04;
+      mesh.add(ring);
+      mesh.userData.ring = ring;
+      stage.group.add(mesh);
+      stage.units.push({ id: c.id, mesh, baseX: a });
+    });
+    this._syncCharacterStageSelection();
+  }
+
+  _syncCharacterStageSelection() {
+    const stage = this.charStage;
+    if (!stage) return;
+    for (const u of stage.units) {
+      const sel = u.id === stage.selectedId;
+      u.mesh.userData.ring.visible = sel;
+      u.mesh.userData.ring.material.opacity = 0.4 + 0.3 * Math.sin(this.clock?.elapsedTime || 0) * 0 + 0.2;
+    }
+  }
+
+  _updateCharacterStage(dt, t) {
+    const stage = this.charStage;
+    if (!stage) return;
+    for (const u of stage.units) {
+      const sel = u.id === stage.selectedId;
+      // The chosen commander steps forward out of the line; the rest idle in
+      // place, breathing with the same pose the game's heroes use.
+      const targetZ = sel ? 1.4 : 0;
+      u.mesh.position.z += (targetZ - u.mesh.position.z) * Math.min(1, dt * 6);
+      const pose = unitPose('idle', t * 1.8 + u.baseX);
+      const body = u.mesh.userData.body;
+      if (body) { body.position.y = pose.y; body.rotation.z = pose.roll; }
+      const limbs = u.mesh.userData.limbs;
+      if (limbs) {
+        if (limbs.legL) limbs.legL.rotation.x = pose.stride;
+        if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
+        if (limbs.armL) limbs.armL.rotation.x = -pose.stride * 0.55;
+        if (limbs.armR) limbs.armR.rotation.x = pose.stride * 0.55;
+      }
+      if (u.mesh.userData.ring.visible) {
+        u.mesh.userData.ring.material.opacity = 0.4 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.4));
+      }
+    }
+  }
+
+  _clearCharacterStage() {
+    if (this.charStage) { this.scene.remove(this.charStage.group); this._disposeObject3D(this.charStage.group); }
+    this.charStage = null;
+  }
+
+  _selectCharacter(c) {
+    if (!c || !this.charStage) return;
+    this.charStage.selectedId = c.id;
+    this._syncCharacterStageSelection();
+  }
+
+  _createCharacter(name, heroKey, banner) {
+    const character = addCharacter(this.profile, makeCharacter(name, heroKey, banner));
+    if (!character) { this.ui.showBanner('The roster is full — six commanders is the law.', 'bad', 3000); return; }
+    this._saveProfile();
+    this._buildCharacterStage();
+    this.ui.showCharacterSelect({
+      characters: this.profile.characters,
+      selectedId: this.profile.characterId,
+      campaign: this.profile.campaign || 0,
+    });
+    this.audio.init();
+  }
+
+  _deleteCharacter(id) {
+    if (deleteCharacter(this.profile, id)) {
+      this._saveProfile();
+      this._buildCharacterStage();
+      this.ui.showCharacterSelect({
+        characters: this.profile.characters,
+        selectedId: this.profile.characterId,
+        campaign: this.profile.campaign || 0,
+      });
+    }
+  }
+
+  _enterWorldAs(character) {
+    if (!character) return;
+    this.character = character; // the commander who walks (stats + ghosts)
+    this.profile.characterId = character.id;
+    this.ui.selectedHero = character.heroKey;
+    this.ui.preselectHero?.(character.heroKey);
+    this._saveProfile();
+    this._clearCharacterStage();
+    this._enterOverworld();
   }
 
   // ---------------- overworld ----------------
@@ -351,7 +520,10 @@ class App {
   _makeOverworldGate(gate) {
     const st = gateState(gate);
     const gr = new THREE.Group();
-    const wood = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
+    // The custom-games arch is stone, not war-camp timber — the one gate on
+    // the planet that leads somewhere other than a front.
+    const stone = !!gate.portal;
+    const wood = new THREE.MeshLambertMaterial({ color: stone ? 0x7d786e : 0x3a3228 });
     for (const dx of [-1.5, 1.5]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
       post.position.set(dx, 1.7, 0);
@@ -362,7 +534,7 @@ class App {
     lintel.position.y = 3.4;
     lintel.castShadow = true;
     gr.add(lintel);
-    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
+    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : stone ? 0x8fd0c9 : 0xe8843c;
     const banner = new THREE.Mesh(
       new THREE.PlaneGeometry(2.2, 1.1),
       new THREE.MeshLambertMaterial({ color: bannerColor, side: THREE.DoubleSide }),
@@ -379,9 +551,9 @@ class App {
     ring.position.y = 0.06;
     gr.add(ring);
     gr.userData.ring = ring;
-    const icon = gate.cave ? '🌀' : gate.boss.icon;
-    const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
-    const sub = gate.cave ? 'the trials below' : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
+    const icon = gate.cave ? '🌀' : gate.portal ? '🜁' : gate.boss.icon;
+    const name = gate.cave ? 'THE LABYRINTH' : gate.portal ? gate.name.toUpperCase() : gate.name.toUpperCase();
+    const sub = gate.cave ? 'the trials below' : gate.portal ? 'custom games' : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
     const label = this._makeLabelSprite(icon, name);
     label.position.y = 5.6;
     label.scale.set(5.2, 2.6, 1);
@@ -397,7 +569,9 @@ class App {
   // mesh, real walk cycle, smaller aura. Rebuilt when the pick changes.
   _makeOverworldHero() {
     if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
-    const key = this.ui.selectedHero || 'alexander';
+    // The walking hero is the selected CHARACTER's hero class — not just the
+    // last hero card clicked. Ghosts read the same pair below.
+    const key = this.character?.heroKey || this.ui.selectedHero || 'alexander';
     const def = HEROES[key] || HEROES.alexander;
     const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
     mesh.scale.setScalar(1.0);
@@ -466,7 +640,11 @@ class App {
     }
     this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
     if (ev.gate.portal) {
-      this.ui.showBanner('🌀 A way off-world — the stars open in a future build.', '', 3200);
+      // The stone arch off the causeway: walk in, the WC3-style browser
+      // slides open over the world. Other worlds' star portals keep their
+      // mystery for the build that earns it.
+      if (ev.gate.action === 'custom') this._openCustomGames();
+      else this.ui.showBanner('🌀 A way off-world — the stars open in a future build.', '', 3200);
       return;
     }
     this.ui.showGateConfirm({
@@ -519,8 +697,10 @@ class App {
       const h = this.ow.hero;
       this._owGhostSend({
         id: this.lobby?.me?.id || 'local',
-        name: this._publicName(),
-        hero: this.ui.selectedHero,
+        // Presence wears the character: other walkers see the commander's
+        // name over the hero class they picked at the roster door.
+        name: this.character?.name || this._publicName(),
+        hero: this.character?.heroKey || this.ui.selectedHero,
         worldId: this.ow.world.id,
         x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
         enter: this.owEnterNote || undefined,
@@ -1003,7 +1183,7 @@ class App {
     try {
       return {
         name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, tutorialDone: false,
-        campaignHeroes: {}, relics: [], questsDone: {},
+        campaignHeroes: {}, relics: [], questsDone: {}, characters: [], characterId: null,
         ...JSON.parse(localStorage.getItem('zillions_profile') || '{}'),
       };
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {} }; }
@@ -1154,6 +1334,10 @@ class App {
       p.labyrinthClears = { ...(p.labyrinthClears || {}), [this.game.levelId]: true };
     }
     p.kills += this.game.stats.kills;
+    // The commander's own career line: plays/wins/kills per character.
+    // Campaign unlocks above stay ACCOUNT-level — every character on this
+    // profile shares the fronts taken (see characters.js).
+    if (this.character) recordCharacterResult(this.character, won, this.game.stats.kills);
     p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
     p.lastHero = this.ui.selectedHero;
 
@@ -1621,7 +1805,14 @@ class App {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => { this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id); this.ui.hubGames(g); },
+      onGames: (g) => {
+        this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id);
+        this.ui.hubGames(g);
+        // The custom browser drinks from the same feed — no second poll, no
+        // parallel presence. Refresh it only while it is on screen.
+        this._customGames = g;
+        if (this.ui._lastScreen === 'custom') this._renderCustomBrowser();
+      },
       onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
@@ -1942,6 +2133,70 @@ class App {
       this.ui.showBanner('⚔️ Invite sent.', '', 2200);
     } catch (e) {
       this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  // ---------------- custom games (the stone arch) ----------------
+  // The WC3 browser: one DOM screen fed by the SAME rooms feed the lobby
+  // uses, filtered to kind=custom. No parallel system — a custom game is a
+  // co-op room with a name and a map tag. Offline is fail-silent: the arch
+  // stands, the list is honest about the silence.
+
+  _renderCustomBrowser() {
+    const connected = !!(this.lobby && this.lobby.connected);
+    const games = (this._customGames || []).filter(isCustomGame);
+    this.ui.showCustomBrowser({ games, offline: !connected, hostName: this._publicName() });
+  }
+
+  _openCustomGames(silent = false) {
+    this.ui._showScreen('custom');
+    this._renderCustomBrowser();
+    if (this.lobby && this.lobby.connected) {
+      this.lobby.refreshGames().catch(() => this._renderCustomBrowser());
+      return;
+    }
+    this._openLobby().then((l) => {
+      if (l && l.connected) l.refreshGames().catch(() => this._renderCustomBrowser());
+      else this._renderCustomBrowser();
+    }).catch(() => this._renderCustomBrowser());
+    void silent;
+  }
+
+  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
+    const lobby = await this._openLobby();
+    if (!lobby || !lobby.connected) {
+      this.ui.showBanner('📡 The lobby is unreachable — custom games need the server.', 'bad', 4500);
+      return;
+    }
+    if (lobby.game) {
+      this.ui.showBanner('You are already in a room — leave it before hosting another.', 'bad', 4000);
+      return;
+    }
+    this.audio.init();
+    this.mpRole = 'host';
+    this.onlineMode = true;
+    this.onlinePending = new Map();
+    try {
+      // Same room, new clothes: the kind/mapName tags are what the browser
+      // filters on, and the hero picks happen at START — WC3 pattern, the
+      // persistent character is never forced into a borrowed war.
+      const game = await lobby.createGame({
+        visibility: 'public',
+        level: mapId || 1,
+        mode: mode || 'campaign',
+        difficulty: difficulty || 'normal',
+        unlockedLevel: highestUnlockedLevel(this.profile.campaign),
+        name, maxPlayers, kind: 'custom', mapName,
+      });
+      await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
+      const room = lobby.game || game;
+      this.ui.showSetup({ online: room, mode: room.mode });
+      this._onRoomUpdate(room);
+      this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
+    } catch (e) {
+      this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
+      this.mpRole = null;
+      this.onlineMode = false;
     }
   }
 
@@ -4386,6 +4641,23 @@ class App {
   }
 
   _updateCamera(dt) {
+    if (!this.game && this.charStage && !this.ow) {
+      // Character select: a slow beat around the lineup — the commander the
+      // player picks is already standing there, stepping forward.
+      const c = this.charStage.group.position;
+      this.menuYaw += dt * 0.12;
+      const dist = 11 + this.charStage.units.length * 1.1;
+      const elev = 0.42;
+      this.camera.position.set(
+        c.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
+        c.y + Math.sin(elev) * dist,
+        c.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
+      );
+      this.camera.lookAt(c.x, 1, c.z);
+      this.sun.position.set(c.x + 30, 46, c.z + 18);
+      this.sun.target.position.set(c.x, 0, c.z);
+      return;
+    }
     if (!this.game && this.ow) {
       // Overworld: the game camera glued to the walking hero — same iso
       // angle, same soft lag, so the menu feels like the game's first step.
@@ -5195,6 +5467,7 @@ class App {
     }
 
     if (!this.game && this.ow) this._updateOverworld(dt, t);
+    if (!this.game && !this.ow && this.charStage) this._updateCharacterStage(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

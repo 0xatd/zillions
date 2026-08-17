@@ -12,6 +12,7 @@ import {
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
 } from './config.js';
 import { formatTime } from './utils.js';
+import { BANNER_COLORS, MAX_CHARACTERS } from './characters.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
@@ -127,6 +128,10 @@ export class UI {
               <span class="cta"><b>PLAY SOLO</b><small>campaign · survival · the labyrinth</small></span>
               <span class="menuarrow">›</span>
             </button>
+            <button class="menubtn" id="m-custom">
+              <span class="cta"><b>CUSTOM GAMES</b><small>any map · any host · up to 3</small></span>
+              <span class="menuarrow">›</span>
+            </button>
             <div class="menuutilities">
               <button class="utilitybtn" id="m-help">How to play</button>
               <button class="utilitybtn" id="m-settings">⚙ Settings</button>
@@ -172,6 +177,59 @@ export class UI {
               <div id="solo-labyrinth-resume" class="moderesume"></div>
               <button class="menubtn modeprimary" id="solo-labyrinth">Enter the trial <span class="menuarrow">›</span></button>
             </section>
+          </div>
+        </div>
+
+        <div id="screen-chars" class="screen charscreen hidden">
+          <div class="charwrap">
+            <div class="charhead">
+              <div class="brandeyebrow">THE WAR COUNCIL ROSTER</div>
+              <h1 class="gametitle small">CHOOSE YOUR COMMANDER</h1>
+              <p class="gamesub" id="ch-sub"></p>
+            </div>
+            <div class="charrow" id="ch-row"></div>
+            <div class="charactions">
+              <button class="menubtn primary" id="ch-enter"><span class="cta"><b>ENTER WORLD</b><small id="ch-enter-sub"></small></span><span class="menuarrow">›</span></button>
+              <button class="menubtn" id="ch-create"><span class="cta"><b>CREATE CHARACTER</b><small id="ch-create-sub"></small></span><span class="menuarrow">+</span></button>
+            </div>
+          </div>
+          <div id="ch-create-panel" class="charcreate hidden">
+            <div class="cchead"><b>FORGE A COMMANDER</b><button class="tbtn" id="ch-cancel">✕</button></div>
+            <label class="field-label" for="ch-name">Name</label>
+            <input id="ch-name" maxlength="18" placeholder="commander name" autocomplete="off" spellcheck="false">
+            <label class="field-label">Hero class</label>
+            <div class="chherogrid" id="ch-heroes"></div>
+            <label class="field-label">Banner</label>
+            <div class="chswatches" id="ch-swatches"></div>
+            <button class="menubtn primary" id="ch-confirm">CREATE</button>
+          </div>
+        </div>
+
+        <div id="screen-custom" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="cu-back">← Back</button>
+            <h2>🜁 CUSTOM GAMES</h2>
+            <span class="gamesub">borrowed wars — any map, any host</span>
+          </div>
+          <div class="custommain">
+            <div id="cu-list" class="lobbygames"></div>
+            <div class="customactions">
+              <button class="diffbtn" id="cu-create">+ CREATE GAME</button>
+              <button class="diffbtn" id="cu-refresh">↻ REFRESH</button>
+            </div>
+            <div class="mphint" id="cu-note"></div>
+          </div>
+          <div id="cu-create-panel" class="charcreate hidden">
+            <div class="cchead"><b>CREATE GAME</b><button class="tbtn" id="cu-cancel">✕</button></div>
+            <label class="field-label" for="cu-name">Game name</label>
+            <input id="cu-name" maxlength="32" placeholder="Friday night siege" autocomplete="off">
+            <label class="field-label">Map</label>
+            <select id="cu-map" class="cumap"></select>
+            <label class="field-label">Difficulty</label>
+            <div class="diffseg" id="cu-diff"></div>
+            <label class="field-label">Max players <small>— the sim hosts three commanders per war</small></label>
+            <div class="diffseg" id="cu-max"></div>
+            <button class="menubtn primary" id="cu-confirm">CREATE GAME</button>
           </div>
         </div>
 
@@ -353,6 +411,62 @@ export class UI {
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
     q('#m-solo').onclick = () => this._showScreen('solo');
+    q('#m-custom').onclick = () => { this._showScreen('custom'); if (this.cb.onCustomOpen) this.cb.onCustomOpen(); };
+    q('#cu-back').onclick = () => this._showScreen(this._overworldMode ? 'main' : 'chars');
+    q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
+    q('#cu-create').onclick = () => this.customCreatePanel(true);
+    q('#cu-cancel').onclick = () => this.customCreatePanel(false);
+    q('#cu-confirm').onclick = () => {
+      const name = q('#cu-name').value.trim() || `${this._customHost || 'Host'}'s game`;
+      const map = this._customMaps?.find((m) => m.value === q('#cu-map').value) || this._customMaps?.[0];
+      if (!map) return;
+      this.customCreatePanel(false);
+      if (this.cb.onCustomCreate) this.cb.onCustomCreate({
+        name, mapId: map.level, mode: map.mode, mapName: map.name,
+        difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 3,
+      });
+    };
+
+    // ----- character select -----
+    this._charSelId = null;
+    this._charCreate = { heroKey: 'alexander', banner: 'gold' };
+    q('#ch-enter').onclick = () => {
+      const c = (this._charList || []).find((x) => x.id === this._charSelId);
+      if (c && this.cb.onCharacterEnter) this.cb.onCharacterEnter(c);
+    };
+    q('#ch-create').onclick = () => this.characterCreatePanel(!q('#ch-create-panel').classList.contains('hidden'));
+    q('#ch-cancel').onclick = () => this.characterCreatePanel(false);
+    q('#ch-confirm').onclick = () => {
+      const name = q('#ch-name').value.trim();
+      if (!name) { q('#ch-name').focus(); return; }
+      if (this.cb.onCharacterCreate) this.cb.onCharacterCreate({ name, ...this._charCreate });
+      this.characterCreatePanel(false);
+    };
+    // Hero class picker + banner swatches for the create panel.
+    const chHeroGrid = q('#ch-heroes');
+    for (const [key, h] of Object.entries(HEROES)) {
+      const chip = document.createElement('button');
+      chip.className = 'chhero' + (key === this._charCreate.heroKey ? ' sel' : '');
+      chip.innerHTML = `<span class="hicon">${h.icon}</span><b>${h.name}</b><small>${h.tagline}</small>`;
+      chip.onclick = () => {
+        this._charCreate.heroKey = key;
+        for (const o of chHeroGrid.children) o.classList.toggle('sel', o === chip);
+      };
+      chHeroGrid.appendChild(chip);
+    }
+    const chSwatches = q('#ch-swatches');
+    for (const b of BANNER_COLORS) {
+      const sw = document.createElement('button');
+      sw.className = 'chswatch' + (b.id === this._charCreate.banner ? ' sel' : '');
+      sw.style.setProperty('--sw', b.hex);
+      sw.title = b.name;
+      sw.onclick = () => {
+        this._charCreate.banner = b.id;
+        for (const o of chSwatches.children) o.classList.toggle('sel', o === sw);
+      };
+      chSwatches.appendChild(sw);
+    }
+
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
     q('#solo-back').onclick = () => this._showScreen('main');
@@ -698,7 +812,7 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'chars', 'custom']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -708,6 +822,7 @@ export class UI {
   // in over it on Esc (or the ⚙ button) and slides back out the same way.
   setOverworldMode(on) {
     this._overworldMode = !!on;
+    if (on) this._atCharSelect = false; // the roster door is behind us
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
   }
@@ -725,6 +840,168 @@ export class UI {
     // are one click from its buttons, and the walk is the point.
     if (this.overlayHidden()) this._showScreen('main');
     else this.hideOverlay();
+  }
+
+  // ----- character select (the WoW door into the overworld) -----
+  // The DOM is the cinema: cards along the bottom, the actual hero meshes
+  // standing on the 3D stage behind (main.js builds that lineup). Selecting
+  // a card highlights it; one click of ENTER WORLD walks you in.
+  showCharacterSelect({ characters, selectedId, campaign = 0 } = {}) {
+    this._atCharSelect = true;
+    this._charList = characters;
+    this._charSelId = selectedId || (characters[0] || {}).id || null;
+    const fronts = Math.min(campaign || 0, LEVELS.length);
+    this.root.querySelector('#ch-sub').textContent =
+      `Campaign progress is shared by every character — ${fronts}/${LEVELS.length} fronts taken.`;
+    this.root.querySelector('#ch-create-sub').textContent =
+      characters.length >= MAX_CHARACTERS ? 'roster full' : `${characters.length}/${MAX_CHARACTERS} used`;
+    this.root.querySelector('#ch-create').disabled = characters.length >= MAX_CHARACTERS;
+    this._renderCharCards();
+    this._showScreen('chars');
+  }
+
+  _renderCharCards() {
+    const row = this.root.querySelector('#ch-row');
+    row.innerHTML = '';
+    for (const c of this._charList || []) {
+      const hero = HEROES[c.heroKey] || HEROES.alexander;
+      const banner = (BANNER_COLORS.find((b) => b.id === c.banner) || BANNER_COLORS[0]).hex;
+      const card = document.createElement('div');
+      card.className = 'charcard' + (c.id === this._charSelId ? ' sel' : '');
+      card.dataset.id = c.id;
+      card.style.setProperty('--banner', banner);
+      const s = c.stats || { plays: 0, wins: 0, kills: 0 };
+      card.innerHTML = `
+        <span class="cc-banner"></span>
+        <b class="cc-name"></b>
+        <small class="cc-class">${hero.icon} ${hero.name}</small>
+        <small class="cc-stats">${s.wins}W · ${s.kills} kills · ${s.plays} runs</small>
+        <button class="tbtn cc-del" title="Delete character">🗑</button>`;
+      card.querySelector('.cc-name').textContent = c.name;
+      card.onclick = () => {
+        this._charSelId = c.id;
+        this._renderCharCards();
+        if (this.cb.onCharacterSelect) this.cb.onCharacterSelect(c);
+      };
+      const del = card.querySelector('.cc-del');
+      del.onclick = (e) => {
+        e.stopPropagation();
+        if (del.dataset.armed) {
+          if (this.cb.onCharacterDelete) this.cb.onCharacterDelete(c.id);
+        } else {
+          del.dataset.armed = '1';
+          del.textContent = 'SURE?';
+          setTimeout(() => { del.dataset.armed = ''; del.textContent = '🗑'; }, 2500);
+        }
+      };
+      row.appendChild(card);
+    }
+    const sel = (this._charList || []).find((c) => c.id === this._charSelId);
+    const hero = sel && (HEROES[sel.heroKey] || HEROES.alexander);
+    this.root.querySelector('#ch-enter-sub').textContent = sel
+      ? `as ${sel.name} · ${hero.icon} ${hero.name}` : 'create a character first';
+    this.root.querySelector('#ch-enter').disabled = !sel;
+    if (this.cb.onCharacterSelect && sel) this.cb.onCharacterSelect(sel);
+  }
+
+  characterCreatePanel(open) {
+    this.root.querySelector('#ch-create-panel').classList.toggle('hidden', !open);
+    if (open) {
+      const input = this.root.querySelector('#ch-name');
+      input.value = '';
+      input.focus();
+    }
+  }
+
+  // ----- custom games browser (WC3 lobby list on SC2 hub styling) -----
+  // Fed from the same rooms feed the lobby uses, filtered to kind=custom.
+  // Offline is a first-class state, not an error: the arch still stands.
+  showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
+    this._customHost = hostName;
+    const box = this.root.querySelector('#cu-list');
+    const note = this.root.querySelector('#cu-note');
+    box.innerHTML = '';
+    const open = games.filter((g) => g.status === 'open');
+    const running = games.filter((g) => g.status !== 'open');
+    if (offline) {
+      note.textContent = '📡 Offline — the lobby is unreachable. Custom games need the server; the campaign does not.';
+      note.classList.add('offline');
+    } else {
+      note.textContent = 'Custom games ride the same rooms as co-op — hero picks happen when the host starts, WoW-style.';
+      note.classList.remove('offline');
+    }
+    if (!games.length) {
+      box.innerHTML = '<div class="mphint gameempty">No custom games — create one.</div>';
+      return;
+    }
+    const renderGroup = (title, rows) => {
+      const heading = document.createElement('div');
+      heading.className = 'gamegrouphead';
+      heading.textContent = `${title} · ${rows.length}`;
+      box.appendChild(heading);
+      for (const g of rows) {
+        const row = document.createElement('div');
+        row.className = `gamerow ${rows === open ? 'open' : 'active'}`;
+        const incompatible = g.protocol_compatible === false;
+        row.innerHTML = `
+          <span class="gamestate">${incompatible ? 'UPDATE' : g.status === 'open' ? 'OPEN' : 'STARTED'}</span>
+          <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
+          <span class="ginfo"></span>
+          <button class="tbtn gjoin" ${incompatible || g.status !== 'open' ? 'disabled' : ''}>${g.status === 'open' ? 'JOIN' : '—'}</button>`;
+        row.querySelector('.gname').textContent = g.name;
+        row.querySelector('.gplayers').textContent = `host @${g.host_name}`;
+        row.querySelector('.ginfo').textContent = `${g.mapName || '?'} · ${g.players}/${g.max_players || 3} players`;
+        if (!incompatible && g.status === 'open') {
+          row.querySelector('.gjoin').onclick = () => this.cb.onCustomJoin && this.cb.onCustomJoin(g);
+        }
+        box.appendChild(row);
+      }
+    };
+    renderGroup('Open games', open);
+    if (running.length) renderGroup('Started', running);
+  }
+
+  customCreatePanel(open) {
+    const panel = this.root.querySelector('#cu-create-panel');
+    panel.classList.toggle('hidden', !open);
+    if (!open) return;
+    // Maps: every labyrinth trial plus a skirmish on any campaign level.
+    const maps = [
+      ...LABYRINTH_LEVELS.map((l) => ({ value: `lab-${l.id}`, level: l.id, mode: 'labyrinth', name: `🌀 ${l.name}` })),
+      ...LEVELS.map((l) => ({ value: `lv-${l.id}`, level: l.id, mode: 'campaign', name: `⚔️ ${l.name}` })),
+    ];
+    this._customMaps = maps;
+    const sel = this.root.querySelector('#cu-map');
+    sel.innerHTML = maps.map((m) => `<option value="${m.value}">${m.name}</option>`).join('');
+    const diff = this.root.querySelector('#cu-diff');
+    diff.innerHTML = '';
+    for (const [key, d] of Object.entries(DIFFICULTY)) {
+      const b = document.createElement('button');
+      b.className = 'diffbtn' + (key === 'normal' ? ' sel' : '');
+      b.textContent = d.label;
+      b.onclick = () => {
+        this._cuDiff = key;
+        for (const o of diff.children) o.classList.toggle('sel', o === b);
+      };
+      diff.appendChild(b);
+    }
+    this._cuDiff = 'normal';
+    const max = this.root.querySelector('#cu-max');
+    max.innerHTML = '';
+    for (const n of [1, 2, 3]) {
+      const b = document.createElement('button');
+      b.className = 'diffbtn' + (n === 3 ? ' sel' : '');
+      b.textContent = `${n}`;
+      b.onclick = () => {
+        this._cuMax = n;
+        for (const o of max.children) o.classList.toggle('sel', o === b);
+      };
+      max.appendChild(b);
+    }
+    this._cuMax = 3;
+    const input = this.root.querySelector('#cu-name');
+    input.value = '';
+    input.focus();
   }
 
   // ----- hero library (Dota Tab-screen grammar) -----
@@ -881,7 +1158,7 @@ export class UI {
     this.root.querySelector('#screen-setup').classList.toggle('roommode', !!online);
     this._loadHeroPortraits();
     const title = online
-      ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
+      ? `🌐 ${online.mapName ? `${online.name} · ${online.mapName} — ` : `${online.visibility === 'private' ? 'Private' : 'Public'} game — `}code ${online.join_code}`
       : coop ? 'Co-op — one city, one hero each'
       : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
@@ -1503,9 +1780,12 @@ export class UI {
     if (state.ready && (state.signedIn || offlineAllowed)) {
       if (!this._accountAccepted) {
         this._accountAccepted = true;
-        // In overworld boots the menu is an overlay the player opens on
-        // purpose — a signed-in (or offline dev) boot goes straight to the
-        // walk, with the hub one Esc away.
+        // The roster door comes first: auth resolving mid-character-select
+        // must not yank the player to the hub. In overworld boots the menu
+        // is an overlay the player opens on purpose — a signed-in (or
+        // offline dev) boot goes straight to the walk, with the hub one Esc
+        // away.
+        if (this._atCharSelect) return;
         if (!this._overworldMode) this._showScreen('main');
         else this.hideOverlay();
       }
