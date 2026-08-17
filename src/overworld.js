@@ -58,7 +58,9 @@ export function overworldLayout(N = OVERWORLD_SIZE) {
 // desert. Deterministic end to end: one rng, one fixed walk order.
 export function stitchOverworld(map, { blight = [] } = {}) {
   const N = map.size;
-  const rng = map.rng;
+  // Derive the stitch's own rng from the seed so generate() is idempotent —
+  // the renderer-backed subclass re-stitches once the campaign is known.
+  const rng = map.rng = makeRNG(map.seed ^ 0x5150);
   const nBase = makeNoise(rng), nRegion = makeNoise(rng), nFine = makeNoise(rng);
   const nMoist = makeNoise(rng);
   const S = {

@@ -47,6 +47,8 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="War council (Esc)">⚙</button>
+
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -492,6 +494,7 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
+    q('#ow-menu').onclick = () => this.toggleOverlay();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -694,9 +697,32 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
+    this._lastScreen = name;
     for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  // ----- overworld: the hub is an overlay, not a destination -----
+  // The game boots onto the walkable planet; the whole menu you knew slides
+  // in over it on Esc (or the ⚙ button) and slides back out the same way.
+  setOverworldMode(on) {
+    this._overworldMode = !!on;
+    this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
+    this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
+  }
+
+  overlayHidden() {
+    return this.root.querySelector('#overlay').classList.contains('hidden');
+  }
+
+  hideOverlay() {
+    this.root.querySelector('#overlay').classList.add('hidden');
+  }
+
+  toggleOverlay() {
+    if (this.overlayHidden()) this._showScreen(this._lastScreen && this._lastScreen !== 'account' ? this._lastScreen : 'main');
+    else this.hideOverlay();
   }
 
   // ----- hero library (Dota Tab-screen grammar) -----
@@ -786,6 +812,50 @@ export class UI {
     const inp = modal.querySelector('#jc-input');
     inp.value = '';
     setTimeout(() => inp.focus(), 50);
+  }
+
+  // ----- overworld: walk-in confirm -----
+  // Walking into a gate asks before it commits you to a front: the panel
+  // carries the level's blurb and the difficulty choice, and Enter takes the
+  // same onStart path the setup screen's START button uses.
+  showGateConfirm({ gate, diff = 'normal', onEnter }) {
+    let modal = this.root.querySelector('#gate-confirm');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'gate-confirm';
+      modal.className = 'roomconfirm';
+      this.root.appendChild(modal);
+    }
+    const cave = !!gate.cave;
+    const diffSeg = cave ? '' : `
+      <div class="steplabel field-label">Difficulty</div>
+      <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
+        `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
+    modal.innerHTML = `
+      <div class="roomconfirmcard">
+        <span class="roomeyebrow">The road onward</span>
+        <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
+        <p>${cave
+          ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
+          : gate.blurb}</p>
+        ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
+        ${diffSeg}
+        <div class="roomconfirmactions">
+          <button class="tbtn" id="gate-back">NOT YET</button>
+          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN THE TRIAL LEDGER' : 'ENTER'}</button>
+        </div>
+      </div>`;
+    const close = () => modal.classList.add('hidden');
+    modal.querySelector('#gate-back').onclick = close;
+    let chosen = diff;
+    for (const b of modal.querySelectorAll('.gate-diff .diffbtn')) {
+      b.onclick = () => {
+        chosen = b.dataset.diff;
+        for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
+      };
+    }
+    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
+    modal.classList.remove('hidden');
   }
 
   _reflectQuality(q) {
@@ -1432,7 +1502,11 @@ export class UI {
     if (state.ready && (state.signedIn || offlineAllowed)) {
       if (!this._accountAccepted) {
         this._accountAccepted = true;
-        this._showScreen('main');
+        // In overworld boots the menu is an overlay the player opens on
+        // purpose — a signed-in (or offline dev) boot goes straight to the
+        // walk, with the hub one Esc away.
+        if (!this._overworldMode) this._showScreen('main');
+        else this.hideOverlay();
       }
       return;
     }
@@ -1706,6 +1780,7 @@ export class UI {
 
   hideStart() {
     this.root.querySelector('#overlay').classList.add('hidden');
+    this.root.querySelector('#ow-menu')?.classList.add('hidden');
     this.pauseOpen = false;
   }
 

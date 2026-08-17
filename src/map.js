@@ -391,7 +391,6 @@ export class GameMap extends TerrainField {
     const c = new THREE.Color();
     const rng = makeRNG(31);
     const spores = [];
-    const base = new THREE.Color(this.colorOf(TILE.FOREST));
     for (let i = 0; i < spots.length; i++) {
       const s = spots[i];
       const leanX = (rng() - 0.5) * 0.16, leanZ = (rng() - 0.5) * 0.16;
@@ -411,9 +410,10 @@ export class GameMap extends TerrainField {
       sc.set(s.s * (0.8 + rng() * 0.4), s.s * (0.65 + rng() * 0.3), s.s * (0.8 + rng() * 0.4));
       m.compose(pos, q, sc);
       lobes.setMatrixAt(i, m);
-      // Canopies key off the map's forest color — one hue family per map,
-      // crowns lighter than understory so the layers read.
-      c.copy(base).offsetHSL((rng() - 0.5) * 0.025, 0.05, (rng() - 0.5) * 0.07);
+      // Canopies key off the map's forest color — one hue family per map
+      // (position-aware so a stitched map can vary palette by region).
+      c.setHex(this.colorOf(TILE.FOREST, s.x, s.z));
+      c.offsetHSL((rng() - 0.5) * 0.02, 0.04, (rng() - 0.5) * 0.06 - 0.02);
       canopies.setColorAt(i, c);
       c.offsetHSL(0.006, 0.06, -0.03); // understory sits in its own shade
       lobes.setColorAt(i, c);
