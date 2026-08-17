@@ -3820,6 +3820,13 @@ class App {
         this.ui.openGameChat();
         return;
       }
+      // The persistent world uses MMO grammar: C opens the selected hero's
+      // character/equipment screen and returns to the world when pressed again.
+      if (!this.game && k === 'c' && this.ow) {
+        e.preventDefault();
+        this.ui.toggleCharacterScreen();
+        return;
+      }
       // Dota grammar: Tab opens the hero library from anywhere in the menu.
       if (!this.game && e.key === 'Tab') {
         e.preventDefault();

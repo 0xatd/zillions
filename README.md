@@ -86,6 +86,7 @@ levels grant tapered stat growth.
 | Input | Action |
 | --- | --- |
 | W, A, S, D | Move in world and minimap directions |
+| C | Open or close the character and equipment screen in the persistent world |
 | Shift | Gallop at full health |
 | Alt | Change Space between Build mode and Fight mode |
 | Space | Found, build, or cast, based on the current mode |
