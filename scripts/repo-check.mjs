@@ -210,6 +210,9 @@ assert.match(mainSource, /this\.showMenuBackdrop\(this\.ui\.selectedLevel \|\| 1
 assert.doesNotMatch(mainSource, /Boot straight onto the overworld/, 'startup must not bypass the first menu');
 assert.match(mainSource, /name = 'planet-edge-title'/, 'title scene must identify its planet-edge orbital layer');
 assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live last-stand simulation');
+assert.match(mainSource, /constellationGeo/, 'title orbit must use stars and constellation marks instead of a ringed moon');
+assert.match(mainSource, /new THREE\.DataTexture\(globePixels/, 'title orbit must render a readable textured globe');
+assert.doesNotMatch(mainSource, /moonRing/, 'title orbit must not restore the distracting Saturn-like moon');
 assert.match(mainSource, /!this\.game && k === 'c' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'C must toggle the character screen from the persistent world');
 assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
 assert.match(uiSource, /this\._mmExploredGame !== game[\s\S]*document\.createElement\('canvas'\)/, 'minimap exploration memory must reset per match and use a cached mask');
