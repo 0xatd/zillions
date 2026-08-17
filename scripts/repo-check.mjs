@@ -201,9 +201,12 @@ assert.match(uiSource, /id="m-online"[\s\S]*<b>PLAY<\/b><small>ONLINE/, 'the hom
 assert.match(uiSource, /id="m-solo"[\s\S]*PLAY SOLO/, 'the home screen must group solo modes');
 assert.match(uiSource, /id="screen-solo"/, 'solo play must have its own mode screen');
 assert.match(uiSource, /id="solo-campaign-resume"/, 'campaign resumes must stay inside Story Campaign');
+assert.match(uiSource, /#solo-campaign'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Story Campaign must open the overworld');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
 assert.doesNotMatch(uiSource, /id="m-play"/, 'Campaign must not return as the primary home-screen action');
+assert.match(mainSource, /this\.showMenuBackdrop\(this\.ui\.selectedLevel \|\| 1\);[\s\S]*this\.renderer\.setAnimationLoop/, 'startup must preserve the authored first menu');
+assert.doesNotMatch(mainSource, /Boot straight onto the overworld/, 'startup must not bypass the first menu');
 
 const architecture = read('docs/architecture.md');
 for (const rel of [
