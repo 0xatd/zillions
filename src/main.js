@@ -418,7 +418,22 @@ class App {
       streak.userData.seed = i * 1.73;
       group.add(streak); streaks.push(streak);
     }
-    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks };
+
+    // Diablo-style account presence: the commander's last-used hero watches
+    // the world from the starship deck while the distress feed plays behind.
+    const heroKey = this.profile.lastHero || this.ui.selectedHero || Object.keys(HEROES)[0];
+    const heroDef = HEROES[heroKey] || HEROES[Object.keys(HEROES)[0]];
+    const titleHero = this._makeUnitMesh({ hero: true, key: heroKey, def: heroDef, auraRadius: 1.3 });
+    titleHero.scale.setScalar(2.65);
+    group.add(titleHero);
+    const heroPedestal = new THREE.Mesh(
+      new THREE.CircleGeometry(3.1, 40),
+      new THREE.MeshBasicMaterial({ color: heroDef.color || 0x65a9ff, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    group.add(heroPedestal);
+    const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
+    group.add(heroLight);
+    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -428,7 +443,7 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks } = this.titleSpace.userData;
+    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     moon.rotation.y = t * 0.015;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
@@ -441,6 +456,18 @@ class App {
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
+    const heroPos = cameraLocal(7.8, -4.5, -18);
+    titleHero.position.copy(heroPos);
+    titleHero.quaternion.copy(this.camera.quaternion);
+    titleHero.rotateY(-0.28);
+    const body = titleHero.userData.body;
+    if (body) {
+      body.position.y = Math.sin(t * 1.5) * 0.025;
+      body.rotation.z = Math.sin(t * 0.65) * 0.015;
+    }
+    heroPedestal.position.copy(cameraLocal(7.8, -5.05, -18));
+    heroPedestal.quaternion.copy(this.camera.quaternion);
+    heroLight.position.copy(cameraLocal(5.6, -1.3, -15));
     ships.position.x = Math.sin(t * 0.08) * 3;
     for (let i = 0; i < streaks.length; i++) {
       const s = streaks[i];
