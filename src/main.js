@@ -9,7 +9,7 @@ import { surveySite } from './plots.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, assetClone } from './assets.js';
+import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
 import { AuthClient } from './auth.js';
@@ -2835,7 +2835,27 @@ class App {
 
   // ---------------- building meshes ----------------
 
+  _authoredBuildingMesh(b) {
+    const tier = Math.max(1, Math.min(3, Number(b.plotTier) || 1));
+    let key = null;
+    if (b.kind === 'hq') key = `humanHqT${tier}`;
+    else if (b.kind === 'tower' && !b.branch) key = `humanTowerT${tier}`;
+    else if (b.kind.startsWith('camp_')) key = `humanBarracksT${tier}`;
+    else if (b.kind === 'mine') key = 'humanMine';
+    if (!key) return null;
+    const model = assetClone(key);
+    if (!model) return null;
+    const g = new THREE.Group();
+    g.add(model);
+    g.userData.head = assetPart(model, 'part_turret');
+    g.userData.rotor = assetPart(model, 'part_rotor');
+    g.userData.core = assetPart(model, 'part_core');
+    return g;
+  }
+
   _makeBuildingMesh(b) {
+    const authored = this._authoredBuildingMesh(b);
+    if (authored) return authored;
     const g = new THREE.Group();
     const M = (color, e = 0) => new THREE.MeshLambertMaterial({ color, emissive: e ? color : 0x000000, emissiveIntensity: e });
     const box = (w, h, dep, color, x = 0, y = 0, z = 0) => {
@@ -3268,6 +3288,8 @@ class App {
       let rec = this.buildingMeshes.get(b.id);
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
         this.scene.remove(rec.mesh);
+        this._disposeObject3D(rec.mesh);
+        this.buildingMeshes.delete(b.id);
         rec = null;
       }
       if (!rec) {
@@ -3283,6 +3305,7 @@ class App {
     for (const [id, rec] of this.buildingMeshes) {
       if (!seen.has(id)) {
         this.scene.remove(rec.mesh);
+        this._disposeObject3D(rec.mesh);
         this.buildingMeshes.delete(id);
       }
     }
@@ -3328,6 +3351,20 @@ class App {
       // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
       const d = u.def;
       const armor = M(d.color), trim = M(d.trim);
+      const authored = u.key === 'scott' ? assetClone('heroScott') : null;
+      if (authored) {
+        // Authored source uses real art-pipeline units. Normalize it to the
+        // existing collision/readability scale; visual meshes never change
+        // the deterministic unit radius.
+        authored.scale.setScalar(0.6);
+        body.add(authored);
+        const weapon = assetPart(authored, 'weapon');
+        if (weapon) trackWeapon(weapon);
+        g.userData.limbs = {
+          legL: assetPart(authored, 'leg_l'), legR: assetPart(authored, 'leg_r'),
+          armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
+        };
+      } else {
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.26), M(0x26282c)), 0, 0.2, 0);          // legs
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.36), armor), 0, 0.62, 0);                 // torso
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.05), trim), 0, 0.68, 0.19);               // chest plate
@@ -3357,6 +3394,7 @@ class App {
         trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), trim), 0.28, 0.64, 0.48));
       } else {
         trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24));   // long rifle
+      }
       }
       const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
       haloGeo.rotateX(-Math.PI / 2);
@@ -3418,6 +3456,24 @@ class App {
       const d = u.def;
       const armor = M(d.color);
       const shell = M(0xd9d3c3);
+      const authored = assetClone('humanRifleman');
+      if (authored) {
+        authored.scale.setScalar(0.48);
+        authored.traverse((o) => {
+          if (!o.isMesh) return;
+          const materials = Array.isArray(o.material) ? o.material : [o.material];
+          for (const material of materials) {
+            if (material?.name === 'mat_hull') material.color.setHex(d.color);
+          }
+        });
+        body.add(authored);
+        const weapon = assetPart(authored, 'weapon');
+        if (weapon) trackWeapon(weapon);
+        g.userData.limbs = {
+          legL: assetPart(authored, 'leg_l'), legR: assetPart(authored, 'leg_r'),
+          armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
+        };
+      } else {
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.2), M(0x26282c)), 0, 0.16, 0);          // legs
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.26), armor), 0, 0.52, 0);                 // torso
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), shell), 0, 0.58, 0.145);              // chest plate
@@ -3427,6 +3483,7 @@ class App {
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.03), M(0x35ff70, 0.9)), 0, 0.87, 0.105); // visor glow
       addB(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.13), M(0x4a4d52)), 0, 0.56, -0.2);        // life-support pack
       trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.62), M(0x232426)), 0.2, 0.56, 0.18));
+      }
     }
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
     affectedGeo.rotateX(-Math.PI / 2);
@@ -3487,6 +3544,14 @@ class App {
         body.position.z = attackPulse * (attackKind === 'melee' ? 0.34 : 0.13);
         body.rotation.x += attackPulse * (attackKind === 'melee' ? -0.75 : -0.24);
         body.rotation.z += attackPulse * (u.hero ? (u.key === 'danny' ? -0.24 : 0.18) : 0.08);
+      }
+      const limbs = rec.mesh.userData.limbs;
+      if (limbs) {
+        const stride = u.moving ? Math.sin(t * 10 + u.id) * 0.62 : 0;
+        if (limbs.legL) limbs.legL.rotation.x = stride;
+        if (limbs.legR) limbs.legR.rotation.x = -stride;
+        if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45;
+        if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65;
       }
       if (weaponParts.length && attackPulse > 0) {
         for (const part of weaponParts) {

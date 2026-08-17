@@ -19,6 +19,7 @@ Choose the document that matches your task:
 | Change product behavior | `docs/product-contract.md` |
 | Change Supabase or Vercel code | `docs/backend.md` |
 | Change maps or fortresses | `docs/thronefall-map-engine.md` and `docs/fortress-inspiration.md` |
+| Change unit or building art | `docs/art-direction.md` and `docs/art-pipeline.md` |
 | Plan future systems | `docs/design-vision.md` |
 | Give an agent compact context | `llms.txt` |
 
@@ -181,5 +182,6 @@ Third-party model terms are in `assets/KAYKIT-LICENSE.txt`.
 
 Three.js terms are in `vendor/THREE-LICENSE.md`.
 
-Use `assets.html` to review repository assets. The production game does not
-link to that page.
+Use `assets.html` to review audio assets. Use `art-slice.html` to review
+production GLBs at gameplay distance and in silhouette mode. The production
+game does not link to either page.

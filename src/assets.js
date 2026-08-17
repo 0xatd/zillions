@@ -16,7 +16,30 @@ const MANIFEST = {
   barrel: 'assets/barrel.glb',
   chest: 'assets/chest_gold.glb',
   pillar: 'assets/pillar.glb',
+  heroScott: 'assets/art-slice/hero_scott.glb',
+  humanRifleman: 'assets/art-slice/human_rifleman.glb',
+  hiveDrone: 'assets/art-slice/hive_drone.glb',
+  humanHqT1: 'assets/art-slice/human_hq_t1.glb',
+  humanHqT2: 'assets/art-slice/human_hq_t2.glb',
+  humanHqT3: 'assets/art-slice/human_hq_t3.glb',
+  humanTowerT1: 'assets/art-slice/human_tower_t1.glb',
+  humanTowerT2: 'assets/art-slice/human_tower_t2.glb',
+  humanTowerT3: 'assets/art-slice/human_tower_t3.glb',
+  humanBarracksT1: 'assets/art-slice/human_barracks_t1.glb',
+  humanBarracksT2: 'assets/art-slice/human_barracks_t2.glb',
+  humanBarracksT3: 'assets/art-slice/human_barracks_t3.glb',
+  humanMine: 'assets/art-slice/human_mine.glb',
+  humanWall: 'assets/art-slice/human_wall.glb',
+  humanGate: 'assets/art-slice/human_gate.glb',
 };
+
+export const ART_SLICE_KEYS = Object.freeze([
+  'heroScott', 'humanRifleman', 'hiveDrone',
+  'humanHqT1', 'humanHqT2', 'humanHqT3',
+  'humanTowerT1', 'humanTowerT2', 'humanTowerT3',
+  'humanBarracksT1', 'humanBarracksT2', 'humanBarracksT3',
+  'humanMine', 'humanWall', 'humanGate',
+]);
 
 export function loadAssets() {
   const loader = new GLTFLoader();
@@ -24,16 +47,21 @@ export function loadAssets() {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;
+      const authored = ART_SLICE_KEYS.includes(key);
       root.traverse((o) => {
         if (o.isMesh) {
           o.castShadow = true;
           o.receiveShadow = true;
-          // Swap PBR for Lambert (cheaper) and dim toward the grimdark palette.
-          const src = o.material;
-          o.material = new THREE.MeshLambertMaterial({
-            map: src.map || null,
-            color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
-          });
+          // Keep the authored slice's metal, roughness, and emissive response.
+          // Legacy KayKit props use Lambert because they are ambient set
+          // dressing and can use the cheaper material path.
+          if (!authored) {
+            const src = o.material;
+            o.material = new THREE.MeshLambertMaterial({
+              map: src.map || null,
+              color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
+            });
+          }
         }
       });
       // Normalize: sit on y=0, remember footprint for scaling at clone time.
@@ -55,10 +83,27 @@ export function assetClone(key, fit) {
   const t = TEMPLATES[key];
   if (!t) return null;
   const g = t.clone(true);
+  // Runtime unit meshes are disposed when they leave the battlefield. Clone
+  // GPU resources so disposing one live instance cannot invalidate the cached
+  // template or another instance.
+  g.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.geometry) o.geometry = o.geometry.clone();
+    if (Array.isArray(o.material)) o.material = o.material.map((m) => m.clone());
+    else if (o.material) o.material = o.material.clone();
+  });
   if (fit) {
     const s = t.userData.size;
     const scale = fit / Math.max(s.x, s.z);
     g.scale.setScalar(scale);
   }
   return g;
+}
+
+export function assetPart(root, name) {
+  let found = null;
+  root?.traverse((o) => {
+    if (!found && o.name === name) found = o;
+  });
+  return found;
 }
