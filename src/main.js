@@ -14,13 +14,15 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
-import { TacticalVisuals, applyRim } from './tactical-visuals.js';
+import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { HordeArt, buildCorpseGeometry } from './horde-art.js';
+import { buildUnitModel } from './unit-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import {
   FOG_DARKNESS,
@@ -265,7 +267,7 @@ class App {
       scene: this.scene,
       map,
       makeUnitMesh: (u) => this._makeUnitMesh(u),
-      zombieMeshes: { body: this.zBody, head: this.zHead, arm: this.zArm, eyes: this.zEyes },
+      horde: this.horde,
       burst: (x, y, z, o) => this.burst(x, y, z, o),
       stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
       addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
@@ -509,29 +511,73 @@ class App {
   }
 
   _makeNestMesh(n) {
+    // The hive: a breathing chitin boil, not a rock. Layered mounds under a
+    // ribcage of grown spines, egg sacs glued to the flanks, glowing brood
+    // fissures, and a ring of churned dead earth so it stains the map around
+    // itself. Deterministic per nest id so peers agree on the dressing.
     const g = new THREE.Group();
-    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshLambertMaterial({ color: 0x3a2a4a }));
+    const vid = (n.id || 0) * 7919;
+    const rot = (k) => ((vid >> k) % 628) / 100;
+    const mat = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
+
+    // Churned dead-earth ring.
+    const ringGeo = new THREE.CircleGeometry(3.1, 20);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshLambertMaterial({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
+    ring.position.y = 0.03;
+    ring.receiveShadow = true;
+    g.add(ring);
+
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), mat(HIDE));
     mound.scale.y = 0.55;
     mound.position.y = 0.4;
     mound.castShadow = true;
     g.add(mound);
     g.userData.mound = mound;
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2 + 0.4;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.3 + (i % 2) * 0.7, 5), new THREE.MeshLambertMaterial({ color: 0x2c2038 }));
-      spike.position.set(Math.cos(a) * 1.5, 0.9, Math.sin(a) * 1.5);
-      spike.rotation.z = Math.cos(a) * 0.5;
-      spike.rotation.x = -Math.sin(a) * 0.5;
+    // Secondary boils shoulder out of the main mound.
+    for (let i = 0; i < 3; i++) {
+      const a = rot(i) + i * 2.1;
+      const boil = new THREE.Mesh(new THREE.SphereGeometry(0.7 + (i % 2) * 0.25, 9, 6), mat(i % 2 ? HIDE2 : HIDE));
+      boil.scale.y = 0.6;
+      boil.position.set(Math.cos(a) * 1.6, 0.35, Math.sin(a) * 1.6);
+      boil.castShadow = true;
+      g.add(boil);
+    }
+    // The grown ribcage: paired spines curving over the crown.
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + rot(3);
+      const h = 1.2 + (i % 3) * 0.5;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.22 + (i % 2) * 0.08, h, 5), mat(HIDE2));
+      spike.position.set(Math.cos(a) * 1.5, 0.75 + h * 0.25, Math.sin(a) * 1.5);
+      spike.rotation.z = Math.cos(a) * 0.55;
+      spike.rotation.x = -Math.sin(a) * 0.55;
       spike.castShadow = true;
       g.add(spike);
     }
+    // Egg sacs glued low on the flanks — matte, faintly lit from within.
+    for (let i = 0; i < 5; i++) {
+      const a = rot(i + 1) + i * 1.35;
+      const r = 1.9 + (i % 2) * 0.45;
+      const sac = new THREE.Mesh(new THREE.SphereGeometry(0.24 + (i % 3) * 0.08, 7, 5), mat(SAC, 0.25));
+      sac.scale.y = 1.25;
+      sac.position.set(Math.cos(a) * r, 0.22, Math.sin(a) * r);
+      sac.castShadow = true;
+      g.add(sac);
+    }
+    // Brood fissures: the glow that tells you where to shoot.
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 1.1;
-      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6),
-        new THREE.MeshLambertMaterial({ color: 0xb44dff, emissive: 0xb44dff, emissiveIntensity: 1.8 }));
-      blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), mat(VEIN, 1.8));
+      blob.scale.set(1, 0.55, 1.6);
+      blob.position.set(Math.cos(a) * 1.1, 1.02, Math.sin(a) * 1.1);
+      blob.rotation.y = -a;
       g.add(blob);
     }
+    const maw = new THREE.Mesh(new THREE.SphereGeometry(0.5, 9, 6), mat(VEIN, 1.4));
+    maw.scale.y = 0.4;
+    maw.position.y = 1.42;
+    g.add(maw);
     g.position.set(n.x, this.map.groundY(n.x, n.z), n.z);
     return g;
   }
@@ -2366,32 +2412,9 @@ class App {
   // ---------------- zombies (instanced) ----------------
 
   _setupZombieMeshes() {
-    const bodyGeo = new THREE.BoxGeometry(0.34, 0.6, 0.22);
-    bodyGeo.translate(0, 0.42, 0);
-    const headGeo = new THREE.SphereGeometry(0.155, 8, 6);
-    headGeo.translate(0, 0.85, 0.03);
-    const armGeo = new THREE.BoxGeometry(0.5, 0.1, 0.34);
-    armGeo.translate(0, 0.6, 0.28);
-    // Cool moonlit rim on the horde: massed zombies keep their silhouette
-    // against grass and stone at every zoom level, day or night.
-    const mat = applyRim(new THREE.MeshLambertMaterial({ color: 0xffffff }), { color: 0x9fb4de, power: 2.0, strength: 0.58 });
-
-    // Glowing eye-strip (unlit material — burns through the navy night).
-    const eyeGeo = new THREE.BoxGeometry(0.18, 0.05, 0.04);
-    eyeGeo.translate(0, 0.87, 0.16);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
-    this.zBody = new THREE.InstancedMesh(bodyGeo, mat, ZMAX);
-    this.zHead = new THREE.InstancedMesh(headGeo, applyRim(mat.clone(), { color: 0x9fb4de, power: 2.0, strength: 0.58 }), ZMAX);
-    this.zArm = new THREE.InstancedMesh(armGeo, mat.clone(), ZMAX);
-    this.zEyes = new THREE.InstancedMesh(eyeGeo, eyeMat, ZMAX);
-    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.castShadow = m !== this.zEyes;
-      m.frustumCulled = false;
-      m.count = 0;
-      this.scene.add(m);
-    }
+    // Per-type authored silhouettes, instanced — see horde-art.js. The menu
+    // vignette writes into the same pools, so the menu horde IS the game's.
+    this.horde = new HordeArt(this.scene, ZMAX);
     this._zdummy = new THREE.Object3D();
     this._zcolor = new THREE.Color();
   }
@@ -2399,7 +2422,8 @@ class App {
   _updateZombieMeshes(t, dt = 0) {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
-    const d = this._zdummy, c = this._zcolor;
+    const c = this._zcolor;
+    this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
@@ -2417,31 +2441,24 @@ class App {
       const ax = attack ? attack.tx - zb.x : Math.sin(yaw);
       const az = attack ? attack.tz - zb.z : Math.cos(yaw);
       const ad = Math.hypot(ax, az) || 1;
-      d.position.set(zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge);
-      d.rotation.set((zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06);
-      d.scale.set(s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25));
-      d.updateMatrix();
-      this.zBody.setMatrixAt(i, d.matrix);
-      this.zHead.setMatrixAt(i, d.matrix);
-      this.zArm.setMatrixAt(i, d.matrix);
-      this.zEyes.setMatrixAt(i, d.matrix);
+      // Tint over the baked palette: white at rest, flushed in the lunge,
+      // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
       else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
-      else c.setHex(zb.def.color);
-      this.zBody.setColorAt(i, c);
-      this.zArm.setColorAt(i, c);
-      c.multiplyScalar(0.8);
-      this.zHead.setColorAt(i, c);
+      else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
+      else c.setRGB(1, 1, 1);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
-      c.setHex(zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a);
-      this.zEyes.setColorAt(i, c);
+      const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
+      this.horde.write(
+        zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
+        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
+        (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
+        s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
+        t, zb.phase, lunge, c, eyeHex,
+      );
     }
-    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
-      m.count = n;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    }
+    this.horde.commit();
   }
 
   // ---------------- coins ----------------
@@ -2491,8 +2508,10 @@ class App {
 
   _setupCorpses() {
     const MAXC = 300;
-    const geo = new THREE.BoxGeometry(0.36, 0.62, 0.24);
-    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), MAXC);
+    // A real felled body (limbs splayed, baked gore) instead of a tumbling
+    // crate — instance color still tints it per type.
+    const geo = buildCorpseGeometry();
+    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
     this.corpseMesh.frustumCulled = false;
@@ -2512,7 +2531,8 @@ class App {
       rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
       wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
       life: 6 + Math.random() * 3, scale: e.big ? 1.7 : 1,
-      color: e.big ? 0x4a3356 : 0x54702e,
+      // Multiplies the corpse geometry's baked pale palette, so keep it bright.
+      color: e.big ? 0xa886c8 : 0xa4bc72,
     });
   }
 
@@ -3049,29 +3069,68 @@ class App {
           const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45 * flip, 2.31, 0.25);
           roof.rotation.z = 0.07 * flip;
           box(1.1, 0.1, 1.3, 0x6da06a, -0.4 * flip, 1.53, 0);      // roof garden
+          for (const gx of [-0.7, -0.1]) {                          // garden rail
+            box(0.04, 0.22, 0.04, 0x4a5058, gx * flip, 1.68, 0.6);
+            box(0.04, 0.22, 0.04, 0x4a5058, gx * flip, 1.68, -0.6);
+          }
+          box(0.66, 0.03, 1.26, 0x565c60, -0.4 * flip, 1.79, 0);
           lit(0.32, 0.52, 0.04, TRIM, 0.3 * flip, 0.33, 0.72, 0.4);
+        }
+        // Lived-in kit: doorstep pad, an air handler with a hot exhaust eye,
+        // and (some homes) a little comms dish aimed at the relay net.
+        box(0.5, 0.05, 0.3, PAD, 0.3 * flip * (tier >= 3 ? 1 : 1), 0.03, tier >= 3 ? 0.86 : 0.72);
+        box(0.26, 0.2, 0.2, 0x9c968a, -0.5 * flip, tier >= 3 ? 1.56 : tier === 2 ? 1.24 : 0.92, 0.3);
+        lit(0.06, 0.06, 0.02, TRIM, -0.5 * flip, tier >= 3 ? 1.6 : tier === 2 ? 1.28 : 0.96, 0.41, 0.6);
+        if (vid % 4 === 1) {
+          const dish = cyl(0.16, 0.03, 0.1, 0xd8d2c2, 0.45 * flip, tier >= 3 ? 2.5 : tier === 2 ? 1.35 : 1.0, -0.35, 8);
+          dish.rotation.x = -0.9;
         }
         windows(tier + 1, tier >= 3 ? 0.85 : 0.45, 0.72);
         break;
       }
       case 'farm': {
-        // Hydroponic beds under a white frame, glowing faintly at the rims.
+        // Hydroponic beds under greenhouse hoops, glowing faintly at the
+        // rims, with a nutrient tank and drip line feeding the rows.
         box(1.9, 0.14, 1.9, HULL2, 0, 0.07);
         for (let r = 0; r < 3; r++) {
           box(1.7, 0.18, 0.36, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.2, -0.6 + r * 0.6);
           lit(1.72, 0.03, 0.38, GLOW, 0, 0.31, -0.6 + r * 0.6, 0.25);
+          // Crop canopy bumps so the beds read as growth, not paint.
+          for (let k = 0; k < 4; k++) {
+            box(0.16, 0.1, 0.16, tier >= 2 ? 0x74e099 : 0x54c078, -0.6 + k * 0.4, 0.34, -0.6 + r * 0.6);
+          }
         }
+        // Greenhouse hoops: a thin white frame arched over the rows.
+        for (const hx of [-0.8, 0, 0.8]) {
+          box(0.05, 0.66, 0.05, HULL, hx, 0.33, -0.86);
+          box(0.05, 0.66, 0.05, HULL, hx, 0.33, 0.86);
+          box(0.05, 0.05, 1.82, HULL, hx, 0.68, 0);
+        }
+        box(1.7, 0.04, 0.05, HULL, 0, 0.68, -0.86);
+        box(1.7, 0.04, 0.05, HULL, 0, 0.68, 0.86);
         if (tier >= 2) {
           cyl(0.28, 0.32, 0.6, HULL, 0.72, 0.44, 0.72, 8);  // nutrient tank
           lit(0.3, 0.05, 0.3, TRIM, 0.72, 0.77, 0.72, 0.5);
+          box(0.05, 0.05, 1.1, 0x4a5058, 0.72, 0.16, 0.1);   // drip feed line
         }
         break;
       }
       case 'mill': {
-        // Wind turbine: slender pylon, nacelle, three long blades.
+        // Wind turbine: slender pylon, nacelle, three long blades — plus the
+        // grid hardware that makes it a power plant: anchor struts, a charge
+        // regulator with a live meter, and a cable run into the ground.
         const h = tier >= 2 ? 3.1 : 2.5;
         box(1.0, 0.16, 1.0, PAD, 0, 0.08);
         cyl(0.13, 0.24, h, HULL, 0, h / 2, 0, 8);
+        for (let i = 0; i < 3; i++) {                       // anchor struts
+          const a = (i / 3) * Math.PI * 2 + 0.5;
+          const strut = box(0.06, h * 0.42, 0.06, HULL2, Math.cos(a) * 0.34, h * 0.19, Math.sin(a) * 0.34);
+          strut.rotation.z = Math.cos(a) * 0.32;
+          strut.rotation.x = -Math.sin(a) * 0.32;
+        }
+        box(0.44, 0.4, 0.34, HULL2, 0.55, 0.36, -0.45);      // charge regulator
+        lit(0.3, 0.08, 0.03, GLOW, 0.55, 0.44, -0.27, 0.5);  // live meter
+        box(0.08, 0.06, 0.7, 0x4a5058, 0.28, 0.05, -0.2, 0); // buried cable run
         box(0.42, 0.3, 0.7, HULL2, 0, h + 0.1, 0.05);
         lit(0.1, 0.1, 0.1, TRIM, 0, h + 0.1, 0.42, 0.8);
         const rotor = new THREE.Group();
@@ -3123,21 +3182,52 @@ class App {
         const head = new THREE.Group();
         head.position.y = h + 0.52;
         if (b.branch === 'flame') {
+          // Incinerator crown: armored fuel bowl, twin tanks racked on the
+          // deck, feed hose, and a pilot light that never goes out.
           const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
           head.add(bowl);
+          const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 8), M(0x2f3338));
+          collar.position.y = 0.18;
+          head.add(collar);
           const fire = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.55, 6), M(0xff7a2e, 0.9));
           fire.position.y = 0.4;
           head.add(fire);
           g.userData.flame = fire;
+          for (const side of [-1, 1]) {
+            const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.4, 8), M(0xb0492a));
+            tank.position.set(side * 0.3, -0.28, -0.34);
+            tank.castShadow = true;
+            head.add(tank);
+            const band = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.05), M(0xe8a83c));
+            band.position.set(side * 0.3, -0.2, -0.31);
+            head.add(band);
+          }
+          const pilot = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), M(0xffb45e, 1.0));
+          pilot.position.set(0, 0.12, 0.42);
+          head.add(pilot);
         } else {
           const bal = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, b.branch === 'ballista' ? 1.5 : 0.9), M(0x4a4440));
           bal.position.z = 0.1;
           bal.castShadow = true;
           head.add(bal);
           if (b.branch === 'ballista') {
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.08), M(0x565c60));
-            arm.position.set(0, 0.1, 0.55);
-            head.add(arm);
+            // Siege lance: throw arms, drawn cable, mounted bolt, ammo rack.
+            for (const side of [-1, 1]) {
+              const arm = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.07, 0.07), M(0x565c60));
+              arm.position.set(side * 0.34, 0.1, 0.5);
+              arm.rotation.y = side * -0.5;
+              head.add(arm);
+            }
+            const cable = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.025, 0.025), M(0x2b2d31));
+            cable.position.set(0, 0.1, 0.28);
+            head.add(cable);
+            const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.01, 0.9, 5), M(0xd8d2c2));
+            bolt.rotation.x = Math.PI / 2;
+            bolt.position.set(0, 0.14, 0.3);
+            head.add(bolt);
+            const rack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.6), M(0x6b6152));
+            rack.position.set(-0.3, -0.02, -0.35);
+            head.add(rack);
           }
         }
         g.add(head);
@@ -3255,10 +3345,20 @@ class App {
       case 'outpost': {
         // One readable frontier fort centered on the captured flag. Tier 1 is
         // the working camp; tier 2 visibly closes a palisade and raises twin
-        // defensive towers; later tiers harden the same silhouette.
+        // defensive towers; later tiers harden the same silhouette. A drop-pad,
+        // field dome, relay mast, sandbags, and searchlight make the claim
+        // readable from across the map.
         box(1.9, 0.24, 1.9, PAD, 0, 0.12);
         cone(0.95, 1.05, HULL, -0.35, 0.55, -0.25, 8);
+        box(0.34, 0.3, 0.06, 0x6a655a, -0.35, 0.42, 0.28);   // dome hatch
         box(0.9, 0.6, 0.7, HULL2, 0.55, 0.3, 0.5);
+        for (const [sx, sz] of [[-0.85, 0.85], [0.85, -0.85], [-0.85, -0.85]]) {
+          box(0.5, 0.18, 0.2, 0x8a8069, sx, 0.33, sz);        // sandbag line
+          box(0.4, 0.16, 0.18, 0x9a907a, sx, 0.49, sz);
+        }
+        const lampArm = box(0.05, 0.05, 0.4, 0x4a5058, 0.85, 2.5, -0.55);
+        lampArm.rotation.x = 0.3;
+        lit(0.14, 0.12, 0.14, 0xfff2c8, 0.85, 2.42, -0.36, 0.9); // searchlight
         box(0.08, 3.4, 0.08, 0x4a5058, 0.85, 1.7, -0.7);
         lit(0.6, 0.4, 0.03, 0x59b06e, 0.5, 3.1, -0.7, 0.5);
         if (tier >= 2) {
@@ -3295,10 +3395,21 @@ class App {
         break;
       }
       case 'workshop': {
+        // Fabrication bay: the drone hall plus the tooling that explains it —
+        // a gantry crane over a work slab, coil stack, and a hot vent.
         box(1.9, 0.25, 1.9, PAD, 0, 0.12);
         box(1.5, 1.0, 1.25, HULL, 0, 0.62);
         box(1.7, 0.16, 1.45, HULL2, 0, 1.15);
         lit(1.52, 0.07, 1.27, GLOW, 0, 1.06, 0, 0.3);
+        box(0.1, 0.9, 0.1, 0x4a5058, -0.82, 0.45, 0.72);     // gantry legs
+        box(0.1, 0.9, 0.1, 0x4a5058, 0.82, 0.45, 0.72);
+        box(1.78, 0.1, 0.12, 0x565c60, 0, 0.95, 0.72);       // gantry beam
+        box(0.12, 0.3, 0.1, 0xe8a83c, 0.25, 0.76, 0.72);     // hoist carriage
+        box(0.7, 0.12, 0.5, 0x6a655a, 0.25, 0.2, 0.72);      // work slab
+        cyl(0.12, 0.12, 0.5, 0x565c60, -0.6, 1.48, -0.45, 8); // coil stack
+        lit(0.14, 0.06, 0.14, TRIM, -0.6, 1.76, -0.45, 0.7);
+        box(0.3, 0.2, 0.2, 0x9c968a, 0.55, 1.33, -0.5);       // hot vent
+        lit(0.22, 0.04, 0.14, 0xff9a4d, 0.55, 1.24, -0.5, 0.45);
         const rotor = new THREE.Group();
         rotor.position.set(0, 1.55, 0);
         for (let i = 0; i < 3 + tier; i++) {
@@ -3312,10 +3423,20 @@ class App {
         break;
       }
       case 'hero_forge': {
-        cyl(1.0, 1.25, 0.45, PAD, 0, 0.22, 0, 10);
+        // Ascension machine: stepped dais, four conduit pylons feeding the
+        // levitating core, coolant lines snaking to the base.
+        cyl(1.15, 1.4, 0.2, 0x8f897d, 0, 0.1, 0, 10);        // lower step
+        cyl(1.0, 1.25, 0.45, PAD, 0, 0.32, 0, 10);
+        lit(0.06, 0.04, 2.0, GLOW, 0, 0.43, 0, 0.4);          // inlaid power seams
+        const seam = lit(0.06, 0.04, 2.0, GLOW, 0, 0.43, 0, 0.4);
+        seam.rotation.y = Math.PI / 2;
         for (let i = 0; i < 4; i++) {
           const a = i * Math.PI / 2;
           box(0.22, 1.8 + tier * 0.25, 0.22, HULL2, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
+          lit(0.1, 0.5, 0.1, GLOW, Math.cos(a) * 0.82, 1.4 + tier * 0.2, Math.sin(a) * 0.82, 0.35); // conduit glass
+          const pipe = cyl(0.05, 0.05, 0.8, 0x4a5058, Math.cos(a) * 1.15, 0.18, Math.sin(a) * 1.15, 6);
+          pipe.rotation.z = Math.cos(a) * 1.2;
+          pipe.rotation.x = -Math.sin(a) * 1.2;
         }
         const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.48 + tier * 0.1, 0), M(tier >= 3 ? 0xffd75e : 0x72cfff, 1.0));
         core.position.y = 1.65 + tier * 0.2;
@@ -3436,18 +3557,9 @@ class App {
 
   _makeUnitMesh(u) {
     const g = new THREE.Group();
-    // Warm daylight rim on your own army and heroes: friendly silhouettes pop
-    // from the ground the way the outline pass pops the selected unit.
-    const M = (c, e = 0) => applyRim(
-      new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
-      { color: 0xfff3e0, power: 2.2, strength: 0.42 },
-    );
-    const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
-
     const body = new THREE.Group();
     g.add(body);
     g.userData.body = body;
-    const addB = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; body.add(mesh); return mesh; };
     const weaponParts = [];
     const trackWeapon = (mesh) => {
       mesh.userData.restPos = mesh.position.clone();
@@ -3457,9 +3569,7 @@ class App {
     };
 
     if (u.hero) {
-      // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
       const d = u.def;
-      const armor = M(d.color), trim = M(d.trim);
       const authored = u.key === 'scott' ? assetClone('heroScott') : null;
       if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
@@ -3474,36 +3584,11 @@ class App {
           armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
         };
       } else {
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.26), M(0x26282c)), 0, 0.2, 0);          // legs
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.36), armor), 0, 0.62, 0);                 // torso
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.05), trim), 0, 0.68, 0.19);               // chest plate
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), -0.34, 0.86, 0);               // pauldron L
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), 0.34, 0.86, 0);                // pauldron R
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 0.22), M(0x3a3d42)), 0, 1.0, 0);           // helm
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), M(0x35ff70, 0.9)), 0, 1.0, 0.12);   // visor glow
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x4a4440)), 0, 0.72, -0.26);       // backpack
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26);
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);
-      if (u.key === 'scott') {
-        // Stubby double-barrel shotgun + the gravity hammer slung on his back.
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x1e1f21)), 0.26, 0.62, 0.24));
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x2b2d31)), 0.26, 0.72, 0.24));
-        const haft = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), M(0x3a3228)), -0.28, 0.8, -0.34));
-        haft.rotation.z = 0.5;
-        haft.userData.restRot = haft.rotation.clone();
-        const head = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.2), trim), -0.5, 1.05, -0.34));
-        head.rotation.z = 0.5;
-        head.userData.restRot = head.rotation.clone();
-      } else if (u.key === 'alexander') {
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26));   // long marksman rifle
-      } else if (d.melee) {
-        // Generic close-quarters weapon for melee heroes without a bespoke
-        // model (Turtle, John, Tiger) — a stout haft with a trim-colored head.
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.58), M(0x2b2d31)), 0.28, 0.6, 0.2));
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), trim), 0.28, 0.64, 0.48));
-      } else {
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24));   // long rifle
-      }
+        // Bespoke procedural rig per hero — see unit-art.js.
+        const model = buildUnitModel(u);
+        body.add(model.node);
+        g.userData.limbs = model.limbs;
+        for (const part of model.weaponParts) weaponParts.push(part);
       }
       const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
       haloGeo.rotateX(-Math.PI / 2);
@@ -3558,14 +3643,12 @@ class App {
       }
       g.scale.setScalar(1.18);
     } else {
-      // Colony marine: a sealed suit — nobody walks this planet bare-headed.
-      // A slimmer cut of the hero kit (legs, doctrine-colored torso, white
-      // helmet with glow visor, pauldrons, life-support pack) so the army
-      // reads as one corps, with doctrine color doing the telling-apart.
+      // Colony troops: one corps, three trades. The authored art-slice
+      // rifleman stays on for the line trooper it was modeled as; rangers,
+      // snipers and hero summons get their own procedural rigs (unit-art.js)
+      // so the army reads apart at a glance.
       const d = u.def;
-      const armor = M(d.color);
-      const shell = M(0xd9d3c3);
-      const authored = assetClone('humanRifleman');
+      const authored = u.key === 'soldier' ? assetClone('humanRifleman') : null;
       if (authored) {
         authored.scale.setScalar(0.48);
         authored.traverse((o) => {
@@ -3583,15 +3666,10 @@ class App {
           armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
         };
       } else {
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.2), M(0x26282c)), 0, 0.16, 0);          // legs
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.26), armor), 0, 0.52, 0);                 // torso
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), shell), 0, 0.58, 0.145);              // chest plate
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), -0.24, 0.7, 0);                // pauldron L
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), 0.24, 0.7, 0);                 // pauldron R
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.19, 0.19), shell), 0, 0.86, 0);                 // helmet
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.03), M(0x35ff70, 0.9)), 0, 0.87, 0.105); // visor glow
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.13), M(0x4a4d52)), 0, 0.56, -0.2);        // life-support pack
-      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.62), M(0x232426)), 0.2, 0.56, 0.18));
+        const model = buildUnitModel(u);
+        body.add(model.node);
+        g.userData.limbs = model.limbs;
+        for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
