@@ -3,10 +3,73 @@ import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from '../vendor/jsm/postprocessing/OutlinePass.js';
 import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 
 const QUALITY_KEY = 'zillions_graphics_quality';
+
+// One gentle grade pass instead of a chain: slight saturation lift, a whisper
+// of shadow lift so dark scenes stay readable on cheap panels, and a soft
+// vignette that pulls the eye to the centre of the diorama where the city is.
+// Everything here is display-referred and subtle on purpose — the grade must
+// be felt (cohesion, mood), never seen (tint).
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uSat: { value: 1.07 },
+    uLift: { value: 0.012 },
+    uVignette: { value: 0.31 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform float uSat;
+    uniform float uLift;
+    uniform float uVignette;
+    varying vec2 vUv;
+    void main() {
+      vec4 texel = texture2D(tDiffuse, vUv);
+      vec3 c = texel.rgb;
+      float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(luma), c, uSat);
+      c = c + uLift * (1.0 - luma);
+      vec2 d = vUv - 0.5;
+      float v = smoothstep(0.85, 0.25, dot(d, d) * 2.0);
+      c *= mix(1.0, v, uVignette);
+      gl_FragColor = vec4(c, texel.a);
+    }`,
+};
+
+// Rim (fresnel) lighting injected into MeshLambertMaterial via
+// onBeforeCompile — a soft edge glow that separates units and heroes from
+// same-coloured ground, which is the single biggest readability win at
+// gameplay zoom. Pure display-side: no sim state, no lockstep impact.
+export function applyRim(mat, { color = 0xdfe9ff, power = 2.8, strength = 0.22 } = {}) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = { value: new THREE.Color(color) };
+    shader.uniforms.uRimPower = { value: power };
+    shader.uniforms.uRimStrength = { value: strength };
+    shader.vertexShader = 'varying vec3 vRimView;\n' + shader.vertexShader.replace(
+      '#include <project_vertex>',
+      '#include <project_vertex>\n vRimView = -mvPosition.xyz;',
+    );
+    shader.fragmentShader = 'uniform vec3 uRimColor;\nuniform float uRimPower;\nuniform float uRimStrength;\nvarying vec3 vRimView;\n'
+      + shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        float rimFace = clamp(dot(normalize(vRimView), normalize(normal)), 0.0, 1.0);
+        totalEmissiveRadiance += uRimColor * pow(1.0 - rimFace, uRimPower) * uRimStrength;`,
+      );
+  };
+  mat.customProgramCacheKey = () => `rim-${color}-${power}-${strength}`;
+  return mat;
+}
 
 function initialQuality() {
   try {
@@ -42,6 +105,9 @@ export class TacticalVisuals {
     // washing the terrain in a generic glow.
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.28, 0.92);
     this.composer.addPass(this.bloom);
+
+    this.grade = new ShaderPass(GradeShader);
+    this.composer.addPass(this.grade);
 
     this.smaa = new SMAAPass(1, 1);
     this.composer.addPass(this.smaa);

@@ -14,7 +14,7 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
-import { TacticalVisuals } from './tactical-visuals.js';
+import { TacticalVisuals, applyRim } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
@@ -2369,7 +2369,9 @@ class App {
     headGeo.translate(0, 0.85, 0.03);
     const armGeo = new THREE.BoxGeometry(0.5, 0.1, 0.34);
     armGeo.translate(0, 0.6, 0.28);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    // Cool moonlit rim on the horde: massed zombies keep their silhouette
+    // against grass and stone at every zoom level, day or night.
+    const mat = applyRim(new THREE.MeshLambertMaterial({ color: 0xffffff }), { color: 0x9fb4de, power: 2.0, strength: 0.58 });
 
     // Glowing eye-strip (unlit material — burns through the navy night).
     const eyeGeo = new THREE.BoxGeometry(0.18, 0.05, 0.04);
@@ -2377,7 +2379,7 @@ class App {
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
     this.zBody = new THREE.InstancedMesh(bodyGeo, mat, ZMAX);
-    this.zHead = new THREE.InstancedMesh(headGeo, mat.clone(), ZMAX);
+    this.zHead = new THREE.InstancedMesh(headGeo, applyRim(mat.clone(), { color: 0x9fb4de, power: 2.0, strength: 0.58 }), ZMAX);
     this.zArm = new THREE.InstancedMesh(armGeo, mat.clone(), ZMAX);
     this.zEyes = new THREE.InstancedMesh(eyeGeo, eyeMat, ZMAX);
     for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
@@ -3419,7 +3421,12 @@ class App {
 
   _makeUnitMesh(u) {
     const g = new THREE.Group();
-    const M = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    // Warm daylight rim on your own army and heroes: friendly silhouettes pop
+    // from the ground the way the outline pass pops the selected unit.
+    const M = (c, e = 0) => applyRim(
+      new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
+      { color: 0xfff3e0, power: 2.2, strength: 0.42 },
+    );
     const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
 
     const body = new THREE.Group();
@@ -4126,7 +4133,6 @@ class App {
     const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
     this.scene.background = sky;
     this.scene.fog.color.copy(sky);
-
     // Windows glow when it's dark.
     const glow = lerp(0.85, 0, b);
     if (Math.abs(glow - (this._winGlow || 0)) > 0.05) {
