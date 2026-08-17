@@ -235,9 +235,9 @@ export class UI {
             <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
             <div><b>🏗️ The city is pre-planned.</b> ALT toggles Space between Build and Fight. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
-            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh squad on a timer, forever. Press <kbd>3</kbd> and the army pushes out along the lanes on its own — no unit micro.</div>
+            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd>3</kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
-            <div><b>🔥 Hives never stop.</b> Each living nest musters its own squads, faster as Threat climbs. Raze them all — then break the counterattack their champion leads.</div>
+            <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
             <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE fires your special and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
@@ -911,13 +911,14 @@ export class UI {
           : '❤️ <b>No lives left</b> — the next fall is final.';
     } else {
       const army = game.units.filter((u) => !u.hero && !u.dead).length;
+      const squads = new Set(game.units.filter((u) => !u.hero && !u.dead && u.squadId).map((u) => u.squadId)).size;
       const stanceText = {
         defend: 'holding the city line',
         guard: 'following your hero',
         attack: 'pushing the lanes',
       }[game.stance] || 'awaiting orders';
       q('#army-status').innerHTML = army
-        ? `<b>${army}</b> troops · ${stanceText} · living camps keep mustering`
+        ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;

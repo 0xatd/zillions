@@ -30,7 +30,9 @@ import {
   MAX_VISION_SOURCES,
 } from './fog-of-war.js';
 
-const ZMAX = 1700;
+// Hives are uncapped in simulation. Keep a large fixed GPU instance pool so a
+// late flood stays visible without allocating new meshes during combat.
+const ZMAX = 6000;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
@@ -166,6 +168,7 @@ class App {
 
     this.buildingMeshes = new Map();  // building id -> {mesh, b, spawnT}
     this.unitMeshes = new Map();
+    this.unitMeshPool = new Map();    // unit key -> reusable dead troop meshes
     this.plotMeshes = new Map();      // plot id -> {group, state fields}
     this.waveMarkers = [];
 
@@ -3602,6 +3605,26 @@ class App {
     return g;
   }
 
+  _takeUnitMesh(u) {
+    if (u.hero || u.temp) return this._makeUnitMesh(u);
+    const pool = this.unitMeshPool.get(u.key);
+    const mesh = pool && pool.pop();
+    if (!mesh) return this._makeUnitMesh(u);
+    mesh.visible = true;
+    return mesh;
+  }
+
+  _poolUnitMesh(rec) {
+    if (rec.u.hero || rec.u.temp) return false;
+    const pool = this.unitMeshPool.get(rec.u.key) || [];
+    if (pool.length >= 96) return false;
+    rec.mesh.visible = false;
+    this.scene.remove(rec.mesh);
+    pool.push(rec.mesh);
+    this.unitMeshPool.set(rec.u.key, pool);
+    return true;
+  }
+
   _syncUnits(t, dt = 0) {
     const g = this.game;
     const seen = new Set();
@@ -3609,7 +3632,7 @@ class App {
       seen.add(u.id);
       let rec = this.unitMeshes.get(u.id);
       if (!rec) {
-        const mesh = this._makeUnitMesh(u);
+        const mesh = this._takeUnitMesh(u);
         this.scene.add(mesh);
         rec = { mesh, u, lastHp: u.hp };
         this.unitMeshes.set(u.id, rec);
@@ -3741,8 +3764,10 @@ class App {
     }
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) {
-        this.scene.remove(rec.mesh);
-        this._disposeObject3D(rec.mesh);
+        if (!this._poolUnitMesh(rec)) {
+          this.scene.remove(rec.mesh);
+          this._disposeObject3D(rec.mesh);
+        }
         this.unitMeshes.delete(id);
       }
     }

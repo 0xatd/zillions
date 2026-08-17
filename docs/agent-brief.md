@@ -23,6 +23,13 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   `every` seconds forever. There is no troop supply cap. Destroyed or ruined
   producers stop. Every living hive musters its own squads on
   `hiveInterval(threat)`.
+- Human musters keep stable formation IDs and slots through save/restore.
+  Global Defend, Follow, and Push orders keep the troops in coherent ranks.
+  Zombies do not form ranks. Combat target acquisition uses deterministic
+  spatial buckets so uncapped armies do not perform all-vs-all scans.
+- One opening hive produces at least 1.5 times the units per second of the
+  fastest single human producer, then accelerates with Threat. Humans overcome
+  that deficit with multiple camps, captured outposts, and hive destruction.
 - Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
   your own conquests. Each whole level triggers a surge — every hive musters at
   once at `SURGE_MULT`.
