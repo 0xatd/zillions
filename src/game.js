@@ -16,6 +16,7 @@ import {
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
+  LABYRINTH_LIVES, BLESSING_KEYS,
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
@@ -127,7 +128,13 @@ export class Game {
     this.heroes = [];
     this.hero = null;            // heroes[0], kept for solo call sites
 
+    // Labyrinth run state — zeros/nulls in every other mode.
+    this.lives = 0;              // shared team lives; a hero's fall spends one
+    this.checkpoint = null;      // where the fallen return: start, then each razed chamber
+    this.blessingOffers = [];    // per-player [key,key,key] while a choice is open
+
     if (snap) this._restore(snap);
+    else if (this.mode === 'labyrinth') this._setupLabyrinth();
     else this._setupStart();
   }
 
@@ -146,6 +153,13 @@ export class Game {
       site: this.site,
       stance: this.stance,
       relics: [...this.relics],
+      // Labyrinth run state. Offers are snapshotted so a save restored
+      // mid-choice reproduces the exact same three options.
+      lives: this.lives,
+      checkpoint: this.checkpoint ? { x: snapNum(this.checkpoint.x), z: snapNum(this.checkpoint.z) } : null,
+      blessingOffers: this.blessingOffers.map((o) => (o ? [...o] : null)),
+      flowSeeds: this.mode === 'labyrinth' ? [...(this._flowSeeds || [])] : null,
+      flowT: snapNum(this.flowTimer),
       timers: {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
         nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
@@ -204,6 +218,8 @@ export class Game {
         summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
+        blessings: [...(h.blessings || [])],
+        fallen: h.fallen ? 1 : 0,
         upgrades: { ...h.upgrades },
       })),
       loot: this.loot.map((l) => [l.key, snapNum(l.x), snapNum(l.z), l.hidden ? 1 : 0, snapNum(l.cool || 0)]),
@@ -239,6 +255,15 @@ export class Game {
     }
     this.relics = [...(snap.relics || [])];
     this.relicMods = itemMods(this.relics);
+    this.lives = snap.lives ?? 0;
+    this.checkpoint = snap.checkpoint ? { x: snap.checkpoint.x, z: snap.checkpoint.z } : null;
+    this.blessingOffers = (snap.blessingOffers || []).map((o) => (o ? [...o] : null));
+    if (this.mode === 'labyrinth' && this.checkpoint) {
+      // offMap is not snapshotted; it is a pure function of the map and any
+      // point inside the corridor, and the checkpoint always is one — so the
+      // same pruning re-derives the exact same partition on every restore.
+      this._pruneUnreachable(this.checkpoint);
+    }
     const timers = snap.timers || {};
     this.incomeT = timers.incomeT ?? this.incomeT;
     this._incomeAcc = timers.incomeAcc ?? 0;
@@ -336,6 +361,11 @@ export class Game {
         level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
       });
       if (hs.id) h.id = hs.id;
+      if (hs.blessings && hs.blessings.length) {
+        h.blessings = [...hs.blessings];
+        this._refreshPackMods(h); // blessings count toward mods before hp lands
+      }
+      h.fallen = !!hs.fallen;
       h.hp = hs.hp;
       h.abilCd = hs.cd || 0;
       h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
@@ -414,7 +444,20 @@ export class Game {
     this.rng.setState(snap.rng);
     setNextId(snap.nextId);
     this.flowDirty = true;
-    this.msg('📂 The city stands as you left it — the siege continues.', 'info');
+    if (this.mode === 'labyrinth' && Array.isArray(snap.flowSeeds)) {
+      // Rebuild the exact hunting field the save was using — recomputing from
+      // the heroes' restored positions would give a slightly different field
+      // and desync a restored peer from an uninterrupted one. Empty seeds
+      // (every hero down, revives pending) still compute: that fills the
+      // field with Infinity, matching the live game's state at that moment.
+      this._flowSeeds = [...snap.flowSeeds];
+      this.flow.compute(this.occ, this._flowSeeds, this.gateIds);
+      this.flowDirty = false;
+      this.flowTimer = snap.flowT ?? 0;
+    }
+    this.msg(this.mode === 'labyrinth'
+      ? '📂 The labyrinth remembers you — the trial continues.'
+      : '📂 The city stands as you left it — the siege continues.', 'info');
   }
 
   // ---------- setup ----------
@@ -430,13 +473,123 @@ export class Game {
     this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and press SPACE to found your city.', 'info');
   }
 
+  // ---------- labyrinth setup ----------
+
+  // The Labyrinth: no founding, no colony, no army — the run opens live, with
+  // the heroes standing in the safest sanctuary and every chamber's brood nest
+  // between them and the way out. Each razed nest offers a blessing and moves
+  // the checkpoint forward; raze them all and the champion walks.
+  _setupLabyrinth() {
+    this.phase = 'live';
+    // Lives are a shared team pool. A bigger party burns through them faster,
+    // so each extra hero banks one more.
+    this.lives = LABYRINTH_LIVES + (this.heroSetups.length - 1);
+    const start = this._labyrinthStart();
+    this.checkpoint = { x: start.x, z: start.z };
+    this._pruneUnreachable(start);
+    const spawns = this._frontierSpawnPoints(this.heroSetups.length, start);
+    this.heroSetups.forEach((e, i) => this._spawnHero(e.k, spawns[i][0], spawns[i][1], e.camp));
+    this._scatterCreeps();
+    this._scatterLoot();
+    const chambers = this.liveNests();
+    this.msg(`🌀 The labyrinth opens. ${chambers} brood chambers stand between you and its champion — raze each one, take its blessing, and keep moving. ${this.lives} lives.`, 'info');
+  }
+
+  // The start sanctuary: of the flattened sites the terrain offers, take the
+  // one farthest from the nearest brood nest — the ground the hive wants least.
+  _labyrinthStart() {
+    let best = this.map.sites[0], bd = -1;
+    for (const s of this.map.sites) {
+      let nearest = Infinity;
+      for (const [nx, nz] of this.map.nestSpots || []) {
+        nearest = Math.min(nearest, dist2(s.x, s.z, nx, nz));
+      }
+      if (nearest > bd) { bd = nearest; best = s; }
+    }
+    return best;
+  }
+
+  // Anything the start sanctuary cannot walk to does not exist for this trial:
+  // an unreachable brood nest would make the run unwinnable, and an
+  // unreachable node is a lie on the minimap.
+  _pruneUnreachable(start) {
+    const N = this.map.size;
+    const seen = new Uint8Array(N * N);
+    const sx = Math.round(start.x), sz = Math.round(start.z);
+    const queue = [[sx, sz]];
+    seen[sz * N + sx] = 1;
+    while (queue.length) {
+      const [x, z] = queue.pop();
+      for (const [dx, dz] of DIR4) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+        const k = nz * N + nx;
+        if (seen[k] || !this.map.isWalkable(nx, nz)) continue;
+        seen[k] = 1;
+        queue.push([nx, nz]);
+      }
+    }
+    const reachable = (x, z) => {
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const tx = (x | 0) + dx, tz = (z | 0) + dz;
+          if (tx >= 0 && tz >= 0 && tx < N && tz < N && seen[tz * N + tx]) return true;
+        }
+      }
+      return false;
+    };
+    for (const nest of this.nests) {
+      if (reachable(nest.x, nest.z)) continue;
+      nest.offMap = true;
+      nest.alive = false;
+      nest.hp = 0;
+    }
+    for (const node of this.nodes) node.offMap = !reachable(node.x, node.z);
+  }
+
+  // A razed chamber offers each player a choice of three blessings. Offers are
+  // drawn from the shared seeded RNG in player order, so lockstep peers draw
+  // identically; a new razing overwrites an ignored older offer.
+  _offerBlessings() {
+    for (let p = 0; p < this.heroes.length; p++) {
+      const h = this.heroes[p];
+      if (!h) continue;
+      const pool = BLESSING_KEYS.filter((k) => !(h.blessings || []).includes(k));
+      const offer = [];
+      while (offer.length < 3 && pool.length) {
+        const i = (this.rng() * pool.length) | 0;
+        offer.push(pool.splice(i, 1)[0]);
+      }
+      this.blessingOffers[p] = offer.length ? offer : null;
+    }
+    this.emit({ type: 'blessing' });
+    this.msg('✨ The chamber falls silent — choose a blessing before you go deeper.', 'info');
+  }
+
+  // Lockstep-safe pick: an index over the wire, ignored when stale/invalid.
+  chooseBlessing(p, i) {
+    const offer = this.blessingOffers[p];
+    const h = this.heroes[p];
+    if (!offer || !h || i < 0 || i >= offer.length) return;
+    const key = offer[i];
+    h.blessings = h.blessings || [];
+    h.blessings.push(key);
+    this.blessingOffers[p] = null;
+    this._refreshPackMods(h);
+    this.emit({ type: 'blessed', x: h.x, z: h.z });
+    this.msg(`✨ ${h.def.name} takes the ${ITEMS[key].name}.`, 'info');
+  }
+
   // Terrain generation owns the centre of the map. It may place deep forest,
   // water, or crag there, so fixed centre coordinates can seal an entire
   // co-op party inside impassable ground. Find the nearest connected patch of
   // walkable tiles and place every hero on that patch deterministically.
-  _frontierSpawnPoints(count) {
+  // `anchor` overrides the search centre (the labyrinth anchors on its start
+  // sanctuary instead of the map middle).
+  _frontierSpawnPoints(count, anchor = null) {
     const N = this.map.size;
-    const cx = N >> 1, cz = N >> 1;
+    const cx = anchor ? Math.round(anchor.x) : N >> 1;
+    const cz = anchor ? Math.round(anchor.z) : N >> 1;
     const candidates = [];
     for (let z = 1; z < N - 1; z++) {
       for (let x = 1; x < N - 1; x++) {
@@ -705,7 +858,12 @@ export class Game {
     let placed = 0, guard = 0;
     while (placed < count && guard++ < count * 30) {
       const x = 2 + this.rng() * (N - 4), z = 2 + this.rng() * (N - 4);
-      if (this.map.sites.some((s) => Math.hypot(x - s.x, z - s.z) < 26)) continue;
+      // Sites are creep-free staging ground — except in the labyrinth, where
+      // only the start sanctuary is safe and the other flats are just rooms.
+      if (this.mode === 'labyrinth') {
+        const cp = this.checkpoint;
+        if (cp && Math.hypot(x - cp.x, z - cp.z) < 18) continue;
+      } else if (this.map.sites.some((s) => Math.hypot(x - s.x, z - s.z) < 26)) continue;
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
       const type = this.rng() < 0.92 ? 'walker' : 'runner';
       this._spawnZombie(type, x, z, false);
@@ -1274,10 +1432,34 @@ export class Game {
     // Campaign: raze every hive and the survivors call one last counterattack.
     if (!this.finalStand && this.nests.length && !this.liveNests()) {
       this.finalStand = true;
-      this.msg('🔥 Every hive lies in ashes — but something enormous is already walking. Hold the Keep!', 'bad');
-      this._spawnBoss(null);
-      this._edgeAssault(Math.round(48 * this.diff.mult * this.level.mult));
+      if (this.mode === 'labyrinth') {
+        // No Keep to hold. The champion rises from the deepest razed chamber
+        // with its last brood — kill it and the trial is cleared.
+        const last = this._deepestChamber();
+        this.msg('👑 Every chamber lies silent — and the labyrinth\'s champion rises from the deepest one. Kill it and walk out.', 'bad');
+        this._spawnBoss(last ? last.id : null);
+        if (last) {
+          const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
+          this._spawnHorde(Math.round(18 * this.diff.mult * this.level.mult), [last.id], w.types);
+        }
+      } else {
+        this.msg('🔥 Every hive lies in ashes — but something enormous is already walking. Hold the Keep!', 'bad');
+        this._spawnBoss(null);
+        this._edgeAssault(Math.round(48 * this.diff.mult * this.level.mult));
+      }
     }
+  }
+
+  // The chamber farthest from the current checkpoint — the bottom of the run.
+  _deepestChamber() {
+    const from = this.checkpoint || { x: this.map.size / 2, z: this.map.size / 2 };
+    let best = null, bd = -1;
+    for (const n of this.nests) {
+      if (n.offMap) continue;
+      const d = dist2(n.x, n.z, from.x, from.z);
+      if (d > bd) { bd = d; best = n; }
+    }
+    return best;
   }
 
   _surge() {
@@ -1741,7 +1923,7 @@ export class Game {
   }
 
   _refreshPackMods(h) {
-    h.itemMods = itemMods([...(h.items || []), ...(h.pack || [])]);
+    h.itemMods = itemMods([...(h.items || []), ...(h.pack || []), ...(h.blessings || [])]);
     this._refreshHeroDerived(h);
   }
 
@@ -1812,7 +1994,7 @@ export class Game {
       mx: 0, mz: 0, sprint: false,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
-      items, pack, itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
+      items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -1974,6 +2156,7 @@ export class Game {
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
       case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
+      case 'blessing': this.chooseBlessing(c.p || 0, c.i ?? -1); break;
     }
   }
 
@@ -2198,12 +2381,16 @@ export class Game {
   _updateHeroOne(h, dt) {
     if (h.abilCd > 0) h.abilCd -= dt;
     if (h.dead) {
+      if (h.fallen) return; // out of lives — this fall is final
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
         h.dead = false;
         h.hp = h.maxHp;
-        h.x = (this.hq ? this.hq.cx : this.map.size / 2) + 2.5;
-        h.z = (this.hq ? this.hq.cz : this.map.size / 2) + 2.5;
+        const at = this.mode === 'labyrinth' && this.checkpoint
+          ? this._walkableNear(this.checkpoint.x, this.checkpoint.z)
+          : { x: (this.hq ? this.hq.cx : this.map.size / 2) + 2.5, z: (this.hq ? this.hq.cz : this.map.size / 2) + 2.5 };
+        h.x = at.x;
+        h.z = at.z;
         this.units.push(h);
         this.emit({ type: 'revive', x: h.x, z: h.z });
         this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
@@ -2297,7 +2484,10 @@ export class Game {
     const B = this.nightBossDef();
     this.bossDef = B;
     const nest = nestId != null ? this.nests[nestId] : null;
-    let [x, z] = nest && nest.alive ? [nest.x, nest.z] : this._edgeSpawnPoint();
+    // The labyrinth's champion rises from a razed chamber; everywhere else a
+    // dead nest cannot spawn and the boss walks in from the rim.
+    const fromNest = nest && (nest.alive || this.mode === 'labyrinth');
+    let [x, z] = fromNest ? [nest.x, nest.z] : this._edgeSpawnPoint();
     for (let r = 0; r < 12; r++) {
       if (this.map.isWalkable((x | 0) + r, z | 0)) { x = (x | 0) + r; break; }
       if (this.map.isWalkable((x | 0) - r, z | 0)) { x = (x | 0) - r; break; }
@@ -2323,8 +2513,9 @@ export class Game {
   }
 
   // Which boss stalks this run (survival cycles the roster as Threat climbs).
+  // Campaign and labyrinth runs fight their level's authored champion.
   nightBossDef() {
-    if (this.mode === 'campaign') return this.level.boss;
+    if (this.mode !== 'survival') return this.level.boss;
     const idx = Math.max(0, (((this.threatLevel / 5) | 0) - 1) % LEVELS.length);
     const base = LEVELS[idx].boss;
     return { ...base, hp: Math.round(base.hp * (0.8 + this.threatLevel * 0.06)) };
@@ -2359,6 +2550,33 @@ export class Game {
         if (hit) this.msg(`${B.icon} The shriek overloads ${hit} tower${hit > 1 ? 's' : ''}!`, 'warn');
       }
     }
+  }
+
+  // The nearest tile a hero can actually stand on — checkpoints sit in razed
+  // chambers where the exact center may be blighted ground or a crag lip.
+  _walkableNear(x, z) {
+    for (let r = 0; r < 8; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const tx = (x | 0) + dx, tz = (z | 0) + dz;
+          if (this.map.isWalkable(tx, tz) && this.occ[tz * this.map.size + tx] === 0) {
+            return { x: tx + 0.5, z: tz + 0.5 };
+          }
+        }
+      }
+    }
+    return { x, z };
+  }
+
+  _nearestHeroPoint(zb) {
+    let best = null, bd = Infinity;
+    for (const h of this.heroes) {
+      if (h.dead) continue;
+      const d = dist2(zb.x, zb.z, h.x, h.z);
+      if (d < bd) { bd = d; best = h; }
+    }
+    return best ? { x: best.x, z: best.z } : null;
   }
 
   wakeZombies(x, z, r) {
@@ -2442,8 +2660,8 @@ export class Game {
           const a = (i / 5) * Math.PI * 2;
           this._spawnCoin(zb.x + Math.cos(a) * 1.4, zb.z + Math.sin(a) * 1.4, Math.ceil(DROPS.bossCoins / 5), zb.x, zb.z);
         }
-        // Campaign victory: the hives are ash and their champion is down.
-        if (this.mode === 'campaign' && this.finalStand) { this._gameOver(true); return; }
+        // Campaign/labyrinth victory: the hives are ash and their champion is down.
+        if (this.mode !== 'survival' && this.finalStand) { this._gameOver(true); return; }
       }
       // Launch vector for corpse physics: away from the damage source.
       let ldx, ldz;
@@ -2522,9 +2740,25 @@ export class Game {
       this.emit({ type: 'udeath', x: u.x, z: u.z });
       if (u.hero) {
         this.stats.heroDeaths++;
-        u.reviveT = 12 + 2.5 * u.level;
         this.emit({ type: 'herodown' });
-        this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Keep in ${Math.round(u.reviveT)}s…`, 'bad');
+        if (this.mode === 'labyrinth') {
+          // A fall spends a shared life. Out of lives, the fall is final —
+          // and when the last hero is down, the labyrinth keeps them.
+          if (this.lives > 0) {
+            this.lives--;
+            u.reviveT = 9;
+            this.msg(`☠️ ${u.def.name} has fallen! Returning at the last checkpoint in ${Math.round(u.reviveT)}s — ${this.lives} ${this.lives === 1 ? 'life' : 'lives'} left.`, 'bad');
+          } else {
+            u.fallen = true;
+            this.msg(`☠️ ${u.def.name} has fallen, and there are no lives left.`, 'bad');
+          }
+          // The run ends only when nobody is coming back — a dead hero with a
+          // revive pending is still in the fight.
+          if (this.heroes.every((h) => h.dead && h.fallen)) this._gameOver(false);
+        } else {
+          u.reviveT = 12 + 2.5 * u.level;
+          this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Keep in ${Math.round(u.reviveT)}s…`, 'bad');
+        }
       }
     }
   }
@@ -2633,15 +2867,33 @@ export class Game {
     this.flowTimer -= dt;
     if (this.flowDirty || this.flowTimer <= 0) {
       const sources = [];
-      for (const b of this.buildings) {
-        if (!b.alive || b.kind === 'wall') continue;
-        for (let dz = 0; dz < b.size; dz++) for (let dx = 0; dx < b.size; dx++) {
-          sources.push((b.z + dz) * this.map.size + (b.x + dx));
+      if (this.mode === 'labyrinth') {
+        // No colony to besiege: the horde hunts the heroes themselves. The
+        // field re-seeds on a short clock because the target keeps walking —
+        // which makes the field's contents SIMULATION STATE: the seeds of the
+        // last compute are snapshotted so a restore rebuilds the exact field
+        // instead of one from the heroes' current positions.
+        for (const h of this.heroes) {
+          if (h.dead) continue;
+          const i = (h.z | 0) * this.map.size + (h.x | 0);
+          if (i >= 0 && i < this.occ.length) sources.push(i);
+        }
+        this._flowSeeds = [...sources];
+      } else {
+        for (const b of this.buildings) {
+          if (!b.alive || b.kind === 'wall') continue;
+          for (let dz = 0; dz < b.size; dz++) for (let dx = 0; dx < b.size; dx++) {
+            sources.push((b.z + dz) * this.map.size + (b.x + dx));
+          }
         }
       }
+      // Always compute, even with zero sources: an empty compute fills the
+      // field with Infinity, which is what "nothing to hunt" must read as.
+      // Skipping it would leave the buffer's initial zeros — every idle creep
+      // on the map would read "the objective is right here" and wake.
       this.flow.compute(this.occ, sources, this.gateIds);
       this.flowDirty = false;
-      this.flowTimer = 2.5;
+      this.flowTimer = this.mode === 'labyrinth' ? 0.8 : 2.5;
     }
   }
 
@@ -2765,8 +3017,10 @@ export class Game {
       const dmgMul = 1 + (zb.frenzy && !zb.def.call ? (ZOMBIES.caller.call.dmg) : 0);
       const range = zb.def.ranged || 0;
 
-      // Siegers ignore your army entirely and go eat a building.
-      if (zb.def.siege) { this._updateSieger(zb, dt, dmgMul); continue; }
+      // Siegers ignore your army entirely and go eat a building. With nothing
+      // built (the labyrinth, or a not-yet-founded run) they fight like the
+      // rest of the horde instead of trailing the heroes inertly.
+      if (zb.def.siege && this.buildings.length) { this._updateSieger(zb, dt, dmgMul); continue; }
 
       // 1) Chase a nearby living unit if close. Veiled heroes are invisible.
       if (zb.targetU && (zb.targetU.dead || zb.targetU.stealth || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
@@ -2808,14 +3062,19 @@ export class Game {
       // 3) Spitters shell whatever structure is in reach before closing.
       if (range && this._spitAtBuilding(zb, range, dmgMul)) continue;
 
-      // 4) Follow the flow field toward the city.
+      // 4) Follow the flow field toward the city (or, in the labyrinth, the
+      // heroes — the field is seeded on them there).
       const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
       if (dir) {
         this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
-      } else if (this.hq && this.hq.alive) {
-        // Off the flow field (local dead spot) — shamble straight at the Keep
-        // until the field picks us up again. Horde zombies never give up.
-        const dx = this.hq.cx - zb.x, dz = this.hq.cz - zb.z;
+        continue;
+      }
+      // Off the flow field (local dead spot) — shamble straight at the
+      // objective until the field picks us up again. Horde zombies never give
+      // up. The anchor is only resolved here, on the rare dead-spot path.
+      const anchor = this.hq && this.hq.alive ? { x: this.hq.cx, z: this.hq.cz } : this._nearestHeroPoint(zb);
+      if (anchor) {
+        const dx = anchor.x - zb.x, dz = anchor.z - zb.z;
         const d = Math.hypot(dx, dz) || 1;
         this._moveZombie(zb, dx / d, dz / d, zb.def.chase * 0.7 * zb.speedMul, dt, true);
         if (!zb.wave) {
@@ -3158,6 +3417,12 @@ export class Game {
       const left = this.liveNests();
       this.emit({ type: 'nestdown', x: n.x, z: n.z });
       this.msg(`🔥 A hive nest is razed! ${left ? `${left} still mustering.` : 'The land holds its breath…'}`, 'info');
+      if (this.mode === 'labyrinth') {
+        // A cleared chamber is the run's progress made physical: the fallen
+        // now return here, and the chamber pays its blessing.
+        this.checkpoint = { x: n.x, z: n.z };
+        this._offerBlessings();
+      }
     }
   }
 

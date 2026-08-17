@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
-import { LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
+import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
 
@@ -397,10 +397,12 @@ assert.ok(siteStats.every((s) => s.outer >= 1),
   'a site was offered no outer chokepoint works at all');
 
 // Every archetype and every city plan has to be in the campaign — an unused
-// one is an untested one.
+// one is an untested one. The labyrinth landform belongs to the Labyrinth
+// trial roster (scripts/labyrinth-check.mjs exercises it), not the campaign.
 const usedTerrain = new Set(LEVELS.map((l) => l.theme.terrain));
+const labyrinthTerrain = new Set(LABYRINTH_LEVELS.map((l) => l.theme.terrain));
 for (const key of Object.keys(TERRAIN_SHAPES)) {
-  assert.ok(usedTerrain.has(key), `landform "${key}" is not used by any level`);
+  assert.ok(usedTerrain.has(key) || labyrinthTerrain.has(key), `landform "${key}" is not used by any level`);
 }
 const usedPlans = new Set(LEVELS.map((l) => l.theme.city));
 for (const key of Object.keys(CITY_PLANS)) {

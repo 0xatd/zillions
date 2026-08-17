@@ -602,6 +602,22 @@ export const ITEMS = {
   quickfire_rig: { name: 'Quickfire Rig', icon: '⚙️', kind: 'field', rof: 0.16, cdr: 0.10, desc: '+16% attack rate, special recharges 10% faster.' },
   lodestone: { name: 'Lodestone', icon: '🧭', kind: 'field', magnet: 2, speed: 0.05, desc: 'Coins leap 2 tiles further, +5% move speed.' },
   war_horn: { name: 'War Horn', icon: '📯', kind: 'field', auraR: 0.3, troopDmg: 0.1, desc: '+30% aura radius, troops +10% damage.' },
+  // Labyrinth blessings — the pick-1-of-3 boons a cleared chamber offers.
+  // Chunkier than field finds on purpose: a labyrinth hero has no city, no
+  // army and no towers, so the blessings ARE the build. Never in loot pools,
+  // never in packs — they exist for one run and die with it.
+  blessing_rampart: { name: 'Blessing of the Rampart', icon: '🧱', kind: 'blessing', hp: 180, desc: '+180 max HP. Be your own wall.' },
+  blessing_ichor: { name: 'Blessing of Ichor', icon: '🩸', kind: 'blessing', regen: 4, desc: '+4 HP/s. The wounds close on their own.' },
+  blessing_fangs: { name: 'Blessing of Fangs', icon: '🦷', kind: 'blessing', dmg: 0.3, desc: '+30% attack damage.' },
+  blessing_trigger: { name: 'Blessing of the Trigger', icon: '🫰', kind: 'blessing', rof: 0.25, desc: '+25% attack rate.' },
+  blessing_longsight: { name: 'Blessing of Longsight', icon: '👁️‍🗨️', kind: 'blessing', range: 2, desc: '+2 attack range.' },
+  blessing_fleet: { name: 'Blessing of the Fleet', icon: '💨', kind: 'blessing', speed: 0.15, desc: '+15% move speed.' },
+  blessing_focus: { name: 'Blessing of Focus', icon: '🧘', kind: 'blessing', cdr: 0.3, desc: 'Special recharges 30% faster.' },
+  blessing_beacon: { name: 'Blessing of the Beacon', icon: '🔆', kind: 'blessing', auraR: 0.5, desc: '+50% aura radius.' },
+  blessing_greed: { name: 'Blessing of Greed', icon: '🪙', kind: 'blessing', magnet: 3, desc: 'Coins leap to you from 3 tiles further.' },
+  blessing_bulwark: { name: 'Blessing of the Bulwark', icon: '🛡️', kind: 'blessing', hp: 100, regen: 1.5, desc: '+100 max HP, +1.5 HP/s.' },
+  blessing_frenzy: { name: 'Blessing of Frenzy', icon: '🌪️', kind: 'blessing', rof: 0.15, speed: 0.08, desc: '+15% attack rate, +8% move speed.' },
+  blessing_execution: { name: 'Blessing of Execution', icon: '⚔️', kind: 'blessing', dmg: 0.18, cdr: 0.12, desc: '+18% damage, special recharges 12% faster.' },
   // Town relics (the civilization's treasures — help every city you found)
   masonry_codex: { name: 'Masonry Codex', icon: '📜', kind: 'relic', buildingHp: 0.25, desc: 'All structures +25% HP.' },
   tithe_ledger: { name: 'Tithe Ledger', icon: '📒', kind: 'relic', income: 0.2, desc: 'Income +20%.' },
@@ -617,6 +633,7 @@ export const FIELD_LOOT = {
   common: ['worn_scope', 'flak_vest', 'runner_boots', 'coin_lure', 'field_stim', 'bandage_roll', 'ration_tin'],
   rare: ['oath_blade', 'pilgrim_plate', 'quickfire_rig', 'lodestone', 'war_horn'],
 };
+export const BLESSING_KEYS = Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'blessing');
 export const PACK_SLOTS = 4;          // how much a hero can carry off the field
 export const LOOT_PICKUP_RADIUS = 1.6; // walk over it and it is yours
 export const LOOT_REVEAL_RADIUS = 7;   // how close before you spot a hidden cache
@@ -771,7 +788,63 @@ function shiftHue(hex, deg) {
   return (to(r2) << 16) | (to(g2) << 8) | to(b2);
 }
 
-export function isGalaxyLevel(id) { return (id | 0) > LEVELS.length; }
+// ---------- The Labyrinth: a hero gauntlet with no colony ----------
+//
+// A separate solo mode, not part of the war for Earth. Each trial is a
+// serpentine canyon of chambers; every chamber's heart is a hive brood-node.
+// Raze it and the chamber offers a blessing. Raze all of them and the
+// labyrinth's champion walks. There is no founding, no gold sink, no army —
+// only the heroes, what they carry, and what the chambers grant.
+// Trial ids live far above the campaign/galaxy range so a labyrinth save can
+// never be mistaken for campaign progress.
+export const LABYRINTH_BASE_ID = 9001;
+export const LABYRINTH_LIVES = 3;   // shared team lives; a fall spends one
+
+export const LABYRINTH_LEVELS = [
+  {
+    id: 9001, name: 'Trial of the Howling Depth', seed: 91101, mult: 1.0, size: 128, nests: 4,
+    labyrinth: true,
+    economy: { startGold: 0, income: 0, pressure: 0.9 },
+    quests: [],
+    blurb: 'Four brood chambers and the Butcher at the bottom. Learn to keep moving.',
+    theme: { terrain: 'labyrinth', city: null, liquidName: 'Black water',
+      palette: { grass: 0x6a7a58, forest: 0x3c5240, water: 0x2f5a6a, mountain: 0x8a8296, sand: 0x9a8e6e, path: 0x7a6e56, sky: 0x6a7a88 } },
+    boss: { name: 'The Butcher Below', icon: '🔪', hp: 3000, dmg: 55, speed: 1.1, chase: 2.2, scale: 3.0,
+      color: 0x9c2f2f, score: 80, enrage: 0.5,
+      desc: 'A mountain of meat and cleavers, fattened in the dark. Enrages at half health.' },
+  },
+  {
+    id: 9002, name: 'Trial of the Drowned Vault', seed: 92202, mult: 1.35, size: 132, nests: 5,
+    labyrinth: true,
+    economy: { startGold: 0, income: 0, pressure: 1.0 },
+    quests: [],
+    blurb: 'Five chambers, colder and tighter. The broodmother has been busy down here.',
+    theme: { terrain: 'labyrinth', city: null, liquidName: 'Grave water',
+      palette: { grass: 0x4e6a6a, forest: 0x2f4a4e, water: 0x3a6a8a, mountain: 0x7a8aa0, sand: 0x76806e, path: 0x5e6a62, sky: 0x58707e } },
+    boss: { name: 'Vault Mother', icon: '🪳', hp: 4200, dmg: 42, speed: 0.95, chase: 1.8, scale: 3.2,
+      color: 0x6e8f3a, score: 110, spawn: { every: 8, count: 5, type: 'walker' },
+      desc: 'Every few seconds she births another brood. In a corridor, that is a wall.' },
+  },
+  {
+    id: 9003, name: 'Trial of the Sunless Crown', seed: 93303, mult: 1.7, size: 136, nests: 6,
+    labyrinth: true,
+    economy: { startGold: 0, income: 0, pressure: 1.05 },
+    quests: [],
+    blurb: 'Six chambers and a king in the last one. Nobody has walked out of this trial.',
+    theme: { terrain: 'labyrinth', city: null, liquidName: 'Void water',
+      palette: { grass: 0x565270, forest: 0x3a3656, water: 0x4a3a7a, mountain: 0x7a6e92, sand: 0x6e6684, path: 0x5e5674, sky: 0x4e4868 } },
+    boss: { name: 'The Sunless King', icon: '⚰️', hp: 6200, dmg: 60, speed: 0.95, chase: 1.9, scale: 3.6,
+      color: 0x3f4b66, score: 170, armor: 0.3, spawn: { every: 11, count: 7, type: 'walker' }, enrage: 0.35,
+      desc: 'Bone-plated, brood-raising, and furious at the end. Bring everything the chambers gave you.' },
+  },
+];
+
+export function isLabyrinthLevel(id) {
+  const n = id | 0;
+  return n >= LABYRINTH_BASE_ID && n < LABYRINTH_BASE_ID + LABYRINTH_LEVELS.length;
+}
+
+export function isGalaxyLevel(id) { return (id | 0) > LEVELS.length && !isLabyrinthLevel(id); }
 
 // Planet n of the galaxy, the same for everyone, forever.
 export function galaxyLevel(id) {
@@ -823,12 +896,14 @@ export function galaxyLevel(id) {
   };
 }
 
-// The one lookup the whole game uses. Ids 1..5 are the authored war; everything
-// past them is the procedural galaxy.
+// The one lookup the whole game uses. Ids 1..5 are the authored war, the 9001
+// band is the Labyrinth trials, and everything else past the war is the
+// procedural galaxy.
 const _galaxyCache = new Map();
 export function levelById(id) {
   const n = Math.max(1, id | 0);
   if (n <= LEVELS.length) return LEVELS[n - 1];
+  if (isLabyrinthLevel(n)) return LABYRINTH_LEVELS[n - LABYRINTH_BASE_ID];
   if (!_galaxyCache.has(n)) _galaxyCache.set(n, galaxyLevel(n));
   return _galaxyCache.get(n);
 }

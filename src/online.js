@@ -7,7 +7,10 @@ const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
 // Increment this only when two browser builds cannot safely share a room.
 // Rooms carry the value in metadata so stale tabs fail before taking a seat.
-export const LOBBY_PROTOCOL_VERSION = 3;
+// v4: the Labyrinth mode — a new room mode older builds would simulate as a
+// founding campaign run, a new lockstep `blessing` command they would drop,
+// and changed found-phase flow-field semantics.
+export const LOBBY_PROTOCOL_VERSION = 4;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

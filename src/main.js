@@ -21,6 +21,7 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { MenuVignette } from './menu-vignette.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -118,6 +119,7 @@ class App {
       onHeroPick: (k) => this._pickHero(k),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
+      onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => location.reload(),
       onQuit: () => location.reload(),
@@ -139,6 +141,7 @@ class App {
       onJoinCode: (code) => this.joinByCode(code),
       onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
+      onModePick: (m) => this._pickSetupMode(m),
       onRoomReady: (ready) => this._setRoomReady(ready),
       onRoomLeave: () => this._leaveOnlineRoom(),
       onMatchLeave: () => this._leaveOnlineMatch(),
@@ -238,11 +241,40 @@ class App {
     if (this.game) return;
     const level = levelById(levelId || 1);
     if (this.menuLevelId === level.id) return;
+    this._clearMenuBackdrop();
     this.menuLevelId = level.id;
-    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; }
     const map = new GameMap(level.seed, level.theme);
+    this.menuMap = map;
     this.menuTerrain = map.buildTerrain();
     this.scene.add(this.menuTerrain);
+    // The backdrop is not a screensaver: doomed patrols play out last stands
+    // against the horde, using the game's own meshes on the game's own ground.
+    if (!this._menuProjV) this._menuProjV = new THREE.Vector3();
+    this.menuShow = new MenuVignette({
+      scene: this.scene,
+      map,
+      makeUnitMesh: (u) => this._makeUnitMesh(u),
+      zombieMeshes: { body: this.zBody, head: this.zHead, arm: this.zArm, eyes: this.zEyes },
+      burst: (x, y, z, o) => this.burst(x, y, z, o),
+      stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
+      addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
+      dispose3D: (obj) => this._disposeObject3D(obj),
+      light: new THREE.PointLight(0xffd9a2, 0, 34, 1.8),
+      dummy: new THREE.Object3D(),
+      color: new THREE.Color(),
+      project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
+    });
+  }
+
+  _clearMenuBackdrop() {
+    if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
+    if (this.menuTerrain) {
+      this.scene.remove(this.menuTerrain);
+      this._disposeObject3D(this.menuTerrain);
+      this.menuTerrain = null;
+    }
+    this.menuMap = null;
+    this.menuLevelId = null;
   }
 
   // ---------------- game start ----------------
@@ -258,7 +290,7 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
-    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this.menuTerrain = null; this.menuLevelId = null; }
+    this._clearMenuBackdrop();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
@@ -318,8 +350,12 @@ class App {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
       this.scene.add(this.plaza);
-    } else {
+    } else if (this.game.mode !== 'labyrinth') {
+      // Labyrinth runs never found a city, so "claim this ground" flags would
+      // be a lie there — sanctuaries are just rooms.
       this._makeSiteMarkers();
+      this._clearNodeMarkers();
+    } else {
       this._clearNodeMarkers();
     }
     this.map.drawMinimap(document.getElementById('minimap-base'));
@@ -332,8 +368,15 @@ class App {
     // left on the minimap. The menu can orbit, but a run must not inherit it.
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
+    // The labyrinth has nothing to build, so Space is always the special.
+    if (mode === 'labyrinth') {
+      this.controlMode = 'fight';
+      if (this.ui.setControlMode) this.ui.setControlMode('fight');
+    }
     this.ui.showBanner(mode === 'survival'
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
+      : mode === 'labyrinth'
+      ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
@@ -765,7 +808,7 @@ class App {
       mode: this.ui.selectedMode || 'campaign',
     });
     if (this.mpRole === 'host' && this.peers.length) {
-      this._broadcast({ t: 'lobbyRoster', n: players.length, players });
+      this._broadcast({ t: 'lobbyRoster', n: players.length, players, mode: this.ui.selectedMode || 'campaign' });
     }
     return players;
   }
@@ -809,12 +852,17 @@ class App {
     if (this.mpRole === 'spectator') return;
     const p = this.profile;
     p.games++;
-    if (won && this.game.mode !== 'survival') {
-      p.wins++;
+    if (won && this.game.mode !== 'survival') p.wins++;
+    // Only campaign wins advance the war for Earth — a labyrinth trial id
+    // (9001+) written here would unlock the whole galaxy.
+    if (won && this.game.mode === 'campaign') {
       p.campaign = Math.max(p.campaign || 0, this.game.levelId);
     }
     if (this.game.mode === 'survival') {
       p.bestSurvival = Math.max(p.bestSurvival || 0, this.game.threatLevel);
+    }
+    if (won && this.game.mode === 'labyrinth') {
+      p.labyrinthClears = { ...(p.labyrinthClears || {}), [this.game.levelId]: true };
     }
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
@@ -1049,7 +1097,7 @@ class App {
       this.mpSeat = m.n;
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
     }
-    else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: this.ui.selectedMode || 'campaign' });
+    else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: m.mode || this.ui.selectedMode || 'campaign' });
     else if (m.t === 'w') {
       // While a resync snapshot is being rebuilt, bank every window on the
       // side — the fresh sim needs the ones sent since the snapshot froze.
@@ -1320,7 +1368,7 @@ class App {
     const waitingToReady = waiting?.length || 0;
     const connectionBlockers = this._roomRosterFromGame(game).filter((player) => !player.host && player.state !== 'connected');
     const connectionNames = connectionBlockers.map((player) => `@${player.name}`).join(', ');
-    this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
+    this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost, mode: game.mode || 'campaign' });
     this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
@@ -1524,6 +1572,23 @@ class App {
       console.warn('room settings update failed', e);
       this.ui.showBanner('Could not update the host game setup.', 'bad', 3000);
     });
+  }
+
+  // Multiplayer setups pick the war mode with header chips. Only whoever owns
+  // the setup applies one: the online room host, or the local player in a
+  // solo/manual-invite screen — a guest's click must not fork their view of
+  // the room.
+  _pickSetupMode(m) {
+    // Any kind of guest — online room or manual invite — must not retarget
+    // their local view; the host's setup is the room's truth.
+    if (this.mpRole && this.mpRole !== 'host') return;
+    if ((this.ui.selectedMode || 'campaign') === m) return;
+    this.ui.applySetupMode(m);
+    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    // Online rooms persist the retarget (and clear every guest Ready vote);
+    // manual co-op just re-broadcasts the roster so guests see the new mode.
+    this._updateRoomSettings({ mode: m, level: this.ui.selectedLevel || 1 });
+    this._syncSetupRoster();
   }
 
   async _sendRoomChat(text, channel = 'room') {
@@ -4485,7 +4550,11 @@ class App {
   }
 
   _autoTuneQuality(dt) {
-    if (!this.game || this.paused || this.tacticalVisuals.quality !== 'high') {
+    // Watch the game while it runs, and the menu while the attract show does —
+    // the vignettes put real load on the backdrop, so the menu gets the same
+    // safety net a live siege has.
+    const active = this.game ? !this.paused : !!this.menuShow;
+    if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
     }
@@ -4674,6 +4743,8 @@ class App {
         this.ui.drawMinimap(this.game, this.focus, viewSize);
       }
     }
+
+    if (!this.game && this.menuShow) this.menuShow.update(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);
