@@ -197,7 +197,7 @@ assert.match(mainSource, /localStorage\.removeItem\('zillions_save'\)/, 'corrupt
 assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be removed from the menu');
 
 const uiSource = read('src/ui.js');
-assert.match(uiSource, /id="m-online"[\s\S]*PLAY ONLINE/, 'the home screen must lead with online play');
+assert.match(uiSource, /id="m-online"[\s\S]*<b>PLAY<\/b><small>ONLINE/, 'the home screen must lead with online play');
 assert.match(uiSource, /id="m-solo"[\s\S]*PLAY SOLO/, 'the home screen must group solo modes');
 assert.match(uiSource, /id="screen-solo"/, 'solo play must have its own mode screen');
 assert.match(uiSource, /id="solo-campaign-resume"/, 'campaign resumes must stay inside Story Campaign');
