@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import {
+  FOG_DARKNESS,
+  FOG_EDGE_SOFTNESS,
+  FOG_INNER_VEIL,
   fogVisionSources,
   HERO_VISION_RADIUS,
   MAX_VISION_SOURCES,
   TROOP_VISION_RADIUS,
 } from '../src/fog-of-war.js';
+
+assert.ok(FOG_DARKNESS >= 0.8 && FOG_DARKNESS <= 0.86, 'fog must stay scary without becoming an opaque black sheet');
+assert.ok(FOG_INNER_VEIL <= 0.02, 'visible ground must remain clear');
+assert.ok(FOG_EDGE_SOFTNESS >= 6, 'vision edges must blend into one coherent frontier');
 
 const sources = fogVisionSources({ units: [
   { id: 1, hero: false, x: 20, z: 21 },

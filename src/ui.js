@@ -14,7 +14,7 @@ import {
 import { formatTime } from './utils.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
-import { fogVisionSources } from './fog-of-war.js';
+import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
 
 export class UI {
   constructor(root, cb) {
@@ -1849,12 +1849,19 @@ export class UI {
     // camera frame remains visible below as navigation chrome.
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(1, 2, 5, 0.94)';
+    ctx.fillStyle = `rgba(1, 2, 5, ${FOG_DARKNESS})`;
     ctx.fillRect(0, 0, N, N);
     ctx.globalCompositeOperation = 'destination-out';
     for (const source of fogVisionSources(game)) {
-      const edge = Math.max(1, source.radius + 3.5);
-      const gradient = ctx.createRadialGradient(source.x, source.z, Math.max(0, source.radius - 3.5), source.x, source.z, edge);
+      const edge = Math.max(1, source.radius + FOG_EDGE_SOFTNESS);
+      const gradient = ctx.createRadialGradient(
+        source.x,
+        source.z,
+        Math.max(0, source.radius - FOG_EDGE_SOFTNESS),
+        source.x,
+        source.z,
+        edge,
+      );
       gradient.addColorStop(0, 'rgba(0,0,0,0.97)');
       gradient.addColorStop(0.52, 'rgba(0,0,0,0.9)');
       gradient.addColorStop(1, 'rgba(0,0,0,0)');

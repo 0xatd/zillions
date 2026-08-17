@@ -1,6 +1,9 @@
 export const MAX_VISION_SOURCES = 64;
-export const HERO_VISION_RADIUS = 15;
-export const TROOP_VISION_RADIUS = 8.5;
+export const HERO_VISION_RADIUS = 19;
+export const TROOP_VISION_RADIUS = 11.5;
+export const FOG_DARKNESS = 0.84;
+export const FOG_INNER_VEIL = 0.015;
+export const FOG_EDGE_SOFTNESS = 7;
 
 // Presentation-only visibility. The simulation stays authoritative and
 // unchanged; each client derives the shroud from its allied unit list.

@@ -22,7 +22,13 @@ import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffe
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { MenuVignette } from './menu-vignette.js';
-import { fogVisionSources, MAX_VISION_SOURCES } from './fog-of-war.js';
+import {
+  FOG_DARKNESS,
+  FOG_EDGE_SOFTNESS,
+  FOG_INNER_VEIL,
+  fogVisionSources,
+  MAX_VISION_SOURCES,
+} from './fog-of-war.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -4149,9 +4155,9 @@ class App {
       uniforms: {
         uVisionCount: { value: 0 },
         uVision: { value: points },
-        uDarkness: { value: 0.94 },
-        uInnerVeil: { value: 0.035 },
-        uSoftness: { value: 3.5 },
+        uDarkness: { value: FOG_DARKNESS },
+        uInnerVeil: { value: FOG_INNER_VEIL },
+        uSoftness: { value: FOG_EDGE_SOFTNESS },
       },
       vertexShader: `
         varying vec2 vWorldXZ;
