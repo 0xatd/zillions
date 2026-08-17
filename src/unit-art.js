@@ -29,10 +29,13 @@ function mesh(parent, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
 const box = (parent, mat, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) =>
   mesh(parent, new THREE.BoxGeometry(w, h, d), mat, x, y, z, rx, ry, rz);
 const sph = (parent, mat, r, x, y, z, sx = 1, sy = 1, sz = 1) => {
-  const m = mesh(parent, new THREE.SphereGeometry(r, 8, 6), mat, x, y, z);
+  const m = mesh(parent, new THREE.SphereGeometry(r, 10, 8), mat, x, y, z);
   m.scale.set(sx, sy, sz);
   return m;
 };
+// Capsule: the body-part primitive. Along +Y before rotation; smooth normals.
+const cap = (parent, mat, r, len, x, y, z, rx = 0, ry = 0, rz = 0) =>
+  mesh(parent, new THREE.CapsuleGeometry(r, len, 4, 10), mat, x, y, z, rx, ry, rz);
 const cyl = (parent, mat, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 8) =>
   mesh(parent, new THREE.CylinderGeometry(r1, r2, h, seg), mat, x, y, z, rx, ry, rz);
 const cone = (parent, mat, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
@@ -59,37 +62,39 @@ function humanoid({
     for (const s of [-1, 1]) {
       const leg = new THREE.Group();
       leg.position.set(s * 0.09 * W, 0.42 * H, 0);
-      box(leg, clothM, 0.1 * W, 0.2 * H, 0.12, 0, -0.1 * H, 0);            // thigh
-      box(leg, bootM, 0.088 * W, 0.2 * H, 0.1, 0, -0.29 * H, 0.005);       // shin
-      box(leg, bootM, 0.1 * W, 0.055, 0.17, 0, -0.4 * H, 0.03);            // boot
+      cap(leg, clothM, 0.052 * W, 0.13 * H, 0, -0.1 * H, 0);               // thigh
+      cap(leg, bootM, 0.046 * W, 0.13 * H, 0, -0.28 * H, 0.005);           // shin
+      sph(leg, bootM, 0.055 * W, 0, -0.4 * H, 0.04, 1, 0.55, 1.6);         // boot
       root.add(leg);
       limbs[s < 0 ? 'legL' : 'legR'] = leg;
     }
-    box(root, clothM, 0.24 * W, 0.1 * H, 0.17, 0, 0.44 * H, 0);            // pelvis
+    sph(root, clothM, 0.13 * W, 0, 0.45 * H, 0, 1.05, 0.6, 0.75);          // pelvis
   }
   const torso = new THREE.Group();
   torso.position.y = 0.5 * H;
   root.add(torso);
-  box(torso, armorM, 0.32 * W, 0.32 * H, 0.22, 0, 0.16 * H, 0);            // cuirass
-  box(torso, shellM, 0.22 * W, 0.14 * H, 0.05, 0, 0.19 * H, 0.12);         // chest plate
-  if (skirt) cone(torso, clothM, 0.26 * W, 0.5 * H, 0, -0.16 * H, 0, 0, 0, 0, 8);
+  cap(torso, armorM, 0.135 * W, 0.14 * H, 0, 0.16 * H, 0);                  // cuirass core
+  const cuirass = sph(torso, armorM, 0.15 * W, 0, 0.2 * H, 0, 1.15, 1.05, 0.78); // barrel chest
+  cuirass.castShadow = true;
+  box(torso, shellM, 0.2 * W, 0.13 * H, 0.045, 0, 0.2 * H, 0.1 * W + 0.025); // chest plate
+  if (skirt) cone(torso, clothM, 0.26 * W, 0.5 * H, 0, -0.16 * H, 0, 0, 0, 0, 10);
 
   for (const s of [-1, 1]) {
     const arm = new THREE.Group();
-    arm.position.set(s * 0.21 * W, 0.78 * H, 0);
+    arm.position.set(s * 0.2 * W, 0.78 * H, 0);
     sph(arm, armorM, 0.095 * W, s * 0.025 * W, 0.02, 0);                   // pauldron
-    box(arm, armorM, 0.08 * W, 0.17 * H, 0.09, 0, -0.11 * H, 0);           // upper arm
-    box(arm, clothM, 0.07 * W, 0.16 * H, 0.08, 0, -0.27 * H, 0.015);       // forearm
-    box(arm, bootM, 0.08 * W, 0.06, 0.1, 0, -0.37 * H, 0.02);              // glove
+    cap(arm, armorM, 0.042 * W, 0.1 * H, 0, -0.11 * H, 0);                 // upper arm
+    cap(arm, clothM, 0.037 * W, 0.1 * H, 0, -0.27 * H, 0.015);             // forearm
+    sph(arm, bootM, 0.048 * W, 0, -0.37 * H, 0.02, 1, 0.8, 1.15);          // glove
     root.add(arm);
     limbs[s < 0 ? 'armL' : 'armR'] = arm;
   }
   const head = new THREE.Group();
   head.position.y = 0.94 * H;
   root.add(head);
-  box(head, shellM, 0.2 * W, 0.19, 0.19, 0, 0.03, 0);                       // helmet
-  mesh(head, new THREE.BoxGeometry(visorWide ? 0.17 * W : 0.14 * W, 0.045, 0.03), M(visor, 0.9), 0, 0.035, 0.105);
-  box(root, packM, 0.26 * W, 0.28 * H, 0.13, 0, 0.62 * H, -0.19);          // life-support pack
+  sph(head, shellM, 0.105 * W, 0, 0.03, 0, 0.95, 1.05, 0.95);               // dome helmet
+  mesh(head, new THREE.BoxGeometry(visorWide ? 0.15 * W : 0.12 * W, 0.042, 0.03), M(visor, 0.9), 0, 0.035, 0.095 * W);
+  box(root, packM, 0.24 * W, 0.26 * H, 0.12, 0, 0.62 * H, -0.16 * W - 0.03); // life-support pack
 
   return { root, limbs, torso, head, armM: armorM, clothM, shellM, bootM };
 }
@@ -136,7 +141,7 @@ function soldierModel(d) {
   // lamp — the colony's standing wall.
   for (const s of [-1, 1]) {
     sph(rig.limbs[s < 0 ? 'armL' : 'armR'], rig.armM, 0.055, s * 0.03, 0.055, 0); // pauldron ridge
-    box(rig.limbs[s < 0 ? 'legL' : 'legR'], rig.shellM, 0.1, 0.07, 0.05, 0, -0.2, 0.07); // knee pad
+    sph(rig.limbs[s < 0 ? 'legL' : 'legR'], rig.shellM, 0.05, 0, -0.2, 0.05, 1.1, 0.9, 0.8); // knee pad
   }
   box(rig.torso, rig.armM, 0.34, 0.06, 0.24, 0, 0.33, 0);                  // collar ring
   box(rig.root, M(0x3d4045), 0.06, 0.3, 0.06, -0.1, 0.85, -0.2, 0, 0, 0.12); // antenna
@@ -199,7 +204,7 @@ function aaronSpiritModel(d) {
   for (const s of [-1, 1]) {
     const arm = new THREE.Group();
     arm.position.set(s * 0.17, 0.78, 0);
-    box(arm, ghost(0x79c8e8, 0.4), 0.07, 0.3, 0.08, 0, -0.13, 0.03);
+    cap(arm, ghost(0x79c8e8, 0.4), 0.035, 0.2, 0, -0.13, 0.03);
     root.add(arm);
     limbs[s < 0 ? 'armL' : 'armR'] = arm;
   }
@@ -230,7 +235,7 @@ function scottModel(d) {
     box(arm, M(d.trim), 0.15, 0.04, 0.15, s * 0.02, 0.09, 0);              // pauldron rim
     sph(arm, rig.armM, 0.12, s * 0.02, 0.045, 0);
   }
-  box(rig.torso, M(d.trim), 0.1, 0.24, 0.02, 0, 0.12, 0.135);              // trim chevron
+  box(rig.torso, M(d.trim), 0.1, 0.24, 0.02, 0, 0.12, 0.175);              // trim chevron
   const gun = new THREE.Group();
   gun.position.set(0.24, 0.6, 0.2);
   rig.root.add(gun);
@@ -300,7 +305,7 @@ function johnModel(d) {
   const rig = humanoid({ armor: d.color, cloth: 0x26262a, bulk: 1.22, tall: 1.03, shell: d.trim, visor: 0xffb347 });
   // Bar-brawler in salvage plate: powerfists, a keg on his back, and a crest
   // that says he has never once walked away from a fight.
-  box(rig.torso, M(d.trim), 0.26, 0.18, 0.05, 0, 0.14, 0.115);              // white chest panel
+  box(rig.torso, M(d.trim), 0.26, 0.18, 0.05, 0, 0.14, 0.16);               // white chest panel
   for (const s of [-1, 1]) {
     const fist = box(rig.limbs[s < 0 ? 'armL' : 'armR'], M(0x565c60), 0.13, 0.12, 0.15, 0, -0.4, 0.04);
     box(fist, M(d.trim), 0.135, 0.04, 0.05, 0, 0.03, 0.05);                 // knuckle bar
@@ -325,7 +330,7 @@ function tigerModel(d) {
     track(weapons, blade);
     cone(rig.head, M(0x1c1a18), 0.05, 0.11, s * 0.07, 0.15, 0, 0, 0, s * -0.3, 4); // ear fin
   }
-  box(rig.torso, M(0x1c1a18), 0.33, 0.04, 0.23, 0, 0.08, 0);                // torso stripe
+  box(rig.torso, M(0x1c1a18), 0.37, 0.04, 0.27, 0, 0.08, 0);                // torso stripe
   box(rig.torso, M(0x1c1a18), 0.1, 0.3, 0.04, 0, 0.02, -0.135, 0.35, 0, 0); // scarf tail
   return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
 }

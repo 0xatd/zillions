@@ -3,6 +3,10 @@
 // vertex-colored geometry and drawn as instanced meshes, so a thousand dead
 // cost the same handful of draw calls the old boxes did.
 //
+// Bodies are sculpted from capsules, ellipsoids and tapered cylinders with
+// smooth normals — rounded human forms gone wrong, not crates. Only grown
+// bone (claws, spines, plate) keeps hard edges.
+//
 // Each type is three instanced parts:
 //   body  — legs, torso, head and gore, merged into one geometry
 //   arms  — both arms merged, origin at the shoulder line so one rotation
@@ -44,11 +48,18 @@ function merger() {
   return {
     box: (hex, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) =>
       add(new THREE.BoxGeometry(w, h, d), hex, x, y, z, rx, ry, rz),
-    sph: (hex, r, x, y, z, sx = 1, sy = 1, sz = 1, ws = 7, hs = 5) =>
+    // Ellipsoid: the workhorse of flesh. Scale it flat for plates, long for
+    // skulls, squat for bellies. Segment counts are deliberately low — smooth
+    // vertex normals keep low-poly rounds looking round at gameplay zoom, and
+    // these geometries are instanced up to ZMAX times.
+    ell: (hex, r, x, y, z, sx = 1, sy = 1, sz = 1, ws = 7, hs = 5) =>
       add(new THREE.SphereGeometry(r, ws, hs), hex, x, y, z, 0, 0, 0, sx, sy, sz),
-    cyl: (hex, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
+    // Capsule limb, along +Y before rotation. `len` is the straight section.
+    cap: (hex, r, len, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) =>
+      add(new THREE.CapsuleGeometry(r, len, 2, 7), hex, x, y, z, rx, ry, rz, sx, sy, sz),
+    cyl: (hex, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 7) =>
       add(new THREE.CylinderGeometry(r1, r2, h, seg), hex, x, y, z, rx, ry, rz),
-    cone: (hex, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 5) =>
+    cone: (hex, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
       add(new THREE.ConeGeometry(r, h, seg), hex, x, y, z, rx, ry, rz),
     build: () => {
       const g = new THREE.BufferGeometry();
@@ -74,31 +85,32 @@ function walkerParts() {
   const SKIN = 0x94ac72, SKIN2 = 0x7d9463, SHIRT = 0x9a948a, PANTS = 0x565349;
   const HAIR = 0x38332c, BLOOD = 0x6e2a22;
   const b = merger();
-  // uneven stance: left leg planted, right leg dragging
-  b.box(PANTS, 0.115, 0.34, 0.125, -0.085, 0.17, 0.02, 0, 0, 0.06);
-  b.box(shade(PANTS, 0.8), 0.115, 0.34, 0.125, 0.09, 0.16, -0.04, -0.18, 0, -0.05);
-  b.box(HAIR, 0.115, 0.07, 0.19, -0.085, 0.035, 0.06);            // shoe
-  b.box(HAIR, 0.115, 0.07, 0.19, 0.09, 0.035, -0.02, 0, 0.35, 0); // shoe, splayed
-  b.box(PANTS, 0.3, 0.15, 0.21, 0, 0.4, 0);                        // hips
-  b.box(SHIRT, 0.34, 0.4, 0.24, 0, 0.64, 0.02, 0.16, 0, 0.04);     // slumped torso
-  b.box(SKIN, 0.11, 0.17, 0.03, 0.09, 0.58, 0.145, 0.16, 0, 0);    // torn shirt, belly showing
-  b.box(BLOOD, 0.17, 0.13, 0.03, -0.07, 0.72, 0.155, 0.16, 0, 0);  // chest wound
-  b.box(BLOOD, 0.1, 0.2, 0.03, 0.05, 0.66, -0.145, 0.16, 0, 0);    // exit smear on the back
-  b.sph(SHIRT, 0.095, -0.19, 0.8, 0.02);                           // dropped shoulder
-  b.sph(SHIRT, 0.095, 0.19, 0.85, 0);                              // raised shoulder
-  b.sph(SKIN, 0.145, 0.025, 0.95, 0.05, 1, 1.08, 1);               // head, lolled
-  b.box(SKIN2, 0.12, 0.07, 0.1, 0.03, 0.865, 0.12, 0.42, 0, 0.18); // hanging jaw
-  b.sph(HAIR, 0.148, 0.02, 0.99, 0.015, 1, 0.72, 1);               // matted hair
+  // uneven stance: left leg planted, right leg dragging behind
+  b.cap(PANTS, 0.055, 0.2, -0.085, 0.24, 0.02, 0, 0, 0.06);
+  b.cap(shade(PANTS, 0.8), 0.055, 0.2, 0.09, 0.23, -0.05, -0.2, 0, -0.05);
+  b.ell(HAIR, 0.06, -0.085, 0.045, 0.07, 1, 0.6, 1.5);             // shoe
+  b.ell(HAIR, 0.06, 0.1, 0.05, -0.03, 1, 0.6, 1.5);                // shoe, dragging
+  b.ell(PANTS, 0.15, 0, 0.42, 0, 1.05, 0.6, 0.75);                  // hips
+  b.cap(SHIRT, 0.145, 0.2, 0, 0.63, 0.02, 0.16, 0, 0.05, 1.15, 1, 0.85); // slumped torso
+  b.ell(SKIN, 0.07, 0.08, 0.55, 0.12, 1.1, 1.2, 0.6);               // torn shirt, belly showing
+  b.ell(BLOOD, 0.075, -0.06, 0.72, 0.13, 1.15, 0.9, 0.4);           // chest wound
+  b.ell(BLOOD, 0.06, 0.05, 0.66, -0.13, 0.9, 1.5, 0.4);             // exit smear on the back
+  b.ell(SHIRT, 0.085, -0.18, 0.79, 0.02);                            // dropped shoulder
+  b.ell(SHIRT, 0.085, 0.18, 0.85, 0);                                // raised shoulder
+  b.cyl(SKIN2, 0.05, 0.06, 0.08, 0.02, 0.9, 0.03, 0.1, 0, 0.15, 8); // neck
+  b.ell(SKIN, 0.115, 0.03, 0.99, 0.05, 0.92, 1.08, 0.98);            // head, lolled
+  b.ell(SKIN2, 0.052, 0.03, 0.895, 0.13, 1, 0.75, 1.1);              // hanging jaw
+  b.ell(HAIR, 0.115, 0.02, 1.04, 0.01, 0.95, 0.72, 1);               // matted hair
   const a = merger(); // pivot at the shoulder line (0, 0.84, 0.02)
-  a.box(SHIRT, 0.09, 0.09, 0.34, -0.19, -0.03, 0.2, 0.12, 0, 0);   // L arm reaching, sleeve
-  a.box(SKIN, 0.075, 0.075, 0.16, -0.19, -0.06, 0.44);             // L forearm, bare
-  a.box(SKIN2, 0.085, 0.06, 0.1, -0.19, -0.075, 0.55);             // L hand
-  a.box(SKIN, 0.085, 0.085, 0.46, 0.19, 0, 0.24, -0.06, 0, 0);     // R arm, outstretched
-  a.box(SKIN2, 0.09, 0.06, 0.11, 0.19, -0.01, 0.5);                // R hand
+  a.cap(SHIRT, 0.048, 0.22, -0.18, -0.03, 0.19, 1.42, 0, 0.1);       // L arm reaching, sleeve
+  a.cap(SKIN, 0.04, 0.14, -0.185, -0.06, 0.42, 1.55, 0, 0);          // L forearm, bare
+  a.ell(SKIN2, 0.05, -0.185, -0.07, 0.54, 1, 0.7, 1.2);              // L hand
+  a.cap(SKIN, 0.045, 0.32, 0.18, -0.01, 0.26, 1.62, 0, -0.04);       // R arm, outstretched
+  a.ell(SKIN2, 0.052, 0.18, -0.02, 0.5, 1, 0.65, 1.25);              // R hand
   return {
     body: b.build(), arms: a.build(),
     pivot: [0, 0.84, 0.02], swingAmp: 0.16, swingRate: 3.4,
-    eyes: [[-0.035, 0.955, 0.175], [0.085, 0.95, 0.17]],
+    eyes: [[-0.035, 1.0, 0.145], [0.085, 0.995, 0.14]],
   };
 }
 
@@ -108,26 +120,26 @@ function runnerParts() {
   const SKIN = 0xb5a565, SKIN2 = 0x998a52, HOOD = 0x685e4e, PANTS = 0x49463f;
   const BLOOD = 0x6e2a22, DARK = 0x322e28;
   const b = merger();
-  b.box(PANTS, 0.1, 0.34, 0.11, -0.075, 0.2, 0.1, -0.55, 0, 0);    // stride: leg forward
-  b.box(PANTS, 0.1, 0.34, 0.11, 0.075, 0.15, -0.12, 0.6, 0, 0);    // leg trailing
-  b.box(DARK, 0.1, 0.06, 0.17, -0.075, 0.05, 0.2);
-  b.box(DARK, 0.1, 0.06, 0.17, 0.075, 0.06, -0.24, 0.5, 0, 0);
-  b.box(PANTS, 0.26, 0.13, 0.19, 0, 0.4, 0);
-  b.box(HOOD, 0.3, 0.38, 0.21, 0, 0.62, 0.09, 0.42, 0, 0);         // hard forward lean
-  b.box(BLOOD, 0.14, 0.1, 0.03, 0.04, 0.6, 0.21, 0.42, 0, 0);
-  b.box(SKIN, 0.09, 0.12, 0.03, -0.08, 0.55, 0.19, 0.42, 0, 0);    // ripped hoodie
-  b.sph(SKIN, 0.125, 0, 0.85, 0.21, 1, 1.02, 1);                   // head thrust forward
-  b.box(SKIN2, 0.1, 0.06, 0.09, 0, 0.78, 0.27, 0.5, 0, 0);         // open jaw
-  b.cone(HOOD, 0.14, 0.2, 0, 0.9, 0.1, -0.5, 0, 0, 5);             // hood blown back
+  b.cap(PANTS, 0.048, 0.2, -0.075, 0.26, 0.11, -0.6, 0, 0);        // stride: leg forward
+  b.cap(PANTS, 0.048, 0.2, 0.075, 0.2, -0.14, 0.65, 0, 0);         // leg trailing
+  b.ell(DARK, 0.055, -0.075, 0.06, 0.21, 1, 0.6, 1.4);
+  b.ell(DARK, 0.055, 0.08, 0.08, -0.27, 1, 0.6, 1.4);
+  b.ell(PANTS, 0.125, 0, 0.42, -0.01, 1.05, 0.55, 0.8);
+  b.cap(HOOD, 0.13, 0.18, 0, 0.6, 0.08, 0.46, 0, 0.03, 1.1, 1, 0.8); // hard forward lean
+  b.ell(BLOOD, 0.06, 0.04, 0.57, 0.19, 1.1, 0.8, 0.5);
+  b.ell(SKIN, 0.05, -0.08, 0.53, 0.17, 0.9, 1.2, 0.5);               // ripped hoodie
+  b.ell(SKIN, 0.095, 0, 0.85, 0.22, 0.94, 1.02, 1.05);               // head thrust forward
+  b.ell(SKIN2, 0.045, 0, 0.775, 0.28, 1, 0.7, 1.1);                  // open jaw
+  b.ell(HOOD, 0.1, 0, 0.87, 0.1, 1.1, 0.9, 1.0);                     // hood blown back
   const a = merger(); // pivot (0, 0.76, 0.06): pumping, elbows back
-  a.box(HOOD, 0.08, 0.08, 0.3, -0.16, -0.05, -0.1, -0.5, 0, 0);
-  a.box(SKIN, 0.07, 0.07, 0.2, -0.16, 0.05, 0.14, -0.3, 0, 0);
-  a.box(HOOD, 0.08, 0.08, 0.3, 0.16, -0.05, 0.12, 0.35, 0, 0);
-  a.box(SKIN, 0.07, 0.07, 0.18, 0.16, -0.16, -0.12, 0.6, 0, 0);
+  a.cap(HOOD, 0.042, 0.18, -0.16, -0.06, -0.09, -0.55, 0, 0.05);
+  a.cap(SKIN, 0.036, 0.13, -0.165, 0.04, 0.13, -0.4, 0, 0);
+  a.cap(HOOD, 0.042, 0.18, 0.16, -0.05, 0.11, 0.4, 0, -0.05);
+  a.cap(SKIN, 0.036, 0.12, 0.165, -0.16, -0.1, 0.7, 0, 0);
   return {
     body: b.build(), arms: a.build(),
     pivot: [0, 0.76, 0.06], swingAmp: 0.42, swingRate: 9.0,
-    eyes: [[-0.045, 0.87, 0.31], [0.045, 0.87, 0.31]],
+    eyes: [[-0.042, 0.87, 0.3], [0.042, 0.87, 0.3]],
   };
 }
 
@@ -137,33 +149,32 @@ function bruteParts() {
   const SKIN = 0x8b74a4, SKIN2 = 0x74608c, MUSCLE = 0x8a4650, HIDE = 0x584e66;
   const BONE = 0xcdc4ae, DARK = 0x36303e;
   const b = merger();
-  b.box(SKIN2, 0.17, 0.34, 0.2, -0.17, 0.17, 0, 0, 0, 0.08);       // tree-trunk legs
-  b.box(SKIN2, 0.17, 0.34, 0.2, 0.17, 0.17, 0, 0, 0, -0.08);
-  b.box(DARK, 0.19, 0.09, 0.26, -0.17, 0.045, 0.03);
-  b.box(DARK, 0.19, 0.09, 0.26, 0.17, 0.045, 0.03);
-  b.box(HIDE, 0.5, 0.2, 0.34, 0, 0.42, 0);                          // ragged waist wrap
-  b.box(SKIN, 0.6, 0.52, 0.42, 0, 0.72, 0, 0.24, 0, 0);             // barrel torso
-  b.box(MUSCLE, 0.2, 0.3, 0.04, -0.12, 0.72, 0.225, 0.24, 0, 0);    // flayed pectoral
-  b.box(MUSCLE, 0.14, 0.18, 0.04, 0.16, 0.66, 0.22, 0.24, 0, 0);
-  b.sph(SKIN, 0.3, 0, 1.0, -0.14, 1.15, 0.85, 1);                   // the hump
-  b.sph(SKIN2, 0.2, -0.3, 0.98, -0.02);                              // shoulder boulders
-  b.sph(SKIN2, 0.2, 0.3, 0.98, -0.02);
-  b.sph(SKIN, 0.115, 0, 0.94, 0.26);                                 // skull sunk in front
-  b.box(SKIN2, 0.11, 0.06, 0.09, 0, 0.87, 0.3, 0.4, 0, 0);           // jaw
-  b.cone(BONE, 0.05, 0.14, 0, 1.24, -0.1, 0.5, 0, 0, 4);             // spine ridge
-  b.cone(BONE, 0.045, 0.12, 0, 1.16, -0.26, 0.9, 0, 0, 4);
-  b.cone(BONE, 0.04, 0.1, 0, 1.0, -0.36, 1.2, 0, 0, 4);
+  b.cap(SKIN2, 0.085, 0.18, -0.17, 0.24, 0, 0, 0, 0.1);            // tree-trunk legs
+  b.cap(SKIN2, 0.085, 0.18, 0.17, 0.24, 0, 0, 0, -0.1);
+  b.ell(DARK, 0.095, -0.17, 0.06, 0.04, 1, 0.55, 1.35);
+  b.ell(DARK, 0.095, 0.17, 0.06, 0.04, 1, 0.55, 1.35);
+  b.ell(HIDE, 0.24, 0, 0.44, 0, 1.05, 0.5, 0.75);                    // ragged waist wrap
+  b.ell(SKIN, 0.3, 0, 0.74, 0, 1.05, 0.95, 0.78, 9, 7);             // barrel torso
+  b.ell(MUSCLE, 0.1, -0.12, 0.74, 0.19, 1.1, 1.35, 0.5);             // flayed pectoral
+  b.ell(MUSCLE, 0.07, 0.16, 0.67, 0.19, 1, 1.2, 0.5);
+  b.ell(SKIN, 0.28, 0, 1.0, -0.14, 1.16, 0.85, 1, 9, 7);            // the hump
+  b.ell(SKIN2, 0.17, -0.31, 0.98, -0.02, 1.1, 0.9, 1);               // shoulder boulders
+  b.ell(SKIN2, 0.17, 0.31, 0.98, -0.02, 1.1, 0.9, 1);
+  b.ell(SKIN, 0.1, 0, 0.94, 0.27, 1, 0.9, 1.05);                     // skull sunk in front
+  b.ell(SKIN2, 0.05, 0, 0.865, 0.31, 1.1, 0.7, 1);                   // jaw
+  b.cone(BONE, 0.05, 0.14, 0, 1.26, -0.1, 0.5, 0, 0, 5);             // spine ridge
+  b.cone(BONE, 0.045, 0.12, 0, 1.18, -0.26, 0.9, 0, 0, 5);
+  b.cone(BONE, 0.04, 0.1, 0, 1.02, -0.38, 1.2, 0, 0, 5);
   const a = merger(); // pivot (0, 0.98, 0): slab arms, fists low and forward
-  a.box(SKIN, 0.17, 0.44, 0.19, -0.34, -0.24, 0.12, -0.35, 0, 0.12);
-  a.box(SKIN2, 0.16, 0.34, 0.17, -0.38, -0.52, 0.26, -0.5, 0, 0);
-  a.sph(SKIN2, 0.13, -0.4, -0.68, 0.36);                             // fist
-  a.box(SKIN, 0.17, 0.44, 0.19, 0.34, -0.24, 0.12, -0.35, 0, -0.12);
-  a.box(SKIN2, 0.16, 0.34, 0.17, 0.38, -0.52, 0.26, -0.5, 0, 0);
-  a.sph(SKIN2, 0.13, 0.4, -0.68, 0.36);
+  for (const s of [-1, 1]) {
+    a.cap(SKIN, 0.095, 0.26, s * 0.35, -0.22, 0.1, -0.35, 0, s * 0.15);
+    a.cap(SKIN2, 0.085, 0.2, s * 0.39, -0.5, 0.26, -0.6, 0, 0);
+    a.ell(SKIN2, 0.115, s * 0.41, -0.66, 0.37, 1.1, 0.95, 1.1);      // fist
+  }
   return {
     body: b.build(), arms: a.build(),
     pivot: [0, 0.98, 0], swingAmp: 0.11, swingRate: 2.6,
-    eyes: [[-0.04, 0.96, 0.35], [0.04, 0.96, 0.35]],
+    eyes: [[-0.038, 0.96, 0.35], [0.038, 0.96, 0.35]],
   };
 }
 
@@ -173,28 +184,28 @@ function spitterParts() {
   const SKIN = 0xa8b26c, SKIN2 = 0x8c9657, SAC = 0xdff04a, CLOTH = 0x6f7258;
   const DARK = 0x3a3b30, BLOOD = 0x6e2a22;
   const b = merger();
-  b.box(SKIN2, 0.095, 0.32, 0.1, -0.08, 0.16, 0, 0, 0, 0.1);       // spindly legs
-  b.box(SKIN2, 0.095, 0.32, 0.1, 0.08, 0.16, 0, 0, 0, -0.1);
-  b.box(DARK, 0.1, 0.06, 0.16, -0.08, 0.03, 0.03);
-  b.box(DARK, 0.1, 0.06, 0.16, 0.08, 0.03, 0.03);
-  b.box(CLOTH, 0.28, 0.16, 0.2, 0, 0.38, -0.01);                    // rotted skirt
-  b.sph(SKIN, 0.27, 0, 0.58, 0.03, 1.04, 0.92, 1.14);               // distended belly
-  b.sph(SAC, 0.2, 0, 0.55, 0.14, 1, 0.82, 1);                        // acid gut, glowing hue
-  b.box(SKIN, 0.26, 0.2, 0.2, 0, 0.82, -0.03, -0.12, 0, 0);          // chest, tipped back
-  b.cyl(SAC, 0.07, 0.09, 0.14, 0, 0.93, 0.08, 0.35, 0, 0, 6);        // straining throat
-  b.sph(SKIN, 0.12, 0, 1.02, 0.05, 1, 1, 1);                          // head thrown back
-  b.box(SKIN2, 0.1, 0.05, 0.1, 0, 0.95, 0.13, 0.8, 0, 0);             // jaw cranked open
-  b.box(BLOOD, 0.05, 0.12, 0.02, 0.03, 0.86, 0.15, 0.3, 0, 0);        // drool track
+  b.cap(SKIN2, 0.045, 0.19, -0.08, 0.24, 0, 0, 0, 0.1);            // spindly legs
+  b.cap(SKIN2, 0.045, 0.19, 0.08, 0.24, 0, 0, 0, -0.1);
+  b.ell(DARK, 0.055, -0.08, 0.045, 0.04, 1, 0.6, 1.35);
+  b.ell(DARK, 0.055, 0.08, 0.045, 0.04, 1, 0.6, 1.35);
+  b.ell(CLOTH, 0.15, 0, 0.4, -0.01, 1, 0.55, 0.75);                  // rotted skirt
+  b.ell(SKIN, 0.27, 0, 0.58, 0.03, 1.04, 0.9, 1.12, 9, 7);          // distended belly
+  b.ell(SAC, 0.2, 0, 0.54, 0.15, 1, 0.8, 1);                          // acid gut, glowing hue
+  b.ell(SKIN, 0.135, 0, 0.84, -0.03, 1, 0.85, 0.8);                   // chest, tipped back
+  b.cyl(SAC, 0.06, 0.08, 0.13, 0, 0.94, 0.06, 0.35, 0, 0, 8);         // straining throat
+  b.ell(SKIN, 0.1, 0, 1.03, 0.05, 0.95, 1, 1);                         // head thrown back
+  b.ell(SKIN2, 0.045, 0, 0.955, 0.14, 1, 0.7, 1.15);                   // jaw cranked open
+  b.ell(BLOOD, 0.025, 0.03, 0.88, 0.15, 0.8, 2.2, 0.6);                // drool track
   const a = merger(); // pivot (0, 0.82, 0): arms wrapped forward around the load
   for (const s of [-1, 1]) {
-    a.box(SKIN, 0.08, 0.09, 0.2, s * 0.24, 0, 0.06, 0.15, s * -0.35, 0);   // upper, clearing the belly
-    a.box(SKIN, 0.07, 0.075, 0.24, s * 0.29, -0.03, 0.24, 0.2, 0, 0);      // forearm
-    a.box(SKIN2, 0.08, 0.05, 0.1, s * 0.29, -0.055, 0.4);                  // hand
+    a.cap(SKIN, 0.045, 0.12, s * 0.24, 0, 0.07, 0.35, 0, s * 0.4);     // upper, rooted at the shoulder, clearing the belly
+    a.cap(SKIN, 0.038, 0.16, s * 0.29, -0.03, 0.25, 1.35, 0, 0);       // forearm
+    a.ell(SKIN2, 0.048, s * 0.29, -0.055, 0.4, 1, 0.7, 1.2);           // hand
   }
   return {
     body: b.build(), arms: a.build(),
     pivot: [0, 0.82, 0], swingAmp: 0.12, swingRate: 3.0,
-    eyes: [[-0.04, 1.04, 0.14], [0.04, 1.04, 0.14]],
+    eyes: [[-0.038, 1.05, 0.13], [0.038, 1.05, 0.13]],
   };
 }
 
@@ -204,22 +215,22 @@ function burrowerParts() {
   const SKIN = 0x8a70bd, SKIN2 = 0x715a9c, CRUST = 0x4c4234, CLAW = 0xd6cbb2;
   const DARK = 0x322c26;
   const b = merger();
-  b.box(SKIN2, 0.1, 0.24, 0.11, -0.09, 0.12, -0.08, 0.55, 0, 0);   // crouched legs
-  b.box(SKIN2, 0.1, 0.24, 0.11, 0.09, 0.12, -0.08, 0.55, 0, 0);
-  b.box(DARK, 0.1, 0.05, 0.15, -0.09, 0.03, -0.02);
-  b.box(DARK, 0.1, 0.05, 0.15, 0.09, 0.03, -0.02);
-  b.box(SKIN, 0.3, 0.34, 0.24, 0, 0.42, 0.06, 0.62, 0, 0);          // torso folded forward
-  b.box(CRUST, 0.32, 0.12, 0.26, 0, 0.56, -0.02, 0.62, 0, 0);       // caked-on soil
-  b.box(CRUST, 0.2, 0.09, 0.18, 0.04, 0.62, -0.12, 0.62, 0, 0.2);
-  b.sph(SKIN, 0.12, 0, 0.56, 0.26);                                  // head down and forward
-  b.box(SKIN2, 0.1, 0.05, 0.09, 0, 0.5, 0.32, 0.5, 0, 0);
+  b.cap(SKIN2, 0.05, 0.13, -0.09, 0.17, -0.07, 0.6, 0, 0);          // crouched legs
+  b.cap(SKIN2, 0.05, 0.13, 0.09, 0.17, -0.07, 0.6, 0, 0);
+  b.ell(DARK, 0.055, -0.09, 0.04, 0.0, 1, 0.6, 1.35);
+  b.ell(DARK, 0.055, 0.09, 0.04, 0.0, 1, 0.6, 1.35);
+  b.cap(SKIN, 0.15, 0.2, 0, 0.44, 0.08, 0.66, 0, 0, 1, 1, 0.85);     // torso folded forward
+  b.ell(CRUST, 0.15, 0, 0.56, -0.02, 1.1, 0.5, 0.95);                 // caked-on soil
+  b.ell(CRUST, 0.09, 0.05, 0.6, -0.14, 1.1, 0.5, 0.9);
+  b.ell(SKIN, 0.1, 0, 0.56, 0.27, 0.95, 0.95, 1.05);                  // head down and forward
+  b.ell(SKIN2, 0.045, 0, 0.5, 0.34, 1, 0.65, 1.1);
   const a = merger(); // pivot (0, 0.52, 0.12): digging churn
   for (const s of [-1, 1]) {
-    a.box(SKIN, 0.09, 0.09, 0.26, s * 0.17, -0.04, 0.12, 0.3, 0, 0);
-    a.box(CLAW, 0.1, 0.06, 0.12, s * 0.17, -0.1, 0.28, 0.3, 0, 0);   // bone shovel
-    a.cone(CLAW, 0.035, 0.14, s * 0.21, -0.12, 0.36, 1.4, 0, 0, 4);  // claws
-    a.cone(CLAW, 0.035, 0.16, s * 0.17, -0.12, 0.38, 1.4, 0, 0, 4);
-    a.cone(CLAW, 0.035, 0.14, s * 0.13, -0.12, 0.36, 1.4, 0, 0, 4);
+    a.cap(SKIN, 0.05, 0.16, s * 0.17, -0.04, 0.13, 1.25, 0, 0);
+    a.ell(CLAW, 0.055, s * 0.17, -0.1, 0.27, 1.1, 0.6, 1.2);          // bone shovel
+    a.cone(CLAW, 0.032, 0.14, s * 0.21, -0.12, 0.36, 1.4, 0, 0, 5);   // claws
+    a.cone(CLAW, 0.032, 0.16, s * 0.17, -0.12, 0.38, 1.4, 0, 0, 5);
+    a.cone(CLAW, 0.032, 0.14, s * 0.13, -0.12, 0.36, 1.4, 0, 0, 5);
   }
   return {
     body: b.build(), arms: a.build(),
@@ -234,26 +245,26 @@ function siegerParts() {
   const SKIN = 0xb5713f, SKIN2 = 0x94582f, PLATE = 0xd5ccba, PLATE2 = 0xbfb49e;
   const DARK = 0x453227;
   const b = merger();
-  b.box(SKIN2, 0.16, 0.32, 0.19, -0.16, 0.16, 0, 0, 0, 0.07);
-  b.box(SKIN2, 0.16, 0.32, 0.19, 0.16, 0.16, 0, 0, 0, -0.07);
-  b.box(PLATE2, 0.18, 0.16, 0.21, -0.16, 0.26, 0.01);                // bone greaves
-  b.box(PLATE2, 0.18, 0.16, 0.21, 0.16, 0.26, 0.01);
-  b.box(DARK, 0.18, 0.08, 0.25, -0.16, 0.04, 0.02);
-  b.box(DARK, 0.18, 0.08, 0.25, 0.16, 0.04, 0.02);
-  b.box(SKIN, 0.52, 0.46, 0.4, 0, 0.62, 0, 0.18, 0, 0);              // bulk torso
-  b.box(PLATE, 0.46, 0.2, 0.06, 0, 0.76, 0.21, 0.3, 0, 0);           // chest slab, upper
-  b.box(PLATE2, 0.4, 0.16, 0.06, 0, 0.58, 0.235, 0.14, 0, 0);        // chest slab, lower
-  b.box(PLATE, 0.5, 0.3, 0.1, 0, 0.94, -0.16, -0.5, 0, 0);           // back carapace
-  b.sph(PLATE, 0.17, -0.3, 0.92, 0, 1.2, 0.8, 1.1);                  // pauldron slabs
-  b.sph(PLATE, 0.17, 0.3, 0.92, 0, 1.2, 0.8, 1.1);
-  b.sph(SKIN2, 0.1, 0, 0.9, 0.22);                                    // small head
-  b.box(PLATE2, 0.14, 0.08, 0.12, 0, 0.97, 0.22, -0.2, 0, 0);         // bone helm
-  b.cone(PLATE2, 0.04, 0.12, 0, 1.04, 0.26, 0.5, 0, 0, 4);            // crest horn
+  b.cap(SKIN2, 0.08, 0.16, -0.16, 0.24, 0, 0, 0, 0.08);
+  b.cap(SKIN2, 0.08, 0.16, 0.16, 0.24, 0, 0, 0, -0.08);
+  b.ell(PLATE2, 0.1, -0.16, 0.28, 0.03, 1, 0.8, 1.1);                // grown bone greaves
+  b.ell(PLATE2, 0.1, 0.16, 0.28, 0.03, 1, 0.8, 1.1);
+  b.ell(DARK, 0.09, -0.16, 0.05, 0.03, 1, 0.55, 1.3);
+  b.ell(DARK, 0.09, 0.16, 0.05, 0.03, 1, 0.55, 1.3);
+  b.ell(SKIN, 0.27, 0, 0.62, 0, 1, 0.9, 0.78, 9, 7);                 // bulk torso
+  b.ell(PLATE, 0.13, 0, 0.76, 0.18, 1.7, 0.85, 0.5);                  // chest slab, upper
+  b.ell(PLATE2, 0.11, 0, 0.58, 0.2, 1.7, 0.7, 0.5);                   // chest slab, lower
+  b.ell(PLATE, 0.24, 0, 0.94, -0.14, 1.05, 0.6, 0.9, 9, 7);          // back carapace
+  b.ell(PLATE, 0.15, -0.3, 0.92, 0, 1.25, 0.75, 1.1);                 // pauldron slabs
+  b.ell(PLATE, 0.15, 0.3, 0.92, 0, 1.25, 0.75, 1.1);
+  b.ell(SKIN2, 0.09, 0, 0.9, 0.23, 0.95, 0.9, 1);                      // small head
+  b.ell(PLATE2, 0.075, 0, 0.965, 0.235, 1.1, 0.65, 1.05);              // bone helm
+  b.cone(PLATE2, 0.04, 0.12, 0, 1.03, 0.27, 0.5, 0, 0, 5);             // crest horn
   const a = merger(); // pivot (0, 0.94, 0.04): ram arms, held low and ready
   for (const s of [-1, 1]) {
-    a.box(SKIN, 0.15, 0.38, 0.17, s * 0.32, -0.2, 0.1, -0.3, 0, s * 0.1);
-    a.cyl(PLATE2, 0.11, 0.13, 0.3, s * 0.36, -0.45, 0.22, -0.6, 0, 0, 6); // fused mace
-    a.sph(PLATE, 0.14, s * 0.37, -0.58, 0.3);                            // blunt cap
+    a.cap(SKIN, 0.08, 0.2, s * 0.32, -0.2, 0.1, -0.3, 0, s * 0.1);
+    a.cyl(PLATE2, 0.09, 0.12, 0.26, s * 0.36, -0.45, 0.22, -0.6, 0, 0, 8); // fused mace
+    a.ell(PLATE, 0.13, s * 0.37, -0.58, 0.3, 1, 0.9, 1);                   // blunt cap
   }
   return {
     body: b.build(), arms: a.build(),
@@ -268,28 +279,28 @@ function callerParts() {
   const SKIN = 0x6cc0a4, SKIN2 = 0x57a189, ROBE = 0x3e5f57, CREST = 0xa5f2da;
   const DARK = 0x2c3a35;
   const b = merger();
-  b.box(SKIN2, 0.09, 0.42, 0.1, -0.08, 0.21, 0, 0, 0, 0.05);       // stilt legs
-  b.box(SKIN2, 0.09, 0.42, 0.1, 0.08, 0.21, 0, 0, 0, -0.05);
-  b.box(DARK, 0.09, 0.05, 0.14, -0.08, 0.025, 0.02);
-  b.box(DARK, 0.09, 0.05, 0.14, 0.08, 0.025, 0.02);
-  b.box(ROBE, 0.26, 0.24, 0.17, 0, 0.5, 0);                          // hanging rags
-  b.box(SKIN, 0.24, 0.34, 0.16, 0, 0.78, 0, -0.08, 0, 0);            // gaunt chest
-  b.box(SKIN2, 0.16, 0.2, 0.03, 0, 0.78, 0.085);                     // ribs showing
-  b.cyl(SKIN, 0.05, 0.06, 0.18, 0, 1.02, 0.02, -0.3, 0, 0, 6);       // craned neck
-  b.sph(SKIN, 0.11, 0, 1.14, 0.06, 1, 1.05, 1);                       // head thrown back
-  b.box(SKIN2, 0.09, 0.05, 0.1, 0, 1.06, 0.13, 1.0, 0, 0);            // jaw wide open, skyward
-  b.cone(CREST, 0.05, 0.2, 0, 1.26, -0.02, -0.4, 0, 0, 4);            // signal crest
-  b.cone(CREST, 0.04, 0.14, 0, 1.2, -0.12, -0.9, 0, 0, 4);
+  b.cap(SKIN2, 0.042, 0.3, -0.08, 0.26, 0, 0, 0, 0.05);              // stilt legs
+  b.cap(SKIN2, 0.042, 0.3, 0.08, 0.26, 0, 0, 0, -0.05);
+  b.ell(DARK, 0.05, -0.08, 0.035, 0.03, 1, 0.55, 1.3);
+  b.ell(DARK, 0.05, 0.08, 0.035, 0.03, 1, 0.55, 1.3);
+  b.ell(ROBE, 0.14, 0, 0.5, 0, 1, 0.85, 0.65);                        // hanging rags
+  b.cap(SKIN, 0.11, 0.16, 0, 0.78, 0, -0.08, 0, 0, 1.05, 1, 0.7);     // gaunt chest
+  b.ell(SKIN2, 0.085, 0, 0.78, 0.06, 1, 1.2, 0.45);                    // ribs showing
+  b.cyl(SKIN, 0.042, 0.05, 0.16, 0, 1.02, 0.02, -0.3, 0, 0, 8);        // craned neck
+  b.ell(SKIN, 0.09, 0, 1.14, 0.05, 0.92, 1.05, 1);                      // head thrown back
+  b.ell(SKIN2, 0.042, 0, 1.075, 0.13, 1, 0.7, 1.3);                     // jaw wide open, skyward
+  b.cone(CREST, 0.05, 0.2, 0, 1.26, -0.02, -0.4, 0, 0, 5);              // signal crest
+  b.cone(CREST, 0.04, 0.14, 0, 1.2, -0.12, -0.9, 0, 0, 5);
   const a = merger(); // pivot (0, 0.92, 0): arms thrown up and out, chained from the shoulder
   for (const s of [-1, 1]) {
-    a.box(SKIN, 0.07, 0.26, 0.08, s * 0.17, 0.08, 0.02, 0, 0, s * -0.45);  // upper, angled out
-    a.box(SKIN2, 0.06, 0.24, 0.07, s * 0.275, 0.29, 0.025, 0, 0, s * -0.2); // forearm, reaching up
-    a.box(SKIN2, 0.085, 0.09, 0.05, s * 0.315, 0.44, 0.03);                // splayed hand
+    a.cap(SKIN, 0.038, 0.18, s * 0.17, 0.08, 0.02, 0, 0, s * -0.45);   // upper, angled out
+    a.cap(SKIN2, 0.033, 0.17, s * 0.275, 0.29, 0.025, 0, 0, s * -0.2);  // forearm, reaching up
+    a.ell(SKIN2, 0.048, s * 0.315, 0.44, 0.03, 1.2, 0.9, 0.7);          // splayed hand
   }
   return {
     body: b.build(), arms: a.build(),
     pivot: [0, 0.92, 0], swingAmp: 0.24, swingRate: 3.8,
-    eyes: [[-0.035, 1.15, 0.15], [0.035, 1.15, 0.15]],
+    eyes: [[-0.035, 1.15, 0.14], [0.035, 1.15, 0.14]],
   };
 }
 
@@ -304,13 +315,13 @@ const BUILDERS = {
 export function buildCorpseGeometry() {
   const SKIN = 0xa8a89a, CLOTH = 0x8c887c, DARK = 0x4c4a42, BLOOD = 0x77332a;
   const b = merger();
-  b.box(CLOTH, 0.34, 0.44, 0.22, 0, 0.42, 0);                    // torso
-  b.box(BLOOD, 0.2, 0.16, 0.03, 0.04, 0.46, 0.115);
-  b.sph(SKIN, 0.13, 0.03, 0.72, 0.03);                            // head, askew
-  b.box(DARK, 0.1, 0.3, 0.11, -0.1, 0.14, 0.05, 0.25, 0, 0.3);    // legs, splayed
-  b.box(DARK, 0.1, 0.3, 0.11, 0.11, 0.14, -0.03, -0.15, 0, -0.35);
-  b.box(SKIN, 0.08, 0.28, 0.09, -0.24, 0.5, 0.04, 0, 0, 1.1);     // arms, flung
-  b.box(SKIN, 0.08, 0.26, 0.09, 0.24, 0.44, -0.02, 0, 0, -1.25);
+  b.cap(CLOTH, 0.14, 0.2, 0, 0.42, 0, 0, 0, 0.06, 1.1, 1, 0.8);    // torso
+  b.ell(BLOOD, 0.08, 0.04, 0.46, 0.1, 1.2, 1, 0.5);
+  b.ell(SKIN, 0.105, 0.03, 0.72, 0.03, 0.95, 1.05, 1);              // head, askew
+  b.cap(DARK, 0.05, 0.18, -0.1, 0.17, 0.06, 0.25, 0, 0.3);          // legs, splayed
+  b.cap(DARK, 0.05, 0.17, 0.11, 0.16, -0.02, -0.15, 0, -0.35);
+  b.cap(SKIN, 0.04, 0.17, -0.25, 0.5, 0.04, 0, 0, 1.1);             // arms, flung
+  b.cap(SKIN, 0.04, 0.16, 0.25, 0.44, -0.02, 0, 0, -1.25);
   const geo = b.build();
   geo.translate(0, -0.42, 0); // center it: corpses tumble around their middle
   return geo;
