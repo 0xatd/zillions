@@ -93,13 +93,17 @@ export class UI {
       <div id="tooltip" class="hidden"></div>
 
       <div id="overlay" class="screen">
-        <div id="screen-account" class="accountscreen">
-          <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Sign in to enter the frontier.</p>
-          <div class="accountcard">
+        <div id="screen-account" class="accountscreen title-screen">
+          <div class="title-lockup">
+            <div class="brandeyebrow">THE LAST WAR CROSSES THE STARS</div>
+            <h1 class="gametitle">ZILLIONS</h1>
+            <p class="gamesub">Every world is a battlefield.</p>
+          </div>
+          <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary" id="a-google">Continue with Google</button>
-            <button class="menubtn hidden" id="a-offline">Continue in offline dev mode</button>
+            <button class="menubtn primary hidden" id="a-enter">ENTER WORLD</button>
+            <button class="menubtn primary" id="a-google">ENTER WITH GOOGLE</button>
+            <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
               <label for="a-username">Public username</label>
               <div class="usernamerow">
@@ -110,53 +114,33 @@ export class UI {
               <small>Letters, numbers, and underscores. Other players see this.</small>
             </form>
           </div>
+          <nav class="title-utilities" aria-label="Title menu">
+            <button id="a-custom">CUSTOM GAMES</button>
+            <button id="a-cinematics">CINEMATICS</button>
+            <button id="a-credits">CREDITS</button>
+            <button id="a-settings">SETTINGS</button>
+            <button id="a-quit">QUIT</button>
+          </nav>
+          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · ONLINE <small>BUILD 0.1</small></div>
         </div>
 
-        <div id="screen-main" class="mainmenu">
-          <div class="brandblock">
-            <div class="brandeyebrow">CO-OP FRONTIER DEFENSE</div>
-            <h1 class="gametitle">ZILLIONS</h1>
-            <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
+        <div id="screen-main" class="mainmenu character-select">
+          <div class="character-heading"><span>EARTH FRONT</span><h1>SELECT YOUR HERO</h1><small>Choose who enters the persistent world.</small></div>
+          <div id="character-stage" class="character-stage">
+            <div id="character-sigil" class="character-sigil"></div>
+            <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <div class="menustack homeactions">
-            <button class="menubtn primary playonline" id="m-online">
-              <span class="cta"><b>PLAY</b><small>ONLINE &nbsp;·&nbsp; create · join · watch</small></span>
-              <span class="menuarrow">›</span>
-            </button>
-            <button class="menubtn" id="m-solo">
-              <span class="cta"><b>PLAY SOLO</b><small>campaign · survival · the labyrinth</small></span>
-              <span class="menuarrow">›</span>
-            </button>
-            <div class="menuutilities">
-              <button class="utilitybtn" id="m-help">How to play</button>
-              <button class="utilitybtn" id="m-settings">⚙ Settings</button>
-              <button class="utilitybtn" id="m-heroes">Heroes (Tab)</button>
-            </div>
-          </div>
-          <div id="hub-panel" class="hubpanel hidden">
-            <div class="hubrow">
-              <span class="hubdot">🟢</span><span id="hub-online">connecting…</span>
-              <span class="hubsep">·</span><span id="hub-games"></span>
-            </div>
-            <div class="hubchat" id="hub-chat"><span class="hubmuted">Lobby chat is quiet…</span></div>
-          </div>
-          <div class="profilerow">
-            <span id="prof-name-display">Signed in</span>
-            <span id="prof-stats"></span>
-          </div>
+          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
         <div id="screen-solo" class="mainmenu solomenu hidden">
-          <button class="tbtn menuback" id="solo-back">← Main menu</button>
-          <h1 class="gametitle small">PLAY SOLO</h1>
-          <p class="gamesub">Choose a war. Saved runs stay with their mode.</p>
+          <button class="tbtn menuback" id="solo-back">← Character select</button>
+          <h1 class="gametitle small">CUSTOM GAMES</h1>
+          <p class="gamesub">Challenges and private wars outside the persistent world.</p>
           <div class="solomodes">
             <section class="modecard">
-              <div class="modeeyebrow">STORY</div>
-              <h2>⚔️ Story Campaign</h2>
-              <p>Retake Earth across five authored fronts, then push into the procedural galaxy.</p>
-              <div id="solo-campaign-resume" class="moderesume"></div>
-              <button class="menubtn modeprimary" id="solo-campaign">Choose mission <span class="menuarrow">›</span></button>
+              <div class="modeeyebrow">MULTIPLAYER</div><h2>🌐 Public & Private Wars</h2><p>Create, join, or watch custom battles with other commanders.</p><button class="menubtn modeprimary" id="custom-online">Open lobby <span class="menuarrow">›</span></button>
             </section>
             <section class="modecard">
               <div class="modeeyebrow">REPLAYABLE</div>
@@ -174,6 +158,9 @@ export class UI {
             </section>
           </div>
         </div>
+
+        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
+        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
@@ -346,7 +333,13 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
-    q('#a-offline').onclick = () => this.cb.onOfflineContinue && this.cb.onOfflineContinue();
+    q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
+    q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
+    q('#a-custom').onclick = () => this._showScreen('solo');
+    q('#a-cinematics').onclick = () => this._showScreen('cinematics');
+    q('#a-credits').onclick = () => this._showScreen('credits');
+    q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
+    q('#a-quit').onclick = () => this.showBanner('Close this browser tab to leave the frontier.', '', 3200);
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
       const input = q('#a-username');
@@ -355,8 +348,11 @@ export class UI {
     q('#m-solo').onclick = () => this._showScreen('solo');
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
+    q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
+    q('#m-custom').onclick = () => this._showScreen('solo');
+    q('#m-logout').onclick = () => this._showScreen('account');
     q('#solo-back').onclick = () => this._showScreen('main');
-    q('#solo-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
+    q('#custom-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
@@ -371,6 +367,7 @@ export class UI {
       } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
     };
     q('#l-back').onclick = () => this._showScreen('main');
+    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._showScreen(this._accountAccepted ? 'main' : 'account');
 
     // ----- lobby -----
     for (const t of this.root.querySelectorAll('.ltab')) {
@@ -405,13 +402,13 @@ export class UI {
     };
 
     // ----- settings -----
-    q('#m-settings').onclick = () => this._showScreen('settings');
+    q('#m-settings').onclick = () => { this._settingsReturn = 'main'; this._showScreen('settings'); };
     q('#m-heroes').onclick = () => this._showScreen('heroes');
     q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
     q('#set-back').onclick = () => {
       if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
-      else this._showScreen('main');
+      else this._showScreen(this._settingsReturn || 'main');
     };
     for (const t of this.root.querySelectorAll('.stab')) {
       t.onclick = () => {
@@ -469,6 +466,7 @@ export class UI {
       card.onmouseleave = () => this._hideTip();
       herorow.appendChild(card);
     }
+    this._buildCharacterSelect();
 
     // ----- setup: levels & difficulty -----
     this.selectedLevel = 1;
@@ -698,9 +696,56 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  _buildCharacterSelect() {
+    const list = this.root.querySelector('#character-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const [key, hero] of Object.entries(HEROES)) {
+      const button = document.createElement('button');
+      button.className = 'character-row';
+      button.dataset.key = key;
+      button.innerHTML = `${PORTRAITS[key] ? `<img src="${PORTRAITS[key]}" alt="">` : `<span>${hero.icon}</span>`}<span><b>${hero.name}</b><small></small></span>`;
+      button.onclick = () => {
+        this.selectedHero = key;
+        this._renderSelectedCharacter();
+        for (const card of this.root.querySelectorAll('.herocard')) card.classList.toggle('sel', card.dataset.key === key);
+        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
+      };
+      list.appendChild(button);
+    }
+    this._renderSelectedCharacter();
+  }
+
+  _renderSelectedCharacter() {
+    const key = this.selectedHero || 'alexander';
+    const hero = HEROES[key];
+    if (!hero) return;
+    const progress = (this._profile?.campaignHeroes || {})[key] || {};
+    const level = progress.level || 1;
+    const gear = (progress.items || []).map((itemKey) => ITEMS[itemKey]).filter(Boolean);
+    for (const row of this.root.querySelectorAll('.character-row')) {
+      const selected = row.dataset.key === key;
+      row.classList.toggle('sel', selected);
+      const small = row.querySelector('small');
+      if (small) small.textContent = `Level ${((this._profile?.campaignHeroes || {})[row.dataset.key]?.level) || 1}`;
+    }
+    const sigil = this.root.querySelector('#character-sigil');
+    sigil.textContent = PORTRAITS[key] ? '' : hero.icon;
+    sigil.style.backgroundImage = PORTRAITS[key]
+      ? `linear-gradient(180deg, transparent 55%, rgba(3,7,13,.85)), url(${PORTRAITS[key]})`
+      : '';
+    sigil.classList.toggle('has-portrait', !!PORTRAITS[key]);
+    sigil.style.setProperty('--hero-color', `#${hero.color.toString(16).padStart(6, '0')}`);
+    this.root.querySelector('#character-name').textContent = `${hero.name} · LEVEL ${level}`;
+    this.root.querySelector('#character-tagline').textContent = hero.tagline;
+    this.root.querySelector('#character-gear').innerHTML = gear.length
+      ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
+      : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
   }
 
   // ----- overworld: the campaign map behind the war-council overlay -----
@@ -1478,6 +1523,7 @@ export class UI {
 
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
+    const enter = this.root.querySelector('#a-enter');
     const google = this.root.querySelector('#a-google');
     const offline = this.root.querySelector('#a-offline');
     const usernameForm = this.root.querySelector('#a-username-form');
@@ -1493,6 +1539,7 @@ export class UI {
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
+    if (enter) enter.classList.toggle('hidden', !state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {
@@ -1501,13 +1548,11 @@ export class UI {
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
-    if (state.ready && (state.signedIn || offlineAllowed)) {
-      if (!this._accountAccepted) {
+    if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
+      if (this._offlineAccepted && !this._accountAccepted) {
         this._accountAccepted = true;
-        // Authentication always lands on the authored title screen. The
-        // player enters the overworld deliberately through Story Campaign.
         this._showScreen('main');
-      }
+      } else if (!this._accountAccepted) this._showScreen('account');
       return;
     }
     this._accountAccepted = false;
@@ -1515,6 +1560,7 @@ export class UI {
   }
 
   setProfile(p) {
+    this._profile = p;
     this._labyrinthClears = p.labyrinthClears || {};
     const nameEl = this.root.querySelector('#prof-name-display');
     const publicName = p.username || p.name || 'Commander';
@@ -1526,6 +1572,7 @@ export class UI {
         : 'first deployment';
     }
     this.refreshHeroBadges(p);
+    this._renderSelectedCharacter();
   }
 
   // WC3-style campaign persistence, shown right on the hero cards.
@@ -1550,6 +1597,7 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._renderSelectedCharacter();
   }
 
   setContinue(snap) {

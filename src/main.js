@@ -24,6 +24,7 @@ import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildCorpseGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
+import { MenuVignette } from './menu-vignette.js';
 import {
   stitchOverworld, Overworld, gateState,
   earthWorldDescriptor, overworldChannel,
@@ -313,6 +314,133 @@ class App {
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
 
+  // ---------------- title diorama ----------------
+  // A real last stand still runs on the surface. The extra geometry makes it
+  // read as one small battlefield on a much larger planet under siege.
+  showMenuBackdrop(levelId = 1) {
+    if (this.game || this.ow || this.menuTerrain) return;
+    const level = levelById(levelId);
+    const map = new GameMap(level.seed, level.theme);
+    this.menuMap = map;
+    this.menuTerrain = map.buildTerrain();
+    this.scene.add(this.menuTerrain);
+    if (!this._menuProjV) this._menuProjV = new THREE.Vector3();
+    this.menuShow = new MenuVignette({
+      scene: this.scene, map, horde: this.horde,
+      makeUnitMesh: (u) => this._makeUnitMesh(u),
+      burst: (x, y, z, o) => this.burst(x, y, z, o),
+      stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
+      addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
+      dispose3D: (obj) => this._disposeObject3D(obj),
+      light: new THREE.PointLight(0xffd39a, 0, 34, 1.8),
+      dummy: new THREE.Object3D(), color: new THREE.Color(),
+      project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
+    });
+    this._buildTitleSpace();
+  }
+
+  _buildTitleSpace() {
+    const group = new THREE.Group();
+    group.name = 'planet-edge-title';
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(185, 48, 24),
+      new THREE.MeshLambertMaterial({ color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
+    );
+    planet.position.set(MAP_SIZE / 2, -185, MAP_SIZE / 2 + 18);
+    group.add(planet);
+    const atmosphere = new THREE.Mesh(
+      new THREE.SphereGeometry(187.2, 48, 24),
+      new THREE.MeshBasicMaterial({ color: 0x4ca8e8, transparent: true, opacity: 0.12, side: THREE.BackSide, depthWrite: false }),
+    );
+    atmosphere.position.copy(planet.position);
+    group.add(atmosphere);
+
+    const starGeo = new THREE.BufferGeometry();
+    const stars = new Float32Array(750 * 3);
+    for (let i = 0; i < 750; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 170 + Math.random() * 220;
+      stars[i * 3] = MAP_SIZE / 2 + Math.sin(a) * r;
+      stars[i * 3 + 1] = 45 + Math.random() * 180;
+      stars[i * 3 + 2] = MAP_SIZE / 2 - 80 + Math.cos(a) * r;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3));
+    const starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xdbeaff, size: 0.95, transparent: true, opacity: 0.9, depthWrite: false, fog: false }));
+    group.add(starField);
+
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(12, 32, 20), new THREE.MeshLambertMaterial({ color: 0x6f8194, emissive: 0x17293d, emissiveIntensity: 0.6, fog: false }));
+    moon.position.set(MAP_SIZE / 2 - 38, 62, MAP_SIZE / 2 - 72);
+    group.add(moon);
+    const moonRing = new THREE.Mesh(
+      new THREE.TorusGeometry(18, 0.9, 8, 64),
+      new THREE.MeshBasicMaterial({ color: 0x8aa7bd, transparent: true, opacity: 0.5, depthWrite: false, fog: false }),
+    );
+    group.add(moonRing);
+    const orbitalGlobe = new THREE.Mesh(
+      new THREE.SphereGeometry(105, 48, 28),
+      new THREE.MeshBasicMaterial({ color: 0x071321, fog: false }),
+    );
+    group.add(orbitalGlobe);
+    const orbitalGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(108, 48, 28),
+      new THREE.MeshBasicMaterial({ color: 0x2686c0, transparent: true, opacity: 0.2, side: THREE.BackSide, depthWrite: false, fog: false }),
+    );
+    group.add(orbitalGlow);
+
+    const ships = new THREE.Group();
+    for (let i = 0; i < 5; i++) {
+      const ship = new THREE.Mesh(new THREE.BoxGeometry(5 + i * 0.7, 0.8, 1.8), new THREE.MeshBasicMaterial({ color: 0x24384d }));
+      ship.position.set(MAP_SIZE / 2 + 38 + i * 13, 54 + (i % 2) * 9, MAP_SIZE / 2 - 105 - i * 7);
+      ship.rotation.y = -0.35;
+      ships.add(ship);
+    }
+    group.add(ships);
+
+    const streakMat = new THREE.MeshBasicMaterial({ color: 0xffb45b, transparent: true, opacity: 0.7, depthWrite: false });
+    const streaks = [];
+    for (let i = 0; i < 4; i++) {
+      const streak = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.2, 18, 6), streakMat.clone());
+      streak.rotation.z = 0.48;
+      streak.userData.seed = i * 1.73;
+      group.add(streak); streaks.push(streak);
+    }
+    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks };
+    this.titleSpace = group;
+    this.scene.add(group);
+    this.scene.background = new THREE.Color(0x020711);
+    this.scene.fog.color.setHex(0x07101b);
+    this.scene.fog.density = 0.0024;
+  }
+
+  _updateTitleSpace(t) {
+    if (!this.titleSpace) return;
+    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks } = this.titleSpace.userData;
+    atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
+    moon.rotation.y = t * 0.015;
+    const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    moon.position.copy(cameraLocal(-42, 27, -125));
+    moonRing.position.copy(moon.position);
+    moonRing.quaternion.copy(this.camera.quaternion);
+    moonRing.rotateX(1.08);
+    moonRing.rotateZ(-0.28);
+    orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
+    orbitalGlow.position.copy(orbitalGlobe.position);
+    ships.position.x = Math.sin(t * 0.08) * 3;
+    for (let i = 0; i < streaks.length; i++) {
+      const s = streaks[i];
+      const p = (t * (0.07 + i * 0.008) + s.userData.seed) % 1;
+      s.position.set(MAP_SIZE / 2 - 55 + i * 34 + p * 22, 78 - p * 72, MAP_SIZE / 2 - 82 + i * 5);
+      s.material.opacity = Math.sin(p * Math.PI) * 0.75;
+    }
+  }
+
+  _clearMenuBackdrop() {
+    if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
+    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this._disposeObject3D(this.menuTerrain); this.menuTerrain = null; }
+    if (this.titleSpace) { this.scene.remove(this.titleSpace); this._disposeObject3D(this.titleSpace); this.titleSpace = null; }
+    this.menuMap = null;
+  }
+
   // ---------------- overworld ----------------
   // The menu is a place: the five fronts stitched onto one small planet,
   // walked by the player's selected hero. Entering a front's gate starts the
@@ -323,6 +451,10 @@ class App {
     this._clearMenuBackdrop();
     this.ui.setOverworldMode(true);
     const map = new OverworldMap(this.profile.campaign || 0);
+    const sky = map.overworldWorld.regions[0]?.palette?.sky || 0x7eaeb5;
+    this.scene.background = new THREE.Color(sky);
+    this.scene.fog.color.setHex(sky);
+    this.scene.fog.density = 0.0045;
     this.owMap = map;
     this.ow = new Overworld(map, { world: map.overworldWorld });
     this.owTerrain = map.buildTerrain();
@@ -575,6 +707,7 @@ class App {
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
+    this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
       await loadAssets();
@@ -3958,11 +4091,12 @@ class App {
       return;
     }
     if (!this.game) {
-      // Menu: slow cinematic orbit over the battlefield.
-      this.menuYaw += dt * 0.05;
-      this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-      const dist = 55;
-      const elev = 0.72;
+      // Title: a low orbital-horizon angle keeps the live last stand in the
+      // foreground while the atmosphere, moon and fleet own the upper frame.
+      this.menuYaw += dt * 0.018;
+      this.focus.set(MAP_SIZE / 2, 2.5, MAP_SIZE / 2 - 8);
+      const dist = 72;
+      const elev = 0.43;
       this.camera.position.set(
         this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
         Math.sin(elev) * dist,
@@ -4744,6 +4878,10 @@ class App {
     }
 
     if (!this.game && this.ow) this._updateOverworld(dt, t);
+    if (!this.game && !this.ow) {
+      this.menuShow?.update(dt, t);
+      this._updateTitleSpace(t);
+    }
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

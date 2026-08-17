@@ -197,16 +197,19 @@ assert.match(mainSource, /localStorage\.removeItem\('zillions_save'\)/, 'corrupt
 assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be removed from the menu');
 
 const uiSource = read('src/ui.js');
-assert.match(uiSource, /id="m-online"[\s\S]*<b>PLAY<\/b><small>ONLINE/, 'the home screen must lead with online play');
-assert.match(uiSource, /id="m-solo"[\s\S]*PLAY SOLO/, 'the home screen must group solo modes');
-assert.match(uiSource, /id="screen-solo"/, 'solo play must have its own mode screen');
-assert.match(uiSource, /id="solo-campaign-resume"/, 'campaign resumes must stay inside Story Campaign');
-assert.match(uiSource, /#solo-campaign'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Story Campaign must open the overworld');
+assert.match(uiSource, /id="a-custom">CUSTOM GAMES/, 'the title screen must expose Custom Games');
+assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must expose Cinematics');
+assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'login must lead to character select');
+assert.match(uiSource, /id="m-enter-world">ENTER WORLD/, 'character select must enter the persistent world');
+assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open the overworld');
+assert.match(uiSource, /id="screen-solo"/, 'custom games must have their own mode screen');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
 assert.doesNotMatch(uiSource, /id="m-play"/, 'Campaign must not return as the primary home-screen action');
 assert.match(mainSource, /this\.showMenuBackdrop\(this\.ui\.selectedLevel \|\| 1\);[\s\S]*this\.renderer\.setAnimationLoop/, 'startup must preserve the authored first menu');
 assert.doesNotMatch(mainSource, /Boot straight onto the overworld/, 'startup must not bypass the first menu');
+assert.match(mainSource, /name = 'planet-edge-title'/, 'title scene must identify its planet-edge orbital layer');
+assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live last-stand simulation');
 
 const architecture = read('docs/architecture.md');
 for (const rel of [
