@@ -14,7 +14,7 @@
 // asserts they are deterministic, connected and honest about lock state. The
 // renderer half (gate meshes, the walking hero, ghosts) lives in main.js and
 // only consumes the data classes here.
-import { TILE, LEVELS, LABYRINTH_LEVELS } from './config.js';
+import { TILE, LEVELS, LABYRINTH_LEVELS, levelById } from './config.js';
 import { TerrainField, TERRAIN_SHAPES } from './terrain.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
@@ -87,6 +87,18 @@ export function earthWorldDescriptor(campaignCleared = 0) {
     locked: false,
     cleared: false,
   });
+  regions.push({
+    id: 'earth-orbital-lift',
+    kind: 'portal',
+    label: 'Orbital Lift',
+    blurb: 'Return to the starship and choose another destination.',
+    palette: LEVELS[0].theme.palette,
+    terrain: LEVELS[0].theme.terrain,
+    gate: { x: 16, z: 29 },
+    center: { x: 16, z: 29 }, radius: 6,
+    locked: false,
+    cleared: false,
+  });
   return {
     id: 'earth',
     name: 'Earth',
@@ -95,6 +107,67 @@ export function earthWorldDescriptor(campaignCleared = 0) {
     spawn: { x: 14, z: 14 },
     regions,
   };
+}
+
+// A frontier planet is a persistent place wrapped around one currently
+// playable instance. The Zillions battlefield is temporary content inside
+// that destination; galaxy travel and world identity do not depend on its
+// eventual art or encounter design.
+export function frontierWorldDescriptor(levelId, campaignCleared = 0) {
+  const level = levelById(levelId);
+  const size = 80;
+  const palette = level.theme.palette;
+  return {
+    id: `frontier-${levelId}`,
+    name: level.name,
+    seed: (level.seed ^ 0x6a11a7) >>> 0,
+    size,
+    spawn: { x: 12, z: 12 },
+    regions: [
+      {
+        id: `frontier-${levelId}-mission`, kind: 'level', levelId,
+        label: `${level.name} Warzone`, blurb: level.blurb,
+        boss: { icon: level.boss.icon, name: level.boss.name },
+        palette, terrain: level.theme.terrain,
+        gate: { x: 48, z: 46 }, locked: levelId > campaignCleared + 1,
+        cleared: levelId <= campaignCleared,
+      },
+      {
+        id: `frontier-${levelId}-orbit`, kind: 'portal', label: 'Orbital Lift',
+        blurb: 'Return to the starship and navigate the galaxy.',
+        palette, terrain: level.theme.terrain,
+        gate: { x: 18, z: 22 }, locked: false, cleared: false,
+      },
+    ],
+  };
+}
+
+export function galaxyDestinations(campaignCleared = 0, depth = 6) {
+  const destinations = [{
+    id: 'earth', name: 'Earth', subtitle: 'Humanity\'s starting world',
+    levelId: null, unlocked: true, cleared: campaignCleared >= LEVELS.length,
+  }];
+  for (let i = 1; i <= depth; i++) {
+    const levelId = LEVELS.length + i;
+    const level = levelById(levelId);
+    destinations.push({
+      id: `frontier-${levelId}`,
+      name: level.name,
+      subtitle: level.blurb,
+      levelId,
+      unlocked: campaignCleared >= LEVELS.length && levelId <= campaignCleared + 1,
+      cleared: levelId <= campaignCleared,
+      threat: Math.max(1, levelId - LEVELS.length),
+    });
+  }
+  return destinations;
+}
+
+export function galaxyWorldDescriptor(worldId, campaignCleared = 0) {
+  if (!worldId || worldId === 'earth') return earthWorldDescriptor(campaignCleared);
+  const match = /^frontier-(\d+)$/.exec(worldId);
+  if (!match) return earthWorldDescriptor(campaignCleared);
+  return frontierWorldDescriptor(Number(match[1]), campaignCleared);
 }
 
 // The gate layout a renderer walks: level and portal regions become march-

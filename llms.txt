@@ -1,6 +1,6 @@
 # Zillions repository guide for language models
 
-Project: browser-based sci-fi planet-conquest siege game
+Project: new browser-based science-fantasy MMO using Zillions as its current playable foundation
 Production: https://zillions.taborlin.co
 Repository: https://github.com/0xatd/zillions
 Default branch: main
@@ -32,6 +32,7 @@ Default branch: main
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
+- src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.

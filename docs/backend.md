@@ -113,6 +113,9 @@ Defined in `supabase/schema.sql`:
 - `profiles`: one row per authenticated player. Stores the public username in
   `handle`, mirrors it in `display_name`, tracks `username_set`, selected hero,
   avatar color, timestamps, and last seen time.
+- Supabase Auth user metadata stores `last_world`. This keeps the selected
+  galaxy destination with the account without exposing it as public profile
+  data.
 - `player_stats`: lifetime games, wins, losses, kills, best day/wave,
   buildings built, and favorite hero.
 - `save_slots`: authenticated cloud save slots. Current UI uses `slot_key =

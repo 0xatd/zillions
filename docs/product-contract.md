@@ -5,7 +5,19 @@ systems, menus, backend code, or docs.
 
 ## Target
 
-Zillions is a sci-fi planet-conquest siege game.
+Zillions is the current playable foundation for a new science-fantasy MMO set
+across a navigable galaxy. The current art, named heroes, siege maps, and
+encounter structures are scaffolding. They may change without redefining the
+new game's world model.
+
+The galaxy is the only hard world boundary. A signed-in character can persist
+across planets, stations, ships, shared planetary zones, and private or party
+instances. Each destination owns its own world descriptor and presence
+channel. Entering an instance does not replace the galaxy journey; the player
+returns to a persistent location with progress and equipment.
+
+The existing Zillions combat and construction systems remain playable content
+while the new game develops:
 
 The player signs in, enters a living frontier, chooses or joins a world, rides a
 hero, founds a fortified city, buys pre-planned plots with coins, and pushes the
@@ -91,10 +103,9 @@ sustained zombie flood. The run is won only by killing the final boss.
    Each whole Threat level triggers a simultaneous surge from every hive.
 5. Campaign maps end when every hive is razed and the champion leading the
    final counterattack is killed — or when the Keep falls.
-6. The campaign is the war for Earth (five authored fronts). Past it the
-   galaxy is procedural and endless: frontier worlds are deterministic from
-   their number, get larger and harder with depth, and stay liberated on the
-   player's profile once cleared.
+6. Earth and frontier battlefields currently provide the playable instances.
+   The star map and Orbital Lifts connect their planetary hubs. Frontier worlds
+   are deterministic from their number and stay liberated on the profile.
 
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.
@@ -119,10 +130,9 @@ blessing choice per razed chamber.
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as
-rule-changers, persistent explored-map memory, world-placed missions, landmarks, and a strategic
-galaxy simulation. Those systems are not implemented. The endless procedural
-frontier worlds are implemented. Prove the siege loop with human playtesting
-before you add more strategic systems.
+rule-changers, persistent explored-map memory, world-placed missions,
+landmarks, and strategic galaxy state. Basic galaxy navigation is implemented.
+Deeper strategic simulation is not.
 
 ## Production UX Rules
 

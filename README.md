@@ -1,7 +1,9 @@
 # Zillions
 
-Zillions is a browser-based planet-conquest game. Control one hero, found a
-colony, build defenses, take lane nodes, and destroy every hive.
+Zillions is the current playable foundation for a new browser-based
+science-fantasy MMO. Create a persistent character, travel between worlds, and
+enter planetary adventures. The current planet-conquest art and siege loop are
+temporary content while the larger game develops.
 
 Production: https://zillions.taborlin.co
 
@@ -32,7 +34,12 @@ Use this source order when documents disagree:
 5. `docs/agent-brief.md`.
 6. Future documents, including `docs/design-vision.md`.
 
-## Current Game
+## Current Playable Game
+
+Normal play now moves through the title screen, character roster, last
+planetary location, Orbital Lift, and galaxy map. Each planet is a persistent
+shared hub with its own presence channel and entrances to playable instances.
+The profile remembers the last world.
 
 Zillions uses a continuous siege loop. There is no day, night, or bell phase.
 
@@ -47,7 +54,9 @@ Threat replaces a wave clock. Threat rises with time, living hives, and
 captured ground. Each whole Threat level triggers a hive surge.
 
 The five Earth missions use distinct landforms and colony plans. After Earth,
-the game creates deterministic frontier worlds from the world number.
+the galaxy map opens deterministic frontier planets. Each planet currently
+contains a Zillions-style warzone instance and a route back to orbit. Future
+destinations can use other art and adventure structures.
 
 Living allied heroes and troops reveal the battlefield. The world outside
 their soft vision circles is almost black, including the minimap.

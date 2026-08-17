@@ -10,10 +10,11 @@ Read this before you review, audit, or change Zillions.
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`.
 - Static GitHub Pages is only a fallback/review build.
 
-The live game is a sci-fi planet-conquest siege game. The player signs in with
-Google, claims a public username, picks a hero, founds a city at a flagged site,
-funds pre-planned plots with gold, pushes the lanes, takes nodes, razes hive
-nests, and clears campaign maps.
+The live game is the playable foundation for a new science-fantasy MMO. The
+player signs in, selects a character, loads a persistent planetary location,
+and can use an Orbital Lift to navigate the known galaxy. Current Zillions
+siege maps and heroes are temporary content and art scaffolding. They are not
+the permanent boundary of the new game.
 
 ## Shipped Combat Loop
 
