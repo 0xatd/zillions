@@ -1098,3 +1098,21 @@ body::after {
 .herolib-card .hc-row b { font-size: 13.5px; }
 .herolib-card .hc-row p { font-size: 12px; opacity: 0.72; line-height: 1.45; }
 .herolib-card .hc-cd { font-size: 11px; opacity: 0.5; }
+
+/* ---------- overworld ---------- */
+/* The ⚙ that opens the war council over the walkable planet. */
+.owmenu {
+  position: absolute; top: 14px; right: 14px; z-index: 60;
+  width: 44px; height: 44px; font-size: 20px;
+}
+/* Overworld boots: the hub is a translucent overlay, never a wall. */
+#overlay.overworld .mainmenu {
+  background: linear-gradient(90deg, rgba(7, 9, 13, 0.88) 0%, rgba(7, 9, 13, 0.72) 380px, rgba(7, 9, 13, 0.0) 720px);
+}
+#overlay.overworld .setup,
+#overlay.overworld .accountscreen {
+  background: rgba(7, 9, 13, 0.72);
+  backdrop-filter: blur(2px);
+}
+.gateboss { opacity: 0.9; }
+.gate-confirm .diffseg { margin: 10px 0 4px; }

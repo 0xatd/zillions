@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE, HEROES,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
@@ -21,7 +21,10 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
-import { MenuVignette } from './menu-vignette.js';
+import {
+  stitchOverworld, Overworld, overworldLayout, gateState,
+  OVERWORLD_SEED, OVERWORLD_SIZE, OVERWORLD_GHOSTS,
+} from './overworld.js';
 import {
   FOG_DARKNESS,
   FOG_EDGE_SOFTNESS,
@@ -37,6 +40,48 @@ const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
+
+// The overworld's renderer half: the headless stitch from overworld.js poured
+// through GameMap's cel terrain pipeline. Each region wears its own level's
+// palette, so the planet reads as the campaign itself.
+class OverworldMap extends GameMap {
+  constructor(campaign = 0) {
+    super(OVERWORLD_SEED, { palette: { water: 0x3d6e8a } }, { size: OVERWORLD_SIZE, nests: 0 });
+    this._owCampaign = campaign;
+    // super() stitched with a zero-campaign blight guess (the ladder is not
+    // known until super returns); re-stitch with the real campaign so locked
+    // fronts bake stained ground on first build. Idempotent — fresh rng.
+    this.generate();
+  }
+
+   generate() {
+     const campaign = this._owCampaign ?? 0;
+     const locked = overworldLayout(this.size).gates.filter((g) => gateState(g, campaign).locked);
+     stitchOverworld(this, { blight: locked });
+   }
+
+   // buildTerrain asks colorOf(tile) without a position — but idx(x, z) is
+   // always called for the same tile first, so the last query tells us where
+   // the color is going. Region palette by position, one biome per band.
+   idx(x, z) { this._q = [x, z]; return super.idx(x, z); }
+
+   regionPalette(x, z) {
+     const r = this.region ? this.region[this.idx(Math.floor(x), Math.floor(z))] : 0;
+     const lv = r >= LEVELS.length ? LABYRINTH_LEVELS[0] : LEVELS[r];
+     return lv.theme.palette;
+   }
+
+   colorOf(t, x, z) {
+     const q = x !== undefined ? [x, z] : this._q;
+     const p = q ? this.regionPalette(q[0], q[1]) : LEVELS[0].theme.palette;
+     const map = {
+       [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
+       [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
+       [TILE.GOLDORE]: p.sand, [TILE.STONEORE]: p.mountain,
+     };
+     return map[t] !== undefined ? map[t] : TILE_INFO[t].color;
+   }
+}
 
 class App {
   constructor() {
@@ -147,7 +192,7 @@ class App {
       onInviteFriend: (userId) => this._inviteFriend(userId),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
-      onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
+      onLevelPick: (id) => { this._updateRoomSettings({ level: id }); },
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
       onModePick: (m) => this._pickSetupMode(m),
       onRoomReady: (ready) => this._setRoomReady(ready),
@@ -255,52 +300,256 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // WC3-style menu: the battlefield lives behind the buttons.
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    // Boot straight onto the overworld: the hero stands on the first front
+    // and the whole campaign is a walk away. The hub is a keystroke away.
+    this._enterOverworld();
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
 
-  // ---------------- menu backdrop ----------------
+  // ---------------- overworld ----------------
+  // The menu is a place: the five fronts stitched onto one small planet,
+  // walked by the player's selected hero. Entering a front's gate starts the
+  // run through the same onStart path the setup screen uses.
 
-  showMenuBackdrop(levelId) {
-    if (this.game) return;
-    const level = levelById(levelId || 1);
-    if (this.menuLevelId === level.id) return;
-    this._clearMenuBackdrop();
-    this.menuLevelId = level.id;
-    const map = new GameMap(level.seed, level.theme);
-    this.menuMap = map;
-    this.menuTerrain = map.buildTerrain();
-    this.scene.add(this.menuTerrain);
-    // The backdrop is not a screensaver: doomed patrols play out last stands
-    // against the horde, using the game's own meshes on the game's own ground.
-    if (!this._menuProjV) this._menuProjV = new THREE.Vector3();
-    this.menuShow = new MenuVignette({
-      scene: this.scene,
-      map,
-      makeUnitMesh: (u) => this._makeUnitMesh(u),
-      zombieMeshes: { body: this.zBody, head: this.zHead, arm: this.zArm, eyes: this.zEyes },
-      burst: (x, y, z, o) => this.burst(x, y, z, o),
-      stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
-      addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
-      dispose3D: (obj) => this._disposeObject3D(obj),
-      light: new THREE.PointLight(0xffd9a2, 0, 34, 1.8),
-      dummy: new THREE.Object3D(),
-      color: new THREE.Color(),
-      project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
+  _enterOverworld() {
+    if (this.game || this.ow) return;
+    this.ui.setOverworldMode(true);
+    const map = new OverworldMap(this.profile.campaign || 0);
+    this.owMap = map;
+    this.ow = new Overworld(map, { campaign: this.profile.campaign || 0 });
+    this.owTerrain = map.buildTerrain();
+    this.scene.add(this.owTerrain);
+    this.owGates = [];
+    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave]) {
+      this.owGates.push(this._makeOverworldGate(gate));
+    }
+    this._makeOverworldHero();
+    this.ui.hideOverlay();
+    this.ui.showBanner('🚶 WASD or arrows to walk · click to set a course · ESC for the war council', '', 6000);
+  }
+
+  _clearOverworld() {
+    if (this.owTerrain) { this.scene.remove(this.owTerrain); this._disposeObject3D(this.owTerrain); }
+    for (const g of this.owGates || []) { this.scene.remove(g); this._disposeObject3D(g); }
+    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
+    for (const m of (this.owGhostMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
+    this.owTerrain = null;
+    this.owGates = [];
+    this.owHero = null;
+    this.owGhostMeshes = new Map();
+    this.owMap = null;
+    this.ow = null;
+    if (this._owGhostChan) { try { this.lobby?.sb?.removeChannel?.(this._owGhostChan); } catch { /* already gone */ } this._owGhostChan = null; }
+  }
+
+  // A front's gate: two posts, a lintel, a banner whose colour is the state
+  // of the war there, and the boss's name overhead. Locked gates stand on
+  // blighted ground with a slow corrupted pulse.
+  _makeOverworldGate(gate) {
+    const st = gateState(gate, this.profile.campaign || 0);
+    const gr = new THREE.Group();
+    const wood = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
+    for (const dx of [-1.5, 1.5]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
+      post.position.set(dx, 1.7, 0);
+      post.castShadow = true;
+      gr.add(post);
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.4, 0.5), wood);
+    lintel.position.y = 3.4;
+    lintel.castShadow = true;
+    gr.add(lintel);
+    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
+    const banner = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.2, 1.1),
+      new THREE.MeshLambertMaterial({ color: bannerColor, side: THREE.DoubleSide }),
+    );
+    banner.position.y = 2.6;
+    gr.add(banner);
+    gr.userData.banner = banner;
+    const ringGeo = new THREE.RingGeometry(2.4, 3.0, 40);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: st.locked ? 0x8a4aff : st.cleared ? 0xc9a44a : 0xfff2d8,
+      transparent: true, opacity: 0.4, depthWrite: false,
+    }));
+    ring.position.y = 0.06;
+    gr.add(ring);
+    gr.userData.ring = ring;
+    const icon = gate.cave ? '🌀' : gate.boss.icon;
+    const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
+    const sub = gate.cave ? 'the trials below' : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
+    const label = this._makeLabelSprite(icon, name);
+    label.position.y = 5.6;
+    label.scale.set(5.2, 2.6, 1);
+    gr.add(label);
+    gr.userData.sub = sub;
+    gr.position.set(gate.x, this.owMap.groundY(gate.x, gate.z), gate.z);
+    gr.userData.gate = gate;
+    this.scene.add(gr);
+    return gr;
+  }
+
+  // The player's chosen hero walks the overworld in miniature — the real unit
+  // mesh, real walk cycle, smaller aura. Rebuilt when the pick changes.
+  _makeOverworldHero() {
+    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
+    const key = this.ui.selectedHero || 'alexander';
+    const def = HEROES[key] || HEROES.alexander;
+    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
+    mesh.scale.setScalar(1.0);
+    this.owHero = mesh;
+    this.scene.add(mesh);
+  }
+
+  _updateOverworld(dt, t) {
+    const ow = this.ow;
+    if (!ow) return;
+    // Steering only while the hub overlay is closed; typing in lobby inputs
+    // already swallows keys, and a menu open over the world means "at ease".
+    if (!this.ui.overlayHidden()) ow.setDir(0, 0);
+    else {
+      let dx = 0, dz = 0;
+      if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
+      if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
+      if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
+      if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
+      ow.setDir(dx, dz);
+    }
+    for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
+
+    const h = ow.hero;
+    if (this.owHero) {
+      this.owHero.position.set(h.x, this.owMap.groundY(h.x, h.z), h.z);
+      this.owHero.rotation.y = h.facing;
+      // The real walk cycle from _syncUnits, mirrored here so the overworld
+      // hero moves like he does in a fight.
+      const pose = unitPose(h.moving ? 'run' : 'idle', t * (h.moving ? 10 : 1.8));
+      const body = this.owHero.userData.body;
+      if (body) {
+        body.position.y = pose.y;
+        body.rotation.z = pose.roll;
+      }
+      const limbs = this.owHero.userData.limbs;
+      if (limbs) {
+        if (limbs.legL) limbs.legL.rotation.x = pose.stride;
+        if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
+        if (limbs.armL) limbs.armL.rotation.x = -pose.stride * 0.55;
+        if (limbs.armR) limbs.armR.rotation.x = pose.stride * 0.55;
+      }
+    }
+
+    // Gates breathe: locked ones pulse a corrupted violet, open ones ripple
+    // gently, and every banner sways on its pole.
+    for (const gr of this.owGates) {
+      const st = gateState(gr.userData.gate, this.profile.campaign || 0);
+      const ph = (t * 0.7) % 1;
+      gr.userData.ring.material.opacity = st.locked
+        ? 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))
+        : 0.3 * (1 - ph * 0.6);
+      gr.userData.ring.scale.setScalar(1 + ph * 0.12);
+      gr.userData.banner.rotation.y = Math.sin(t * 1.8 + gr.position.x) * 0.22;
+    }
+    this._updateOverworldGhosts(dt, t);
+  }
+
+  _onOverworldEvent(ev) {
+    if (ev.t !== 'gate') return;
+    if (ev.state.locked) {
+      this.shake = 0.35;
+      this.audio.deny();
+      this.ui.showBanner('🔒 The road ends here — take the front before it first.', 'bad', 2600);
+      return;
+    }
+    this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
+    this.ui.showGateConfirm({
+      gate: ev.gate,
+      diff: this.ui.selectedDiff,
+      onEnter: (diff) => {
+        if (ev.gate.cave) {
+          this.ui.selectedMode = 'labyrinth';
+          this.ui.showSetup({ mode: 'labyrinth' });
+          this.ui.hideOverlay();
+          return;
+        }
+        // Same path the setup screen's START button takes; only the level
+        // selection is made by geography instead of a card click.
+        this.ui.selectedMode = 'campaign';
+        this.ui.selectedLevel = ev.gate.levelId;
+        this.ui.selectedDiff = diff;
+        this.ui.cb.onStart(diff, this.ui.selectedHero);
+      },
     });
   }
 
-  _clearMenuBackdrop() {
-    if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
-    if (this.menuTerrain) {
-      this.scene.remove(this.menuTerrain);
-      this._disposeObject3D(this.menuTerrain);
-      this.menuTerrain = null;
+  // ----- multiplayer ghosts: presence garnish, never game netcode -----
+
+  _owGhostSend(payload) {
+    if (!OVERWORLD_GHOSTS || !this.lobby?.connected || !this.lobby.sb || !this.lobby.me) return;
+    try {
+      if (!this._owGhostChan) {
+        this._owGhostChan = this.lobby.sb.channel('zl-overworld')
+          .on('broadcast', { event: 'pos' }, ({ payload: p }) => {
+            if (!this.ow || !p || p.id === this.lobby.me.id) return;
+            this.ow.ghostUpsert(p.id, p, this.ow.time);
+            if (p.enter) this._owGhostNote(p);
+          })
+          .subscribe();
+      }
+      const res = this._owGhostChan.send({ type: 'broadcast', event: 'pos', payload });
+      if (res && res.catch) res.catch(() => {});
+    } catch { /* the overworld is walkable alone */ }
+  }
+
+  _updateOverworldGhosts(dt, t) {
+    if (!OVERWORLD_GHOSTS) return;
+    this._owGhostAcc = (this._owGhostAcc || 0) + dt;
+    if (this._owGhostAcc >= 0.25) {
+      this._owGhostAcc = 0;
+      const h = this.ow.hero;
+      this._owGhostSend({
+        id: this.lobby?.me?.id || 'local',
+        name: this._publicName(),
+        hero: this.ui.selectedHero,
+        x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
+        enter: this.owEnterNote || undefined,
+      });
+      this.owEnterNote = null;
+      this.ow.ghostSweep(6, this.ow.time);
     }
-    this.menuMap = null;
-    this.menuLevelId = null;
+    this.owGhostMeshes = this.owGhostMeshes || new Map();
+    for (const [id, g] of this.ow.ghosts) {
+      let mesh = this.owGhostMeshes.get(id);
+      if (!mesh) {
+        const def = HEROES[g.hero] || HEROES.alexander;
+        mesh = this._makeUnitMesh({ hero: true, key: g.hero, def, auraRadius: 1.3 });
+        mesh.scale.setScalar(0.92);
+        mesh.userData.label = this._makeLabelSprite('👤', g.name);
+        mesh.userData.label.position.y = 2.6;
+        mesh.userData.label.scale.set(3.4, 1.7, 1);
+        mesh.add(mesh.userData.label);
+        this.scene.add(mesh);
+        this.owGhostMeshes.set(id, mesh);
+      }
+      mesh.position.set(g.x, this.owMap.groundY(g.x, g.z), g.z);
+      mesh.userData.label.material.opacity = 0.85;
+    }
+    for (const [id, mesh] of this.owGhostMeshes) {
+      if (!this.ow.ghosts.has(id)) {
+        this.scene.remove(mesh);
+        this._disposeObject3D(mesh);
+        this.owGhostMeshes.delete(id);
+      }
+    }
+    void t;
+  }
+
+  // "X entered Greenfall Marches" — the hub chat strip doubles as the war
+  // report for whoever is walking the same planet.
+  _owGhostNote(p) {
+    this._hubChatLog = [...(this._hubChatLog || []), { name: p.name || 'A commander', text: `entered ${p.enter}` }];
+    this.ui.hubChat(this._hubChatLog);
   }
 
   // ---------------- game start ----------------
@@ -316,7 +565,7 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
-    this._clearMenuBackdrop();
+    this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
@@ -771,6 +1020,9 @@ class App {
 
   _pickHero(key) {
     const msg = this._heroPayload(key);
+    // On the overworld the pick is visible immediately: the walking hero is
+    // rebuilt from the new unit def.
+    if (!this.game && this.ow) this._makeOverworldHero();
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
     if (this.lobby?.game) {
@@ -985,7 +1237,6 @@ class App {
     console.error('saved game restore failed', error);
     try { localStorage.removeItem('zillions_save'); } catch { /* blocked storage */ }
     this.ui.setContinue(null);
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
     this.ui.showBanner('That save could not be restored and was removed. Start a new war.', 'bad', 8000);
     if (this.auth?.isSignedIn()) {
       this.auth.clearLatestSave().catch((cloudError) => console.warn('cloud save clear failed', cloudError));
@@ -1611,9 +1862,6 @@ class App {
     if (this.mpRole && this.mpRole !== 'host') return;
     if ((this.ui.selectedMode || 'campaign') === m) return;
     this.ui.applySetupMode(m);
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
-    // Online rooms persist the retarget (and clear every guest Ready vote);
-    // manual co-op just re-broadcasts the roster so guests see the new mode.
     this._updateRoomSettings({ mode: m, level: this.ui.selectedLevel || 1 });
     this._syncSetupRoster();
   }
@@ -3888,7 +4136,16 @@ class App {
         else this.ui._showScreen('heroes');
         return;
       }
-      if (!this.game) return;
+      if (!this.game) {
+        // The overworld owns Escape: the hub slides in as a translucent
+        // overlay and slides back out — the walk never stops underneath.
+        if (k === 'escape') {
+          e.preventDefault();
+          this.ui.toggleOverlay();
+          return;
+        }
+        return;
+      }
       if (k === ' ') {
         e.preventDefault();
         // Space follows the current control mode. Build mode never fires the
@@ -3919,7 +4176,23 @@ class App {
     }, { passive: false });
 
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
-    cv.addEventListener('pointerdown', () => this.audio.init());
+    cv.addEventListener('pointerdown', (e) => {
+      this.audio.init();
+      // Overworld click-to-move: a course set on the ground itself.
+      if (!this.game && this.ow && e.button === 0 && this.ui.overlayHidden()) {
+        this._owMouse = this._owMouse || new THREE.Vector2();
+        this._owRay = this._owRay || new THREE.Raycaster();
+        this._owPlane = this._owPlane || new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        this._owHit = this._owHit || new THREE.Vector3();
+        this._owMouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+        this._owRay.setFromCamera(this._owMouse, this.camera);
+        if (this._owRay.ray.intersectPlane(this._owPlane, this._owHit)) {
+          this._owHit.x = clamp(this._owHit.x, 1, this.owMap.size - 1);
+          this._owHit.z = clamp(this._owHit.z, 1, this.owMap.size - 1);
+          this.ow.setTarget(this._owHit.x, this._owHit.z);
+        }
+      }
+    });
   }
 
   // WASD → hero direction, sent through the lockstep pipe only on change.
@@ -4103,6 +4376,28 @@ class App {
   }
 
   _updateCamera(dt) {
+    if (!this.game && this.ow) {
+      // Overworld: the game camera glued to the walking hero — same iso
+      // angle, same soft lag, so the menu feels like the game's first step.
+      const h = this.ow.hero;
+      const k = 1 - Math.exp(-6 * dt);
+      this.focus.x += (h.x - this.focus.x) * k;
+      this.focus.z += (h.z - this.focus.z) * k;
+      this.focus.x = clamp(this.focus.x, 2, this.owMap.size - 2);
+      this.focus.z = clamp(this.focus.z, 2, this.owMap.size - 2);
+      this.focus.y += (Math.max(0, this.owMap.groundY(this.focus.x, this.focus.z)) - this.focus.y) * (1 - Math.exp(-4 * dt));
+      const dist = 30;
+      const elev = 0.78;
+      this.camera.position.set(
+        this.focus.x + Math.sin(this.camYaw) * Math.cos(elev) * dist,
+        this.focus.y + Math.sin(elev) * dist,
+        this.focus.z + Math.cos(this.camYaw) * Math.cos(elev) * dist,
+      );
+      this.camera.lookAt(this.focus);
+      this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
+      this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+      return;
+    }
     if (!this.game) {
       // Menu: slow cinematic orbit over the battlefield.
       this.menuYaw += dt * 0.05;
@@ -4696,7 +4991,7 @@ class App {
     // Watch the game while it runs, and the menu while the attract show does —
     // the vignettes put real load on the backdrop, so the menu gets the same
     // safety net a live siege has.
-    const active = this.game ? !this.paused : !!this.menuShow;
+    const active = this.game ? !this.paused : !!this.ow;
     if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
@@ -4889,7 +5184,7 @@ class App {
       }
     }
 
-    if (!this.game && this.menuShow) this.menuShow.update(dt, t);
+    if (!this.game && this.ow) this._updateOverworld(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

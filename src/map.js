@@ -319,8 +319,9 @@ export class GameMap extends TerrainField {
       pos.y = gy + (0.5 + 0.45) * s.s;
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
-      // Canopies key off the map's forest color — one hue family per map.
-      c.setHex(this.colorOf(TILE.FOREST));
+      // Canopies key off the map's forest color — one hue family per map
+      // (position-aware so a stitched map can vary palette by region).
+      c.setHex(this.colorOf(TILE.FOREST, s.x, s.z));
       c.offsetHSL((rng() - 0.5) * 0.02, 0.04, (rng() - 0.5) * 0.06 - 0.02);
       canopies.setColorAt(i, c);
     }
