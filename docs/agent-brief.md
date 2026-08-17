@@ -19,9 +19,10 @@ nests, and clears campaign maps.
 
 Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 
-- Both sides run an economy. Camps muster a squad every `every` seconds forever
-  and sustain a standing force of `count * CAMP_STANDING`. Every living hive
-  musters its own squads on `hiveInterval(threat)`.
+- Both sides run an economy. Each living camp musters its full squad every
+  `every` seconds forever. There is no troop supply cap. Destroyed or ruined
+  producers stop. Every living hive musters its own squads on
+  `hiveInterval(threat)`.
 - Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
   your own conquests. Each whole level triggers a surge — every hive musters at
   once at `SURGE_MULT`.
@@ -131,8 +132,8 @@ does not run an end-to-end victory bot today.
 Current automated guarantees:
 
 - `scripts/balance-check.mjs` checks opening economy, upgrade payback, upgrade
-  access, structure repair, construction refunds, supply, Threat, and campaign
-  scaling invariants.
+  access, structure repair, construction refunds, continuous troop production,
+  Threat, and campaign scaling invariants.
 - `scripts/map-check.mjs` checks all five authored maps, early procedural
   planets, route reachability, city closure, gates, troop exits, expansion-fort
   spacing, loot, and two minutes of siege.

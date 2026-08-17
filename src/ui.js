@@ -916,12 +916,8 @@ export class UI {
         guard: 'following your hero',
         attack: 'pushing the lanes',
       }[game.stance] || 'awaiting orders';
-      // Show the supply ceiling, not just the count: when it is full, the way
-      // to field more is to go and take more ground.
-      const cap = game.unitCap ? game.unitCap() : army;
-      const full = army >= cap;
       q('#army-status').innerHTML = army
-        ? `<b>${army}</b>/${cap} supply · ${stanceText}${full ? ' · <b>take ground for more</b>' : ''}`
+        ? `<b>${army}</b> troops · ${stanceText} · living camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;

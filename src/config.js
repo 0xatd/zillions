@@ -9,20 +9,6 @@ import { makeRNG } from './utils.js';
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
 export const ZOMBIE_CAP = 1600;
-// Supply comes from TERRITORY. A commander who has taken half the planet can
-// field more than one penned into a city — and without this the player's power
-// is flat while Threat rises forever, which leaves them sitting on a pile of
-// gold with nothing to buy and no way to crack the last hive.
-// Measured as a SHARE of the planet, not a count of nodes. Counting nodes made
-// bigger maps easier — more nodes meant more supply meant a bigger army — which
-// is why the five-hive map used to finish faster than the three-hive one.
-// Holding the whole planet is worth the same army whatever size the planet is.
-export const SUPPLY = {
-  base: 42,        // what the city alone can sustain
-  perPlanet: 72,   // added at 100% of the planet's lane nodes held
-  max: 130,        // absolute ceiling, for the simulation's sake
-};
-export const UNIT_CAP = SUPPLY.max;   // hard ceiling; the live cap is Game.unitCap()
 
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range

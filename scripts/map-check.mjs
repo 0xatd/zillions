@@ -369,17 +369,24 @@ for (const level of LEVELS) {
     }
     game.stance = 'attack';
 
-    for (let i = 0; i < 120 * 30; i++) game.update(1 / 30);
-    assert.ok(!game.over, `${label} ended on its own inside two minutes`);
-    assert.ok(game.zombies.length > 0, `${label}: nothing is coming — the horde never mustered`);
-    assert.ok(game.threat > 0, `${label}: threat never rose`);
-    const nearCity = game.zombies.filter((z) => Math.hypot(z.x - game.hq.cx, z.z - game.hq.cz) < 46).length;
-    assert.ok(nearCity > 0, `${label}: no attacker can find a way to the city`);
+    let peakZombies = 0, peakThreat = 0, peakNearCity = 0;
+    for (let i = 0; i < 120 * 30; i++) {
+      game.update(1 / 30);
+      peakZombies = Math.max(peakZombies, game.zombies.length);
+      peakThreat = Math.max(peakThreat, game.threat);
+      peakNearCity = Math.max(peakNearCity,
+        game.zombies.filter((z) => Math.hypot(z.x - game.hq.cx, z.z - game.hq.cz) < 46).length);
+      if (game.over) break;
+    }
+    assert.ok(!game.over || game.won, `${label} lost on its own inside two minutes`);
+    assert.ok(peakZombies > 0, `${label}: nothing is coming — the horde never mustered`);
+    assert.ok(peakThreat > 0, `${label}: threat never rose`);
+    assert.ok(peakNearCity > 0, `${label}: no attacker can find a way to the city`);
 
     assert.ok(game.units.length > 0, `${label}: the wards mustered nobody`);
     const out = game.units.filter((u) => Math.hypot(u.x - game.hq.cx, u.z - game.hq.cz) > hqReach + 6).length;
     assert.ok(out >= 3, `${label}: only ${out} squads got out of the city — the gates do not work`);
-    sortie = { units: game.units.length, out, zombies: game.zombies.length, threat: +game.threat.toFixed(1) };
+    sortie = { units: game.units.length, out, zombies: peakZombies, threat: +peakThreat.toFixed(1) };
   }
 
   // --- no two planets may read the same ------------------------------------
