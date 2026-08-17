@@ -655,7 +655,7 @@ export const NEST_HP_LEVEL_SHARE = 0.8;   // hp = base * (1 - share + share * le
 
 export const LEVELS = [
   {
-    id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8, size: 160, nests: 3,
+    id: 1, name: 'Greenfall Marches', seed: 20101, mult: 0.8, size: 200, nests: 3,
     economy: { startGold: 58, income: 1.0, pressure: 0.9 },
     quests: [
       { id: 'l1q1', name: 'First Blood', desc: 'Slay 150 of the dead', reward: 'targeting_optic', check: (g) => g.stats.kills >= 150 },
@@ -670,7 +670,7 @@ export const LEVELS = [
       desc: 'A mountain of meat and cleavers. Enrages at half health.' },
   },
   {
-    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 160, nests: 3,
+    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 200, nests: 3,
     economy: { startGold: 64, income: 1.04, pressure: 0.96 },
     quests: [
       { id: 'l2q1', name: 'Drain the Fen', desc: 'Raze 2 hive nests', reward: 'tithe_ledger', check: (g) => g.stats.nests >= 2 },
@@ -685,7 +685,7 @@ export const LEVELS = [
       desc: 'Every few seconds she births another brood. Kill her fast.' },
   },
   {
-    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 160, nests: 4,
+    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 200, nests: 4,
     economy: { startGold: 72, income: 1.08, pressure: 1.0 },
     quests: [
       { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
@@ -703,7 +703,7 @@ export const LEVELS = [
       desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
   },
   {
-    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 160, nests: 4,
+    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 200, nests: 4,
     economy: { startGold: 82, income: 1.12, pressure: 1.04 },
     quests: [
       { id: 'l4q1', name: 'Tomb Raider', desc: 'Raze 3 hive nests', reward: 'ballistics_manual', check: (g) => g.stats.nests >= 3 },
@@ -718,7 +718,7 @@ export const LEVELS = [
       desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
   },
   {
-    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 160, nests: 5,
+    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 200, nests: 5,
     economy: { startGold: 96, income: 1.16, pressure: 1.08 },
     quests: [
       { id: 'l5q1', name: 'Blind the Eye', desc: 'Kill The Zillion within 120s', reward: 'void_shard', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 120 },
@@ -863,7 +863,7 @@ export function galaxyLevel(id) {
   // Frontier worlds are big and get bigger: more ground between you and the
   // hives, longer lanes, more room for the front to be a place. Capped where
   // the flow-field and mesh still stay comfortable.
-  const size = Math.min(220, 172 + n * 6);
+  const size = Math.min(248, 192 + n * 6);
   return {
     id, name, galaxy: true, seed: (77000 + id * 613) >>> 0,
     mult, size, nests,
