@@ -121,6 +121,7 @@ class App {
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onSettings: (s) => this.applySettings(s),
       onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
@@ -229,6 +230,9 @@ class App {
 
     this.ui.setProfile(this.profile);
     this.ui.setQualityUI(this.tacticalVisuals.quality);
+    // Settings restore: volumes apply inside AudioSys before any sound;
+    // UI controls sync to whatever was persisted.
+    this.ui.setSettingsUI(this._restoreSettings());
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -3583,6 +3587,29 @@ class App {
     else if (this.netMode) { this.paused = false; }
     else { this.speed = s; this.paused = false; }
     this.ui.setSpeedUI(this.speed, this.paused);
+  }
+
+  // Settings: apply immediately and persist to localStorage. Volume and mute
+  // compose inside AudioSys (gain = base * volume, or 0 when muted); quality
+  // routes through TacticalVisuals so lockstep sim state stays untouched.
+  applySettings(s = {}) {
+    try {
+      const cur = JSON.parse(localStorage.getItem('zillions_settings') || '{}');
+      localStorage.setItem('zillions_settings', JSON.stringify({ ...cur, ...s }));
+    } catch { /* storage can be blocked */ }
+    if (s.volume !== undefined) this.audio.setVolume(s.volume);
+    if (s.music !== undefined) this.audio.setMusicVolume(s.music);
+    if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
+    if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
+  }
+
+  _restoreSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem('zillions_settings') || '{}'); } catch { /* ignore */ }
+    if (s.volume !== undefined) this.audio.setVolume(s.volume);
+    if (s.music !== undefined) this.audio.setMusicVolume(s.music);
+    if (s.sfx === false) this.audio.setMuted(true);
+    return s;
   }
 
   pause() {
