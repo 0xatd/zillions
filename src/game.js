@@ -2125,7 +2125,7 @@ export class Game {
       }
     }
     this.wakeZombies(h.x, h.z, 8);
-    this.emit({ type: 'cast', x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
+    this.emit({ type: 'cast', heroId: h.id, x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
   }
 
   _updateHero(dt) {

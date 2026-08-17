@@ -22,12 +22,26 @@
     <aside>
       <label for="asset">Asset</label>
       <select id="asset"></select>
+      <label for="state">State review</label>
+      <select id="state">
+        <option value="auto">Automatic showcase</option>
+        <option value="idle">Idle / operational</option>
+        <option value="run">Run</option>
+        <option value="attack">Attack</option>
+        <option value="cast">Cast</option>
+        <option value="hit">Hit / impact</option>
+        <option value="down">Down</option>
+        <option value="constructing">Construction</option>
+        <option value="damaged">Damaged</option>
+        <option value="critical">Critical</option>
+      </select>
       <label><input id="silhouette" type="checkbox"> Silhouette review</label>
       <label><input id="close" type="checkbox"> Close inspection</label>
       <dl>
         <dt>Normal view</dt><dd>Matches the battlefield camera angle.</dd>
         <dt>Silhouette</dt><dd>Removes surface color. Identity must remain.</dd>
         <dt>Close</dt><dd>Checks joins, clipping, and sockets.</dd>
+        <dt>State</dt><dd>Checks motion and damage readability before gameplay QA.</dd>
       </dl>
       <div id="status" role="status">Loading...</div>
     </aside>
