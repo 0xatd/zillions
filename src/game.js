@@ -444,12 +444,14 @@ export class Game {
     this.rng.setState(snap.rng);
     setNextId(snap.nextId);
     this.flowDirty = true;
-    if (this.mode === 'labyrinth' && snap.flowSeeds) {
+    if (this.mode === 'labyrinth' && Array.isArray(snap.flowSeeds)) {
       // Rebuild the exact hunting field the save was using — recomputing from
       // the heroes' restored positions would give a slightly different field
-      // and desync a restored peer from an uninterrupted one.
+      // and desync a restored peer from an uninterrupted one. Empty seeds
+      // (every hero down, revives pending) still compute: that fills the
+      // field with Infinity, matching the live game's state at that moment.
       this._flowSeeds = [...snap.flowSeeds];
-      if (this._flowSeeds.length) this.flow.compute(this.occ, this._flowSeeds, this.gateIds);
+      this.flow.compute(this.occ, this._flowSeeds, this.gateIds);
       this.flowDirty = false;
       this.flowTimer = snap.flowT ?? 0;
     }
@@ -485,7 +487,7 @@ export class Game {
     const start = this._labyrinthStart();
     this.checkpoint = { x: start.x, z: start.z };
     this._pruneUnreachable(start);
-    const spawns = this._sanctuarySpawnPoints(start, this.heroSetups.length);
+    const spawns = this._frontierSpawnPoints(this.heroSetups.length, start);
     this.heroSetups.forEach((e, i) => this._spawnHero(e.k, spawns[i][0], spawns[i][1], e.camp));
     this._scatterCreeps();
     this._scatterLoot();
@@ -545,27 +547,6 @@ export class Game {
     for (const node of this.nodes) node.offMap = !reachable(node.x, node.z);
   }
 
-  // Heroes start together on the sanctuary's connected walkable ground.
-  _sanctuarySpawnPoints(start, count) {
-    const N = this.map.size;
-    const sx = Math.round(start.x), sz = Math.round(start.z);
-    const queue = [[sx, sz]];
-    const seenKeys = new Set([sz * N + sx]);
-    const spots = [];
-    for (let i = 0; i < queue.length && spots.length < Math.max(1, count); i++) {
-      const [x, z] = queue[i];
-      if (this.map.isWalkable(x, z)) spots.push([x + 0.5, z + 0.5]);
-      for (const [dx, dz] of DIR4) {
-        const nx = x + dx, nz = z + dz, k = nz * N + nx;
-        if (nx <= 0 || nz <= 0 || nx >= N - 1 || nz >= N - 1 || seenKeys.has(k)) continue;
-        seenKeys.add(k);
-        if (this.map.isWalkable(nx, nz)) queue.push([nx, nz]);
-      }
-    }
-    while (spots.length < Math.max(1, count)) spots.push([sx + 0.5, sz + 0.5]);
-    return spots;
-  }
-
   // A razed chamber offers each player a choice of three blessings. Offers are
   // drawn from the shared seeded RNG in player order, so lockstep peers draw
   // identically; a new razing overwrites an ignored older offer.
@@ -603,9 +584,12 @@ export class Game {
   // water, or crag there, so fixed centre coordinates can seal an entire
   // co-op party inside impassable ground. Find the nearest connected patch of
   // walkable tiles and place every hero on that patch deterministically.
-  _frontierSpawnPoints(count) {
+  // `anchor` overrides the search centre (the labyrinth anchors on its start
+  // sanctuary instead of the map middle).
+  _frontierSpawnPoints(count, anchor = null) {
     const N = this.map.size;
-    const cx = N >> 1, cz = N >> 1;
+    const cx = anchor ? Math.round(anchor.x) : N >> 1;
+    const cz = anchor ? Math.round(anchor.z) : N >> 1;
     const candidates = [];
     for (let z = 1; z < N - 1; z++) {
       for (let x = 1; x < N - 1; x++) {
@@ -2903,7 +2887,11 @@ export class Game {
           }
         }
       }
-      if (sources.length) this.flow.compute(this.occ, sources, this.gateIds);
+      // Always compute, even with zero sources: an empty compute fills the
+      // field with Infinity, which is what "nothing to hunt" must read as.
+      // Skipping it would leave the buffer's initial zeros — every idle creep
+      // on the map would read "the objective is right here" and wake.
+      this.flow.compute(this.occ, sources, this.gateIds);
       this.flowDirty = false;
       this.flowTimer = this.mode === 'labyrinth' ? 0.8 : 2.5;
     }
@@ -3077,13 +3065,15 @@ export class Game {
       // 4) Follow the flow field toward the city (or, in the labyrinth, the
       // heroes — the field is seeded on them there).
       const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
-      const anchor = this.hq && this.hq.alive ? { x: this.hq.cx, z: this.hq.cz } : this._nearestHeroPoint(zb);
       if (dir) {
         this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true);
-      } else if (anchor) {
-        // Off the flow field (local dead spot) — shamble straight at the
-        // objective until the field picks us up again. Horde zombies never
-        // give up.
+        continue;
+      }
+      // Off the flow field (local dead spot) — shamble straight at the
+      // objective until the field picks us up again. Horde zombies never give
+      // up. The anchor is only resolved here, on the rare dead-spot path.
+      const anchor = this.hq && this.hq.alive ? { x: this.hq.cx, z: this.hq.cz } : this._nearestHeroPoint(zb);
+      if (anchor) {
         const dx = anchor.x - zb.x, dz = anchor.z - zb.z;
         const d = Math.hypot(dx, dz) || 1;
         this._moveZombie(zb, dx / d, dz / d, zb.def.chase * 0.7 * zb.speedMul, dt, true);

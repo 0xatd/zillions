@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { TerrainField } from '../src/terrain.js';
 import { Game } from '../src/game.js';
 import {
-  LABYRINTH_LEVELS, LABYRINTH_LIVES, BLESSING_KEYS, SIM_DT, ITEMS, isLabyrinthLevel, levelById,
+  LEVELS, LABYRINTH_LEVELS, LABYRINTH_LIVES, BLESSING_KEYS, SIM_DT, ITEMS, isLabyrinthLevel, levelById,
 } from '../src/config.js';
 
 // Canonical hash: key order varies between a fresh and a restored sim (e.g.
@@ -154,4 +154,41 @@ for (const lv of LABYRINTH_LEVELS) {
   assert.equal(g2.lives, g.lives, 'shared lives must survive restore');
 }
 
-console.log(`labyrinth check passed: ${LABYRINTH_LEVELS.length} trials — setup, hunting flow, blessings, restore determinism, finale, lives, and 3-player co-op all hold`);
+// -- shared _updateFlow seam: the labyrinth's hero-seeded flow must not
+// change founding-phase behavior in the other modes. An empty compute fills
+// the field with Infinity ("nothing to hunt"); skipping it would leave the
+// buffer's initial zeros and wake every idle creep on the map at once. --
+{
+  const lv = LEVELS[0];
+  const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
+  const g = new Game(map, 'normal', 'scott', null, lv.id, 'campaign');
+  assert.equal(g.phase, 'found');
+  for (let i = 0; i < Math.ceil(10 / SIM_DT); i++) g.update(SIM_DT);
+  const aggro = g.zombies.filter((zb) => zb.state === 2).length;
+  assert.ok(aggro <= 30,
+    `found-phase creeps must stay idle with nothing built — ${aggro}/${g.zombies.length} are aggro (the empty flow field is reading as "objective everywhere")`);
+}
+
+// -- restore determinism while EVERY hero is down (revives pending): the
+// snapshotted flow seeds are empty at that moment, and restore must rebuild
+// the same all-Infinity field the live game had, not skip the compute. --
+{
+  const lv = LABYRINTH_LEVELS[0];
+  const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
+  const g = new Game(map, 'normal', 'scott', null, lv.id, 'labyrinth');
+  for (let i = 0; i < 90; i++) g.update(SIM_DT);
+  const h = g.heroes[0];
+  g._damageUnit(h, h.hp + h.shieldHp + 1);
+  assert.ok(h.dead && !h.fallen, 'the hero should be down with a revive pending');
+  for (let i = 0; i < 60; i++) g.update(SIM_DT); // past a flow recompute with zero living seeds
+  const mid = g.snapshot();
+  assert.equal((mid.flowSeeds || []).length, 0, 'expected an all-dead snapshot with empty flow seeds');
+  for (let i = 0; i < 300; i++) g.update(SIM_DT);
+  const uninterrupted = hash(g.snapshot());
+  const g2 = new Game(map, 'normal', 'scott', mid, lv.id, 'labyrinth');
+  for (let i = 0; i < 300; i++) g2.update(SIM_DT);
+  assert.equal(hash(g2.snapshot()), uninterrupted,
+    'a run restored from an all-heroes-down snapshot diverged from the uninterrupted one');
+}
+
+console.log(`labyrinth check passed: ${LABYRINTH_LEVELS.length} trials — setup, hunting flow, blessings, restore determinism (including all-heroes-down), finale, lives, 3-player co-op, and the found-phase flow seam all hold`);

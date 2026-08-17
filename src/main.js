@@ -807,7 +807,7 @@ class App {
       mode: this.ui.selectedMode || 'campaign',
     });
     if (this.mpRole === 'host' && this.peers.length) {
-      this._broadcast({ t: 'lobbyRoster', n: players.length, players });
+      this._broadcast({ t: 'lobbyRoster', n: players.length, players, mode: this.ui.selectedMode || 'campaign' });
     }
     return players;
   }
@@ -1096,7 +1096,7 @@ class App {
       this.mpSeat = m.n;
       this.ui.mpConnected(false, m.n, this._guestRoster(m.players, m.n));
     }
-    else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: this.ui.selectedMode || 'campaign' });
+    else if (m.t === 'lobbyRoster') this.ui.roomRoster(this._guestRoster(m.players, this.mpSeat || 2), { isHost: false, mode: m.mode || this.ui.selectedMode || 'campaign' });
     else if (m.t === 'w') {
       // While a resync snapshot is being rebuilt, bank every window on the
       // side — the fresh sim needs the ones sent since the snapshot froze.
@@ -1578,7 +1578,9 @@ class App {
   // solo/manual-invite screen — a guest's click must not fork their view of
   // the room.
   _pickSetupMode(m) {
-    if (this.onlineMode && this.lobby?.game && this.mpRole !== 'host') return;
+    // Any kind of guest — online room or manual invite — must not retarget
+    // their local view; the host's setup is the room's truth.
+    if (this.mpRole && this.mpRole !== 'host') return;
     if ((this.ui.selectedMode || 'campaign') === m) return;
     this.ui.applySetupMode(m);
     this.showMenuBackdrop(this.ui.selectedLevel || 1);

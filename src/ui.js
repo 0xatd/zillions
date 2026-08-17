@@ -691,7 +691,7 @@ export class UI {
     for (const id of ids) {
       const lv = levelById(id);
       const locked = allUnlocked ? false : lv.id > cleared + 1;
-      const done = lv.id <= cleared;
+      const done = labyrinth ? !!(this._labyrinthClears || {})[lv.id] : lv.id <= cleared;
       // Landform and city plan are part of what a level IS — say so before
       // the player commits twenty minutes to it.
       const land = (TERRAIN_SHAPES[lv.theme.terrain] || {}).label || 'frontier';
@@ -1212,6 +1212,7 @@ export class UI {
   }
 
   setProfile(p) {
+    this._labyrinthClears = p.labyrinthClears || {};
     const nameEl = this.root.querySelector('#prof-name-display');
     const publicName = p.username || p.name || 'Commander';
     if (nameEl) nameEl.textContent = `🪖 @${publicName}`;
