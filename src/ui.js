@@ -111,22 +111,23 @@ export class UI {
         </div>
 
         <div id="screen-main" class="mainmenu">
-          <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
+          <div class="brandblock">
+            <div class="brandeyebrow">CO-OP FRONTIER DEFENSE</div>
+            <h1 class="gametitle">ZILLIONS</h1>
+            <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
+          </div>
           <div class="menustack homeactions">
             <button class="menubtn primary playonline" id="m-online">
-              <span class="menuicon">🌐</span>
-              <span><b>PLAY ONLINE</b><small>create · join · browse · watch</small></span>
+              <span class="cta"><b>PLAY</b><small>ONLINE &nbsp;·&nbsp; create · join · watch</small></span>
               <span class="menuarrow">›</span>
             </button>
             <button class="menubtn" id="m-solo">
-              <span class="menuicon">⚔️</span>
-              <span><b>PLAY SOLO</b><small>story campaign · endless survival · the labyrinth</small></span>
+              <span class="cta"><b>PLAY SOLO</b><small>campaign · survival · the labyrinth</small></span>
               <span class="menuarrow">›</span>
             </button>
             <div class="menuutilities">
-              <button class="utilitybtn" id="m-help">📜 How to play</button>
-              <button class="utilitybtn" id="m-settings">⚙️ Settings</button>
+              <button class="utilitybtn" id="m-help">How to play</button>
+              <button class="utilitybtn" id="m-settings">⚙ Settings</button>
             </div>
           </div>
           <div class="profilerow">
