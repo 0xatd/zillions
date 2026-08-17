@@ -19,7 +19,7 @@ const tileHash = (f) =>
 
 // 1. Deterministic: the same descriptor stitches the same planet byte for
 // byte. The reference includes Earth's authored Orbital Lift terrace.
-const EARTH_HASH = 'ee5defcfc1c992f03fe31df4b43a0979a3e4509e7bf8030beff2ca00f95c447e';
+const EARTH_HASH = 'PENDING_CUSTOM_GATE_HASH';
 const a = new OverworldField(earthWorldDescriptor(0));
 const b = new OverworldField(earthWorldDescriptor(0));
 assert.equal(tileHash(a), EARTH_HASH, 'Earth tiles are byte-stable across the descriptor refactor');
@@ -35,9 +35,10 @@ assert.notDeepEqual([...a.tiles], [...c.tiles], 'overworld must consume its rng'
 
 // 2. Gates: all five fronts plus the labyrinth mouth, in march order.
 const layout = overworldLayout(earthWorldDescriptor(0));
-assert.equal(layout.gates.length, LEVELS.length + 1, 'one gate per campaign front plus the Orbital Lift');
+assert.equal(layout.gates.length, LEVELS.length + 2, 'one gate per campaign front plus Custom Games and the Orbital Lift');
 assert.deepEqual(layout.gates.filter((g) => !g.portal).map((g) => g.levelId), LEVELS.map((l) => l.id), 'gates map to level ids in order');
-assert.ok(layout.gates.at(-1).portal, 'Earth has a physical route to the galaxy map');
+assert.ok(layout.gates.some((g) => g.portal && g.action === 'custom'), 'Earth has a physical Custom Games arch');
+assert.ok(layout.gates.some((g) => g.portal && !g.action), 'Earth has a physical route to the galaxy map');
 assert.ok(layout.cave.cave && layout.cave.trials.length === LABYRINTH_LEVELS.length, 'the cave leads to the trials');
 
 // 3. Reachable: every gate stands on walkable ground connected to the spawn
