@@ -109,6 +109,16 @@ for (const level of LEVELS) {
         }
       }
       assert.ok(ok, `${label}: lane node ${nd.kind} at ${nd.x | 0},${nd.z | 0} is unreachable from ${map.sites[0].name}`);
+      // The current outpost progression is a 2x2 fort centered exactly on the
+      // flag. A reachable flag is still broken if that footprint is submerged
+      // or buried in forest/crag.
+      const x0 = (nd.x | 0) - 1, z0 = (nd.z | 0) - 1;
+      for (let z = z0; z < z0 + 2; z++) {
+        for (let x = x0; x < x0 + 2; x++) {
+          assert.ok(map.isBuildable(x, z),
+            `${label}: lane node ${nd.kind} at ${nd.x | 0},${nd.z | 0} has an unbuildable outpost foundation`);
+        }
+      }
     }
     // Buildable pockets outside the main flood must be scenery-sized (<6 tiles).
     const claimed = new Uint8Array(N * N);

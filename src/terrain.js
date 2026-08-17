@@ -217,6 +217,7 @@ export class TerrainField {
     // causeways) so the fences and watchtowers built on them stay valid.
     this.nodeSpots = this._findNodeFeatures();
     this._connectFrontier();
+    this._prepareNodeFoundations();
     this._connectPockets();
     this.chokeSpots = this._findChokepoints();
     this._nameSites();
@@ -727,6 +728,27 @@ export class TerrainField {
         bridged = true;
       }
       if (!bridged) return;
+    }
+  }
+
+  // Outposts are anchored exactly on their flags and use the 2x2 footprint
+  // whose north-west corner is (node - 1). Reachability alone is not enough:
+  // a ford or forest node can be easy to walk to while its future fort still
+  // overlaps water, trees, or crag. Clear only that foundation so the flag
+  // stays where the terrain reader placed it and the authored feature around
+  // it remains intact.
+  _prepareNodeFoundations() {
+    for (const node of this.nodeSpots || []) {
+      const x0 = (node.x | 0) - 1;
+      const z0 = (node.z | 0) - 1;
+      for (let dz = 0; dz < 2; dz++) {
+        for (let dx = 0; dx < 2; dx++) {
+          const x = x0 + dx, z = z0 + dz;
+          if (!this.inBounds(x, z) || this.isBuildable(x, z)) continue;
+          const i = this.idx(x, z);
+          this.tiles[i] = this.tiles[i] === TILE.WATER ? TILE.SAND : TILE.GRASS;
+        }
+      }
     }
   }
 
