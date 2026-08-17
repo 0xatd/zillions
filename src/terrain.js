@@ -89,6 +89,37 @@ export const TERRAIN_SHAPES = {
       return S.base(x, z, 0.05, 3) * 0.55 + band * 0.45;
     },
   },
+  // The Labyrinth: not a planet to conquer but a gauntlet to survive. One
+  // serpentine canyon runs the map south to north, swelling into chambers on
+  // the way; everything off the spine is shattered crag broken into dead-end
+  // pockets. Deliberately absent from SHAPE_ORDER — no campaign or galaxy
+  // seed may ever roll it. Only the labyrinth trials name it.
+  labyrinth: {
+    label: 'sunless labyrinth',
+    cover: { water: 0.04, mountain: 0.55, forest: 0.09 },
+    rivers: 0,
+    ore: { gold: 4, stone: 6 },
+    nodes: { barrow: 3, quarry: 2, clearing: 2, ore: 2, ford: 0 },
+    elev: (x, z, S) => {
+      const N = S.N;
+      const t = z / N;
+      // Canyon spine: a doubled serpentine so the way down is never straight.
+      const line = N * (0.5 + Math.sin(t * Math.PI * 2.6 + 1.7) * 0.2 + Math.sin(t * Math.PI * 5.9) * 0.06);
+      const d = Math.abs(x - line);
+      // Chambers: the spine swells into arenas at fixed depths. Trials place
+      // their brood nests in these — the widest ground on the map.
+      let width = N * 0.035;
+      for (const zc of [0.12, 0.3, 0.48, 0.66, 0.85]) {
+        width += Math.exp(-(((t - zc) / 0.05) ** 2)) * N * 0.065;
+      }
+      const carve = Math.exp(-((d / width) ** 2));
+      // Off the spine, ridged noise shatters the high ground into pockets and
+      // blind alleys — the dead ends the labyrinth is named for. The frontier
+      // connector will thread a few causeways into them; they lead nowhere.
+      const shatter = Math.pow(S.ridge(S.base(x, z, 0.05, 3)), 1.7);
+      return 0.62 + shatter * 0.33 - carve * (0.5 + S.fine(x, z) * 0.06);
+    },
+  },
 };
 
 const SHAPE_ORDER = ['moor', 'fen', 'wastes', 'hills', 'vale'];

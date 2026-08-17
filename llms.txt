@@ -35,6 +35,7 @@ Default branch: main
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
+- src/menu-vignette.js owns the menu attract show (presentation only, no sim).
 - src/online.js owns Supabase room and signaling state.
 - src/net.js owns WebRTC transport and diagnostics.
 - src/auth.js owns sign-in, profiles, saves, and stats.

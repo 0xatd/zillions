@@ -81,6 +81,23 @@ Do not turn Survival back into a generic RTS or a debug launcher.
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.
 
+The Labyrinth is the third solo mode: a hero gauntlet with no colony, no
+economy, and no army. Three authored trials (level ids 9001+) use the
+`labyrinth` landform — a serpentine canyon of chambers. Every chamber holds a
+hive brood nest; razing it advances the revive checkpoint and offers each
+player a pick-1-of-3 blessing (run-scoped stat boons). The horde's flow field
+is seeded on the heroes, the team shares a pool of lives, and razing every
+chamber summons the trial's champion — kill it to clear the trial. Labyrinth
+runs never advance campaign progress or unlock galaxy planets.
+
+The Labyrinth is playable solo and co-op up to 3 players, through both online
+rooms and manual invite codes. Multiplayer setup screens carry war-mode chips
+(Campaign / Survival / Labyrinth) in the header; only the host may retarget a
+room's mode, and doing so clears every guest Ready vote like any other setup
+change. The shared life pool grows by one per extra hero, every living hero
+seeds the horde's flow field, and each player gets their own pick-1-of-3
+blessing choice per razed chamber.
+
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as
@@ -93,7 +110,7 @@ before you add more strategic systems.
 
 - Production must be account-first.
 - The signed-in home screen is multiplayer-first. `Play Online` is the primary
-  action. `Play Solo` contains Story Campaign and Survival.
+  action. `Play Solo` contains Story Campaign, Survival, and The Labyrinth.
 - Campaign and Survival own their saved runs. Show Resume inside the matching
   solo mode. Do not add a generic Continue button to the home screen.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the
