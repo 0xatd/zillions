@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+page.on('pageerror', (e) => console.log('PAGEERROR', String(e)));
+page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text(), m.location()?.url); });
+page.on('requestfailed', (r) => console.log('REQFAIL', r.url(), r.failure()?.errorText));
+page.on('response', (r) => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url()); });
+await page.goto('http://127.0.0.1:8901/index.html');
+await page.waitForTimeout(2000);
+const pos1 = await page.evaluate(() => ({ x: window.__app.ow.hero.x, z: window.__app.ow.hero.z, keys: [...window.__app.keys], hid: window.__app.ui.overlayHidden(), camp: window.__app.profile.campaign }));
+console.log('before', pos1);
+await page.keyboard.down('w');
+await page.waitForTimeout(600);
+const pos2 = await page.evaluate(() => ({ x: window.__app.ow.hero.x, z: window.__app.ow.hero.z, keys: [...window.__app.keys], dir: window.__app.ow.dir }));
+console.log('after', pos2);
+await page.keyboard.up('w');
+await browser.close();

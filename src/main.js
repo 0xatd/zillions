@@ -468,9 +468,10 @@ class App {
       diff: this.ui.selectedDiff,
       onEnter: (diff) => {
         if (ev.gate.cave) {
+          // The trial ledger IS the labyrinth flow: the setup screen lists
+          // the trials, exactly as Play Solo → The Labyrinth does.
           this.ui.selectedMode = 'labyrinth';
           this.ui.showSetup({ mode: 'labyrinth' });
-          this.ui.hideOverlay();
           return;
         }
         // Same path the setup screen's START button takes; only the level

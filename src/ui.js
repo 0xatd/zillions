@@ -721,7 +721,9 @@ export class UI {
   }
 
   toggleOverlay() {
-    if (this.overlayHidden()) this._showScreen(this._lastScreen && this._lastScreen !== 'account' ? this._lastScreen : 'main');
+    // Esc always brings up the hub home — the deep screens (lobby, settings)
+    // are one click from its buttons, and the walk is the point.
+    if (this.overlayHidden()) this._showScreen('main');
     else this.hideOverlay();
   }
 
