@@ -2207,10 +2207,17 @@ export class UI {
     // dim (terrain shape, no contacts); current vision is clear. Without this
     // the map goes blind the moment the hero rides on — a map you cannot read
     // from memory is not a map.
-    if (!this._mmExplored || this._mmExplored.length !== N * N) {
+    if (this._mmExploredGame !== game || !this._mmExplored || this._mmExplored.length !== N * N) {
+      this._mmExploredGame = game;
       this._mmExplored = new Uint8Array(N * N);
+      this._mmExploredCanvas = document.createElement('canvas');
+      this._mmExploredCanvas.width = N;
+      this._mmExploredCanvas.height = N;
+      this._mmExploredCtx = this._mmExploredCanvas.getContext('2d');
+      this._mmExploredCtx.fillStyle = '#fff';
     }
     const explored = this._mmExplored;
+    const exploredCtx = this._mmExploredCtx;
     const visionSources = fogVisionSources(game);
     for (const source of visionSources) {
       const r = Math.ceil(source.radius);
@@ -2220,7 +2227,11 @@ export class UI {
         const dz = z - source.z;
         for (let x = x0; x <= x1; x++) {
           const dx = x - source.x;
-          if (dx * dx + dz * dz <= source.radius * source.radius) explored[z * N + x] = 1;
+          const i = z * N + x;
+          if (!explored[i] && dx * dx + dz * dz <= source.radius * source.radius) {
+            explored[i] = 1;
+            exploredCtx.fillRect(x, z, 1, 1);
+          }
         }
       }
     }
@@ -2234,12 +2245,9 @@ export class UI {
     // Explored: lift the shroud to a veil — half light, so remembered ground
     // is legible but obviously not live.
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        if (explored[z * N + x]) ctx.fillRect(x, z, 1, 1);
-      }
-    }
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(this._mmExploredCanvas, 0, 0);
+    ctx.globalAlpha = 1;
     // Current vision: fully clear.
     for (const source of visionSources) {
       const edge = Math.max(1, source.radius + FOG_EDGE_SOFTNESS);
@@ -2269,7 +2277,7 @@ export class UI {
     ctx.fillStyle = '#7fd6ff';
     for (const u of game.units) {
       if (!u.hero || u.dead) continue;
-      const mine = u === game.hero || (game.heroes && game.heroes[0] === u);
+      const mine = game.heroes && game.heroes[this._p] === u;
       if (mine) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(u.x - 2, u.z - 2, 4.5, 4.5);
