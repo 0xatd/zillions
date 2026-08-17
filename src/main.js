@@ -4593,6 +4593,7 @@ class App {
       }
 
       this._consumeEvents();
+      this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
       this._syncUnits(t, dt);
       this._syncNests(t);

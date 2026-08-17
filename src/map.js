@@ -164,7 +164,84 @@ export class GameMap extends TerrainField {
     group.add(this._buildRocks());
     group.add(this._buildOre());
     group.add(this._buildDetail());
+    if (this.labyrinthLayout) group.add(this._buildLabyrinthLandmarks());
     return group;
+  }
+
+  _buildLabyrinthLandmarks() {
+    const group = new THREE.Group();
+    const stone = new THREE.MeshLambertMaterial({ color: 0x373442 });
+    const bone = new THREE.MeshLambertMaterial({ color: 0xb8ad98 });
+    const red = new THREE.MeshLambertMaterial({ color: 0x842f35, emissive: 0x4a1018, emissiveIntensity: 0.8 });
+    const blue = new THREE.MeshLambertMaterial({ color: 0x527a91, emissive: 0x183b52, emissiveIntensity: 0.7 });
+    const addBox = (x, z, sx, sy, sz, mat, y = 0) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+      mesh.position.set(x, this.groundY(x, z) + sy / 2 + y, z);
+      mesh.castShadow = mesh.receiveShadow = true;
+      group.add(mesh);
+    };
+    const addPillar = (x, z, mat = stone, h = 3.6) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.65, h, 7), mat);
+      mesh.position.set(x, this.groundY(x, z) + h / 2, z);
+      mesh.castShadow = true;
+      group.add(mesh);
+    };
+    const rooms = this.labyrinthLayout.rooms;
+    const bridge = rooms[2], reliquary = rooms[3], cells = rooms[5];
+    const gallery = rooms[6], gate = rooms[7], throne = rooms[8], start = rooms[0];
+    // Last Lantern: a tall blue beacon visible from the first junction.
+    addPillar(start.x, start.z + 3, stone, 5.5);
+    addBox(start.x, start.z + 3, 1.3, 0.35, 1.3, blue, 5.4);
+    // Ash Bridge rails and broken pylons frame a narrow defense lane.
+    for (const dx of [-10, -5, 0, 5, 10]) for (const dz of [-4.8, 4.8]) addPillar(bridge.x + dx, bridge.z + dz, stone, 2.2);
+    // The Reliquary is a ring of red-lit monoliths.
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      addPillar(reliquary.x + Math.cos(a) * 8, reliquary.z + Math.sin(a) * 8, i % 2 ? red : stone, 3.8);
+    }
+    // Drowned Cells and Bone Gallery use different repeated silhouettes.
+    for (const dx of [-8, 0, 8]) for (const dz of [-6, 6]) addPillar(cells.x + dx, cells.z + dz, blue, 2.8);
+    for (const dx of [-11, -6, -1, 4, 9]) for (const dz of [-5, 5]) addPillar(gallery.x + dx, gallery.z + dz, bone, 3.1);
+    // Crown Gate: twin towers and a monumental lintel announce the threshold.
+    addPillar(gate.x - 6, gate.z - 5, stone, 7);
+    addPillar(gate.x + 6, gate.z - 5, stone, 7);
+    addBox(gate.x, gate.z - 5, 13, 1.4, 1.4, red, 5.8);
+    // Sunless Throne: stepped dais, rear columns, and a black throne block.
+    addBox(throne.x, throne.z - 2, 10, 0.7, 7, stone);
+    addBox(throne.x, throne.z - 3, 7, 0.8, 5, bone, 0.7);
+    addBox(throne.x, throne.z - 4, 3, 4.5, 2.2, red, 1.4);
+    for (const dx of [-10, -5, 5, 10]) addPillar(throne.x + dx, throne.z - 7, stone, 6.5);
+    // Room seals are visible energy walls. The simulation closes the matching
+    // corridor tiles; these meshes make that state readable to the player.
+    this.labyrinthDoorMeshes = [];
+    const sealMat = new THREE.MeshLambertMaterial({
+      color: 0xb93b4b, emissive: 0x8a1728, emissiveIntensity: 1.2,
+      transparent: true, opacity: 0.72,
+    });
+    for (const def of this.labyrinthLayout.encounters || []) {
+      const room = rooms[def.room];
+      for (const fromIndex of def.from || []) {
+        const from = rooms[fromIndex];
+        const dx = from.x - room.x, dz = from.z - room.z;
+        const d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+        const x = room.x + ux * 9, z = room.z + uz * 9;
+        const seal = new THREE.Mesh(new THREE.BoxGeometry(8.5, 3.4, 0.35), sealMat.clone());
+        seal.position.set(x, this.groundY(x, z) + 1.7, z);
+        seal.rotation.y = Math.atan2(uz, ux) + Math.PI / 2;
+        seal.visible = false;
+        seal.userData.encounterKey = def.key;
+        group.add(seal);
+        this.labyrinthDoorMeshes.push(seal);
+      }
+    }
+    return group;
+  }
+
+  syncLabyrinthDoors(game) {
+    for (const mesh of this.labyrinthDoorMeshes || []) {
+      const state = game.labyrinthEncounters?.find((e) => e.key === mesh.userData.encounterKey);
+      mesh.visible = state?.status === 'active' || state?.status === 'sealed';
+    }
   }
 
   // White foam dashes: a bright ring hugging every shoreline plus sparse

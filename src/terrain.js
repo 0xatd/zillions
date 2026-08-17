@@ -89,11 +89,10 @@ export const TERRAIN_SHAPES = {
       return S.base(x, z, 0.05, 3) * 0.55 + band * 0.45;
     },
   },
-  // The Labyrinth: not a planet to conquer but a gauntlet to survive. One
-  // serpentine canyon runs the map south to north, swelling into chambers on
-  // the way; everything off the spine is shattered crag broken into dead-end
-  // pockets. Deliberately absent from SHAPE_ORDER — no campaign or galaxy
-  // seed may ever roll it. Only the labyrinth trials name it.
+  // The Labyrinth: not a planet to conquer but a fixed gauntlet to survive.
+  // `_buildLabyrinthLayout` replaces these provisional paint values with its
+  // authored rooms and corridors. It is absent from SHAPE_ORDER, so no
+  // campaign or galaxy seed may ever roll it.
   labyrinth: {
     label: 'sunless labyrinth',
     cover: { water: 0.04, mountain: 0.55, forest: 0.09 },
@@ -200,6 +199,10 @@ export class TerrainField {
     this.sites = this._pickSites(elev);
     this._flattenSites(elev);
     this._paintTiles(elev, shape);
+    if (this.terrainKind === 'labyrinth') {
+      this._buildLabyrinthLayout();
+      return;
+    }
     this._carveRivers(shape.rivers || 0, elev);
     this._clearSiteFootprints();
     const ore = shape.ore || {};
@@ -210,6 +213,107 @@ export class TerrainField {
     this._connectFrontier();
     this.nodeSpots = this._findNodeFeatures();
     this.chokeSpots = this._findChokepoints();
+    this._nameSites();
+  }
+
+  // The Labyrinth is one authored level. It does not mirror, roll rooms, or
+  // change topology with the seed. Players can learn this place; difficulty
+  // comes from the pursuit and fights, not arbitrary navigation.
+  _buildLabyrinthLayout() {
+    const N = this.size;
+    const point = (x, z, kind, label) => ({
+      x: Math.round(N * x),
+      z: Math.round(N * z), kind, label,
+    });
+    const rooms = [
+      point(0.50, 0.91, 'start', 'The Last Lantern'),
+      point(0.50, 0.78, 'junction', 'Fork of Teeth'),
+      point(0.27, 0.68, 'brood', 'The Ash Bridge'),
+      point(0.73, 0.67, 'brood', 'The Red Reliquary'),
+      point(0.50, 0.56, 'brood', 'The Blood Cross'),
+      point(0.25, 0.43, 'brood', 'The Drowned Cells'),
+      point(0.75, 0.42, 'brood', 'The Bone Gallery'),
+      point(0.50, 0.30, 'brood', 'Crown Gate'),
+      point(0.50, 0.12, 'boss', 'The Sunless Throne'),
+      point(0.88, 0.28, 'reward', 'The Blind Vault'),
+    ];
+    const edges = [
+      [0, 1], [1, 2], [1, 3], [2, 4], [3, 4],
+      [4, 5], [4, 6], [5, 7], [6, 7], [7, 8], [6, 9], [9, 7],
+    ];
+
+    this.tiles.fill(TILE.MOUNTAIN);
+    const carveDisc = (cx, cz, radius, tile = TILE.GRASS) => {
+      const r = Math.ceil(radius);
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dz * dz > radius * radius) continue;
+        const x = cx + dx, z = cz + dz;
+        if (this.inBounds(x, z)) this.tiles[this.idx(x, z)] = tile;
+      }
+    };
+    const carveCorridor = (a, b, width = 3.3) => {
+      const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 1.5);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / Math.max(1, steps);
+        const x = Math.round(a.x + (b.x - a.x) * t);
+        const z = Math.round(a.z + (b.z - a.z) * t);
+        carveDisc(x, z, width, TILE.PATH);
+      }
+    };
+    for (const [a, b] of edges) carveCorridor(rooms[a], rooms[b]);
+    rooms.forEach((room) => carveDisc(room.x, room.z,
+      room.kind === 'start' ? 8 : room.kind === 'junction' ? 6 : 9));
+
+    // Each combat room has its own silhouette and floor language. These are
+    // authored set pieces, not renamed copies of one circular arena.
+    const carveBox = (cx, cz, rx, rz, tile = TILE.GRASS) => {
+      for (let z = cz - rz; z <= cz + rz; z++) for (let x = cx - rx; x <= cx + rx; x++) {
+        if (this.inBounds(x, z)) this.tiles[this.idx(x, z)] = tile;
+      }
+    };
+    carveBox(rooms[2].x, rooms[2].z, 12, 4, TILE.PATH); // narrow bridge defense
+    carveDisc(rooms[3].x, rooms[3].z, 11, TILE.SAND);   // reliquary rotunda
+    carveBox(rooms[4].x, rooms[4].z, 10, 10, TILE.PATH);
+    carveBox(rooms[4].x, rooms[4].z, 3, 12, TILE.PATH); // blood-cross transepts
+    carveBox(rooms[4].x, rooms[4].z, 12, 3, TILE.PATH);
+    carveBox(rooms[5].x, rooms[5].z, 11, 7, TILE.SAND); // drowned causeway hall
+    carveBox(rooms[6].x, rooms[6].z, 14, 5, TILE.STONEORE); // long bone gallery
+    carveBox(rooms[7].x, rooms[7].z, 12, 7, TILE.PATH); // crown gate holdout
+    carveDisc(rooms[8].x, rooms[8].z, 14, TILE.STONEORE); // final throne amphitheatre
+
+    // Environmental hazards and landmarks leave wide co-op lanes intact.
+    for (const dx of [-8, 8]) for (const dz of [-4, 4]) {
+      carveDisc(rooms[5].x + dx, rooms[5].z + dz, 2.6, TILE.WATER);
+    }
+    for (const dx of [-8, 8]) carveDisc(rooms[3].x + dx, rooms[3].z, 1.8, TILE.GOLDORE);
+    for (const dx of [-9, 9]) carveDisc(rooms[8].x + dx, rooms[8].z + 2, 2.3, TILE.MOUNTAIN);
+
+    // Small landmark inlays keep side rooms recognizable at gameplay zoom.
+    carveDisc(rooms[3].x, rooms[3].z, 2.2, TILE.GOLDORE);
+    carveDisc(rooms[9].x, rooms[9].z, 2.2, TILE.STONEORE);
+
+    const broodRooms = rooms.filter((r) => r.kind === 'brood');
+    this.nestSpots = broodRooms.map((r) => [r.x, r.z]);
+    this.sites = [{ ...rooms[0], name: rooms[0].label, hint: 'The only safe ground behind you.' }];
+    this.nodeSpots = [];
+    this.chokeSpots = [];
+    const encounters = [
+      { room: 2, from: [1], nest: 0, key: 'ash_bridge', kind: 'bridge', choice: 'first', waves: 2 },
+      { room: 3, from: [1], nest: 1, key: 'red_reliquary', kind: 'seals', choice: 'first', waves: 2 },
+      { room: 4, from: [2, 3], nest: 2, key: 'blood_cross', kind: 'ambush', waves: 3 },
+      { room: 5, from: [4], nest: 3, key: 'drowned_cells', kind: 'causeway', choice: 'second', waves: 2 },
+      { room: 6, from: [4], nest: 4, key: 'bone_gallery', kind: 'crypts', choice: 'second', waves: 3 },
+      { room: 7, from: [5, 6], nest: 5, key: 'crown_gate', kind: 'holdout', waves: 4 },
+    ];
+    this.labyrinthLayout = { rooms, edges, encounters, start: rooms[0], boss: rooms[8], reward: rooms[9] };
+
+    // Match the rendered relief to the carved floor. High tiles stay crag;
+    // walkable rooms and corridors sit in a readable lower plane.
+    if (this.elev) {
+      for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+        if (this.isWalkable(x, z)) this.elev[this.idx(x, z)] *= 0.55;
+      }
+    }
     this._nameSites();
   }
 

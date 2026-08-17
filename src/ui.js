@@ -872,7 +872,9 @@ export class UI {
       ? '🏳️ <b>Claim your ground</b>'
       : game.finalStand
         ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
-        : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+        : labyrinth
+          ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
+          : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
     // In the labyrinth the front is chambers and lives, not nodes and camps.
     if (labyrinth) {
@@ -898,9 +900,14 @@ export class UI {
       }
     }
     if (labyrinth) {
-      q('#army-status').innerHTML = game.lives > 0
-        ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · the fallen return at the last razed chamber`
-        : '❤️ <b>No lives left</b> — the next fall is final.';
+      const active = game.labyrinthEncounters?.find((e) => e.status === 'active');
+      const def = active && game.map.labyrinthLayout?.encounters?.find((e) => e.key === active.key);
+      const room = def && game.map.labyrinthLayout?.rooms?.[def.room];
+      q('#army-status').innerHTML = active && room
+        ? `⚔️ <b>${room.label}</b> · wave ${Math.max(1, active.wave)}/${def.waves} · doors sealed during combat`
+        : game.lives > 0
+          ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · choose a marked route and reach the Sunless Throne`
+          : '❤️ <b>No lives left</b> — the next fall is final.';
     } else {
       const army = game.units.filter((u) => !u.hero && !u.dead).length;
       const stanceText = {
