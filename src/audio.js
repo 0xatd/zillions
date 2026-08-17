@@ -14,6 +14,8 @@ export class AudioSys {
       .catch(() => {});
     this.ctx = null;
     this.muted = false;
+    this.volMult = 1;
+    this.musicMult = 1;
     this.master = null;
     this.musicGain = null;
     this.noiseBuf = null;
@@ -64,7 +66,19 @@ export class AudioSys {
 
   setMuted(m) {
     this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.55;
+    if (this.master) this.master.gain.value = m ? 0 : 0.55 * this.volMult;
+  }
+
+  // Settings-driven volume (0..1), persisted by the caller. Kept separate
+  // from mute so the two compose: gain = 0.55 * volume, or 0 when muted.
+  setVolume(v) {
+    this.volMult = Math.max(0, Math.min(1, v));
+    if (this.master && !this.muted) this.master.gain.value = 0.55 * this.volMult;
+  }
+
+  setMusicVolume(v) {
+    this.musicMult = Math.max(0, Math.min(1, v));
+    if (this.musicGain) this.musicGain.gain.value = 0.16 * this.musicMult;
   }
 
   now() { return this.ctx ? this.ctx.currentTime : 0; }

@@ -47,6 +47,8 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="War council (Esc)">⚙</button>
+
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -91,13 +93,17 @@ export class UI {
       <div id="tooltip" class="hidden"></div>
 
       <div id="overlay" class="screen">
-        <div id="screen-account" class="accountscreen">
-          <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Sign in to enter the frontier.</p>
-          <div class="accountcard">
+        <div id="screen-account" class="accountscreen title-screen">
+          <div class="title-lockup">
+            <div class="brandeyebrow">THE LAST WAR CROSSES THE STARS</div>
+            <h1 class="gametitle">ZILLIONS</h1>
+            <p class="gamesub">Every world is a battlefield.</p>
+          </div>
+          <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary" id="a-google">Continue with Google</button>
-            <button class="menubtn hidden" id="a-offline">Continue in offline dev mode</button>
+            <button class="menubtn primary hidden" id="a-enter">ENTER WORLD</button>
+            <button class="menubtn primary" id="a-google">ENTER WITH GOOGLE</button>
+            <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
               <label for="a-username">Public username</label>
               <div class="usernamerow">
@@ -108,43 +114,33 @@ export class UI {
               <small>Letters, numbers, and underscores. Other players see this.</small>
             </form>
           </div>
+          <nav class="title-utilities" aria-label="Title menu">
+            <button id="a-custom">CUSTOM GAMES</button>
+            <button id="a-cinematics">CINEMATICS</button>
+            <button id="a-credits">CREDITS</button>
+            <button id="a-settings">SETTINGS</button>
+            <button id="a-quit">QUIT</button>
+          </nav>
+          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · ONLINE <small>BUILD 0.1</small></div>
         </div>
 
-        <div id="screen-main" class="mainmenu">
-          <h1 class="gametitle">🧟 ZILLIONS</h1>
-          <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
-          <div class="menustack homeactions">
-            <button class="menubtn primary playonline" id="m-online">
-              <span class="menuicon">🌐</span>
-              <span><b>PLAY ONLINE</b><small>create · join · browse · watch</small></span>
-              <span class="menuarrow">›</span>
-            </button>
-            <button class="menubtn" id="m-solo">
-              <span class="menuicon">⚔️</span>
-              <span><b>PLAY SOLO</b><small>story campaign · endless survival · the labyrinth</small></span>
-              <span class="menuarrow">›</span>
-            </button>
-            <div class="menuutilities">
-              <button class="utilitybtn" id="m-help">📜 How to play</button>
-            </div>
+        <div id="screen-main" class="mainmenu character-select">
+          <div class="character-heading"><span>EARTH FRONT</span><h1>SELECT YOUR HERO</h1><small>Choose who enters the persistent world. Press C in the world to open this character screen.</small></div>
+          <div id="character-stage" class="character-stage">
+            <div id="character-sigil" class="character-sigil"></div>
+            <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <div class="profilerow">
-            <span id="prof-name-display">Signed in</span>
-            <span id="prof-stats"></span>
-          </div>
+          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
         <div id="screen-solo" class="mainmenu solomenu hidden">
-          <button class="tbtn menuback" id="solo-back">← Main menu</button>
-          <h1 class="gametitle small">PLAY SOLO</h1>
-          <p class="gamesub">Choose a war. Saved runs stay with their mode.</p>
+          <button class="tbtn menuback" id="solo-back">← Character select</button>
+          <h1 class="gametitle small">CUSTOM GAMES</h1>
+          <p class="gamesub">Challenges and private wars outside the persistent world.</p>
           <div class="solomodes">
             <section class="modecard">
-              <div class="modeeyebrow">STORY</div>
-              <h2>⚔️ Story Campaign</h2>
-              <p>Retake Earth across five authored fronts, then push into the procedural galaxy.</p>
-              <div id="solo-campaign-resume" class="moderesume"></div>
-              <button class="menubtn modeprimary" id="solo-campaign">Choose mission <span class="menuarrow">›</span></button>
+              <div class="modeeyebrow">MULTIPLAYER</div><h2>🌐 Public & Private Wars</h2><p>Create, join, or watch custom battles with other commanders.</p><button class="menubtn modeprimary" id="custom-online">Open lobby <span class="menuarrow">›</span></button>
             </section>
             <section class="modecard">
               <div class="modeeyebrow">REPLAYABLE</div>
@@ -162,6 +158,9 @@ export class UI {
             </section>
           </div>
         </div>
+
+        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
+        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
@@ -203,9 +202,21 @@ export class UI {
               </div>
               <div id="l-tab-games" class="ltabpane">
                 <div class="lobbycreate">
-                  <button class="diffbtn sel" id="l-create-pub">🌐 Create public game</button>
-                  <button class="diffbtn" id="l-create-priv">🔒 Create private game</button>
-                  <span class="joincode"><input id="l-joincode" maxlength="6" placeholder="CODE"><button class="tbtn" id="l-joinbtn">Join</button></span>
+                  <button class="createcard" id="l-create-pub">
+                    <span class="cc-icon">🌐</span>
+                    <b>Create public game</b>
+                    <small>Anyone can see it and join</small>
+                  </button>
+                  <button class="createcard" id="l-create-priv">
+                    <span class="cc-icon">🔒</span>
+                    <b>Create private game</b>
+                    <small>Invite by 6-letter code</small>
+                  </button>
+                  <button class="createcard" id="l-create-join">
+                    <span class="cc-icon">🎫</span>
+                    <b>Join by code</b>
+                    <small>Enter a friend's invite code</small>
+                  </button>
                 </div>
                 <div id="l-games" class="lobbygames"></div>
                 <div class="mphint">Public games appear here for everyone. Private games are joined by code. <a href="#" id="l-manual">Manual invite codes</a> work without the internet lobby.</div>
@@ -250,10 +261,61 @@ export class UI {
           <div class="menustack">
             <button class="menubtn primary" id="p-resume">▶ &nbsp;Resume</button>
             <button class="menubtn" id="p-help">📜 &nbsp;How to play</button>
+            <button class="menubtn" id="p-settings">⚙️ &nbsp;Settings</button>
             <button class="menubtn" id="p-restart">🔄 &nbsp;Restart level</button>
             <button class="menubtn" id="p-quit">🚪 &nbsp;Quit to menu</button>
           </div>
           <div id="p-note" class="gamesub"></div>
+        </div>
+        <div id="screen-heroes" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="hero-back">← Back</button>
+            <h2>Heroes of the Frontier</h2>
+            <span class="gamesub">Tab anywhere in the menu to open this</span>
+          </div>
+          <div class="herogrid" id="herogrid"></div>
+        </div>
+        <div id="screen-settings" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="set-back">← Back</button>
+            <h2>⚙️ Settings</h2>
+          </div>
+          <div class="settingsgrid">
+            <div class="settingstabs">
+              <button class="stab sel" data-tab="audio">🔊 Audio</button>
+              <button class="stab" data-tab="video">🖥️ Video</button>
+            </div>
+            <div class="settingspane">
+              <div id="set-pane-audio" class="setpane">
+                <label class="setrow">
+                  <span>Master volume</span>
+                  <input type="range" id="set-vol" min="0" max="100" value="100">
+                  <b id="set-vol-val">100%</b>
+                </label>
+                <label class="setrow">
+                  <span>Music volume</span>
+                  <input type="range" id="set-music" min="0" max="100" value="100">
+                  <b id="set-music-val">100%</b>
+                </label>
+                <label class="setrow">
+                  <span>Sound effects</span>
+                  <input type="checkbox" id="set-sfx">
+                  <b id="set-sfx-val"></b>
+                </label>
+                <div class="sethint">Effects are procedural WebAudio; hero barks are pre-recorded. Mute anytime with <kbd>M</kbd>.</div>
+              </div>
+              <div id="set-pane-video" class="setpane hidden">
+                <div class="setrow">
+                  <span>Graphics quality</span>
+                  <div class="modeseg" id="set-quality">
+                    <button class="diffbtn" data-q="low">Performance</button>
+                    <button class="diffbtn" data-q="high">Quality</button>
+                  </div>
+                </div>
+                <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="room-confirm" class="roomconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="room-confirm-title">
           <div class="roomconfirmcard">
@@ -271,7 +333,13 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
-    q('#a-offline').onclick = () => this.cb.onOfflineContinue && this.cb.onOfflineContinue();
+    q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
+    q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
+    q('#a-custom').onclick = () => this._showScreen('solo');
+    q('#a-cinematics').onclick = () => this._showScreen('cinematics');
+    q('#a-credits').onclick = () => this._showScreen('credits');
+    q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
+    q('#a-quit').onclick = () => this.showBanner('Close this browser tab to leave the frontier.', '', 3200);
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
       const input = q('#a-username');
@@ -280,8 +348,11 @@ export class UI {
     q('#m-solo').onclick = () => this._showScreen('solo');
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
+    q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
+    q('#m-custom').onclick = () => this._showScreen('solo');
+    q('#m-logout').onclick = () => this._showScreen('account');
     q('#solo-back').onclick = () => this._showScreen('main');
-    q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
+    q('#custom-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
@@ -296,6 +367,7 @@ export class UI {
       } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
     };
     q('#l-back').onclick = () => this._showScreen('main');
+    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._showScreen(this._accountAccepted ? 'main' : 'account');
 
     // ----- lobby -----
     for (const t of this.root.querySelectorAll('.ltab')) {
@@ -322,12 +394,48 @@ export class UI {
     q('#l-friendcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') addFriend(); });
     q('#l-create-pub').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('public');
     q('#l-create-priv').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('private');
-    q('#l-joinbtn').onclick = () => this.cb.onJoinCode && this.cb.onJoinCode(q('#l-joincode').value);
+    q('#l-create-join').onclick = () => this._showJoinCode();
     q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
       else this._showScreen('main');
     };
+
+    // ----- settings -----
+    q('#m-settings').onclick = () => { this._settingsReturn = 'main'; this._showScreen('settings'); };
+    q('#m-heroes').onclick = () => this._showScreen('heroes');
+    q('#hero-back').onclick = () => this._showScreen('main');
+    q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
+    q('#set-back').onclick = () => {
+      if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
+      else this._showScreen(this._settingsReturn || 'main');
+    };
+    for (const t of this.root.querySelectorAll('.stab')) {
+      t.onclick = () => {
+        for (const o of this.root.querySelectorAll('.stab')) o.classList.toggle('sel', o === t);
+        this.root.querySelector('#set-pane-audio').classList.toggle('hidden', t.dataset.tab !== 'audio');
+        this.root.querySelector('#set-pane-video').classList.toggle('hidden', t.dataset.tab !== 'video');
+      };
+    }
+    const vol = q('#set-vol'), mus = q('#set-music'), sfx = q('#set-sfx');
+    vol.oninput = () => {
+      q('#set-vol-val').textContent = vol.value + '%';
+      if (this.cb.onSettings) this.cb.onSettings({ volume: vol.value / 100 });
+    };
+    mus.oninput = () => {
+      q('#set-music-val').textContent = mus.value + '%';
+      if (this.cb.onSettings) this.cb.onSettings({ music: mus.value / 100 });
+    };
+    sfx.onchange = () => {
+      q('#set-sfx-val').textContent = sfx.checked ? 'ON' : 'OFF';
+      if (this.cb.onSettings) this.cb.onSettings({ sfx: sfx.checked });
+    };
+    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
+      b.onclick = () => {
+        if (this.cb.onSettings) this.cb.onSettings({ quality: b.dataset.q });
+        this._reflectQuality(b.dataset.q);
+      };
+    }
 
     // ----- pause menu -----
     q('#p-resume').onclick = () => this.cb.onResume();
@@ -358,6 +466,7 @@ export class UI {
       card.onmouseleave = () => this._hideTip();
       herorow.appendChild(card);
     }
+    this._buildCharacterSelect();
 
     // ----- setup: levels & difficulty -----
     this.selectedLevel = 1;
@@ -383,6 +492,7 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
+    q('#ow-menu').onclick = () => this.toggleOverlay();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -585,9 +695,228 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby']) {
+    this._lastScreen = name;
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  _buildCharacterSelect() {
+    const list = this.root.querySelector('#character-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const [key, hero] of Object.entries(HEROES)) {
+      const button = document.createElement('button');
+      button.className = 'character-row';
+      button.dataset.key = key;
+      button.innerHTML = `${PORTRAITS[key] ? `<img src="${PORTRAITS[key]}" alt="">` : `<span>${hero.icon}</span>`}<span><b>${hero.name}</b><small></small></span>`;
+      button.onclick = () => {
+        this.selectedHero = key;
+        this._renderSelectedCharacter();
+        for (const card of this.root.querySelectorAll('.herocard')) card.classList.toggle('sel', card.dataset.key === key);
+        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
+      };
+      list.appendChild(button);
+    }
+    this._renderSelectedCharacter();
+  }
+
+  _renderSelectedCharacter() {
+    const key = this.selectedHero || 'alexander';
+    const hero = HEROES[key];
+    if (!hero) return;
+    const progress = (this._profile?.campaignHeroes || {})[key] || {};
+    const level = progress.level || 1;
+    const gear = (progress.items || []).map((itemKey) => ITEMS[itemKey]).filter(Boolean);
+    for (const row of this.root.querySelectorAll('.character-row')) {
+      const selected = row.dataset.key === key;
+      row.classList.toggle('sel', selected);
+      const small = row.querySelector('small');
+      if (small) small.textContent = `Level ${((this._profile?.campaignHeroes || {})[row.dataset.key]?.level) || 1}`;
+    }
+    const sigil = this.root.querySelector('#character-sigil');
+    sigil.textContent = PORTRAITS[key] ? '' : hero.icon;
+    sigil.style.backgroundImage = PORTRAITS[key]
+      ? `linear-gradient(180deg, transparent 55%, rgba(3,7,13,.85)), url(${PORTRAITS[key]})`
+      : '';
+    sigil.classList.toggle('has-portrait', !!PORTRAITS[key]);
+    sigil.style.setProperty('--hero-color', `#${hero.color.toString(16).padStart(6, '0')}`);
+    this.root.querySelector('#character-name').textContent = `${hero.name} · LEVEL ${level}`;
+    this.root.querySelector('#character-tagline').textContent = hero.tagline;
+    this.root.querySelector('#character-gear').innerHTML = gear.length
+      ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
+      : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
+  }
+
+  // ----- overworld: the campaign map behind the war-council overlay -----
+  // The title screen remains the front door. Story Campaign enters the
+  // walkable planet; Esc (or the ⚙ button) opens the council over it.
+  setOverworldMode(on) {
+    this._overworldMode = !!on;
+    this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
+    this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
+  }
+
+  overlayHidden() {
+    return this.root.querySelector('#overlay').classList.contains('hidden');
+  }
+
+  hideOverlay() {
+    this.root.querySelector('#overlay').classList.add('hidden');
+  }
+
+  toggleOverlay() {
+    // Esc always brings up the hub home — the deep screens (lobby, settings)
+    // are one click from its buttons, and the walk is the point.
+    if (this.overlayHidden()) this._showScreen('main');
+    else this.hideOverlay();
+  }
+
+  toggleCharacterScreen() {
+    const screen = this.root.querySelector('#screen-main');
+    const characterOpen = !this.overlayHidden() && screen && !screen.classList.contains('hidden');
+    if (characterOpen) this.hideOverlay();
+    else this._showScreen('main');
+  }
+
+  // ----- hero library (Dota Tab-screen grammar) -----
+  fillHeroGrid(heroes) {
+    const grid = this.root.querySelector('#herogrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    for (const h of Object.values(heroes)) {
+      const card = document.createElement('div');
+      card.className = 'herolib-card';
+      const rgb = (c) => `#${(c || 0x888888).toString(16).padStart(6, '0')}`;
+      card.innerHTML = `
+        <div class="hc-head" style="border-color:${rgb(h.color)}">
+          <span class="hc-icon">${h.icon}</span>
+          <div><b>${h.name}</b><small>${h.tagline}</small></div>
+        </div>
+        <div class="hc-stats">HP ${h.hp} · DMG ${h.dmg} · RANGE ${h.range} · SPEED ${h.speed}</div>
+        <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
+        <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
+        ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
+      `;
+      grid.appendChild(card);
+    }
+  }
+
+  // ----- living hub strip on the main menu -----
+  hubOnline(n) {
+    const el = this.root.querySelector('#hub-online');
+    if (el) el.textContent = `${n} online now`;
+  }
+  hubGames(rows) {
+    const el = this.root.querySelector('#hub-games');
+    if (!el) return;
+    const open = (rows || []).filter((g) => g.status === 'open').length;
+    const live = (rows || []).filter((g) => g.status === 'in_game' || g.status === 'starting').length;
+    el.textContent = `${open} open rooms · ${live} live to watch`;
+  }
+  hubChat(msgs) {
+    const el = this.root.querySelector('#hub-chat');
+    if (!el) return;
+    const recent = (msgs || []).slice(-3);
+    if (!recent.length) return;
+    el.innerHTML = '';
+    for (const m of recent) {
+      const line = document.createElement('div');
+      line.className = 'hubchatline';
+      const who = document.createElement('b'); who.textContent = m.name || 'Commander';
+      const txt = document.createElement('span'); txt.textContent = m.text || '';
+      line.append(who, txt);
+      el.appendChild(line);
+    }
+  }
+
+  // Join-by-code flow: a small modal asking for the 6-letter invite code.
+  _showJoinCode() {
+    let modal = this.root.querySelector('#joincode-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'joincode-modal';
+      modal.className = 'roomconfirm';
+      modal.innerHTML = `
+        <div class="roomconfirmcard">
+          <span class="roomeyebrow">Join a war</span>
+          <h2>Enter invite code</h2>
+          <div class="joincode big">
+            <input id="jc-input" maxlength="6" placeholder="ABC123" autocomplete="off" spellcheck="false">
+            <button class="tbtn" id="jc-go">JOIN</button>
+          </div>
+          <div class="mphint" id="jc-hint"></div>
+          <div class="roomconfirmactions">
+            <button class="tbtn" id="jc-cancel">CANCEL</button>
+          </div>
+        </div>`;
+      this.root.appendChild(modal);
+      const close = () => modal.classList.add('hidden');
+      modal.querySelector('#jc-cancel').onclick = close;
+      const go = () => {
+        const code = modal.querySelector('#jc-input').value.trim().toUpperCase();
+        if (!code) { modal.querySelector('#jc-hint').textContent = 'Enter the 6-letter code your friend sent.'; return; }
+        if (this.cb.onJoinCode) this.cb.onJoinCode(code);
+        close();
+      };
+      modal.querySelector('#jc-go').onclick = go;
+      modal.querySelector('#jc-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    }
+    modal.classList.remove('hidden');
+    const inp = modal.querySelector('#jc-input');
+    inp.value = '';
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  // ----- overworld: walk-in confirm -----
+  // Walking into a gate asks before it commits you to a front: the panel
+  // carries the level's blurb and the difficulty choice, and Enter takes the
+  // same onStart path the setup screen's START button uses.
+  showGateConfirm({ gate, diff = 'normal', onEnter }) {
+    let modal = this.root.querySelector('#gate-confirm');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'gate-confirm';
+      modal.className = 'roomconfirm';
+      this.root.appendChild(modal);
+    }
+    const cave = !!gate.cave;
+    const diffSeg = cave ? '' : `
+      <div class="steplabel field-label">Difficulty</div>
+      <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
+        `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
+    modal.innerHTML = `
+      <div class="roomconfirmcard">
+        <span class="roomeyebrow">The road onward</span>
+        <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
+        <p>${cave
+          ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
+          : gate.blurb}</p>
+        ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
+        ${diffSeg}
+        <div class="roomconfirmactions">
+          <button class="tbtn" id="gate-back">NOT YET</button>
+          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN THE TRIAL LEDGER' : 'ENTER'}</button>
+        </div>
+      </div>`;
+    const close = () => modal.classList.add('hidden');
+    modal.querySelector('#gate-back').onclick = close;
+    let chosen = diff;
+    for (const b of modal.querySelectorAll('.gate-diff .diffbtn')) {
+      b.onclick = () => {
+        chosen = b.dataset.diff;
+        for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
+      };
+    }
+    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
+    modal.classList.remove('hidden');
+  }
+
+  _reflectQuality(q) {
+    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
+      b.classList.toggle('sel', b.dataset.q === q);
+    }
+    this.setQualityUI(q);
   }
 
   _loadHeroPortraits() {
@@ -1171,6 +1500,25 @@ export class UI {
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
 
+  // Sync the settings controls to persisted values (startup restore).
+  setSettingsUI(s = {}) {
+    if (s.volume !== undefined) {
+      const v = Math.round(s.volume * 100);
+      this.root.querySelector('#set-vol').value = v;
+      this.root.querySelector('#set-vol-val').textContent = v + '%';
+    }
+    if (s.music !== undefined) {
+      const v = Math.round(s.music * 100);
+      this.root.querySelector('#set-music').value = v;
+      this.root.querySelector('#set-music-val').textContent = v + '%';
+    }
+    if (s.sfx !== undefined) {
+      this.root.querySelector('#set-sfx').checked = !!s.sfx;
+      this.root.querySelector('#set-sfx-val').textContent = s.sfx ? 'ON' : 'OFF';
+    }
+    if (s.quality !== undefined) this._reflectQuality(s.quality);
+  }
+
   setQualityUI(quality) {
     const button = this.root.querySelector('#b-quality');
     if (!button) return;
@@ -1182,6 +1530,7 @@ export class UI {
 
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
+    const enter = this.root.querySelector('#a-enter');
     const google = this.root.querySelector('#a-google');
     const offline = this.root.querySelector('#a-offline');
     const usernameForm = this.root.querySelector('#a-username-form');
@@ -1197,6 +1546,7 @@ export class UI {
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
+    if (enter) enter.classList.toggle('hidden', !state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {
@@ -1205,11 +1555,11 @@ export class UI {
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
-    if (state.ready && (state.signedIn || offlineAllowed)) {
-      if (!this._accountAccepted) {
+    if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
+      if (this._offlineAccepted && !this._accountAccepted) {
         this._accountAccepted = true;
         this._showScreen('main');
-      }
+      } else if (!this._accountAccepted) this._showScreen('account');
       return;
     }
     this._accountAccepted = false;
@@ -1217,6 +1567,7 @@ export class UI {
   }
 
   setProfile(p) {
+    this._profile = p;
     this._labyrinthClears = p.labyrinthClears || {};
     const nameEl = this.root.querySelector('#prof-name-display');
     const publicName = p.username || p.name || 'Commander';
@@ -1228,6 +1579,7 @@ export class UI {
         : 'first deployment';
     }
     this.refreshHeroBadges(p);
+    this._renderSelectedCharacter();
   }
 
   // WC3-style campaign persistence, shown right on the hero cards.
@@ -1252,6 +1604,7 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._renderSelectedCharacter();
   }
 
   setContinue(snap) {
@@ -1482,6 +1835,7 @@ export class UI {
 
   hideStart() {
     this.root.querySelector('#overlay').classList.add('hidden');
+    this.root.querySelector('#ow-menu')?.classList.add('hidden');
     this.pauseOpen = false;
   }
 

@@ -12,14 +12,17 @@ import { LEVELS } from '../src/config.js';
 const DT = 1 / 30;
 const SIM_SECONDS = 300;
 
-function stubInstanced() {
+// Stub of the HordeArt writer (src/horde-art.js): tracks the per-frame write
+// count the way the real per-type instanced pools track cursors.
+function stubHorde() {
   return {
+    pending: 0,
     count: 0,
     writes: 0,
-    instanceMatrix: { needsUpdate: false },
-    instanceColor: null,
-    setMatrixAt() { this.writes++; },
-    setColorAt() {},
+    begin() { this.pending = 0; },
+    write() { this.pending++; this.writes++; },
+    commit() { this.count = this.pending; },
+    clear() { this.pending = 0; this.count = 0; },
   };
 }
 
@@ -48,7 +51,7 @@ const scene = {
   add: (o) => sceneObjects.add(o),
   remove: (o) => sceneObjects.delete(o),
 };
-const zm = { body: stubInstanced(), head: stubInstanced(), arm: stubInstanced(), eyes: stubInstanced() };
+const horde = stubHorde();
 let meshesMade = 0;
 let disposed = 0;
 let corpses = 0;
@@ -58,7 +61,7 @@ const show = new MenuVignette({
   scene,
   map,
   makeUnitMesh: () => { meshesMade++; return stubUnitMesh(); },
-  zombieMeshes: zm,
+  horde,
   burst: () => { fxCalls++; },
   stream: () => { fxCalls++; },
   addCorpse: () => { corpses++; },
@@ -93,7 +96,7 @@ for (let i = 0; i < ticks; i++) {
   if (show.light.intensity > 1.5) sawLitLamp = true;
   if (sawLitLamp && show.phase === 'dark' && show.light.intensity < 0.2) sawDarkAfterLight = true;
   assert.ok(show.zombies.length <= 150, `mob exceeded its cap: ${show.zombies.length}`);
-  assert.ok(zm.body.count <= 150, `instanced count exceeded the menu cap: ${zm.body.count}`);
+  assert.ok(horde.count <= 150, `instanced count exceeded the menu cap: ${horde.count}`);
 }
 
 assert.ok(vignettesStarted >= 2, `expected at least 2 vignettes in ${SIM_SECONDS}s, saw ${vignettesStarted}`);
@@ -108,7 +111,7 @@ assert.ok(sawDarkAfterLight, 'the lamp never guttered back to dark after a last 
 // The show borrows the game's shared pools — teardown must hand them back
 // empty, and every minted trooper mesh must be disposed.
 show.dispose();
-assert.equal(zm.body.count, 0, 'zombie pool not returned to 0 on dispose');
+assert.equal(horde.count, 0, 'zombie pool not returned to 0 on dispose');
 assert.equal(show.troopers.length, 0, 'troopers not cleared on dispose');
 assert.equal(disposed, meshesMade, `minted ${meshesMade} trooper meshes but disposed ${disposed}`);
 assert.ok(!sceneObjects.has(show.light), 'squad lamp left in the scene on dispose');

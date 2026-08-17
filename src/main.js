@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
@@ -14,14 +14,22 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
-import { TacticalVisuals, applyRim } from './tactical-visuals.js';
+import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { HordeArt, buildCorpseGeometry } from './horde-art.js';
+import { buildUnitModel } from './unit-art.js';
+import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
+import {
+  stitchOverworld, Overworld, gateState,
+  earthWorldDescriptor, overworldChannel,
+  OVERWORLD_SIZE, OVERWORLD_GHOSTS,
+} from './overworld.js';
 import {
   FOG_DARKNESS,
   FOG_EDGE_SOFTNESS,
@@ -30,15 +38,56 @@ import {
   MAX_VISION_SOURCES,
 } from './fog-of-war.js';
 
-// Hives are uncapped in simulation. Keep a large fixed GPU instance pool so a
-// late flood stays visible without allocating new meshes during combat.
-const ZMAX = 6000;
+const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
+
+// The overworld's renderer half: the headless stitch from overworld.js poured
+// through GameMap's cel terrain pipeline. Each region wears its own level's
+// palette, so the planet reads as the campaign itself.
+class OverworldMap extends GameMap {
+  constructor(campaign = 0) {
+    // The planet is a descriptor: Earth today, other servers' universes
+    // tomorrow — same stitch, same renderer, different data.
+    const world = earthWorldDescriptor(campaign);
+    super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
+    this._owWorld = world;
+    // super() stitched with a zero-campaign descriptor (the ladder is not
+    // known until super returns); re-stitch with the real campaign so locked
+    // fronts bake stained ground on first build. Idempotent — fresh rng.
+    this.generate();
+  }
+
+   generate() { stitchOverworld(this, this._owWorld || earthWorldDescriptor()); }
+
+   // buildTerrain asks colorOf(tile) without a position — but idx(x, z) is
+   // always called for the same tile first, so the last query tells us where
+   // the color is going. Region palette by position, one biome per band.
+   idx(x, z) { this._q = [x, z]; return super.idx(x, z); }
+
+   regionPalette(x, z) {
+     // Colour comes from whichever region's descriptor owns this tile.
+     const regions = (this.overworldWorld && this.overworldWorld.regions) || [];
+     const r = this.region ? this.region[this.idx(Math.floor(x), Math.floor(z))] : 0;
+     const lv = regions[r] || regions[0];
+     return lv && lv.palette;
+   }
+
+   colorOf(t, x, z) {
+     const q = x !== undefined ? [x, z] : this._q;
+     const p = q ? this.regionPalette(q[0], q[1]) : (this.overworldWorld.regions[0].palette);
+     const map = {
+       [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
+       [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
+       [TILE.GOLDORE]: p.sand, [TILE.STONEORE]: p.mountain,
+     };
+     return map[t] !== undefined ? map[t] : TILE_INFO[t].color;
+   }
+}
 
 class App {
   constructor() {
@@ -120,6 +169,7 @@ class App {
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onSettings: (s) => this.applySettings(s),
       onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
@@ -135,6 +185,7 @@ class App {
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
+      onCampaignMap: () => this._enterOverworld(),
       onSignIn: () => this._signIn(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
@@ -148,7 +199,7 @@ class App {
       onInviteFriend: (userId) => this._inviteFriend(userId),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
-      onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
+      onLevelPick: (id) => { this._updateRoomSettings({ level: id }); },
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
       onModePick: (m) => this._pickSetupMode(m),
       onRoomReady: (ready) => this._setRoomReady(ready),
@@ -168,7 +219,6 @@ class App {
 
     this.buildingMeshes = new Map();  // building id -> {mesh, b, spawnT}
     this.unitMeshes = new Map();
-    this.unitMeshPool = new Map();    // unit key -> reusable dead troop meshes
     this.plotMeshes = new Map();      // plot id -> {group, state fields}
     this.waveMarkers = [];
 
@@ -229,6 +279,23 @@ class App {
 
     this.ui.setProfile(this.profile);
     this.ui.setQualityUI(this.tacticalVisuals.quality);
+    // Settings restore: volumes apply inside AudioSys before any sound;
+    // UI controls sync to whatever was persisted.
+    this.ui.setSettingsUI(this._restoreSettings());
+    this.ui.fillHeroGrid(HEROES);
+    // Living hub: connect the lobby quietly in the background so the main
+    // menu shows live presence/games/chat before the player clicks PLAY.
+    // Failures stay silent — solo play must never feel blocked by the lobby.
+    this._hubChatLog = [];
+    this._hubChatDirty = false;
+    setTimeout(() => this._openLobby().then((l) => {
+      if (!l || !l.connected) return;
+      l.loadChat().then((rows) => {
+        this._hubChatLog = rows || [];
+        this.ui.hubChat(this._hubChatLog);
+        this.root?.querySelector?.('#hub-panel')?.classList.remove('hidden');
+      }).catch(() => {});
+    }).catch(() => {}), 1500);
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -240,52 +307,396 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // WC3-style menu: the battlefield lives behind the buttons.
+    // The authored title screen remains the front door. Story Campaign opens
+    // the walkable overworld after the player deliberately chooses it.
     this.showMenuBackdrop(this.ui.selectedLevel || 1);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
 
-  // ---------------- menu backdrop ----------------
-
-  showMenuBackdrop(levelId) {
-    if (this.game) return;
-    const level = levelById(levelId || 1);
-    if (this.menuLevelId === level.id) return;
-    this._clearMenuBackdrop();
-    this.menuLevelId = level.id;
+  // ---------------- title diorama ----------------
+  // A real last stand still runs on the surface. The extra geometry makes it
+  // read as one small battlefield on a much larger planet under siege.
+  showMenuBackdrop(levelId = 1) {
+    if (this.game || this.ow || this.menuTerrain) return;
+    const level = levelById(levelId);
     const map = new GameMap(level.seed, level.theme);
     this.menuMap = map;
     this.menuTerrain = map.buildTerrain();
     this.scene.add(this.menuTerrain);
-    // The backdrop is not a screensaver: doomed patrols play out last stands
-    // against the horde, using the game's own meshes on the game's own ground.
     if (!this._menuProjV) this._menuProjV = new THREE.Vector3();
     this.menuShow = new MenuVignette({
-      scene: this.scene,
-      map,
+      scene: this.scene, map, horde: this.horde,
       makeUnitMesh: (u) => this._makeUnitMesh(u),
-      zombieMeshes: { body: this.zBody, head: this.zHead, arm: this.zArm, eyes: this.zEyes },
       burst: (x, y, z, o) => this.burst(x, y, z, o),
       stream: (fx, fy, fz, tx, ty, tz, o) => this.stream(fx, fy, fz, tx, ty, tz, o),
       addCorpse: (c) => { if (this.corpses.length >= 300) this.corpses.shift(); this.corpses.push(c); },
       dispose3D: (obj) => this._disposeObject3D(obj),
-      light: new THREE.PointLight(0xffd9a2, 0, 34, 1.8),
-      dummy: new THREE.Object3D(),
-      color: new THREE.Color(),
+      light: new THREE.PointLight(0xffd39a, 0, 34, 1.8),
+      dummy: new THREE.Object3D(), color: new THREE.Color(),
       project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
     });
+    this._buildTitleSpace();
+  }
+
+  _buildTitleSpace() {
+    const group = new THREE.Group();
+    group.name = 'planet-edge-title';
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(185, 48, 24),
+      new THREE.MeshLambertMaterial({ color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
+    );
+    planet.position.set(MAP_SIZE / 2, -185, MAP_SIZE / 2 + 18);
+    group.add(planet);
+    const atmosphere = new THREE.Mesh(
+      new THREE.SphereGeometry(187.2, 48, 24),
+      new THREE.MeshBasicMaterial({ color: 0x4ca8e8, transparent: true, opacity: 0.12, side: THREE.BackSide, depthWrite: false }),
+    );
+    atmosphere.position.copy(planet.position);
+    group.add(atmosphere);
+
+    const starGeo = new THREE.BufferGeometry();
+    const stars = new Float32Array(750 * 3);
+    for (let i = 0; i < 750; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 170 + Math.random() * 220;
+      stars[i * 3] = MAP_SIZE / 2 + Math.sin(a) * r;
+      stars[i * 3 + 1] = 45 + Math.random() * 180;
+      stars[i * 3 + 2] = MAP_SIZE / 2 - 80 + Math.cos(a) * r;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3));
+    const starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xdbeaff, size: 0.95, transparent: true, opacity: 0.9, depthWrite: false, fog: false }));
+    group.add(starField);
+
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(12, 32, 20), new THREE.MeshLambertMaterial({ color: 0x6f8194, emissive: 0x17293d, emissiveIntensity: 0.6, fog: false }));
+    moon.position.set(MAP_SIZE / 2 - 38, 62, MAP_SIZE / 2 - 72);
+    group.add(moon);
+    const moonRing = new THREE.Mesh(
+      new THREE.TorusGeometry(18, 0.9, 8, 64),
+      new THREE.MeshBasicMaterial({ color: 0x8aa7bd, transparent: true, opacity: 0.5, depthWrite: false, fog: false }),
+    );
+    group.add(moonRing);
+    const orbitalGlobe = new THREE.Mesh(
+      new THREE.SphereGeometry(105, 48, 28),
+      new THREE.MeshBasicMaterial({ color: 0x071321, fog: false }),
+    );
+    group.add(orbitalGlobe);
+    const orbitalGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(108, 48, 28),
+      new THREE.MeshBasicMaterial({ color: 0x2686c0, transparent: true, opacity: 0.2, side: THREE.BackSide, depthWrite: false, fog: false }),
+    );
+    group.add(orbitalGlow);
+
+    const ships = new THREE.Group();
+    for (let i = 0; i < 5; i++) {
+      const ship = new THREE.Mesh(new THREE.BoxGeometry(5 + i * 0.7, 0.8, 1.8), new THREE.MeshBasicMaterial({ color: 0x24384d }));
+      ship.position.set(MAP_SIZE / 2 + 38 + i * 13, 54 + (i % 2) * 9, MAP_SIZE / 2 - 105 - i * 7);
+      ship.rotation.y = -0.35;
+      ships.add(ship);
+    }
+    group.add(ships);
+
+    const streakMat = new THREE.MeshBasicMaterial({ color: 0xffb45b, transparent: true, opacity: 0.7, depthWrite: false });
+    const streaks = [];
+    for (let i = 0; i < 4; i++) {
+      const streak = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.2, 18, 6), streakMat.clone());
+      streak.rotation.z = 0.48;
+      streak.userData.seed = i * 1.73;
+      group.add(streak); streaks.push(streak);
+    }
+    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks };
+    this.titleSpace = group;
+    this.scene.add(group);
+    this.scene.background = new THREE.Color(0x020711);
+    this.scene.fog.color.setHex(0x07101b);
+    this.scene.fog.density = 0.0024;
+  }
+
+  _updateTitleSpace(t) {
+    if (!this.titleSpace) return;
+    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks } = this.titleSpace.userData;
+    atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
+    moon.rotation.y = t * 0.015;
+    const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    moon.position.copy(cameraLocal(-42, 27, -125));
+    moonRing.position.copy(moon.position);
+    moonRing.quaternion.copy(this.camera.quaternion);
+    moonRing.rotateX(1.08);
+    moonRing.rotateZ(-0.28);
+    orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
+    orbitalGlow.position.copy(orbitalGlobe.position);
+    ships.position.x = Math.sin(t * 0.08) * 3;
+    for (let i = 0; i < streaks.length; i++) {
+      const s = streaks[i];
+      const p = (t * (0.07 + i * 0.008) + s.userData.seed) % 1;
+      s.position.set(MAP_SIZE / 2 - 55 + i * 34 + p * 22, 78 - p * 72, MAP_SIZE / 2 - 82 + i * 5);
+      s.material.opacity = Math.sin(p * Math.PI) * 0.75;
+    }
   }
 
   _clearMenuBackdrop() {
     if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
-    if (this.menuTerrain) {
-      this.scene.remove(this.menuTerrain);
-      this._disposeObject3D(this.menuTerrain);
-      this.menuTerrain = null;
-    }
+    if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this._disposeObject3D(this.menuTerrain); this.menuTerrain = null; }
+    if (this.titleSpace) { this.scene.remove(this.titleSpace); this._disposeObject3D(this.titleSpace); this.titleSpace = null; }
     this.menuMap = null;
-    this.menuLevelId = null;
+  }
+
+  // ---------------- overworld ----------------
+  // The menu is a place: the five fronts stitched onto one small planet,
+  // walked by the player's selected hero. Entering a front's gate starts the
+  // run through the same onStart path the setup screen uses.
+
+  _enterOverworld() {
+    if (this.game || this.ow) return;
+    this._clearMenuBackdrop();
+    this.ui.setOverworldMode(true);
+    const map = new OverworldMap(this.profile.campaign || 0);
+    const sky = map.overworldWorld.regions[0]?.palette?.sky || 0x7eaeb5;
+    this.scene.background = new THREE.Color(sky);
+    this.scene.fog.color.setHex(sky);
+    this.scene.fog.density = 0.0045;
+    this.owMap = map;
+    this.ow = new Overworld(map, { world: map.overworldWorld });
+    this.owTerrain = map.buildTerrain();
+    this.scene.add(this.owTerrain);
+    this.owGates = [];
+    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave].filter(Boolean)) {
+      this.owGates.push(this._makeOverworldGate(gate));
+    }
+    this._makeOverworldHero();
+    this.ui.hideOverlay();
+    this.ui.showBanner('🚶 WASD or arrows to walk · click to set a course · ESC for the war council', '', 6000);
+  }
+
+  _clearOverworld() {
+    if (this.owTerrain) { this.scene.remove(this.owTerrain); this._disposeObject3D(this.owTerrain); }
+    for (const g of this.owGates || []) { this.scene.remove(g); this._disposeObject3D(g); }
+    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
+    for (const m of (this.owGhostMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
+    this.owTerrain = null;
+    this.owGates = [];
+    this.owHero = null;
+    this.owGhostMeshes = new Map();
+    this.owMap = null;
+    this.ow = null;
+    if (this._owGhostChan) { try { this.lobby?.sb?.removeChannel?.(this._owGhostChan); } catch { /* already gone */ } this._owGhostChan = null; }
+  }
+
+  // A front's gate: two posts, a lintel, a banner whose colour is the state
+  // of the war there, and the boss's name overhead. Locked gates stand on
+  // blighted ground with a slow corrupted pulse.
+  _makeOverworldGate(gate) {
+    const st = gateState(gate);
+    const gr = new THREE.Group();
+    const wood = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
+    for (const dx of [-1.5, 1.5]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
+      post.position.set(dx, 1.7, 0);
+      post.castShadow = true;
+      gr.add(post);
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.4, 0.5), wood);
+    lintel.position.y = 3.4;
+    lintel.castShadow = true;
+    gr.add(lintel);
+    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
+    const banner = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.2, 1.1),
+      new THREE.MeshLambertMaterial({ color: bannerColor, side: THREE.DoubleSide }),
+    );
+    banner.position.y = 2.6;
+    gr.add(banner);
+    gr.userData.banner = banner;
+    const ringGeo = new THREE.RingGeometry(2.4, 3.0, 40);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: st.locked ? 0x8a4aff : st.cleared ? 0xc9a44a : 0xfff2d8,
+      transparent: true, opacity: 0.4, depthWrite: false,
+    }));
+    ring.position.y = 0.06;
+    gr.add(ring);
+    gr.userData.ring = ring;
+    const icon = gate.cave ? '🌀' : gate.boss.icon;
+    const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
+    const sub = gate.cave ? 'the trials below' : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
+    const label = this._makeLabelSprite(icon, name);
+    label.position.y = 5.6;
+    label.scale.set(5.2, 2.6, 1);
+    gr.add(label);
+    gr.userData.sub = sub;
+    gr.position.set(gate.x, this.owMap.groundY(gate.x, gate.z), gate.z);
+    gr.userData.gate = gate;
+    this.scene.add(gr);
+    return gr;
+  }
+
+  // The player's chosen hero walks the overworld in miniature — the real unit
+  // mesh, real walk cycle, smaller aura. Rebuilt when the pick changes.
+  _makeOverworldHero() {
+    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
+    const key = this.ui.selectedHero || 'alexander';
+    const def = HEROES[key] || HEROES.alexander;
+    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
+    mesh.scale.setScalar(1.0);
+    this.owHero = mesh;
+    this.scene.add(mesh);
+  }
+
+  _updateOverworld(dt, t) {
+    const ow = this.ow;
+    if (!ow) return;
+    // Steering only while the hub overlay is closed; typing in lobby inputs
+    // already swallows keys, and a menu open over the world means "at ease".
+    if (!this.ui.overlayHidden()) ow.setDir(0, 0);
+    else {
+      let dx = 0, dz = 0;
+      if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
+      if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
+      if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
+      if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
+      ow.setDir(dx, dz);
+    }
+    for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
+
+    const h = ow.hero;
+    if (this.owHero) {
+      this.owHero.position.set(h.x, this.owMap.groundY(h.x, h.z), h.z);
+      this.owHero.rotation.y = h.facing;
+      // The real walk cycle from _syncUnits, mirrored here so the overworld
+      // hero moves like he does in a fight.
+      const pose = unitPose(h.moving ? 'run' : 'idle', t * (h.moving ? 10 : 1.8));
+      const body = this.owHero.userData.body;
+      if (body) {
+        body.position.y = pose.y;
+        body.rotation.z = pose.roll;
+      }
+      const limbs = this.owHero.userData.limbs;
+      if (limbs) {
+        if (limbs.legL) limbs.legL.rotation.x = pose.stride;
+        if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
+        if (limbs.armL) limbs.armL.rotation.x = -pose.stride * 0.55;
+        if (limbs.armR) limbs.armR.rotation.x = pose.stride * 0.55;
+      }
+    }
+
+    // Gates breathe: locked ones pulse a corrupted violet, open ones ripple
+    // gently, and every banner sways on its pole.
+    for (const gr of this.owGates) {
+      const st = gateState(gr.userData.gate);
+      const ph = (t * 0.7) % 1;
+      gr.userData.ring.material.opacity = st.locked
+        ? 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))
+        : 0.3 * (1 - ph * 0.6);
+      gr.userData.ring.scale.setScalar(1 + ph * 0.12);
+      gr.userData.banner.rotation.y = Math.sin(t * 1.8 + gr.position.x) * 0.22;
+    }
+    this._updateOverworldGhosts(dt, t);
+  }
+
+  _onOverworldEvent(ev) {
+    if (ev.t !== 'gate') return;
+    if (ev.state.locked) {
+      this.shake = 0.35;
+      this.audio.deny();
+      this.ui.showBanner('🔒 The road ends here — take the front before it first.', 'bad', 2600);
+      return;
+    }
+    this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
+    if (ev.gate.portal) {
+      this.ui.showBanner('🌀 A way off-world — the stars open in a future build.', '', 3200);
+      return;
+    }
+    this.ui.showGateConfirm({
+      gate: ev.gate,
+      diff: this.ui.selectedDiff,
+      onEnter: (diff) => {
+        if (ev.gate.cave) {
+          // The trial ledger IS the labyrinth flow: the setup screen lists
+          // the trials, exactly as Play Solo → The Labyrinth does.
+          this.ui.selectedMode = 'labyrinth';
+          this.ui.showSetup({ mode: 'labyrinth' });
+          return;
+        }
+        // Same path the setup screen's START button takes; only the level
+        // selection is made by geography instead of a card click.
+        this.ui.selectedMode = 'campaign';
+        this.ui.selectedLevel = ev.gate.levelId;
+        this.ui.selectedDiff = diff;
+        this.ui.cb.onStart(diff, this.ui.selectedHero);
+      },
+    });
+  }
+
+  // ----- multiplayer ghosts: presence garnish, never game netcode -----
+
+  _owGhostSend(payload) {
+    if (!OVERWORLD_GHOSTS || !this.lobby?.connected || !this.lobby.sb || !this.lobby.me) return;
+    try {
+      if (!this._owGhostChan) {
+        // Presence is scoped per planet: ghosts you see walk YOUR world.
+        this._owGhostChan = this.lobby.sb.channel(overworldChannel(this.ow.world.id))
+          .on('broadcast', { event: 'pos' }, ({ payload: p }) => {
+            if (!this.ow || !p || p.id === this.lobby.me.id) return;
+            if (p.worldId && p.worldId !== this.ow.world.id) return; // another planet's ghost
+            this.ow.ghostUpsert(p.id, p, this.ow.time);
+            if (p.enter) this._owGhostNote(p);
+          })
+          .subscribe();
+      }
+      const res = this._owGhostChan.send({ type: 'broadcast', event: 'pos', payload });
+      if (res && res.catch) res.catch(() => {});
+    } catch { /* the overworld is walkable alone */ }
+  }
+
+  _updateOverworldGhosts(dt, t) {
+    if (!OVERWORLD_GHOSTS) return;
+    this._owGhostAcc = (this._owGhostAcc || 0) + dt;
+    if (this._owGhostAcc >= 0.25) {
+      this._owGhostAcc = 0;
+      const h = this.ow.hero;
+      this._owGhostSend({
+        id: this.lobby?.me?.id || 'local',
+        name: this._publicName(),
+        hero: this.ui.selectedHero,
+        worldId: this.ow.world.id,
+        x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
+        enter: this.owEnterNote || undefined,
+      });
+      this.owEnterNote = null;
+      this.ow.ghostSweep(6, this.ow.time);
+    }
+    this.owGhostMeshes = this.owGhostMeshes || new Map();
+    for (const [id, g] of this.ow.ghosts) {
+      let mesh = this.owGhostMeshes.get(id);
+      if (!mesh) {
+        const def = HEROES[g.hero] || HEROES.alexander;
+        mesh = this._makeUnitMesh({ hero: true, key: g.hero, def, auraRadius: 1.3 });
+        mesh.scale.setScalar(0.92);
+        mesh.userData.label = this._makeLabelSprite('👤', g.name);
+        mesh.userData.label.position.y = 2.6;
+        mesh.userData.label.scale.set(3.4, 1.7, 1);
+        mesh.add(mesh.userData.label);
+        this.scene.add(mesh);
+        this.owGhostMeshes.set(id, mesh);
+      }
+      mesh.position.set(g.x, this.owMap.groundY(g.x, g.z), g.z);
+      mesh.userData.label.material.opacity = 0.85;
+    }
+    for (const [id, mesh] of this.owGhostMeshes) {
+      if (!this.ow.ghosts.has(id)) {
+        this.scene.remove(mesh);
+        this._disposeObject3D(mesh);
+        this.owGhostMeshes.delete(id);
+      }
+    }
+    void t;
+  }
+
+  // "X entered Greenfall Marches" — the hub chat strip doubles as the war
+  // report for whoever is walking the same planet.
+  _owGhostNote(p) {
+    this._hubChatLog = [...(this._hubChatLog || []), { name: p.name || 'A commander', text: `entered ${p.enter}` }];
+    this.ui.hubChat(this._hubChatLog);
   }
 
   // ---------------- game start ----------------
@@ -296,12 +707,13 @@ class App {
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
+    this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
       await loadAssets();
       this.assetsLoaded = true;
     }
-    this._clearMenuBackdrop();
+    this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
@@ -509,29 +921,73 @@ class App {
   }
 
   _makeNestMesh(n) {
+    // The hive: a breathing chitin boil, not a rock. Layered mounds under a
+    // ribcage of grown spines, egg sacs glued to the flanks, glowing brood
+    // fissures, and a ring of churned dead earth so it stains the map around
+    // itself. Deterministic per nest id so peers agree on the dressing.
     const g = new THREE.Group();
-    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshLambertMaterial({ color: 0x3a2a4a }));
+    const vid = (n.id || 0) * 7919;
+    const rot = (k) => ((vid >> k) % 628) / 100;
+    const mat = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
+
+    // Churned dead-earth ring.
+    const ringGeo = new THREE.CircleGeometry(3.1, 20);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshLambertMaterial({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
+    ring.position.y = 0.03;
+    ring.receiveShadow = true;
+    g.add(ring);
+
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), mat(HIDE));
     mound.scale.y = 0.55;
     mound.position.y = 0.4;
     mound.castShadow = true;
     g.add(mound);
     g.userData.mound = mound;
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2 + 0.4;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.3 + (i % 2) * 0.7, 5), new THREE.MeshLambertMaterial({ color: 0x2c2038 }));
-      spike.position.set(Math.cos(a) * 1.5, 0.9, Math.sin(a) * 1.5);
-      spike.rotation.z = Math.cos(a) * 0.5;
-      spike.rotation.x = -Math.sin(a) * 0.5;
+    // Secondary boils shoulder out of the main mound.
+    for (let i = 0; i < 3; i++) {
+      const a = rot(i) + i * 2.1;
+      const boil = new THREE.Mesh(new THREE.SphereGeometry(0.7 + (i % 2) * 0.25, 9, 6), mat(i % 2 ? HIDE2 : HIDE));
+      boil.scale.y = 0.6;
+      boil.position.set(Math.cos(a) * 1.6, 0.35, Math.sin(a) * 1.6);
+      boil.castShadow = true;
+      g.add(boil);
+    }
+    // The grown ribcage: paired spines curving over the crown.
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + rot(3);
+      const h = 1.2 + (i % 3) * 0.5;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.22 + (i % 2) * 0.08, h, 5), mat(HIDE2));
+      spike.position.set(Math.cos(a) * 1.5, 0.75 + h * 0.25, Math.sin(a) * 1.5);
+      spike.rotation.z = Math.cos(a) * 0.55;
+      spike.rotation.x = -Math.sin(a) * 0.55;
       spike.castShadow = true;
       g.add(spike);
     }
+    // Egg sacs glued low on the flanks — matte, faintly lit from within.
+    for (let i = 0; i < 5; i++) {
+      const a = rot(i + 1) + i * 1.35;
+      const r = 1.9 + (i % 2) * 0.45;
+      const sac = new THREE.Mesh(new THREE.SphereGeometry(0.24 + (i % 3) * 0.08, 7, 5), mat(SAC, 0.25));
+      sac.scale.y = 1.25;
+      sac.position.set(Math.cos(a) * r, 0.22, Math.sin(a) * r);
+      sac.castShadow = true;
+      g.add(sac);
+    }
+    // Brood fissures: the glow that tells you where to shoot.
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 1.1;
-      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6),
-        new THREE.MeshLambertMaterial({ color: 0xb44dff, emissive: 0xb44dff, emissiveIntensity: 1.8 }));
-      blob.position.set(Math.cos(a) * 1.1, 1.05, Math.sin(a) * 1.1);
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), mat(VEIN, 1.8));
+      blob.scale.set(1, 0.55, 1.6);
+      blob.position.set(Math.cos(a) * 1.1, 1.02, Math.sin(a) * 1.1);
+      blob.rotation.y = -a;
       g.add(blob);
     }
+    const maw = new THREE.Mesh(new THREE.SphereGeometry(0.5, 9, 6), mat(VEIN, 1.4));
+    maw.scale.y = 0.4;
+    maw.position.y = 1.42;
+    g.add(maw);
     g.position.set(n.x, this.map.groundY(n.x, n.z), n.z);
     return g;
   }
@@ -756,6 +1212,9 @@ class App {
 
   _pickHero(key) {
     const msg = this._heroPayload(key);
+    // On the overworld the pick is visible immediately: the walking hero is
+    // rebuilt from the new unit def.
+    if (!this.game && this.ow) this._makeOverworldHero();
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
     if (this.lobby?.game) {
@@ -970,7 +1429,6 @@ class App {
     console.error('saved game restore failed', error);
     try { localStorage.removeItem('zillions_save'); } catch { /* blocked storage */ }
     this.ui.setContinue(null);
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
     this.ui.showBanner('That save could not be restored and was removed. Start a new war.', 'bad', 8000);
     if (this.auth?.isSignedIn()) {
       this.auth.clearLatestSave().catch((cloudError) => console.warn('cloud save clear failed', cloudError));
@@ -1340,13 +1798,13 @@ class App {
       return this.lobby;
     }
     this.lobby = new OnlineLobby({
-      onChat: (m) => this.ui.lobbyChatAdd(m),
+      onChat: (m) => { this.ui.lobbyChatAdd(m); this._hubChatDirty = true; },
       onRoomChat: (m) => {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id),
-      onOnline: (map) => { this.ui.lobbyOnline(map); },
+      onGames: (g) => { this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id); this.ui.hubGames(g); },
+      onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onRoom: (game) => this._onRoomUpdate(game),
@@ -1596,9 +2054,6 @@ class App {
     if (this.mpRole && this.mpRole !== 'host') return;
     if ((this.ui.selectedMode || 'campaign') === m) return;
     this.ui.applySetupMode(m);
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
-    // Online rooms persist the retarget (and clear every guest Ready vote);
-    // manual co-op just re-broadcasts the roster so guests see the new mode.
     this._updateRoomSettings({ mode: m, level: this.ui.selectedLevel || 1 });
     this._syncSetupRoster();
   }
@@ -2366,32 +2821,9 @@ class App {
   // ---------------- zombies (instanced) ----------------
 
   _setupZombieMeshes() {
-    const bodyGeo = new THREE.BoxGeometry(0.34, 0.6, 0.22);
-    bodyGeo.translate(0, 0.42, 0);
-    const headGeo = new THREE.SphereGeometry(0.155, 8, 6);
-    headGeo.translate(0, 0.85, 0.03);
-    const armGeo = new THREE.BoxGeometry(0.5, 0.1, 0.34);
-    armGeo.translate(0, 0.6, 0.28);
-    // Cool moonlit rim on the horde: massed zombies keep their silhouette
-    // against grass and stone at every zoom level, day or night.
-    const mat = applyRim(new THREE.MeshLambertMaterial({ color: 0xffffff }), { color: 0x9fb4de, power: 2.0, strength: 0.58 });
-
-    // Glowing eye-strip (unlit material — burns through the navy night).
-    const eyeGeo = new THREE.BoxGeometry(0.18, 0.05, 0.04);
-    eyeGeo.translate(0, 0.87, 0.16);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
-    this.zBody = new THREE.InstancedMesh(bodyGeo, mat, ZMAX);
-    this.zHead = new THREE.InstancedMesh(headGeo, applyRim(mat.clone(), { color: 0x9fb4de, power: 2.0, strength: 0.58 }), ZMAX);
-    this.zArm = new THREE.InstancedMesh(armGeo, mat.clone(), ZMAX);
-    this.zEyes = new THREE.InstancedMesh(eyeGeo, eyeMat, ZMAX);
-    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.castShadow = m !== this.zEyes;
-      m.frustumCulled = false;
-      m.count = 0;
-      this.scene.add(m);
-    }
+    // Per-type authored silhouettes, instanced — see horde-art.js. The menu
+    // vignette writes into the same pools, so the menu horde IS the game's.
+    this.horde = new HordeArt(this.scene, ZMAX);
     this._zdummy = new THREE.Object3D();
     this._zcolor = new THREE.Color();
   }
@@ -2399,7 +2831,8 @@ class App {
   _updateZombieMeshes(t, dt = 0) {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
-    const d = this._zdummy, c = this._zcolor;
+    const c = this._zcolor;
+    this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
@@ -2417,31 +2850,24 @@ class App {
       const ax = attack ? attack.tx - zb.x : Math.sin(yaw);
       const az = attack ? attack.tz - zb.z : Math.cos(yaw);
       const ad = Math.hypot(ax, az) || 1;
-      d.position.set(zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge);
-      d.rotation.set((zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06);
-      d.scale.set(s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25));
-      d.updateMatrix();
-      this.zBody.setMatrixAt(i, d.matrix);
-      this.zHead.setMatrixAt(i, d.matrix);
-      this.zArm.setMatrixAt(i, d.matrix);
-      this.zEyes.setMatrixAt(i, d.matrix);
+      // Tint over the baked palette: white at rest, flushed in the lunge,
+      // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
       else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
-      else c.setHex(zb.def.color);
-      this.zBody.setColorAt(i, c);
-      this.zArm.setColorAt(i, c);
-      c.multiplyScalar(0.8);
-      this.zHead.setColorAt(i, c);
+      else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
+      else c.setRGB(1, 1, 1);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
-      c.setHex(zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a);
-      this.zEyes.setColorAt(i, c);
+      const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
+      this.horde.write(
+        zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
+        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
+        (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
+        s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
+        t, zb.phase, lunge, c, eyeHex,
+      );
     }
-    for (const m of [this.zBody, this.zHead, this.zArm, this.zEyes]) {
-      m.count = n;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    }
+    this.horde.commit();
   }
 
   // ---------------- coins ----------------
@@ -2491,8 +2917,10 @@ class App {
 
   _setupCorpses() {
     const MAXC = 300;
-    const geo = new THREE.BoxGeometry(0.36, 0.62, 0.24);
-    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), MAXC);
+    // A real felled body (limbs splayed, baked gore) instead of a tumbling
+    // crate — instance color still tints it per type.
+    const geo = buildCorpseGeometry();
+    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
     this.corpseMesh.frustumCulled = false;
@@ -2512,7 +2940,8 @@ class App {
       rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
       wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
       life: 6 + Math.random() * 3, scale: e.big ? 1.7 : 1,
-      color: e.big ? 0x4a3356 : 0x54702e,
+      // Multiplies the corpse geometry's baked pale palette, so keep it bright.
+      color: e.big ? 0xa886c8 : 0xa4bc72,
     });
   }
 
@@ -2915,460 +3344,17 @@ class App {
 
   // ---------------- building meshes ----------------
 
-  _authoredBuildingMesh(b) {
-    const tier = Math.max(1, Math.min(3, Number(b.plotTier) || 1));
-    let key = null;
-    if (b.kind === 'hq') key = `humanHqT${tier}`;
-    else if (b.kind === 'tower' && !b.branch) key = `humanTowerT${tier}`;
-    else if (b.kind.startsWith('camp_')) key = `humanBarracksT${tier}`;
-    else if (b.kind === 'mine') key = 'humanMine';
-    if (!key) return null;
-    const model = assetClone(key);
-    if (!model) return null;
-    const g = new THREE.Group();
-    g.add(model);
-    g.userData.authored = true;
-    g.userData.head = assetPart(model, 'part_turret');
-    g.userData.rotor = assetPart(model, 'part_rotor');
-    g.userData.core = assetPart(model, 'part_core');
-    return g;
-  }
-
   _makeBuildingMesh(b) {
-    const authored = this._authoredBuildingMesh(b);
-    if (authored) return authored;
-    const g = new THREE.Group();
-    const M = (color, e = 0) => new THREE.MeshLambertMaterial({ color, emissive: e ? color : 0x000000, emissiveIntensity: e });
-    const box = (w, h, dep, color, x = 0, y = 0, z = 0) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), M(color));
-      m.position.set(x, y, z);
-      m.castShadow = true; m.receiveShadow = true;
-      g.add(m); return m;
-    };
-    const cyl = (r1, r2, h, color, x = 0, y = 0, z = 0, seg = 10) => {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, seg), M(color));
-      m.position.set(x, y, z);
-      m.castShadow = true;
-      g.add(m); return m;
-    };
-    const cone = (r, h, color, x = 0, y = 0, z = 0, seg = 4) => {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, seg), M(color));
-      m.position.set(x, y, z);
-      m.rotation.y = Math.PI / 4;
-      m.castShadow = true;
-      g.add(m); return m;
-    };
-    // Always-lit accent: marker lights, sensor bands, holo panels.
-    const lit = (w, h, dep, color, x = 0, y = 0, z = 0, i = 0.7) => {
-      const m = box(w, h, dep, color, x, y, z);
-      m.material.emissive.setHex(color);
-      m.material.emissiveIntensity = i;
-      m.castShadow = false;
-      return m;
-    };
-    // The colony kit: one hull family + one trim so every structure on the
-    // planet reads as the same expedition's prefab, never a random block.
-    const HULL = 0xe6e0d0, HULL2 = 0xcfc9b8, PAD = 0x9c968a, TRIM = 0xe8843c, SOLAR = 0x31506b, GLOW = 0x5fd8c8;
-    const windows = (n, y, r, color = 0xffca6e) => {
-      // Emissive windows that glow at night (renderer toggles intensity).
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + 0.4;
-        const w = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.03), M(color, 0.0));
-        w.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
-        w.lookAt(Math.cos(a) * 2 * r, y, Math.sin(a) * 2 * r);
-        w.userData.window = true;
-        g.add(w);
-      }
-    };
-    const tier = b.plotTier || 1;
-
-    switch (b.kind) {
-      case 'hq': {
-        // Colony Command: a terraced landing terrace, the operations hall
-        // with a lit sensor band, comm pylons that fill in as it grows, and
-        // one tall control spire with a dish and a beacon you can find from
-        // anywhere on the planet.
-        box(4.6, 0.4, 4.6, PAD, 0, 0.2);
-        box(3.9, 0.4, 3.9, 0xaba593, 0, 0.6);
-        lit(3.92, 0.06, 3.92, TRIM, 0, 0.82, 0, 0.4);      // terrace edge light
-        box(3.1, 1.5, 3.1, HULL, 0, 1.55);
-        box(3.3, 0.24, 3.3, HULL2, 0, 2.4);                // hall cornice
-        lit(3.14, 0.14, 3.14, GLOW, 0, 1.95, 0, 0.35);     // ops glass band
-        const pylon = (x, z) => {
-          cyl(0.3, 0.4, 2.7, HULL2, x, 1.8, z, 8);
-          lit(0.24, 0.24, 0.24, TRIM, x, 3.25, z, 0.8);
-        };
-        pylon(1.35, 1.35);
-        if (tier >= 2) pylon(-1.35, -1.35);
-        if (tier >= 3) { pylon(1.35, -1.35); pylon(-1.35, 1.35); }
-        // The spire: taller with every tier.
-        const spireH = 2.2 + tier * 0.5;
-        cyl(0.68, 0.9, spireH, HULL, 0, 2.4 + spireH / 2, 0, 12);
-        lit(1.5, 0.12, 1.5, GLOW, 0, 2.4 + spireH * 0.62, 0, 0.3); // control ring
-        cyl(0.95, 0.72, 0.3, HULL2, 0, 2.5 + spireH, 0, 12);        // crown deck
-        // Comms dish, aimed at the sky.
-        const dish = cyl(0.55, 0.08, 0.3, 0xd8d2c2, 0.45, 2.85 + spireH, 0.35, 10);
-        dish.rotation.x = -0.7; dish.rotation.z = -0.35;
-        box(0.07, 1.4, 0.07, 0x4a5058, -0.3, 3.15 + spireH, -0.25);
-        const beacon = lit(0.2, 0.2, 0.2, tier >= 4 ? 0xf3c53d : TRIM, -0.3, 3.95 + spireH, -0.25, 1.0);
-        // Holo-banner off the crown: the expedition's colors.
-        const flag = lit(0.7, 0.4, 0.03, TRIM, 0.65, 2.9 + spireH, -0.2, 0.5);
-        flag.material.transparent = true; flag.material.opacity = 0.85;
-        g.userData.flag = flag;
-        windows(6, 1.55, 1.62);
-        windows(4, 2.4 + spireH * 0.4, 0.84);
-        break;
-      }
-      case 'house': {
-        // Hab unit: white prefab hull, tilted solar roof, lit door. Bigger
-        // tiers stack a second module instead of growing a random block.
-        // Variation is keyed off the plot id — deterministic, so peers and
-        // rebuilds agree — and flips the roof pitch, door side and antenna,
-        // so a street of habs reads as a neighborhood, not a print run.
-        const vid = b.plotId || b.id || 0;
-        const flip = vid % 2 ? 1 : -1;
-        const hullVar = new THREE.Color(HULL).offsetHSL(0, 0.004 * (vid % 3), ((vid % 5) - 2) * 0.012).getHex();
-        if (tier === 1) {
-          box(1.5, 0.1, 1.3, PAD, 0, 0.05);                 // foundation skirt
-          box(1.3, 0.7, 1.1, hullVar, 0, 0.4);
-          const roof = box(1.36, 0.08, 1.16, SOLAR, 0, 0.83);
-          roof.rotation.z = 0.07 * flip;
-          lit(0.3, 0.44, 0.04, TRIM, 0.3 * flip, 0.29, 0.56, 0.4);
-          if (vid % 3 === 0) box(0.04, 0.5, 0.04, 0x4a5058, -0.5 * flip, 1.0, -0.35);
-        } else if (tier === 2) {
-          box(1.7, 0.1, 1.5, PAD, 0, 0.05);
-          box(1.5, 1.0, 1.3, hullVar, 0, 0.55);
-          const roof = box(1.56, 0.09, 1.36, SOLAR, 0, 1.13);
-          roof.rotation.z = 0.07 * flip;
-          lit(0.32, 0.5, 0.04, TRIM, 0.32 * flip, 0.32, 0.66, 0.4);
-          box(0.05, 0.7, 0.05, 0x4a5058, -0.55 * flip, 1.45, -0.4); // antenna
-        } else {
-          box(1.8, 0.1, 1.6, PAD, 0, 0.05);
-          box(1.6, 1.4, 1.4, hullVar, 0, 0.75);
-          box(1.0, 0.8, 1.0, HULL2, 0.45 * flip, 1.85, 0.25);
-          const roof = box(1.06, 0.08, 1.06, SOLAR, 0.45 * flip, 2.31, 0.25);
-          roof.rotation.z = 0.07 * flip;
-          box(1.1, 0.1, 1.3, 0x6da06a, -0.4 * flip, 1.53, 0);      // roof garden
-          lit(0.32, 0.52, 0.04, TRIM, 0.3 * flip, 0.33, 0.72, 0.4);
-        }
-        windows(tier + 1, tier >= 3 ? 0.85 : 0.45, 0.72);
-        break;
-      }
-      case 'farm': {
-        // Hydroponic beds under a white frame, glowing faintly at the rims.
-        box(1.9, 0.14, 1.9, HULL2, 0, 0.07);
-        for (let r = 0; r < 3; r++) {
-          box(1.7, 0.18, 0.36, tier >= 2 ? 0x5fd889 : 0x3fae64, 0, 0.2, -0.6 + r * 0.6);
-          lit(1.72, 0.03, 0.38, GLOW, 0, 0.31, -0.6 + r * 0.6, 0.25);
-        }
-        if (tier >= 2) {
-          cyl(0.28, 0.32, 0.6, HULL, 0.72, 0.44, 0.72, 8);  // nutrient tank
-          lit(0.3, 0.05, 0.3, TRIM, 0.72, 0.77, 0.72, 0.5);
-        }
-        break;
-      }
-      case 'mill': {
-        // Wind turbine: slender pylon, nacelle, three long blades.
-        const h = tier >= 2 ? 3.1 : 2.5;
-        box(1.0, 0.16, 1.0, PAD, 0, 0.08);
-        cyl(0.13, 0.24, h, HULL, 0, h / 2, 0, 8);
-        box(0.42, 0.3, 0.7, HULL2, 0, h + 0.1, 0.05);
-        lit(0.1, 0.1, 0.1, TRIM, 0, h + 0.1, 0.42, 0.8);
-        const rotor = new THREE.Group();
-        rotor.position.set(0, h + 0.1, 0.42);
-        for (let i = 0; i < 3; i++) {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.7, 0.03), M(0xe9e3d4));
-          blade.position.y = 0.88;
-          blade.castShadow = true;
-          const pivot = new THREE.Group();
-          pivot.rotation.z = (i * Math.PI * 2) / 3;
-          pivot.add(blade);
-          rotor.add(pivot);
-        }
-        g.add(rotor);
-        g.userData.rotor = rotor;
-        break;
-      }
-      case 'mine': {
-        box(1.9, 0.22, 1.9, PAD, 0, 0.11);
-        box(0.8, 0.8, 0.8, HULL2, 0, 0.62);
-        box(0.12, 1.8, 0.12, HULL, -0.45, 1.1, -0.45);
-        box(0.12, 1.8, 0.12, HULL, 0.45, 1.1, -0.45);
-        box(1.2, 0.14, 0.5, HULL2, 0, 2.0, -0.45);
-        const wheel = cyl(0.34, 0.34, 0.16, 0xf3c53d, 0, 2.0, -0.45, 12);
-        wheel.rotation.x = Math.PI / 2;
-        g.userData.rotor = wheel;
-        if (tier >= 2) box(1.0, 0.5, 0.7, HULL, 0.55, 0.25, 0.6);
-        break;
-      }
-      case 'tower': {
-        // Defense pylon: the tower silhouette kept (base plinth, tapering
-        // shaft, flared gun deck wider than the shaft) but drawn in hull
-        // plate with a sensor band and deck railing — not castle stone.
-        const h = 2.3 + tier * 0.5;
-        const hull = tier >= 3 ? 0xece6d6 : HULL;
-        box(1.75, 0.36, 1.75, PAD, 0, 0.18);
-        cyl(0.58, 0.78, h - 0.3, hull, 0, 0.3 + (h - 0.3) / 2, 0, 12);
-        const band = cyl(0.63, 0.72, 0.16, GLOW, 0, h * 0.45, 0, 12);
-        band.material.emissive.setHex(GLOW);
-        band.material.emissiveIntensity = 0.5;
-        cyl(0.92, 0.66, 0.42, HULL2, 0, h + 0.06, 0, 12);   // flared gun deck
-        cyl(0.98, 0.98, 0.1, PAD, 0, h + 0.32, 0, 12);      // deck plate
-        for (let i = 0; i < 6; i++) {                       // deck railing
-          const a = (i / 6) * Math.PI * 2 + 0.26;
-          box(0.06, 0.3, 0.06, 0x4a5058, Math.cos(a) * 0.86, h + 0.5, Math.sin(a) * 0.86);
-        }
-        lit(0.14, 0.14, 0.14, TRIM, 0, h + 0.32, 0.86, 0.9); // muzzle marker
-        windows(2, h * 0.62, 0.68);
-        const head = new THREE.Group();
-        head.position.y = h + 0.52;
-        if (b.branch === 'flame') {
-          const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.35, 8), M(0x3d4246));
-          head.add(bowl);
-          const fire = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.55, 6), M(0xff7a2e, 0.9));
-          fire.position.y = 0.4;
-          head.add(fire);
-          g.userData.flame = fire;
-        } else {
-          const bal = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, b.branch === 'ballista' ? 1.5 : 0.9), M(0x4a4440));
-          bal.position.z = 0.1;
-          bal.castShadow = true;
-          head.add(bal);
-          if (b.branch === 'ballista') {
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.08), M(0x565c60));
-            arm.position.set(0, 0.1, 0.55);
-            head.add(arm);
-          }
-        }
-        g.add(head);
-        g.userData.head = head;
-        break;
-      }
-      case 'wall': {
-        // The rampart is drawn as a SMOOTHED POLYLINE, not a stack of
-        // axis-aligned blocks. Each tile pulls its pier toward the average of
-        // its wall neighbors — an L-corner chamfers into a 45° cut — and
-        // hangs a rotated curtain panel out to the midpoint it shares with
-        // each neighbor. Adjacent tiles meet exactly at those midpoints, so a
-        // curving ring reads as a curve and a diagonal run as one straight
-        // wall, while the sim keeps its plain tile occupancy untouched.
-        const N = this.game.map.size;
-        if (!this._wallTiles) {
-          this._wallTiles = new Set();
-          for (const p of this.game.plots) {
-            if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
-          }
-        }
-        const nbs = [];
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          if (this._wallTiles.has((b.z + dz) * N + (b.x + dx))) nbs.push([dx, dz]);
-        }
-        // Chamfered pier position (local to the tile center).
-        let scx = 0, scz = 0;
-        for (const [dx, dz] of nbs) { scx += dx * 0.26; scz += dz * 0.26; }
-        // One segment per neighbor: pier → shared midpoint on the tile edge.
-        const segs = nbs.map(([dx, dz]) => {
-          const ex = dx * 0.5, ez = dz * 0.5;
-          return {
-            mx: (scx + ex) / 2, mz: (scz + ez) / 2,
-            len: Math.hypot(ex - scx, ez - scz) + 0.12,
-            yaw: Math.atan2(ez - scz, ex - scx),
-          };
-        });
-        const panel = (s, len, h, thick, color, y) => {
-          const m = box(len, h, thick, color, s.mx, y, s.mz);
-          m.rotation.y = -s.yaw;
-          return m;
-        };
-        // Wall run direction (for orienting the gate) and its perpendicular.
-        const run = nbs.length === 2
-          ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
-          : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
-        const pvx = -Math.sin(run), pvz = Math.cos(run);
-        const passYaw = Math.atan2(pvz, pvx);
-        // Barrier ladder: razorwire fence → hull-plate curtain → shock/bastion.
-        const shock = b.branch === 'shock';
-        const bastion = b.branch === 'bastion';
-        const capCol = 0x8a8069;
-        if (tier === 1 && !b.gate) {
-          // Razorwire: gunmetal post + taut wire strands along each segment.
-          box(0.16, 0.78, 0.16, 0x565c60, scx, 0.39, scz);
-          box(0.2, 0.06, 0.2, 0xe8a83c, scx, 0.81, scz); // hazard cap
-          for (const s of segs) {
-            for (const wy of [0.3, 0.6]) panel(s, s.len, 0.045, 0.045, 0x9aa0a2, wy);
-          }
-          break;
-        }
-        const H = bastion ? 1.55 : tier >= 3 ? 1.1 : tier === 1 ? 0.8 : 0.95;
-        const hull = bastion ? 0xece6d6 : tier === 1 ? 0xb9b19c : HULL;
-        if (b.gate) {
-          // The gate is UNMISTAKABLE: low lit wing-walls tie into the
-          // rampart, two tall pylons stand astride the passage, a bright
-          // portal arch spans them, and an amber threshold glows on the
-          // ground through the opening — readable from across the map.
-          for (const s of segs) {
-            panel(s, s.len, H * 0.55, 0.32, hull, H * 0.275);
-            panel(s, s.len + 0.05, 0.12, 0.38, capCol, H * 0.55 + 0.06);
-          }
-          const towH = H + 1.25;
-          for (const side of [-1, 1]) {
-            const px = pvx * side * 0.46, pz = pvz * side * 0.46;
-            const pyl = box(0.44, towH, 0.44, hull, px, towH / 2, pz);
-            pyl.rotation.y = -run;
-            const cap = box(0.52, 0.14, 0.52, capCol, px, towH + 0.07, pz);
-            cap.rotation.y = -run;
-            const light = lit(0.56, 0.16, 0.56, TRIM, px, towH + 0.24, pz, 0.9);
-            light.rotation.y = -run;
-          }
-          const arch = lit(1.06, 0.2, 0.2, TRIM, 0, towH - 0.2, 0, 0.75);
-          arch.rotation.y = -passYaw;
-          const threshold = lit(1.6, 0.05, 0.56, TRIM, 0, 0.05, 0, 0.45);
-          threshold.rotation.y = -passYaw;
-          threshold.material.transparent = true;
-          threshold.material.opacity = 0.75;
-          const ban = assetClone('banner', 0.7);
-          if (ban) { ban.position.set(pvx * -0.9, 0, pvz * -0.9); g.add(ban); }
-          break;
-        }
-        // Rounded pier at the chamfered point, slightly proud of the curtains.
-        cyl(0.3, 0.34, H + 0.14, hull, scx, (H + 0.14) / 2, scz, 8);
-        cyl(0.37, 0.37, 0.12, capCol, scx, H + 0.2, scz, 8);
-        lit(0.16, 0.1, 0.16, TRIM, scx, H + 0.32, scz, 0.8); // perimeter marker light
-        for (const s of segs) {
-          panel(s, s.len, H, 0.34, hull, H / 2);
-          panel(s, s.len + 0.05, 0.14, 0.42, capCol, H + 0.07);
-          // Shock fence: a live plasma conduit runs the parapet.
-          if (shock) {
-            const strip = panel(s, s.len, 0.07, 0.1, 0x4dd8c8, H + 0.19);
-            strip.material.emissive.setHex(0x4dd8c8);
-            strip.material.emissiveIntensity = 0.9;
-          }
-        }
-        if (shock) {
-          const core = box(0.2, 0.2, 0.2, 0x4dd8c8, scx, H + 0.42, scz);
-          core.material.emissive.setHex(0x4dd8c8);
-          core.material.emissiveIntensity = 1.0;
-        }
-        if (!segs.length) box(0.9, H, 0.9, hull, 0, H / 2); // stranded stub (shouldn't happen)
-        break;
-      }
-      case 'outpost': {
-        // One readable frontier fort centered on the captured flag. Tier 1 is
-        // the working camp; tier 2 visibly closes a palisade and raises twin
-        // defensive towers; later tiers harden the same silhouette.
-        box(1.9, 0.24, 1.9, PAD, 0, 0.12);
-        cone(0.95, 1.05, HULL, -0.35, 0.55, -0.25, 8);
-        box(0.9, 0.6, 0.7, HULL2, 0.55, 0.3, 0.5);
-        box(0.08, 3.4, 0.08, 0x4a5058, 0.85, 1.7, -0.7);
-        lit(0.6, 0.4, 0.03, 0x59b06e, 0.5, 3.1, -0.7, 0.5);
-        if (tier >= 2) {
-          const fenceCol = tier >= 3 ? 0x59616b : 0x6b5842;
-          // Rear and side curtains leave a broad gate toward the lane/front.
-          box(6.8, 0.72, 0.22, fenceCol, 0, 0.38, -3.35);
-          box(0.22, 0.72, 6.8, fenceCol, -3.35, 0.38, 0);
-          box(0.22, 0.72, 6.8, fenceCol, 3.35, 0.38, 0);
-          box(2.15, 0.72, 0.22, fenceCol, -2.28, 0.38, 3.35);
-          box(2.15, 0.72, 0.22, fenceCol, 2.28, 0.38, 3.35);
-          for (const x of [-2.75, 2.75]) {
-            cyl(0.62, 0.8, tier >= 3 ? 2.8 : 2.25, HULL2, x, tier >= 3 ? 1.4 : 1.12, 2.75, 8);
-            lit(0.32, 0.16, 0.32, 0x72cfff, x, tier >= 3 ? 2.95 : 2.4, 2.75, 0.8);
-          }
-          box(0.75, 0.85, 0.75, HULL2, -0.7, 0.42, 0.75);
-          box(0.08, 3.4, 0.08, 0x4a5058, -0.85, 1.7, -0.7);
-          lit(0.6, 0.4, 0.03, 0x59b06e, -0.5, 3.1, -0.7, 0.5);
-          const head = new THREE.Group();
-          head.position.set(0.25, 1.65, -0.15);
-          const gun = new THREE.Mesh(new THREE.BoxGeometry(tier >= 3 ? 0.34 : 0.24, 0.2, tier >= 3 ? 1.25 : 0.78), M(tier >= 3 ? 0x4a4440 : 0x2f3a44));
-          gun.position.z = 0.25;
-          gun.castShadow = true;
-          head.add(gun);
-          if (tier >= 3) {
-            const shield = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.62, 0.12), M(0x6b6152));
-            shield.position.set(0, -0.05, -0.18);
-            shield.castShadow = true;
-            head.add(shield);
-            box(1.8, 0.45, 0.28, 0x4d5560, 0, 0.8, -0.9);
-          }
-          g.add(head);
-          g.userData.head = head;
-        }
-        break;
-      }
-      case 'workshop': {
-        box(1.9, 0.25, 1.9, PAD, 0, 0.12);
-        box(1.5, 1.0, 1.25, HULL, 0, 0.62);
-        box(1.7, 0.16, 1.45, HULL2, 0, 1.15);
-        lit(1.52, 0.07, 1.27, GLOW, 0, 1.06, 0, 0.3);
-        const rotor = new THREE.Group();
-        rotor.position.set(0, 1.55, 0);
-        for (let i = 0; i < 3 + tier; i++) {
-          const a = (i / (3 + tier)) * Math.PI * 2;
-          const drone = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.42), M(0x55ddeb, 0.7));
-          drone.position.set(Math.cos(a) * (0.65 + tier * 0.12), Math.sin(a * 2) * 0.12, Math.sin(a) * (0.65 + tier * 0.12));
-          rotor.add(drone);
-        }
-        g.add(rotor);
-        g.userData.rotor = rotor;
-        break;
-      }
-      case 'hero_forge': {
-        cyl(1.0, 1.25, 0.45, PAD, 0, 0.22, 0, 10);
-        for (let i = 0; i < 4; i++) {
-          const a = i * Math.PI / 2;
-          box(0.22, 1.8 + tier * 0.25, 0.22, HULL2, Math.cos(a) * 0.82, 0.9 + tier * 0.12, Math.sin(a) * 0.82);
-        }
-        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.48 + tier * 0.1, 0), M(tier >= 3 ? 0xffd75e : 0x72cfff, 1.0));
-        core.position.y = 1.65 + tier * 0.2;
-        core.userData.window = true;
-        g.add(core);
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85 + tier * 0.1, 0.08, 8, 32), M(0x72cfff, 0.8));
-        ring.position.y = core.position.y;
-        ring.rotation.x = Math.PI / 2;
-        g.add(ring);
-        g.userData.rotor = ring;
-        break;
-      }
-      case 'camp_militia':
-      case 'camp_ranger':
-      case 'camp_sniper': {
-        // Muster bay: a quonset prefab with a doctrine-colored light stripe,
-        // so the three camp kinds read apart at a glance without clutter.
-        const col = b.kind === 'camp_militia' ? 0x5f9ccf : b.kind === 'camp_ranger' ? 0x74c96a : 0xb98fe0;
-        const hut = cyl(0.62, 0.62, 1.5, HULL, -0.25, 0.5, 0.05, 10);
-        hut.rotation.z = Math.PI / 2;
-        box(0.06, 1.24, 1.24, HULL2, 0.52, 0.5, 0.05); // end wall
-        lit(1.52, 0.06, 0.1, col, -0.25, 0.98, 0.05, 0.7); // doctrine stripe
-        box(1.5, 0.1, 1.9, PAD, -0.2, 0.05, 0);        // muster pad
-        box(0.06, 1.7, 0.06, 0x4a5058, 0.85, 0.9, -0.7);
-        lit(0.5, 0.3, 0.03, col, 0.58, 1.55, -0.7, 0.55); // holo banner
-        if (tier >= 2) box(0.7, 0.5, 0.6, HULL2, -0.6, 0.3, 0.75);
-        break;
+    // Colony-kit construction lives in building-art.js; the renderer only
+    // supplies the wall-plot occupancy the smoothed rampart polyline needs.
+    if (!this._wallTiles) {
+      const N = this.game.map.size;
+      this._wallTiles = new Set();
+      for (const p of this.game.plots) {
+        if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
       }
     }
-
-    // CC0 prop dressing (skipped gracefully when assets are unavailable).
-    const dress = (assetKey, fit, x, z, ry = 0) => {
-      const a = assetClone(assetKey, fit);
-      if (a) { a.position.set(x, 0, z); a.rotation.y = ry; g.add(a); }
-    };
-    if (b.kind === 'hq') {
-      dress('banner', 0.85, -1.7, 0.6);
-      dress('banner', 0.85, 1.7, 0.6, Math.PI);
-      dress('crates', 1.1, -1.4, 1.5, 0.4);
-      dress('torch', 0.45, 1.5, 1.6);
-    } else if (b.kind.startsWith('camp') || b.kind === 'outpost') {
-      dress('boxes', 0.9, -0.75, -0.6, 0.7);
-      dress('torch', 0.42, 0.2, 0.85);
-    } else if (b.kind === 'house' && tier >= 2) {
-      dress('barrel', 0.5, 0.75, 0.6);
-    } else if (b.kind === 'mine') {
-      dress('crates', 0.9, 0.8, -0.8, 0.3);
-    } else if (b.kind === 'tower') {
-      dress('torch', 0.4, 0.7, 0.7);
-    } else if (b.kind === 'mill') {
-      dress('barrel', 0.5, 0.8, 0.6);
-    }
-    return g;
+    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles });
   }
 
   _syncBuildings() {
@@ -3436,18 +3422,9 @@ class App {
 
   _makeUnitMesh(u) {
     const g = new THREE.Group();
-    // Warm daylight rim on your own army and heroes: friendly silhouettes pop
-    // from the ground the way the outline pass pops the selected unit.
-    const M = (c, e = 0) => applyRim(
-      new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
-      { color: 0xfff3e0, power: 2.2, strength: 0.42 },
-    );
-    const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
-
     const body = new THREE.Group();
     g.add(body);
     g.userData.body = body;
-    const addB = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; body.add(mesh); return mesh; };
     const weaponParts = [];
     const trackWeapon = (mesh) => {
       mesh.userData.restPos = mesh.position.clone();
@@ -3457,9 +3434,7 @@ class App {
     };
 
     if (u.hero) {
-      // Power-armored space marine: broad torso, pauldrons, backpack, glow visor.
       const d = u.def;
-      const armor = M(d.color), trim = M(d.trim);
       const authored = u.key === 'scott' ? assetClone('heroScott') : null;
       if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
@@ -3474,36 +3449,11 @@ class App {
           armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
         };
       } else {
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.26), M(0x26282c)), 0, 0.2, 0);          // legs
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.36), armor), 0, 0.62, 0);                 // torso
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.05), trim), 0, 0.68, 0.19);               // chest plate
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), -0.34, 0.86, 0);               // pauldron L
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), armor), 0.34, 0.86, 0);                // pauldron R
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 0.22), M(0x3a3d42)), 0, 1.0, 0);           // helm
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), M(0x35ff70, 0.9)), 0, 1.0, 0.12);   // visor glow
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), M(0x4a4440)), 0, 0.72, -0.26);       // backpack
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), -0.12, 1.0, -0.26);
-      addB(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 6), M(0x4a4d52)), 0.12, 1.0, -0.26);
-      if (u.key === 'scott') {
-        // Stubby double-barrel shotgun + the gravity hammer slung on his back.
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x1e1f21)), 0.26, 0.62, 0.24));
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.46), M(0x2b2d31)), 0.26, 0.72, 0.24));
-        const haft = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), M(0x3a3228)), -0.28, 0.8, -0.34));
-        haft.rotation.z = 0.5;
-        haft.userData.restRot = haft.rotation.clone();
-        const head = trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.2), trim), -0.5, 1.05, -0.34));
-        head.rotation.z = 0.5;
-        head.userData.restRot = head.rotation.clone();
-      } else if (u.key === 'alexander') {
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.82), M(0x1e1f21)), 0.3, 0.64, 0.26));   // long marksman rifle
-      } else if (d.melee) {
-        // Generic close-quarters weapon for melee heroes without a bespoke
-        // model (Turtle, John, Tiger) — a stout haft with a trim-colored head.
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.58), M(0x2b2d31)), 0.28, 0.6, 0.2));
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), trim), 0.28, 0.64, 0.48));
-      } else {
-        trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.78), M(0x1e1f21)), 0.28, 0.66, 0.24));   // long rifle
-      }
+        // Bespoke procedural rig per hero — see unit-art.js.
+        const model = buildUnitModel(u);
+        body.add(model.node);
+        g.userData.limbs = model.limbs;
+        for (const part of model.weaponParts) weaponParts.push(part);
       }
       const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
       haloGeo.rotateX(-Math.PI / 2);
@@ -3558,14 +3508,12 @@ class App {
       }
       g.scale.setScalar(1.18);
     } else {
-      // Colony marine: a sealed suit — nobody walks this planet bare-headed.
-      // A slimmer cut of the hero kit (legs, doctrine-colored torso, white
-      // helmet with glow visor, pauldrons, life-support pack) so the army
-      // reads as one corps, with doctrine color doing the telling-apart.
+      // Colony troops: one corps, three trades. The authored art-slice
+      // rifleman stays on for the line trooper it was modeled as; rangers,
+      // snipers and hero summons get their own procedural rigs (unit-art.js)
+      // so the army reads apart at a glance.
       const d = u.def;
-      const armor = M(d.color);
-      const shell = M(0xd9d3c3);
-      const authored = assetClone('humanRifleman');
+      const authored = u.key === 'soldier' ? assetClone('humanRifleman') : null;
       if (authored) {
         authored.scale.setScalar(0.48);
         authored.traverse((o) => {
@@ -3583,15 +3531,10 @@ class App {
           armL: assetPart(authored, 'arm_l'), armR: assetPart(authored, 'arm_r'),
         };
       } else {
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.2), M(0x26282c)), 0, 0.16, 0);          // legs
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.26), armor), 0, 0.52, 0);                 // torso
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), shell), 0, 0.58, 0.145);              // chest plate
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), -0.24, 0.7, 0);                // pauldron L
-      addB(new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), armor), 0.24, 0.7, 0);                 // pauldron R
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.19, 0.19), shell), 0, 0.86, 0);                 // helmet
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.03), M(0x35ff70, 0.9)), 0, 0.87, 0.105); // visor glow
-      addB(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.13), M(0x4a4d52)), 0, 0.56, -0.2);        // life-support pack
-      trackWeapon(addB(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.62), M(0x232426)), 0.2, 0.56, 0.18));
+        const model = buildUnitModel(u);
+        body.add(model.node);
+        g.userData.limbs = model.limbs;
+        for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
@@ -3605,26 +3548,6 @@ class App {
     return g;
   }
 
-  _takeUnitMesh(u) {
-    if (u.hero || u.temp) return this._makeUnitMesh(u);
-    const pool = this.unitMeshPool.get(u.key);
-    const mesh = pool && pool.pop();
-    if (!mesh) return this._makeUnitMesh(u);
-    mesh.visible = true;
-    return mesh;
-  }
-
-  _poolUnitMesh(rec) {
-    if (rec.u.hero || rec.u.temp) return false;
-    const pool = this.unitMeshPool.get(rec.u.key) || [];
-    if (pool.length >= 96) return false;
-    rec.mesh.visible = false;
-    this.scene.remove(rec.mesh);
-    pool.push(rec.mesh);
-    this.unitMeshPool.set(rec.u.key, pool);
-    return true;
-  }
-
   _syncUnits(t, dt = 0) {
     const g = this.game;
     const seen = new Set();
@@ -3632,7 +3555,7 @@ class App {
       seen.add(u.id);
       let rec = this.unitMeshes.get(u.id);
       if (!rec) {
-        const mesh = this._takeUnitMesh(u);
+        const mesh = this._makeUnitMesh(u);
         this.scene.add(mesh);
         rec = { mesh, u, lastHp: u.hp };
         this.unitMeshes.set(u.id, rec);
@@ -3764,10 +3687,8 @@ class App {
     }
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) {
-        if (!this._poolUnitMesh(rec)) {
-          this.scene.remove(rec.mesh);
-          this._disposeObject3D(rec.mesh);
-        }
+        this.scene.remove(rec.mesh);
+        this._disposeObject3D(rec.mesh);
         this.unitMeshes.delete(id);
       }
     }
@@ -3849,9 +3770,9 @@ class App {
       for (const node of g.nodes) {
         if (node.offMap) continue;
         const gr = new THREE.Group();
-        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.16, SIEGE.captureRadius, 64);
+        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
         ringGeo.rotateX(-Math.PI / 2);
-        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.13, depthWrite: false }));
+        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshLambertMaterial({ color: 0x39332a }));
@@ -3864,7 +3785,7 @@ class App {
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
-        gr.userData = { ring, pole, flag, label, node };
+        gr.userData = { ring, flag, label, node };
         gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
@@ -3877,16 +3798,10 @@ class App {
         : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
       gr.userData.ring.material.color.setHex(col);
       gr.userData.flag.material.color.setHex(col);
-      const outpost = g.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id);
-      const fortRaised = outpost && outpost.tier > 0 && !outpost.ruined;
-      // The fort occupies the claim marker once raised; do not leave a flag
-      // clipping through the main building.
-      gr.userData.pole.visible = !fortRaised;
-      gr.userData.flag.visible = !fortRaised;
       const contested = node.cap > 0.05;
       gr.userData.ring.material.opacity = contested
-        ? 0.16 + 0.18 * (0.5 + 0.5 * Math.sin(t * 9))
-        : (node.owner === 'player' ? 0.12 : 0.08);
+        ? 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(t * 9))
+        : (node.owner === 'player' ? 0.34 : 0.2);
       gr.userData.flag.rotation.y = Math.sin(t * 2.2 + node.id) * 0.28;
     }
   }
@@ -3905,7 +3820,31 @@ class App {
         this.ui.openGameChat();
         return;
       }
-      if (!this.game) return;
+      // The persistent world uses MMO grammar: C opens the selected hero's
+      // character/equipment screen and returns to the world when pressed again.
+      if (!this.game && k === 'c' && this.ow) {
+        e.preventDefault();
+        this.ui.toggleCharacterScreen();
+        return;
+      }
+      // Dota grammar: Tab opens the hero library from anywhere in the menu.
+      if (!this.game && e.key === 'Tab') {
+        e.preventDefault();
+        const screen = document.querySelector('#screen-heroes');
+        if (screen && !screen.classList.contains('hidden')) this.ui._showScreen('main');
+        else this.ui._showScreen('heroes');
+        return;
+      }
+      if (!this.game) {
+        // The overworld owns Escape: the hub slides in as a translucent
+        // overlay and slides back out — the walk never stops underneath.
+        if (k === 'escape') {
+          e.preventDefault();
+          this.ui.toggleOverlay();
+          return;
+        }
+        return;
+      }
       if (k === ' ') {
         e.preventDefault();
         // Space follows the current control mode. Build mode never fires the
@@ -3936,7 +3875,23 @@ class App {
     }, { passive: false });
 
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
-    cv.addEventListener('pointerdown', () => this.audio.init());
+    cv.addEventListener('pointerdown', (e) => {
+      this.audio.init();
+      // Overworld click-to-move: a course set on the ground itself.
+      if (!this.game && this.ow && e.button === 0 && this.ui.overlayHidden()) {
+        this._owMouse = this._owMouse || new THREE.Vector2();
+        this._owRay = this._owRay || new THREE.Raycaster();
+        this._owPlane = this._owPlane || new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        this._owHit = this._owHit || new THREE.Vector3();
+        this._owMouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+        this._owRay.setFromCamera(this._owMouse, this.camera);
+        if (this._owRay.ray.intersectPlane(this._owPlane, this._owHit)) {
+          this._owHit.x = clamp(this._owHit.x, 1, this.owMap.size - 1);
+          this._owHit.z = clamp(this._owHit.z, 1, this.owMap.size - 1);
+          this.ow.setTarget(this._owHit.x, this._owHit.z);
+        }
+      }
+    });
   }
 
   // WASD → hero direction, sent through the lockstep pipe only on change.
@@ -4081,6 +4036,29 @@ class App {
     this.ui.setSpeedUI(this.speed, this.paused);
   }
 
+  // Settings: apply immediately and persist to localStorage. Volume and mute
+  // compose inside AudioSys (gain = base * volume, or 0 when muted); quality
+  // routes through TacticalVisuals so lockstep sim state stays untouched.
+  applySettings(s = {}) {
+    try {
+      const cur = JSON.parse(localStorage.getItem('zillions_settings') || '{}');
+      localStorage.setItem('zillions_settings', JSON.stringify({ ...cur, ...s }));
+    } catch { /* storage can be blocked */ }
+    if (s.volume !== undefined) this.audio.setVolume(s.volume);
+    if (s.music !== undefined) this.audio.setMusicVolume(s.music);
+    if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
+    if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
+  }
+
+  _restoreSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem('zillions_settings') || '{}'); } catch { /* ignore */ }
+    if (s.volume !== undefined) this.audio.setVolume(s.volume);
+    if (s.music !== undefined) this.audio.setMusicVolume(s.music);
+    if (s.sfx === false) this.audio.setMuted(true);
+    return s;
+  }
+
   pause() {
     this.paused = true;
     this.ui.setSpeedUI(this.speed, this.paused);
@@ -4097,12 +4075,35 @@ class App {
   }
 
   _updateCamera(dt) {
+    if (!this.game && this.ow) {
+      // Overworld: the game camera glued to the walking hero — same iso
+      // angle, same soft lag, so the menu feels like the game's first step.
+      const h = this.ow.hero;
+      const k = 1 - Math.exp(-6 * dt);
+      this.focus.x += (h.x - this.focus.x) * k;
+      this.focus.z += (h.z - this.focus.z) * k;
+      this.focus.x = clamp(this.focus.x, 2, this.owMap.size - 2);
+      this.focus.z = clamp(this.focus.z, 2, this.owMap.size - 2);
+      this.focus.y += (Math.max(0, this.owMap.groundY(this.focus.x, this.focus.z)) - this.focus.y) * (1 - Math.exp(-4 * dt));
+      const dist = 30;
+      const elev = 0.78;
+      this.camera.position.set(
+        this.focus.x + Math.sin(this.camYaw) * Math.cos(elev) * dist,
+        this.focus.y + Math.sin(elev) * dist,
+        this.focus.z + Math.cos(this.camYaw) * Math.cos(elev) * dist,
+      );
+      this.camera.lookAt(this.focus);
+      this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
+      this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+      return;
+    }
     if (!this.game) {
-      // Menu: slow cinematic orbit over the battlefield.
-      this.menuYaw += dt * 0.05;
-      this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-      const dist = 55;
-      const elev = 0.72;
+      // Title: a low orbital-horizon angle keeps the live last stand in the
+      // foreground while the atmosphere, moon and fleet own the upper frame.
+      this.menuYaw += dt * 0.018;
+      this.focus.set(MAP_SIZE / 2, 2.5, MAP_SIZE / 2 - 8);
+      const dist = 72;
+      const elev = 0.43;
       this.camera.position.set(
         this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
         Math.sin(elev) * dist,
@@ -4690,7 +4691,7 @@ class App {
     // Watch the game while it runs, and the menu while the attract show does —
     // the vignettes put real load on the backdrop, so the menu gets the same
     // safety net a live siege has.
-    const active = this.game ? !this.paused : !!this.menuShow;
+    const active = this.game ? !this.paused : !!this.ow;
     if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
@@ -4883,7 +4884,11 @@ class App {
       }
     }
 
-    if (!this.game && this.menuShow) this.menuShow.update(dt, t);
+    if (!this.game && this.ow) this._updateOverworld(dt, t);
+    if (!this.game && !this.ow) {
+      this.menuShow?.update(dt, t);
+      this._updateTitleSpace(t);
+    }
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

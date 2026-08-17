@@ -351,7 +351,13 @@ export class OnlineLobby {
       .order('created_at', { ascending: false })
       .limit(80);
     if (error) throw error;
-    const rows = (data || []).reverse().map((m) => ({
+    // Chat is a living room, not an archive: anything older than a day reads
+    // as a ghost town ("days-old messages still there"). Keep the freshest
+    // 80, then drop whatever fell outside the last 24 hours.
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = (data || []).reverse()
+      .filter((m) => new Date(m.created_at).getTime() >= dayAgo)
+      .map((m) => ({
       id: m.id,
       user_id: m.user_id,
       name: profileName(m.profiles, this.profileCache.get(m.user_id)),

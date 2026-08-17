@@ -41,6 +41,9 @@ Default branch: main
 - src/auth.js owns sign-in, profiles, saves, and stats.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.
+- src/horde-art.js owns per-type instanced zombie models (presentation only).
+- src/unit-art.js owns procedural troop and hero rigs (presentation only).
+- src/building-art.js owns building meshes, walls and gates (presentation only).
 - api/ contains Vercel server routes.
 - supabase/schema.sql is the database schema source.
 
