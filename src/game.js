@@ -1157,9 +1157,10 @@ export class Game {
     const def = this.tierDef(plot, plot.tier);
     if (!def) return;
     if (plot.kind === 'wall') {
+      const arch = new Set((plot.arch || (plot.gate ? [plot.gate] : [])).map(([x, z]) => x + ',' + z));
       for (const [x, z] of plot.tiles) {
         if (this.occ[z * this.map.size + x] === 0) {
-          this._addBuilding(plot, x, z, def, !!plot.gate && x === plot.gate[0] && z === plot.gate[1]);
+          this._addBuilding(plot, x, z, def, arch.has(x + ',' + z));
           this.emit({ type: 'build', kind: 'wall', plotId: plot.id, tier: plot.tier, x: x + 0.5, z: z + 0.5, quiet: true });
         }
       }
@@ -1180,10 +1181,14 @@ export class Game {
     if (!free) this.stats.built++;
 
     if (plot.kind === 'wall') {
+      // One building per rampart tile; the gate ARCH (every wall tile the
+      // plan opened beside the gate tile — a ring traced over stairs and
+      // diagonals is thicker than one tile there) lets friendlies through.
+      const arch = new Set((plot.arch || (plot.gate ? [plot.gate] : [])).map(([x, z]) => x + ',' + z));
       // One building per rampart tile; the gate tile lets friendlies through.
       if (plot.tier === 1) {
         for (const [x, z] of plot.tiles) {
-          this._addBuilding(plot, x, z, def, !!plot.gate && x === plot.gate[0] && z === plot.gate[1]);
+          this._addBuilding(plot, x, z, def, arch.has(x + ',' + z));
         }
       } else {
         for (const b of this.buildings) {
