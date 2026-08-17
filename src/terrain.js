@@ -210,8 +210,15 @@ export class TerrainField {
     this._orePatches(TILE.STONEORE, ore.stone ?? 10);
     this.nestSpots = this._pickNests();
     this._carveWarRoads();
-    this._connectFrontier();
+    // Lane nodes are read BEFORE the frontier connector runs, so the connector
+    // can guarantee they are reachable — a node marooned behind water or crag
+    // is a broken map, not flavor. Chokes are read AFTER every terrain pass
+    // that can still rewrite tiles (war roads, frontier bridges, pocket
+    // causeways) so the fences and watchtowers built on them stay valid.
     this.nodeSpots = this._findNodeFeatures();
+    this._connectFrontier();
+    this._prepareNodeFoundations();
+    this._connectPockets();
     this.chokeSpots = this._findChokepoints();
     this._nameSites();
   }
@@ -706,6 +713,9 @@ export class TerrainField {
     const targets = [
       ...this.sites.slice(1).map((s) => [Math.round(s.x), Math.round(s.z)]),
       ...this.nestSpots,
+      // Lane nodes are objectives the player must be able to ride to; a node
+      // marooned behind water or crag is a quest nobody can finish.
+      ...(this.nodeSpots || []).map((n) => [Math.round(n.x), Math.round(n.z)]),
     ];
     const from = [Math.round(this.sites[0].x), Math.round(this.sites[0].z)];
     for (let pass = 0; pass < 3; pass++) {
@@ -718,6 +728,78 @@ export class TerrainField {
         bridged = true;
       }
       if (!bridged) return;
+    }
+  }
+
+  // Outposts are anchored exactly on their flags and use the 2x2 footprint
+  // whose north-west corner is (node - 1). Reachability alone is not enough:
+  // a ford or forest node can be easy to walk to while its future fort still
+  // overlaps water, trees, or crag. Clear only that foundation so the flag
+  // stays where the terrain reader placed it and the authored feature around
+  // it remains intact.
+  _prepareNodeFoundations() {
+    for (const node of this.nodeSpots || []) {
+      const x0 = (node.x | 0) - 1;
+      const z0 = (node.z | 0) - 1;
+      for (let dz = 0; dz < 2; dz++) {
+        for (let dx = 0; dx < 2; dx++) {
+          const x = x0 + dx, z = z0 + dz;
+          if (!this.inBounds(x, z) || this.isBuildable(x, z)) continue;
+          const i = this.idx(x, z);
+          this.tiles[i] = this.tiles[i] === TILE.WATER ? TILE.SAND : TILE.GRASS;
+        }
+      }
+    }
+  }
+
+  // Buildable ground the player cannot walk to is not scenery — it is a
+  // promised outpost or farm with no road. Flood the walkable world from the
+  // heart site, find every buildable pocket outside that flood, and bridge
+  // the meaningful ones (>= POCKET_MIN tiles). Small pockets stay islands on
+  // purpose: they read as scenery, not broken promises.
+  _connectPockets() {
+    const N = this.size;
+    const POCKET_MIN = 6;
+    const from = [Math.round(this.sites[0].x), Math.round(this.sites[0].z)];
+    for (let pass = 0; pass < 4; pass++) {
+      const reach = this._floodWalkable(from[0], from[1]);
+      const claimed = new Uint8Array(N * N);
+      let bridgedAny = false;
+      for (let i = 0; i < N * N; i++) {
+        if (claimed[i] || reach[i] || !this.isBuildable(i % N, (i / N) | 0)) continue;
+        // Measure this pocket with its own flood.
+        const pocket = [];
+        const stack = [i];
+        claimed[i] = 1;
+        while (stack.length) {
+          const j = stack.pop();
+          pocket.push(j);
+          const x = j % N, z = (j / N) | 0;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx, nz = z + dz;
+            if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+            const ni = nz * N + nx;
+            if (claimed[ni] || reach[ni] || !this.isBuildable(nx, nz)) continue;
+            claimed[ni] = 1;
+            stack.push(ni);
+          }
+        }
+        if (pocket.length < POCKET_MIN) continue;
+        // Bridge from the pocket's centroid to the nearest reached tile.
+        const cx = pocket.reduce((a, j) => a + (j % N), 0) / pocket.length;
+        const cz = pocket.reduce((a, j) => a + ((j / N) | 0), 0) / pocket.length;
+        let bx = -1, bz = -1, bd = Infinity;
+        for (let j = 0; j < N * N; j++) {
+          if (!reach[j]) continue;
+          const x = j % N, z = (j / N) | 0;
+          const d = Math.hypot(x - cx, z - cz);
+          if (d < bd) { bd = d; bx = x; bz = z; }
+        }
+        if (bx < 0) continue;
+        this._bridge(Math.round(cx), Math.round(cz), bx, bz);
+        bridgedAny = true;
+      }
+      if (!bridgedAny) return;
     }
   }
 
