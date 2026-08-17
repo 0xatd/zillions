@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE,
+  ITEMS, BOSS_DROPS, UNITS, TILE, HEROES,
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
@@ -233,6 +233,20 @@ class App {
     // Settings restore: volumes apply inside AudioSys before any sound;
     // UI controls sync to whatever was persisted.
     this.ui.setSettingsUI(this._restoreSettings());
+    this.ui.fillHeroGrid(HEROES);
+    // Living hub: connect the lobby quietly in the background so the main
+    // menu shows live presence/games/chat before the player clicks PLAY.
+    // Failures stay silent — solo play must never feel blocked by the lobby.
+    this._hubChatLog = [];
+    this._hubChatDirty = false;
+    setTimeout(() => this._openLobby().then((l) => {
+      if (!l || !l.connected) return;
+      l.loadChat().then((rows) => {
+        this._hubChatLog = rows || [];
+        this.ui.hubChat(this._hubChatLog);
+        this.root?.querySelector?.('#hub-panel')?.classList.remove('hidden');
+      }).catch(() => {});
+    }).catch(() => {}), 1500);
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -1388,13 +1402,13 @@ class App {
       return this.lobby;
     }
     this.lobby = new OnlineLobby({
-      onChat: (m) => this.ui.lobbyChatAdd(m),
+      onChat: (m) => { this.ui.lobbyChatAdd(m); this._hubChatDirty = true; },
       onRoomChat: (m) => {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id),
-      onOnline: (map) => { this.ui.lobbyOnline(map); },
+      onGames: (g) => { this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id); this.ui.hubGames(g); },
+      onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onRoom: (game) => this._onRoomUpdate(game),
@@ -3411,6 +3425,14 @@ class App {
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
         this.ui.openGameChat();
+        return;
+      }
+      // Dota grammar: Tab opens the hero library from anywhere in the menu.
+      if (!this.game && e.key === 'Tab') {
+        e.preventDefault();
+        const screen = document.querySelector('#screen-heroes');
+        if (screen && !screen.classList.contains('hidden')) this.ui._showScreen('main');
+        else this.ui._showScreen('heroes');
         return;
       }
       if (!this.game) return;
