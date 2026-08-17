@@ -22,6 +22,7 @@ import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffe
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { MenuVignette } from './menu-vignette.js';
+import { fogVisionSources, MAX_VISION_SOURCES } from './fog-of-war.js';
 
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
@@ -215,6 +216,7 @@ class App {
     this.bhitSfxT = 0;
     this.smokeT = 0;
     this.minimapT = 0;
+    this.fogOfWar = null;
 
     this.ui.setProfile(this.profile);
     this.ui.setQualityUI(this.tacticalVisuals.quality);
@@ -341,6 +343,7 @@ class App {
     this._blockWarned = {};
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
+    this._setupFogOfWar();
     // The plaza and city appear where (and when) the city is founded.
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
     this._clearSiteMarkers();
@@ -4130,6 +4133,85 @@ class App {
     }
   }
 
+  _setupFogOfWar() {
+    if (this.fogOfWar) {
+      this.scene.remove(this.fogOfWar.mesh);
+      this.fogOfWar.mesh.geometry.dispose();
+      this.fogOfWar.material.dispose();
+      this.fogOfWar = null;
+    }
+    if (!this.game || !this.map) return;
+    const points = Array.from({ length: MAX_VISION_SOURCES }, () => new THREE.Vector3(-9999, -9999, 0));
+    const material = new THREE.ShaderMaterial({
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        uVisionCount: { value: 0 },
+        uVision: { value: points },
+        uDarkness: { value: 0.94 },
+        uInnerVeil: { value: 0.035 },
+        uSoftness: { value: 3.5 },
+      },
+      vertexShader: `
+        varying vec2 vWorldXZ;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vWorldXZ = world.xz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        #define MAX_VISION ${MAX_VISION_SOURCES}
+        uniform int uVisionCount;
+        uniform vec3 uVision[MAX_VISION];
+        uniform float uDarkness;
+        uniform float uInnerVeil;
+        uniform float uSoftness;
+        varying vec2 vWorldXZ;
+        void main() {
+          float visible = 0.0;
+          for (int i = 0; i < MAX_VISION; i++) {
+            if (i >= uVisionCount) break;
+            float distanceToScout = distance(vWorldXZ, uVision[i].xy);
+            float sourceVisibility = 1.0 - smoothstep(
+              uVision[i].z - uSoftness,
+              uVision[i].z + uSoftness,
+              distanceToScout
+            );
+            visible = max(visible, sourceVisibility);
+          }
+          float alpha = mix(uDarkness, uInnerVeil, visible);
+          gl_FragColor = vec4(0.006, 0.009, 0.018, alpha);
+        }
+      `,
+    });
+    const size = this.map.size || MAP_SIZE;
+    const geometry = new THREE.PlaneGeometry(size, size);
+    geometry.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(size / 2, 0.04, size / 2);
+    mesh.renderOrder = 10000;
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    this.fogOfWar = { mesh, material, points };
+    this._updateFogOfWar();
+  }
+
+  _updateFogOfWar() {
+    if (!this.fogOfWar) return;
+    const sources = fogVisionSources(this.game);
+    for (let i = 0; i < this.fogOfWar.points.length; i++) {
+      const source = sources[i];
+      this.fogOfWar.points[i].set(
+        source ? source.x : -9999,
+        source ? source.z : -9999,
+        source ? source.radius : 0,
+      );
+    }
+    this.fogOfWar.material.uniforms.uVisionCount.value = sources.length;
+  }
+
   _consumeEvents() {
     const g = this.game;
     // The sim can run many ticks per frame (catch-up after a hidden tab, the
@@ -4615,6 +4697,7 @@ class App {
       this._updateBars();
       this._updateNodeMarkers(t);
       this._updateDayNight(dt);
+      this._updateFogOfWar();
       this._updateTutorial(dt);
 
       // Authored building state is presentation-only: construction reveal,

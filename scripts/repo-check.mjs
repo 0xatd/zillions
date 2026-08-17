@@ -90,6 +90,9 @@ assert.ok(packageJson.scripts?.check?.includes('repo-check.mjs'), 'npm run check
 assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'npm run check must include the deterministic sim harness');
 assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run check must validate production GLBs');
 assert.ok(packageJson.scripts?.check?.includes('art-state-check.mjs'), 'npm run check must validate presentation states');
+assert.ok(packageJson.scripts?.check?.includes('fog-of-war-check.mjs'), 'npm run check must validate fog-of-war source rules');
+assert.ok(read('src/main.js').includes('this._updateFogOfWar()'), 'main renderer must update the tactical vision shroud');
+assert.ok(read('src/ui.js').includes('fogVisionSources(game)'), 'minimap must use the same allied vision sources');
 assert.ok(read('art-slice.html').includes('State review'), 'art review page must expose state inspection');
 assert.ok(read('src/main.js').includes('s.snap.v === 5'), 'continue-save gate must accept current v5 snapshots');
 assert.ok(read('scripts/sim-determinism-check.mjs').includes('workerArgs.push(ticksArg)'), 'determinism harness must forward --ticks to workers');

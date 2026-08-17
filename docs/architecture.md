@@ -172,6 +172,10 @@ Each authored mission selects one landform and one colony plan.
 chokepoints. `src/plots.js` fits the colony plan to the selected site.
 `src/map.js` renders the resulting relief.
 
+`src/fog-of-war.js` selects living allied vision sources. `src/main.js`
+renders the presentation-only world shroud. `src/ui.js` applies the same
+source list to the minimap. Fog must not add simulation state or commands.
+
 Natural water, crag, and deep woods can replace built rampart sections. Gates
 must remain reachable. Friendly troops must be able to leave the colony.
 
