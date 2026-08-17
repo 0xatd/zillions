@@ -184,6 +184,7 @@ class App {
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
+      onCampaignMap: () => this._enterOverworld(),
       onSignIn: () => this._signIn(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
@@ -305,9 +306,9 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // Boot straight onto the overworld: the hero stands on the first front
-    // and the whole campaign is a walk away. The hub is a keystroke away.
-    this._enterOverworld();
+    // The authored title screen remains the front door. Story Campaign opens
+    // the walkable overworld after the player deliberately chooses it.
+    this.showMenuBackdrop(this.ui.selectedLevel || 1);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
@@ -319,6 +320,7 @@ class App {
 
   _enterOverworld() {
     if (this.game || this.ow) return;
+    this._clearMenuBackdrop();
     this.ui.setOverworldMode(true);
     const map = new OverworldMap(this.profile.campaign || 0);
     this.owMap = map;

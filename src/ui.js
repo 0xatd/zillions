@@ -356,7 +356,7 @@ export class UI {
     q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
     q('#solo-back').onclick = () => this._showScreen('main');
-    q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
+    q('#solo-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
@@ -703,9 +703,9 @@ export class UI {
     }
   }
 
-  // ----- overworld: the hub is an overlay, not a destination -----
-  // The game boots onto the walkable planet; the whole menu you knew slides
-  // in over it on Esc (or the ⚙ button) and slides back out the same way.
+  // ----- overworld: the campaign map behind the war-council overlay -----
+  // The title screen remains the front door. Story Campaign enters the
+  // walkable planet; Esc (or the ⚙ button) opens the council over it.
   setOverworldMode(on) {
     this._overworldMode = !!on;
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
@@ -1504,11 +1504,9 @@ export class UI {
     if (state.ready && (state.signedIn || offlineAllowed)) {
       if (!this._accountAccepted) {
         this._accountAccepted = true;
-        // In overworld boots the menu is an overlay the player opens on
-        // purpose — a signed-in (or offline dev) boot goes straight to the
-        // walk, with the hub one Esc away.
-        if (!this._overworldMode) this._showScreen('main');
-        else this.hideOverlay();
+        // Authentication always lands on the authored title screen. The
+        // player enters the overworld deliberately through Story Campaign.
+        this._showScreen('main');
       }
       return;
     }
