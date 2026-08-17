@@ -777,6 +777,22 @@ export function buildBuildingMesh(b, ctx = {}) {
       floodlight(B, G, 0.55, 0.5, 2.55, 2.2);
       hazard(B, 0.55, 2.15, 0.12, 0.7, 0, 0.05);
       if (tier >= 2) {
+        // The captured flag grows into one readable fort, not a loose cluster
+        // of unrelated plots. Three full curtains and a split front curtain
+        // leave a broad lane-facing gate; twin towers make the tier change
+        // legible from strategy zoom.
+        const fenceCol = tier >= 3 ? 0x59616b : 0x6b5842;
+        B.box(fenceCol, 6.8, 0.72, 0.22, 0, 0.38, -3.35);
+        B.box(fenceCol, 0.22, 0.72, 6.8, -3.35, 0.38, 0);
+        B.box(fenceCol, 0.22, 0.72, 6.8, 3.35, 0.38, 0);
+        B.box(fenceCol, 2.15, 0.72, 0.22, -2.28, 0.38, 3.35);
+        B.box(fenceCol, 2.15, 0.72, 0.22, 2.28, 0.38, 3.35);
+        const towerH = tier >= 3 ? 2.8 : 2.25;
+        for (const x of [-2.75, 2.75]) {
+          B.cyl(HULL2, 0.62, 0.8, towerH, x, towerH / 2, 2.75, 10);
+          B.cyl(GUN, 0.72, 0.66, 0.2, x, towerH + 0.1, 2.75, 10);
+          G.box(0x72cfff, 0.32, 0.16, 0.32, x, towerH + 0.35, 2.75);
+        }
         const head = new THREE.Group();
         head.position.set(0.25, 1.7, -0.35);
         const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, tier >= 3 ? 1.15 : 0.8, 7), M(0x2b2e33));
