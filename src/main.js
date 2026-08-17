@@ -379,9 +379,22 @@ class App {
     group.add(moonRing);
     const orbitalGlobe = new THREE.Mesh(
       new THREE.SphereGeometry(105, 48, 28),
-      new THREE.MeshBasicMaterial({ color: 0x071321, fog: false }),
+      new THREE.MeshLambertMaterial({ color: 0x06101a, emissive: 0x02060b, emissiveIntensity: 0.8, fog: false }),
     );
     group.add(orbitalGlobe);
+    const signalGeo = new THREE.BufferGeometry();
+    const signalPoints = new Float32Array(90 * 3);
+    for (let i = 0; i < 90; i++) {
+      const y = 1 - (i / 89) * 2;
+      const radius = Math.sqrt(1 - y * y);
+      const a = i * 2.399963;
+      signalPoints[i * 3] = Math.cos(a) * radius * 105.8;
+      signalPoints[i * 3 + 1] = y * 105.8;
+      signalPoints[i * 3 + 2] = Math.sin(a) * radius * 105.8;
+    }
+    signalGeo.setAttribute('position', new THREE.BufferAttribute(signalPoints, 3));
+    const signals = new THREE.Points(signalGeo, new THREE.PointsMaterial({ color: 0xff9d55, size: 1.7, transparent: true, opacity: 0.72, depthWrite: false, fog: false }));
+    orbitalGlobe.add(signals);
     const orbitalGlow = new THREE.Mesh(
       new THREE.SphereGeometry(108, 48, 28),
       new THREE.MeshBasicMaterial({ color: 0x2686c0, transparent: true, opacity: 0.2, side: THREE.BackSide, depthWrite: false, fog: false }),
@@ -405,7 +418,7 @@ class App {
       streak.userData.seed = i * 1.73;
       group.add(streak); streaks.push(streak);
     }
-    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks };
+    group.userData = { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -415,7 +428,7 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, ships, streaks } = this.titleSpace.userData;
+    const { atmosphere, moon, moonRing, orbitalGlobe, orbitalGlow, signals, ships, streaks } = this.titleSpace.userData;
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     moon.rotation.y = t * 0.015;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
@@ -426,6 +439,8 @@ class App {
     moonRing.rotateZ(-0.28);
     orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
     orbitalGlow.position.copy(orbitalGlobe.position);
+    orbitalGlobe.rotation.y = t * 0.025;
+    signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
     ships.position.x = Math.sin(t * 0.08) * 3;
     for (let i = 0; i < streaks.length; i++) {
       const s = streaks[i];
@@ -4104,6 +4119,9 @@ class App {
       this.menuYaw += dt * 0.018;
       const shot = this.menuShow?.cameraState();
       const dive = shot?.phase === 'run' ? shot.progress : 0;
+      const surfaceVisible = dive > 0.18;
+      if (this.menuTerrain) this.menuTerrain.visible = surfaceVisible;
+      this.menuShow?.setSurfaceVisible(surfaceVisible);
       const tx = shot?.x ?? MAP_SIZE / 2;
       const tz = shot?.z ?? MAP_SIZE / 2;
       const k = 1 - Math.exp(-1.35 * dt);
@@ -4118,6 +4136,13 @@ class App {
         this.focus.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
       );
       this.camera.lookAt(this.focus);
+      const title = document.querySelector('.title-screen');
+      if (title && shot) {
+        const ndc = this._menuProjV.set(tx, this.menuMap?.groundY(tx, tz) || 0, tz).project(this.camera);
+        title.style.setProperty('--signal-x', `${clamp((ndc.x * .5 + .5) * 100, 8, 72)}%`);
+        title.style.setProperty('--signal-y', `${clamp((-ndc.y * .5 + .5) * 100, 12, 88)}%`);
+        title.style.setProperty('--fog-alpha', surfaceVisible ? '.88' : '0');
+      }
       const telemetry = document.querySelector('#title-telemetry');
       if (telemetry && shot) telemetry.innerHTML = `<b>${shot.scenario}</b><span>SIGNAL ${String(shot.observed).padStart(4, '0')} · ${shot.phase === 'run' ? `${shot.survivors} SURVIVORS` : 'SEARCHING'}</span>`;
       if (shot?.observed) localStorage.setItem('zillions-title-stands', String(shot.observed));

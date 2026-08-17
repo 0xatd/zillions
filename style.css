@@ -1119,7 +1119,16 @@ body::after {
 .title-screen {
   position: relative; width: 100%; height: 100%; padding: 0;
   background: linear-gradient(180deg, rgba(2,5,12,.08), rgba(1,3,8,.18) 45%, rgba(1,3,8,.66));
+  --signal-x: 42%; --signal-y: 52%; --fog-alpha: 0;
 }
+.title-screen::before {
+  content:""; position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:rgba(0,2,6,var(--fog-alpha));
+  -webkit-mask-image:radial-gradient(circle 13vw at var(--signal-x) var(--signal-y), transparent 0 34%, rgba(0,0,0,.45) 58%, #000 100%);
+  mask-image:radial-gradient(circle 13vw at var(--signal-x) var(--signal-y), transparent 0 34%, rgba(0,0,0,.45) 58%, #000 100%);
+  transition:background .35s ease;
+}
+.title-screen > * { z-index:2; }
 .title-lockup {
   position: absolute; left: clamp(22px, 4vw, 72px); top: clamp(22px, 5vh, 64px);
   width: min(680px, 66vw); text-align: left; text-shadow: 0 4px 24px #000;
@@ -1127,7 +1136,7 @@ body::after {
 .title-lockup .gametitle { font-size: clamp(54px, 8vw, 104px); letter-spacing: .13em; line-height: .9; }
 .title-lockup .gamesub { margin-top: 10px; color: #dceaff; letter-spacing: .22em; text-transform: uppercase; }
 .title-login {
-  position: absolute; right: clamp(20px, 4vw, 70px); top: 46%; transform: translateY(-50%);
+  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
   width: min(390px, calc(100vw - 36px)); padding: 12px;
   background: rgba(5,9,17,.78); border: 1px solid rgba(147,190,255,.3); border-radius: 8px;
   box-shadow: 0 14px 50px rgba(0,0,0,.6); backdrop-filter: blur(9px);
@@ -1135,7 +1144,7 @@ body::after {
 .title-login .accountstatus { font-size: 11px; margin-bottom: 8px; color: #bed5ee; }
 .title-login .menubtn { min-height: 43px; padding: 9px 18px; }
 .title-utilities {
-  position: absolute; right: clamp(20px, 4vw, 70px); bottom: 28px;
+  position: absolute; right: clamp(20px, 4vw, 70px); bottom: 22px;
   display: flex; flex-direction: column; width: min(230px, 25vw); gap: 6px;
 }
 .title-telemetry { position:absolute; left:clamp(22px,4vw,72px); bottom:58px; display:flex; flex-direction:column; gap:5px; color:#d5e8f7; font-size:10px; letter-spacing:.16em; text-shadow:0 2px 10px #000; }
@@ -1190,7 +1199,8 @@ body::after {
 
 @media (max-width: 760px) {
   .title-lockup { bottom: 190px; width: 90vw; }
-  .title-utilities { top: 16px; right: 12px; transform: none; width: 155px; }
+  .title-login { bottom: 18px; width: min(300px, calc(100vw - 190px)); }
+  .title-utilities { top: auto; bottom: 12px; right: 8px; transform: none; width: 150px; }
   .title-utilities button { min-height: 34px; padding: 7px 9px; font-size: 9px; }
   .character-heading { left: 16px; top: 14px; }
   .character-stage { left: 5%; right: 43%; }

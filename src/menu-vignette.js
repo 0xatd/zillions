@@ -485,6 +485,12 @@ export class MenuVignette {
     };
   }
 
+  setSurfaceVisible(visible) {
+    for (const tr of this.troopers) tr.mesh.visible = visible;
+    this.surfaceVisible = visible;
+    if (!visible) this.horde.clear();
+  }
+
   // Fallen troopers keel over where they died and settle into the ground.
   _updateFallen(dt) {
     for (let i = this.troopers.length - 1; i >= 0; i--) {
@@ -508,6 +514,7 @@ export class MenuVignette {
   // and palette grammar the in-game renderer uses, so the menu horde IS the
   // game's horde.
   _writeMob(t) {
+    if (this.surfaceVisible === false) { this.horde.clear(); return; }
     const c = this._color;
     const n = Math.min(this.zombies.length, MOB_CAP);
     this.horde.begin();
