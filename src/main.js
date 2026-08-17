@@ -25,8 +25,9 @@ import { HordeArt, buildCorpseGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import {
-  stitchOverworld, Overworld, overworldLayout, gateState,
-  OVERWORLD_SEED, OVERWORLD_SIZE, OVERWORLD_GHOSTS,
+  stitchOverworld, Overworld, gateState,
+  earthWorldDescriptor, overworldChannel,
+  OVERWORLD_SIZE, OVERWORLD_GHOSTS,
 } from './overworld.js';
 import {
   FOG_DARKNESS,
@@ -49,19 +50,18 @@ const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // palette, so the planet reads as the campaign itself.
 class OverworldMap extends GameMap {
   constructor(campaign = 0) {
-    super(OVERWORLD_SEED, { palette: { water: 0x3d6e8a } }, { size: OVERWORLD_SIZE, nests: 0 });
-    this._owCampaign = campaign;
-    // super() stitched with a zero-campaign blight guess (the ladder is not
+    // The planet is a descriptor: Earth today, other servers' universes
+    // tomorrow — same stitch, same renderer, different data.
+    const world = earthWorldDescriptor(campaign);
+    super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
+    this._owWorld = world;
+    // super() stitched with a zero-campaign descriptor (the ladder is not
     // known until super returns); re-stitch with the real campaign so locked
     // fronts bake stained ground on first build. Idempotent — fresh rng.
     this.generate();
   }
 
-   generate() {
-     const campaign = this._owCampaign ?? 0;
-     const locked = overworldLayout(this.size).gates.filter((g) => gateState(g, campaign).locked);
-     stitchOverworld(this, { blight: locked });
-   }
+   generate() { stitchOverworld(this, this._owWorld || earthWorldDescriptor()); }
 
    // buildTerrain asks colorOf(tile) without a position — but idx(x, z) is
    // always called for the same tile first, so the last query tells us where
@@ -69,14 +69,16 @@ class OverworldMap extends GameMap {
    idx(x, z) { this._q = [x, z]; return super.idx(x, z); }
 
    regionPalette(x, z) {
+     // Colour comes from whichever region's descriptor owns this tile.
+     const regions = (this.overworldWorld && this.overworldWorld.regions) || [];
      const r = this.region ? this.region[this.idx(Math.floor(x), Math.floor(z))] : 0;
-     const lv = r >= LEVELS.length ? LABYRINTH_LEVELS[0] : LEVELS[r];
-     return lv.theme.palette;
+     const lv = regions[r] || regions[0];
+     return lv && lv.palette;
    }
 
    colorOf(t, x, z) {
      const q = x !== undefined ? [x, z] : this._q;
-     const p = q ? this.regionPalette(q[0], q[1]) : LEVELS[0].theme.palette;
+     const p = q ? this.regionPalette(q[0], q[1]) : (this.overworldWorld.regions[0].palette);
      const map = {
        [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
        [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
@@ -320,11 +322,11 @@ class App {
     this.ui.setOverworldMode(true);
     const map = new OverworldMap(this.profile.campaign || 0);
     this.owMap = map;
-    this.ow = new Overworld(map, { campaign: this.profile.campaign || 0 });
+    this.ow = new Overworld(map, { world: map.overworldWorld });
     this.owTerrain = map.buildTerrain();
     this.scene.add(this.owTerrain);
     this.owGates = [];
-    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave]) {
+    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave].filter(Boolean)) {
       this.owGates.push(this._makeOverworldGate(gate));
     }
     this._makeOverworldHero();
@@ -350,7 +352,7 @@ class App {
   // of the war there, and the boss's name overhead. Locked gates stand on
   // blighted ground with a slow corrupted pulse.
   _makeOverworldGate(gate) {
-    const st = gateState(gate, this.profile.campaign || 0);
+    const st = gateState(gate);
     const gr = new THREE.Group();
     const wood = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
     for (const dx of [-1.5, 1.5]) {
@@ -446,7 +448,7 @@ class App {
     // Gates breathe: locked ones pulse a corrupted violet, open ones ripple
     // gently, and every banner sways on its pole.
     for (const gr of this.owGates) {
-      const st = gateState(gr.userData.gate, this.profile.campaign || 0);
+      const st = gateState(gr.userData.gate);
       const ph = (t * 0.7) % 1;
       gr.userData.ring.material.opacity = st.locked
         ? 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))
@@ -466,6 +468,10 @@ class App {
       return;
     }
     this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
+    if (ev.gate.portal) {
+      this.ui.showBanner('🌀 A way off-world — the stars open in a future build.', '', 3200);
+      return;
+    }
     this.ui.showGateConfirm({
       gate: ev.gate,
       diff: this.ui.selectedDiff,
@@ -493,9 +499,11 @@ class App {
     if (!OVERWORLD_GHOSTS || !this.lobby?.connected || !this.lobby.sb || !this.lobby.me) return;
     try {
       if (!this._owGhostChan) {
-        this._owGhostChan = this.lobby.sb.channel('zl-overworld')
+        // Presence is scoped per planet: ghosts you see walk YOUR world.
+        this._owGhostChan = this.lobby.sb.channel(overworldChannel(this.ow.world.id))
           .on('broadcast', { event: 'pos' }, ({ payload: p }) => {
             if (!this.ow || !p || p.id === this.lobby.me.id) return;
+            if (p.worldId && p.worldId !== this.ow.world.id) return; // another planet's ghost
             this.ow.ghostUpsert(p.id, p, this.ow.time);
             if (p.enter) this._owGhostNote(p);
           })
@@ -516,6 +524,7 @@ class App {
         id: this.lobby?.me?.id || 'local',
         name: this._publicName(),
         hero: this.ui.selectedHero,
+        worldId: this.ow.world.id,
         x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
         enter: this.owEnterNote || undefined,
       });
