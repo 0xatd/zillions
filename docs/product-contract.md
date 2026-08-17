@@ -44,8 +44,10 @@ Use continuous siege on a lane graph as the gameplay base:
   outside allied vision is almost black. The soft edge keeps movement readable
   and makes unseen approaches threatening.
 - Hive nests are real bases: health, defenders, and blighted ground.
-- Lane nodes are taken by presence, pay income, and unlock a real expansion
-  fort: Forward Camp, watchtower, and a palisade where the ground pinches.
+- Lane nodes are taken by presence and become flag-centered expansion forts.
+  Build or upgrade from anywhere inside the owned territory circle. The first
+  Forward Camp pays income and musters troops forever; later tiers add its
+  palisade, twin towers, heavier fire, and repair support.
 - The map hides items worth going to look for. Heroes pick them up by walking
   over them, carry a limited pack, can drop what they do not want, and keep
   what they carry out — in survival as well as campaign.

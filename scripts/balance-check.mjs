@@ -256,10 +256,27 @@ function assertSiegeLoop(level) {
   assert.equal(branchPlot.tier, branchTierBefore, `${level.name} invalid branch construction changed the tier`);
   assert.equal(branchBuilding.def, branchDefBefore, `${level.name} invalid branch construction poisoned the building`);
 
-  // Hives keep producing on their own, forever.
+  // Hives keep producing on their own, forever. They are allowed to push past
+  // the former global 1,600-enemy ceiling and stop only when the nest dies.
   const before = game.zombies.length;
   for (let i = 0; i < 40; i++) game._updateHives(1);
   assert.ok(game.zombies.length > before, `${level.name} hives never mustered`);
+  const savedZombies = game.zombies;
+  const liveNest = game.nests.find((n) => n.alive);
+  const nestAlive = game.nests.map((n) => n.alive);
+  for (const nest of game.nests) nest.alive = nest === liveNest;
+  game.zombies = Array.from({ length: 1600 }, () => ({ dead: true }));
+  liveNest.musterT = 0;
+  game._updateHives(0.1);
+  assert.ok(game.zombies.length > 1600, `${level.name} hive stopped at the old enemy cap`);
+  const afterUncappedMuster = game.zombies.length;
+  liveNest.alive = false;
+  liveNest.musterT = 0;
+  game._updateHives(20);
+  assert.equal(game.zombies.length, afterUncappedMuster,
+    `${level.name} destroyed hive continued producing`);
+  game.nests.forEach((nest, i) => { nest.alive = nestAlive[i]; });
+  game.zombies = savedZombies;
 
   // Standing on a clear node takes it.
   const node = game.nodes[0];
@@ -271,6 +288,19 @@ function assertSiegeLoop(level) {
   assert.ok(game.stats.bestHeld >= 1, `${level.name} did not record held nodes`);
   assert.ok(!game.plotLocked(game.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id)),
     `${level.name} kept the Forward Camp locked on a node the player holds`);
+  const nodeOutpost = game.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id);
+  hero.x = node.x + SIEGE.captureRadius - 0.25;
+  hero.z = node.z;
+  assert.equal(game.buildTargetFor(hero)?.plot.id, nodeOutpost.id,
+    `${level.name} outpost cannot be upgraded from inside the capture circle`);
+  game._construct(nodeOutpost, true);
+  const outpostDef = game.tierDef(nodeOutpost, nodeOutpost.tier);
+  assert.ok(outpostDef.income > 0 && outpostDef.count > 0,
+    `${level.name} first outpost tier gives neither income nor troops`);
+  const nodeTroops = game.units.filter((u) => !u.hero).length;
+  for (let i = 0; i < outpostDef.every * 2 + 2; i++) game._updateCamps(0.5);
+  assert.ok(game.units.filter((u) => !u.hero).length >= nodeTroops + outpostDef.count,
+    `${level.name} upgraded outpost did not keep mustering`);
 
   // Major progression lives on physical plots instead of a hidden menu.
   const forge = game.plots.find((p) => p.kind === 'hero_forge');

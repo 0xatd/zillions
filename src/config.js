@@ -8,8 +8,6 @@ import { makeRNG } from './utils.js';
 
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
-export const ZOMBIE_CAP = 1600;
-
 export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
@@ -229,7 +227,7 @@ export const PLOT_KINDS = {
       { name: 'Repair Bastion', cost: 165, hp: 1900, count: 5, every: 14, income: 24, dmg: 42, rof: 1.0, range: 7.2, splash: 1.4,
         repairRadius: 9, repairRate: 32 },
     ],
-    desc: 'Raise it on ground you hold. Upgrades turn each lane into a short-range guard post that musters blockers and shoots nearby pressure.',
+    desc: 'Raise it at a captured flag from anywhere inside the territory circle. It pays gold and musters troops; upgrades add a palisade, twin towers, heavier fire, and repairs.',
   },
   workshop: {
     name: 'Auto-Workshop', icon: '🔧',
@@ -323,7 +321,10 @@ export const TOWER_PRIORITY = [
 // worse as Threat climbs, so the pressure curve is a consequence, not a script.
 
 export function hiveInterval(threat) {
-  return Math.max(11, 30 - threat);
+  // A nest is an enemy production building, not a scripted wave emitter.
+  // It starts at the fastest allied production cadence and accelerates with
+  // Threat. Production ends only when the nest itself is destroyed.
+  return Math.max(8, 14 - threat * 0.25);
 }
 
 export function hiveSquad(threat, mult) {
