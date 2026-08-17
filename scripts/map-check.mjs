@@ -204,6 +204,71 @@ for (const level of LEVELS) {
     game.foundCity(0, 0);
     const hqReach = game.plots.find((p) => p.kind === 'hq').plan.reach;
     assert.ok(game.laneGraph && game.laneGraph.size > 0, `${label} built no lane graph on its real terrain`);
+
+    // --- the sortie guarantee, at WORST CASE: every plot funded to its top
+    // tier. A city the hero cannot walk out of — plaza sealed by its own
+    // districts, or gates that open into terrain pockets — is unplayable no
+    // matter how pretty the plan (QA 2026-08-16: a full-built L5 throat keep
+    // sealed the hero in with 0 of 1780 outside tiles reachable).
+    {
+      const N = game.map.size, occ = game.occ, gates = game.gateIds;
+      for (const p of game.plots) {
+        let guard = 0;
+        while (p.tier < 3 && guard++ < 4) game._construct(p, true);
+      }
+      const pass = (x, z) => x >= 0 && z >= 0 && x < N && z < N
+        && game.map.isWalkable(x, z)
+        && (occ[z * N + x] === 0 || gates.has(occ[z * N + x]));
+      const hq = game.hq;
+      const seen = new Uint8Array(N * N);
+      // Seed on the plaza ring around the Keep, not the Keep itself.
+      let sx = -1, sz = -1;
+      outer:
+      for (let r = 2; r <= 6; r++) {
+        for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+          const x = (hq.cx | 0) + dx, z = (hq.cz | 0) + dz;
+          if (pass(x, z)) { sx = x; sz = z; break outer; }
+        }
+      }
+      assert.ok(sx >= 0, `${label}: the Keep plaza itself is unwalkable at full build`);
+      // City-ring gates only (rampart + inner ward) — outer palisades are
+      // optional works, not entrances.
+      const cityGateIds = new Set();
+      for (const b of game.buildings) {
+        if (!b.gate) continue;
+        const p = game.plots.find((pl) => pl.id === b.plotId);
+        if (p && p.kind === 'wall' && p.role !== 'outer') cityGateIds.add(b.id);
+      }
+      const stack = [sz * N + sx];
+      seen[sz * N + sx] = 1;
+      let escaped = false;
+      // Distinct entrances, not tiles: an arch is 3-4 adjacent gate buildings
+      // of one wall plot, and the flood must not stop at the first way out.
+      const cityGatePlots = new Map();
+      for (const b of game.buildings) {
+        if (!b.gate) continue;
+        const p = game.plots.find((pl) => pl.id === b.plotId);
+        if (p && p.kind === 'wall' && p.role !== 'outer') cityGatePlots.set(b.id, p.id);
+      }
+      const reachedGates = new Set();
+      while (stack.length) {
+        const idx = stack.pop();
+        const x = idx % N, z = (idx / N) | 0;
+        if (Math.hypot(x + 0.5 - hq.cx, z + 0.5 - hq.cz) > hqReach + 4) escaped = true;
+        const gatePlot = cityGatePlots.get(occ[idx]);
+        if (gatePlot) reachedGates.add(gatePlot);
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz, ni = nz * N + nx;
+          if (seen[ni] || !pass(nx, nz)) continue;
+          seen[ni] = 1;
+          stack.push(ni);
+        }
+      }
+      assert.ok(reachedGates.size >= 2,
+        `${label}: at full build the plaza reaches only ${reachedGates.size} city gates — the wards sealed the streets`);
+      assert.ok(escaped,
+        `${label}: at full build nothing reaches open country — the city is a box`);
+    }
     // Ground you take is ground you can fortify: every reachable node carries a
     // Forward Camp and a watchtower, and every work on it is locked until the
     // node is yours.

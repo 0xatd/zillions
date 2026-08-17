@@ -353,6 +353,16 @@ export function generatePlots(map, anchor = null, opts = {}) {
         tier: 0, paid: 0, branch: null,
       };
       for (const [x, z] of p.tiles) taken.add(z * N + x);
+      // The gate is an ARCH, not a slot: every wall tile in this plot within
+      // arm's reach of the gate tile opens with it. A ring traced along
+      // diagonal or stair-stepped ground is two tiles thick exactly where the
+      // gate wants to be, and a one-tile door in a two-tile wall is just a
+      // wall (QA 2026-08-16: full-built cities sealed their own gates).
+      if (gateTile) {
+        p.arch = open
+          .filter((tile) => Math.hypot(tile.x - gateTile.x, tile.z - gateTile.z) <= 1.5)
+          .map((tile) => [tile.x, tile.z]);
+      }
       plots.push(p);
       if (gateTile) made.push({ gate: p.gate, ang: world, t: mid.ang, plot: p });
     });
@@ -383,6 +393,50 @@ export function generatePlots(map, anchor = null, opts = {}) {
     rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: true });
   }
   const gates = rampart.gates;
+  // Every gate's exit is a road out. A gate that opens onto a pocket of crag
+  // or thick wood is a gate to nowhere — the sortie dies in the doorway
+  // (QA 2026-08-16: four of a throat keep's seven gates did). Cut a causeway
+  // radially outward from each rampart gate until it meets ground the whole
+  // map can walk. The ray leaves the ring only at the gate itself — the ring
+  // is single-valued in radius around the keep — so it can never open the
+  // boundary anywhere else.
+  {
+    const outside = new Uint8Array(N * N);
+    const stack = [];
+    for (let i = 0; i < N; i++) {
+      for (const [x, z] of [[i, 0], [i, N - 1], [0, i], [N - 1, i]]) {
+        if (!outside[z * N + x] && map.isWalkable(x, z)) { outside[z * N + x] = 1; stack.push([x, z]); }
+      }
+    }
+    while (stack.length) {
+      const [x, z] = stack.pop();
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= N || nz >= N || outside[nz * N + nx]) continue;
+        if (!map.isWalkable(nx, nz)) continue;
+        outside[nz * N + nx] = 1;
+        stack.push([nx, nz]);
+      }
+    }
+    for (const g of gates) {
+      const gx = g.gate[0] + 0.5, gz = g.gate[1] + 0.5;
+      const len = Math.hypot(gx - cx, gz - cz) || 1;
+      const ux = (gx - cx) / len, uz = (gz - cz) / len;
+      const px = -uz, pz = ux;
+      let linked = false;
+      for (let d = 2.5; d <= 26 && !linked; d += 0.5) {
+        for (const w of (d < 4 ? [0] : [-1, 0, 1])) {
+          const x = Math.round(gx + ux * d + px * w);
+          const z = Math.round(gz + uz * d + pz * w);
+          if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
+          if (outside[z * N + x]) { linked = true; break; }
+          const t = map.tiles[z * N + x];
+          if (t === TILE.WATER) map.tiles[z * N + x] = TILE.SAND;
+          else if (t === TILE.MOUNTAIN || t === TILE.FOREST) map.tiles[z * N + x] = TILE.GRASS;
+        }
+      }
+    }
+  }
 
   // --- Local frame helpers: u runs toward the enemy, v runs across. Layouts
   // are written in this frame, so a plan reads the same whichever way the city
@@ -424,31 +478,27 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
   }
 
-  // --- Streets: from every gate to the plaza, before anything is built, so the
-  // streets are streets and not the gaps between buildings. Where there is an
-  // inner ward the road bends to its gate first — the bent approach that Krak
-  // des Chevaliers made famous, and a longer walk under the towers.
+  // --- Streets: from every gate to the plaza, before anything is built, so
+  // the streets are streets and not the gaps between buildings — and so the
+  // city can never grow itself shut (QA 2026-08-16: a full-built city sealed
+  // its own plaza; the hero reached 0 of 4 gates). Where there is an inner
+  // ward the road bends to the ward's own gate first — the bent approach that
+  // Krak des Chevaliers made famous, and a longer walk under the towers. The
+  // lines run gate tile to gate tile (not to a radius), so a road cannot stop
+  // short and leave the last stretch to the districts to close.
   for (const g of gates) {
-    const dx = -Math.cos(g.ang), dz = -Math.sin(g.ang);
-    const stop = inner ? plan.inner.radius + 2.0 : Math.max(2, radiusAt(g.t) - 5.4);
-    const inward = Math.max(2, radiusAt(g.t) - stop);
-    let px = g.gate[0], pz = g.gate[1];
-    for (let d = 1; d <= inward; d += 0.5) {
-      px = Math.round(g.gate[0] + dx * d); pz = Math.round(g.gate[1] + dz * d);
-      markPathTile(px, pz);
-    }
     if (inner) {
       let best = null, bd = Infinity;
       for (const ig of inner.gates) {
-        const d = Math.hypot(ig.gate[0] - px, ig.gate[1] - pz);
+        const d = angDiff(g.ang, ig.ang);
         if (d < bd) { bd = d; best = ig; }
       }
-      if (best) {
-        markPathLine(px, pz, best.gate[0], best.gate[1]);
-        markPathLine(best.gate[0], best.gate[1], cx, cz);
-      }
+      if (best) markPathLine(g.gate[0], g.gate[1], best.gate[0], best.gate[1]);
+    } else {
+      markPathLine(g.gate[0], g.gate[1], cx, cz);
     }
   }
+  if (inner) for (const ig of inner.gates) markPathLine(ig.gate[0], ig.gate[1], cx, cz);
 
   const campPlots = [];
   const addCamp = (kind, x, z, maxR = 6) => {
