@@ -126,6 +126,7 @@ export class UI {
             </button>
             <div class="menuutilities">
               <button class="utilitybtn" id="m-help">📜 How to play</button>
+              <button class="utilitybtn" id="m-settings">⚙️ Settings</button>
             </div>
           </div>
           <div class="profilerow">
@@ -203,9 +204,21 @@ export class UI {
               </div>
               <div id="l-tab-games" class="ltabpane">
                 <div class="lobbycreate">
-                  <button class="diffbtn sel" id="l-create-pub">🌐 Create public game</button>
-                  <button class="diffbtn" id="l-create-priv">🔒 Create private game</button>
-                  <span class="joincode"><input id="l-joincode" maxlength="6" placeholder="CODE"><button class="tbtn" id="l-joinbtn">Join</button></span>
+                  <button class="createcard" id="l-create-pub">
+                    <span class="cc-icon">🌐</span>
+                    <b>Create public game</b>
+                    <small>Anyone can see it and join</small>
+                  </button>
+                  <button class="createcard" id="l-create-priv">
+                    <span class="cc-icon">🔒</span>
+                    <b>Create private game</b>
+                    <small>Invite by 6-letter code</small>
+                  </button>
+                  <button class="createcard" id="l-create-join">
+                    <span class="cc-icon">🎫</span>
+                    <b>Join by code</b>
+                    <small>Enter a friend's invite code</small>
+                  </button>
                 </div>
                 <div id="l-games" class="lobbygames"></div>
                 <div class="mphint">Public games appear here for everyone. Private games are joined by code. <a href="#" id="l-manual">Manual invite codes</a> work without the internet lobby.</div>
@@ -250,10 +263,53 @@ export class UI {
           <div class="menustack">
             <button class="menubtn primary" id="p-resume">▶ &nbsp;Resume</button>
             <button class="menubtn" id="p-help">📜 &nbsp;How to play</button>
+            <button class="menubtn" id="p-settings">⚙️ &nbsp;Settings</button>
             <button class="menubtn" id="p-restart">🔄 &nbsp;Restart level</button>
             <button class="menubtn" id="p-quit">🚪 &nbsp;Quit to menu</button>
           </div>
           <div id="p-note" class="gamesub"></div>
+        </div>
+        <div id="screen-settings" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="set-back">← Back</button>
+            <h2>⚙️ Settings</h2>
+          </div>
+          <div class="settingsgrid">
+            <div class="settingstabs">
+              <button class="stab sel" data-tab="audio">🔊 Audio</button>
+              <button class="stab" data-tab="video">🖥️ Video</button>
+            </div>
+            <div class="settingspane">
+              <div id="set-pane-audio" class="setpane">
+                <label class="setrow">
+                  <span>Master volume</span>
+                  <input type="range" id="set-vol" min="0" max="100" value="100">
+                  <b id="set-vol-val">100%</b>
+                </label>
+                <label class="setrow">
+                  <span>Music volume</span>
+                  <input type="range" id="set-music" min="0" max="100" value="100">
+                  <b id="set-music-val">100%</b>
+                </label>
+                <label class="setrow">
+                  <span>Sound effects</span>
+                  <input type="checkbox" id="set-sfx">
+                  <b id="set-sfx-val"></b>
+                </label>
+                <div class="sethint">Effects are procedural WebAudio; hero barks are pre-recorded. Mute anytime with <kbd>M</kbd>.</div>
+              </div>
+              <div id="set-pane-video" class="setpane hidden">
+                <div class="setrow">
+                  <span>Graphics quality</span>
+                  <div class="modeseg" id="set-quality">
+                    <button class="diffbtn" data-q="low">Performance</button>
+                    <button class="diffbtn" data-q="high">Quality</button>
+                  </div>
+                </div>
+                <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="room-confirm" class="roomconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="room-confirm-title">
           <div class="roomconfirmcard">
@@ -322,12 +378,46 @@ export class UI {
     q('#l-friendcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') addFriend(); });
     q('#l-create-pub').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('public');
     q('#l-create-priv').onclick = () => this.cb.onCreateGame && this.cb.onCreateGame('private');
-    q('#l-joinbtn').onclick = () => this.cb.onJoinCode && this.cb.onJoinCode(q('#l-joincode').value);
+    q('#l-create-join').onclick = () => this._showJoinCode();
     q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
       else this._showScreen('main');
     };
+
+    // ----- settings -----
+    q('#m-settings').onclick = () => this._showScreen('settings');
+    q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
+    q('#set-back').onclick = () => {
+      if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
+      else this._showScreen('main');
+    };
+    for (const t of this.root.querySelectorAll('.stab')) {
+      t.onclick = () => {
+        for (const o of this.root.querySelectorAll('.stab')) o.classList.toggle('sel', o === t);
+        this.root.querySelector('#set-pane-audio').classList.toggle('hidden', t.dataset.tab !== 'audio');
+        this.root.querySelector('#set-pane-video').classList.toggle('hidden', t.dataset.tab !== 'video');
+      };
+    }
+    const vol = q('#set-vol'), mus = q('#set-music'), sfx = q('#set-sfx');
+    vol.oninput = () => {
+      q('#set-vol-val').textContent = vol.value + '%';
+      if (this.cb.onSettings) this.cb.onSettings({ volume: vol.value / 100 });
+    };
+    mus.oninput = () => {
+      q('#set-music-val').textContent = mus.value + '%';
+      if (this.cb.onSettings) this.cb.onSettings({ music: mus.value / 100 });
+    };
+    sfx.onchange = () => {
+      q('#set-sfx-val').textContent = sfx.checked ? 'ON' : 'OFF';
+      if (this.cb.onSettings) this.cb.onSettings({ sfx: sfx.checked });
+    };
+    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
+      b.onclick = () => {
+        if (this.cb.onSettings) this.cb.onSettings({ quality: b.dataset.q });
+        this._reflectQuality(b.dataset.q);
+      };
+    }
 
     // ----- pause menu -----
     q('#p-resume').onclick = () => this.cb.onResume();
@@ -585,9 +675,54 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  // Join-by-code flow: a small modal asking for the 6-letter invite code.
+  _showJoinCode() {
+    let modal = this.root.querySelector('#joincode-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'joincode-modal';
+      modal.className = 'roomconfirm';
+      modal.innerHTML = `
+        <div class="roomconfirmcard">
+          <span class="roomeyebrow">Join a war</span>
+          <h2>Enter invite code</h2>
+          <div class="joincode big">
+            <input id="jc-input" maxlength="6" placeholder="ABC123" autocomplete="off" spellcheck="false">
+            <button class="tbtn" id="jc-go">JOIN</button>
+          </div>
+          <div class="mphint" id="jc-hint"></div>
+          <div class="roomconfirmactions">
+            <button class="tbtn" id="jc-cancel">CANCEL</button>
+          </div>
+        </div>`;
+      this.root.appendChild(modal);
+      const close = () => modal.classList.add('hidden');
+      modal.querySelector('#jc-cancel').onclick = close;
+      const go = () => {
+        const code = modal.querySelector('#jc-input').value.trim().toUpperCase();
+        if (!code) { modal.querySelector('#jc-hint').textContent = 'Enter the 6-letter code your friend sent.'; return; }
+        if (this.cb.onJoinCode) this.cb.onJoinCode(code);
+        close();
+      };
+      modal.querySelector('#jc-go').onclick = go;
+      modal.querySelector('#jc-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    }
+    modal.classList.remove('hidden');
+    const inp = modal.querySelector('#jc-input');
+    inp.value = '';
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  _reflectQuality(q) {
+    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
+      b.classList.toggle('sel', b.dataset.q === q);
+    }
+    this.setQualityUI(q);
   }
 
   _loadHeroPortraits() {
@@ -1169,6 +1304,25 @@ export class UI {
   }
 
   setMuteUI(m) { this.root.querySelector('#b-mute').textContent = m ? '🔇' : '🔊'; }
+
+  // Sync the settings controls to persisted values (startup restore).
+  setSettingsUI(s = {}) {
+    if (s.volume !== undefined) {
+      const v = Math.round(s.volume * 100);
+      this.root.querySelector('#set-vol').value = v;
+      this.root.querySelector('#set-vol-val').textContent = v + '%';
+    }
+    if (s.music !== undefined) {
+      const v = Math.round(s.music * 100);
+      this.root.querySelector('#set-music').value = v;
+      this.root.querySelector('#set-music-val').textContent = v + '%';
+    }
+    if (s.sfx !== undefined) {
+      this.root.querySelector('#set-sfx').checked = !!s.sfx;
+      this.root.querySelector('#set-sfx-val').textContent = s.sfx ? 'ON' : 'OFF';
+    }
+    if (s.quality !== undefined) this._reflectQuality(s.quality);
+  }
 
   setQualityUI(quality) {
     const button = this.root.querySelector('#b-quality');
