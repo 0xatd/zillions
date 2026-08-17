@@ -666,7 +666,7 @@ body::after {
 /* flex-wrap + a min-width keep this readable as the roster grows past a
    single row's worth of cards, instead of squeezing everyone paper-thin. */
 .herorow { display: flex; flex-wrap: wrap; gap: 10px; }
-.herocard {
+.herolib-card {
   flex: 1 1 108px; min-width: 108px; display: flex; flex-direction: column; gap: 3px; align-items: center;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--panel-border); border-radius: 12px;
@@ -1063,3 +1063,38 @@ body::after {
 .cta small { margin: 0; font-size: 11px; font-weight: 500; opacity: 0.55; letter-spacing: 0.4px; }
 .menuutilities { margin-top: 8px; }
 .utilitybtn { font-size: 12px; letter-spacing: 0.5px; padding: 10px 16px; }
+
+/* ---------- Living hub strip (main menu) + hero library ---------- */
+.hubpanel {
+  margin-top: 26px; width: min(380px, 86vw);
+  background: rgba(10, 13, 18, 0.82); border: 1px solid var(--panel-border); border-radius: 10px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.hubrow { font-size: 12.5px; color: #b9e0c0; display: flex; gap: 6px; align-items: baseline; }
+.hubrow .hubsep { opacity: 0.4; }
+.hubdot { font-size: 10px; }
+.hubchat { display: flex; flex-direction: column; gap: 3px; min-height: 44px; }
+.hubchatline { font-size: 12px; color: #cfcaba; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hubchatline b { color: var(--gold); margin-right: 6px; font-weight: 600; }
+.hubmuted { font-size: 12px; opacity: 0.4; font-style: italic; }
+
+/* Hero library grid — Dota Tab-screen grammar */
+.herogrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px; width: 100%; max-width: 1020px; margin: 0 auto; padding-bottom: 30px;
+  overflow-y: auto; max-height: calc(100vh - 200px);
+}
+.herolib-card {
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px;
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left;
+}
+.herolib-card .hc-head { display: flex; gap: 12px; align-items: center; border-bottom: 2px solid; padding-bottom: 10px; }
+.herolib-card .hc-icon { font-size: 34px; }
+.herolib-card .hc-head b { font-size: 17px; letter-spacing: 0.5px; display: block; }
+.herolib-card .hc-head small { font-size: 11.5px; opacity: 0.6; }
+.herolib-card .hc-stats { font-size: 11.5px; letter-spacing: 0.6px; color: var(--gold); }
+.herolib-card .hc-row { display: flex; flex-direction: column; gap: 2px; }
+.herolib-card .hc-k { font-size: 9.5px; font-weight: 800; letter-spacing: 2px; opacity: 0.4; text-transform: uppercase; }
+.herolib-card .hc-row b { font-size: 13.5px; }
+.herolib-card .hc-row p { font-size: 12px; opacity: 0.72; line-height: 1.45; }
+.herolib-card .hc-cd { font-size: 11px; opacity: 0.5; }

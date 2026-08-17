@@ -128,7 +128,15 @@ export class UI {
             <div class="menuutilities">
               <button class="utilitybtn" id="m-help">How to play</button>
               <button class="utilitybtn" id="m-settings">⚙ Settings</button>
+              <button class="utilitybtn" id="m-heroes">Heroes (Tab)</button>
             </div>
+          </div>
+          <div id="hub-panel" class="hubpanel hidden">
+            <div class="hubrow">
+              <span class="hubdot">🟢</span><span id="hub-online">connecting…</span>
+              <span class="hubsep">·</span><span id="hub-games"></span>
+            </div>
+            <div class="hubchat" id="hub-chat"><span class="hubmuted">Lobby chat is quiet…</span></div>
           </div>
           <div class="profilerow">
             <span id="prof-name-display">Signed in</span>
@@ -270,6 +278,14 @@ export class UI {
           </div>
           <div id="p-note" class="gamesub"></div>
         </div>
+        <div id="screen-heroes" class="setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="hero-back">← Back</button>
+            <h2>Heroes of the Frontier</h2>
+            <span class="gamesub">Tab anywhere in the menu to open this</span>
+          </div>
+          <div class="herogrid" id="herogrid"></div>
+        </div>
         <div id="screen-settings" class="setup hidden">
           <div class="setuphead">
             <button class="tbtn" id="set-back">← Back</button>
@@ -388,6 +404,8 @@ export class UI {
 
     // ----- settings -----
     q('#m-settings').onclick = () => this._showScreen('settings');
+    q('#m-heroes').onclick = () => this._showScreen('heroes');
+    q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
     q('#set-back').onclick = () => {
       if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
@@ -676,8 +694,59 @@ export class UI {
   _showScreen(name) {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings']) {
+    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
+    }
+  }
+
+  // ----- hero library (Dota Tab-screen grammar) -----
+  fillHeroGrid(heroes) {
+    const grid = this.root.querySelector('#herogrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    for (const h of Object.values(heroes)) {
+      const card = document.createElement('div');
+      card.className = 'herolib-card';
+      const rgb = (c) => `#${(c || 0x888888).toString(16).padStart(6, '0')}`;
+      card.innerHTML = `
+        <div class="hc-head" style="border-color:${rgb(h.color)}">
+          <span class="hc-icon">${h.icon}</span>
+          <div><b>${h.name}</b><small>${h.tagline}</small></div>
+        </div>
+        <div class="hc-stats">HP ${h.hp} · DMG ${h.dmg} · RANGE ${h.range} · SPEED ${h.speed}</div>
+        <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
+        <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
+        ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
+      `;
+      grid.appendChild(card);
+    }
+  }
+
+  // ----- living hub strip on the main menu -----
+  hubOnline(n) {
+    const el = this.root.querySelector('#hub-online');
+    if (el) el.textContent = `${n} online now`;
+  }
+  hubGames(rows) {
+    const el = this.root.querySelector('#hub-games');
+    if (!el) return;
+    const open = (rows || []).filter((g) => g.status === 'open').length;
+    const live = (rows || []).filter((g) => g.status === 'in_game' || g.status === 'starting').length;
+    el.textContent = `${open} open rooms · ${live} live to watch`;
+  }
+  hubChat(msgs) {
+    const el = this.root.querySelector('#hub-chat');
+    if (!el) return;
+    const recent = (msgs || []).slice(-3);
+    if (!recent.length) return;
+    el.innerHTML = '';
+    for (const m of recent) {
+      const line = document.createElement('div');
+      line.className = 'hubchatline';
+      const who = document.createElement('b'); who.textContent = m.name || 'Commander';
+      const txt = document.createElement('span'); txt.textContent = m.text || '';
+      line.append(who, txt);
+      el.appendChild(line);
     }
   }
 
