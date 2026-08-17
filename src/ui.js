@@ -1848,15 +1848,46 @@ export class UI {
       });
     }
 
-    // Match the battlefield shroud. Draw this after world markers so enemies,
-    // nests, loot, and terrain outside allied vision disappear together. The
-    // camera frame remains visible below as navigation chrome.
+    // Explored memory: the minimap remembers where allied vision has been.
+    // Unexplored ground is near-black; explored-but-not-currently-seen reads
+    // dim (terrain shape, no contacts); current vision is clear. Without this
+    // the map goes blind the moment the hero rides on — a map you cannot read
+    // from memory is not a map.
+    if (!this._mmExplored || this._mmExplored.length !== N * N) {
+      this._mmExplored = new Uint8Array(N * N);
+    }
+    const explored = this._mmExplored;
+    const visionSources = fogVisionSources(game);
+    for (const source of visionSources) {
+      const r = Math.ceil(source.radius);
+      const x0 = Math.max(0, (source.x - r) | 0), x1 = Math.min(N - 1, (source.x + r) | 0);
+      const z0 = Math.max(0, (source.z - r) | 0), z1 = Math.min(N - 1, (source.z + r) | 0);
+      for (let z = z0; z <= z1; z++) {
+        const dz = z - source.z;
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - source.x;
+          if (dx * dx + dz * dz <= source.radius * source.radius) explored[z * N + x] = 1;
+        }
+      }
+    }
+    // Pre-render the explored veil once per redraw: dim the base canvas's
+    // colors onto the overlay where explored, so memory reads as terrain.
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
+    // Unexplored: the full shroud.
     ctx.fillStyle = `rgba(1, 2, 5, ${FOG_DARKNESS})`;
     ctx.fillRect(0, 0, N, N);
+    // Explored: lift the shroud to a veil — half light, so remembered ground
+    // is legible but obviously not live.
     ctx.globalCompositeOperation = 'destination-out';
-    for (const source of fogVisionSources(game)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        if (explored[z * N + x]) ctx.fillRect(x, z, 1, 1);
+      }
+    }
+    // Current vision: fully clear.
+    for (const source of visionSources) {
       const edge = Math.max(1, source.radius + FOG_EDGE_SOFTNESS);
       const gradient = ctx.createRadialGradient(
         source.x,
@@ -1875,6 +1906,42 @@ export class UI {
       ctx.fill();
     }
     ctx.restore();
+
+    // Above the shroud — the things a commander can never lose track of.
+    // Co-op allies share vision, so their heroes are always on the map, each
+    // in their own strong colour so "where is my partner" is one glance.
+    // The boss, once it walks, is a map-wide event: big pulsing ring, always
+    // visible, because it is the one blip hiding in fog would actually hurt.
+    ctx.fillStyle = '#7fd6ff';
+    for (const u of game.units) {
+      if (!u.hero || u.dead) continue;
+      const mine = u === game.hero || (game.heroes && game.heroes[0] === u);
+      if (mine) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(u.x - 2, u.z - 2, 4.5, 4.5);
+        ctx.strokeStyle = '#7fd6ff';
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(u.x - 2.4, u.z - 2.4, 5.3, 5.3);
+      } else {
+        ctx.fillStyle = '#ffb347';
+        ctx.fillRect(u.x - 1.8, u.z - 1.8, 4, 4);
+        ctx.fillStyle = '#1b1408';
+        ctx.fillRect(u.x - 0.7, u.z - 0.7, 1.6, 1.6);
+      }
+    }
+    if (game.boss && !game.boss.dead) {
+      const bossPulse = (performance.now() / 700) % 1;
+      ctx.fillStyle = '#ff2d1f';
+      ctx.fillRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
+      ctx.strokeStyle = `rgba(255,215,94,${0.95 - bossPulse * 0.6})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(game.boss.x, game.boss.z, 4 + bossPulse * 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#ffd75e';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(game.boss.x - 3.6, game.boss.z - 3.6, 7.2, 7.2);
+    }
 
     // Pings: expanding red circles.
     for (const p of this.pings) {
