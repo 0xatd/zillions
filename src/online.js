@@ -74,6 +74,9 @@ function roomToGame(row) {
     client_version: String(metadata.clientVersion || 'legacy'),
     protocol_compatible: Number(metadata.protocolVersion || 0) === LOBBY_PROTOCOL_VERSION,
     difficulty: row.difficulty || 'normal',
+    // Custom games (the WC3 browser) ride the same rooms with a kind tag.
+    custom: metadata.kind === 'custom',
+    mapName: metadata.mapName || null,
     // A selected roster is authoritative. metadata.players is only a legacy
     // fallback for rows fetched without the nested relation.
     players: Math.max(1, hasRoster ? players.length : Number(metadata.players || 1)),
@@ -105,6 +108,13 @@ export function assertRoomCompatibility(game) {
 export function canRejoinRoom(game, userId) {
   return !!game && game.status === 'in_game' && !!userId && game.host_id !== userId
     && (game._players || []).some((player) => player.user_id === userId);
+}
+
+// Custom games are the same rooms wearing a kind tag — one system, one
+// browser per flavour. The lobby feed shows both; the custom browser and
+// the portal filter to these.
+export function isCustomGame(game) {
+  return !!(game && game.custom);
 }
 
 export class OnlineLobby {
@@ -468,7 +478,12 @@ export class OnlineLobby {
     return games;
   }
 
-  async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1 } = {}) {
+  // Custom games are the same rooms wearing a kind tag — one system, one
+  // browser per flavour. The lobby feed shows both; the custom browser and
+  // the portal filter to these. (See isCustomGame at module level.)
+
+  async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1,
+    name = null, maxPlayers = 3, kind = null, mapName = null } = {}) {
     const metadata = {
       level,
       mode,
@@ -476,13 +491,15 @@ export class OnlineLobby {
       players: 1,
       protocolVersion: LOBBY_PROTOCOL_VERSION,
       clientVersion: CLIENT_VERSION,
+      ...(kind ? { kind, mapName: mapName || null } : {}),
     };
     const { data, error } = await this.sb.from('rooms').insert({
-      name: `${this.me.name}'s frontier`,
+      name: name || `${this.me.name}'s frontier`,
       host_user_id: this.me.id,
       visibility,
       rules: CURRENT_RULES,
       difficulty,
+      max_players: Math.max(1, Math.min(3, Number(maxPlayers) || 3)),
       metadata,
       last_seen_at: new Date().toISOString(),
     }).select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at').single();

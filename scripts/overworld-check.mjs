@@ -17,29 +17,37 @@ const tileHash = (f) =>
   crypto.createHash('sha256').update(Buffer.from(f.tiles)).digest('hex');
 
 // 1. Deterministic: the same descriptor stitches the same planet, byte for
-// byte — and the descriptor refactor kept Earth exactly where it stood.
-const EARTH_HASH = '631edb03d73dc0811b4032f1c7936c56d1ba3616dea3f680ee1900a077f30937';
+// byte. Earth gained a region for the custom-games arch (a stone gate near
+// spawn), so its hash moved once — deliberately — and is pinned again here.
+const EARTH_HASH = '21f394e2a73aa3cb5c306e3aaa1187d04a1b65fa376f7c3334e54724ea43edc3';
 const a = new OverworldField(earthWorldDescriptor(0));
 const b = new OverworldField(earthWorldDescriptor(0));
 assert.equal(tileHash(a), EARTH_HASH, 'Earth tiles are byte-stable across the descriptor refactor');
-assert.deepEqual([...a.tiles], [...b.tiles], 'overworld tiles must be seed-stable');
 assert.deepEqual([...a.elev].map((v) => Math.round(v * 1e6)), [...b.elev].map((v) => Math.round(v * 1e6)),
   'overworld relief must be seed-stable');
+assert.deepEqual([...a.tiles], [...b.tiles], 'overworld tiles must be seed-stable');
 assert.equal(a.size, 128, 'the overworld is a small planet, not a battlefield');
-assert.ok(a.overworldLayout && a.overworldLayout.spawn, 'layout is attached to the field');
 
+assert.ok(a.overworldLayout && a.overworldLayout.spawn, 'layout is attached to the field');
 // A different seed is a different planet (sanity that we truly consume rng).
 const c = new OverworldField({ ...earthWorldDescriptor(), seed: OVERWORLD_SEED + 1 });
+
 assert.notDeepEqual([...a.tiles], [...c.tiles], 'overworld must consume its rng');
 
-// 2. Gates: all five fronts plus the labyrinth mouth, in march order.
+// 2. Gates: the custom-games portal plus all five fronts, in march order,
+// and the labyrinth mouth in its corner.
 const layout = overworldLayout(earthWorldDescriptor(0));
-assert.equal(layout.gates.length, LEVELS.length, 'one gate per campaign front');
-assert.deepEqual(layout.gates.map((g) => g.levelId), LEVELS.map((l) => l.id), 'gates map to level ids in order');
+const portalGate = layout.gates.find((g) => g.portal);
+const levelGates = layout.gates.filter((g) => g.levelId);
+assert.ok(portalGate && portalGate.action === 'custom', 'the custom-games portal is a gate with an action');
+assert.equal(portalGate.x, 27, 'the custom arch stands near spawn, off the causeway');
+assert.equal(levelGates.length, LEVELS.length, 'one gate per campaign front');
+assert.deepEqual(levelGates.map((g) => g.levelId), LEVELS.map((l) => l.id), 'gates map to level ids in order');
 assert.ok(layout.cave.cave && layout.cave.trials.length === LABYRINTH_LEVELS.length, 'the cave leads to the trials');
 
-// 3. Reachable: every gate stands on walkable ground connected to the spawn
-// (map-check's flood idea, applied to the road planet).
+// 3. Reachable: every gate — the custom portal included — stands on
+// walkable ground connected to the spawn (map-check's flood idea, applied
+// to the road planet).
 const reach = overworldReachable(a);
 const N = a.size;
 assert.ok(reach.size > N, 'the walkable overworld must be more than a corridor');
@@ -49,38 +57,53 @@ for (const g of [...layout.gates, layout.cave]) {
 }
 
 // Each region keeps real walkable ground of its own, not just the road.
-for (let r = 0; r < LEVELS.length; r++) {
+// Each banded region keeps real walkable ground of its own, not just the
+// road. (The labyrinth's bounded crag is authored mountain — its only
+// walkable ground is the mouth terrace the gate stands on.)
+const earthRegions = earthWorldDescriptor(0).regions.filter((r) => r.radius == null);
+for (let r = 0; r < earthRegions.length; r++) {
   let walk = 0;
   for (let i = 0; i < a.tiles.length; i++) if (a.region[i] === r) {
     const t = a.tiles[i];
     if (t === 0 || t === 4 || t === 5 || t === 6 || t === 7) walk++; // grass/sand/gold/stone/path
   }
-  assert.ok(walk > 300, `region ${LEVELS[r].name} must have real walkable ground (${walk} tiles)`);
+  assert.ok(walk > 300, `region ${earthRegions[r].label} must have real walkable ground (${walk} tiles)`);
 }
-
-// 4. Lock state: the campaign ladder, honestly reported at the gates.
-assert.deepEqual(gateState(layout.gates[0]), { locked: false, cleared: false }, 'front 1 is always open');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(0)).gates[1]), { locked: true, cleared: false }, 'front 2 locked on a fresh profile');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(1)).gates[1]), { locked: false, cleared: false }, 'winning front 1 opens front 2');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(1)).gates[0]), { locked: false, cleared: true }, 'cleared fronts read cleared');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(4)).gates[4]), { locked: false, cleared: false }, 'the last front opens last');
+// 4. Lock state: the campaign ladder, honestly reported at the gates — and
+// the custom-games portal never locks (the browser is free to walk into).
+const levelGatesOf = (cleared) => overworldLayout(earthWorldDescriptor(cleared)).gates.filter((g) => g.levelId);
+assert.deepEqual(gateState(portalGate), { locked: false, cleared: false }, 'the custom arch is always open');
+assert.deepEqual(gateState(levelGates[0]), { locked: false, cleared: false }, 'front 1 is always open');
+assert.deepEqual(gateState(levelGates[1]), { locked: true, cleared: false }, 'front 2 locked on a fresh profile');
+assert.deepEqual(gateState(levelGatesOf(1)[1]), { locked: false, cleared: false }, 'winning front 1 opens front 2');
+assert.deepEqual(gateState(levelGatesOf(1)[0]), { locked: false, cleared: true }, 'cleared fronts read cleared');
+assert.deepEqual(gateState(levelGatesOf(4)[4]), { locked: false, cleared: false }, 'the last front opens last');
 assert.deepEqual(gateState(layout.cave), { locked: false, cleared: false }, 'the labyrinth is its own door');
 
 // 5. Walk-in triggers: stepping into a gate ring fires the right level id,
 // movement collides with impassable tiles, and ghosts expire.
 const ow = new Overworld(a, { world: a.overworldWorld });
 let sawLevel1 = false, sawLocked = false;
-ow.hero.x = layout.gates[0].x + 0.5; ow.hero.z = layout.gates[0].z + 0.5;
+ow.hero.x = levelGates[0].x + 0.5; ow.hero.z = levelGates[0].z + 0.5;
 for (const ev of ow.update(0.016)) {
   if (ev.t === 'gate' && ev.gate.levelId === 1 && !ev.state.locked) sawLevel1 = true;
 }
 const lockedLayout = overworldLayout(earthWorldDescriptor(0));
-ow.hero.x = lockedLayout.gates[1].x + 0.5; ow.hero.z = lockedLayout.gates[1].z + 0.5;
+const lockedGates = lockedLayout.gates.filter((g) => g.levelId);
+ow.hero.x = lockedGates[1].x + 0.5; ow.hero.z = lockedGates[1].z + 0.5;
 for (const ev of ow.update(0.016)) {
   if (ev.t === 'gate' && ev.gate.levelId === 2 && ev.state.locked) sawLocked = true;
 }
 assert.ok(sawLevel1, 'greenfall gate triggers level 1');
 assert.ok(sawLocked, 'rotmire gate reports locked on a fresh profile');
+
+// The custom portal fires too — carrying its action, not a level id.
+let sawPortal = false;
+ow.hero.x = portalGate.x + 0.5; ow.hero.z = portalGate.z + 0.5;
+for (const ev of ow.update(0.016)) {
+  if (ev.t === 'gate' && ev.gate.portal && ev.gate.action === 'custom') sawPortal = true;
+}
+assert.ok(sawPortal, 'the custom-games arch triggers on walk-in');
 
 // No trigger outside the ring, and no double-trigger inside the cooldown.
 assert.equal(ow.update(0.016).length, 0, 'gate respects its cooldown');
