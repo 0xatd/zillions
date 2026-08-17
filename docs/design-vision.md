@@ -183,7 +183,7 @@ If the answer to several questions is no, do not build the proposal yet.
 
 - folklore factions
 - strategic faction simulation between worlds
-- full fog of war
+- persistent explored-map memory beyond the shipped tactical vision shroud
 - world-placed dynamic missions
 - authored landmark system
 - server-authoritative combat

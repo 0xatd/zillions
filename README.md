@@ -49,6 +49,9 @@ captured ground. Each whole Threat level triggers a hive surge.
 The five Earth missions use distinct landforms and colony plans. After Earth,
 the game creates deterministic frontier worlds from the world number.
 
+Living allied heroes and troops reveal the battlefield. The world outside
+their soft vision circles is almost black, including the minimap.
+
 ## Modes
 
 - **Play Online** is the primary mode. Create, join, rejoin, or watch a room.

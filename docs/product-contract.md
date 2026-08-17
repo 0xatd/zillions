@@ -40,6 +40,9 @@ Use continuous siege on a lane graph as the gameplay base:
   hold-to-build verb.
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
+- Living allied heroes and troops reveal the battlefield around them. Ground
+  outside allied vision is almost black. The soft edge keeps movement readable
+  and makes unseen approaches threatening.
 - Hive nests are real bases: health, defenders, and blighted ground.
 - Lane nodes are taken by presence, pay income, and unlock a real expansion
   fort: Forward Camp, watchtower, and a palisade where the ground pinches.
@@ -108,7 +111,7 @@ blessing choice per razed chamber.
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as
-rule-changers, fog of war, world-placed missions, landmarks, and a strategic
+rule-changers, persistent explored-map memory, world-placed missions, landmarks, and a strategic
 galaxy simulation. Those systems are not implemented. The endless procedural
 frontier worlds are implemented. Prove the siege loop with human playtesting
 before you add more strategic systems.
