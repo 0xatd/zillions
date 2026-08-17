@@ -26,6 +26,10 @@ import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import {
+  MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
+  addMmoCharacter, characterCamp, recordMmoInstance,
+} from './mmo-characters.js';
+import {
   stitchOverworld, Overworld, gateState,
   earthWorldDescriptor, galaxyWorldDescriptor, galaxyDestinations, overworldChannel,
   OVERWORLD_SIZE, OVERWORLD_GHOSTS,
@@ -176,11 +180,13 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
+      onCharacterSelect: (id) => this._selectMmoCharacter(id),
+      onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
-      onRestart: () => location.reload(),
+      onRestart: () => this._restartOrReturn(),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
@@ -269,6 +275,13 @@ class App {
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
     this.profile = this._loadProfile();
+    normalizeMmoCharacters(this.profile);
+    const initialCharacter = selectedMmoCharacter(this.profile);
+    if (initialCharacter) {
+      this.ui.selectedHero = initialCharacter.proxyHero;
+      this.profile.lastHero = initialCharacter.proxyHero;
+      this.profile.lastWorld = initialCharacter.lastWorld || this.profile.lastWorld || 'earth';
+    }
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
 
@@ -521,7 +534,14 @@ class App {
 
   _enterOverworld(worldId = null) {
     if (this.game || this.ow) return;
-    worldId = worldId || this.profile.lastWorld || 'earth';
+    const character = selectedMmoCharacter(this.profile);
+    if (!character) {
+      this.ui.setProfile(this.profile);
+      this.ui.showBanner('Create a character before entering the galaxy.', 'bad', 2600);
+      return;
+    }
+    this.ui.selectedHero = character.proxyHero;
+    worldId = worldId || character.lastWorld || this.profile.lastWorld || 'earth';
     this._clearMenuBackdrop();
     this.ui.setOverworldMode(true);
     const map = new OverworldMap(this.profile.campaign || 0, worldId);
@@ -539,6 +559,7 @@ class App {
     }
     this._makeOverworldHero();
     this.profile.lastWorld = map.overworldWorld.id;
+    character.lastWorld = map.overworldWorld.id;
     this._saveProfile();
     this.ui.hideOverlay();
     this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
@@ -637,6 +658,13 @@ class App {
     const key = this.ui.selectedHero || 'alexander';
     const def = HEROES[key] || HEROES.alexander;
     const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
+    const character = selectedMmoCharacter(this.profile);
+    const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
+      : character.appearance === 'cobalt' ? '4679b8'
+      : character.appearance === 'bone' ? 'b7aa8c'
+      : character.appearance === 'void' ? '6d568f'
+      : character.appearance === 'forest' ? '4f785d' : '8493a6'), 16) : null;
+    if (tint != null) mesh.userData.characterTint = tint;
     mesh.scale.setScalar(1.0);
     this.owHero = mesh;
     this.scene.add(mesh);
@@ -884,7 +912,8 @@ class App {
     }
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
-    this.ui.initHUD(this.game, this.myPlayer);
+    this.ui.initHUD(this.game, this.myPlayer,
+      this.game.mode === 'campaign' ? selectedMmoCharacter(this.profile) : null);
     this.ui.setGameChatEnabled(this.netMode);
     if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
@@ -1224,6 +1253,12 @@ class App {
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
+        normalizeMmoCharacters(this.profile);
+        const character = selectedMmoCharacter(this.profile);
+        if (character) {
+          this.ui.selectedHero = character.proxyHero;
+          this.profile.lastHero = character.proxyHero;
+        }
         this._saveProfile();
         this.ui.setProfile(this.profile);
         this.ui.setCampaign(this.profile.campaign || 0);
@@ -1239,6 +1274,17 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
+      sessionStorage.removeItem('zillions-return-to-world');
+      setTimeout(() => this._enterOverworld(selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
+    }
+  }
+
+  _restartOrReturn() {
+    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+      try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+    }
+    location.reload();
   }
 
   async _signIn() {
@@ -1256,6 +1302,7 @@ class App {
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
+        normalizeMmoCharacters(this.profile);
         this._saveProfile();
         this.ui.setProfile(this.profile);
         this.ui.setCampaign(this.profile.campaign || 0);
@@ -1285,14 +1332,52 @@ class App {
     try {
       return {
         name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, tutorialDone: false,
-        campaignHeroes: {}, relics: [], questsDone: {},
+        campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null,
         ...JSON.parse(localStorage.getItem('zillions_profile') || '{}'),
       };
-    } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {} }; }
+    } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
+  }
+
+  _selectMmoCharacter(id) {
+    normalizeMmoCharacters(this.profile);
+    const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
+    if (!character) return;
+    this.profile.mmoCharacterId = character.id;
+    this.profile.lastHero = character.proxyHero;
+    this.profile.lastWorld = character.lastWorld || this.profile.lastWorld || 'earth';
+    this.ui.selectedHero = character.proxyHero;
+    this._saveProfile();
+    this.ui.setProfile(this.profile);
+    if (!this.game && this.ow) this._makeOverworldHero();
+  }
+
+  _createMmoCharacter({ name, classKey, appearance } = {}) {
+    const clean = String(name || '').trim();
+    if (!clean) {
+      this.ui.showBanner('Choose a character name.', 'bad', 2200);
+      return;
+    }
+    const character = makeMmoCharacter(clean, classKey, appearance);
+    if (!addMmoCharacter(this.profile, character)) {
+      this.ui.showBanner('The character roster is full.', 'bad', 2200);
+      return;
+    }
+    this.profile.lastHero = character.proxyHero;
+    this.profile.lastWorld = character.lastWorld;
+    this.ui.selectedHero = character.proxyHero;
+    this._saveProfile();
+    this.ui.setProfile(this.profile);
+    this.ui._showScreen('main');
+    const klass = MMO_CLASSES[character.classKey];
+    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
   }
 
   // The WC3-style persistent campaign hero this profile brings into a run.
   campFor(key) {
+    const character = selectedMmoCharacter(this.profile);
+    if ((this.ui.selectedMode || 'campaign') === 'campaign' && character && key === character.proxyHero) {
+      return characterCamp(character, this.profile.relics || []);
+    }
     const ch = (this.profile.campaignHeroes || {})[key] || {};
     return {
       level: ch.level || 1, xp: ch.xp || 0,
@@ -1443,7 +1528,10 @@ class App {
     // and quest/boss rewards granted here await them on the next map.
     this._endExtras = null;
     const h = this.game.heroes[this.myPlayer];
-    if (h) {
+    // Named heroes belong to Custom Games. Their legacy career records remain
+    // available there, but persistent campaign instances write to the selected
+    // player-created character instead.
+    if (h && this.game.mode !== 'campaign') {
       p.campaignHeroes = p.campaignHeroes || {};
       p.relics = p.relics || [];
       p.questsDone = p.questsDone || {};
@@ -1487,6 +1575,44 @@ class App {
         quests: this.game.mode === 'campaign' ? (this.game.questResults || []) : [],
       };
       this.ui.refreshHeroBadges(p);
+    }
+    if (h && this.game.mode === 'campaign') {
+      const character = selectedMmoCharacter(p);
+      if (character) {
+        p.relics = p.relics || [];
+        p.questsDone = p.questsDone || {};
+        const rewards = [...new Set(h.pack || [])].filter((key) => ITEMS[key]);
+        for (const q of this.game.questResults || []) {
+          if (!q.done || p.questsDone[q.id]) continue;
+          p.questsDone[q.id] = true;
+          if (ITEMS[q.reward]?.kind === 'relic') {
+            if (!p.relics.includes(q.reward)) p.relics.push(q.reward);
+          } else if (ITEMS[q.reward]) rewards.push(q.reward);
+        }
+        const drop = won ? BOSS_DROPS[this.game.levelId] : null;
+        if (drop) rewards.push(drop);
+        const xp = Math.max(25, Math.floor(this.game.stats.kills * 0.35))
+          + (this.game.stats.nests || 0) * 30
+          + (won ? 180 + this.game.levelId * 25 : 0);
+        const result = recordMmoInstance(character, {
+          won,
+          kills: this.game.stats.kills,
+          xp,
+          world: this.profile.lastWorld || 'earth',
+          items: [...new Set([...(h.items || []), ...rewards])],
+        });
+        character.upgrades = { ...(character.upgrades || {}), ...(h.upgrades || {}) };
+        this._endExtras = {
+          heroKey: character.proxyHero,
+          heroName: character.name,
+          level: character.level,
+          grants: result.items,
+          quests: this.game.questResults || [],
+          xp,
+          levels: result.levels,
+        };
+        this.ui.setProfile(p);
+      }
     }
     this._saveProfile();
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }

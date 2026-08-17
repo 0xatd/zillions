@@ -15,6 +15,7 @@ import { formatTime } from './utils.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
+import { MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel } from './mmo-characters.js';
 
 export class UI {
   constructor(root, cb) {
@@ -126,13 +127,24 @@ export class UI {
         </div>
 
         <div id="screen-main" class="mainmenu character-select">
-          <div class="character-heading"><span>EARTH FRONT</span><h1>SELECT YOUR HERO</h1><small>Choose who enters the persistent world. Press C in the world to open this character screen.</small></div>
+          <div class="character-heading"><span>GALAXY ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment, level and last world persist between adventures. Press C in the world to return here.</small></div>
           <div id="character-stage" class="character-stage">
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
+          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+        </div>
+
+        <div id="screen-character-create" class="character-create-screen hidden">
+          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>CHOOSE YOUR PATH</h1><p>All thirteen class identities are available. Vanguard is the first class with its complete combat progression; the others currently use prototype combat rigs while their full kits come online.</p></div>
+          <form id="character-create-form" class="creator-form">
+            <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
+            <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
+            <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
+            <div id="creator-summary" class="creator-summary"></div>
+            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
+          </form>
         </div>
 
         <div id="screen-solo" class="mainmenu solomenu hidden">
@@ -358,6 +370,16 @@ export class UI {
     q('#m-help').onclick = () => this._showScreen('help');
     q('#m-galaxy').onclick = () => this.cb.onGalaxyOpen && this.cb.onGalaxyOpen();
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
+    q('#m-create-character').onclick = () => this._showCharacterCreator();
+    q('#creator-cancel').onclick = () => this._showScreen('main');
+    q('#character-create-form').onsubmit = (event) => {
+      event.preventDefault();
+      if (this.cb.onCharacterCreate) this.cb.onCharacterCreate({
+        name: q('#creator-name').value,
+        classKey: this._creatorClass || 'vanguard',
+        appearance: this._creatorAppearance || 'iron',
+      });
+    };
     q('#m-custom').onclick = () => this._showScreen('solo');
     q('#m-logout').onclick = () => this._showScreen('account');
     q('#solo-back').onclick = () => this._showScreen('main');
@@ -476,6 +498,7 @@ export class UI {
       card.onmouseleave = () => this._hideTip();
       herorow.appendChild(card);
     }
+    this._buildCharacterCreator();
     this._buildCharacterSelect();
 
     // ----- setup: levels & difficulty -----
@@ -706,53 +729,113 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    for (const id of ['account', 'main', 'character-create', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  _buildCharacterCreator() {
+    const classes = this.root.querySelector('#creator-classes');
+    const appearances = this.root.querySelector('#creator-appearance');
+    if (!classes || !appearances) return;
+    this._creatorClass = 'vanguard';
+    this._creatorAppearance = 'iron';
+    for (const [key, klass] of Object.entries(MMO_CLASSES)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `creator-class${key === this._creatorClass ? ' sel' : ''}`;
+      button.dataset.key = key;
+      button.innerHTML = `<i>${klass.icon}</i><span><b>${klass.name}</b><small>${klass.role}</small></span>${klass.ready ? '<em>COMPLETE</em>' : '<em>PROTOTYPE</em>'}`;
+      button.onclick = () => {
+        this._creatorClass = key;
+        for (const entry of classes.children) entry.classList.toggle('sel', entry === button);
+        this._renderCreatorSummary();
+      };
+      classes.appendChild(button);
+    }
+    for (const [key, appearance] of Object.entries(APPEARANCES)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `creator-swatch${key === this._creatorAppearance ? ' sel' : ''}`;
+      button.dataset.key = key;
+      button.style.setProperty('--swatch', appearance.color);
+      button.innerHTML = `<i></i><span>${appearance.name}</span>`;
+      button.onclick = () => {
+        this._creatorAppearance = key;
+        for (const entry of appearances.children) entry.classList.toggle('sel', entry === button);
+        this._renderCreatorSummary();
+      };
+      appearances.appendChild(button);
+    }
+    this._renderCreatorSummary();
+  }
+
+  _renderCreatorSummary() {
+    const klass = MMO_CLASSES[this._creatorClass || 'vanguard'];
+    const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
+    const summary = this.root.querySelector('#creator-summary');
+    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal Alt construction</small>`;
+  }
+
+  _showCharacterCreator() {
+    if ((this._profile?.mmoCharacters || []).length >= MAX_MMO_CHARACTERS) return;
+    const name = this.root.querySelector('#creator-name');
+    if (name) name.value = '';
+    this._showScreen('character-create');
+    setTimeout(() => name?.focus(), 0);
   }
 
   _buildCharacterSelect() {
     const list = this.root.querySelector('#character-list');
     if (!list) return;
     list.innerHTML = '';
-    for (const [key, hero] of Object.entries(HEROES)) {
+    const characters = this._profile?.mmoCharacters || [];
+    for (const character of characters) {
+      const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+      const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
       const button = document.createElement('button');
       button.className = 'character-row';
-      button.dataset.key = key;
-      button.innerHTML = `${PORTRAITS[key] ? `<img src="${PORTRAITS[key]}" alt="">` : `<span>${hero.icon}</span>`}<span><b>${hero.name}</b><small></small></span>`;
+      button.dataset.id = character.id;
+      button.innerHTML = `<span style="--character-color:${appearance.color}">${klass.icon}</span><span><b>${character.name}</b><small>${klass.name} · Level ${character.level || 1}</small></span>`;
       button.onclick = () => {
-        this.selectedHero = key;
+        if (this.cb.onCharacterSelect) this.cb.onCharacterSelect(character.id);
+        this.selectedHero = character.proxyHero || klass.proxy;
         this._renderSelectedCharacter();
-        for (const card of this.root.querySelectorAll('.herocard')) card.classList.toggle('sel', card.dataset.key === key);
-        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       list.appendChild(button);
     }
+    list.classList.toggle('empty', !characters.length);
+    if (!characters.length) list.innerHTML = '<div class="character-empty"><b>NO CHARACTERS</b><span>Create your first survivor to enter the galaxy.</span></div>';
+    const enter = this.root.querySelector('#m-enter-world');
+    if (enter) enter.disabled = !characters.length;
+    const create = this.root.querySelector('#m-create-character');
+    if (create) create.disabled = characters.length >= MAX_MMO_CHARACTERS;
     this._renderSelectedCharacter();
   }
 
   _renderSelectedCharacter() {
-    const key = this.selectedHero || 'alexander';
-    const hero = HEROES[key];
-    if (!hero) return;
-    const progress = (this._profile?.campaignHeroes || {})[key] || {};
-    const level = progress.level || 1;
-    const gear = (progress.items || []).map((itemKey) => ITEMS[itemKey]).filter(Boolean);
+    const characters = this._profile?.mmoCharacters || [];
+    const character = characters.find((entry) => entry.id === this._profile?.mmoCharacterId) || characters[0];
+    if (!character) {
+      this.root.querySelector('#character-name').textContent = 'CREATE YOUR FIRST CHARACTER';
+      this.root.querySelector('#character-tagline').textContent = 'Choose a class and begin on Earth.';
+      this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
+      this.root.querySelector('#character-sigil').textContent = '✦';
+      return;
+    }
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
+    const gear = (character.items || []).map((itemKey) => ITEMS[itemKey]).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
-      const selected = row.dataset.key === key;
-      row.classList.toggle('sel', selected);
-      const small = row.querySelector('small');
-      if (small) small.textContent = `Level ${((this._profile?.campaignHeroes || {})[row.dataset.key]?.level) || 1}`;
+      row.classList.toggle('sel', row.dataset.id === character.id);
     }
     const sigil = this.root.querySelector('#character-sigil');
-    sigil.textContent = PORTRAITS[key] ? '' : hero.icon;
-    sigil.style.backgroundImage = PORTRAITS[key]
-      ? `linear-gradient(180deg, transparent 55%, rgba(3,7,13,.85)), url(${PORTRAITS[key]})`
-      : '';
-    sigil.classList.toggle('has-portrait', !!PORTRAITS[key]);
-    sigil.style.setProperty('--hero-color', `#${hero.color.toString(16).padStart(6, '0')}`);
-    this.root.querySelector('#character-name').textContent = `${hero.name} · LEVEL ${level}`;
-    this.root.querySelector('#character-tagline').textContent = hero.tagline;
+    sigil.textContent = klass.icon;
+    sigil.style.backgroundImage = '';
+    sigil.classList.remove('has-portrait');
+    sigil.style.setProperty('--hero-color', appearance.color);
+    this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
+    this.root.querySelector('#character-tagline').textContent = `${klass.name} — ${klass.role} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP · ${character.talentPoints || 0} talent points`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
       ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
       : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
@@ -1176,7 +1259,7 @@ export class UI {
 
   // ---------- in-game HUD ----------
 
-  initHUD(game, p) {
+  initHUD(game, p, character = null) {
     this.msgSeen = 0;
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
@@ -1189,8 +1272,9 @@ export class UI {
     const h = game.heroes[p];
     const d = h.def;
     const face = this.root.querySelector('#a-face');
-    face.innerHTML = PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
-    this.root.querySelector('#a-name').textContent = d.name;
+    const klass = character ? MMO_CLASSES[character.classKey] : null;
+    face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
+    this.root.querySelector('#a-name').textContent = character ? `${character.name} · ${klass.name}` : d.name;
     const big = this.root.querySelector('#bigaction');
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
@@ -1621,7 +1705,7 @@ export class UI {
         : 'first deployment';
     }
     this.refreshHeroBadges(p);
-    this._renderSelectedCharacter();
+    this._buildCharacterSelect();
   }
 
   // WC3-style campaign persistence, shown right on the hero cards.
@@ -1933,10 +2017,10 @@ export class UI {
           <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
-        ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${grants.length
+        ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${grants.length
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
         ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
-        <button class="startbtn" id="b-restart">${won ? 'Continue' : 'Try again'}</button>
+        <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
   }

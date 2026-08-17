@@ -68,6 +68,8 @@ export class AuthClient {
   status(extra = {}) {
     const user = this.user;
     const username = publicName(this.profile);
+    const mmoCharacters = Array.isArray(this.user?.user_metadata?.mmo_characters)
+      ? this.user.user_metadata.mmo_characters : null;
     return {
       ready: this.ready,
       enabled: this.enabled,
@@ -158,6 +160,10 @@ export class AuthClient {
       bestDay: stats.best_day || 0,
       lastHero: profile.selected_hero || stats.favorite_hero || null,
       lastWorld: this.user?.user_metadata?.last_world || 'earth',
+      ...(mmoCharacters ? {
+        mmoCharacters,
+        mmoCharacterId: this.user?.user_metadata?.mmo_character_id || mmoCharacters[0]?.id || null,
+      } : {}),
       updatedAt: Date.parse(profile.updated_at || stats.updated_at || '') || 0,
     };
   }
@@ -267,7 +273,11 @@ export class AuthClient {
         favorite_hero: hero,
         updated_at: isoNow(),
       }, { onConflict: 'user_id' }),
-      this.client.auth.updateUser({ data: { last_world: localProfile.lastWorld || 'earth' } }),
+      this.client.auth.updateUser({ data: {
+        last_world: localProfile.lastWorld || 'earth',
+        mmo_character_id: localProfile.mmoCharacterId || null,
+        mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 8) : [],
+      } }),
     ]);
     if (profileError) throw profileError;
     if (statsError) throw statsError;
