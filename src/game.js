@@ -12,7 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  ZOMBIE_CAP, UNIT_CAP, SUPPLY, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
+  ZOMBIE_CAP, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
@@ -27,7 +27,6 @@ const IDLE = 0, WANDER = 1, AGGRO = 2;
 const OUTPOST_PLOT_BASE = 5000;   // outpost plot ids never collide with city plots
 const NODE_TOWER_PLOT_BASE = 6000; // the watchtower on a node
 const NODE_WALL_PLOT_BASE = 7000;  // the palisade across the node's pinch
-const CAMP_STANDING = 5;          // a camp sustains count x this many living troops
 const NEST_BLIGHT_R = 7.5;        // the poisoned ground around a living hive
 const NEST_BLIGHT_DPS = 6;        // damage per second to anything standing in it
 const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guard first
@@ -943,13 +942,6 @@ export class Game {
   // Marooned nodes are excluded everywhere: they are not capturable, not
   // counted, and not drawn.
   activeNodes() { return this.nodes.filter((n) => !n.offMap); }
-  // How many troops you can field. Ground you hold is what raises it, so the
-  // answer to "I am stuck and rich" is always "go take something".
-  unitCap() {
-    const total = this.activeNodes().length;
-    const share = total ? this.heldNodes() / total : 0;
-    return Math.min(SUPPLY.max, Math.round(SUPPLY.base + SUPPLY.perPlanet * share));
-  }
   heldNodes() { return this.nodes.filter((n) => !n.offMap && n.owner === 'player').length; }
   liveNests() { return this.nests.filter((n) => n.alive).length; }
 
@@ -1409,19 +1401,14 @@ export class Game {
 
   _muster(plot, def) {
     const kindDef = PLOT_KINDS[plot.kind];
-    // Each camp sustains its own standing force, so army size scales with how
-    // many camps you have bought — not with how long you have been alive.
-    const standing = this.units.filter((u) => u.camp === plot.id && !u.dead).length;
-    const room = def.count * CAMP_STANDING - standing;
-    const cap = this.unitCap();
-    let spawned = 0;
-    for (let i = 0; i < Math.min(def.count, room) && this.units.length < cap; i++) {
+    // A living producer is an uncapped faucet. It musters its full squad on
+    // every cycle until the building is destroyed or the plot is ruined.
+    for (let i = 0; i < def.count; i++) {
       const a = (i / Math.max(1, def.count)) * Math.PI * 2;
       const u = this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
       u.homeNodeId = plot.nodeId != null ? plot.nodeId : null;
-      spawned++;
     }
-    if (spawned) this.emit({ type: 'muster', x: plot.cx, z: plot.cz, n: spawned, kind: plot.kind });
+    this.emit({ type: 'muster', x: plot.cx, z: plot.cz, n: def.count, kind: plot.kind });
   }
 
   chooseBranch(plotId, branch, p = 0) {

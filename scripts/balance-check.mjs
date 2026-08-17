@@ -4,7 +4,7 @@ import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
   HEROES, LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, UPGRADE_PAY_RATE,
-  START_GOLD, SUPPLY, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
+  START_GOLD, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
 } from '../src/config.js';
 
 function fakeMap(level) {
@@ -226,17 +226,24 @@ function assertSiegeLoop(level) {
     }
   }
 
-  // A camp is a faucet: it musters on build, and again on its timer.
+  // A living camp is an uncapped faucet. It musters every cycle, even after
+  // producing far more than the old per-building standing-force ceiling.
   const camp = game.plots.find((p) => p.kind === 'camp_ranger');
   game._construct(camp, false);
   const afterBuild = game.units.filter((u) => !u.hero).length;
   assert.ok(afterBuild > 0, `${level.name} camp mustered nobody when raised`);
   const def = game.tierDef(camp, camp.tier);
-  for (let i = 0; i < def.every * 2 + 2; i++) game._updateCamps(0.5);
-  assert.ok(
-    game.units.filter((u) => !u.hero).length > afterBuild,
-    `${level.name} camp never mustered a second squad`,
-  );
+  const cycles = 7;
+  for (let i = 0; i < def.every * cycles * 2 + 2; i++) game._updateCamps(0.5);
+  const afterCycles = game.units.filter((u) => !u.hero).length;
+  assert.ok(afterCycles >= afterBuild + def.count * cycles,
+    `${level.name} living camp stopped mustering continuously`);
+  const producer = game.buildings.find((b) => b.plotId === camp.id && b.alive);
+  game._damageBuilding(producer, producer.hp + 1);
+  const afterDestroy = game.units.filter((u) => !u.hero).length;
+  for (let i = 0; i < def.every * 4 + 2; i++) game._updateCamps(0.5);
+  assert.equal(game.units.filter((u) => !u.hero).length, afterDestroy,
+    `${level.name} destroyed camp continued mustering`);
 
   // A branch tier without a selected doctrine is not a valid construction.
   // Reject it before changing the plot or its existing building definition.
@@ -264,18 +271,6 @@ function assertSiegeLoop(level) {
   assert.ok(game.stats.bestHeld >= 1, `${level.name} did not record held nodes`);
   assert.ok(!game.plotLocked(game.plots.find((p) => p.kind === 'outpost' && p.nodeId === node.id)),
     `${level.name} kept the Forward Camp locked on a node the player holds`);
-
-  // Supply must grow with territory, or the player's power goes flat while
-  // Threat keeps climbing and the run becomes unwinnable with a full purse.
-  const baseCap = game.unitCap();
-  for (const n of game.activeNodes().slice(0, 3)) n.owner = 'player';
-  assert.ok(game.unitCap() > baseCap, `${level.name}: holding ground does not raise supply`);
-  // Supply is a SHARE of the planet, so owning all of it is worth the same
-  // army on a small map as on a large one. Counting nodes made big maps easier.
-  for (const n of game.activeNodes()) n.owner = 'player';
-  assert.equal(game.unitCap(), Math.min(SUPPLY.max, SUPPLY.base + SUPPLY.perPlanet),
-    `${level.name}: a fully held planet does not give the standard supply ceiling`);
-  for (const n of game.activeNodes()) n.owner = 'neutral';
 
   // Major progression lives on physical plots instead of a hidden menu.
   const forge = game.plots.find((p) => p.kind === 'hero_forge');
