@@ -1114,5 +1114,89 @@ body::after {
   background: rgba(7, 9, 13, 0.72);
   backdrop-filter: blur(2px);
 }
+
+/* ---------- planet-edge title + persistent-world character select ---------- */
+.title-screen {
+  position: relative; width: 100%; height: 100%; padding: 0;
+  background: linear-gradient(180deg, rgba(2,5,12,.08), rgba(1,3,8,.18) 45%, rgba(1,3,8,.66));
+}
+.title-lockup {
+  position: absolute; left: 50%; bottom: 158px; transform: translateX(-50%);
+  width: min(680px, 66vw); text-align: center; text-shadow: 0 4px 24px #000;
+}
+.title-lockup .gametitle { font-size: clamp(54px, 8vw, 104px); letter-spacing: .13em; line-height: .9; }
+.title-lockup .gamesub { margin-top: 10px; color: #dceaff; letter-spacing: .22em; text-transform: uppercase; }
+.title-login {
+  position: absolute; left: 50%; bottom: 42px; transform: translateX(-50%);
+  width: min(390px, calc(100vw - 36px)); padding: 12px;
+  background: rgba(5,9,17,.78); border: 1px solid rgba(147,190,255,.3); border-radius: 8px;
+  box-shadow: 0 14px 50px rgba(0,0,0,.6); backdrop-filter: blur(9px);
+}
+.title-login .accountstatus { font-size: 11px; margin-bottom: 8px; color: #bed5ee; }
+.title-login .menubtn { min-height: 43px; padding: 9px 18px; }
+.title-utilities {
+  position: absolute; right: clamp(20px, 4vw, 70px); top: 50%; transform: translateY(-48%);
+  display: flex; flex-direction: column; width: min(230px, 25vw); gap: 6px;
+}
+.title-utilities button {
+  min-height: 42px; padding: 9px 16px; color: #d9e7f8; font: 800 13px/1 inherit;
+  text-align: left; letter-spacing: .12em; cursor: pointer;
+  border: 1px solid rgba(147,190,255,.2); border-radius: 3px;
+  background: linear-gradient(90deg, rgba(6,12,23,.88), rgba(12,25,42,.5));
+  box-shadow: inset 3px 0 0 rgba(255,190,70,.48), 0 4px 18px rgba(0,0,0,.3);
+}
+.title-utilities button:hover { color: #fff4c7; border-color: rgba(255,211,107,.64); transform: translateX(-4px); }
+.planet-status { position: absolute; left: 22px; bottom: 18px; font-size: 10px; letter-spacing: .12em; color: #afc9df; }
+.planet-status small { display: block; margin: 5px 0 0 15px; opacity: .5; }
+.online-pip { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #69ff9f; box-shadow: 0 0 10px #69ff9f; }
+
+.character-select {
+  position: relative; width: 100%; height: 100%; max-width: none; padding: 24px 34px;
+  background: linear-gradient(90deg, rgba(3,7,13,.84), rgba(3,7,13,.18) 34%, rgba(3,7,13,.18) 65%, rgba(3,7,13,.88));
+}
+.character-heading { position: absolute; left: 34px; top: 28px; text-align: left; text-shadow: 0 3px 18px #000; }
+.character-heading span { color: var(--gold); font-size: 10px; letter-spacing: .22em; }
+.character-heading h1 { margin: 4px 0; font-size: 31px; letter-spacing: .09em; }
+.character-heading small { color: #b9c8d8; }
+.character-stage { position: absolute; left: 24%; right: 27%; top: 15%; bottom: 13%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; pointer-events: none; }
+.character-sigil {
+  display: grid; place-items: center; width: min(33vw, 390px); aspect-ratio: 1; font-size: clamp(110px, 18vw, 250px);
+  border-radius: 50%; color: white; text-shadow: 0 10px 30px #000;
+  background: radial-gradient(circle, color-mix(in srgb, var(--hero-color) 40%, transparent), transparent 68%);
+  filter: drop-shadow(0 0 30px color-mix(in srgb, var(--hero-color) 45%, transparent));
+}
+.character-sigil.has-portrait { background-size: cover; background-position: center top; border: 1px solid color-mix(in srgb, var(--hero-color) 60%, #fff); box-shadow: 0 0 70px color-mix(in srgb, var(--hero-color) 32%, transparent); }
+.character-copy { width: min(560px, 52vw); padding: 12px 20px; text-align: center; border-top: 1px solid rgba(255,215,94,.35); background: linear-gradient(90deg, transparent, rgba(3,7,13,.82), transparent); }
+.character-copy h2 { color: #fff1b8; letter-spacing: .08em; }
+.character-copy p { margin-top: 4px; color: #bdd1e5; }
+.character-gear { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.character-gear span { padding: 4px 7px; border: 1px solid rgba(255,215,94,.25); background: rgba(0,0,0,.35); border-radius: 4px; font-size: 10px; }
+.character-gear .empty-gear { opacity: .65; }
+.character-roster { position: absolute; right: 28px; top: 34px; bottom: 78px; width: min(290px, 28vw); display: flex; flex-direction: column; gap: 9px; }
+#character-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+.character-row { display: flex; align-items: center; gap: 9px; padding: 7px; color: #dce7f3; text-align: left; background: rgba(5,10,18,.78); border: 1px solid rgba(255,255,255,.12); border-radius: 5px; cursor: pointer; }
+.character-row:hover, .character-row.sel { border-color: rgba(255,215,94,.65); background: rgba(49,43,24,.78); transform: translateX(-3px); }
+.character-row img, .character-row > span:first-child { width: 42px; height: 42px; display: grid; place-items: center; object-fit: cover; object-position: top; border-radius: 4px; font-size: 26px; background: rgba(255,255,255,.06); }
+.character-row > span:last-child { display: flex; flex-direction: column; }
+.character-row b { font-size: 12px; }
+.character-row small { margin-top: 2px; color: #9fb4c8; font-size: 9px; }
+.enter-world, .character-custom { min-height: 48px; border-radius: 4px; font-weight: 900; letter-spacing: .12em; cursor: pointer; }
+.enter-world { color: #161006; background: linear-gradient(#ffe48a, #c99528); border: 1px solid #ffe9a7; box-shadow: 0 0 24px rgba(255,196,61,.25); }
+.character-custom { color: #d8e8f8; background: rgba(6,14,26,.88); border: 1px solid rgba(147,190,255,.35); }
+.character-footer { position: absolute; left: 28px; right: 28px; bottom: 22px; display: flex; align-items: center; gap: 7px; }
+.character-footer .profilerow { margin-right: auto; }
+
+@media (max-width: 760px) {
+  .title-lockup { bottom: 190px; width: 90vw; }
+  .title-utilities { top: 16px; right: 12px; transform: none; width: 155px; }
+  .title-utilities button { min-height: 34px; padding: 7px 9px; font-size: 9px; }
+  .character-heading { left: 16px; top: 14px; }
+  .character-stage { left: 5%; right: 43%; }
+  .character-roster { right: 10px; width: 40vw; top: 76px; }
+  .character-row { padding: 4px; }
+  .character-row img, .character-row > span:first-child { width: 32px; height: 32px; }
+  .character-footer { left: 12px; bottom: 10px; }
+  .character-footer .profilerow { display: none; }
+}
 .gateboss { opacity: 0.9; }
 .gate-confirm .diffseg { margin: 10px 0 4px; }
