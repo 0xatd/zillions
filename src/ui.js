@@ -166,6 +166,7 @@ export class UI {
           <div class="setuphead">
             <button class="tbtn roomexit" id="s-back">← Back</button>
             <h2 id="s-title">Choose your battle</h2>
+            <div id="modeseg" class="modeseg hidden"></div>
           </div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
@@ -517,9 +518,55 @@ export class UI {
     btn.title = title || '';
   }
 
-  setRoomSettings({ level = 1, difficulty = 'normal', isHost = false } = {}) {
+  // The mode chips shown in multiplayer setups. Solo entry cards already ARE
+  // the mode choice, so the chips only appear for co-op and online rooms.
+  _renderModeSeg(mode, show) {
+    const seg = this.root.querySelector('#modeseg');
+    seg.classList.toggle('hidden', !show);
+    if (!show) return;
+    if (!seg.dataset.init) {
+      seg.dataset.init = '1';
+      seg.innerHTML = [
+        ['campaign', '⚔️ Campaign'], ['survival', '💀 Survival'], ['labyrinth', '🌀 Labyrinth'],
+      ].map(([key, label]) => `<button class="tbtn modechip" data-mode="${key}">${label}</button>`).join('');
+      for (const chip of seg.querySelectorAll('.modechip')) {
+        chip.onclick = () => this.cb.onModePick && this.cb.onModePick(chip.dataset.mode);
+      }
+    }
+    for (const chip of seg.querySelectorAll('.modechip')) {
+      chip.classList.toggle('sel', chip.dataset.mode === mode);
+    }
+  }
+
+  _startCopyFor(mode) {
+    return mode === 'survival'
+      ? '▶  START — SURVIVE AS LONG AS YOU CAN'
+      : mode === 'labyrinth'
+      ? '▶  DESCEND — CLEAR THE TRIAL'
+      : '▶  START — TAKE THE PLANET';
+  }
+
+  // Switch the open setup screen to another war mode: reselect the chip,
+  // rebuild the battlefield roster for that mode, refresh the start copy.
+  // Called only by whoever owns the setup (the host, or a solo/manual player).
+  applySetupMode(mode) {
+    if ((this.selectedMode || 'campaign') === mode) return;
+    this.selectedMode = mode;
+    this._renderModeSeg(mode, !this.root.querySelector('#modeseg').classList.contains('hidden'));
+    this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
+    this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
+  }
+
+  setRoomSettings({ level = 1, difficulty = 'normal', isHost = false, mode = null } = {}) {
+    // The host may retarget the room to another mode; every peer's setup
+    // screen follows, rebuilding the battlefield roster before reselecting.
+    if (mode && (this.selectedMode || 'campaign') !== mode) this.applySetupMode(mode);
     this.selectedLevel = Number(level) || 1;
     this.selectedDiff = difficulty;
+    for (const chip of this.root.querySelectorAll('#modeseg .modechip')) {
+      chip.disabled = !isHost;
+      if (!isHost) chip.title = 'The host controls the war mode.';
+    }
     for (const card of this.root.querySelectorAll('#levelrow .levelcard')) {
       card.classList.toggle('sel', Number(card.dataset.level) === this.selectedLevel);
       card.disabled = isHost ? card.classList.contains('locked') : true;
@@ -562,16 +609,11 @@ export class UI {
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
+    // Multiplayer setups choose the war mode here; solo modes chose it on the
+    // Play Solo card, so the chips would be a second, contradictory entrance.
+    this._renderModeSeg(mode, coop || !!online);
     this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
-    this.setStartButton({
-      text: mode === 'survival'
-        ? '▶  START — SURVIVE AS LONG AS YOU CAN'
-        : mode === 'labyrinth'
-        ? '▶  DESCEND — CLEAR THE TRIAL'
-        : '▶  START — TAKE THE PLANET',
-      disabled: false,
-      title: '',
-    });
+    this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {

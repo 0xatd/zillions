@@ -90,6 +90,14 @@ is seeded on the heroes, the team shares a pool of lives, and razing every
 chamber summons the trial's champion — kill it to clear the trial. Labyrinth
 runs never advance campaign progress or unlock galaxy planets.
 
+The Labyrinth is playable solo and co-op up to 3 players, through both online
+rooms and manual invite codes. Multiplayer setup screens carry war-mode chips
+(Campaign / Survival / Labyrinth) in the header; only the host may retarget a
+room's mode, and doing so clears every guest Ready vote like any other setup
+change. The shared life pool grows by one per extra hero, every living hero
+seeds the horde's flow field, and each player gets their own pick-1-of-3
+blessing choice per razed chamber.
+
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as

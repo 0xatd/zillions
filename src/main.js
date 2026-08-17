@@ -140,6 +140,7 @@ class App {
       onJoinCode: (code) => this.joinByCode(code),
       onLevelPick: (id) => { this.showMenuBackdrop(id); this._updateRoomSettings({ level: id }); },
       onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
+      onModePick: (m) => this._pickSetupMode(m),
       onRoomReady: (ready) => this._setRoomReady(ready),
       onRoomLeave: () => this._leaveOnlineRoom(),
       onMatchLeave: () => this._leaveOnlineMatch(),
@@ -1366,7 +1367,7 @@ class App {
     const waitingToReady = waiting?.length || 0;
     const connectionBlockers = this._roomRosterFromGame(game).filter((player) => !player.host && player.state !== 'connected');
     const connectionNames = connectionBlockers.map((player) => `@${player.name}`).join(', ');
-    this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost });
+    this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost, mode: game.mode || 'campaign' });
     this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
       maxPlayers: game.max_players || 3,
@@ -1570,6 +1571,21 @@ class App {
       console.warn('room settings update failed', e);
       this.ui.showBanner('Could not update the host game setup.', 'bad', 3000);
     });
+  }
+
+  // Multiplayer setups pick the war mode with header chips. Only whoever owns
+  // the setup applies one: the online room host, or the local player in a
+  // solo/manual-invite screen — a guest's click must not fork their view of
+  // the room.
+  _pickSetupMode(m) {
+    if (this.onlineMode && this.lobby?.game && this.mpRole !== 'host') return;
+    if ((this.ui.selectedMode || 'campaign') === m) return;
+    this.ui.applySetupMode(m);
+    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    // Online rooms persist the retarget (and clear every guest Ready vote);
+    // manual co-op just re-broadcasts the roster so guests see the new mode.
+    this._updateRoomSettings({ mode: m, level: this.ui.selectedLevel || 1 });
+    this._syncSetupRoster();
   }
 
   async _sendRoomChat(text, channel = 'room') {

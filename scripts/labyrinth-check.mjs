@@ -124,4 +124,34 @@ for (const lv of LABYRINTH_LEVELS) {
   assert.ok(g.over && !g.won, 'last hero down with no lives must end the run');
 }
 
-console.log(`labyrinth check passed: ${LABYRINTH_LEVELS.length} trials — setup, hunting flow, blessings, restore determinism, finale, and lives all hold`);
+// -- co-op: up to 3 players share the run — lives scale, everyone is a flow
+// seed, every player gets their own blessing choice --
+{
+  const lv = LABYRINTH_LEVELS[0];
+  const map = new TerrainField(lv.seed, lv.theme, { size: lv.size, nests: lv.nests });
+  const g = new Game(map, 'normal', ['scott', 'alexander', 'danny'], null, lv.id, 'labyrinth');
+  assert.equal(g.heroes.length, 3, 'co-op labyrinth must spawn every hero');
+  assert.equal(g.lives, LABYRINTH_LIVES + 2, 'shared lives must scale with party size');
+  for (const h of g.heroes) {
+    assert.ok(map.isWalkable(h.x | 0, h.z | 0), 'a co-op hero spawned on unwalkable ground');
+  }
+  for (let i = 0; i < 90; i++) g.update(SIM_DT);
+  for (const h of g.heroes) {
+    assert.ok(g.flow.distAt(h.x | 0, h.z | 0) < 3, 'the horde must hunt every living hero, not just player 0');
+  }
+  const first = g.nests.find((n) => n.alive);
+  g._damageNest(first, first.hp * 10);
+  const offers = g.blessingOffers.slice(0, 3);
+  assert.ok(offers.every((o) => o && o.length === 3), 'every player must get their own 3-blessing offer');
+  g.exec({ t: 'blessing', p: 1, i: 0 }); // player order does not matter
+  g.exec({ t: 'blessing', p: 0, i: 1 });
+  g.exec({ t: 'blessing', p: 2, i: 2 });
+  assert.ok(g.heroes.every((h) => (h.blessings || []).length === 1), 'each hero must carry their own pick');
+  const snap = g.snapshot();
+  const g2 = new Game(map, 'normal', ['scott', 'alexander', 'danny'], snap, lv.id, 'labyrinth');
+  assert.deepEqual(g2.heroes.map((h) => h.blessings), g.heroes.map((h) => h.blessings),
+    'per-player blessings must survive restore');
+  assert.equal(g2.lives, g.lives, 'shared lives must survive restore');
+}
+
+console.log(`labyrinth check passed: ${LABYRINTH_LEVELS.length} trials — setup, hunting flow, blessings, restore determinism, finale, lives, and 3-player co-op all hold`);

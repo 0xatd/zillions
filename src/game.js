@@ -479,7 +479,9 @@ export class Game {
   // the checkpoint forward; raze them all and the champion walks.
   _setupLabyrinth() {
     this.phase = 'live';
-    this.lives = LABYRINTH_LIVES;
+    // Lives are a shared team pool. A bigger party burns through them faster,
+    // so each extra hero banks one more.
+    this.lives = LABYRINTH_LIVES + (this.heroSetups.length - 1);
     const start = this._labyrinthStart();
     this.checkpoint = { x: start.x, z: start.z };
     this._pruneUnreachable(start);
