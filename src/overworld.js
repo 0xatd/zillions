@@ -1,23 +1,26 @@
 // The overworld — the space between wars.
 //
-// Instead of a static menu backdrop, the five campaign fronts are stitched
-// onto ONE small walkable planet: Greenfall's moor in the south-west, then
-// Rotmire's fen, Cinder's ash canyons, the Barrow hills and finally the Black
-// Vale at the north-east end of the road. Each region is painted by its own
-// level's landform archetype and palette, so the world reads as the campaign
-// itself — a Thronefall-style level select you walk with your hero.
+// A world descriptor ({ id, name, seed, size, spawn, regions }) fully defines
+// a walkable planet: each region carries its own landform archetype, palette,
+// gate position and lock state. The five-front Earth campaign is just ONE
+// such descriptor (`earthWorldDescriptor()`); the architecture is deliberate:
+// eventually different servers host different universes and travelling to a
+// planet swaps in that planet's descriptor and rebuilds the scene — zero
+// changes to the walking, gate or ghost code here. Adding a galaxy world is
+// authoring a descriptor, not forking this module.
 //
 // Like terrain.js and menu-vignette.js, this module never imports three.js:
-// `scripts/overworld-check.mjs` builds the whole planet headless in Node and
-// asserts it is deterministic, connected and honest about lock state. The
+// `scripts/overworld-check.mjs` builds whole planets headless in Node and
+// asserts they are deterministic, connected and honest about lock state. The
 // renderer half (gate meshes, the walking hero, ghosts) lives in main.js and
 // only consumes the data classes here.
 import { TILE, LEVELS, LABYRINTH_LEVELS } from './config.js';
 import { TerrainField, TERRAIN_SHAPES } from './terrain.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
-// Fixed planet: the overworld must be the same world for every player, every
-// boot — ghosts walk it together, and the check asserts byte-stable tiles.
+// The start world's fixed seed: the Earth overworld must be the same planet
+// for every player, every boot — ghosts walk it together, and the check
+// asserts byte-stable tiles.
 export const OVERWORLD_SEED = 5150;
 export const OVERWORLD_SIZE = 128;
 
@@ -25,38 +28,110 @@ export const OVERWORLD_SIZE = 128;
 // so the whole feature can be darkened without touching the lockstep pipe.
 export const OVERWORLD_GHOSTS = true;
 
-// The road south-west → north-east, by gate position on the diagonal.
-// Gate i sits inside its own region band ((x+z)/2N in [i/5, (i+1)/5]) so the
-// biome you stand in when you read the banner IS the biome you will fight in.
-const gatePos = (i, N) => Math.round(N * (0.16 + i * 0.19));
-const CAVE = { cx: 0.86, cz: 0.14 };  // labyrinth mouth, north-east corner
+// Ghost presence is scoped per planet: two worlds are two rooms. The check
+// asserts the naming rule so every server agrees on it.
+export const overworldChannel = (worldId) => `zl-overworld:${worldId}`;
 
-export function overworldLayout(N = OVERWORLD_SIZE) {
-  const gates = LEVELS.map((lv, i) => {
-    const g = gatePos(i, N);
+// ---------------------------------------------------------------------------
+// World descriptors
+// ---------------------------------------------------------------------------
+// region: {
+//   id, kind: 'level' | 'labyrinth' | 'portal',
+//   levelId?        — the level a 'level' gate starts
+//   label           — gate/banner name
+//   palette         — the biome's tile colours
+//   terrain         — TERRAIN_SHAPES archetype name painting this region
+//   gate: { x, z }  — where the gate stands (tile coords)
+//   radius?         — bounded region: owns its disc outright and is painted
+//                     authored crag (the labyrinth kind) instead of banded
+//   center?         — the disc's centre (defaults to the gate position)
+//   locked?, cleared?  — war state, baked into banners and blight
+//   ...flavour      — blurb/boss/trials flow straight through to the UI
+// }
+// Regions without a radius are BANDED: band k of the diagonal is band-index
+// k of the banded regions in descriptor order, so the biome you stand in
+// when you read a banner IS the biome you will fight in.
+//
+// The Earth campaign world: the five fronts march the diagonal south-west →
+// north-east, and the labyrinth keeps a crag mouth in the north-east corner.
+export function earthWorldDescriptor(campaignCleared = 0) {
+  const N = OVERWORLD_SIZE;
+  const gatePos = (i) => Math.round(N * (0.16 + i * 0.19));
+  const regions = LEVELS.map((lv, i) => {
+    const g = gatePos(i);
     return {
-      levelId: lv.id, name: lv.name, blurb: lv.blurb,
+      id: `earth-l${lv.id}`,
+      kind: 'level',
+      levelId: lv.id,
+      label: lv.name,
+      blurb: lv.blurb,
       boss: { icon: lv.boss.icon, name: lv.boss.name },
-      x: g, z: g, region: i,
+      palette: lv.theme.palette,
+      terrain: lv.theme.terrain,
+      gate: { x: g, z: g },
+      locked: lv.id > campaignCleared + 1,
+      cleared: lv.id <= campaignCleared,
     };
   });
-  const cave = {
-    cave: true, name: 'The Labyrinth',
-    x: Math.round(N * CAVE.cx) - 3, z: Math.round(N * CAVE.cz) + 3,
-    cx: Math.round(N * CAVE.cx), cz: Math.round(N * CAVE.cz),
+  const cx = Math.round(N * 0.86), cz = Math.round(N * 0.14);
+  regions.push({
+    id: 'earth-labyrinth',
+    kind: 'labyrinth',
+    label: 'The Labyrinth',
     trials: LABYRINTH_LEVELS.map((l) => ({ id: l.id, name: l.name })),
-    region: LEVELS.length,
+    palette: LABYRINTH_LEVELS[0].theme.palette,
+    terrain: 'labyrinth',
+    gate: { x: cx - 3, z: cz + 3 },
+    // The cave owns a wide crag knuckle around its mouth.
+    center: { x: cx, z: cz }, radius: 20,
+    locked: false,
+    cleared: false,
+  });
+  return {
+    id: 'earth',
+    name: 'Earth',
+    seed: OVERWORLD_SEED,
+    size: N,
+    spawn: { x: 14, z: 14 },
+    regions,
   };
-  return { gates, cave, spawn: { x: 14, z: 14 } };
 }
 
-// Paint the stitched planet onto any TerrainField-shaped map (the headless
-// OverworldField, or GameMap's renderer-backed subclass in main.js).
-// Region per tile comes from the diagonal projection; each region is then
-// classified with its OWN landform archetype and LOCAL coverage quantiles,
-// so a fen is still a third water even though it shares the planet with a
-// desert. Deterministic end to end: one rng, one fixed walk order.
-export function stitchOverworld(map, { blight = [] } = {}) {
+// The gate layout a renderer walks: level and portal regions become march-
+// order gates, the labyrinth region becomes the cave. Pure projection of the
+// descriptor — no Earth knowledge lives below this line.
+export function overworldLayout(world) {
+  const gates = [];
+  let cave = null;
+  world.regions.forEach((r, i) => {
+    if (r.kind === 'labyrinth') {
+      cave = {
+        cave: true, name: r.label,
+        x: r.gate.x, z: r.gate.z, region: i,
+        trials: r.trials || [], locked: !!r.locked, cleared: !!r.cleared,
+      };
+    } else {
+      gates.push({
+        levelId: r.levelId, name: r.label, blurb: r.blurb, boss: r.boss,
+        portal: r.kind === 'portal' || undefined,
+        x: r.gate.x, z: r.gate.z, region: i, locked: !!r.locked, cleared: !!r.cleared,
+      });
+    }
+  });
+  return { gates, cave, spawn: { ...world.spawn }, worldId: world.id };
+}
+
+// ---------------------------------------------------------------------------
+// Stitching
+// ---------------------------------------------------------------------------
+// Paint a descriptor's planet onto any TerrainField-shaped map (the headless
+// OverworldField, or GameMap's renderer-backed subclass in main.js). Banded
+// regions take diagonal stripes; bounded regions own their disc outright.
+// Each region is classified with its OWN archetype and LOCAL coverage
+// quantiles, so a fen is still a third water even though it shares the
+// planet with a desert. Deterministic end to end: one rng derived from the
+// world seed, one fixed walk order.
+export function stitchOverworld(map, world) {
   const N = map.size;
   // Derive the stitch's own rng from the seed so generate() is idempotent —
   // the renderer-backed subclass re-stitches once the campaign is known.
@@ -70,34 +145,42 @@ export function stitchOverworld(map, { blight = [] } = {}) {
     fine: (x, z, f = 0.11, o = 2) => nFine(x * f + 90, z * f + 90, o),
     ridge: (v) => 1 - Math.abs(v * 2 - 1),
   };
-  const layout = overworldLayout(N);
-  map.overworldLayout = layout;
+  map.overworldWorld = world;
+  map.overworldLayout = overworldLayout(world);
   map.region = new Uint8Array(N * N);
   const elev = new Float32Array(N * N);
-  const shapes = LEVELS.map((lv) => TERRAIN_SHAPES[lv.theme.terrain] || TERRAIN_SHAPES.moor);
+  const regions = world.regions;
+  const banded = regions.map((r, i) => (r.radius == null ? i : -1)).filter((i) => i >= 0);
+  const bounded = regions.map((r, i) => (r.radius != null ? i : -1)).filter((i) => i >= 0);
+  const centers = regions.map((r) => r.center || r.gate);
+  const shapes = regions.map((r) => TERRAIN_SHAPES[r.terrain] || TERRAIN_SHAPES.moor);
+  const crag = (r) => regions[r].kind === 'labyrinth' && regions[r].radius != null;
 
-  // Pass 1 — raw elevation per tile from its region's own archetype.
+  // Pass 1 — raw elevation per tile from its region's own archetype. Bounded
+  // regions claim their disc first; everything else falls to its diagonal
+  // band. The labyrinth kind is authored crag rather than a generated biome.
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = z * N + x;
       const edge = clamp(Math.min(x, z, N - 1 - x, N - 1 - z) / 7, 0, 1);
-      // The labyrinth corner is its own place: a crag knuckle off the road,
-      // far from every region band it overlaps.
-      const caveD = Math.hypot(x - layout.cave.cx, z - layout.cave.cz);
-      const r = caveD < 20 ? LEVELS.length : clamp(Math.floor(((x + z) / (2 * (N - 1))) * LEVELS.length), 0, LEVELS.length - 1);
+      let r = -1;
+      for (const b of bounded) {
+        const c = centers[b];
+        if (Math.hypot(x - c.x, z - c.z) < regions[b].radius) { r = b; break; }
+      }
+      if (r < 0) r = banded[clamp(Math.floor(((x + z) / (2 * (N - 1))) * banded.length), 0, banded.length - 1)];
       map.region[i] = r;
-      // Region 5 (the cave crag) is authored, not generated: a high knuckle.
-      elev[i] = r === LEVELS.length
+      elev[i] = crag(r)
         ? 0.9 + S.fine(x, z) * 0.06
         : shapes[r].elev(x, z, S) * (0.35 + 0.65 * edge);
     }
   }
   map.elev = elev;
 
-  // Pass 2 — classify each region with its own cover quantiles. Local
-  // thresholds are what make five biomes share one planet honestly: the
+  // Pass 2 — classify each banded region with its own cover quantiles. Local
+  // thresholds are what make several biomes share one planet honestly: the
   // fen keeps its drowned thirds, the wastes keep their canyon walls.
-  for (let r = 0; r < LEVELS.length; r++) {
+  for (const r of banded) {
     const cover = shapes[r].cover;
     const sample = [];
     let regionTiles = 0;
@@ -108,7 +191,7 @@ export function stitchOverworld(map, { blight = [] } = {}) {
     sample.sort((a, b) => a - b);
     const q = (f) => sample[clamp(Math.round(f * (sample.length - 1)), 0, sample.length - 1)];
     const waterT = q(cover.water), sandT = q(Math.min(0.98, cover.water + 0.03)), mountT = q(1 - cover.mountain);
-    // Forest from the same moisture field, thresholded on this region's land.
+    // Forest from the shared moisture field, thresholded on this region's land.
     const land = [];
     for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
       const i = z * N + x;
@@ -132,10 +215,11 @@ export function stitchOverworld(map, { blight = [] } = {}) {
       map.tiles[i] = t;
     }
   }
-  // The cave crag: solid mountain with a dark mouth, punched after the biome
-  // pass so no archetype can soften it.
-  for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
-    if (map.region[z * N + x] === LEVELS.length) map.tiles[z * N + x] = TILE.MOUNTAIN;
+  // Authored crag (bounded labyrinth regions): solid mountain, punched after
+  // the biome pass so no archetype can soften it.
+  for (const r of bounded) {
+    if (!crag(r)) continue;
+    for (let i = 0; i < map.tiles.length; i++) if (map.region[i] === r) map.tiles[i] = TILE.MOUNTAIN;
   }
   const disc = (cx, cz, rad, tile) => {
     const R = Math.ceil(rad);
@@ -146,11 +230,11 @@ export function stitchOverworld(map, { blight = [] } = {}) {
     }
   };
   // Pass 3 — the road. Gate terraces are flattened walkable discs; the road
-  // is a causeway stamped gate to gate, so every front is reachable on foot
-  // whatever the noise did between them.
-  disc(layout.cave.x, layout.cave.z, 3.4, TILE.PATH);
-  for (const g of layout.gates) disc(g.x, g.z, 5.5, TILE.GRASS);
-  disc(layout.spawn.x, layout.spawn.z, 4.5, TILE.GRASS);
+  // is a causeway stamped spawn → gate → gate in descriptor order, so every
+  // gate is reachable on foot whatever the noise did between them.
+  for (const r of bounded) disc(regions[r].gate.x, regions[r].gate.z, 3.4, TILE.PATH);
+  for (const r of banded) disc(regions[r].gate.x, regions[r].gate.z, 5.5, TILE.GRASS);
+  disc(world.spawn.x, world.spawn.z, 4.5, TILE.GRASS);
   const road = (a, b) => {
     const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z)) * 2;
     for (let s = 0; s <= steps; s++) {
@@ -158,30 +242,31 @@ export function stitchOverworld(map, { blight = [] } = {}) {
       disc(Math.round(a.x + (b.x - a.x) * t), Math.round(a.z + (b.z - a.z) * t), 1.7, TILE.PATH);
     }
   };
-  let prev = layout.spawn;
-  for (const g of [...layout.gates, layout.cave]) { road(prev, g); prev = g; }
+  let prev = world.spawn;
+  for (const r of [...banded, ...bounded]) { road(prev, regions[r].gate); prev = regions[r].gate; }
 
   // Blight where the war has not reached: the check and the renderer agree
-  // on stained ground around every still-locked gate.
-  map.nestSpots = blight.map((g) => [g.x, g.z]);
+  // on stained ground around every locked gate.
+  map.nestSpots = regions.filter((r) => r.locked).map((r) => [r.gate.x, r.gate.z]);
   map.sites = [];
   map._levels = { waterT: 0.3, sandT: 0.34, mountT: 0.72 };
 }
 
-// The headless planet. GameMap's subclass in main.js reuses stitchOverworld
-// for the renderer-backed twin of exactly this landform.
+// The headless planet for a descriptor (default: Earth). GameMap's subclass
+// in main.js reuses stitchOverworld for the renderer-backed twin of exactly
+// this landform; both re-stitch through generate(), idempotent on a fresh rng.
 export class OverworldField extends TerrainField {
-  constructor(seed = OVERWORLD_SEED, opts = {}) {
-    super(seed, null, { size: OVERWORLD_SIZE, nests: 0 });
-    void opts;
-    // super() already ran generate() → stitchOverworld above.
+  constructor(world = null) {
+    super((world && world.seed) || OVERWORLD_SEED, null, { size: (world && world.size) || OVERWORLD_SIZE, nests: 0 });
+    this._world = world; // null → generate() falls back to Earth
+    this.generate();
   }
 
-  generate() { stitchOverworld(this, {}); }
+  generate() { stitchOverworld(this, this._world || earthWorldDescriptor()); }
 }
 
 // Flood walkable ground from the spawn; map-check's reachability idea applied
-// to the road planet. Returns a Set of reachable tile indices.
+// to any descriptor's road planet. Returns a Set of reachable tile indices.
 export function overworldReachable(map) {
   const N = map.size;
   const { spawn } = map.overworldLayout;
@@ -201,11 +286,10 @@ export function overworldReachable(map) {
   return seen;
 }
 
-// Lock state is profile data, not landform: a front opens when the one before
-// it is won. Cleared gates fly the victory colour instead of the war colour.
-export function gateState(gate, campaignCleared = 0) {
-  if (gate.cave) return { locked: false, cleared: false };
-  return { locked: gate.levelId > campaignCleared + 1, cleared: gate.levelId <= campaignCleared };
+// Lock state was resolved by whoever authored the descriptor (the Earth
+// factory applies the campaign ladder); the walk-in trigger just reads it.
+export function gateState(gate) {
+  return { locked: !!gate.locked, cleared: !!gate.cleared };
 }
 
 // The walking half: hero movement with terrain collision, click-to-move, gate
@@ -216,9 +300,9 @@ const GATE_RADIUS = 3.4;    // walk-in trigger distance
 const GATE_COOLDOWN = 1.6;  // seconds before the same gate may re-trigger
 
 export class Overworld {
-  constructor(map, { campaign = 0 } = {}) {
+  constructor(map, { world = null } = {}) {
     this.map = map;
-    this.campaign = campaign;
+    this.world = world || map.overworldWorld;
     this.hero = { x: map.overworldLayout.spawn.x + 0.5, z: map.overworldLayout.spawn.z + 0.5, facing: 0, moving: false };
     this.dir = { x: 0, z: 0 };
     this.target = null;
@@ -259,15 +343,18 @@ export class Overworld {
       this._tryMove(this.hero.x + dx * WALK_SPEED * dt, this.hero.z + dz * WALK_SPEED * dt);
       this.hero.facing = Math.atan2(dx, dz);
     }
-    // Gate triggers: entering the ring fires once, then the gate rests.
+    // Gate triggers: entering the ring fires once, then the gate rests. The
+    // list is whatever this world's descriptor put on the road — no Earth
+    // knowledge here.
     const events = [];
-    const all = [...this.map.overworldLayout.gates, this.map.overworldLayout.cave];
+    const all = [...this.map.overworldLayout.gates];
+    if (this.map.overworldLayout.cave) all.push(this.map.overworldLayout.cave);
     for (const g of all) {
       const d = Math.hypot(this.hero.x - g.x, this.hero.z - g.z);
       const cool = this._cool.get(g.name) || 0;
       if (d < GATE_RADIUS && this.time > cool) {
         this._cool.set(g.name, this.time + GATE_COOLDOWN);
-        events.push({ t: 'gate', gate: g, state: gateState(g, this.campaign) });
+        events.push({ t: 'gate', gate: g, state: gateState(g) });
       }
     }
     return events;
