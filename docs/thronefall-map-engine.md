@@ -257,7 +257,7 @@ clock, or `Math.random()`:
 | Per-level thesis (rule 7) | plan/level data | Add ratio knobs (`towers: 2.0, walls: 0.3`) consumed by `generatePlots` — data, not new code paths. |
 | New biome look | level `palette` | All ground/prop colors key off the palette; a new biome is seven hex values. |
 | New prop kit | `map.js _buildDetail` | Add a silhouette + placement *rule* (which tile/feature it belongs to), never coordinates. Feed it from `nodeSpots`/`chokeSpots`/tiles so it lands where the map means something. |
-| Building look | `main.js _makeBuildingMesh` | Meshes are constructed from parameters (tier, branch, neighbors), so one silhouette upgrade restyles every city ever generated — past and future. |
+| Building look | `building-art.js buildBuildingMesh` | Meshes are constructed from parameters (tier, branch, neighbors), so one silhouette upgrade restyles every city ever generated — past and future. |
 | Wave choreography (rule 10) | `game.js` hive logic | Derive spawn-preview markers from the same nest/lane data the sim already uses; telegraphing is a render of existing state, not new state. |
 
 ### What the current beauty layer does, procedurally
@@ -277,7 +277,7 @@ clock, or `Math.random()`:
 Zillions is a sci-fi colony game. We borrow Thronefall's *silhouette
 discipline* — battered bases, shafts that taper, crowns wider than the
 shaft, one tall landmark at the center of the hierarchy — but draw it in the
-expedition's own materials. The kit (constants in `_makeBuildingMesh`):
+expedition's own materials. The kit (constants in `building-art.js`):
 
 - **HULL/HULL2** warm white prefab plate — every structure's body.
 - **PAD** poured-pad concrete — terraces, plinths, muster pads, the plaza.

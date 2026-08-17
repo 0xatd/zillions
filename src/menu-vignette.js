@@ -13,8 +13,8 @@
 // Like terrain.js, this module never imports three.js, so the committed
 // check (scripts/menu-vignette-check.mjs) can run the whole show headless in
 // Node. Everything renderer-shaped comes in through the constructor: the
-// caller's mesh factory, the shared zombie InstancedMeshes, a scratch
-// dummy/color pair for matrix writes, the squad lamp, and a screen projector.
+// caller's mesh factory, the shared horde writer (HordeArt), a scratch
+// dummy/color pair, the squad lamp, and a screen projector.
 import { FlowField } from './flowfield.js';
 import { UNITS, ZOMBIES } from './config.js';
 import { clamp, lerp } from './utils.js';
@@ -24,11 +24,11 @@ const STAGE_R = 26;          // vignettes live where the orbiting camera can see
 const FLOW_PERIOD = 0.45;    // horde pathing recompute cadence (seconds)
 
 export class MenuVignette {
-  constructor({ scene, map, makeUnitMesh, zombieMeshes, burst, stream, addCorpse, dispose3D, light, dummy, color, project }) {
+  constructor({ scene, map, makeUnitMesh, horde, burst, stream, addCorpse, dispose3D, light, dummy, color, project }) {
     this.scene = scene;
     this.map = map;
     this.makeUnitMesh = makeUnitMesh;
-    this.zm = zombieMeshes;   // { body, head, arm, eyes } shared InstancedMeshes
+    this.horde = horde;       // shared per-type instanced horde writer
     this.burst = burst;
     this.stream = stream;
     this.addCorpse = addCorpse;
@@ -90,10 +90,7 @@ export class MenuVignette {
     }
     this.troopers = [];
     this.zombies = [];
-    for (const m of [this.zm.body, this.zm.head, this.zm.arm, this.zm.eyes]) {
-      m.count = 0;
-      m.instanceMatrix.needsUpdate = true;
-    }
+    this.horde.clear();
   }
 
   // ---------------- vignette setup ----------------
@@ -358,7 +355,7 @@ export class MenuVignette {
       const type = roll < 0.72 || this.elapsed < 6 ? 'walker' : roll < 0.94 ? 'runner' : 'brute';
       const def = ZOMBIES[type];
       this.zombies.push({
-        x, z, def,
+        x, z, type, def,
         hp: def.hp * (type === 'brute' ? 0.4 : 1), // menu brutes die for drama, not stats
         phase: Math.random() * Math.PI * 2,
         speed: def.chase * (0.85 + Math.random() * 0.3),
@@ -464,39 +461,30 @@ export class MenuVignette {
     }
   }
 
-  // Write the mob into the shared zombie InstancedMeshes — the exact transform
+  // Write the mob through the shared horde writer — the exact transform
   // and palette grammar the in-game renderer uses, so the menu horde IS the
   // game's horde.
   _writeMob(t) {
-    const d = this._dummy, c = this._color;
+    const c = this._color;
     const n = Math.min(this.zombies.length, MOB_CAP);
+    this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = this.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       const lunge = zb.lungeT > 0 ? Math.sin((zb.lungeT / 0.32) * Math.PI) * 0.42 : 0;
       const s = zb.def.scale * clamp(zb.fade, 0, 1);
-      d.position.set(zb.x + zb.dirX * lunge, bob, zb.z + zb.dirZ * lunge);
-      d.rotation.set(0.22 + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06);
-      d.scale.set(s * (1 + lunge * 0.25), s * (1 - lunge * 0.2), s * (1 + lunge * 0.25));
-      d.updateMatrix();
-      this.zm.body.setMatrixAt(i, d.matrix);
-      this.zm.head.setMatrixAt(i, d.matrix);
-      this.zm.arm.setMatrixAt(i, d.matrix);
-      this.zm.eyes.setMatrixAt(i, d.matrix);
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
-      else c.setHex(zb.def.color);
-      this.zm.body.setColorAt(i, c);
-      this.zm.arm.setColorAt(i, c);
-      c.multiplyScalar(0.8);
-      this.zm.head.setColorAt(i, c);
-      c.setHex(0xff4636); // the hunt is always on
-      this.zm.eyes.setColorAt(i, c);
+      else c.setRGB(1, 1, 1);
+      this.horde.write(
+        zb.type,
+        zb.x + zb.dirX * lunge, bob, zb.z + zb.dirZ * lunge,
+        0.22 + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
+        s * (1 + lunge * 0.25), s * (1 - lunge * 0.2), s * (1 + lunge * 0.25),
+        t, zb.phase, lunge,
+        c, 0xff4636, // the hunt is always on
+      );
     }
-    for (const m of [this.zm.body, this.zm.head, this.zm.arm, this.zm.eyes]) {
-      m.count = n;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    }
+    this.horde.commit();
   }
 }
