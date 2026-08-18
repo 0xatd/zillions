@@ -5281,6 +5281,12 @@ class App {
     this._updatePayCoins(dt);
     this._updateProjectiles(dt);
     this._updateAbilityFx(dt);
+    // Water rolls on every surface that has it — menu vignette, overworld
+    // walk, and the battle map all carry the same shader clock.
+    for (const terrain of [this.menuTerrain, this.owTerrain, this.terrain]) {
+      const water = terrain?.userData?.water;
+      if (water) water.material.uniforms.uTime.value = t;
+    }
     this.tacticalVisuals.update(dt);
     this.tacticalVisuals.render();
   }
