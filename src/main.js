@@ -3539,7 +3539,7 @@ class App {
     if (buildMode && mh && !mh.dead) {
       let bd = 4.5 * 4.5;
       for (const plot of g.plots) {
-        const act = g.plotAction(plot);
+        const act = g.firstSiegePlotActionable(plot) ? g.plotAction(plot) : null;
         if (!act || act.mode === 'branch') continue;
         const [px, pz] = g.payPoint(plot, mh);
         const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
@@ -3547,6 +3547,11 @@ class App {
       }
     }
     for (const plot of g.plots) {
+      if (!g.firstSiegePlotVisible(plot)) {
+        const hidden = this.plotMeshes.get(plot.id);
+        if (hidden) hidden.group.visible = false;
+        continue;
+      }
       // A Forward Camp doesn't exist until the node under it is yours.
       if (g.plotLocked(plot)) {
         const hidden = this.plotMeshes.get(plot.id);
@@ -3562,7 +3567,7 @@ class App {
       }
       rec.group.visible = true;
       const ud = rec.group.userData;
-      const act = g.plotAction(plot);
+      const act = g.firstSiegePlotActionable(plot) ? g.plotAction(plot) : null;
       // `nt` keeps the shape the rest of this function has always read.
       const nt = !act ? null
         : act.mode === 'branch' ? act.nt
@@ -5180,6 +5185,13 @@ class App {
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
 
       // Wave marker pulse.
+      const firstSiege = this.game.firstSiegeStatus?.();
+      const markerNest = firstSiege?.nest;
+      const markerKey = markerNest ? `${markerNest.id}:${this.game.firstSiege.stage}` : '';
+      if (markerKey !== this._firstSiegeMarkerKey) {
+        this._firstSiegeMarkerKey = markerKey;
+        this._setWaveMarkers(markerNest ? [[markerNest.x, markerNest.z]] : []);
+      }
       for (const m of this.waveMarkers) {
         const ring = m.userData.ring;
         const ph = (t * 1.2) % 1;
