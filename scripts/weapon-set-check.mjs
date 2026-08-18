@@ -5,9 +5,9 @@ import { TILE, WEAPON_SWAP_CD, weaponFor, hasSecondSet } from '../src/config.js'
 import { rollItemKey, resolveItem, EQUIP_SLOTS, WEAPON_SETS, slotPool } from '../src/items.js';
 import {
   makeMmoCharacter, normalizeMmoCharacters, characterCamp,
-  allocateLatticeNode, setLatticeNodeSet,
+  allocateLatticeNode, setLatticeNodeSet, legalEquipment, canEquip, innateAttributes,
 } from '../src/mmo-characters.js';
-import { frontier, buildLattice, treeBonusesForSet, normalizeSetSpec } from '../src/skilltree.js';
+import { frontier, buildLattice, treeBonusesForSet, normalizeSetSpec, pathTo } from '../src/skilltree.js';
 
 let failures = 0;
 const fail = (msg) => { console.error(`FAIL: ${msg}`); failures++; };
@@ -164,6 +164,114 @@ ok(hasSecondSet({ weapon: scatter, weapon2: rifle }), 'a second weapon was not s
   game.heroes[0].swapCd = 0;
   game.swapWeaponSet(0);
   ok(Math.abs(hero.mods.dmg - before) < 1e-9, 'swapping back did not remove the pinned bonus');
+}
+
+
+// ---------- regression: doctrines follow the drawn set ----------
+// characterCamp stored the unconditional doctrine list beside the per-set mod
+// bags, so a doctrine pinned to set II was in force while set I was drawn, and
+// the runtime kept one static list across swaps. Reported on PR #77.
+{
+  const character = makeMmoCharacter('Pinned', 'arcanist');
+  character.level = 100;
+  const node = buildLattice().nodes.find((n) => n.doctrine === 'scorched_supply');
+  for (const id of pathTo([], node.id, 'arcanist')) allocateLatticeNode(character, id);
+  ok(character.lattice.includes(node.id), 'test fixture: the doctrine should be allocated');
+
+  // Unpinned, it is in force on both sets.
+  let camp = characterCamp(character);
+  ok(camp.treeSets[0].doctrines.includes('scorched_supply'), 'an unpinned doctrine is missing from set I');
+  ok(camp.treeSets[1].doctrines.includes('scorched_supply'), 'an unpinned doctrine is missing from set II');
+
+  // Pinned to set II, it must be absent from set I.
+  setLatticeNodeSet(character, node.id, 1);
+  camp = characterCamp(character);
+  ok(!camp.treeSets[0].doctrines.includes('scorched_supply'), 'a set II doctrine is in force on set I');
+  ok(camp.treeSets[1].doctrines.includes('scorched_supply'), 'a set II doctrine is missing from set II');
+
+  // Pinned to set I, the mirror case.
+  setLatticeNodeSet(character, node.id, 0);
+  camp = characterCamp(character);
+  ok(camp.treeSets[0].doctrines.includes('scorched_supply'), 'a set I doctrine is missing from set I');
+  ok(!camp.treeSets[1].doctrines.includes('scorched_supply'), 'a set I doctrine is in force on set II');
+
+  // And in the run: the flag has to turn on and off as the sets are drawn.
+  const game = makeGame({
+    level: 20, equipment: { weapon: scatter, weapon2: rifle }, activeSet: 0,
+    treeSets: [{ mods: {}, doctrines: [] }, { mods: {}, doctrines: ['scorched_supply'] }],
+  });
+  const hero = game.heroes[0];
+  ok(!hero.doctrines.includes('scorched_supply'), 'a set II doctrine was active on spawn with set I drawn');
+  ok(game._doctrineScorched === false, 'the rule flag was on with set I drawn');
+  game.swapWeaponSet(0);
+  ok(hero.doctrines.includes('scorched_supply'), 'drawing set II did not bring its doctrine');
+  ok(game._doctrineScorched === true, 'the rule flag did not turn on with set II drawn');
+  hero.swapCd = 0;
+  game.swapWeaponSet(0);
+  ok(!hero.doctrines.includes('scorched_supply'), 'sheathing set II did not take its doctrine away');
+  ok(game._doctrineScorched === false, 'the rule flag stayed on after sheathing set II');
+
+  // A restored hero must land on the same footing.
+  hero.swapCd = 0;
+  game.swapWeaponSet(0);
+  const restored = new Game(fakeMap(), 'normal', ['scott'], game.snapshot(), 1, 'campaign');
+  ok(restored.heroes[0].doctrines.includes('scorched_supply'), 'restore lost the drawn set\'s doctrine');
+  ok(restored._doctrineScorched === true, 'restore did not re-resolve the rule flag');
+}
+
+// ---------- regression: gear cannot qualify itself ----------
+// characterAttributes summed every equipped item before requirements were
+// checked, so an item's own attribute roll satisfied its own requirement, and
+// the sheathed set qualified the drawn one. Reported on PR #77.
+{
+  let plate = null;
+  for (let i = 0; i < 400 && !plate; i++) {
+    const key = rollItemKey('siege_plate', `self${i}`, 60, 3);
+    if ((resolveItem(key).mods.frame || 0) >= 14) plate = key;
+  }
+  ok(plate, 'test fixture: needed a plate rolling Frame');
+
+  const weak = makeMmoCharacter('Weak', 'vanguard');
+  weak.level = 1;
+  weak.equipment = { armor: plate };
+  ok(!legalEquipment(weak).armor, 'an item satisfied its own attribute requirement');
+  ok(!canEquip(weak, plate, 'armor'), 'canEquip allowed a self-qualifying item');
+
+  const strong = makeMmoCharacter('Strong', 'vanguard');
+  strong.level = 60;
+  strong.equipment = { armor: plate };
+  ok(legalEquipment(strong).armor === plate, 'a character who genuinely qualifies was refused');
+
+  // The sheathed set must not qualify the drawn set.
+  let frameWeapon = null;
+  for (let i = 0; i < 400 && !frameWeapon; i++) {
+    const key = rollItemKey('chainblade_mk1', `fw${i}`, 60, 3);
+    if ((resolveItem(key).mods.frame || 0) >= 14) frameWeapon = key;
+  }
+  if (frameWeapon) {
+    const heavy = 'scatter_mk3';
+    let needy = null;
+    for (let i = 0; i < 200 && !needy; i++) {
+      const key = rollItemKey(heavy, `nd${i}`, 60, 1);
+      if (!resolveItem(key).mods.frame) needy = key;
+    }
+    const cross = makeMmoCharacter('Cross', 'vanguard');
+    cross.level = 30;
+    cross.equipment = { weapon: needy, weapon2: frameWeapon };
+    const legal = legalEquipment(cross);
+    const innate = innateAttributes(cross).frame;
+    const need = resolveItem(needy).base.req.frame;
+    if (innate < need) {
+      ok(!legal.weapon, 'the sheathed set qualified a weapon in the drawn set');
+    }
+  }
+
+  // Dropping one item must drop anything that only qualified through it.
+  const chain = makeMmoCharacter('Chain', 'vanguard');
+  chain.level = 1;
+  chain.equipment = { armor: plate, weapon: rollItemKey('scatter_mk3', 'chain', 60, 1) };
+  const chained = legalEquipment(chain);
+  ok(!chained.armor && !chained.weapon, 'a chain of self-qualifying gear survived');
 }
 
 if (failures) {

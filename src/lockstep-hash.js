@@ -7,7 +7,7 @@
 // It lives in its own module, apart from the renderer, so a check can drive it
 // headless — this is the highest-consequence function in the multiplayer path
 // and it must be testable without a browser.
-import { EQUIP_SLOTS, hashString } from './items.js';
+import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 
 export function stateHash(g) {
   let h = 7;
@@ -30,6 +30,23 @@ export function stateHash(g) {
     }
     for (const id of hr.doctrines || []) h = (h * 31 + hashString(id)) | 0;
     h = (h * 31 + (hr.activeSet || 0) * 977) | 0;
+    // The Lattice itself, not just the doctrines hanging off it. Hashing
+    // equipment and doctrine ids alone let two peers carry different tree
+    // damage and health and still agree — the divergence would only surface
+    // later through combat outcomes, which is exactly what this exists to
+    // catch early.
+    //
+    // Both sets are hashed, so a difference pinned to the sheathed set is
+    // caught before it is ever drawn. MOD_KEYS gives a stable order that does
+    // not depend on how either peer happened to build the bag.
+    for (const bag of hr.treeSets || (hr.treeMods ? [hr.treeMods] : [])) {
+      const mods = bag && bag.mods ? bag.mods : bag;
+      for (const key of MOD_KEYS) {
+        const value = (mods && mods[key]) || 0;
+        if (value) h = (h * 31 + hashString(key) + Math.round(value * 1000)) | 0;
+      }
+      for (const id of (bag && bag.doctrines) || []) h = (h * 31 + hashString(id)) | 0;
+    }
     const w = hr.weapon;
     if (w) {
       h = (h * 31 + Math.round(w.dmg * 16) + Math.round(w.rof * 64) * 3 + Math.round(w.range * 16) * 7) | 0;

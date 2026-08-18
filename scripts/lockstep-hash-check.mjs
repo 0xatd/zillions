@@ -100,6 +100,37 @@ differs('a different level', { ...base, level: 21 });
   ok(stateHash(a) !== stateHash(b), 'a hero position divergence produced the same hash');
 }
 
+
+// ---------- regression: the Lattice reaches the hash ----------
+// Hashing equipment keys and doctrine ids alone let two peers carry different
+// tree damage and health and still agree. Reported on PR #77.
+{
+  const withTree = (mods, doctrines = []) => peer({
+    ...base, treeMods: mods, doctrines,
+    treeSets: [{ mods, doctrines }, { mods, doctrines }],
+  });
+  const a = withTree({ dmg: 0.2, hp: 100 });
+  const b = withTree({ dmg: 0.5, hp: 250 });
+  ok(stateHash(a) !== stateHash(b), 'two peers with different Lattice bonuses produced the same hash');
+  ok(stateHash(a) === stateHash(withTree({ dmg: 0.2, hp: 100 })), 'identical Lattice bonuses disagreed');
+
+  // A single key, and a tiny difference in one, both have to move it.
+  ok(stateHash(withTree({ dmg: 0.2 })) !== stateHash(withTree({ dmg: 0.21 })), 'a small mod difference was lost');
+  ok(stateHash(withTree({ dmg: 0.2 })) !== stateHash(withTree({ hp: 0.2 })),
+    'two different keys with the same value hashed the same');
+  ok(stateHash(withTree({})) !== stateHash(withTree({ dmg: 0.2 })), 'an empty bag matched a populated one');
+
+  // A difference pinned to the SHEATHED set must be caught before it is drawn.
+  const pinnedA = peer({ ...base, treeSets: [{ mods: {}, doctrines: [] }, { mods: { dmg: 0.4 }, doctrines: [] }], activeSet: 0 });
+  const pinnedB = peer({ ...base, treeSets: [{ mods: {}, doctrines: [] }, { mods: { dmg: 0.9 }, doctrines: [] }], activeSet: 0 });
+  ok(stateHash(pinnedA) !== stateHash(pinnedB), 'a difference on the sheathed set was not caught');
+
+  // Doctrines carried per set must reach it too.
+  const docA = peer({ ...base, treeSets: [{ mods: {}, doctrines: [] }, { mods: {}, doctrines: ['scorched_supply'] }] });
+  const docB = peer({ ...base, treeSets: [{ mods: {}, doctrines: [] }, { mods: {}, doctrines: [] }] });
+  ok(stateHash(docA) !== stateHash(docB), 'a per-set doctrine did not reach the hash');
+}
+
 if (failures) {
   console.error(`\nlockstep-hash-check: ${failures} failure(s)`);
   process.exit(1);

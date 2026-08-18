@@ -18,7 +18,7 @@ import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.
 import {
   MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
-  setLatticeNodeSet,
+  setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
 import { loadMeta, charge, META_CURRENCY } from './meta.js';
 import {
@@ -1014,6 +1014,9 @@ export class UI {
   _renderGearPanel(character) {
     const slots = this.root.querySelector('#gear-slots');
     const attrs = this._sheetAttributes(character);
+    // What the run will actually use. A slot holding something the character
+    // cannot legally wield is shown as illegal rather than quietly counted.
+    const worn = legalEquipment(character);
     const label = {
       weapon: 'SET I · WEAPON', offhand: 'SET I · OFF-HAND',
       weapon2: 'SET II · WEAPON', offhand2: 'SET II · OFF-HAND',
@@ -1026,7 +1029,7 @@ export class UI {
         return `<button class="gear-slot empty" data-slot="${slot}"><span class="gear-slot-label">${label[slot]}</span>
           <span class="gear-slot-name">— empty —</span></button>`;
       }
-      const legal = meetsRequirement(item, attrs);
+      const legal = worn[slot] === key;
       return `<button class="gear-slot${legal ? '' : ' illegal'}" data-slot="${slot}" style="--rarity:${item.rarityColor}">
         <span class="gear-slot-label">${label[slot]}</span>
         <span class="gear-slot-name">${item.icon} ${item.name}</span>
@@ -1111,7 +1114,9 @@ export class UI {
     const candidates = slotsForPool(item.slot);
     const equipment = character.equipment || {};
     const slot = candidates.find((s) => !equipment[s]) || candidates[0];
-    if (!meetsRequirement(item, this._sheetAttributes(character))) {
+    // Ask the model. It refuses an item that could only meet its requirement by
+    // counting itself, or by borrowing from the sheathed weapon set.
+    if (!canEquip(character, key, slot)) {
       this.showBanner(`✋ ${item.name} needs ${requirementText(item)}.`, '', 2600);
       return;
     }

@@ -92,6 +92,24 @@ export const slotPool = (equipSlot) => {
 // Which slots belong to a given weapon set — used to decide what a swap swaps.
 export const setSlots = (set) => WEAPON_SETS[set === 1 ? 1 : 0];
 
+// One weapon set's resolved Lattice payload. A payload is { mods, doctrines };
+// older shapes carried the bag alone, and a snapshot written before this can
+// still hold one, so both are read here rather than at every call site.
+export function latticeMods(treeSets, set = 0, fallback = null) {
+  const payload = treeSets && treeSets[set === 1 ? 1 : 0];
+  if (!payload) return fallback;
+  return payload.mods || payload;
+}
+
+// The doctrines the DRAWN set carries. A doctrine pinned to the sheathed set
+// must not be in force, which is why this follows the set rather than reading
+// one unconditional list.
+export function latticeDoctrines(treeSets, set = 0, fallback = null) {
+  const payload = treeSets && treeSets[set === 1 ? 1 : 0];
+  if (payload && Array.isArray(payload.doctrines)) return [...payload.doctrines];
+  return fallback ? [...fallback] : [];
+}
+
 // The keys whose GLOBAL mods apply right now. Only the drawn set's weapon and
 // off-hand count — the sheathed set contributes nothing, which is what keeps
 // two sets from being strictly better than one.

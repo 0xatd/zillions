@@ -2,7 +2,9 @@
 // heroes remain in Custom Games; MMO characters carry their own class, level,
 // equipment, appearance and last world between instances.
 
-import { EQUIP_SLOTS, slotPool, isRolledKey, meetsRequirement, hasOwn } from './items.js';
+import {
+  EQUIP_SLOTS, slotPool, setSlots, equippedKeys, isRolledKey, meetsRequirement, hasOwn,
+} from './items.js';
 import {
   pruneAlloc, latticePoints, treeBonuses, treeBonusesForSet, normalizeSetSpec,
   canAllocate, canDeallocate, LATTICE_VERSION,
@@ -57,18 +59,34 @@ export function baseAttributes(character) {
   return out;
 }
 
-// Everything a requirement is checked against: the character, their gear, and
-// their Lattice. One function, so the screen and the run agree.
-export function characterAttributes(character) {
+// What a character has before any gear: class, level, and the Lattice. This is
+// the floor every requirement is measured up from, and the reason it exists
+// apart from characterAttributes() is that gear must never help qualify itself.
+export function innateAttributes(character) {
   const base = baseAttributes(character);
-  const equipped = EQUIP_SLOTS.map((slot) => (character?.equipment || {})[slot]).filter(Boolean);
-  const gear = itemMods(equipped);
   const tree = treeBonuses(character?.lattice, character?.classKey).mods;
   return {
-    frame: base.frame + (gear.frame || 0) + (tree.frame || 0),
-    reflex: base.reflex + (gear.reflex || 0) + (tree.reflex || 0),
-    signal: base.signal + (gear.signal || 0) + (tree.signal || 0),
+    frame: base.frame + (tree.frame || 0),
+    reflex: base.reflex + (tree.reflex || 0),
+    signal: base.signal + (tree.signal || 0),
   };
+}
+
+const addAttributes = (attrs, keys) => {
+  const gear = itemMods(keys);
+  return {
+    frame: attrs.frame + (gear.frame || 0),
+    reflex: attrs.reflex + (gear.reflex || 0),
+    signal: attrs.signal + (gear.signal || 0),
+  };
+};
+
+// Everything a requirement is checked against for a character as they stand:
+// innate attributes plus the gear they are legally wearing on the drawn set.
+export function characterAttributes(character) {
+  const legal = legalEquipment(character);
+  const set = character?.activeSet === 1 ? 1 : 0;
+  return addAttributes(innateAttributes(character), equippedKeys(legal, set));
 }
 
 export const APPEARANCES = {
@@ -97,18 +115,66 @@ export function normalizeEquipment(raw) {
   return out;
 }
 
-// Equipment the character can actually wield right now. A rewire or a lost
-// level can leave an item equipped that no longer meets its requirement; the
-// screen shows it as illegal, and the run simply does not use it.
+// The slots worn at the same time as a given one. A sheathed weapon is not on
+// the character while the other set is drawn, so it cannot help qualify
+// anything in that set.
+const SHARED_SLOTS = ['armor', 'implant1', 'implant2'];
+function slotsWornWith(set) {
+  const { weapon, offhand } = setSlots(set);
+  return [weapon, offhand, ...SHARED_SLOTS];
+}
+
+// Equipment the character can actually wield, resolved to a fixed point.
+//
+// An item must meet its requirement WITHOUT counting itself, or a plate that
+// rolls +20 Frame satisfies its own 26 Frame requirement and a level one
+// character wears end-game armour. Dropping one item can drop the attributes
+// that qualified another, so this repeats until nothing more falls out.
+//
+// Weapons and off-hands are judged inside their own set. Armour and implants
+// are worn through both, so they have to hold up in both — otherwise a swap
+// would strip the character mid-fight.
+function legalForSet(equipment, innate, set) {
+  const slots = slotsWornWith(set).filter((slot) => equipment[slot]);
+  const kept = new Set(slots);
+  for (;;) {
+    let dropped = null;
+    for (const slot of kept) {
+      const item = itemInfo(equipment[slot]);
+      const others = [...kept].filter((s) => s !== slot).map((s) => equipment[s]);
+      if (item && meetsRequirement(item, addAttributes(innate, others))) continue;
+      dropped = slot;
+      break;
+    }
+    if (!dropped) break;
+    kept.delete(dropped);
+  }
+  return kept;
+}
+
 export function legalEquipment(character) {
   const equipment = normalizeEquipment(character?.equipment);
-  const attrs = characterAttributes(character);
+  const innate = innateAttributes(character);
+  const first = legalForSet(equipment, innate, 0);
+  const second = legalForSet(equipment, innate, 1);
   const out = {};
-  for (const [slot, key] of Object.entries(equipment)) {
-    const item = itemInfo(key);
-    if (item && meetsRequirement(item, attrs)) out[slot] = key;
+  for (const slot of EQUIP_SLOTS) {
+    if (!equipment[slot]) continue;
+    if (slot === 'weapon' || slot === 'offhand') { if (first.has(slot)) out[slot] = equipment[slot]; }
+    else if (slot === 'weapon2' || slot === 'offhand2') { if (second.has(slot)) out[slot] = equipment[slot]; }
+    else if (first.has(slot) && second.has(slot)) out[slot] = equipment[slot];
   }
   return out;
+}
+
+// Can this character put this item in this slot? Asked by the screen before it
+// equips anything, and it answers the same way the run will.
+export function canEquip(character, key, slot) {
+  const item = itemInfo(key);
+  if (!item || !item.slot || item.slot !== slotPool(slot)) return false;
+  const candidate = { ...normalizeEquipment(character?.equipment), [slot]: key };
+  const legal = legalEquipment({ ...character, equipment: candidate });
+  return legal[slot] === key;
 }
 
 const cleanName = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 18);
@@ -225,11 +291,15 @@ export function characterCamp(character, relics = []) {
     lattice: [...(character?.lattice || [])],
     treeMods: tree.mods,
     doctrines: tree.doctrines,
-    // One resolved bag per weapon set. Swapping in the field is then a lookup,
-    // never a tree walk — the simulation still never queries a node.
-    treeSets: [0, 1].map((set) => treeBonusesForSet(
-      character?.lattice, character?.classKey, character?.latticeSets, set,
-    ).mods),
+    // One resolved payload per weapon set — mods AND doctrines. Carrying only
+    // the mods per set left a doctrine pinned to set II active while set I was
+    // drawn, because the unconditional list was the one that reached the run.
+    treeSets: [0, 1].map((set) => {
+      const resolved = treeBonusesForSet(
+        character?.lattice, character?.classKey, character?.latticeSets, set,
+      );
+      return { mods: resolved.mods, doctrines: resolved.doctrines };
+    }),
     activeSet: character?.activeSet === 1 ? 1 : 0,
     relics: [...relics],
   };

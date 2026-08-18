@@ -14,6 +14,7 @@ import {
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
   NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor, hasSecondSet,
+  latticeMods, latticeDoctrines,
   equippedKeys,
   WEAPON_SWAP_CD,
   rollLootKey, worldItemLevel,
@@ -2124,9 +2125,10 @@ export class Game {
     if (h.swapCd > 0) { this.emit({ type: 'deny' }); return; }
     h.activeSet = h.activeSet === 1 ? 0 : 1;
     h.swapCd = WEAPON_SWAP_CD;
-    // The sheathed set's global mods go away with it, so the whole bag is
-    // rebuilt rather than just the derived stats.
+    // The sheathed set's global mods and its doctrines both go away with it, so
+    // the whole bag is rebuilt and the rule flags are re-resolved.
     this._refreshPackMods(h);
+    this._refreshDoctrines();
     const w = h.weapon;
     this.msg(`🔁 ${h.def.name} draws ${w && w.name ? w.name : 'the other weapon'}.`, 'info');
     this.emit({ type: 'swapset', x: h.x, z: h.z, set: h.activeSet, heroKey: h.key });
@@ -2267,13 +2269,12 @@ export class Game {
     const equipment = equipmentIn;
     const weapon = weaponFor(key, equipment, setIn);
     // The Lattice arrives already resolved: a flat bag of numbers and a list of
-    // rule flags. Nothing here queries a tree node, now or during the run.
+    // rule flags, one payload per weapon set. Nothing here queries a tree node,
+    // now or during the run.
     const treeMods = (camp && camp.treeMods) || null;
-    const doctrines = (camp && camp.doctrines) ? [...camp.doctrines] : [];
-    // One resolved tree bag per weapon set, so a swap is a lookup rather than
-    // anything that has to walk a graph mid-run.
     const treeSets = (camp && camp.treeSets) || null;
     const activeSet = camp && camp.activeSet === 1 ? 1 : 0;
+    const doctrines = latticeDoctrines(treeSets, activeSet, camp && camp.doctrines);
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
@@ -2314,14 +2315,16 @@ export class Game {
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
     // The Lattice folds in here, beside gear and hero passives, on the same
     // additive keys. One bag, one place, one rule.
-    // The drawn set decides which tree bag applies. A node pinned to set II is
-    // simply not in set I's bag, so nothing here has to know about pinning.
-    const treeBag = (h.treeSets && h.treeSets[h.activeSet || 0]) || h.treeMods;
+    // The drawn set decides which tree payload applies. A node pinned to set II
+    // is simply not in set I's payload, so nothing here has to know about
+    // pinning — including its doctrines, which follow the set with it.
+    const treeBag = latticeMods(h.treeSets, h.activeSet || 0, h.treeMods);
     if (treeBag) {
       for (const [key, value] of Object.entries(treeBag)) {
         if (value) mods[key] = (mods[key] || 0) + value;
       }
     }
+    h.doctrines = latticeDoctrines(h.treeSets, h.activeSet || 0, h.doctrines);
     const forge = this._heroForgeMods();
     mods.dmg = (mods.dmg || 0) + forge.dmg;
     mods.hp = (mods.hp || 0) + forge.hp;
@@ -2976,6 +2979,8 @@ export class Game {
 
   // Rule-bearing doctrines are read on every hit, so they are resolved to
   // plain booleans whenever the roster changes rather than searched each time.
+  //
+  // Called on spawn, on restore, and on every weapon-set swap.
   _refreshDoctrines() {
     this._doctrineScorched = this.hasDoctrine('scorched_supply');
     this._doctrineHollow = this.hasDoctrine('hollow_pact');

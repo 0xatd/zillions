@@ -9,6 +9,7 @@ import {
   MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
   rollLootKey, rollLootKeyForSlot, worldItemLevel,
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE, setSlots, WEAPON_SETS, equippedKeys, hasOwn,
+  latticeMods, latticeDoctrines,
 } from './items.js';
 
 export const MAP_SIZE = 120;
@@ -647,7 +648,7 @@ export const MOD_KEYS = GEAR_MOD_KEYS;
 export {
   rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines,
   DAMAGE_TYPES, DAMAGE_TYPE_INFO, RESIST_CAP, VOID_ARMOR_SHARE, ATTRIBUTES,
-  WEAPON_SETS, setSlots, EQUIP_SLOTS, equippedKeys, slotsForPool,
+  WEAPON_SETS, setSlots, EQUIP_SLOTS, equippedKeys, slotsForPool, latticeMods, latticeDoctrines,
 } from './items.js';
 
 // Two kinds of key reach this function and both are legal:

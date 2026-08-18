@@ -42,8 +42,14 @@ assert.match(ui, /deallocateLatticeNode\(character, node\.id\)/, 'the sheet must
 assert.doesNotMatch(ui, /character\.lattice\.push/, 'the sheet must not write the allocation directly');
 
 // Requirements must be checked before equipping, or a character wears what it
-// cannot lift and the run silently drops it.
-assert.match(ui, /meetsRequirement\(item, this\._sheetAttributes\(character\)\)/, 'equipping must check requirements');
+// cannot lift and the run silently drops it. The screen asks the model rather
+// than summing attributes itself — its own sum counted the candidate item, so
+// a plate that rolled +20 Frame satisfied its own 26 Frame requirement.
+assert.match(ui, /canEquip\(character, key, slot\)/, 'equipping must ask the model whether it is legal');
+assert.doesNotMatch(ui, /meetsRequirement\(item, this\._sheetAttributes/,
+  'the screen must not decide equip legality from its own attribute sum');
+assert.match(ui, /const worn = legalEquipment\(character\)/,
+  'the gear panel must mark slots illegal the same way the run does');
 
 // Rolled items must render through itemInfo everywhere in the UI. A direct
 // ITEMS[key] lookup shows a blank for anything the world rolled.
