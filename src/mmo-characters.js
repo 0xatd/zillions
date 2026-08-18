@@ -2,11 +2,11 @@
 // heroes remain in Custom Games; MMO characters carry their own class, level,
 // equipment, appearance and last world between instances.
 
-import { EQUIP_SLOTS, slotPool, isRolledKey } from './items.js';
+import { EQUIP_SLOTS, slotPool, isRolledKey, meetsRequirement } from './items.js';
 import {
   pruneAlloc, latticePoints, treeBonuses, canAllocate, canDeallocate, LATTICE_VERSION,
 } from './skilltree.js';
-import { itemInfo } from './config.js';
+import { itemInfo, itemMods } from './config.js';
 
 export const MAX_MMO_CHARACTERS = 8;
 // What a character can keep between adventures. Rolled gear is unique, so
@@ -28,6 +28,47 @@ export const MMO_CLASSES = {
   arcanist: { name: 'Arcanist', icon: '✦', role: 'Prepared technomancy and broad control', proxy: 'alexander', resource: 'Flux' },
   engineer: { name: 'Engineer', icon: '⚙️', role: 'Deployables, repairs and fortress mastery', proxy: 'aaron', resource: 'Charge' },
 };
+
+// What each class is made of. The primary attribute grows every level, the
+// others slowly — so a class reaches its own weapon family on the way up and
+// has to buy attribute nodes on the Lattice to wield somebody else's.
+export const CLASS_ATTRS = {
+  berserker: 'frame', vox_officer: 'signal', chaplain: 'signal', xenoshaper: 'frame',
+  vanguard: 'frame', voidblade: 'reflex', warden: 'frame', recon: 'reflex',
+  operative: 'reflex', psion: 'signal', voidbound: 'signal', arcanist: 'signal',
+  engineer: 'reflex',
+};
+
+export const ATTR_BASE = 8;          // every attribute starts here
+export const ATTR_PRIMARY_BASE = 12; // the class's own attribute starts higher
+
+// Attributes from the character alone — class, level, and nothing else. Gear
+// and the Lattice add to this; see characterAttributes().
+export function baseAttributes(character) {
+  const primary = CLASS_ATTRS[character?.classKey] || 'frame';
+  const level = Math.max(1, Math.min(100, Number(character?.level) || 1));
+  const out = { frame: ATTR_BASE, reflex: ATTR_BASE, signal: ATTR_BASE };
+  out[primary] = ATTR_PRIMARY_BASE;
+  out[primary] += level - 1;                      // one a level in your own line
+  for (const key of Object.keys(out)) {
+    if (key !== primary) out[key] += Math.floor((level - 1) / 3);
+  }
+  return out;
+}
+
+// Everything a requirement is checked against: the character, their gear, and
+// their Lattice. One function, so the screen and the run agree.
+export function characterAttributes(character) {
+  const base = baseAttributes(character);
+  const equipped = EQUIP_SLOTS.map((slot) => (character?.equipment || {})[slot]).filter(Boolean);
+  const gear = itemMods(equipped);
+  const tree = treeBonuses(character?.lattice, character?.classKey).mods;
+  return {
+    frame: base.frame + (gear.frame || 0) + (tree.frame || 0),
+    reflex: base.reflex + (gear.reflex || 0) + (tree.reflex || 0),
+    signal: base.signal + (gear.signal || 0) + (tree.signal || 0),
+  };
+}
 
 export const APPEARANCES = {
   iron: { name: 'Iron', color: '#8493a6' },
@@ -51,6 +92,20 @@ export function normalizeEquipment(raw) {
     if (!item) continue;
     if (item.slot && item.slot !== slotPool(slot)) continue;
     out[slot] = key;
+  }
+  return out;
+}
+
+// Equipment the character can actually wield right now. A rewire or a lost
+// level can leave an item equipped that no longer meets its requirement; the
+// screen shows it as illegal, and the run simply does not use it.
+export function legalEquipment(character) {
+  const equipment = normalizeEquipment(character?.equipment);
+  const attrs = characterAttributes(character);
+  const out = {};
+  for (const [slot, key] of Object.entries(equipment)) {
+    const item = itemInfo(key);
+    if (item && meetsRequirement(item, attrs)) out[slot] = key;
   }
   return out;
 }
@@ -153,7 +208,7 @@ export function characterCamp(character, relics = []) {
     level: character?.level || 1,
     xp: character?.xp || 0,
     items: [...(character?.items || [])],
-    equipment: normalizeEquipment(character?.equipment),
+    equipment: legalEquipment(character),
     upgrades: { ...(character?.upgrades || {}) },
     lattice: [...(character?.lattice || [])],
     treeMods: tree.mods,

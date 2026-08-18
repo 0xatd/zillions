@@ -184,6 +184,9 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
+      // The sheet edits the character object the profile owns, so persisting is
+      // all that is left to do once it has changed something.
+      onProfileDirty: () => this._saveProfile(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),

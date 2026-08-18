@@ -39,7 +39,7 @@ export const REWIRE_COST = 45;         // Salvage Alloy per point refunded
 // some sectors and a long walk from others.
 export const SECTORS = {
   bulwark: {
-    key: 'bulwark', name: 'Bulwark', icon: '🛡️', attr: 'frame', arc: 0,
+    key: 'bulwark', name: 'Bulwark', icon: '🛡️', attr: 'frame', color: '#8fa3c4', arc: 0,
     desc: 'Plate, mass and the refusal to fall over.',
     traces: [{ hp: 22 }, { hp: 16, regen: 0.4 }, { armor: 0.012 }],
     relays: [
@@ -50,7 +50,7 @@ export const SECTORS = {
     ],
   },
   butchery: {
-    key: 'butchery', name: 'Butchery', icon: '🪓', attr: 'frame', arc: 1,
+    key: 'butchery', name: 'Butchery', icon: '🪓', attr: 'frame', color: '#d07070', arc: 1,
     desc: 'Weight behind the swing. Everything here is about the hit landing harder.',
     traces: [{ dmg: 0.018 }, { dmg: 0.014, critMult: 0.02 }, { dmg: 0.012, hp: 8 }],
     relays: [
@@ -61,7 +61,7 @@ export const SECTORS = {
     ],
   },
   siegeworks: {
-    key: 'siegeworks', name: 'Siegeworks', icon: '🏗️', attr: 'frame', arc: 2,
+    key: 'siegeworks', name: 'Siegeworks', icon: '🏗️', attr: 'frame', color: '#c9a45e', arc: 2,
     desc: 'The colony and the army under your command, not the hand on the trigger.',
     traces: [{ troopDmg: 0.014 }, { towerDmg: 0.016 }, { buildingHp: 0.018 }, { income: 0.01 }],
     relays: [
@@ -72,7 +72,7 @@ export const SECTORS = {
     ],
   },
   swiftness: {
-    key: 'swiftness', name: 'Swiftness', icon: '🌬️', attr: 'reflex', arc: 3,
+    key: 'swiftness', name: 'Swiftness', icon: '🌬️', attr: 'reflex', color: '#7fd0a8', arc: 3,
     desc: 'Ground crossed and shots not taken.',
     traces: [{ speed: 0.008 }, { evadeChance: 0.008 }, { speed: 0.006, magnet: 0.15 }],
     relays: [
@@ -83,7 +83,7 @@ export const SECTORS = {
     ],
   },
   marksmanship: {
-    key: 'marksmanship', name: 'Marksmanship', icon: '🎯', attr: 'reflex', arc: 4,
+    key: 'marksmanship', name: 'Marksmanship', icon: '🎯', attr: 'reflex', color: '#7fb8e0', arc: 4,
     desc: 'Distance and the precision to use it.',
     traces: [{ range: 0.07 }, { critChance: 0.006 }, { critMult: 0.025 }],
     relays: [
@@ -94,7 +94,7 @@ export const SECTORS = {
     ],
   },
   fusillade: {
-    key: 'fusillade', name: 'Fusillade', icon: '🔥', attr: 'reflex', arc: 5,
+    key: 'fusillade', name: 'Fusillade', icon: '🔥', attr: 'reflex', color: '#e0956a', arc: 5,
     desc: 'Volume of fire. More trigger-pulls, faster.',
     traces: [{ rof: 0.012 }, { rof: 0.009, dmg: 0.006 }, { cdr: 0.008 }],
     relays: [
@@ -105,7 +105,7 @@ export const SECTORS = {
     ],
   },
   resonance: {
-    key: 'resonance', name: 'Resonance', icon: '📡', attr: 'signal', arc: 6,
+    key: 'resonance', name: 'Resonance', icon: '📡', attr: 'signal', color: '#a9c0e8', arc: 6,
     desc: 'What reaches past you — auras, recharge, the field you stand in.',
     traces: [{ auraR: 0.014 }, { cdr: 0.01 }, { auraR: 0.01, regen: 0.3 }],
     relays: [
@@ -116,7 +116,7 @@ export const SECTORS = {
     ],
   },
   thermics: {
-    key: 'thermics', name: 'Thermics', icon: '🔥', attr: 'signal', arc: 7,
+    key: 'thermics', name: 'Thermics', icon: '🔥', attr: 'signal', color: '#e08a4b', arc: 7,
     desc: 'Burn-through. Nothing here helps until something is on fire.',
     traces: [{ thermal: 0.016 }, { thermal: 0.012, dmg: 0.006 }, { shock: 0.014 }],
     relays: [
@@ -127,7 +127,7 @@ export const SECTORS = {
     ],
   },
   abyss: {
-    key: 'abyss', name: 'The Abyss', icon: '☲', attr: 'signal', arc: 8,
+    key: 'abyss', name: 'The Abyss', icon: '☲', attr: 'signal', color: '#a07fd0', arc: 8,
     desc: 'Void work. It unmakes armour and asks for something back.',
     traces: [{ void: 0.016 }, { void: 0.012, cdr: 0.006 }, { void: 0.01, hp: -6 }],
     relays: [

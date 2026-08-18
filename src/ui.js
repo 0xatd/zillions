@@ -8,14 +8,22 @@ const PORTRAITS = {
   danny: 'assets/heroes/portraits/danny_256.webp',
 };
 import {
-  PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, PACK_SLOTS,
+  PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
 } from './config.js';
 import { formatTime } from './utils.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
-import { MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel } from './mmo-characters.js';
+import {
+  MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
+  allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
+} from './mmo-characters.js';
+import {
+  buildLattice, frontier, pathTo, canAllocate, canDeallocate, latticePoints,
+  treeBonuses, originIdFor, SECTORS, DOCTRINES, rewireCost,
+} from './skilltree.js';
+import { EQUIP_SLOTS, slotPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES } from './items.js';
 
 export class UI {
   constructor(root, cb) {
@@ -132,8 +140,38 @@ export class UI {
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
+          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+        </div>
+
+        <div id="screen-character-sheet" class="sheet-screen hidden">
+          <div class="sheet-head">
+            <div class="sheet-ident"><span id="sheet-sigil" class="sheet-sigil"></span>
+              <div><h1 id="sheet-name">CHARACTER</h1><p id="sheet-sub"></p></div></div>
+            <div class="sheet-tabs">
+              <button class="sheet-tab sel" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
+            </div>
+            <button class="utilitybtn" id="sheet-close">← ROSTER</button>
+          </div>
+
+          <div id="sheet-panel-gear" class="sheet-panel">
+            <div class="gear-slots" id="gear-slots"></div>
+            <div class="gear-stash"><h3>STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
+            <div class="gear-stats"><h3>THE HERO THIS BUILDS</h3><div id="gear-stat-list"></div></div>
+          </div>
+
+          <div id="sheet-panel-lattice" class="sheet-panel hidden">
+            <div class="lattice-stage">
+              <canvas id="lattice-canvas"></canvas>
+              <div class="lattice-hud">
+                <span id="lattice-points"></span>
+                <input id="lattice-search" placeholder="Search the Lattice" autocomplete="off">
+                <button class="utilitybtn" id="lattice-rewire">REWIRE</button>
+              </div>
+            </div>
+            <aside class="lattice-detail" id="lattice-detail"></aside>
+          </div>
         </div>
 
         <div id="screen-character-create" class="character-create-screen hidden">
@@ -388,6 +426,11 @@ export class UI {
     q('#m-galaxy').onclick = () => this.cb.onGalaxyOpen && this.cb.onGalaxyOpen();
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => this._showCharacterCreator();
+    q('#m-character-sheet').onclick = () => this.showCharacterSheet();
+    q('#sheet-close').onclick = () => this._showScreen('main');
+    for (const tab of this.root.querySelectorAll('.sheet-tab')) {
+      tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
+    }
     q('#creator-cancel').onclick = () => this._showScreen('main');
     q('#character-create-form').onsubmit = (event) => {
       event.preventDefault();
@@ -757,7 +800,7 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'character-create', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -890,7 +933,7 @@ export class UI {
     }
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
     const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
-    const gear = (character.items || []).map((itemKey) => ITEMS[itemKey]).filter(Boolean);
+    const gear = (character.items || []).map((itemKey) => itemInfo(itemKey)).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
       row.classList.toggle('sel', row.dataset.id === character.id);
     }
@@ -904,6 +947,431 @@ export class UI {
     this.root.querySelector('#character-gear').innerHTML = gear.length
       ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
       : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
+  }
+
+  // ----- the character sheet: equipment and the Lattice -----
+  //
+  // Both halves read and write the SAME character object the profile owns, and
+  // every mutation goes through the model's own legality rules in
+  // `mmo-characters.js` — the screen never decides what a legal build is.
+
+  _sheetCharacter() {
+    const characters = this._profile?.mmoCharacters || [];
+    return characters.find((entry) => entry.id === this._profile?.mmoCharacterId) || characters[0] || null;
+  }
+
+  _sheetChanged() {
+    this.cb.onProfileDirty && this.cb.onProfileDirty();
+    this._renderCharacterSheet();
+    this._renderSelectedCharacter();
+  }
+
+  showCharacterSheet(tab = null) {
+    if (!this._sheetCharacter()) return;
+    if (tab) this._sheetTab = tab;
+    this._sheetTab = this._sheetTab || 'gear';
+    this._showScreen('character-sheet');
+    this._renderCharacterSheet();
+  }
+
+  _renderCharacterSheet() {
+    const character = this._sheetCharacter();
+    if (!character) return;
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const budget = latticePoints(character.level, character.questPoints);
+    const spent = (character.lattice || []).length;
+
+    this.root.querySelector('#sheet-sigil').textContent = klass.icon;
+    this.root.querySelector('#sheet-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
+    this.root.querySelector('#sheet-sub').textContent =
+      `${klass.name} — ${klass.role} · ${budget - spent} of ${budget} Lattice points unspent`;
+
+    for (const button of this.root.querySelectorAll('.sheet-tab')) {
+      button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
+    }
+    this.root.querySelector('#sheet-panel-gear').classList.toggle('hidden', this._sheetTab !== 'gear');
+    this.root.querySelector('#sheet-panel-lattice').classList.toggle('hidden', this._sheetTab !== 'lattice');
+
+    if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    else this._renderLatticePanel(character);
+  }
+
+  // What a character is wearing, what is in the stash, and what the two add up
+  // to. The totals are the same call the simulation makes, so the screen can
+  // never disagree with the battlefield.
+  _renderGearPanel(character) {
+    const slots = this.root.querySelector('#gear-slots');
+    const attrs = this._sheetAttributes(character);
+    const label = { weapon: 'WEAPON', offhand: 'OFF-HAND', armor: 'ARMOUR', implant1: 'IMPLANT I', implant2: 'IMPLANT II' };
+    slots.innerHTML = EQUIP_SLOTS.map((slot) => {
+      const key = (character.equipment || {})[slot];
+      const item = key ? itemInfo(key) : null;
+      if (!item) {
+        return `<button class="gear-slot empty" data-slot="${slot}"><span class="gear-slot-label">${label[slot]}</span>
+          <span class="gear-slot-name">— empty —</span></button>`;
+      }
+      const legal = meetsRequirement(item, attrs);
+      return `<button class="gear-slot${legal ? '' : ' illegal'}" data-slot="${slot}" style="--rarity:${item.rarityColor}">
+        <span class="gear-slot-label">${label[slot]}</span>
+        <span class="gear-slot-name">${item.icon} ${item.name}</span>
+        <span class="gear-slot-lines">${itemLines(item).slice(0, 4).map((l) => `<i>${l}</i>`).join('')}</span>
+        ${legal ? '' : `<span class="gear-slot-req">REQUIRES ${requirementText(item)}</span>`}
+      </button>`;
+    }).join('');
+    for (const button of slots.querySelectorAll('.gear-slot')) {
+      button.onclick = () => this._unequip(character, button.dataset.slot);
+    }
+
+    const stash = (character.items || []);
+    this.root.querySelector('#gear-stash-count').textContent = `${stash.length}/${STASH_SLOTS}`;
+    const list = this.root.querySelector('#gear-stash-list');
+    list.innerHTML = stash.length
+      ? stash.map((key, index) => {
+        const item = itemInfo(key);
+        if (!item) return '';
+        const legal = meetsRequirement(item, attrs);
+        const wearable = !!item.slot;
+        return `<button class="stash-item${legal ? '' : ' illegal'}${wearable ? '' : ' fixed'}" data-index="${index}"
+          style="--rarity:${item.rarityColor}" title="${itemLines(item).join(' · ') || item.desc || ''}">
+          <span>${item.icon} ${item.name}</span>
+          <small>${item.ilvl ? `i${item.ilvl} ` : ''}${item.rarityName}${legal || !item.req ? '' : ` · needs ${requirementText(item)}`}</small>
+        </button>`;
+      }).join('')
+      : '<span class="empty-gear">Nothing recovered yet. The frontier is hiding it.</span>';
+    for (const button of list.querySelectorAll('.stash-item')) {
+      button.onclick = () => this._equipFromStash(character, Number(button.dataset.index));
+    }
+
+    this._renderGearStats(character, attrs);
+  }
+
+  // Attributes come from gear and the Lattice together, and they are what gate
+  // a weapon base — so the panel has to sum both before it can say "illegal".
+  _sheetAttributes(character) {
+    return characterAttributes(character);
+  }
+
+  _renderGearStats(character, attrs) {
+    const equipped = EQUIP_SLOTS.map((slot) => (character.equipment || {})[slot]).filter(Boolean);
+    const gear = itemMods(equipped);
+    const tree = treeBonuses(character.lattice, character.classKey);
+    const total = {};
+    for (const [key, value] of Object.entries(gear)) total[key] = (total[key] || 0) + value;
+    for (const [key, value] of Object.entries(tree.mods)) total[key] = (total[key] || 0) + value;
+
+    const weaponKey = (character.equipment || {}).weapon;
+    const weapon = weaponKey ? itemInfo(weaponKey)?.weapon : null;
+    const rows = [];
+    rows.push(`<div class="gear-attr">${Object.values(ATTRIBUTES).map((a) =>
+      `<span>${a.icon} ${a.name} <b>${Math.round(attrs[a.key] || 0)}</b></span>`).join('')}</div>`);
+    if (weapon) {
+      const split = Object.entries(weapon.types || {}).filter(([, v]) => v > 0)
+        .map(([t, v]) => `${Math.round(v * 100)}% ${t}`).join(', ');
+      rows.push(`<div class="gear-weapon"><b>${Math.round(weapon.dmg)}</b> damage · <b>${weapon.rof.toFixed(2)}</b>/s · <b>${weapon.range.toFixed(1)}</b> range<small>${split}</small></div>`);
+    } else {
+      rows.push('<div class="gear-weapon"><b>Signature weapon</b><small>Your class fights with what it was written with.</small></div>');
+    }
+    const shown = itemLines({ mods: total, affixes: [] });
+    rows.push(shown.length ? `<ul>${shown.map((l) => `<li>${l}</li>`).join('')}</ul>`
+      : '<p class="empty-gear">No bonuses yet.</p>');
+    if (tree.doctrines.length) {
+      rows.push(`<div class="gear-doctrines"><h4>DOCTRINES</h4>${tree.doctrines.map((id) => {
+        const d = DOCTRINES[id];
+        return `<p><b>${d.icon} ${d.name}</b> — ${d.desc} <i>${d.cost}</i></p>`;
+      }).join('')}</div>`);
+    }
+    this.root.querySelector('#gear-stat-list').innerHTML = rows.join('');
+  }
+
+  _equipFromStash(character, index) {
+    const key = (character.items || [])[index];
+    const item = key ? itemInfo(key) : null;
+    if (!item || !item.slot) return;
+    // Implants have two sockets. Fill the empty one first, then replace the
+    // first — never silently drop the one already in.
+    let slot = item.slot;
+    if (slot === 'implant') {
+      slot = (character.equipment || {}).implant1 ? 'implant2' : 'implant1';
+      if ((character.equipment || {}).implant1 && (character.equipment || {}).implant2) slot = 'implant1';
+    }
+    if (!meetsRequirement(item, this._sheetAttributes(character))) {
+      this.showBanner(`✋ ${item.name} needs ${requirementText(item)}.`, '', 2600);
+      return;
+    }
+    const previous = (character.equipment || {})[slot];
+    character.equipment = { ...(character.equipment || {}), [slot]: key };
+    character.items = (character.items || []).filter((_, i) => i !== index);
+    if (previous) character.items.push(previous);
+    character.equipment = normalizeEquipment(character.equipment);
+    this._sheetChanged();
+  }
+
+  _unequip(character, slot) {
+    const key = (character.equipment || {})[slot];
+    if (!key) return;
+    if ((character.items || []).length >= STASH_SLOTS) {
+      this.showBanner('✋ The stash is full.', '', 2400);
+      return;
+    }
+    const next = { ...(character.equipment || {}) };
+    delete next[slot];
+    character.equipment = next;
+    character.items = [...(character.items || []), key];
+    this._sheetChanged();
+  }
+
+  // The Lattice screen. A pan-and-zoom canvas over the generated graph — 646
+  // nodes is far past what DOM elements would carry, and the tree is pure
+  // geometry, so a canvas is the honest tool.
+  _renderLatticePanel(character) {
+    const canvas = this.root.querySelector('#lattice-canvas');
+    const tree = buildLattice();
+    if (!this._latticeView) {
+      this._latticeView = { x: 0, y: 0, scale: 0.42, hover: null, selected: null, query: '' };
+      this._bindLatticeInput(canvas);
+    }
+    // Centre on the character's origin the first time they open it.
+    if (this._latticeOrigin !== character.id) {
+      this._latticeOrigin = character.id;
+      const origin = tree.byId.get(originIdFor(character.classKey));
+      if (origin) {
+        this._latticeView.x = -origin.x;
+        this._latticeView.y = -origin.y;
+      }
+      this._latticeView.selected = null;
+    }
+    const budget = latticePoints(character.level, character.questPoints);
+    const spent = (character.lattice || []).length;
+    this.root.querySelector('#lattice-points').innerHTML =
+      `<b>${budget - spent}</b> unspent · ${spent}/${budget} allocated`;
+    this._drawLattice(character);
+    this._renderLatticeDetail(character);
+  }
+
+  _bindLatticeInput(canvas) {
+    const view = this._latticeView;
+    const toWorld = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left - rect.width / 2) / view.scale - view.x,
+        y: (event.clientY - rect.top - rect.height / 2) / view.scale - view.y,
+      };
+    };
+    // Nearest node within a generous radius — the nodes are small on screen
+    // and a build should never be lost to a two-pixel miss.
+    const pick = (event) => {
+      const world = toWorld(event);
+      const tree = buildLattice();
+      let best = null, bd = (34 / view.scale) ** 2;
+      for (const node of tree.nodes) {
+        const d = (node.x - world.x) ** 2 + (node.y - world.y) ** 2;
+        if (d < bd) { bd = d; best = node; }
+      }
+      return best;
+    };
+
+    let dragging = false, moved = false, lastX = 0, lastY = 0;
+    canvas.onpointerdown = (event) => {
+      dragging = true; moved = false;
+      lastX = event.clientX; lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+    };
+    canvas.onpointermove = (event) => {
+      if (dragging) {
+        const dx = event.clientX - lastX, dy = event.clientY - lastY;
+        if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+        view.x += dx / view.scale;
+        view.y += dy / view.scale;
+        lastX = event.clientX; lastY = event.clientY;
+        this._drawLattice(this._sheetCharacter());
+        return;
+      }
+      const node = pick(event);
+      if (node?.id !== view.hover?.id) {
+        view.hover = node;
+        this._drawLattice(this._sheetCharacter());
+      }
+    };
+    canvas.onpointerup = (event) => {
+      dragging = false;
+      canvas.releasePointerCapture(event.pointerId);
+      if (moved) return;
+      const node = pick(event);
+      if (!node) return;
+      view.selected = node;
+      this._latticeClick(this._sheetCharacter(), node, event.shiftKey);
+    };
+    canvas.onwheel = (event) => {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
+      view.scale = Math.max(0.16, Math.min(2.4, view.scale * factor));
+      this._drawLattice(this._sheetCharacter());
+    };
+
+    const search = this.root.querySelector('#lattice-search');
+    search.oninput = () => {
+      view.query = search.value.trim().toLowerCase();
+      this._drawLattice(this._sheetCharacter());
+    };
+    this.root.querySelector('#lattice-rewire').onclick = () => {
+      const character = this._sheetCharacter();
+      if (!character || !(character.lattice || []).length) return;
+      const cost = rewireCost((character.lattice || []).length);
+      if (!window.confirm(`Rewire the whole Lattice for ${cost} Salvage Alloy? Every point comes back.`)) return;
+      const returned = rewireLattice(character);
+      this.showBanner(`⚡ Rewired — ${returned} points returned.`, '', 2600);
+      this._sheetChanged();
+    };
+  }
+
+  // A click buys the node, or the whole path to it. Shift removes. Both go
+  // through the model, so an illegal move is refused there, not here.
+  _latticeClick(character, node, remove) {
+    if (!character || node.kind === 'origin') return;
+    const owned = character.lattice || [];
+    if (remove || owned.includes(node.id)) {
+      if (!owned.includes(node.id)) return;
+      if (!deallocateLatticeNode(character, node.id)) {
+        this.showBanner('✋ Removing that would strand the rest of the build.', '', 2600);
+        return;
+      }
+      this._sheetChanged();
+      return;
+    }
+    const budget = latticePoints(character.level, character.questPoints);
+    const path = pathTo(owned, node.id, character.classKey) || [];
+    if (!path.length) return;
+    if (owned.length + path.length > budget) {
+      this.showBanner(`✋ That route costs ${path.length} points and you have ${budget - owned.length}.`, '', 2800);
+      return;
+    }
+    for (const id of path) allocateLatticeNode(character, id);
+    this._sheetChanged();
+  }
+
+  _drawLattice(character) {
+    const canvas = this.root.querySelector('#lattice-canvas');
+    if (!canvas || !character) return;
+    const view = this._latticeView;
+    const tree = buildLattice();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const width = canvas.clientWidth || 900, height = canvas.clientHeight || 620;
+    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(view.scale, view.scale);
+    ctx.translate(view.x, view.y);
+
+    const owned = new Set(character.lattice || []);
+    const originId = originIdFor(character.classKey);
+    const reachable = frontier(character.lattice, character.classKey);
+    const preview = view.hover && !owned.has(view.hover.id) && view.hover.kind !== 'origin'
+      ? new Set(pathTo(character.lattice, view.hover.id, character.classKey) || [])
+      : new Set();
+    const query = view.query;
+
+    // Edges first, so nodes sit on top of them.
+    ctx.lineWidth = 2 / view.scale;
+    for (const node of tree.nodes) {
+      for (const id of node.edges) {
+        if (id < node.id) continue;             // draw each edge once
+        const other = tree.byId.get(id);
+        if (!other) continue;
+        const bothOwned = (owned.has(node.id) || node.id === originId)
+          && (owned.has(id) || id === originId);
+        const onPath = preview.has(node.id) || preview.has(id);
+        ctx.strokeStyle = bothOwned ? 'rgba(240, 214, 140, 0.85)'
+          : onPath ? 'rgba(120, 200, 255, 0.7)'
+          : 'rgba(150, 160, 180, 0.16)';
+        ctx.beginPath();
+        ctx.moveTo(node.x, node.y);
+        ctx.lineTo(other.x, other.y);
+        ctx.stroke();
+      }
+    }
+
+    const RADIUS = { trace: 7, attribute: 9, relay: 14, doctrine: 20, origin: 22 };
+    for (const node of tree.nodes) {
+      const isOwned = owned.has(node.id) || node.id === originId;
+      const isOrigin = node.kind === 'origin';
+      const mine = isOrigin && node.id === originId;
+      if (isOrigin && !mine) continue;          // other classes' doors are not yours
+      const hit = query && node.name.toLowerCase().includes(query);
+      const r = RADIUS[node.kind] || 7;
+      const sector = SECTORS[node.sector];
+
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      // Owned nodes are gold, the buyable frontier is bright, and everything
+      // else is tinted by its sector so the nine territories read at a glance.
+      ctx.fillStyle = isOwned ? '#f0d68c'
+        : preview.has(node.id) ? '#79c8ff'
+        : reachable.has(node.id) ? 'rgba(220, 230, 246, 0.7)'
+        : sector ? this._sectorTint(sector.color, node.kind)
+        : 'rgba(120, 130, 150, 0.28)';
+      ctx.fill();
+      if (hit) {
+        ctx.strokeStyle = '#8ef0a0';
+        ctx.lineWidth = 4 / view.scale;
+        ctx.stroke();
+      } else if (node.kind === 'doctrine' || node.kind === 'relay') {
+        ctx.strokeStyle = isOwned ? 'rgba(255,255,255,0.75)' : 'rgba(200,210,230,0.35)';
+        ctx.lineWidth = 2 / view.scale;
+        ctx.stroke();
+      }
+      // Only the big nodes carry a glyph — traces would be unreadable soup.
+      if (node.kind === 'doctrine' || node.kind === 'origin' || node.kind === 'relay') {
+        ctx.fillStyle = isOwned ? '#1a1712' : 'rgba(230, 236, 246, 0.8)';
+        ctx.font = `${Math.round(r * 1.1)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.icon || '·', node.x, node.y);
+      }
+    }
+    ctx.restore();
+  }
+
+  // A sector's colour, dimmed by how minor the node is. Traces are almost
+  // background; relays and doctrines carry the sector's actual hue.
+  _sectorTint(hex, kind) {
+    const alpha = kind === 'doctrine' ? 0.95 : kind === 'relay' ? 0.75 : kind === 'attribute' ? 0.45 : 0.3;
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  _renderLatticeDetail(character) {
+    const box = this.root.querySelector('#lattice-detail');
+    const node = this._latticeView?.selected || this._latticeView?.hover;
+    if (!node) {
+      const tree = treeBonuses(character.lattice, character.classKey);
+      const lines = itemLines({ mods: tree.mods, affixes: [] });
+      box.innerHTML = `<h3>THE LATTICE</h3>
+        <p class="lattice-blurb">One tree, thirteen doors into it. Your class decides where you start, not what you can become.</p>
+        <p class="lattice-blurb"><b>Click</b> a node to buy the whole route to it. <b>Shift-click</b> to sell one back. Drag to pan, scroll to zoom.</p>
+        <h4>THIS BUILD</h4>
+        ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : '<p class="empty-gear">Nothing allocated yet.</p>'}`;
+      return;
+    }
+    const owned = (character.lattice || []).includes(node.id);
+    const sector = SECTORS[node.sector];
+    const path = owned ? [] : (pathTo(character.lattice, node.id, character.classKey) || []);
+    const doctrine = node.doctrine ? DOCTRINES[node.doctrine] : null;
+    const lines = itemLines({ mods: node.mods || {}, affixes: [] });
+    box.innerHTML = `
+      <h3>${node.icon && node.icon !== '·' ? `${node.icon} ` : ''}${node.name}</h3>
+      <p class="lattice-kind">${node.kind.toUpperCase()}${sector ? ` · ${sector.name}` : ''}</p>
+      ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
+      ${doctrine ? `<p class="lattice-doctrine">${doctrine.desc}</p><p class="lattice-cost">${doctrine.cost}</p>` : ''}
+      ${sector ? `<p class="lattice-blurb">${sector.desc}</p>` : ''}
+      <p class="lattice-route">${owned ? 'ALLOCATED — shift-click to sell back'
+        : path.length ? `${path.length} point${path.length === 1 ? '' : 's'} to reach`
+        : 'No route from your build'}</p>`;
   }
 
   // ----- overworld: the campaign map behind the war-council overlay -----
@@ -1456,7 +1924,7 @@ export class UI {
       if (this._itemsKey !== itemsKey) {
         this._itemsKey = itemsKey;
         q('#a-items').innerHTML = (h.items || [])
-          .map((k) => (ITEMS[k] ? `<span class="hitem" title="${ITEMS[k].name} — ${ITEMS[k].desc}">${ITEMS[k].icon}</span>` : ''))
+          .map((k) => { const it = itemInfo(k); return it ? `<span class="hitem" title="${it.name} — ${it.desc || itemLines(it).join(', ')}">${it.icon}</span>` : ''; })
           .join('');
       }
 
@@ -1468,7 +1936,7 @@ export class UI {
         const slots = [];
         for (let i = 0; i < PACK_SLOTS; i++) {
           const key = (h.pack || [])[i];
-          const it = key ? ITEMS[key] : null;
+          const it = key ? itemInfo(key) : null;
           slots.push(it
             ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
             : '<span class="pslot"></span>');
@@ -1635,7 +2103,7 @@ export class UI {
     const row = document.createElement('div');
     row.className = 'branchrow';
     offer.forEach((k, i) => {
-      const it = ITEMS[k];
+      const it = itemInfo(k);
       if (!it) return;
       const b = document.createElement('button');
       b.className = 'branchbtn blessbtn';
@@ -1786,7 +2254,7 @@ export class UI {
       }
       const items = ch.items || [];
       badge.textContent = `⭐ Lv ${ch.level}${items.length ? ` · ${items.length} item${items.length > 1 ? 's' : ''}` : ''}`;
-      badge.title = items.map((k) => ITEMS[k] ? `${ITEMS[k].icon} ${ITEMS[k].name}` : k).join('\n');
+      badge.title = items.map((k) => { const it = itemInfo(k); return it ? `${it.icon} ${it.name}` : k; }).join('\n');
     }
   }
 
@@ -2035,7 +2503,7 @@ export class UI {
     this._showScreen(help ? 'help' : 'pause');
     const note = this.root.querySelector('#p-note');
     const questHtml = (quests || []).map((q) => {
-      const it = ITEMS[q.reward];
+      const it = itemInfo(q.reward);
       return `<div class="questrow ${q.claimed ? 'done' : q.done ? 'done' : ''}">${q.claimed ? '🏅' : q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}${it ? ` <span class="qreward">${it.icon} ${it.name}</span>` : ''}</div>`;
     }).join('');
     note.innerHTML = (questHtml ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questHtml}</div>` : '')
@@ -2055,11 +2523,11 @@ export class UI {
     const survival = mode === 'survival';
     const labyrinth = mode === 'labyrinth';
     const questRows = (extra && extra.quests || []).map((q) => {
-      const it = ITEMS[q.reward];
+      const it = itemInfo(q.reward);
       return `<div class="questrow ${q.done ? 'done' : ''}">${q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}
         <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
     }).join('');
-    const grants = (extra && extra.grants || []).map((k) => ITEMS[k]).filter(Boolean);
+    const grants = (extra && extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
