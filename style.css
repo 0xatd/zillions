@@ -1461,9 +1461,38 @@ body::after {
 }
 .character-sheet-open:hover { background: rgba(40, 50, 68, 0.95); }
 
+/* Narrow screens: one column, and the whole sheet scrolls as a page. The
+   Lattice canvas has to be given a real height here — in a scrolling column a
+   `1fr` row collapses to nothing and the tree disappears entirely. */
 @media (max-width: 1100px) {
-  #sheet-panel-gear { grid-template-columns: 1fr; }
-  #sheet-panel-lattice { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .sheet-screen {
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 16px 14px 18px; gap: 12px;
+    overflow-y: auto; overflow-x: hidden;
+  }
+  .sheet-head { flex-wrap: wrap; gap: 12px; }
+  .sheet-ident { flex: 1 1 100%; }
+  .sheet-head h1 { font-size: 18px; }
+  .sheet-tabs { flex: 1 1 auto; }
+  .sheet-tab { flex: 1; padding: 9px 10px; }
+  #sheet-close { flex: 0 0 auto; }
+
+  #sheet-panel-gear { grid-template-columns: 1fr; gap: 12px; }
+  .gear-slots, .gear-stash, .gear-stats { overflow: visible; max-height: none; }
+
+  #sheet-panel-lattice { grid-template-columns: 1fr; grid-template-rows: auto auto; gap: 12px; }
+  .lattice-stage { height: 58vh; min-height: 320px; }
+  .lattice-hud { flex-wrap: wrap; gap: 8px; }
+  #lattice-search { max-width: none; flex: 1 1 100%; order: 3; }
+  .lattice-detail { max-height: none; }
+}
+
+@media (max-width: 520px) {
+  .sheet-sigil { width: 44px; height: 44px; font-size: 22px; }
+  .sheet-head h1 { font-size: 16px; }
+  .sheet-head p { font-size: 11px; }
+  .sheet-tab { font-size: 10px; letter-spacing: 0.06em; }
+  .lattice-stage { height: 52vh; }
 }
 .lattice-pin { margin-top: 14px; display: flex; gap: 6px; flex-wrap: wrap; }
 .lattice-pin h4 { width: 100%; margin: 0 0 4px; }

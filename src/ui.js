@@ -20,11 +20,21 @@ import {
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet,
 } from './mmo-characters.js';
+import { loadMeta, charge, META_CURRENCY } from './meta.js';
 import {
   buildLattice, frontier, pathTo, canAllocate, canDeallocate, latticePoints,
   treeBonuses, originIdFor, SECTORS, DOCTRINES, rewireCost,
 } from './skilltree.js';
-import { EQUIP_SLOTS, slotPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES } from './items.js';
+import {
+  EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
+} from './items.js';
+
+// A player-authored name is the only free text in this UI. Names are written
+// with textContent wherever possible; where markup has to be built, they go
+// through here.
+const escapeHtml = (value) => String(value == null ? '' : value)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export class UI {
   constructor(root, cb) {
@@ -906,7 +916,7 @@ export class UI {
       const button = document.createElement('button');
       button.className = 'character-row';
       button.dataset.id = character.id;
-      button.innerHTML = `<span style="--character-color:${appearance.color}">${klass.icon}</span><span><b>${character.name}</b><small>${klass.name} · Level ${character.level || 1}</small></span>`;
+      button.innerHTML = `<span style="--character-color:${appearance.color}">${klass.icon}</span><span><b>${escapeHtml(character.name)}</b><small>${klass.name} · Level ${character.level || 1}</small></span>`;
       button.onclick = () => {
         if (this.cb.onCharacterSelect) this.cb.onCharacterSelect(character.id);
         this.selectedHero = character.proxyHero || klass.proxy;
@@ -1095,11 +1105,12 @@ export class UI {
     if (!item || !item.slot) return;
     // Implants have two sockets. Fill the empty one first, then replace the
     // first — never silently drop the one already in.
-    let slot = item.slot;
-    if (slot === 'implant') {
-      slot = (character.equipment || {}).implant1 ? 'implant2' : 'implant1';
-      if ((character.equipment || {}).implant1 && (character.equipment || {}).implant2) slot = 'implant1';
-    }
+    // Every slot the item could go in, nearest-empty-first. Without this the
+    // second weapon set was unreachable: a weapon always landed in slot one,
+    // so hasSecondSet() was never true and X always denied.
+    const candidates = slotsForPool(item.slot);
+    const equipment = character.equipment || {};
+    const slot = candidates.find((s) => !equipment[s]) || candidates[0];
     if (!meetsRequirement(item, this._sheetAttributes(character))) {
       this.showBanner(`✋ ${item.name} needs ${requirementText(item)}.`, '', 2600);
       return;
@@ -1150,6 +1161,9 @@ export class UI {
     const spent = (character.lattice || []).length;
     this.root.querySelector('#lattice-points').innerHTML =
       `<b>${budget - spent}</b> unspent · ${spent}/${budget} allocated`;
+    const rewire = this.root.querySelector('#lattice-rewire');
+    rewire.disabled = !spent;
+    rewire.textContent = spent ? `REWIRE · ${rewireCost(spent)} ${META_CURRENCY.short}` : 'REWIRE';
     this._drawLattice(character);
     this._renderLatticeDetail(character);
   }
@@ -1223,9 +1237,20 @@ export class UI {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
       const cost = rewireCost((character.lattice || []).length);
-      if (!window.confirm(`Rewire the whole Lattice for ${cost} Salvage Alloy? Every point comes back.`)) return;
+      const held = loadMeta().currency;
+      if (held < cost) {
+        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${held}.`, '', 3200);
+        return;
+      }
+      if (!window.confirm(`Rewire the whole Lattice for ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
+      // Charge first. A refused charge must not hand the points back.
+      const paid = charge(cost);
+      if (!paid.ok) {
+        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`, '', 3200);
+        return;
+      }
       const returned = rewireLattice(character);
-      this.showBanner(`⚡ Rewired — ${returned} points returned.`, '', 2600);
+      this.showBanner(`⚡ Rewired — ${returned} points returned for ${cost} ${META_CURRENCY.short}.`, '', 2800);
       this._sheetChanged();
     };
   }

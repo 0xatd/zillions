@@ -61,4 +61,35 @@ assert.match(mainSource, /const showTitleCharacter = !!selectedMmoCharacter\(thi
 assert.doesNotMatch(mainSource, /const heroKey = this\.profile\.lastHero \|\| this\.ui\.selectedHero/,
   'the title stage must not fall back to Custom Games heroes');
 
+
+// A profile blob is untrusted input. Hostile keys must normalise away rather
+// than resolving through Object.prototype or throwing.
+{
+  const hostile = {
+    id: 'mmo_bad', name: 'x'.repeat(500), classKey: 'recon', level: 9e9,
+    items: [null, 42, {}, '__proto__', 'constructor', 'scatter_mk1:zz:999:9'],
+    equipment: { weapon: '__proto__', armor: 42, nope: 'x', implant1: 'constructor' },
+    lattice: ['__proto__', 'constructor', 'o_recon', 99],
+    latticeSets: { __proto__: 1, constructor: 0 },
+    activeSet: 99, questPoints: -5, upgrades: null, stats: null,
+  };
+  const profile = { mmoCharacters: [hostile], mmoCharacterId: 'mmo_bad' };
+  normalizeMmoCharacters(profile);
+  assert.equal(hostile.level, 100, 'level must clamp');
+  assert.deepEqual(hostile.lattice, [], 'hostile allocation must normalise away');
+  assert.equal(Object.keys(hostile.equipment).length, 0, 'hostile equipment must normalise away');
+  assert.equal(hostile.activeSet, 0, 'active set must clamp to a real set');
+  assert.equal(hostile.questPoints, 0, 'quest points must floor at zero');
+  assert.equal({}.polluted, undefined, 'normalizing must not pollute Object.prototype');
+  const camp = characterCamp(hostile);
+  assert.ok(Array.isArray(camp.treeSets) && camp.treeSets.length === 2, 'camp must still resolve');
+  assert.ok(camp.items.every((k) => typeof k === 'string'), 'camp items must all be real keys');
+
+  // A class key that only exists on Object.prototype is not a class.
+  const fake = { id: 'x', name: 'x', classKey: 'constructor', level: 5 };
+  const p2 = { mmoCharacters: [fake], mmoCharacterId: 'x' };
+  normalizeMmoCharacters(p2);
+  assert.equal(p2.mmoCharacters.length, 0, 'a prototype key was accepted as a class');
+}
+
 console.log('MMO character check passed: 13 classes, persistent Vanguard, level-100 cap, loot extraction');

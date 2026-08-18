@@ -337,6 +337,26 @@ export function applySpend(meta, nodeId) {
   return { ok: true, reason: 'bought', meta: state, node, currency: state.currency };
 }
 
+// A flat charge against the currency, for costs that are not tree nodes — the
+// Lattice rewire is the first. Refuses rather than going negative.
+export function applyCharge(meta, amount) {
+  const state = normalizeMeta(meta);
+  const cost = Math.max(0, Math.floor(Number(amount) || 0));
+  if (state.currency < cost) {
+    return { ok: false, reason: 'poor', meta: state, short: cost - state.currency };
+  }
+  state.currency -= cost;
+  state.lifetime.spent += cost;
+  return { ok: true, reason: 'charged', meta: state, currency: state.currency, cost };
+}
+
+// Persisting charge. Nothing is written when it is refused.
+export function charge(amount, { now = 0 } = {}) {
+  const result = applyCharge(loadMeta(), amount);
+  if (result.ok) saveMeta(result.meta, now);
+  return result;
+}
+
 // Persisting spend. Nothing is written when the purchase is refused.
 export function spend(nodeId, { now = 0 } = {}) {
   const result = applySpend(loadMeta(), nodeId);

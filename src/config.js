@@ -8,7 +8,7 @@ import { makeRNG } from './utils.js';
 import {
   MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
   rollLootKey, rollLootKeyForSlot, worldItemLevel,
-  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE, setSlots, WEAPON_SETS,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE, setSlots, WEAPON_SETS, equippedKeys, hasOwn,
 } from './items.js';
 
 export const MAP_SIZE = 120;
@@ -647,7 +647,7 @@ export const MOD_KEYS = GEAR_MOD_KEYS;
 export {
   rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines,
   DAMAGE_TYPES, DAMAGE_TYPE_INFO, RESIST_CAP, VOID_ARMOR_SHARE, ATTRIBUTES,
-  WEAPON_SETS, setSlots, EQUIP_SLOTS,
+  WEAPON_SETS, setSlots, EQUIP_SLOTS, equippedKeys, slotsForPool,
 } from './items.js';
 
 // Two kinds of key reach this function and both are legal:
@@ -711,11 +711,18 @@ export function itemMods(items) {
       for (const k of MOD_KEYS) if (rolled.mods[k]) m[k] += rolled.mods[k];
       continue;
     }
+    if (!hasOwn(ITEMS, key)) continue;
     const it = ITEMS[key];
-    if (!it) continue;
     for (const k of MOD_KEYS) if (it[k]) m[k] += it[k];
   }
   return m;
+}
+
+// An authored item's stat keys, and nothing else.
+function authoredMods(it) {
+  const out = {};
+  for (const key of MOD_KEYS) if (it[key]) out[key] = it[key];
+  return out;
 }
 
 // One accessor for "what is this key", whichever kind it is. The UI and the
@@ -723,12 +730,14 @@ export function itemMods(items) {
 export function itemInfo(key) {
   const rolled = isRolledKey(key) ? resolveItem(key) : null;
   if (rolled) return rolled;
+  if (!hasOwn(ITEMS, key)) return null;
   const it = ITEMS[key];
-  if (!it) return null;
   return {
     key, baseKey: key, base: it, slot: it.slot || null, name: it.name, icon: it.icon,
     ilvl: 0, rarity: 4, rarityName: 'Signature', rarityColor: '#d8a13a',
-    req: null, affixes: [], mods: it, local: {}, weapon: null, rolled: false, desc: it.desc,
+    // Only the stat keys. Handing the whole definition over as a mod bag made
+    // itemLines() emit "+Oath Blade name" and "+🗡️ icon" into every tooltip.
+    req: null, affixes: [], mods: authoredMods(it), local: {}, weapon: null, rolled: false, desc: it.desc,
   };
 }
 

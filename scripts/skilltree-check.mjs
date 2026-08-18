@@ -7,6 +7,7 @@ import {
   treeBonuses, latticePoints, originIdFor, latticeNode, rewireCost,
 } from '../src/skilltree.js';
 import { MOD_KEYS } from '../src/items.js';
+import { applyCharge, emptyMeta } from '../src/meta.js';
 import { Game } from '../src/game.js';
 import { TILE } from '../src/config.js';
 import { MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, characterCamp,
@@ -271,6 +272,40 @@ for (const [id, doctrine] of Object.entries(DOCTRINES)) {
 
   // A hero with no tree is untouched, which is what lets this ship dark.
   ok(Math.abs(bareDmg - bare.heroDmg(bare.heroes[0])) < 1e-9, 'a treeless hero moved');
+}
+
+
+// ---------- regression: doctrine numbers are on the right scale ----------
+// `hp` is flat and `armor` is an absolute fraction. A doctrine written as if
+// they were percentages either costs nothing or costs everything.
+for (const [id, doctrine] of Object.entries(DOCTRINES)) {
+  for (const [key, value] of Object.entries(doctrine.mods || {})) {
+    if (key === 'hp') {
+      ok(Math.abs(value) >= 1 || value === 0,
+        `${id}: hp is flat, so ${value} is a rounding error rather than a cost`);
+    }
+    if (key === 'armor' || key === 'evadeChance' || key === 'critChance') {
+      ok(Math.abs(value) <= 0.5, `${id}: ${key} ${value} is an absolute fraction and far too large`);
+    }
+  }
+}
+// The two doctrines that were mis-scaled, pinned by name.
+ok(DOCTRINES.glass_lattice.mods.hp <= -50, 'Glass Lattice must cost real health');
+ok(Math.abs(DOCTRINES.forced_march.mods.armor) <= 0.15, 'Forced March must not wipe all damage reduction');
+
+// ---------- regression: rewiring is paid for ----------
+// The confirm dialog quoted a Salvage Alloy price that was never charged.
+{
+  const meta = emptyMeta();
+  meta.currency = 500;
+  const poor = applyCharge(meta, 900);
+  ok(!poor.ok && poor.meta.currency === 500, 'an unaffordable charge went through');
+  const paid = applyCharge(meta, 200);
+  ok(paid.ok && paid.meta.currency === 300, `a charge did not deduct (${paid.meta.currency})`);
+  ok(paid.meta.lifetime.spent === 200, 'a charge did not record lifetime spend');
+  ok(applyCharge(meta, 0).ok, 'a zero charge was refused');
+  ok(applyCharge(meta, -50).meta.currency === 500, 'a negative charge added currency');
+  ok(rewireCost(20) > 0, 'rewiring is free');
 }
 
 if (failures) {

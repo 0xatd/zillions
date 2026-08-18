@@ -14,6 +14,7 @@ import {
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
   NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor, hasSecondSet,
+  equippedKeys,
   WEAPON_SWAP_CD,
   rollLootKey, worldItemLevel,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
@@ -2123,14 +2124,19 @@ export class Game {
     if (h.swapCd > 0) { this.emit({ type: 'deny' }); return; }
     h.activeSet = h.activeSet === 1 ? 0 : 1;
     h.swapCd = WEAPON_SWAP_CD;
-    this._refreshHeroDerived(h);
+    // The sheathed set's global mods go away with it, so the whole bag is
+    // rebuilt rather than just the derived stats.
+    this._refreshPackMods(h);
     const w = h.weapon;
     this.msg(`🔁 ${h.def.name} draws ${w && w.name ? w.name : 'the other weapon'}.`, 'info');
     this.emit({ type: 'swapset', x: h.x, z: h.z, set: h.activeSet, heroKey: h.key });
   }
 
   _refreshPackMods(h) {
-    h.itemMods = itemMods([...(h.items || []), ...(h.pack || []), ...(h.blessings || [])]);
+    h.itemMods = itemMods([
+      ...(h.items || []), ...(h.pack || []), ...(h.blessings || []),
+      ...equippedKeys(h.equipment, h.activeSet || 0),
+    ]);
     this._refreshHeroDerived(h);
   }
 
@@ -2247,14 +2253,19 @@ export class Game {
     // stats the moment it goes in, and it is the only gear that grows during a
     // survival run.
     const pack = camp && camp.pack ? [...camp.pack] : [];
-    const itemModsOnly = itemMods([...items, ...pack]);
+    const equipmentIn = camp && camp.equipment ? { ...camp.equipment } : {};
+    const setIn = camp && camp.activeSet === 1 ? 1 : 0;
+    // Worn gear counts. Before this, equipment reached the hero only through
+    // the weapon, so wearing armour was strictly worse than leaving it in the
+    // stash — the stash was being summed and the body was not.
+    const itemModsOnly = itemMods([...items, ...pack, ...equippedKeys(equipmentIn, setIn)]);
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
     // What this hero is swinging. An empty equipment map resolves to the
     // hero's signature weapon, which carries that hero's original numbers —
     // so an unequipped hero fights exactly as they did before weapons existed.
-    const equipment = camp && camp.equipment ? { ...camp.equipment } : {};
-    const weapon = weaponFor(key, equipment, camp && camp.activeSet === 1 ? 1 : 0);
+    const equipment = equipmentIn;
+    const weapon = weaponFor(key, equipment, setIn);
     // The Lattice arrives already resolved: a flat bag of numbers and a list of
     // rule flags. Nothing here queries a tree node, now or during the run.
     const treeMods = (camp && camp.treeMods) || null;
@@ -2973,7 +2984,7 @@ export class Game {
   // Armour and per-type resistance, resolved together. Void is the exception
   // the type table promises: it ignores most armour, which is what makes a
   // psi-focus worth carrying into a plated horde.
-  _resolveTypedDamage(zb, dmg, types) {
+  _resolveTypedDamage(zb, dmg, types, mods = null) {
     if (!types) {
       // The pre-types path, kept exact.
       return zb.armor ? dmg * (1 - zb.armor) : dmg;
@@ -2990,6 +3001,11 @@ export class Game {
       const share = types[type] || 0;
       if (!share) continue;
       let part = dmg * share;
+      // Increased damage of one type, from gear and the Lattice. This is what
+      // the Thermics and Abyss sectors and the elemental cores actually do —
+      // without it two whole sectors were inert.
+      const increased = mods ? (mods[type] || 0) : 0;
+      if (increased) part *= 1 + increased;
       const armor = type === 'void' ? (zb.armor || 0) * voidArmor : (zb.armor || 0);
       if (armor) part *= 1 - armor;
       let r = resist ? (resist[type] || 0) : 0;
@@ -3004,9 +3020,9 @@ export class Game {
   // nothing and the hit is pure kinetic against no resistance, which is
   // exactly how every damage source behaved before types existed. That default
   // is why adding this axis moved no balance number.
-  damageZombie(zb, dmg, sx, sz, types = null) {
+  damageZombie(zb, dmg, sx, sz, types = null, mods = null) {
     if (zb.hp <= 0) return;
-    dmg = this._resolveTypedDamage(zb, dmg, types);
+    dmg = this._resolveTypedDamage(zb, dmg, types, mods);
     zb.hp -= dmg;
     const bcfg = zb.cfg;
     if (zb.boss && bcfg && bcfg.enrage && !zb.enraged && zb.hp < zb.maxHp * bcfg.enrage) {
@@ -3093,7 +3109,9 @@ export class Game {
       return;
     }
     const armor = (u.def.armor || 0) + ((mods && mods.armor) || 0) + (u.fortifyArmor || 0) + (u.auraArmor || 0);
-    if (armor > 0) dmg *= Math.max(0.25, 1 - armor);
+    // Negative armour has to bite. Gating on `armor > 0` silently discarded
+    // every doctrine drawback that traded armour away, making them free.
+    if (armor) dmg *= Math.max(0.25, Math.min(1.75, 1 - armor));
     if (u.shieldHp > 0 && dmg > 0) {
       const absorb = Math.min(u.shieldHp, dmg);
       u.shieldHp -= absorb;
@@ -3665,7 +3683,15 @@ export class Game {
       const hitDmg = () => {
         let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
         const critChance = (u.hero ? (w.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
-        if (critChance > 0 && this.rng() < critChance) dmg *= (u.hero && w.critMult) || 1.75;
+        if (critChance > 0 && this.rng() < critChance) {
+          // Critical damage comes from the weapon AND from everything the hero
+          // is carrying or has allocated. Reading only the weapon made every
+          // relay and doctrine that grants critical damage do nothing.
+          const critMult = u.hero
+            ? (w.critMult || 1.75) + ((u.mods && u.mods.critMult) || 0)
+            : 1.75;
+          dmg *= critMult;
+        }
         return dmg;
       };
       if (u.target && !u.target.dead && u.cooldown <= 0) {
@@ -3674,13 +3700,13 @@ export class Game {
           u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = hitDmg();
-          this.damageZombie(zb, dmg, u.x, u.z, w.types || null);
+          this.damageZombie(zb, dmg, u.x, u.z, w.types || null, u.hero ? u.mods : null);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (w.splash) {
             const s2 = w.splash * w.splash;
             for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, w.splash)) {
               if (zb2 === zb || zb2.dead) continue;
-              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z, w.types || null);
+              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z, w.types || null, u.hero ? u.mods : null);
             }
           }
           const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;

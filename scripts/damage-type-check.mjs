@@ -111,6 +111,59 @@ for (const [key, def] of Object.entries(ZOMBIES)) {
     'a signature weapon no longer deals its pre-types damage');
 }
 
+
+// ---------- regression: global damage-type mods are read ----------
+// The Thermics and Abyss sectors and the elemental implants all grant
+// increased damage of one type. Nothing read those keys, so two whole Lattice
+// sectors and three implants were inert.
+{
+  const t = target(0);
+  const plain = hit(t, 100, { thermal: 1 });
+  const boosted = game._resolveTypedDamage(t, 100, { thermal: 1 }, { thermal: 0.5 });
+  ok(boosted > plain, 'increased thermal damage did nothing');
+  ok(near(boosted, 150), `increased thermal damage is wrong: ${boosted}`);
+  // It must only touch its own type.
+  ok(near(game._resolveTypedDamage(t, 100, { kinetic: 1 }, { thermal: 0.5 }), 100),
+    'a thermal mod changed kinetic damage');
+  // And it scales only its share of a split weapon.
+  ok(near(game._resolveTypedDamage(t, 100, { thermal: 0.5, kinetic: 0.5 }, { thermal: 1 }), 150),
+    'increased damage did not scale by share');
+  // No mods bag behaves exactly as before.
+  ok(near(game._resolveTypedDamage(t, 100, { thermal: 1 }, null), plain), 'passing no mods changed the result');
+}
+
+// ---------- regression: negative armour is a real drawback ----------
+// _damageUnit gated on `armor > 0`, so any doctrine that traded armour away
+// had its drawback silently discarded and was strictly free.
+{
+  const hero = game.heroes[0];
+  const baseHp = hero.hp;
+  hero.mods.armor = -0.5;
+  game._damageUnit(hero, 100);
+  const withNegative = baseHp - hero.hp;
+  ok(withNegative > 100, `negative armour did not increase damage taken (${withNegative})`);
+
+  hero.hp = baseHp;
+  hero.mods.armor = 0;
+  game._damageUnit(hero, 100);
+  const neutral = baseHp - hero.hp;
+  ok(near(neutral, 100), `zero armour changed the damage taken (${neutral})`);
+
+  hero.hp = baseHp;
+  hero.mods.armor = 0.5;
+  game._damageUnit(hero, 100);
+  ok(baseHp - hero.hp < 100, 'positive armour stopped reducing damage');
+
+  // Both directions stay clamped, so no build becomes untouchable or paper.
+  hero.hp = baseHp; hero.mods.armor = -50;
+  game._damageUnit(hero, 100);
+  ok(baseHp - hero.hp <= 175.0001, 'negative armour is not clamped');
+  hero.hp = baseHp; hero.mods.armor = 50;
+  game._damageUnit(hero, 100);
+  ok(baseHp - hero.hp >= 24.9999, 'positive armour is not clamped');
+  hero.mods.armor = 0;
+}
+
 if (failures) {
   console.error(`\ndamage-type-check: ${failures} failure(s)`);
   process.exit(1);

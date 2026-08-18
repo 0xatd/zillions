@@ -56,4 +56,19 @@ for (const match of ui.matchAll(/ITEMS\[([^\]]+)\]/g)) {
 assert.match(css, /\.sheet-screen \{[^}]*background:/s, 'the sheet needs its own backdrop');
 assert.match(css, /#lattice-canvas \{[^}]*touch-action: none/s, 'the canvas must not scroll the page while panning');
 
+// A player-authored character name is the only free text in this UI. It must
+// never be built into markup unescaped.
+assert.match(ui, /const escapeHtml =/, 'ui.js needs an HTML escape for player-authored names');
+assert.doesNotMatch(ui, /innerHTML = `[^`]*\$\{character\.name\}/s,
+  'a character name is being built into markup unescaped — use escapeHtml() or textContent');
+assert.match(ui, /#sheet-name'\)\.textContent/, 'the sheet must write the character name with textContent');
+
+// On a narrow screen the sheet becomes a scrolling column, and a `1fr` canvas
+// row collapses to zero there — the Lattice vanished entirely at 390px wide.
+// The canvas must be given a real height at that size.
+const narrow = css.slice(css.indexOf('@media (max-width: 1100px)'));
+assert.match(narrow, /\.lattice-stage \{[^}]*height:/s, 'the Lattice canvas needs an explicit height on narrow screens');
+assert.match(narrow, /#sheet-panel-lattice \{[^}]*grid-template-columns: 1fr/s, 'the sheet must go single-column on narrow screens');
+assert.match(narrow, /\.sheet-head \{[^}]*flex-wrap: wrap/s, 'the sheet header must wrap rather than overflow');
+
 console.log('character sheet check passed');

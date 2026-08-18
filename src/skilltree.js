@@ -19,7 +19,7 @@
 //
 // Headless and three-free — `scripts/skilltree-check.mjs` drives the whole
 // surface in plain Node.
-import { MOD_KEYS, ATTRIBUTES } from './items.js';
+import { MOD_KEYS, ATTRIBUTES, hasOwn } from './items.js';
 
 // Bumping this invalidates saved allocations. Every character prunes to a
 // legal build on load rather than breaking, but the points come back.
@@ -165,8 +165,9 @@ export const DOCTRINES = {
   glass_lattice: {
     id: 'glass_lattice', name: 'Glass Lattice', icon: '💎', sector: 'marksmanship',
     desc: 'Every shot is a killing shot. +30% critical damage, +8% critical chance.',
-    cost: 'You have 35% less maximum health.',
-    mods: { critMult: 0.3, critChance: 0.08, hp: -0.35 },
+    // `hp` is flat, not fractional. -0.35 cost a third of one hit point.
+    cost: 'You have 300 less maximum health.',
+    mods: { critMult: 0.3, critChance: 0.08, hp: -300 },
   },
   immovable: {
     id: 'immovable', name: 'Immovable', icon: '🗿', sector: 'bulwark',
@@ -189,8 +190,11 @@ export const DOCTRINES = {
   forced_march: {
     id: 'forced_march', name: 'Forced March', icon: '🥾', sector: 'swiftness',
     desc: 'You and your squads move 20% faster.',
-    cost: 'You have 25% less armour and evasion.',
-    mods: { speed: 0.2, armor: -0.25, evadeChance: -0.25 },
+    // Armour and evasion are absolute fractions here, not percentages of what
+    // you have. -0.25 was a quarter of ALL damage reduction and wiped evasion
+    // outright; these are the real numbers.
+    cost: 'You take 8% more damage and evade 8% less often.',
+    mods: { speed: 0.2, armor: -0.08, evadeChance: -0.08 },
   },
   quartermaster: {
     id: 'quartermaster', name: 'Quartermaster', icon: '📦', sector: 'siegeworks',
@@ -436,7 +440,7 @@ function ensureReachable(tree) {
 // character's origin — the same rule the screen draws and the same rule the
 // server would enforce if one ever owned this.
 
-export const originIdFor = (classKey) => (ORIGINS[classKey] ? `o_${classKey}` : null);
+export const originIdFor = (classKey) => (hasOwn(ORIGINS, classKey) ? `o_${classKey}` : null);
 
 // How many points a character has to spend. One per level past the first,
 // plus whatever the campaign has handed out, capped.

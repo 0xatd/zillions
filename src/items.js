@@ -92,6 +92,25 @@ export const slotPool = (equipSlot) => {
 // Which slots belong to a given weapon set — used to decide what a swap swaps.
 export const setSlots = (set) => WEAPON_SETS[set === 1 ? 1 : 0];
 
+// The keys whose GLOBAL mods apply right now. Only the drawn set's weapon and
+// off-hand count — the sheathed set contributes nothing, which is what keeps
+// two sets from being strictly better than one.
+export function equippedKeys(equipment, set = 0) {
+  if (!equipment) return [];
+  const { weapon, offhand } = setSlots(set);
+  return [equipment[weapon], equipment[offhand], equipment.armor, equipment.implant1, equipment.implant2]
+    .filter(Boolean);
+}
+
+// Every slot a given item could go in, nearest-empty-first. A weapon can go to
+// either set, an implant to either socket.
+export function slotsForPool(pool) {
+  if (pool === 'weapon') return ['weapon', 'weapon2'];
+  if (pool === 'offhand') return ['offhand', 'offhand2'];
+  if (pool === 'implant') return ['implant1', 'implant2'];
+  return [pool];
+}
+
 // ---------- bases ----------
 //
 // A base is the frame an item rolls on: what it is before anything is rolled.
@@ -310,6 +329,11 @@ export const AFFIX_BY_ID = new Map(AFFIXES.map((a) => [a.id, a]));
 // Its own hash and its own stream. This never touches the simulation random
 // source, so generating an item cannot move a lockstep peer's RNG by one step.
 
+// Table lookups that take an untrusted key. `ITEM_BASES['constructor']` finds
+// a function on Object.prototype and reads as a legitimate base, so every
+// lookup driven by profile or snapshot data goes through here.
+export const hasOwn = (table, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key);
+
 export function hashString(str) {
   let h = 2166136261 >>> 0;
   const s = String(str);
@@ -341,13 +365,13 @@ function bestTier(affix, ilvl) {
 }
 
 const clampIlvl = (v) => Math.max(1, Math.min(100, Math.floor(Number(v) || 1)));
-const clampRarity = (v) => (RARITIES[Math.floor(Number(v))] ? Math.floor(Number(v)) : 1);
+const clampRarity = (v) => (RARITIES[Math.floor(Number(v))] && Math.floor(Number(v)) >= 1 && Math.floor(Number(v)) <= 3 ? Math.floor(Number(v)) : 1);
 
 // Build a key. `seed` is any string or number — derive it from drop context
 // (run seed, kill, world) so an item that could not have dropped from a real
 // run stays detectable later, without server authority today.
 export function rollItemKey(baseKey, seed, ilvl = 1, rarity = 2) {
-  if (!ITEM_BASES[baseKey]) return null;
+  if (!hasOwn(ITEM_BASES, baseKey)) return null;
   const s = (typeof seed === 'number' ? seed >>> 0 : hashString(seed)) >>> 0;
   return `${baseKey}:${s.toString(36)}:${clampIlvl(ilvl)}:${clampRarity(rarity)}`;
 }
@@ -356,7 +380,7 @@ export function parseItemKey(key) {
   const str = String(key || '');
   if (!str.includes(':')) return null;
   const [baseKey, seedRaw, ilvlRaw, rarityRaw] = str.split(':');
-  if (!ITEM_BASES[baseKey]) return null;
+  if (!hasOwn(ITEM_BASES, baseKey)) return null;
   const seed = parseInt(seedRaw, 36);
   if (!Number.isFinite(seed)) return null;
   return { baseKey, seed: seed >>> 0, ilvl: clampIlvl(ilvlRaw), rarity: clampRarity(rarityRaw) };
@@ -414,7 +438,11 @@ function buildName(base, affixes, rarity) {
   const prefix = affixes.find((a) => a.kind === P);
   const suffix = affixes.find((a) => a.kind === S);
   let name = base.name;
-  if (prefix) name = `${prefix.word} ${name}`;
+  // A base can already contain the prefix's word — "Long Marksman Rifle"
+  // rolling the "Long" prefix reads as "Long Long Marksman Rifle". Skip the
+  // word rather than stutter; the roll still shows in the item's lines.
+  const words = new Set(base.name.toLowerCase().split(/\s+/));
+  if (prefix && !words.has(prefix.word.toLowerCase())) name = `${prefix.word} ${name}`;
   if (suffix) name = `${name} ${suffix.word}`;
   return name;
 }

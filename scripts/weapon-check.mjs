@@ -147,6 +147,67 @@ for (const [baseKey, base] of Object.entries(ITEM_BASES)) {
   ok(!item.weapon.signature, 'a rolled weapon claims to be a signature');
 }
 
+
+// ---------- regression: worn gear must reach the hero ----------
+// Equipment used to reach the hero only through the weapon. Armour, off-hands
+// and implants were summed from the STASH and not from the body, so wearing a
+// plate was strictly worse than leaving it in the bag.
+{
+  const plateKey = rollItemKey('siege_plate', 'worn-regression', 60, 3);
+  const plate = resolveItem(plateKey);
+  ok(plate.mods.hp > 0, 'test fixture: the plate should grant health');
+
+  const bare = makeGame(['scott']);
+  const bareHp = bare.heroes[0].maxHp;
+
+  const worn = new Game(fakeMap(), 'normal', [{ k: 'scott', camp: { level: 20, items: [], equipment: { armor: plateKey } } }], null, 1, 'campaign');
+  ok(worn.heroes[0].maxHp > bareHp, 'worn armour did not raise max health');
+  ok(Math.abs(worn.heroes[0].mods.hp - plate.mods.hp) < 1e-9, 'worn armour did not contribute its exact health');
+  ok(Math.abs(worn.heroes[0].mods.armor - plate.mods.armor) < 1e-9, 'worn armour did not contribute its armour');
+
+  // Only the DRAWN set's weapon and off-hand count. A sheathed weapon must not
+  // hand over its global mods, or two sets would be strictly better than one.
+  const a = rollItemKey('marksman_mk2', 'set-glob-a', 50, 3);
+  const b = rollItemKey('scatter_mk2', 'set-glob-b', 50, 3);
+  const both = new Game(fakeMap(), 'normal', [{ k: 'scott', camp: { level: 20, equipment: { weapon: a, weapon2: b }, activeSet: 0 } }], null, 1, 'campaign');
+  const onlyA = new Game(fakeMap(), 'normal', [{ k: 'scott', camp: { level: 20, equipment: { weapon: a }, activeSet: 0 } }], null, 1, 'campaign');
+  for (const key of ['hp', 'frame', 'reflex', 'signal', 'critChance']) {
+    ok(Math.abs(both.heroes[0].mods[key] - onlyA.heroes[0].mods[key]) < 1e-9,
+      `the sheathed set leaked its global ${key}`);
+  }
+  // And drawing it brings its globals with it.
+  both.swapWeaponSet(0);
+  const bItem = resolveItem(b);
+  if (bItem.mods.hp) ok(Math.abs(both.heroes[0].mods.hp - bItem.mods.hp) < 1e-9, 'the drawn set did not bring its globals');
+}
+
+// ---------- regression: critical damage from gear and the tree is read ----------
+// hitDmg() read only the weapon's crit multiplier, so every relay, implant and
+// doctrine granting critical damage did nothing at all.
+{
+  const game = makeGame(['scott']);
+  const hero = game.heroes[0];
+  hero.treeMods = { critChance: 1, critMult: 1.0 };   // always crit, +100% crit damage
+  game._refreshHeroDerived(hero, false);
+  ok(hero.mods.critMult === 1.0, 'critMult did not reach the hero mod bag');
+
+  const target = { hp: 1e9, maxHp: 1e9, armor: 0, dead: false, def: { scale: 1, resist: null }, resist: null, x: hero.x, z: hero.z };
+  game.zombies = [target];
+  game._zombieBuckets = null;
+  // Drive one attack and compare against the weapon-only multiplier.
+  const base = game.heroDmg(hero);
+  const weaponOnly = base * (hero.weapon.critMult || 1.75);
+  const withMods = base * ((hero.weapon.critMult || 1.75) + hero.mods.critMult);
+  ok(withMods > weaponOnly, 'test fixture: mods should raise the multiplier');
+  hero.cooldown = 0;
+  const before = target.hp;
+  game.update(1 / 30);
+  const dealt = before - target.hp;
+  if (dealt > 0) {
+    ok(dealt > weaponOnly * 0.9, `a crit dealt ${dealt}, weapon-only would be ${weaponOnly} — critMult mods are not being read`);
+  }
+}
+
 if (failures) {
   console.error(`\nweapon-check: ${failures} failure(s)`);
   process.exit(1);

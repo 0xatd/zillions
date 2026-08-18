@@ -2,7 +2,7 @@
 // heroes remain in Custom Games; MMO characters carry their own class, level,
 // equipment, appearance and last world between instances.
 
-import { EQUIP_SLOTS, slotPool, isRolledKey, meetsRequirement } from './items.js';
+import { EQUIP_SLOTS, slotPool, isRolledKey, meetsRequirement, hasOwn } from './items.js';
 import {
   pruneAlloc, latticePoints, treeBonuses, treeBonusesForSet, normalizeSetSpec,
   canAllocate, canDeallocate, LATTICE_VERSION,
@@ -46,7 +46,7 @@ export const ATTR_PRIMARY_BASE = 12; // the class's own attribute starts higher
 // Attributes from the character alone — class, level, and nothing else. Gear
 // and the Lattice add to this; see characterAttributes().
 export function baseAttributes(character) {
-  const primary = CLASS_ATTRS[character?.classKey] || 'frame';
+  const primary = (hasOwn(CLASS_ATTRS, character?.classKey) && CLASS_ATTRS[character.classKey]) || 'frame';
   const level = Math.max(1, Math.min(100, Number(character?.level) || 1));
   const out = { frame: ATTR_BASE, reflex: ATTR_BASE, signal: ATTR_BASE };
   out[primary] = ATTR_PRIMARY_BASE;
@@ -141,7 +141,7 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
 
 export function normalizeMmoCharacters(profile) {
   profile.mmoCharacters = Array.isArray(profile.mmoCharacters)
-    ? profile.mmoCharacters.filter((c) => c && c.id && MMO_CLASSES[c.classKey]).slice(0, MAX_MMO_CHARACTERS)
+    ? profile.mmoCharacters.filter((c) => c && c.id && hasOwn(MMO_CLASSES, c.classKey)).slice(0, MAX_MMO_CHARACTERS)
     : [];
   for (const character of profile.mmoCharacters) {
     const klass = MMO_CLASSES[character.classKey];
@@ -212,7 +212,14 @@ export function characterCamp(character, relics = []) {
   return {
     level: character?.level || 1,
     xp: character?.xp || 0,
-    items: [...(character?.items || [])],
+    // The stash is storage, not a second body. Anything with a slot has to be
+    // worn to count, or equipping would be pointless and the sheet would be a
+    // lie. Authored items carry no slot and keep working the way they always
+    // have — they are trinkets you own, not gear you put on.
+    items: (character?.items || []).filter((key) => {
+      const item = itemInfo(key);
+      return item && !item.slot;
+    }),
     equipment: legalEquipment(character),
     upgrades: { ...(character?.upgrades || {}) },
     lattice: [...(character?.lattice || [])],

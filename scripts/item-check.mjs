@@ -3,7 +3,7 @@
 import {
   ITEM_BASES, AFFIXES, MOD_KEYS, DAMAGE_TYPES, RARITIES, BASES_BY_SLOT,
   rollItemKey, parseItemKey, resolveItem, isRolledKey, rolledMods,
-  rollLootKey, rollLootKeyForSlot, worldItemLevel,
+  rollLootKey, rollLootKeyForSlot, worldItemLevel, slotsForPool, slotPool, EQUIP_SLOTS, equippedKeys, hasOwn,
   meetsRequirement, itemLines, applyLocal, hashString,
 } from '../src/items.js';
 import { ITEMS, itemMods, itemInfo } from '../src/config.js';
@@ -226,6 +226,80 @@ for (const levelId of [1, 2, 3, 4, 5, 20, 60]) {
 }
 ok(worldItemLevel(9999, null, null) <= 100, 'worldItemLevel did not clamp a huge level id');
 ok(worldItemLevel(null, null, null) >= 1, 'worldItemLevel did not floor a missing level id');
+
+
+// ---------- regression: an authored item's mod bag is stats only ----------
+// itemInfo() handed the whole definition over as a mod bag, so tooltips read
+// "+Oath Blade name" and "+🗡️ icon" alongside the real lines.
+for (const key of Object.keys(ITEMS)) {
+  const info = itemInfo(key);
+  for (const modKey of Object.keys(info.mods)) {
+    ok(MOD_KEYS.includes(modKey), `${key}: mod bag carries non-stat key "${modKey}"`);
+    ok(typeof info.mods[modKey] === 'number', `${key}: mod "${modKey}" is not a number`);
+  }
+  for (const line of itemLines(info)) {
+    ok(!/name|icon|kind|desc/i.test(line), `${key}: tooltip line leaks a definition field — "${line}"`);
+  }
+}
+
+// ---------- regression: every slot pool can be filled ----------
+// A weapon always landed in slot one, so the second set was unreachable and
+// the whole weapon-swap feature was dead in the shipped UI.
+ok(slotsForPool('weapon').includes('weapon2'), 'a weapon cannot reach the second set');
+ok(slotsForPool('offhand').includes('offhand2'), 'an off-hand cannot reach the second set');
+ok(slotsForPool('implant').length === 2, 'an implant cannot reach both sockets');
+ok(slotsForPool('armor').length === 1, 'armour has more than one slot');
+for (const pool of ['weapon', 'offhand', 'armor', 'implant']) {
+  for (const slot of slotsForPool(pool)) {
+    ok(EQUIP_SLOTS.includes(slot), `${pool} maps to "${slot}", which is not an equipment slot`);
+    ok(slotPool(slot) === pool, `${slot} does not map back to ${pool}`);
+  }
+}
+
+// ---------- regression: only the drawn set contributes global mods ----------
+{
+  const a = rollItemKey('marksman_mk2', 'eq-a', 50, 3);
+  const b = rollItemKey('scatter_mk2', 'eq-b', 50, 3);
+  const equipment = { weapon: a, weapon2: b, armor: rollItemKey('flak_plate', 'eq-c', 50, 2) };
+  const drawnFirst = equippedKeys(equipment, 0);
+  const drawnSecond = equippedKeys(equipment, 1);
+  ok(drawnFirst.includes(a) && !drawnFirst.includes(b), 'set I included the sheathed weapon');
+  ok(drawnSecond.includes(b) && !drawnSecond.includes(a), 'set II included the sheathed weapon');
+  ok(drawnFirst.length === drawnSecond.length, 'the two sets contribute a different number of items');
+  ok(equippedKeys(null, 0).length === 0, 'equippedKeys threw on no equipment');
+}
+
+
+// ---------- regression: a name must not stutter ----------
+// "Long Marksman Rifle" rolling the "Long" prefix read as "Long Long Marksman
+// Rifle". Every generated name is checked for a repeated word.
+for (const key of sample) {
+  const name = resolveItem(key).name;
+  const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && w !== 'the');
+  ok(new Set(words).size === words.length, `${key}: name stutters — "${name}"`);
+}
+
+
+// ---------- regression: prototype keys are not items ----------
+// Item keys arrive from a profile blob and a peer's snapshot. A bare table
+// lookup finds Object.prototype members, so "constructor" resolved as a real
+// item named "Object" and "toString" as one named "toString".
+for (const key of ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+  ok(itemInfo(key) === null, `"${key}" resolves as an item`);
+  ok(parseItemKey(`${key}:1:1:1`) === null, `"${key}" parses as a rolled base`);
+  ok(rollItemKey(key, 's', 10, 2) === null, `"${key}" can be rolled as a base`);
+  ok(itemMods([key]).dmg === 0, `"${key}" contributed mods`);
+  ok(!isRolledKey(`${key}:1:1:1`), `"${key}" counts as a rolled key`);
+}
+ok(hasOwn(ITEM_BASES, 'scatter_mk1'), 'hasOwn rejects a real base');
+ok(!hasOwn(ITEM_BASES, 'constructor'), 'hasOwn accepts a prototype key');
+ok(!hasOwn(ITEM_BASES, null) && !hasOwn(ITEM_BASES, 42), 'hasOwn accepts a non-string key');
+
+// Rarity must clamp to a real grade rather than trusting the key.
+for (const bad of ['scatter_mk1:a:10:9', 'scatter_mk1:a:10:0', 'scatter_mk1:a:10:-3']) {
+  const item = resolveItem(bad);
+  ok(item && RARITIES[item.rarity], `${bad}: resolved to rarity ${item && item.rarity}`);
+}
 
 if (failures) {
   console.error(`\nitem-check: ${failures} failure(s)`);
