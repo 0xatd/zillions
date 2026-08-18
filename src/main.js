@@ -206,6 +206,8 @@ class App {
       // ----- character select -----
       onCharacterSelect: (c) => this._selectCharacter(c),
       onCharacterEnter: (c) => this._enterWorldAs(c),
+      onEnterWorld: () => this._enterCharacterSelect(),
+      onCharacterExit: () => this._clearCharacterStage(),
       onCharacterCreate: ({ name, heroKey, banner }) => this._createCharacter(name, heroKey, banner),
       onCharacterDelete: (id) => this._deleteCharacter(id),
       // ----- custom games -----
@@ -316,9 +318,10 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // Boot at the roster door: pick (or forge) a commander, then walk the
-    // overworld as them. The hub is a keystroke away once inside.
-    this._enterCharacterSelect();
+    // The menu is the front door: boot lands on the title screen, exactly
+    // as the arcade intended. ENTER WORLD opens the roster door; the planet
+    // waits behind it, walked as the chosen commander.
+    this.ui._showScreen('main');
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
@@ -497,7 +500,7 @@ class App {
     }
     this._makeOverworldHero();
     this.ui.hideOverlay();
-    this.ui.showBanner('🚶 WASD or arrows to walk · click to set a course · ESC for the war council', '', 6000);
+    this.ui.showBanner('🚶 WASD or arrows to walk · click to set a course · ESC for the main menu', '', 6000);
   }
 
   _clearOverworld() {
@@ -4402,10 +4405,14 @@ class App {
         return;
       }
       if (!this.game) {
-        // The overworld owns Escape: the hub slides in as a translucent
-        // overlay and slides back out — the walk never stops underneath.
+        // Escape comes home: on the planet the full main menu slides in
+        // over the walk — translucent, the world still turning beneath it
+        // — and slides back out the same way.
         if (k === 'escape') {
           e.preventDefault();
+          // Backing out of character select tears down the 3D lineup so the
+          // title screen stands alone again.
+          if (this.charStage && !this.ow) this._clearCharacterStage();
           this.ui.toggleOverlay();
           return;
         }

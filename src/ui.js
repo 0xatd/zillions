@@ -48,7 +48,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
-      <button id="ow-menu" class="tbtn owmenu hidden" title="War council (Esc)">⚙</button>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="Main menu (Esc)">⚙</button>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -120,12 +120,9 @@ export class UI {
             <p class="gamesub">Fight together. Hold the frontier. Take the planet.</p>
           </div>
           <div class="menustack homeactions">
-            <button class="menubtn primary playonline" id="m-online">
-              <span class="cta"><b>PLAY</b><small>ONLINE &nbsp;·&nbsp; create · join · watch</small></span>
-              <span class="menuarrow">›</span>
-            </button>
-            <button class="menubtn" id="m-solo">
-              <span class="cta"><b>PLAY SOLO</b><small>campaign · survival · the labyrinth</small></span>
+            <div id="main-resume" class="moderesume mainresume"></div>
+            <button class="menubtn primary playonline" id="m-enter">
+              <span class="cta"><b>ENTER WORLD</b><small>the planet &nbsp;·&nbsp; campaign gates · the labyrinth</small></span>
               <span class="menuarrow">›</span>
             </button>
             <button class="menubtn" id="m-custom">
@@ -135,7 +132,7 @@ export class UI {
             <div class="menuutilities">
               <button class="utilitybtn" id="m-help">How to play</button>
               <button class="utilitybtn" id="m-settings">⚙ Settings</button>
-              <button class="utilitybtn" id="m-heroes">Heroes (Tab)</button>
+              <button class="utilitybtn" id="m-solo">Play solo modes</button>
             </div>
           </div>
           <div id="hub-panel" class="hubpanel hidden">
@@ -187,6 +184,7 @@ export class UI {
               <h1 class="gametitle small">CHOOSE YOUR COMMANDER</h1>
               <p class="gamesub" id="ch-sub"></p>
             </div>
+            <button class="tbtn menuback" id="ch-back">← Main menu</button>
             <div class="charrow" id="ch-row"></div>
             <div class="charactions">
               <button class="menubtn primary" id="ch-enter"><span class="cta"><b>ENTER WORLD</b><small id="ch-enter-sub"></small></span><span class="menuarrow">›</span></button>
@@ -411,8 +409,18 @@ export class UI {
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
     q('#m-solo').onclick = () => this._showScreen('solo');
+    q('#m-enter').onclick = () => this.cb.onEnterWorld && this.cb.onEnterWorld();
+    q('#ch-back').onclick = () => {
+      if (this.cb.onCharacterExit) this.cb.onCharacterExit();
+      this._showScreen('main');
+    };
     q('#m-custom').onclick = () => { this._showScreen('custom'); if (this.cb.onCustomOpen) this.cb.onCustomOpen(); };
-    q('#cu-back').onclick = () => this._showScreen(this._overworldMode ? 'main' : 'chars');
+    q('#cu-back').onclick = () => {
+      // The browser has two doors: from the menu it returns to the menu;
+      // from the stone arch on the planet it returns to the walk.
+      if (this._overworldMode) this.hideOverlay();
+      else this._showScreen('main');
+    };
     q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
     q('#cu-create').onclick = () => this.customCreatePanel(true);
     q('#cu-cancel').onclick = () => this.customCreatePanel(false);
@@ -434,7 +442,7 @@ export class UI {
       const c = (this._charList || []).find((x) => x.id === this._charSelId);
       if (c && this.cb.onCharacterEnter) this.cb.onCharacterEnter(c);
     };
-    q('#ch-create').onclick = () => this.characterCreatePanel(!q('#ch-create-panel').classList.contains('hidden'));
+    q('#ch-create').onclick = () => this.characterCreatePanel(q('#ch-create-panel').classList.contains('hidden'));
     q('#ch-cancel').onclick = () => this.characterCreatePanel(false);
     q('#ch-confirm').onclick = () => {
       const name = q('#ch-name').value.trim();
@@ -467,7 +475,6 @@ export class UI {
       chSwatches.appendChild(sw);
     }
 
-    q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#m-help').onclick = () => this._showScreen('help');
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#solo-campaign').onclick = () => this.showSetup({ mode: 'campaign' });
@@ -520,7 +527,8 @@ export class UI {
 
     // ----- settings -----
     q('#m-settings').onclick = () => this._showScreen('settings');
-    q('#m-heroes').onclick = () => this._showScreen('heroes');
+    // The hero library lives on Tab (Dota grammar) and in pause — not on
+    // the title screen, where identity now comes from character select.
     q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
     q('#set-back').onclick = () => {
@@ -817,9 +825,10 @@ export class UI {
     }
   }
 
-  // ----- overworld: the hub is an overlay, not a destination -----
-  // The game boots onto the walkable planet; the whole menu you knew slides
-  // in over it on Esc (or the ⚙ button) and slides back out the same way.
+  // ----- overworld: the menu is an overlay, not a destination -----
+  // The title screen is the front door; once the player enters the world,
+  // Esc (or the ⚙ button) slides that same full menu in over the walk —
+  // translucent glass over a living planet — and back out again.
   setOverworldMode(on) {
     this._overworldMode = !!on;
     if (on) this._atCharSelect = false; // the roster door is behind us
@@ -836,10 +845,18 @@ export class UI {
   }
 
   toggleOverlay() {
-    // Esc always brings up the hub home — the deep screens (lobby, settings)
-    // are one click from its buttons, and the walk is the point.
-    if (this.overlayHidden()) this._showScreen('main');
-    else this.hideOverlay();
+    // Esc always comes home to the full menu screen. On the planet the walk
+    // keeps running underneath it — translucent, alive, one Esc away again.
+    // At the front door (no world yet) the menu simply stays the menu.
+    if (this._overworldMode) {
+      if (this.overlayHidden()) this._showScreen('main');
+      else this.hideOverlay();
+    } else if (!this.overlayHidden()) {
+      // leave deep screens (chars, custom, settings…) — Esc returns to main
+      this._showScreen('main');
+    } else {
+      this._showScreen('main');
+    }
   }
 
   // ----- character select (the WoW door into the overworld) -----
@@ -1780,11 +1797,10 @@ export class UI {
     if (state.ready && (state.signedIn || offlineAllowed)) {
       if (!this._accountAccepted) {
         this._accountAccepted = true;
-        // The roster door comes first: auth resolving mid-character-select
-        // must not yank the player to the hub. In overworld boots the menu
-        // is an overlay the player opens on purpose — a signed-in (or
-        // offline dev) boot goes straight to the walk, with the hub one Esc
-        // away.
+        // The title screen is home base: auth resolving at the front door
+        // simply confirms the menu that is already up. Mid-character-select
+        // it must not yank the player away; on the planet the menu is an
+        // overlay the player opens on purpose.
         if (this._atCharSelect) return;
         if (!this._overworldMode) this._showScreen('main');
         else this.hideOverlay();
@@ -1837,8 +1853,6 @@ export class UI {
     for (const row of this.root.querySelectorAll('.moderesume')) row.innerHTML = '';
     if (!snap) return;
     const mode = snap.mode === 'survival' ? 'survival' : snap.mode === 'labyrinth' ? 'labyrinth' : 'campaign';
-    const row = this.root.querySelector(`#solo-${mode}-resume`);
-    if (!row) return;
     const players = Array.isArray(snap.heroKeys) ? snap.heroKeys.length : 1;
     // Snapshots store the level id under `level`.
     const levelId = snap.level ?? snap.levelId ?? 1;
@@ -1846,8 +1860,19 @@ export class UI {
       : mode === 'labyrinth' ? `Resume ${levelById(levelId).name}`
       : `Resume Level ${levelId}`;
     const detail = `Threat ${snap.threatLevel || 1} · ${snap.diff || 'normal'}${players > 1 ? ` · ${players} players` : ''}`;
-    row.innerHTML = `<button class="resumebtn" id="b-continue"><span>▶</span><span><b>${label}</b><small>${detail}</small></span></button>`;
-    row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
+    const resumeBtn = () => {
+      const b = document.createElement('button');
+      b.className = 'resumebtn';
+      b.id = 'b-continue';
+      b.innerHTML = `<span>▶</span><span><b>${label}</b><small>${detail}</small></span>`;
+      b.onclick = () => this.cb.onContinue();
+      return b;
+    };
+    // The front door carries the run: one tap from the title screen straight
+    // back into the war — no character select detour mid-campaign.
+    this.root.querySelector('#main-resume')?.appendChild(resumeBtn());
+    const row = this.root.querySelector(`#solo-${mode}-resume`);
+    if (row) row.appendChild(resumeBtn());
   }
 
   setWaiting(on, text = '⏳ Syncing co-op…') {
