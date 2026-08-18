@@ -1,6 +1,7 @@
 const PLAYER_KEY = 'zillions_player_id';
 const API = '/api/state';
 const LOBBY_API = '/api/lobby';
+const GALAXY_API = '/api/galaxy-state';
 
 export function backendEnabled() {
   const { hostname, protocol, search } = location;
@@ -31,6 +32,16 @@ export function getPlayerId() {
 export async function getRemoteState() {
   if (!backendEnabled()) return null;
   const response = await fetch(`${API}?playerId=${encodeURIComponent(getPlayerId())}`, {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+export async function getGalaxyState() {
+  if (!backendEnabled()) return null;
+  const response = await fetch(GALAXY_API, {
     headers: { accept: 'application/json' },
     cache: 'no-store',
   });

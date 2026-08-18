@@ -29,6 +29,7 @@ import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './gala
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld } from './keybinds.js';
+import { getGalaxyState } from './backend.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
@@ -594,10 +595,13 @@ class App {
     this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
   }
 
-  _openGalaxyMap() {
+  async _openGalaxyMap() {
     const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
     const depth = 12 + metaBonuses().unlock.galaxyDepth;
-    this.ui.showGalaxy(galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth), currentWorld);
+    const destinations = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth);
+    let macro = null;
+    try { macro = await getGalaxyState(); } catch { /* local galaxy still works */ }
+    this.ui.showGalaxy(destinations, currentWorld, macro);
   }
 
   _travelToWorld(worldId) {
