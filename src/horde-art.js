@@ -342,7 +342,7 @@ export class HordeArt {
     for (const [type, buildParts] of Object.entries(BUILDERS)) {
       const parts = buildParts();
       const bodyMat = applyRim(
-        new THREE.MeshLambertMaterial({ vertexColors: true }),
+        new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.0, vertexColors: true }),
         { color: 0x9fb4de, power: 2.0, strength: 0.58 },
       );
       // body and arms share one rimmed material (clone() would drop the

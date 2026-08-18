@@ -57,7 +57,7 @@ export function loadAssets() {
           // dressing and can use the cheaper material path.
           if (!authored) {
             const src = o.material;
-            o.material = new THREE.MeshLambertMaterial({
+            o.material = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.03,
               map: src.map || null,
               color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
             });
