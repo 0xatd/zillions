@@ -181,7 +181,7 @@ which reads the same table the game dispatches through.
 | Ctrl | Secondary ability bar — reserved |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Build, upgrade, repair, or rebuild |
-| Alt | Change the primary input between Build mode and Fight mode |
+| Alt | Show or hide vacant construction markers |
 | F1, F2, F3 | Set Defend, Follow, or Push stance |
 | T | Change the nearest tower target rule |
 | Z | Drop the newest field item |
@@ -196,9 +196,11 @@ Movement is not camera-relative. W always moves north on the minimap.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
-does not — that freed 1 and 2 for a future consumable system. And Alt still
-toggles build mode, because founding and funding a colony is the half of this
-game an action-RPG layout has no opinion about.
+does not — that freed 1 and 2 for a future consumable system. Alt controls
+construction-marker visibility because founding and funding a colony is the
+half of this game an action-RPG layout has no opinion about. It does not change
+the controls: Space always dodges, Q always uses the primary ability, and B
+always builds.
 
 ## Local Development
 

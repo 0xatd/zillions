@@ -92,6 +92,8 @@ assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run 
 assert.ok(packageJson.scripts?.check?.includes('art-state-check.mjs'), 'npm run check must validate presentation states');
 assert.ok(packageJson.scripts?.check?.includes('fog-of-war-check.mjs'), 'npm run check must validate fog-of-war source rules');
 assert.ok(packageJson.scripts?.check?.includes('galaxy-check.mjs'), 'npm run check must validate the galaxy and meta-progression layers');
+assert.ok(packageJson.scripts?.check?.includes('first-siege-check.mjs'), 'npm run check must validate the guided First Siege');
+assert.ok(packageJson.scripts?.check?.includes('stabilization-check.mjs'), 'npm run check must validate entry and control contracts');
 assert.ok(read('src/main.js').includes('this._updateFogOfWar()'), 'main renderer must update the tactical vision shroud');
 assert.ok(read('src/ui.js').includes('fogVisionSources(game)'), 'minimap must use the same allied vision sources');
 assert.ok(read('art-slice.html').includes('State review'), 'art review page must expose state inspection');
@@ -200,9 +202,9 @@ assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be
 const uiSource = read('src/ui.js');
 assert.match(uiSource, /id="a-custom">CUSTOM GAMES/, 'the title screen must expose Custom Games');
 assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must expose Cinematics');
-assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'login must lead to character select');
-assert.match(uiSource, /id="m-enter-world">ENTER WORLD/, 'character select must enter the persistent world');
-assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open the overworld');
+assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
+assert.match(uiSource, /id="m-enter-world">RESUME WORLD/, 'the roster must resume rather than repeat ENTER WORLD');
+assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Resume World must open the overworld');
 assert.match(uiSource, /id="screen-solo"/, 'custom games must have their own mode screen');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');

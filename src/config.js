@@ -369,7 +369,7 @@ export const SURGE_MULT = 2.0;
 
 // ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
 // The whole kit stays Thronefall-simple: you steer, your weapon fires itself,
-// an aura hums around you, and SPACE/Q fires the special.
+// an aura hums around you, and the primary-ability binding fires the special.
 // Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
 
 // A hero's ladder runs to 100. The first ten levels are exactly what they

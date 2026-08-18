@@ -28,7 +28,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
-import { loadBinds, saveBinds, resetBinds, actionFor, isHeld } from './keybinds.js';
+import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
@@ -122,7 +122,9 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    this.controlMode = 'build'; // Alt toggles whether Space builds or fires the special.
+    // Alt only changes which construction affordances are visible. Inputs are
+    // never contextual: Space dodges, Q casts, and B builds.
+    this.controlMode = 'build';
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
@@ -288,6 +290,7 @@ class App {
     // a development/offline mirror.
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
+    this._authenticatedEntryHandled = false;
     this.profile = this._loadProfile();
     this.meta = loadMeta();
     this.profile.metaCurrency = this.meta.currency;
@@ -563,11 +566,15 @@ class App {
     // Already on the planet — the hub's ENTER WORLD means "resume the walk",
     // not a no-op. It used to early-return with the overlay still up, which
     // read as a dead button inside the custom-games loop (QA 2026-08-18).
-    if (this.ow) { this.ui.hideOverlay(); return; }
+    if (this.ow) {
+      this._makeOverworldHero();
+      this.ui.hideOverlay();
+      return;
+    }
     const character = selectedMmoCharacter(this.profile);
     if (!character) {
       this.ui.setProfile(this.profile);
-      this.ui.showBanner('Create a character before entering the galaxy.', 'bad', 2600);
+      this.ui.showCharacterCreator();
       return;
     }
     this.ui.selectedHero = character.proxyHero;
@@ -967,7 +974,7 @@ class App {
     // left on the minimap. The menu can orbit, but a run must not inherit it.
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
-    // The labyrinth has nothing to build, so Space is always the special.
+    // The labyrinth has nothing to build, so construction markers stay hidden.
     if (mode === 'labyrinth') {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
@@ -1091,7 +1098,7 @@ class App {
       // generic "open on every side" flavour when the wall line says otherwise.
       const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
       this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
-        `A ${survey.plan.label} would stand here · SPACE to found the city`, 5600);
+        `A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`, 5600);
     });
   }
 
@@ -1256,15 +1263,19 @@ class App {
   }
 
   _startTutorial() {
+    const binds = this.binds();
+    const build = keyLabel(binds.build);
+    const push = keyLabel(binds.stance_push);
+    const tower = keyLabel(binds.tower_priority);
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
-      [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
-      [24, '⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press 3 and those squads push out along the lanes on their own.'],
+      [5, `🏳️ This land is unclaimed! Ride to a flagged site and press ${build} to found your city.`],
+      [14, `💰 Walk to a glowing foundation and HOLD ${build} — your coins build it.`],
+      [24, `⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press ${push} and those squads push out along the lanes on their own.`],
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
+      [62, `🔧 Nothing repairs itself — hold ${build} to repair. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -1317,6 +1328,7 @@ class App {
       }
     } else if (status.enabled) {
       this.lobby = null;
+      this._authenticatedEntryHandled = false;
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
@@ -1325,10 +1337,23 @@ class App {
       // Returning from a finished run: back onto the planet you launched
       // from. No character yet (created mid-session edge)? Land on the
       // roster, one click from making one — never a dead title screen.
-      const returning = selectedMmoCharacter(this.profile) || this.profile.lastWorld;
+      const returning = selectedMmoCharacter(this.profile);
+      this._authenticatedEntryHandled = true;
       if (returning) setTimeout(() => this._enterOverworld(
-        selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
-      else setTimeout(() => this.ui._showScreen('main'), 0);
+        returning.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      else setTimeout(() => this.ui.showCharacterCreator(), 0);
+      return;
+    }
+    // ENTER WORLD is the only front door. Once authentication and profile
+    // hydration finish, do not make the player pass through a second roster
+    // confirmation. Existing characters resume their last world; a new
+    // account goes directly to creation and enters Earth after submit.
+    if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
+      this._authenticatedEntryHandled = true;
+      const character = selectedMmoCharacter(this.profile);
+      if (character) setTimeout(() => this._enterOverworld(
+        character.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      else setTimeout(() => this.ui.showCharacterCreator(), 0);
     }
   }
 
@@ -1422,9 +1447,11 @@ class App {
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    this.ui._showScreen('main');
     const klass = MMO_CLASSES[character.classKey];
     this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
+    const worldId = character.lastWorld || 'earth';
+    if (this.ow && this.ow.world?.id !== worldId) this._travelToWorld(worldId);
+    else this._enterOverworld(worldId);
   }
 
   // The WC3-style persistent campaign hero this profile brings into a run.
@@ -3538,17 +3565,13 @@ class App {
     const mh = this.myHero();
     const buildMode = this.controlMode !== 'fight';
     if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
-    // Pips belong to ONE plot: the nearest fundable one within reach.
+    // Pips belong to the exact plot that Build would fund. A second nearest-
+    // ring search can disagree with game.buildTargetFor() and highlight one
+    // building while paying another.
     let pipPlotId = -1;
-    if (buildMode && mh && !mh.dead) {
-      let bd = 4.5 * 4.5;
-      for (const plot of g.plots) {
-        const act = g.firstSiegePlotActionable(plot) ? g.plotAction(plot) : null;
-        if (!act || act.mode === 'branch') continue;
-        const [px, pz] = g.payPoint(plot, mh);
-        const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
-        if (d < bd) { bd = d; pipPlotId = plot.id; }
-      }
+    if (buildMode && g.buildTargetFor && mh && !mh.dead) {
+      const target = g.buildTargetFor(mh);
+      if (target) pipPlotId = target.plot.id;
     }
     for (const plot of g.plots) {
       if (!g.firstSiegePlotVisible(plot)) {
@@ -3884,6 +3907,28 @@ class App {
       rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
+      // Render-only local lead makes a guest's own hero answer immediately
+      // while lockstep catches up. Never apply this to the host or another
+      // guest: their meshes must stay on confirmed simulation positions.
+      if (u === g.heroes[this.myPlayer] && this.mpRole === 'guest' && !u.dead && this.lastDir) {
+        if (this._leadX === undefined) { this._leadX = 0; this._leadZ = 0; }
+        const spd = (u.def.speed || 3.5) * (u.sprintMul || 1);
+        const look = 0.16;
+        const targetX = (this.lastDir.x || 0) * spd * look;
+        const targetZ = (this.lastDir.z || 0) * spd * look;
+        const response = 1 - Math.exp(-12 * (dt || 0.016));
+        this._leadX += (targetX - this._leadX) * response;
+        this._leadZ += (targetZ - this._leadZ) * response;
+        if (Math.abs(this._leadX) > 3 || Math.abs(this._leadZ) > 3) {
+          this._leadX = 0;
+          this._leadZ = 0;
+        }
+        rec.mesh.position.set(
+          u.x + this._leadX,
+          this.map.groundY(u.x + this._leadX, u.z + this._leadZ),
+          u.z + this._leadZ,
+        );
+      }
       let attackPulse = 0;
       let attackKind = '';
       if (rec.attack) {
@@ -4175,9 +4220,9 @@ class App {
       switch (act) {
         case 'dodge': {
           e.preventDefault();
-          // Founding a colony still owns the primary input while the phase is
-          // waiting for it — there is nothing to dodge yet.
-          if (this.game.phase === 'found') { this._tryFound(); break; }
+          // Space has one meaning. Before the city is founded there is no live
+          // dodge yet, but it must not silently become the build key.
+          if (this.game.phase === 'found') break;
           const dir = this.lastDir || { x: 0, z: 0 };
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
@@ -4188,6 +4233,9 @@ class App {
         case 'build_mode':
           e.preventDefault();
           this.toggleControlMode();
+          break;
+        case 'build':
+          if (this.game.phase === 'found') this._tryFound();
           break;
         case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
         case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
@@ -4268,14 +4316,13 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Hold-to-build: B always pays. Space/button pay only in Build mode, so the
-    // player can toggle into Fight mode when they want the special to win.
+    // Hold-to-build has one keyboard owner: the configured build action. The
+    // on-screen construction button may also hold payment, but dodge never can.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
-    const buildModePays = this.controlMode === 'build' && canPay
-      && (isHeld(bindsNow, this.keys, 'dodge') || this.buttonPay);
-    const pay = isHeld(bindsNow, this.keys, 'build') || buildModePays;
+    const buttonPays = canPay && this.buttonPay;
+    const pay = isHeld(bindsNow, this.keys, 'build') || buttonPays;
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -5242,12 +5289,11 @@ class App {
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
             const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
-            const buildKeys = buildMode
-              ? '<kbd>SPACE</kbd> or <kbd>B</kbd>'
-              : '<kbd>B</kbd>';
+            const buildKey = keyLabel(this.binds().build);
+            const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
               ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-              : `<div>Hold ${buildKeys} — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}${buildMode ? ' · Alt toggles Fight mode.' : ' · Fight mode: Space fires your special. Alt toggles.'}</div>`;
+              : `<div>Hold <kbd>${buildKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} ${buildMode ? 'hides' : 'shows'} construction markers.</div>`;
           }
         }
       }

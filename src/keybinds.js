@@ -91,8 +91,8 @@ export const ACTIONS = [
     desc: 'Hold at a foundation. Gold streams out until it rises.',
   },
   {
-    id: 'build_mode', name: 'Toggle build mode', scopes: ['battle'], context: 'army', default: 'alt',
-    desc: 'Switches what the primary input does between building and fighting.',
+    id: 'build_mode', name: 'Toggle construction markers', scopes: ['battle'], context: 'army', default: 'alt',
+    desc: 'Shows or hides vacant construction markers. It never changes what Space, Q, or B do.',
   },
   {
     id: 'stance_defend', name: 'Stance: defend city', scopes: ['battle'], context: 'army', default: 'f1',

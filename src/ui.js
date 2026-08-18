@@ -51,7 +51,7 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold Space in Build mode, or B anytime, to spend at a foundation">🪙 <b>0</b></div>
+        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend">🪙 <b>0</b></div>
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
         <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
@@ -85,7 +85,7 @@ export class UI {
           <div class="rallyhints" id="stancebar">
             <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
           </div>
-          <button class="mode-toggle build" id="mode-toggle" title="Alt toggles Space between build and special ability"><b>ALT</b><span>Build mode</span></button>
+          <button class="mode-toggle build" id="mode-toggle" title="Show or hide construction markers"><b data-bind-label="build_mode"></b><span>Construction shown</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
         <div class="actionmain">
@@ -125,8 +125,8 @@ export class UI {
           <div id="title-telemetry" class="title-telemetry"><b>ORBITAL WATCH</b><span>SEARCHING FOR DISTRESS SIGNAL</span></div>
           <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary hidden" id="a-enter">ENTER WORLD</button>
-            <button class="menubtn primary" id="a-google">ENTER WITH GOOGLE</button>
+            <button class="menubtn primary hidden" id="a-enter">RESUME WORLD</button>
+            <button class="menubtn primary" id="a-google">ENTER WORLD</button>
             <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
               <label for="a-username">Public username</label>
@@ -154,7 +154,7 @@ export class UI {
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button></aside>
+          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">RESUME WORLD</button></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
@@ -195,7 +195,7 @@ export class UI {
             <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
             <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
             <div id="creator-summary" class="creator-summary"></div>
-            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
+            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE &amp; ENTER</button></div>
           </form>
         </div>
 
@@ -259,7 +259,7 @@ export class UI {
           </div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
+          <div class="steplabel hero-label">2 · Your hero <small>— auto-attacks on his own; move with WASD, dodge with <span data-bind-label="dodge"></span>, and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
           <div class="steplabel diff-label">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
@@ -332,13 +332,13 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only), <kbd>SPACE</kbd> to dodge roll out of danger. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only), <kbd data-bind-label="dodge"></kbd> to dodge roll out of danger. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Build and Fight mode. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
-            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd>3</kbd> and those squads push the lanes together — no unit micro.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Hold <kbd data-bind-label="build"></kbd> at a glowing foundation — coins fly from your purse until it rises. Use <kbd data-bind-label="build_mode"></kbd> to show or hide construction markers.</div>
+            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE dodges, <kbd>Q</kbd> fires your special, and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Hold <kbd data-bind-label="build"></kbd> to build, repair, or rebuild. <kbd data-bind-label="dodge"></kbd> always dodges. <kbd data-bind-label="ability1"></kbd> always fires your special. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
@@ -431,7 +431,10 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
-    q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
+    q('#a-enter').onclick = () => {
+      this._accountAccepted = true;
+      if (this.cb.onCampaignMap) this.cb.onCampaignMap();
+    };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
     q('#a-custom').onclick = () => { this._customFrom = 'account'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
@@ -912,7 +915,7 @@ export class UI {
     const klass = MMO_CLASSES[this._creatorClass || 'vanguard'];
     const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
     const summary = this.root.querySelector('#creator-summary');
-    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal Alt construction</small>`;
+    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal ${this._keyLabel('build')} construction</small>`;
   }
 
   _showCharacterCreator() {
@@ -921,6 +924,10 @@ export class UI {
     if (name) name.value = '';
     this._showScreen('character-create');
     setTimeout(() => name?.focus(), 0);
+  }
+
+  showCharacterCreator() {
+    this._showCharacterCreator();
   }
 
   _buildCharacterSelect() {
@@ -990,6 +997,11 @@ export class UI {
     if (!this.root.querySelector('#set-pane-controls').classList.contains('hidden')) this._renderKeybinds();
   }
 
+  _keyLabel(id) {
+    const binds = this._binds || loadBinds();
+    return keyLabel(binds[id]);
+  }
+
   // Any HUD element carrying data-bind shows the key currently bound to it, so
   // a rebind is visible on the stance bar without a reload.
   _refreshBindLabels() {
@@ -997,6 +1009,9 @@ export class UI {
     for (const el of this.root.querySelectorAll('[data-bind]')) {
       const slot = el.querySelector('b');
       if (slot) slot.textContent = keyLabel(binds[el.dataset.bind]);
+    }
+    for (const el of this.root.querySelectorAll('[data-bind-label]')) {
+      el.textContent = keyLabel(binds[el.dataset.bindLabel]);
     }
   }
 
@@ -1952,7 +1967,7 @@ export class UI {
     return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
       (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       (passives ? `${passives}<br>` : '') +
-      `<span class="tfx">${a.icon} <b>${a.name}</b> — SPACE/Q, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
+      `<span class="tfx">${a.icon} <b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
       `<br><span class="tdesc">Level-ups grant upgrade points for Aura, Passive I, Passive II, or Ult Damage.</span>`;
   }
 
@@ -2001,14 +2016,12 @@ export class UI {
   setControlMode(mode = 'build') {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
-    const fight = mode === 'fight';
-    chip.classList.toggle('fight', fight);
-    chip.classList.toggle('build', !fight);
+    const hidden = mode === 'fight';
+    chip.classList.toggle('fight', hidden);
+    chip.classList.toggle('build', !hidden);
     const label = chip.querySelector('span');
-    if (label) label.textContent = fight ? 'Fight mode' : 'Build mode';
-    chip.title = fight
-      ? 'Fight mode: Space fires the hero special. Hold B to build. Alt toggles.'
-      : 'Build mode: Space/B builds. Auto-attacks still run. Alt toggles.';
+    if (label) label.textContent = hidden ? 'Construction hidden' : 'Construction shown';
+    chip.title = `${this._keyLabel('build_mode')} ${hidden ? 'shows' : 'hides'} construction markers. ${this._keyLabel('build')} always builds; ${this._keyLabel('ability1')} always uses the special.`;
   }
 
   update(game, p = 0, controls = {}) {
@@ -2136,7 +2149,7 @@ export class UI {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>SPACE</small></span>`;
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
         big.disabled = !near || h.dead;
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
@@ -2148,12 +2161,12 @@ export class UI {
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
           big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold SPACE/B · ${cost}🪙 · ALT fight</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} hide</small></span>`;
           big.disabled = h.dead;
         } else {
           this._bigMode = 'idle';
           big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Auto-attacks on · ride to a plot · ALT fight</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Construction shown<small>Auto-attacks on · ride to a plot · ${this._keyLabel('build_mode')} hide</small></span>`;
           big.disabled = true;
         }
       } else {
@@ -2162,7 +2175,7 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE${controlMode === 'fight' ? ' · ALT build' : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
