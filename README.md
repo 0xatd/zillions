@@ -23,7 +23,7 @@ Choose the document that matches your task:
 | Change maps or fortresses | `docs/thronefall-map-engine.md` and `docs/fortress-inspiration.md` |
 | Change unit or building art | `docs/art-direction.md` and `docs/art-pipeline.md` |
 | Plan future systems | `docs/design-vision.md` |
-| Plan character progression | `docs/skill-tree-integration.md` and `docs/weapons-and-items.md` |
+| Change gear, weapons, or the Lattice | `docs/weapons-and-items.md` and `docs/skill-tree-integration.md` |
 | Give an agent compact context | `llms.txt` |
 
 Use this source order when documents disagree:
@@ -100,6 +100,29 @@ Heroes can reach level 100. Levels 2 through 10 grant upgrade points. Later
 levels grant tapered stat growth.
 
 `src/config.js` is the source of truth for hero stats and abilities.
+
+## Characters, Gear and the Lattice
+
+A galaxy character carries its own build between adventures.
+
+Gear is rolled. An item is a key such as `scatter_mk2:7f3a91:62:2` — base, roll
+seed, item level and rarity — and it resolves to the same item on every machine
+without storing anything but the key. Item level comes from the world, so loot
+gets better the further out you travel. Five slots are worn, and the weapon and
+off-hand exist twice: press X to draw the other set mid-fight.
+
+The Lattice is one shared 646-node passive tree. All thirteen classes allocate
+into the same tree from thirteen different starting positions, so a class
+decides where you begin, not what you can become. You earn one point per level
+plus campaign points, and 122 points against 646 nodes means every build leaves
+most of the tree behind. Nodes can be pinned to one weapon set.
+
+Weapons carry the damage numbers, split across kinetic, thermal, shock and
+void. Enemies resist some and are vulnerable to others. A hero with nothing
+equipped fights with their signature weapon, which is exactly the numbers that
+hero always had.
+
+`src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
 ## Controls
 

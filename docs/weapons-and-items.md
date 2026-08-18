@@ -1,9 +1,12 @@
-# Future Design: Weapons and Loot Depth
+# Weapons and Loot Depth
 
-This document describes a future system. It is not a current-state
-specification. Read `docs/skill-tree-integration.md` first. That document plans
-the Lattice. This one plans the gear the Lattice scales, and it revises the
-delivery order in that document.
+This system is shipped. This document records what was built and why, and the
+decisions a change to it has to respect. Read `docs/skill-tree-integration.md`
+for the Lattice, which this layer scales.
+
+Owned by `src/items.js`. Checked by `scripts/item-check.mjs`,
+`scripts/weapon-check.mjs`, `scripts/damage-type-check.mjs` and
+`scripts/weapon-set-check.mjs`.
 
 ## The Blocker
 
@@ -162,23 +165,46 @@ Gear, weapons, affixes and the Lattice all fold into the same mod bag in
 node while it runs. Depth belongs between runs. The minute stays one hero, one
 gold resource, and one input.
 
-## Delivery Order
+## What Shipped
 
-This reorders `docs/skill-tree-integration.md`. Weapons and damage types come
-before the large tree, because they are what makes tree nodes differ from each
-other.
+All seven stages, in this order. Weapons and damage types came before the tree,
+because they are what make tree nodes differ from each other.
 
-1. Seeded item keys, the resolver, and its check. No new content. Old keys
-   still resolve. Pure and headless.
-2. The `WEAPONS` table and the hero definition split. The weapon drives
-   damage, range, rate and splash.
-3. Affix pools, item level, and rarity. Generation first, loot tables second.
-4. Damage types and resistances through `_damageUnit()`.
+1. Seeded item keys and the resolver. No new content; old keys still resolve.
+2. The weapon block left the hero definition. Signature weapons are generated
+   from each hero's own stats, so no balance value moved.
+3. Affix pools, item level and rarity, then world loot rolling.
+4. Damage types and resistances through the existing damage choke point.
 5. The equipment screen, replacing the stub.
 6. The Lattice, sized against real weapons and real damage types.
-7. Weapon-set swap, and Lattice nodes that specialise per set.
+7. Weapon-set swap, and Lattice nodes pinned to a set.
 
-Stage 7 reverses the recommendation in `docs/skill-tree-integration.md`. That
-document rejects weapon-set specialisation, and it is right to reject it while
-every hero has one fixed weapon. Once stage 2 ships, a second set is a real
-decision and the feature earns its cost.
+Stage 7 reversed an earlier recommendation. Rejecting weapon-set specialisation
+was right while every hero carried one fixed weapon; once stage 2 shipped, a
+second set became a real decision and the feature earned its cost.
+
+## Rules A Change Here Must Keep
+
+- An unequipped hero fights with their signature weapon, and that weapon is
+  generated from the hero definition. `weapon-check.mjs` asserts it byte for
+  byte at levels 1, 10, 40 and 100. Weapons must never move a bare hero's
+  numbers.
+- Item generation is pure and uses its own stream. It must never touch the
+  simulation random source.
+- Local weapon mods never enter the global bag.
+- A damage source that passes no type split takes the pre-types path exactly.
+- Read items through `itemInfo()`. A direct `ITEMS[key]` read renders a blank
+  for anything the world rolled, and `character-sheet-check.mjs` fails on one.
+- Equipment, doctrines, resolved weapon stats and the drawn set are in the
+  lockstep hash. Keep them there.
+
+## Still Not Built
+
+- Sockets and support gems.
+- Currency crafting.
+- Trade. This one is a hard block, not a backlog item: seeded keys mean a
+  client can mint any item, and there is no server authority. Peers regenerate
+  every item from its key and hash the result, which protects co-op. Trade
+  would turn one player's cheating into everyone's problem, and it must wait
+  for a server that owns item creation.
+- Ailment stacks.

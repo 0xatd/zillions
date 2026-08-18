@@ -1,7 +1,10 @@
-# Future Design: The Lattice
+# The Lattice
 
-This document describes a future system. It is not a current-state
-specification. Read `docs/product-contract.md` for shipped product rules.
+This system is shipped. This document records what was built and why, and the
+decisions a change to it has to respect.
+
+Owned by `src/skilltree.js`. Checked by `scripts/skilltree-check.mjs` and
+`scripts/character-sheet-check.mjs`.
 
 The Lattice is a large shared passive tree for MMO characters. It borrows the
 mechanical structure of an action-RPG passive tree. It uses Zillions names,
@@ -9,7 +12,7 @@ Zillions stat keys, and Zillions data only.
 
 ## Why This System
 
-Three progression systems exist today and only two of them do a job.
+Three progression systems existed and only two of them did a job.
 
 | System | Owner | Scope | State |
 | --- | --- | --- | --- |
@@ -17,9 +20,9 @@ Three progression systems exist today and only two of them do a job.
 | Meta tree | `src/meta.js` | account | shipped as data, no screen |
 | Character talent points | `src/mmo-characters.js` | character | granted, never spent |
 
-`grantMmoExperience()` adds one talent point per level to level 100. Nothing
-spends it. A character at level 40 holds 39 dead points. The Lattice is the
-spend surface for those points.
+`grantMmoExperience()` added one talent point per level to level 100 and
+nothing spent it. A character at level 40 held 39 dead points. The Lattice is
+the spend surface for those points.
 
 Give each system one job:
 
@@ -175,13 +178,37 @@ character. Rewire follows the same path with a Salvage Alloy cost.
 - The generator uses its own fixed seed. It must never touch the simulation
   random source.
 
-## Delivery
+## What Shipped
 
-One focused pull request each. Each lands with a committed check.
+646 nodes across nine sectors, 100 relays, 9 doctrines and 13 origins, against
+a 122-point budget — a build takes 19% of the tree.
 
-`docs/weapons-and-items.md` puts weapons and damage types ahead of this
-sequence. Follow that order. Tree nodes cannot differ from each other until
-damage has more than one axis, so the Lattice is sized after weapons ship.
+Weapons and damage types shipped first, because tree nodes cannot differ from
+each other until damage has more than one axis. See
+`docs/weapons-and-items.md`.
+
+## Rules A Change Here Must Keep
+
+- The tree is generated from a fixed seed. Same seed, same graph, on every
+  machine. `skilltree-check.mjs` compares full node signatures across builds.
+- Every origin can reach every node. A node no class can reach can never be
+  bought and sits on the screen looking like a bug.
+- Effects are data. A rule-changing node is a flag and the rule lives in
+  `src/game.js`. No doctrine may claim an effect that is not wired; the check
+  enforces the pairing in both directions.
+- Allocations prune on load, dropping unknown and unreachable nodes and
+  refunding their points. A reshaped tree must never brick a character.
+- The screen never decides what a legal build is. Every mutation goes through
+  the model's own rules.
+- Bumping `LATTICE_VERSION` invalidates saved allocations. Points come back,
+  but builds do not survive it.
+
+## Still Not Built
+
+- Socketed jewels and radius effects.
+- Allegiance subtrees. This is where the Folk direction in
+  `docs/design-vision.md` would attach to a character, and it is the natural
+  next piece.
 
 1. `src/skilltree.js` and `scripts/skilltree-check.mjs`. Generator, validators,
    `treeBonuses(alloc)`. No UI. No game hookup. Verifies every node reachable,

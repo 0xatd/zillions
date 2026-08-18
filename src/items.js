@@ -445,9 +445,18 @@ export function resolveItem(key) {
     icon: base.icon, ilvl: parsed.ilvl,
     rarity: parsed.rarity, rarityName: rarity.name, rarityColor: rarity.color,
     req: base.req || null, affixes, mods, local,
-    weapon: base.w ? applyLocal(base.w, local) : null,
+    weapon: null,
     rolled: true,
   };
+  // The weapon block carries the ITEM's name, not the base's — the HUD and the
+  // swap message name what the hero is actually holding.
+  if (base.w) {
+    item.weapon = applyLocal(base.w, local);
+    item.weapon.name = item.name;
+    item.weapon.icon = base.icon;
+    item.weapon.key = key;
+    item.weapon.class = base.class;
+  }
   if (RESOLVE_CACHE.size > CACHE_LIMIT) RESOLVE_CACHE.clear();
   RESOLVE_CACHE.set(key, item);
   return item;

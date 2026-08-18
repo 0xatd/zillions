@@ -127,6 +127,40 @@ change. The shared life pool grows by one per extra hero, every living hero
 seeds the horde's flow field, and each player gets their own pick-1-of-3
 blessing choice per razed chamber.
 
+## Character Progression
+
+An MMO character carries a build between adventures, and it has three layers
+that must stay separate.
+
+Gear is rolled. An item is a key that resolves to a base, an item level, a
+rarity and its affixes; item level comes from the world, so loot quality is
+tied to how far out the player has travelled. Five slots are worn: weapon,
+off-hand, armour and two implants. Weapon and off-hand exist twice, and X draws
+the other set in the field on a four-second cooldown.
+
+The Lattice is one shared 646-node passive tree with thirteen origins. A class
+picks where it starts, not what it can become. A character spends one point per
+level plus campaign points, capped at 122, so a build excludes far more than it
+takes. Nodes can be pinned to one weapon set. Rewiring returns every point for
+Salvage Alloy.
+
+Weapons carry the damage numbers. A hero without an equipped weapon fights with
+their signature weapon, which is that hero's original stats exactly. Damage is
+split across kinetic, thermal, shock and void, and enemies resist or are
+vulnerable to each.
+
+The rules these must keep:
+
+- Depth belongs between runs. Gear, the Lattice and weapon sets all resolve to
+  flat numbers before a run starts; the simulation never queries them while it
+  runs, and the tactical minute stays one hero, one gold resource, one input.
+- The three layers own different jobs. In-run hero upgrades own the run, the
+  Lattice owns the character, the meta tree owns the account. Two systems must
+  not sell the same bonus.
+- Nothing is unrecoverable. A reshaped tree, a lost level or a rewire refunds
+  and prunes; it never breaks a character.
+- No trade until a server owns item creation.
+
 ## Longer-Range Direction
 
 `docs/design-vision.md` holds the next horizon: folklore factions as

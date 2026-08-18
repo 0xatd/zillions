@@ -55,6 +55,19 @@ economy, and army systems, and never let its wins advance campaign progress.
 - Read `docs/thronefall-map-engine.md` before you change terrain rendering.
 - Read `docs/fortress-inspiration.md` before you change colony generation.
 
+### Gear and the Lattice
+
+- An item is a key. Rolled keys resolve through `resolveItem()`; authored keys
+  resolve from `ITEMS`. Read either through `itemInfo()`, never `ITEMS[key]`.
+- Keep item generation pure and off the simulation random source.
+- Keep local weapon mods out of the global mod bag.
+- Keep Lattice effects as data. A rule-changing node is a flag, and the rule
+  lives in `src/game.js` with a committed check.
+- Resolve gear and the Lattice at run start. Never query them during a run.
+- Prune allocations on load. A tree that changes shape must refund, not break.
+- Keep equipment, doctrines and the drawn weapon set in the lockstep hash.
+- Every hero's signature weapon must stay identical to that hero's own stats.
+
 ### Heroes
 
 - Keep this roster: Scott English, Alexander Thomas, Danny Donovan, Turtle
@@ -94,6 +107,8 @@ economy, and army systems, and never let its wins advance campaign progress.
 - `src/terrain.js`: terrain field and terrain-derived sites.
 - `src/galaxy.js`: procedural star systems, world kinds, and world descriptors.
 - `src/factions.js`: faction roster, presence archetypes, and ownership.
+- `src/items.js`: item bases, weapons, affixes, damage types, and item generation.
+- `src/skilltree.js`: the Lattice — sectors, tree generation, allocation, payload.
 - `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.

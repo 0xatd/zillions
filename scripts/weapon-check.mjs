@@ -134,6 +134,19 @@ for (const [baseKey, base] of Object.entries(ITEM_BASES)) {
   ok(game.heroStats(h).rate > 0, `${baseKey}: equipping produced no attack rate`);
 }
 
+
+// ---------- a resolved weapon knows what it is ----------
+// The HUD and the swap message name the weapon the hero is holding, so the
+// block has to carry the ITEM's name rather than the base's.
+{
+  const key = rollItemKey('scatter_mk3', 'named', 60, 3);
+  const item = resolveItem(key);
+  ok(item.weapon.name === item.name, `weapon block is named "${item.weapon.name}", item is "${item.name}"`);
+  ok(item.weapon.icon && item.weapon.class, 'weapon block lost its icon or class');
+  ok(item.weapon.key === key, 'weapon block does not carry its key');
+  ok(!item.weapon.signature, 'a rolled weapon claims to be a signature');
+}
+
 if (failures) {
   console.error(`\nweapon-check: ${failures} failure(s)`);
   process.exit(1);
