@@ -3,6 +3,7 @@
 import {
   ITEM_BASES, AFFIXES, MOD_KEYS, DAMAGE_TYPES, RARITIES, BASES_BY_SLOT,
   rollItemKey, parseItemKey, resolveItem, isRolledKey, rolledMods,
+  rollLootKey, rollLootKeyForSlot, worldItemLevel,
   meetsRequirement, itemLines, applyLocal, hashString,
 } from '../src/items.js';
 import { ITEMS, itemMods, itemInfo } from '../src/config.js';
@@ -192,6 +193,39 @@ ok(meetsRequirement(resolveItem(rollItemKey('neural_shunt', 'req2', 10, 1)), {})
 ok(hashString('zillions') === hashString('zillions'), 'hashString is not stable');
 ok(hashString('a') !== hashString('b'), 'hashString collides on trivial input');
 ok(rolledMods([]).dmg === 0, 'rolledMods empty bag');
+
+
+// ---------- loot rolling ----------
+// A world must never offer a base it is not deep enough to have made, and the
+// same context must always produce the same drop.
+for (const ilvl of [1, 5, 20, 50, 100]) {
+  for (let r = 0; r < 40; r++) {
+    const roll = r / 40;
+    const key = rollLootKey(`w${ilvl}`, ilvl, 2, roll);
+    ok(key, `rollLootKey returned null at ilvl ${ilvl}`);
+    const item = resolveItem(key);
+    ok(item, `rollLootKey produced an unresolvable key at ilvl ${ilvl}`);
+    ok(item.base.ilvl <= ilvl, `ilvl ${ilvl} dropped ${item.baseKey}, which needs ${item.base.ilvl}`);
+    ok(rollLootKey(`w${ilvl}`, ilvl, 2, roll) === key, 'rollLootKey is not deterministic');
+  }
+}
+for (const slot of ['weapon', 'offhand', 'armor', 'implant']) {
+  const key = rollLootKeyForSlot(slot, 'slotroll', 100, 3, 0.5);
+  ok(key && resolveItem(key).slot === slot, `rollLootKeyForSlot returned the wrong slot for ${slot}`);
+}
+ok(rollLootKeyForSlot('weapon', 's', 1, 1, 0.5), 'no weapon is reachable at item level 1');
+ok(rollLootKey('edge', 1, 2, 0) && rollLootKey('edge', 1, 2, 0.9999), 'roll edges must both resolve');
+
+// Item level must rise with the world and never leave 1..100.
+let previous = 0;
+for (const levelId of [1, 2, 3, 4, 5, 20, 60]) {
+  const ilvl = worldItemLevel(levelId, { mult: 1 + levelId * 0.1 }, { mult: 1 });
+  ok(ilvl >= 1 && ilvl <= 100, `worldItemLevel(${levelId}) = ${ilvl}, out of range`);
+  ok(ilvl >= previous, `worldItemLevel fell from ${previous} to ${ilvl} at level ${levelId}`);
+  previous = ilvl;
+}
+ok(worldItemLevel(9999, null, null) <= 100, 'worldItemLevel did not clamp a huge level id');
+ok(worldItemLevel(null, null, null) >= 1, 'worldItemLevel did not floor a missing level id');
 
 if (failures) {
   console.error(`\nitem-check: ${failures} failure(s)`);

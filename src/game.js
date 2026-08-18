@@ -12,7 +12,8 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, weaponFor,
+  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor,
+  rollLootKey, worldItemLevel,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
@@ -79,6 +80,7 @@ export class Game {
     this.gold = this.economy.startGold;
     this.coins = [];             // physical coins on the ground
     this.loot = [];              // items lying on the frontier, most of them hidden
+    this._lootSerial = 0;        // per-game roll counter — see _scatterLoot()
     this.site = -1;              // chosen city site index (-1 = not founded yet)
     this.plots = [];             // generated when the city is founded
     this.buildings = [];
@@ -637,7 +639,7 @@ export class Game {
     this.blessingOffers[p] = null;
     this._refreshPackMods(h);
     this.emit({ type: 'blessed', x: h.x, z: h.z });
-    this.msg(`✨ ${h.def.name} takes the ${ITEMS[key].name}.`, 'info');
+    this.msg(`✨ ${h.def.name} takes the ${itemInfo(key)?.name || 'blessing'}.`, 'info');
   }
 
   // Terrain generation owns the centre of the map. It may place deep forest,
@@ -1952,7 +1954,24 @@ export class Game {
   // hoards what it took off the people it ate, and a pass is where travellers
   // die with their packs still on. Seeded, so lockstep peers agree.
   _scatterLoot() {
+    // Two kinds of thing lie on the frontier now. The authored field finds are
+    // still here — they are the recognisable ones — and alongside them the
+    // world rolls its own gear at a level set by the world itself.
+    //
+    // The roll seed comes from the map seed, the level, and a per-game serial.
+    // All three are identical on every peer, so every peer scatters the same
+    // items. The serial is deliberately NOT the global entity id, which can
+    // differ between peers that have played a different number of games.
+    const ilvl = worldItemLevel(this.levelId, this.level, this.diff);
     const pick = (rare) => {
+      if (this.rng() < (rare ? 0.75 : 0.55)) {
+        const rarity = rare ? (this.rng() < 0.35 ? 3 : 2) : (this.rng() < 0.2 ? 2 : 1);
+        const key = rollLootKey(
+          `${this.map.seed}:${this.levelId}:${this._lootSerial++}`,
+          ilvl, rarity, this.rng(),
+        );
+        if (key) return key;
+      }
       const pool = rare ? FIELD_LOOT.rare : FIELD_LOOT.common;
       return pool[Math.floor(this.rng() * pool.length)];
     };
@@ -2030,7 +2049,7 @@ export class Game {
         if (l.hidden) {
           if (d2 > LOOT_REVEAL_RADIUS * LOOT_REVEAL_RADIUS) continue;
           l.hidden = false;
-          const it = ITEMS[l.key];
+          const it = itemInfo(l.key);
           this.msg(`${it ? it.icon : '📦'} You spot something half-buried — ${it ? it.name : 'a cache'}.`, 'info');
           this.emit({ type: 'lootseen', x: l.x, z: l.z, key: l.key, id: l.id });
           continue;
@@ -2056,13 +2075,15 @@ export class Game {
   // Into the pack, and into the hero's stats immediately — a find you cannot
   // feel until the next level is not a find.
   giveItem(h, key) {
-    const it = ITEMS[key];
+    // Authored or rolled — both arrive here, and both must be takeable.
+    const it = itemInfo(key);
     if (!it) return false;
     h.pack = h.pack || [];
     if (h.pack.length >= PACK_SLOTS) return false;
     h.pack.push(key);
     this._refreshPackMods(h);
-    this.msg(`${it.icon} ${h.def.name} takes the ${it.name} — ${it.desc}`, 'good');
+    const blurb = it.desc || itemLines(it).join(', ') || it.rarityName;
+    this.msg(`${it.icon} ${h.def.name} takes the ${it.name} — ${blurb}`, 'good');
     this.emit({ type: 'loot', x: h.x, z: h.z, key });
     return true;
   }
@@ -2076,7 +2097,7 @@ export class Game {
     const [key] = h.pack.splice(i, 1);
     this._refreshPackMods(h);
     this.dropLoot(h.x, h.z, key);
-    const it = ITEMS[key];
+    const it = itemInfo(key);
     this.msg(`${it ? it.icon : '📦'} Dropped the ${it ? it.name : 'find'}.`, 'info');
   }
 

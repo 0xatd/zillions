@@ -5,7 +5,10 @@
 // the two flows meet.
 
 import { makeRNG } from './utils.js';
-import { MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey } from './items.js';
+import {
+  MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
+  rollLootKey, rollLootKeyForSlot, worldItemLevel,
+} from './items.js';
 
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
@@ -632,6 +635,7 @@ export const LOOT_DROP_COOLDOWN = 2.5; // seconds before a dropped item can be p
 // The stat vocabulary lives in `items.js` so the gear layer and the authored
 // table cannot drift apart. One list, one source.
 export const MOD_KEYS = GEAR_MOD_KEYS;
+export { rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines } from './items.js';
 
 // Two kinds of key reach this function and both are legal:
 //   'oath_blade'                  an authored item from ITEMS above

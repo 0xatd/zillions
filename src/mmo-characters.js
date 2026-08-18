@@ -2,10 +2,13 @@
 // heroes remain in Custom Games; MMO characters carry their own class, level,
 // equipment, appearance and last world between instances.
 
-import { EQUIP_SLOTS, slotPool } from './items.js';
+import { EQUIP_SLOTS, slotPool, isRolledKey } from './items.js';
 import { itemInfo } from './config.js';
 
 export const MAX_MMO_CHARACTERS = 8;
+// What a character can keep between adventures. Rolled gear is unique, so
+// without a cap a stash grows without bound inside the profile blob.
+export const STASH_SLOTS = 60;
 
 export const MMO_CLASSES = {
   berserker: { name: 'Berserker', icon: '🪓', role: 'Melee bruiser and horde breaker', proxy: 'john', resource: 'Fury' },
@@ -81,7 +84,7 @@ export function normalizeMmoCharacters(profile) {
     character.proxyHero = klass.proxy;
     character.level = Math.max(1, Math.min(100, Number(character.level) || 1));
     character.xp = Math.max(0, Number(character.xp) || 0);
-    character.items = Array.isArray(character.items) ? character.items : [];
+    character.items = (Array.isArray(character.items) ? character.items : []).slice(0, STASH_SLOTS);
     character.equipment = normalizeEquipment(character.equipment);
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
@@ -141,9 +144,16 @@ export function recordMmoInstance(character, { won = false, kills = 0, xp = 0, w
   if (won) character.stats.victories++;
   character.stats.kills += Math.max(0, kills | 0);
   if (world) character.lastWorld = world;
+  // Rolled items are unique by construction, so the old identity dedupe stopped
+  // meaning anything the moment gear started rolling. A stash cap replaces it:
+  // authored items still land once, rolled ones stack up to the cap.
   const granted = [];
   for (const item of items) {
-    if (item && !character.items.includes(item)) { character.items.push(item); granted.push(item); }
+    if (!item) continue;
+    if (!isRolledKey(item) && character.items.includes(item)) continue;
+    if (character.items.length >= STASH_SLOTS) break;
+    character.items.push(item);
+    granted.push(item);
   }
   return { levels: grantMmoExperience(character, xp), items: granted };
 }

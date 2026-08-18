@@ -531,3 +531,40 @@ export function rolledMods(keys) {
   }
   return out;
 }
+
+// ---------- loot ----------
+//
+// What a world drops, and how good it is. Both answers are one number and one
+// deterministic roll, so the simulation can ask for an item without carrying
+// a loot system of its own.
+
+// How deep a world's gear rolls. Item level is the single lever that ties loot
+// quality to where the player is, and it is why affix tiers exist at all.
+export function worldItemLevel(levelId, level = null, diff = null) {
+  const base = Math.max(1, Math.min(100, Math.round((Number(levelId) || 1) * 1.6)));
+  const byMult = level && level.mult ? Math.round((level.mult - 1) * 34) : 0;
+  const byDiff = diff && diff.mult ? Math.round((diff.mult - 1) * 12) : 0;
+  return Math.max(1, Math.min(100, base + byMult + byDiff));
+}
+
+// Roll one item key. `roll` is a caller-supplied 0..1 from the SIMULATION's
+// random source — that is what keeps peers agreeing on which base dropped —
+// while the affixes come from `seed`, which never touches that source.
+export function rollLootKey(seed, ilvl = 1, rarity = 2, roll = 0) {
+  const level = Math.max(1, Math.min(100, Math.round(Number(ilvl) || 1)));
+  // Only offer bases the world is deep enough to have made.
+  const legal = Object.keys(ITEM_BASES).filter((key) => ITEM_BASES[key].ilvl <= level);
+  if (!legal.length) return null;
+  const idx = Math.min(legal.length - 1, Math.floor(Math.max(0, Math.min(0.999999, roll)) * legal.length));
+  return rollItemKey(legal[idx], seed, level, rarity);
+}
+
+// The same roll, restricted to one slot — for rewards that should be a weapon,
+// or a boss that should hand back armour.
+export function rollLootKeyForSlot(slot, seed, ilvl = 1, rarity = 2, roll = 0) {
+  const level = Math.max(1, Math.min(100, Math.round(Number(ilvl) || 1)));
+  const legal = (BASES_BY_SLOT[slot] || []).filter((key) => ITEM_BASES[key].ilvl <= level);
+  if (!legal.length) return null;
+  const idx = Math.min(legal.length - 1, Math.floor(Math.max(0, Math.min(0.999999, roll)) * legal.length));
+  return rollItemKey(legal[idx], seed, level, rarity);
+}

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
-import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS, SIEGE } from '../src/config.js';
+import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS, SIEGE, itemInfo } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
 
@@ -401,7 +401,9 @@ for (const level of LEVELS) {
     assert.ok(game.loot.length >= 6, `${label} hid only ${game.loot.length} caches on a whole planet`);
     for (const l of game.loot) {
       assert.ok(live.isWalkable(l.x | 0, l.z | 0), `${label}: a cache is lying on unwalkable ground`);
-      assert.ok(ITEMS[l.key], `${label}: a cache holds an unknown item "${l.key}"`);
+      // A cache holds either an authored item or a rolled one. Both must
+      // resolve to something wearable — an unresolvable key is a dead pickup.
+      assert.ok(itemInfo(l.key), `${label}: a cache holds an unknown item "${l.key}"`);
       assert.ok(l.hidden, `${label}: a cache is visible before anyone has been near it`);
     }
     // Walk a hero onto four caches: the first fill the pack, the last is
