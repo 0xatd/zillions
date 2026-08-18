@@ -68,8 +68,6 @@ export class AuthClient {
   status(extra = {}) {
     const user = this.user;
     const username = publicName(this.profile);
-    const mmoCharacters = Array.isArray(this.user?.user_metadata?.mmo_characters)
-      ? this.user.user_metadata.mmo_characters : null;
     return {
       ready: this.ready,
       enabled: this.enabled,
@@ -149,6 +147,8 @@ export class AuthClient {
     const profile = bundle.profile;
     const stats = bundle.stats || {};
     const username = publicName(profile);
+    const mmoCharacters = Array.isArray(this.user?.user_metadata?.mmo_characters)
+      ? this.user.user_metadata.mmo_characters : null;
     return {
       name: username,
       username,
