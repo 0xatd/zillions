@@ -15,8 +15,20 @@
 export const KEYBIND_KEY = 'zillions_keybinds';
 export const KEYBIND_VERSION = 1;
 
-// Where an action applies. A key may repeat across contexts without clashing:
-// the same key can mean one thing in a battle and another in the hub.
+// WHERE an action is actually listening. This is not the same thing as the
+// group it is displayed under, and conflating the two was a real bug: the
+// Settings screen grouped by context and checked conflicts per context, but a
+// battle has movement, combat, army and interface actions all live at once, so
+// binding the character sheet to Q reported no conflict and then never fired —
+// the dispatcher found `ability1` first and stopped.
+//
+// Conflicts are judged by scope overlap. Grouping is presentation only.
+export const SCOPES = {
+  battle: 'During a match',
+  hub: 'In the persistent world',
+};
+
+// Display groups for the Settings screen. These carry no meaning at dispatch.
 export const BIND_CONTEXTS = {
   movement: { key: 'movement', name: 'Movement', desc: 'Getting around the battlefield.' },
   combat: { key: 'combat', name: 'Combat', desc: 'Abilities, dodging, and your weapon sets.' },
@@ -29,81 +41,81 @@ export const BIND_CONTEXTS = {
 // screen shows the complete scheme rather than a filtered one.
 export const ACTIONS = [
   // ---- movement ----
-  { id: 'move_up', name: 'Move north', context: 'movement', default: 'w', alt: 'arrowup', held: true },
-  { id: 'move_left', name: 'Move west', context: 'movement', default: 'a', alt: 'arrowleft', held: true },
-  { id: 'move_down', name: 'Move south', context: 'movement', default: 's', alt: 'arrowdown', held: true },
-  { id: 'move_right', name: 'Move east', context: 'movement', default: 'd', alt: 'arrowright', held: true },
+  { id: 'move_up', name: 'Move north', scopes: ['battle', 'hub'], context: 'movement', default: 'w', alt: 'arrowup', held: true },
+  { id: 'move_left', name: 'Move west', scopes: ['battle', 'hub'], context: 'movement', default: 'a', alt: 'arrowleft', held: true },
+  { id: 'move_down', name: 'Move south', scopes: ['battle', 'hub'], context: 'movement', default: 's', alt: 'arrowdown', held: true },
+  { id: 'move_right', name: 'Move east', scopes: ['battle', 'hub'], context: 'movement', default: 'd', alt: 'arrowright', held: true },
   {
-    id: 'sprint', name: 'Gallop', context: 'movement', default: 'shift', held: true,
+    id: 'sprint', name: 'Gallop', scopes: ['battle', 'hub'], context: 'movement', default: 'shift', held: true,
     desc: 'Full speed, and only at full health.',
   },
 
   // ---- combat ----
   {
-    id: 'dodge', name: 'Dodge roll', context: 'combat', default: ' ',
+    id: 'dodge', name: 'Dodge roll', scopes: ['battle'], context: 'combat', default: ' ',
     desc: 'A short burst out of danger. Briefly untouchable, then a cooldown.',
   },
   {
-    id: 'ability1', name: 'Primary ability', context: 'combat', default: 'q',
+    id: 'ability1', name: 'Primary ability', scopes: ['battle'], context: 'combat', default: 'q',
     desc: 'Your hero special.',
   },
   {
-    id: 'ability2', name: 'Ability II', context: 'combat', default: 'e', reserved: true,
+    id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'e', reserved: true,
     desc: 'Reserved. Heroes carry one ability today; this slot is where a second lands.',
   },
   {
-    id: 'ability3', name: 'Ability III', context: 'combat', default: 'r', reserved: true,
+    id: 'ability3', name: 'Ability III', scopes: ['battle'], context: 'combat', default: 'r', reserved: true,
     desc: 'Reserved, as above.',
   },
   {
-    id: 'swap_set', name: 'Swap weapon set', context: 'combat', default: 'x',
+    id: 'swap_set', name: 'Swap weapon set', scopes: ['battle'], context: 'combat', default: 'x',
     desc: 'Draw the other weapon set. Four second cooldown.',
   },
   {
-    id: 'second_bar', name: 'Secondary bar (hold)', context: 'combat', default: 'control', held: true,
+    id: 'second_bar', name: 'Secondary bar (hold)', scopes: ['battle'], context: 'combat', default: 'control', held: true,
     reserved: true,
     desc: 'Reserved. Holds a second layer of ability slots once heroes carry more than one.',
   },
   {
-    id: 'consumable1', name: 'Consumable I', context: 'combat', default: '1', reserved: true,
+    id: 'consumable1', name: 'Consumable I', scopes: ['battle'], context: 'combat', default: '1', reserved: true,
     desc: 'Reserved. Zillions has no flask system; these slots are where one would go.',
   },
   {
-    id: 'consumable2', name: 'Consumable II', context: 'combat', default: '2', reserved: true,
+    id: 'consumable2', name: 'Consumable II', scopes: ['battle'], context: 'combat', default: '2', reserved: true,
     desc: 'Reserved, as above.',
   },
 
   // ---- army and colony ----
   {
-    id: 'build', name: 'Build, upgrade, repair', context: 'army', default: 'b', held: true,
+    id: 'build', name: 'Build, upgrade, repair', scopes: ['battle'], context: 'army', default: 'b', held: true,
     desc: 'Hold at a foundation. Gold streams out until it rises.',
   },
   {
-    id: 'build_mode', name: 'Toggle build mode', context: 'army', default: 'alt',
+    id: 'build_mode', name: 'Toggle build mode', scopes: ['battle'], context: 'army', default: 'alt',
     desc: 'Switches what the primary input does between building and fighting.',
   },
   {
-    id: 'stance_defend', name: 'Stance: defend city', context: 'army', default: 'f1',
+    id: 'stance_defend', name: 'Stance: defend city', scopes: ['battle'], context: 'army', default: 'f1',
     desc: 'Zillions has no PoE equivalent — squads are ours.',
   },
-  { id: 'stance_follow', name: 'Stance: follow hero', context: 'army', default: 'f2' },
-  { id: 'stance_push', name: 'Stance: push lanes', context: 'army', default: 'f3' },
-  { id: 'tower_priority', name: 'Cycle tower targeting', context: 'army', default: 't' },
-  { id: 'drop_item', name: 'Drop newest field item', context: 'army', default: 'z' },
+  { id: 'stance_follow', name: 'Stance: follow hero', scopes: ['battle'], context: 'army', default: 'f2' },
+  { id: 'stance_push', name: 'Stance: push lanes', scopes: ['battle'], context: 'army', default: 'f3' },
+  { id: 'tower_priority', name: 'Cycle tower targeting', scopes: ['battle'], context: 'army', default: 't' },
+  { id: 'drop_item', name: 'Drop newest field item', scopes: ['battle'], context: 'army', default: 'z' },
 
   // ---- interface ----
   {
-    id: 'character_sheet', name: 'Character & equipment', context: 'interface', default: 'c',
+    id: 'character_sheet', name: 'Character & equipment', scopes: ['battle', 'hub'], context: 'interface', default: 'c',
     desc: 'Your gear, your stash, and what it all adds up to.',
   },
   {
-    id: 'lattice_panel', name: 'The Lattice', context: 'interface', default: 'g',
+    id: 'lattice_panel', name: 'The Lattice', scopes: ['battle', 'hub'], context: 'interface', default: 'g',
     desc: 'The passive tree. Opens the same sheet on its Lattice tab.',
   },
-  { id: 'pause', name: 'Pause', context: 'interface', default: 'p' },
-  { id: 'mute', name: 'Mute audio', context: 'interface', default: 'm' },
-  { id: 'chat', name: 'Team chat', context: 'interface', default: 'enter' },
-  { id: 'menu', name: 'Game menu', context: 'interface', default: 'escape', fixed: true },
+  { id: 'pause', name: 'Pause', scopes: ['battle'], context: 'interface', default: 'p' },
+  { id: 'mute', name: 'Mute audio', scopes: ['battle', 'hub'], context: 'interface', default: 'm' },
+  { id: 'chat', name: 'Team chat', scopes: ['battle'], context: 'interface', default: 'enter' },
+  { id: 'menu', name: 'Game menu', scopes: ['battle', 'hub'], context: 'interface', default: 'escape', fixed: true },
 ];
 
 export const ACTIONS_BY_ID = new Map(ACTIONS.map((a) => [a.id, a]));
@@ -130,34 +142,35 @@ export function defaultBinds() {
   return out;
 }
 
-// Anything off disk goes through here. An unknown action, a missing key or a
-// key held by a fixed action all fall back to the default rather than leaving
-// the player unable to move.
-export function normalizeBinds(raw) {
-  const out = defaultBinds();
-  if (!raw || typeof raw !== 'object') return out;
-  for (const [id, key] of Object.entries(raw)) {
-    const action = ACTIONS_BY_ID.get(id);
-    if (!action || action.fixed) continue;
-    if (typeof key !== 'string' || !key) continue;
-    out[id] = key.toLowerCase();
-  }
+// Every key an action answers to: what it is bound to, plus its fixed
+// alternate. A conflict on EITHER is a conflict — the arrow keys are not
+// rebindable, so an action bound to ArrowUp is shadowed by movement forever.
+export function keysForAction(binds, action, override = undefined) {
+  const bound = override === undefined ? (binds || {})[action.id] : override;
+  const out = [];
+  if (bound) out.push(String(bound).toLowerCase());
+  if (action.alt) out.push(String(action.alt).toLowerCase());
   return out;
 }
 
-// Two actions in the SAME context may not share a key. Across contexts they
-// may: the character sheet and the colony never listen at the same moment.
+const scopesOverlap = (a, b) => (a.scopes || []).some((scope) => (b.scopes || []).includes(scope));
+
+// Two actions that can be listening at the same moment may not share a key.
+// Scope decides that, not the display group: during a battle, movement, combat,
+// army and interface actions are all live, so a key shared across those groups
+// leaves one of them permanently dead.
 export function conflictsFor(binds, id, key) {
   const action = ACTIONS_BY_ID.get(id);
   if (!action) return [];
-  const wanted = String(key || '').toLowerCase();
+  const wanted = new Set(keysForAction(binds, action, key));
+  if (!wanted.size) return [];
   return ACTIONS.filter((other) => other.id !== id
-    && other.context === action.context
-    && (binds[other.id] || '').toLowerCase() === wanted);
+    && scopesOverlap(action, other)
+    && keysForAction(binds, other).some((k) => wanted.has(k)));
 }
 
-// Every context that has a duplicate, for the screen to flag and the check to
-// refuse. A scheme with a clash in it is a scheme with a dead action.
+// Every duplicate in a scheme, for the screen to flag and the check to refuse.
+// A scheme with a clash in it is a scheme with a dead action.
 export function allConflicts(binds) {
   const out = [];
   for (const action of ACTIONS) {
@@ -167,14 +180,45 @@ export function allConflicts(binds) {
   return out;
 }
 
-// The action a key press means in a context, or null. Alternates (the arrow
-// keys) count, and they are not rebindable — they shadow the primary.
-export function actionFor(binds, key, context = null) {
-  const k = String(key || '').toLowerCase();
+// Anything off disk goes through here, and what comes out is always playable:
+// unknown actions and fixed rebinds are dropped, and a scheme that would leave
+// two actions fighting over one key is resolved rather than stored. An action
+// that cannot be given a free key comes back UNBOUND, which the screen shows
+// plainly — an unbound action is honest, a shadowed one is a silent bug.
+export function normalizeBinds(raw) {
+  const requested = {};
+  if (raw && typeof raw === 'object') {
+    for (const id of Object.keys(raw)) {
+      const action = ACTIONS_BY_ID.get(id);
+      if (!action || action.fixed) continue;
+      const key = raw[id];
+      if (typeof key !== 'string' || !key) continue;
+      requested[id] = key.toLowerCase();
+    }
+  }
+  const out = {};
+  // Declaration order decides who keeps a contested key, so the same stored
+  // scheme always normalises to the same result on every machine.
   for (const action of ACTIONS) {
-    if (context && action.context !== context) continue;
-    if ((binds[action.id] || '').toLowerCase() === k) return action.id;
-    if (action.alt && action.alt === k) return action.id;
+    const wanted = action.fixed ? action.default : (requested[action.id] || action.default);
+    for (const candidate of [wanted, action.default, '']) {
+      if (candidate && conflictsFor(out, action.id, candidate).length) continue;
+      out[action.id] = candidate;
+      break;
+    }
+  }
+  return out;
+}
+
+// The action a key press means, or null. Pass the scope the press happened in
+// — the battle loop and the hub listen to different sets, and a scoped lookup
+// cannot pick an action that is not listening.
+export function actionFor(binds, key, scope = null) {
+  const k = String(key || '').toLowerCase();
+  if (!k) return null;
+  for (const action of ACTIONS) {
+    if (scope && !(action.scopes || []).includes(scope)) continue;
+    if (keysForAction(binds, action).includes(k)) return action.id;
   }
   return null;
 }
@@ -183,8 +227,7 @@ export function actionFor(binds, key, context = null) {
 export function isHeld(binds, keys, id) {
   const action = ACTIONS_BY_ID.get(id);
   if (!action) return false;
-  if (keys.has((binds[id] || '').toLowerCase())) return true;
-  return !!(action.alt && keys.has(action.alt));
+  return keysForAction(binds, action).some((k) => keys.has(k));
 }
 
 // ---------- storage ----------

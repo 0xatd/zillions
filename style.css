@@ -1538,3 +1538,4 @@ body::after {
   .bindalt { display: none; }
   .bindhead { flex-wrap: wrap; }
 }
+.bindrow.unbound .bindkey { color: #9aa4b6; font-style: italic; border-style: dashed; }

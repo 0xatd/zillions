@@ -151,8 +151,16 @@ grammar a player arriving from an action RPG already has in their hands.
   the in-game help and the README controls table cannot drift apart:
   `scripts/keybind-check.mjs` fails the build if they do.
 
-Two actions in one group may not share a key. Across groups they may, because
-the two never listen at the same moment.
+Two actions that can be listening at the same moment may not share a key. That
+is decided by scope — where an action is live — and not by the group it is
+displayed under. A battle has movement, combat, army and interface actions all
+listening at once, so a key shared across those groups leaves one of them dead.
+An action's fixed alternates count as its keys for this purpose.
+
+A scheme is never stored in a conflicting state. Rebinding a key that another
+action holds hands that action the key being replaced; anything that still
+cannot be given a free key is stored unbound and shown as such, because an
+unbound action is honest and a shadowed one is a silent bug.
 
 ## Character Progression
 

@@ -407,7 +407,7 @@ export class UI {
               </div>
               <div id="set-pane-controls" class="setpane hidden">
                 <div class="bindhead">
-                  <p>Click any key to rebind it. Two actions in the same group may not share a key.</p>
+                  <p>Click any key to rebind it. Two actions that can be used at the same time may not share a key — rebinding onto one hands it the key you replaced.</p>
                   <button class="tbtn" id="set-binds-reset">Restore defaults</button>
                 </div>
                 <div id="set-binds"></div>
@@ -1008,12 +1008,12 @@ export class UI {
         const key = binds[action.id];
         const clash = clashes.get(action.id);
         const listening = this._bindingId === action.id;
-        return `<div class="bindrow${clash ? ' clash' : ''}${action.reserved ? ' reserved' : ''}">
+        return `<div class="bindrow${clash ? ' clash' : ''}${action.reserved ? ' reserved' : ''}${key ? '' : ' unbound'}">
           <span class="bindname">${escapeHtml(action.name)}${action.reserved ? '<em>not yet used</em>' : ''}
             ${action.desc ? `<small>${escapeHtml(action.desc)}</small>` : ''}</span>
           <button class="bindkey${listening ? ' listening' : ''}" data-action="${action.id}"
             ${action.fixed ? 'disabled title="This key is fixed."' : ''}>
-            ${listening ? 'press a key…' : escapeHtml(keyLabel(key))}</button>
+            ${listening ? 'press a key…' : (key ? escapeHtml(keyLabel(key)) : 'unbound')}</button>
           ${action.alt ? `<span class="bindalt">or ${escapeHtml(keyLabel(action.alt))}</span>` : '<span class="bindalt"></span>'}
         </div>`;
       }).join('');
@@ -1021,9 +1021,12 @@ export class UI {
         <p class="bindgroupdesc">${escapeHtml(context.desc)}</p>${rows}</section>`;
     }).join('');
 
+    const unbound = ACTIONS.filter((a) => !binds[a.id]);
     const conflictNote = clashes.size
-      ? `<p class="bindconflict">Two actions in the same group share a key. Rebind one — the second will never fire.</p>`
-      : '';
+      ? '<p class="bindconflict">Two actions that are live at the same time share a key. Rebind one — the second will never fire.</p>'
+      : unbound.length
+        ? `<p class="bindconflict">${unbound.length} action${unbound.length === 1 ? ' has' : 's have'} no key. Click to bind.</p>`
+        : '';
     box.innerHTML = conflictNote + groups;
 
     for (const button of box.querySelectorAll('.bindkey')) {

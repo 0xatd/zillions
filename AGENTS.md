@@ -58,7 +58,8 @@ economy, and army systems, and never let its wins advance campaign progress.
 ### Controls
 
 - Declare an action in `src/keybinds.js`. Never dispatch on a key literal.
-- Two actions in one group may not share a key.
+- Two actions whose scopes overlap may not share a key. Scope is where an
+  action listens, not the group it is displayed under. Alternates count.
 - Update the README controls table with any binding change. `keybind-check`
   compares them and fails on a mismatch in either direction.
 - Army stances stay off the number row. 1 and 2 are reserved for consumables.

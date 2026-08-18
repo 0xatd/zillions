@@ -4115,7 +4115,7 @@ class App {
       }
       // The persistent world uses MMO grammar: C opens the selected hero's
       // character/equipment screen and returns to the world when pressed again.
-      if (!this.game && actionFor(this.binds(), k, 'interface') === 'character_sheet' && this.ow) {
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ow) {
         e.preventDefault();
         this.ui.toggleCharacterScreen();
         return;
@@ -4142,7 +4142,9 @@ class App {
       // knows a letter, so the scheme, the Settings screen and the help page
       // cannot drift apart.
       const binds = this.binds();
-      const act = actionFor(binds, k);
+      // Scoped: the battle loop can only ever pick an action that listens in a
+      // battle. Conflict detection guarantees no two of those share a key.
+      const act = actionFor(binds, k, 'battle');
       switch (act) {
         case 'dodge': {
           e.preventDefault();
