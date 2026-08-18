@@ -166,24 +166,39 @@ hero always had.
 
 ## Controls
 
+The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
+system it does not. Every key below can be rebound in **Settings → Controls**,
+which reads the same table the game dispatches through.
+
 | Input | Action |
 | --- | --- |
 | W, A, S, D | Move in world and minimap directions |
-| C | Open or close the character and equipment screen in the persistent world |
 | Shift | Gallop at full health |
-| Alt | Change Space between Build mode and Fight mode |
-| Space | Found, build, or cast, based on the current mode |
-| B | Build, upgrade, repair, or rebuild |
-| Q | Cast the hero special |
-| T | Change the nearest tower target rule |
-| G | Drop the newest field item |
+| Space | Dodge roll — a burst out of danger, briefly untouchable |
+| Q | Primary ability (your hero special) |
+| E, R | Ability II and III — reserved; heroes carry one ability today |
 | X | Draw the other weapon set |
-| 1, 2, 3 | Set Defend, Follow, or Push stance |
+| Ctrl | Secondary ability bar — reserved |
+| 1, 2 | Consumable slots — reserved; Zillions has no flask system |
+| B | Build, upgrade, repair, or rebuild |
+| Alt | Change the primary input between Build mode and Fight mode |
+| F1, F2, F3 | Set Defend, Follow, or Push stance |
+| T | Change the nearest tower target rule |
+| Z | Drop the newest field item |
+| C | Character and equipment screen |
+| G | The Lattice |
+| Enter | Team chat |
 | P | Pause a solo game |
-| Esc | Open the game menu |
 | M | Mute audio |
+| Esc | Open the game menu |
 
 Movement is not camera-relative. W always moves north on the minimap.
+
+Two places deviate from Path of Exile deliberately. Army stances take F1–F3
+rather than the number row, because Zillions commands squads and Path of Exile
+does not — that freed 1 and 2 for a future consumable system. And Alt still
+toggles build mode, because founding and funding a colony is the half of this
+game an action-RPG layout has no opinion about.
 
 ## Local Development
 

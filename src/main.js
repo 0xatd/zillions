@@ -28,6 +28,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
+import { loadBinds, saveBinds, resetBinds, actionFor, isHeld } from './keybinds.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
@@ -187,6 +188,8 @@ class App {
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
+      onKeybindChange: (binds) => this.setBinds(binds),
+      onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
@@ -305,6 +308,7 @@ class App {
     this.fogOfWar = null;
 
     this.ui.setProfile(this.profile);
+    this.ui.setKeybinds(this.binds());
     this.ui.setQualityUI(this.tacticalVisuals.quality);
     // Settings restore: volumes apply inside AudioSys before any sound;
     // UI controls sync to whatever was persisted.
@@ -700,11 +704,13 @@ class App {
     // already swallows keys, and a menu open over the world means "at ease".
     if (!this.ui.overlayHidden()) ow.setDir(0, 0);
     else {
+      // The hub walks on the same bindings the battlefield does.
+      const binds = this.binds();
       let dx = 0, dz = 0;
-      if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
-      if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
-      if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
-      if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
+      if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+      if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+      if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+      if (isHeld(binds, this.keys, 'move_right')) dx += 1;
       ow.setDir(dx, dz);
     }
     for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
@@ -4109,7 +4115,7 @@ class App {
       }
       // The persistent world uses MMO grammar: C opens the selected hero's
       // character/equipment screen and returns to the world when pressed again.
-      if (!this.game && k === 'c' && this.ow) {
+      if (!this.game && actionFor(this.binds(), k, 'interface') === 'character_sheet' && this.ow) {
         e.preventDefault();
         this.ui.toggleCharacterScreen();
         return;
@@ -4132,28 +4138,43 @@ class App {
         }
         return;
       }
-      if (k === ' ') {
-        e.preventDefault();
-        // Space follows the current control mode. Build mode never fires the
-        // special; hero auto-attacks still run on their own.
-        if (this.game.phase === 'found') this._tryFound();
-        else if (this.controlMode === 'fight') this.tryCast();
+      // Every in-battle key goes through the binding table. Nothing here
+      // knows a letter, so the scheme, the Settings screen and the help page
+      // cannot drift apart.
+      const binds = this.binds();
+      const act = actionFor(binds, k);
+      switch (act) {
+        case 'dodge': {
+          e.preventDefault();
+          // Founding a colony still owns the primary input while the phase is
+          // waiting for it — there is nothing to dodge yet.
+          if (this.game.phase === 'found') { this._tryFound(); break; }
+          const dir = this.lastDir || { x: 0, z: 0 };
+          this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
+          break;
+        }
+        case 'ability1':
+          if (this.controlMode === 'fight' || this.game.phase !== 'found') this.tryCast();
+          break;
+        case 'build_mode':
+          e.preventDefault();
+          this.toggleControlMode();
+          break;
+        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
+        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
+        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
+        case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
+        case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
+        case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
+        case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
+        case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
+        case 'pause': this.setSpeed(0); break;
+        case 'menu': this.togglePauseMenu(); break;
+        default:
+          if (k === 'h') this.togglePauseMenu(true);
+          break;
       }
-      else if (k === 'q') this.tryCast();
-      else if (k === 'alt') {
-        e.preventDefault();
-        this.toggleControlMode();
-      }
-      else if (k === '1') this.issue({ t: 'stance', s: 'defend', p: this.myPlayer });
-      else if (k === '2') this.issue({ t: 'stance', s: 'guard', p: this.myPlayer });
-      else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
-      else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
-      else if (k === 'g') this.issue({ t: 'drop', p: this.myPlayer, i: -1 });
-      else if (k === 'x') this.issue({ t: 'swapset', p: this.myPlayer });
-      else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
-      else if (k === 'h') { this.togglePauseMenu(true); }
-      else if (k === 'escape') this.togglePauseMenu();
-      else if (k === 'p') this.setSpeed(0);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
 
@@ -4182,6 +4203,24 @@ class App {
     });
   }
 
+  // The current scheme. Cached because the movement path asks every frame.
+  binds() {
+    if (!this._binds) this._binds = loadBinds();
+    return this._binds;
+  }
+
+  setBinds(next) {
+    this._binds = saveBinds(next);
+    this.ui.setKeybinds(this._binds);
+    return this._binds;
+  }
+
+  resetKeybinds() {
+    this._binds = resetBinds();
+    this.ui.setKeybinds(this._binds);
+    return this._binds;
+  }
+
   // WASD → hero direction, sent through the lockstep pipe only on change.
   // Zillions uses a fixed Thronefall-style orientation during gameplay:
   // WASD maps to the minimap cardinal directions. This keeps keyboard
@@ -4189,11 +4228,12 @@ class App {
   _updateHeroInput() {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
-    if (this.keys.has('w') || this.keys.has('arrowup')) dz -= 1;
-    if (this.keys.has('s') || this.keys.has('arrowdown')) dz += 1;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= 1;
-    if (this.keys.has('d') || this.keys.has('arrowright')) dx += 1;
-    const s = this.keys.has('shift');
+    const binds = this.binds();
+    if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+    if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+    if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+    if (isHeld(binds, this.keys, 'move_right')) dx += 1;
+    const s = isHeld(binds, this.keys, 'sprint');
     const last = this.lastDir;
     if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
       this.lastDir = { x: dx, z: dz, s };
@@ -4203,8 +4243,10 @@ class App {
     // player can toggle into Fight mode when they want the special to win.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
-    const buildModePays = this.controlMode === 'build' && canPay && (this.keys.has(' ') || this.buttonPay);
-    const pay = this.keys.has('b') || buildModePays;
+    const bindsNow = this.binds();
+    const buildModePays = this.controlMode === 'build' && canPay
+      && (isHeld(bindsNow, this.keys, 'dodge') || this.buttonPay);
+    const pay = isHeld(bindsNow, this.keys, 'build') || buildModePays;
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -4274,7 +4316,7 @@ class App {
   toggleControlMode() {
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
-    if (this.lastPay && !this.keys.has('b')) {
+    if (this.lastPay && !isHeld(this.binds(), this.keys, 'build')) {
       this.lastPay = false;
       this.issue({ t: 'pay', p: this.myPlayer, on: false });
     }

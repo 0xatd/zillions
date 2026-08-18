@@ -22,6 +22,9 @@ import {
 } from './mmo-characters.js';
 import { loadMeta, charge, META_CURRENCY } from './meta.js';
 import {
+  ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, loadBinds, allConflicts, conflictsFor,
+} from './keybinds.js';
+import {
   buildLattice, frontier, pathTo, canAllocate, canDeallocate, latticePoints,
   treeBonuses, originIdFor, SECTORS, DOCTRINES, rewireCost,
 } from './skilltree.js';
@@ -80,7 +83,7 @@ export class UI {
       <div id="actionbar" class="hidden">
         <div class="commandtop">
           <div class="rallyhints" id="stancebar">
-            <span class="stance" data-st="defend" title="Hold the current city line"><b>1</b> 🛡️ Defend city</span><span class="stance" data-st="guard" title="Escort the hero"><b>2</b> 🚩 Follow hero</span><span class="stance" data-st="attack" title="Push the lanes: take nodes, then siege the hives"><b>3</b> ⚔️ Push lanes</span>
+            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
           </div>
           <button class="mode-toggle build" id="mode-toggle" title="Alt toggles Space between build and special ability"><b>ALT</b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
@@ -329,16 +332,16 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only). You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only), <kbd>SPACE</kbd> to dodge roll out of danger. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Space between Build and Fight. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
+            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Build and Fight mode. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd>3</kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE fires your special and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
-            <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
+            <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE dodges, <kbd>Q</kbd> fires your special, and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
+            <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
-            <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
+            <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
             <div><b>☠️ Threat is the clock.</b> It rises on its own, faster while hives stand, and every whole level makes every hive muster at once. If the Keep falls, all is lost.</div>
           </div>
         </div>
@@ -371,6 +374,7 @@ export class UI {
             <div class="settingstabs">
               <button class="stab sel" data-tab="audio">🔊 Audio</button>
               <button class="stab" data-tab="video">🖥️ Video</button>
+              <button class="stab" data-tab="controls">⌨️ Controls</button>
             </div>
             <div class="settingspane">
               <div id="set-pane-audio" class="setpane">
@@ -400,6 +404,13 @@ export class UI {
                   </div>
                 </div>
                 <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
+              </div>
+              <div id="set-pane-controls" class="setpane hidden">
+                <div class="bindhead">
+                  <p>Click any key to rebind it. Two actions in the same group may not share a key.</p>
+                  <button class="tbtn" id="set-binds-reset">Restore defaults</button>
+                </div>
+                <div id="set-binds"></div>
               </div>
             </div>
           </div>
@@ -530,6 +541,8 @@ export class UI {
         for (const o of this.root.querySelectorAll('.stab')) o.classList.toggle('sel', o === t);
         this.root.querySelector('#set-pane-audio').classList.toggle('hidden', t.dataset.tab !== 'audio');
         this.root.querySelector('#set-pane-video').classList.toggle('hidden', t.dataset.tab !== 'video');
+        this.root.querySelector('#set-pane-controls').classList.toggle('hidden', t.dataset.tab !== 'controls');
+        if (t.dataset.tab === 'controls') this._renderKeybinds();
       };
     }
     const vol = q('#set-vol'), mus = q('#set-music'), sfx = q('#set-sfx');
@@ -959,6 +972,96 @@ export class UI {
     this.root.querySelector('#character-gear').innerHTML = gear.length
       ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
       : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
+  }
+
+  // ----- controls -----
+  //
+  // Reads the same table the input handler dispatches through, so what this
+  // screen shows is what the game actually does. Nothing here knows a letter.
+
+  setKeybinds(binds) {
+    this._binds = binds;
+    this._refreshBindLabels();
+    if (!this.root.querySelector('#set-pane-controls').classList.contains('hidden')) this._renderKeybinds();
+  }
+
+  // Any HUD element carrying data-bind shows the key currently bound to it, so
+  // a rebind is visible on the stance bar without a reload.
+  _refreshBindLabels() {
+    const binds = this._binds || loadBinds();
+    for (const el of this.root.querySelectorAll('[data-bind]')) {
+      const slot = el.querySelector('b');
+      if (slot) slot.textContent = keyLabel(binds[el.dataset.bind]);
+    }
+  }
+
+  _renderKeybinds() {
+    const box = this.root.querySelector('#set-binds');
+    if (!box) return;
+    const binds = this._binds || loadBinds();
+    this._binds = binds;
+    const clashes = new Map();
+    for (const clash of allConflicts(binds)) clashes.set(clash.id, clash.with);
+
+    const groups = Object.values(BIND_CONTEXTS).map((context) => {
+      const rows = ACTIONS.filter((a) => a.context === context.key).map((action) => {
+        const key = binds[action.id];
+        const clash = clashes.get(action.id);
+        const listening = this._bindingId === action.id;
+        return `<div class="bindrow${clash ? ' clash' : ''}${action.reserved ? ' reserved' : ''}">
+          <span class="bindname">${escapeHtml(action.name)}${action.reserved ? '<em>not yet used</em>' : ''}
+            ${action.desc ? `<small>${escapeHtml(action.desc)}</small>` : ''}</span>
+          <button class="bindkey${listening ? ' listening' : ''}" data-action="${action.id}"
+            ${action.fixed ? 'disabled title="This key is fixed."' : ''}>
+            ${listening ? 'press a key…' : escapeHtml(keyLabel(key))}</button>
+          ${action.alt ? `<span class="bindalt">or ${escapeHtml(keyLabel(action.alt))}</span>` : '<span class="bindalt"></span>'}
+        </div>`;
+      }).join('');
+      return `<section class="bindgroup"><h3>${context.name}</h3>
+        <p class="bindgroupdesc">${escapeHtml(context.desc)}</p>${rows}</section>`;
+    }).join('');
+
+    const conflictNote = clashes.size
+      ? `<p class="bindconflict">Two actions in the same group share a key. Rebind one — the second will never fire.</p>`
+      : '';
+    box.innerHTML = conflictNote + groups;
+
+    for (const button of box.querySelectorAll('.bindkey')) {
+      button.onclick = () => this._listenForBind(button.dataset.action);
+    }
+    const reset = this.root.querySelector('#set-binds-reset');
+    if (reset) reset.onclick = () => { this.cb.onKeybindReset && this.cb.onKeybindReset(); };
+  }
+
+  // Capture the next key press for one action. Escape cancels rather than
+  // binding, or a player could strand themselves out of the menu.
+  _listenForBind(actionId) {
+    const action = ACTIONS_BY_ID.get(actionId);
+    if (!action || action.fixed) return;
+    if (this._bindListener) window.removeEventListener('keydown', this._bindListener, true);
+    this._bindingId = actionId;
+    this._renderKeybinds();
+
+    this._bindListener = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.removeEventListener('keydown', this._bindListener, true);
+      this._bindListener = null;
+      const key = String(event.key).toLowerCase();
+      this._bindingId = null;
+      if (key === 'escape') { this._renderKeybinds(); return; }
+      const next = { ...(this._binds || loadBinds()), [actionId]: key };
+      // Taking a key from another action in the same group would leave that one
+      // dead, so the one that lost it is handed the key being replaced.
+      const displaced = conflictsFor(next, actionId, key);
+      const freed = (this._binds || loadBinds())[actionId];
+      for (const other of displaced) next[other.id] = freed;
+      this.cb.onKeybindChange && this.cb.onKeybindChange(next);
+      if (displaced.length) {
+        this.showBanner(`⌨️ ${displaced[0].name} took ${keyLabel(freed)}.`, '', 2600);
+      }
+    };
+    window.addEventListener('keydown', this._bindListener, true);
   }
 
   // ----- the character sheet: equipment and the Lattice -----

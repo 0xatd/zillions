@@ -71,7 +71,8 @@ Use continuous siege on a lane graph as the gameplay base:
   global army stance: defend city, follow the hero, or hunt outward toward
   enemies and hive nests.
 - No individual squad micro. Squads are autonomous; the player sets the global
-  stance: Defend city, Follow hero, or Push the lanes.
+  stance: Defend city, Follow hero, or Push the lanes. The stances sit on
+  F1–F3, not the number row — see Controls below.
 - Each human muster is one persistent formation. Its troops keep stable slots
   while defending, escorting, and marching. Zombies never use formation slots;
   their identity is an irregular flood.
@@ -126,6 +127,32 @@ room's mode, and doing so clears every guest Ready vote like any other setup
 change. The shared life pool grows by one per extra hero, every living hero
 seeds the horde's flow field, and each player gets their own pick-1-of-3
 blessing choice per razed chamber.
+
+## Controls
+
+The control scheme follows Path of Exile 2's WASD mode, because that is the
+grammar a player arriving from an action RPG already has in their hands.
+
+- Movement is WASD and is never camera-relative.
+- Space is the dodge roll. It is a real simulation mechanic: a committed burst
+  with a short invulnerable window and a cooldown longer than the roll, issued
+  as a lockstep command and carried in the snapshot.
+- Q, E and R are the ability slots. Only Q is used today, because a hero has
+  one controlled ability; E and R are declared and shown as reserved rather
+  than hidden, so the layout does not shift when a second ability lands.
+- X draws the other weapon set.
+- Alt still toggles build mode. Founding and funding a colony is the half of
+  this game an action-RPG layout has no opinion about, and it keeps its key.
+- Army stances take F1–F3. They moved off 1/2/3 deliberately: Path of Exile
+  puts consumables there, Zillions commands squads and Path of Exile does not,
+  and 1/2 are now reserved for a consumable system that does not exist yet.
+- Every binding is rebindable in Settings → Controls, which reads the same
+  table `src/keybinds.js` dispatches through. The code, the Settings screen,
+  the in-game help and the README controls table cannot drift apart:
+  `scripts/keybind-check.mjs` fails the build if they do.
+
+Two actions in one group may not share a key. Across groups they may, because
+the two never listen at the same moment.
 
 ## Character Progression
 

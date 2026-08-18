@@ -12,6 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
+  DODGE_CD, DODGE_TIME, DODGE_IFRAMES, DODGE_SPEED,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
   NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor, hasSecondSet,
   latticeMods, latticeDoctrines,
@@ -260,6 +261,9 @@ export class Game {
         pack: [...(h.pack || [])],
         equip: { ...(h.equipment || {}) },
         set: h.activeSet || 0, swapCd: snapNum(h.swapCd || 0),
+        dodgeT: snapNum(h.dodgeT || 0), dodgeIT: snapNum(h.dodgeIT || 0),
+        dodgeCd: snapNum(h.dodgeCd || 0),
+        dodgeX: snapNum(h.dodgeX || 0), dodgeZ: snapNum(h.dodgeZ || 0),
         treeMods: h.treeMods ? { ...h.treeMods } : null,
         treeSets: h.treeSets ? h.treeSets.map((bag) => ({ ...bag })) : null,
         doctrines: [...(h.doctrines || [])],
@@ -429,6 +433,9 @@ export class Game {
       }
       h.fallen = !!hs.fallen;
       h.swapCd = hs.swapCd || 0;
+      h.dodgeT = hs.dodgeT || 0; h.dodgeIT = hs.dodgeIT || 0;
+      h.dodgeCd = hs.dodgeCd || 0;
+      h.dodgeX = hs.dodgeX || 0; h.dodgeZ = hs.dodgeZ || 0;
       // Old saves can restore heroes into crag/water or inside fresh
       // footprints — reseat to the nearest safe tile, frontier fallback if
       // the whole area is sealed. Same guarantee the launch path has.
@@ -2116,6 +2123,30 @@ export class Game {
     this.msg(`${it ? it.icon : '📦'} Dropped the ${it ? it.name : 'find'}.`, 'info');
   }
 
+  // Throw yourself out of the way. A command like any other, so every peer
+  // rolls on the same tick from the same direction.
+  //
+  // The direction is sent WITH the command rather than read from the hero's
+  // current input, because a peer applying this command a window later may
+  // have already seen a different direction arrive.
+  dodgeRoll(p = 0, dx = null, dz = null) {
+    const h = this.heroes[p];
+    if (!h || h.dead) return;
+    if (h.dodgeCd > 0 || h.dodgeT > 0) { this.emit({ type: 'deny' }); return; }
+    // Roll where you are pointed. Standing still rolls the way you face, so
+    // the button always does something.
+    let x = Number(dx) || 0, z = Number(dz) || 0;
+    if (!x && !z) { x = Math.sin(h.facing || 0); z = Math.cos(h.facing || 0); }
+    const len = Math.hypot(x, z) || 1;
+    h.dodgeX = x / len;
+    h.dodgeZ = z / len;
+    h.dodgeT = DODGE_TIME;
+    h.dodgeIT = DODGE_IFRAMES;
+    h.dodgeCd = DODGE_CD;
+    h.facing = Math.atan2(h.dodgeX, h.dodgeZ);
+    this.emit({ type: 'dodge', x: h.x, z: h.z, dx: h.dodgeX, dz: h.dodgeZ, heroKey: h.key });
+  }
+
   // Draw the other weapon set. A command like any other, so it travels the
   // lockstep path and every peer swaps on the same tick.
   swapWeaponSet(p = 0) {
@@ -2283,6 +2314,7 @@ export class Game {
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
       equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
+      dodgeT: 0, dodgeIT: 0, dodgeCd: 0, dodgeX: 0, dodgeZ: 0,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -2462,6 +2494,7 @@ export class Game {
       case 'found': this.foundCity(c.s, c.p || 0); break;
       case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
       case 'swapset': this.swapWeaponSet(c.p || 0); break;
+      case 'dodge': this.dodgeRoll(c.p || 0, c.x, c.z); break;
       case 'blessing': this.chooseBlessing(c.p || 0, c.i ?? -1); break;
     }
   }
@@ -2713,6 +2746,7 @@ export class Game {
       }
       return;
     }
+    if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
     const regen = h.def.regen + 0.25 * (h.level - 1) + h.mods.regen;
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     // hasteT/hasteMult decay centrally in _updateUnits (it walks every unit,
@@ -2746,11 +2780,21 @@ export class Game {
     // Direct WASD movement (Thronefall-style): slide along blockers, pass
     // gates. `moving` tracks ACTUAL movement — pressing into a building counts
     // as standing, so nuzzling a structure funds its upgrade.
+    const baseSpeed = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed);
+    // A roll owns the hero for its duration: it ignores the movement keys, so
+    // the commitment is real and a peer cannot steer it differently mid-roll.
+    if (h.dodgeT > 0) {
+      h.dodgeT = Math.max(0, h.dodgeT - dt);
+      h.dodgeIT = Math.max(0, (h.dodgeIT || 0) - dt);
+      h.moving = this._moveActor(h, h.dodgeX || 0, h.dodgeZ || 0, baseSpeed * DODGE_SPEED, dt);
+      h.facing = Math.atan2(h.dodgeX || 0, h.dodgeZ || 0);
+      return;
+    }
     if (h.mx !== 0 || h.mz !== 0) {
       const len = Math.hypot(h.mx, h.mz) || 1;
       // Thronefall gallop rule: sprint only at full health.
       const canSprint = h.sprint && h.hp >= h.maxHp - 0.5;
-      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed) * (canSprint ? 1.5 : 1)
+      const spd = baseSpeed * (canSprint ? 1.5 : 1)
         * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
@@ -3107,6 +3151,12 @@ export class Game {
   // `attacker` is the zombie that dealt the hit, when one is available — pass
   // null for damage sources thorns should not reflect against (e.g. blight).
   _damageUnit(u, dmg, attacker = null) {
+    // Mid-roll, and inside the invulnerable window, nothing lands. The window
+    // is shorter than the roll, so a late dodge still eats the hit.
+    if (u.hero && u.dodgeT > 0 && (u.dodgeIT || 0) > 0) {
+      this.emit({ type: 'evade', x: u.x, z: u.z });
+      return;
+    }
     const mods = u.mods || null;
     const evade = (u.def.evadeChance || 0) + ((mods && mods.evadeChance) || 0);
     if (dmg > 0 && evade > 0 && this.rng() < evade) {

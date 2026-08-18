@@ -18,6 +18,13 @@ export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
+// The dodge roll. Short, committed, and on a cooldown long enough that it is a
+// read rather than a movement key you hold. The invulnerable window is shorter
+// than the roll itself, so a badly-timed dodge still gets you hit at the end.
+export const DODGE_CD = 3.2;           // seconds between rolls
+export const DODGE_TIME = 0.34;        // how long the roll lasts
+export const DODGE_IFRAMES = 0.24;     // untouchable for this much of it
+export const DODGE_SPEED = 3.1;        // multiplier on move speed while rolling
 export const WEAPON_SWAP_CD = 4;       // seconds between weapon-set swaps — a decision, not a toggle
 export const UPGRADE_PAY_RATE = 50;    // upgrades finish quickly; the cost, not a long hold, is the commitment
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep

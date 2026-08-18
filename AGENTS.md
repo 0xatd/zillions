@@ -55,6 +55,14 @@ economy, and army systems, and never let its wins advance campaign progress.
 - Read `docs/thronefall-map-engine.md` before you change terrain rendering.
 - Read `docs/fortress-inspiration.md` before you change colony generation.
 
+### Controls
+
+- Declare an action in `src/keybinds.js`. Never dispatch on a key literal.
+- Two actions in one group may not share a key.
+- Update the README controls table with any binding change. `keybind-check`
+  compares them and fails on a mismatch in either direction.
+- Army stances stay off the number row. 1 and 2 are reserved for consumables.
+
 ### Gear and the Lattice
 
 Read "Why This Exists" in `README.md` before reviewing a change here. It records
@@ -116,6 +124,7 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/items.js`: item bases, weapons, affixes, damage types, and item generation.
 - `src/skilltree.js`: the Lattice — sectors, tree generation, allocation, payload.
 - `src/lockstep-hash.js`: the per-window state hash every peer compares.
+- `src/keybinds.js`: the control scheme — actions, defaults, and rebinding.
 - `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
