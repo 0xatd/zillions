@@ -225,6 +225,9 @@ export class Game {
         node: u.targetNodeId != null ? u.targetNodeId : -1, gi: u.targetGi ?? -1,
         route: snapRoute(u.route), routeI: u.routeI || 0, routeStuck: snapNum(u.routeStuck || 0),
         routeBest: Number.isFinite(u.routeBest) ? snapNum(u.routeBest) : null, repathT: snapNum(u.repathT || 0),
+        gateExit: u.gateExit ? 1 : 0, gateCool: snapNum(u.gateCool || 0),
+        exitDx: u.exitDx != null ? snapNum(u.exitDx) : null,
+        exitDz: u.exitDz != null ? snapNum(u.exitDz) : null,
         shield: snapNum(u.shieldHp || 0),
         squad: u.squadId || null, squadI: u.squadIndex ?? -1, squadN: u.squadSize || 0,
         // Temporary allies (Tiger's clones, Aaron's spirit) carry a lifespan and
@@ -388,6 +391,10 @@ export class Game {
       u.routeStuck = us.routeStuck || 0;
       u.routeBest = us.routeBest == null ? Infinity : us.routeBest;
       u.repathT = us.repathT || 0;
+      u.gateExit = !!us.gateExit;
+      u.gateCool = us.gateCool || 0;
+      u.exitDx = us.exitDx ?? null;
+      u.exitDz = us.exitDz ?? null;
       u.shieldHp = us.shield || 0;
       u.squadId = us.squad || null;
       u.squadIndex = us.squadI ?? -1;

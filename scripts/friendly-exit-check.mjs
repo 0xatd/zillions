@@ -128,6 +128,27 @@ for (const u of game.units) {
 assert.ok(alive >= 1, 'the war must leave someone alive to tell it');
 assert.equal(trapped.length, 0, `squads still sealed inside the walls after ${RUN_SECONDS}s: ${trapped.join('; ')}`);
 
+// A solo save can land while a squad is descending the exit field or taking
+// its post-gate beeline. Those flags change future movement, so the snapshot
+// must preserve them alongside the existing route/watchdog state.
+const probe = game.units.find((u) => !u.hero && !u.dead);
+assert.ok(probe, 'the save/restore probe needs a living squad');
+probe.gateExit = true;
+probe.gateCool = 1.375;
+probe.exitDx = -0.625;
+probe.exitDz = 0.75;
+const saved = game.snapshot();
+const restoredMap = new TerrainField(LEVELS[0].seed, LEVELS[0].theme,
+  { size: LEVELS[0].size, nests: LEVELS[0].nests });
+const restored = new Game(restoredMap, saved.diff, saved.heroes.map((h) => h.k), saved,
+  saved.level, saved.mode);
+const restoredProbe = restored.units.find((u) => u.id === probe.id);
+assert.ok(restoredProbe, 'the gate-exit squad must survive restore');
+assert.equal(restoredProbe.gateExit, true, 'restore must keep an active gate exit');
+assert.equal(restoredProbe.gateCool, 1.375, 'restore must keep gate hysteresis');
+assert.equal(restoredProbe.exitDx, -0.625, 'restore must keep the exit beeline X direction');
+assert.equal(restoredProbe.exitDz, 0.75, 'restore must keep the exit beeline Z direction');
+
 // The exit is a deterministic field descent — run the whole war again and
 // every surviving squad must land on the same tile.
 // Determinism must be judged across processes: unit ids are assigned from a
