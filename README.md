@@ -23,7 +23,7 @@ Choose the document that matches your task:
 | Change maps or fortresses | `docs/thronefall-map-engine.md` and `docs/fortress-inspiration.md` |
 | Change unit or building art | `docs/art-direction.md` and `docs/art-pipeline.md` |
 | Plan future systems | `docs/design-vision.md` |
-| Plan character progression | `docs/skill-tree-integration.md` |
+| Plan character progression | `docs/skill-tree-integration.md` and `docs/weapons-and-items.md` |
 | Give an agent compact context | `llms.txt` |
 
 Use this source order when documents disagree:

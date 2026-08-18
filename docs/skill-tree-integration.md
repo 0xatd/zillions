@@ -48,8 +48,10 @@ Copy:
 Do not copy in the first release:
 
 - Socketed jewels and radius effects. They need a spatial query system.
-- Weapon-set node specialization. Zillions has one controlled ability. The
-  feature would double the UI and the lockstep hash surface for no decision.
+- Weapon-set node specialization, while every hero carries one fixed weapon.
+  The feature would double the UI and the lockstep hash surface for no
+  decision. `docs/weapons-and-items.md` revisits this. Once weapons become
+  equipment, a second set is a real choice and the feature earns its cost.
 - Node counts near two thousand. That is a decade of content maintenance.
 
 Never copy:
@@ -176,6 +178,10 @@ character. Rewire follows the same path with a Salvage Alloy cost.
 ## Delivery
 
 One focused pull request each. Each lands with a committed check.
+
+`docs/weapons-and-items.md` puts weapons and damage types ahead of this
+sequence. Follow that order. Tree nodes cannot differ from each other until
+damage has more than one axis, so the Lattice is sized after weapons ship.
 
 1. `src/skilltree.js` and `scripts/skilltree-check.mjs`. Generator, validators,
    `treeBonuses(alloc)`. No UI. No game hookup. Verifies every node reachable,
