@@ -11,8 +11,14 @@
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
+  DODGE_CD, DODGE_TIME, DODGE_IFRAMES, DODGE_SPEED,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
+  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor, hasSecondSet,
+  latticeMods, latticeDoctrines,
+  equippedKeys,
+  WEAPON_SWAP_CD,
+  rollLootKey, worldItemLevel,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
@@ -79,6 +85,9 @@ export class Game {
     this.gold = this.economy.startGold;
     this.coins = [];             // physical coins on the ground
     this.loot = [];              // items lying on the frontier, most of them hidden
+    this._lootSerial = 0;        // per-game roll counter — see _scatterLoot()
+    this._doctrineScorched = false;  // resolved by _refreshDoctrines()
+    this._doctrineHollow = false;
     this.site = -1;              // chosen city site index (-1 = not founded yet)
     this.plots = [];             // generated when the city is founded
     this.buildings = [];
@@ -256,6 +265,14 @@ export class Game {
         summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
+        equip: { ...(h.equipment || {}) },
+        set: h.activeSet || 0, swapCd: snapNum(h.swapCd || 0),
+        dodgeT: snapNum(h.dodgeT || 0), dodgeIT: snapNum(h.dodgeIT || 0),
+        dodgeCd: snapNum(h.dodgeCd || 0),
+        dodgeX: snapNum(h.dodgeX || 0), dodgeZ: snapNum(h.dodgeZ || 0),
+        treeMods: h.treeMods ? { ...h.treeMods } : null,
+        treeSets: h.treeSets ? h.treeSets.map((bag) => ({ ...bag })) : null,
+        doctrines: [...(h.doctrines || [])],
         blessings: [...(h.blessings || [])],
         fallen: h.fallen ? 1 : 0,
         upgrades: { ...h.upgrades },
@@ -413,6 +430,11 @@ export class Game {
     for (const hs of snap.heroes) {
       const h = this._spawnHero(hs.k, hs.x, hs.z, {
         level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
+        equipment: hs.equip || {},
+        treeMods: hs.treeMods || null,
+        treeSets: hs.treeSets || null,
+        doctrines: hs.doctrines || [],
+        activeSet: hs.set || 0,
       });
       if (hs.id) h.id = hs.id;
       if (hs.blessings && hs.blessings.length) {
@@ -420,6 +442,10 @@ export class Game {
         this._refreshPackMods(h); // blessings count toward mods before hp lands
       }
       h.fallen = !!hs.fallen;
+      h.swapCd = hs.swapCd || 0;
+      h.dodgeT = hs.dodgeT || 0; h.dodgeIT = hs.dodgeIT || 0;
+      h.dodgeCd = hs.dodgeCd || 0;
+      h.dodgeX = hs.dodgeX || 0; h.dodgeZ = hs.dodgeZ || 0;
       // Old saves can restore heroes into crag/water or inside fresh
       // footprints — reseat to the nearest safe tile, frontier fallback if
       // the whole area is sealed. Same guarantee the launch path has.
@@ -651,7 +677,7 @@ export class Game {
     this.blessingOffers[p] = null;
     this._refreshPackMods(h);
     this.emit({ type: 'blessed', x: h.x, z: h.z });
-    this.msg(`✨ ${h.def.name} takes the ${ITEMS[key].name}.`, 'info');
+    this.msg(`✨ ${h.def.name} takes the ${itemInfo(key)?.name || 'blessing'}.`, 'info');
   }
 
   // Terrain generation owns the centre of the map. It may place deep forest,
@@ -2043,7 +2069,24 @@ export class Game {
   // hoards what it took off the people it ate, and a pass is where travellers
   // die with their packs still on. Seeded, so lockstep peers agree.
   _scatterLoot() {
+    // Two kinds of thing lie on the frontier now. The authored field finds are
+    // still here — they are the recognisable ones — and alongside them the
+    // world rolls its own gear at a level set by the world itself.
+    //
+    // The roll seed comes from the map seed, the level, and a per-game serial.
+    // All three are identical on every peer, so every peer scatters the same
+    // items. The serial is deliberately NOT the global entity id, which can
+    // differ between peers that have played a different number of games.
+    const ilvl = worldItemLevel(this.levelId, this.level, this.diff);
     const pick = (rare) => {
+      if (this.rng() < (rare ? 0.75 : 0.55)) {
+        const rarity = rare ? (this.rng() < 0.35 ? 3 : 2) : (this.rng() < 0.2 ? 2 : 1);
+        const key = rollLootKey(
+          `${this.map.seed}:${this.levelId}:${this._lootSerial++}`,
+          ilvl, rarity, this.rng(),
+        );
+        if (key) return key;
+      }
       const pool = rare ? FIELD_LOOT.rare : FIELD_LOOT.common;
       return pool[Math.floor(this.rng() * pool.length)];
     };
@@ -2121,7 +2164,7 @@ export class Game {
         if (l.hidden) {
           if (d2 > LOOT_REVEAL_RADIUS * LOOT_REVEAL_RADIUS) continue;
           l.hidden = false;
-          const it = ITEMS[l.key];
+          const it = itemInfo(l.key);
           this.msg(`${it ? it.icon : '📦'} You spot something half-buried — ${it ? it.name : 'a cache'}.`, 'info');
           this.emit({ type: 'lootseen', x: l.x, z: l.z, key: l.key, id: l.id });
           continue;
@@ -2147,13 +2190,15 @@ export class Game {
   // Into the pack, and into the hero's stats immediately — a find you cannot
   // feel until the next level is not a find.
   giveItem(h, key) {
-    const it = ITEMS[key];
+    // Authored or rolled — both arrive here, and both must be takeable.
+    const it = itemInfo(key);
     if (!it) return false;
     h.pack = h.pack || [];
     if (h.pack.length >= PACK_SLOTS) return false;
     h.pack.push(key);
     this._refreshPackMods(h);
-    this.msg(`${it.icon} ${h.def.name} takes the ${it.name} — ${it.desc}`, 'good');
+    const blurb = it.desc || itemLines(it).join(', ') || it.rarityName;
+    this.msg(`${it.icon} ${h.def.name} takes the ${it.name} — ${blurb}`, 'good');
     this.emit({ type: 'loot', x: h.x, z: h.z, key });
     return true;
   }
@@ -2167,12 +2212,57 @@ export class Game {
     const [key] = h.pack.splice(i, 1);
     this._refreshPackMods(h);
     this.dropLoot(h.x, h.z, key);
-    const it = ITEMS[key];
+    const it = itemInfo(key);
     this.msg(`${it ? it.icon : '📦'} Dropped the ${it ? it.name : 'find'}.`, 'info');
   }
 
+  // Throw yourself out of the way. A command like any other, so every peer
+  // rolls on the same tick from the same direction.
+  //
+  // The direction is sent WITH the command rather than read from the hero's
+  // current input, because a peer applying this command a window later may
+  // have already seen a different direction arrive.
+  dodgeRoll(p = 0, dx = null, dz = null) {
+    const h = this.heroes[p];
+    if (!h || h.dead) return;
+    if (h.dodgeCd > 0 || h.dodgeT > 0) { this.emit({ type: 'deny' }); return; }
+    // Roll where you are pointed. Standing still rolls the way you face, so
+    // the button always does something.
+    let x = Number(dx) || 0, z = Number(dz) || 0;
+    if (!x && !z) { x = Math.sin(h.facing || 0); z = Math.cos(h.facing || 0); }
+    const len = Math.hypot(x, z) || 1;
+    h.dodgeX = x / len;
+    h.dodgeZ = z / len;
+    h.dodgeT = DODGE_TIME;
+    h.dodgeIT = DODGE_IFRAMES;
+    h.dodgeCd = DODGE_CD;
+    h.facing = Math.atan2(h.dodgeX, h.dodgeZ);
+    this.emit({ type: 'dodge', x: h.x, z: h.z, dx: h.dodgeX, dz: h.dodgeZ, heroKey: h.key });
+  }
+
+  // Draw the other weapon set. A command like any other, so it travels the
+  // lockstep path and every peer swaps on the same tick.
+  swapWeaponSet(p = 0) {
+    const h = this.heroes[p];
+    if (!h || h.dead) return;
+    if (!hasSecondSet(h.equipment)) { this.emit({ type: 'deny' }); return; }
+    if (h.swapCd > 0) { this.emit({ type: 'deny' }); return; }
+    h.activeSet = h.activeSet === 1 ? 0 : 1;
+    h.swapCd = WEAPON_SWAP_CD;
+    // The sheathed set's global mods and its doctrines both go away with it, so
+    // the whole bag is rebuilt and the rule flags are re-resolved.
+    this._refreshPackMods(h);
+    this._refreshDoctrines();
+    const w = h.weapon;
+    this.msg(`🔁 ${h.def.name} draws ${w && w.name ? w.name : 'the other weapon'}.`, 'info');
+    this.emit({ type: 'swapset', x: h.x, z: h.z, set: h.activeSet, heroKey: h.key });
+  }
+
   _refreshPackMods(h) {
-    h.itemMods = itemMods([...(h.items || []), ...(h.pack || []), ...(h.blessings || [])]);
+    h.itemMods = itemMods([
+      ...(h.items || []), ...(h.pack || []), ...(h.blessings || []),
+      ...equippedKeys(h.equipment, h.activeSet || 0),
+    ]);
     this._refreshHeroDerived(h);
   }
 
@@ -2289,9 +2379,26 @@ export class Game {
     // stats the moment it goes in, and it is the only gear that grows during a
     // survival run.
     const pack = camp && camp.pack ? [...camp.pack] : [];
-    const itemModsOnly = itemMods([...items, ...pack]);
+    const equipmentIn = camp && camp.equipment ? { ...camp.equipment } : {};
+    const setIn = camp && camp.activeSet === 1 ? 1 : 0;
+    // Worn gear counts. Before this, equipment reached the hero only through
+    // the weapon, so wearing armour was strictly worse than leaving it in the
+    // stash — the stash was being summed and the body was not.
+    const itemModsOnly = itemMods([...items, ...pack, ...equippedKeys(equipmentIn, setIn)]);
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
+    // What this hero is swinging. An empty equipment map resolves to the
+    // hero's signature weapon, which carries that hero's original numbers —
+    // so an unequipped hero fights exactly as they did before weapons existed.
+    const equipment = equipmentIn;
+    const weapon = weaponFor(key, equipment, setIn);
+    // The Lattice arrives already resolved: a flat bag of numbers and a list of
+    // rule flags, one payload per weapon set. Nothing here queries a tree node,
+    // now or during the run.
+    const treeMods = (camp && camp.treeMods) || null;
+    const treeSets = (camp && camp.treeSets) || null;
+    const activeSet = camp && camp.activeSet === 1 ? 1 : 0;
+    const doctrines = latticeDoctrines(treeSets, activeSet, camp && camp.doctrines);
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
@@ -2299,6 +2406,8 @@ export class Game {
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
+      equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
+      dodgeT: 0, dodgeIT: 0, dodgeCd: 0, dodgeX: 0, dodgeZ: 0,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -2306,6 +2415,7 @@ export class Game {
     this.units.push(h);
     this.heroes.push(h);
     if (!this.hero) this.hero = h;
+    this._refreshDoctrines();
     return h;
   }
 
@@ -2328,11 +2438,26 @@ export class Game {
     const passiveMods = this._heroPassiveMods(h);
     const mods = { ...h.itemMods };
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
+    // The Lattice folds in here, beside gear and hero passives, on the same
+    // additive keys. One bag, one place, one rule.
+    // The drawn set decides which tree payload applies. A node pinned to set II
+    // is simply not in set I's payload, so nothing here has to know about
+    // pinning — including its doctrines, which follow the set with it.
+    const treeBag = latticeMods(h.treeSets, h.activeSet || 0, h.treeMods);
+    if (treeBag) {
+      for (const [key, value] of Object.entries(treeBag)) {
+        if (value) mods[key] = (mods[key] || 0) + value;
+      }
+    }
+    h.doctrines = latticeDoctrines(h.treeSets, h.activeSet || 0, h.doctrines);
     const forge = this._heroForgeMods();
     mods.dmg = (mods.dmg || 0) + forge.dmg;
     mods.hp = (mods.hp || 0) + forge.hp;
     mods.cdr = (mods.cdr || 0) + forge.cdr;
     h.mods = mods;
+    // Equipment can change between runs and, later, between weapon sets. The
+    // resolved weapon is rebuilt here so every derived stat reads one source.
+    h.weapon = weaponFor(h.key, h.equipment, h.activeSet || 0) || h.weapon;
     h.maxHp = h.def.hp + h.def.levelHp * heroGrowthUnits(h.level) + h.mods.hp;
     h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
     h.auraRank = h.upgrades.aura || 0;
@@ -2354,7 +2479,8 @@ export class Game {
   }
 
   heroRange(h) {
-    return h.def.range + ((h.mods && h.mods.range) || 0);
+    const w = h.weapon || h.def;
+    return w.range + ((h.mods && h.mods.range) || 0);
   }
 
   heroUltDamageMult(h) {
@@ -2392,7 +2518,7 @@ export class Game {
     return {
       damage: this.heroDmg(h),
       range: this.heroRange(h),
-      rate: h.def.rof * (1 + ((h.mods && h.mods.rof) || 0)),
+      rate: (h.weapon || h.def).rof * (1 + ((h.mods && h.mods.rof) || 0)),
       speed: h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + ((h.mods && h.mods.speed) || 0)),
       regen: h.def.regen + 0.25 * (h.level - 1) + ((h.mods && h.mods.regen) || 0),
       cooldown: h.def.ability.cd * Math.max(0.15, cdMult),
@@ -2460,12 +2586,17 @@ export class Game {
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
       case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
+      case 'swapset': this.swapWeaponSet(c.p || 0); break;
+      case 'dodge': this.dodgeRoll(c.p || 0, c.x, c.z); break;
       case 'blessing': this.chooseBlessing(c.p || 0, c.i ?? -1); break;
     }
   }
 
   heroDmg(h) {
-    return (h.def.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
+    // Base damage comes from the WEAPON. Growth per level stays on the hero,
+    // because levelling the character is not levelling the gun.
+    const w = h.weapon || h.def;
+    return (w.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
   }
 
   addXp(h, amount) {
@@ -2583,7 +2714,8 @@ export class Game {
           const x = h.x + Math.cos(a) * 1.4, z = h.z + Math.sin(a) * 1.4;
           const u = this._spawnUnit('tiger_clone', x, z, null);
           const hp = Math.round(h.maxHp * mult);
-          u.def = { ...UNITS.tiger_clone, hp, dmg: Math.round(baseDmg * mult * ultMult), range: h.def.range, rof: h.def.rof, speed: h.def.speed, color: h.def.color };
+          const hw = h.weapon || h.def;
+          u.def = { ...UNITS.tiger_clone, hp, dmg: Math.round(baseDmg * mult * ultMult), range: hw.range, rof: hw.rof, speed: h.def.speed, color: h.def.color };
           u.hp = hp; u.maxHp = hp;
           u.holdX = x; u.holdZ = z;
           u.temp = true; u.expireT = dur; u.ownerHeroId = h.id;
@@ -2707,6 +2839,7 @@ export class Game {
       }
       return;
     }
+    if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
     const regen = h.def.regen + 0.25 * (h.level - 1) + h.mods.regen;
     h.hp = Math.min(h.maxHp, h.hp + regen * dt);
     // hasteT/hasteMult decay centrally in _updateUnits (it walks every unit,
@@ -2740,11 +2873,21 @@ export class Game {
     // Direct WASD movement (Thronefall-style): slide along blockers, pass
     // gates. `moving` tracks ACTUAL movement — pressing into a building counts
     // as standing, so nuzzling a structure funds its upgrade.
+    const baseSpeed = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed);
+    // A roll owns the hero for its duration: it ignores the movement keys, so
+    // the commitment is real and a peer cannot steer it differently mid-roll.
+    if (h.dodgeT > 0) {
+      h.dodgeT = Math.max(0, h.dodgeT - dt);
+      h.dodgeIT = Math.max(0, (h.dodgeIT || 0) - dt);
+      h.moving = this._moveActor(h, h.dodgeX || 0, h.dodgeZ || 0, baseSpeed * DODGE_SPEED, dt);
+      h.facing = Math.atan2(h.dodgeX || 0, h.dodgeZ || 0);
+      return;
+    }
     if (h.mx !== 0 || h.mz !== 0) {
       const len = Math.hypot(h.mx, h.mz) || 1;
       // Thronefall gallop rule: sprint only at full health.
       const canSprint = h.sprint && h.hp >= h.maxHp - 0.5;
-      const spd = h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + h.mods.speed) * (canSprint ? 1.5 : 1)
+      const spd = baseSpeed * (canSprint ? 1.5 : 1)
         * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
@@ -2961,9 +3104,67 @@ export class Game {
 
   // ---------- damage ----------
 
-  damageZombie(zb, dmg, sx, sz) {
+  // Does any hero in this game carry a doctrine? Doctrines are global rules
+  // rather than per-hero stats, so in co-op one player's pact changes the war
+  // for everybody. Resolved from the flags the camp carried in.
+  hasDoctrine(id) {
+    for (const h of this.heroes) {
+      if (h.doctrines && h.doctrines.includes(id)) return true;
+    }
+    return false;
+  }
+
+  // Rule-bearing doctrines are read on every hit, so they are resolved to
+  // plain booleans whenever the roster changes rather than searched each time.
+  //
+  // Called on spawn, on restore, and on every weapon-set swap.
+  _refreshDoctrines() {
+    this._doctrineScorched = this.hasDoctrine('scorched_supply');
+    this._doctrineHollow = this.hasDoctrine('hollow_pact');
+  }
+
+  // Armour and per-type resistance, resolved together. Void is the exception
+  // the type table promises: it ignores most armour, which is what makes a
+  // psi-focus worth carrying into a plated horde.
+  _resolveTypedDamage(zb, dmg, types, mods = null) {
+    if (!types) {
+      // The pre-types path, kept exact.
+      return zb.armor ? dmg * (1 - zb.armor) : dmg;
+    }
+    const resist = zb.resist || (zb.def && zb.def.resist) || null;
+    // Doctrine: Scorched Supply. Your fire renders everything, so a resistance
+    // only counts for half. A vulnerability is not halved — this doctrine is a
+    // promise about what you burn through, not a penalty on what burns easy.
+    const resistScale = this._doctrineScorched ? 0.5 : 1;
+    // Doctrine: Hollow Pact. Void ignores armour outright rather than mostly.
+    const voidArmor = this._doctrineHollow ? 0 : VOID_ARMOR_SHARE;
+    let total = 0;
+    for (const type of DAMAGE_TYPES) {
+      const share = types[type] || 0;
+      if (!share) continue;
+      let part = dmg * share;
+      // Increased damage of one type, from gear and the Lattice. This is what
+      // the Thermics and Abyss sectors and the elemental cores actually do —
+      // without it two whole sectors were inert.
+      const increased = mods ? (mods[type] || 0) : 0;
+      if (increased) part *= 1 + increased;
+      const armor = type === 'void' ? (zb.armor || 0) * voidArmor : (zb.armor || 0);
+      if (armor) part *= 1 - armor;
+      let r = resist ? (resist[type] || 0) : 0;
+      if (r > 0) r *= resistScale;
+      if (r) part *= 1 - Math.max(-1, Math.min(RESIST_CAP, r));
+      total += part;
+    }
+    return total;
+  }
+
+  // `types` is a weapon's damage split — { thermal: 0.8, kinetic: 0.2 }. Pass
+  // nothing and the hit is pure kinetic against no resistance, which is
+  // exactly how every damage source behaved before types existed. That default
+  // is why adding this axis moved no balance number.
+  damageZombie(zb, dmg, sx, sz, types = null, mods = null) {
     if (zb.hp <= 0) return;
-    if (zb.armor) dmg *= 1 - zb.armor;
+    dmg = this._resolveTypedDamage(zb, dmg, types, mods);
     zb.hp -= dmg;
     const bcfg = zb.cfg;
     if (zb.boss && bcfg && bcfg.enrage && !zb.enraged && zb.hp < zb.maxHp * bcfg.enrage) {
@@ -3043,6 +3244,12 @@ export class Game {
   // `attacker` is the zombie that dealt the hit, when one is available — pass
   // null for damage sources thorns should not reflect against (e.g. blight).
   _damageUnit(u, dmg, attacker = null) {
+    // Mid-roll, and inside the invulnerable window, nothing lands. The window
+    // is shorter than the roll, so a late dodge still eats the hit.
+    if (u.hero && u.dodgeT > 0 && (u.dodgeIT || 0) > 0) {
+      this.emit({ type: 'evade', x: u.x, z: u.z });
+      return;
+    }
     const mods = u.mods || null;
     const evade = (u.def.evadeChance || 0) + ((mods && mods.evadeChance) || 0);
     if (dmg > 0 && evade > 0 && this.rng() < evade) {
@@ -3050,7 +3257,9 @@ export class Game {
       return;
     }
     const armor = (u.def.armor || 0) + ((mods && mods.armor) || 0) + (u.fortifyArmor || 0) + (u.auraArmor || 0);
-    if (armor > 0) dmg *= Math.max(0.25, 1 - armor);
+    // Negative armour has to bite. Gating on `armor > 0` silently discarded
+    // every doctrine drawback that traded armour away, making them free.
+    if (armor) dmg *= Math.max(0.25, Math.min(1.75, 1 - armor));
     if (u.shieldHp > 0 && dmg > 0) {
       const absorb = Math.min(u.shieldHp, dmg);
       u.shieldHp -= absorb;
@@ -3584,6 +3793,7 @@ export class Game {
 
       // Auto-attack — units fire even while moving. A weaving hero is a blade
       // between worlds: no gunfire until the threads release him.
+      if (u.hero && u.swapCd > 0) u.swapCd = Math.max(0, u.swapCd - dt);
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
@@ -3625,6 +3835,9 @@ export class Game {
       // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
       // squad troops too), not just heroes self-buffing.
       const rofMult = (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);
+      // A hero swings their equipped weapon; a squad trooper swings their unit
+      // definition. Both answer the same questions, so one accessor serves.
+      const w = u.weapon || u.def;
       const attackRange = u.hero ? this.heroRange(u) : u.def.range;
       // Crit: a hero's own chance (base + passives) plus whatever an aura is
       // granting right now (John's Reckless Bravado reaches squad troops too).
@@ -3633,38 +3846,46 @@ export class Game {
       // regardless of how often each client's HUD happens to re-render.
       const hitDmg = () => {
         let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
-        const critChance = (u.hero ? (u.def.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
-        if (critChance > 0 && this.rng() < critChance) dmg *= (u.hero && u.def.critMult) || 1.75;
+        const critChance = (u.hero ? (w.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
+        if (critChance > 0 && this.rng() < critChance) {
+          // Critical damage comes from the weapon AND from everything the hero
+          // is carrying or has allocated. Reading only the weapon made every
+          // relay and doctrine that grants critical damage do nothing.
+          const critMult = u.hero
+            ? (w.critMult || 1.75) + ((u.mods && u.mods.critMult) || 0)
+            : 1.75;
+          dmg *= critMult;
+        }
         return dmg;
       };
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= attackRange * attackRange) {
-          u.cooldown = 1 / (u.def.rof * rofMult);
+          u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = hitDmg();
-          this.damageZombie(zb, dmg, u.x, u.z);
+          this.damageZombie(zb, dmg, u.x, u.z, w.types || null, u.hero ? u.mods : null);
           // Shotgun spread: the blast mauls everything packed around the target.
-          if (u.def.splash) {
-            const s2 = u.def.splash * u.def.splash;
-            for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, u.def.splash)) {
+          if (w.splash) {
+            const s2 = w.splash * w.splash;
+            for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, w.splash)) {
               if (zb2 === zb || zb2.dead) continue;
-              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z);
+              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z, w.types || null, u.hero ? u.mods : null);
             }
           }
-          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
+          const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale });
-          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+          if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
         const n = u.targetNest;
         if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 2.5) ** 2) {
-          u.cooldown = 1 / (u.def.rof * rofMult);
+          u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());
-          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
+          const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7, targetKind: 'nest' });
-          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+          if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       }
     }

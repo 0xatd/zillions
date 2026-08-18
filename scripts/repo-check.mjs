@@ -214,7 +214,10 @@ assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live
 assert.match(mainSource, /constellationGeo/, 'title orbit must use stars and constellation marks instead of a ringed moon');
 assert.match(mainSource, /new THREE\.DataTexture\(globePixels/, 'title orbit must render a readable textured globe');
 assert.doesNotMatch(mainSource, /moonRing/, 'title orbit must not restore the distracting Saturn-like moon');
-assert.match(mainSource, /!this\.game && k === 'c' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'C must toggle the character screen from the persistent world');
+// The character screen must stay reachable from the persistent world. The key
+// is no longer a literal — it comes from the binding table — so this asserts
+// the dispatch rather than the letter, and keybind-check pins the default to C.
+assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'the character screen must be reachable from the persistent world');
 assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
 assert.match(uiSource, /this\._mmExploredGame !== game[\s\S]*document\.createElement\('canvas'\)/, 'minimap exploration memory must reset per match and use a cached mask');
 assert.match(uiSource, /game\.heroes\[this\._p\] === u/, 'the minimap must identify the local co-op hero, not always player one');

@@ -71,7 +71,8 @@ Use continuous siege on a lane graph as the gameplay base:
   global army stance: defend city, follow the hero, or hunt outward toward
   enemies and hive nests.
 - No individual squad micro. Squads are autonomous; the player sets the global
-  stance: Defend city, Follow hero, or Push the lanes.
+  stance: Defend city, Follow hero, or Push the lanes. The stances sit on
+  F1–F3, not the number row — see Controls below.
 - Each human muster is one persistent formation. Its troops keep stable slots
   while defending, escorting, and marching. Zombies never use formation slots;
   their identity is an irregular flood.
@@ -126,6 +127,74 @@ room's mode, and doing so clears every guest Ready vote like any other setup
 change. The shared life pool grows by one per extra hero, every living hero
 seeds the horde's flow field, and each player gets their own pick-1-of-3
 blessing choice per razed chamber.
+
+## Controls
+
+The control scheme follows Path of Exile 2's WASD mode, because that is the
+grammar a player arriving from an action RPG already has in their hands.
+
+- Movement is WASD and is never camera-relative.
+- Space is the dodge roll. It is a real simulation mechanic: a committed burst
+  with a short invulnerable window and a cooldown longer than the roll, issued
+  as a lockstep command and carried in the snapshot.
+- Q, E and R are the ability slots. Only Q is used today, because a hero has
+  one controlled ability; E and R are declared and shown as reserved rather
+  than hidden, so the layout does not shift when a second ability lands.
+- X draws the other weapon set.
+- Alt still toggles build mode. Founding and funding a colony is the half of
+  this game an action-RPG layout has no opinion about, and it keeps its key.
+- Army stances take F1–F3. They moved off 1/2/3 deliberately: Path of Exile
+  puts consumables there, Zillions commands squads and Path of Exile does not,
+  and 1/2 are now reserved for a consumable system that does not exist yet.
+- Every binding is rebindable in Settings → Controls, which reads the same
+  table `src/keybinds.js` dispatches through. The code, the Settings screen,
+  the in-game help and the README controls table cannot drift apart:
+  `scripts/keybind-check.mjs` fails the build if they do.
+
+Two actions that can be listening at the same moment may not share a key. That
+is decided by scope — where an action is live — and not by the group it is
+displayed under. A battle has movement, combat, army and interface actions all
+listening at once, so a key shared across those groups leaves one of them dead.
+An action's fixed alternates count as its keys for this purpose.
+
+A scheme is never stored in a conflicting state. Rebinding a key that another
+action holds hands that action the key being replaced; anything that still
+cannot be given a free key is stored unbound and shown as such, because an
+unbound action is honest and a shadowed one is a silent bug.
+
+## Character Progression
+
+An MMO character carries a build between adventures, and it has three layers
+that must stay separate.
+
+Gear is rolled. An item is a key that resolves to a base, an item level, a
+rarity and its affixes; item level comes from the world, so loot quality is
+tied to how far out the player has travelled. Five slots are worn: weapon,
+off-hand, armour and two implants. Weapon and off-hand exist twice, and X draws
+the other set in the field on a four-second cooldown.
+
+The Lattice is one shared 646-node passive tree with thirteen origins. A class
+picks where it starts, not what it can become. A character spends one point per
+level plus campaign points, capped at 122, so a build excludes far more than it
+takes. Nodes can be pinned to one weapon set. Rewiring returns every point for
+Salvage Alloy.
+
+Weapons carry the damage numbers. A hero without an equipped weapon fights with
+their signature weapon, which is that hero's original stats exactly. Damage is
+split across kinetic, thermal, shock and void, and enemies resist or are
+vulnerable to each.
+
+The rules these must keep:
+
+- Depth belongs between runs. Gear, the Lattice and weapon sets all resolve to
+  flat numbers before a run starts; the simulation never queries them while it
+  runs, and the tactical minute stays one hero, one gold resource, one input.
+- The three layers own different jobs. In-run hero upgrades own the run, the
+  Lattice owns the character, the meta tree owns the account. Two systems must
+  not sell the same bonus.
+- Nothing is unrecoverable. A reshaped tree, a lost level or a rewire refunds
+  and prunes; it never breaks a character.
+- No trade until a server owns item creation.
 
 ## Longer-Range Direction
 

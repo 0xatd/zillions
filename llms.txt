@@ -36,6 +36,17 @@ Default branch: main
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
 - src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
 - src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
+- src/items.js owns item bases, weapons, affixes, damage types, and deterministic
+  item generation. An item is a key; "base:seed:ilvl:rarity" resolves to a rolled
+  item, a bare key resolves to an authored one.
+- src/skilltree.js owns the Lattice, a 646-node shared passive tree generated
+  from a fixed seed. Effects are data; rule-changing doctrines are flags read by
+  src/game.js.
+- src/keybinds.js owns the control scheme. Every action is declared once with a
+  default key; main.js dispatches through it and Settings rebinds it. Keys are
+  never literals in the input handler.
+- src/lockstep-hash.js owns the per-window state hash peers compare. It is a pure
+  function over a Game so it can be checked headless.
 - src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.

@@ -5,6 +5,12 @@
 // the two flows meet.
 
 import { makeRNG } from './utils.js';
+import {
+  MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
+  rollLootKey, rollLootKeyForSlot, worldItemLevel,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE, setSlots, WEAPON_SETS, equippedKeys, hasOwn,
+  latticeMods, latticeDoctrines,
+} from './items.js';
 
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
@@ -12,6 +18,14 @@ export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
+// The dodge roll. Short, committed, and on a cooldown long enough that it is a
+// read rather than a movement key you hold. The invulnerable window is shorter
+// than the roll itself, so a badly-timed dodge still gets you hit at the end.
+export const DODGE_CD = 3.2;           // seconds between rolls
+export const DODGE_TIME = 0.34;        // how long the roll lasts
+export const DODGE_IFRAMES = 0.24;     // untouchable for this much of it
+export const DODGE_SPEED = 3.1;        // multiplier on move speed while rolling
+export const WEAPON_SWAP_CD = 4;       // seconds between weapon-set swaps — a decision, not a toggle
 export const UPGRADE_PAY_RATE = 50;    // upgrades finish quickly; the cost, not a long hold, is the commitment
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
 export const CITY_PAD_R = 27;         // the founders' pad: flat, buildable disc stamped at a city site
@@ -287,10 +301,13 @@ export const UNITS = {
 export const ZOMBIES = {
   walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x86c24e, scale: 1.0,  score: 1 },
   runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xd0c052, scale: 0.92, score: 2 },
-  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8 },
+  // Bone and bulk. Fire renders it; shock earths out through all that meat.
+  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8,
+    resist: { thermal: -0.25, shock: 0.3 } },
   spitter: {
     hp: 42, dmg: 11, speed: 1.05, chase: 1.95, color: 0xc9d84e, scale: 1.05, score: 3,
     ranged: 8.5, rof: 0.5,
+    resist: { thermal: -0.2 },
     desc: 'Spits acid from beyond your wall. You cannot turtle it out.',
   },
   burrower: {
@@ -301,11 +318,15 @@ export const ZOMBIES = {
   sieger: {
     hp: 320, dmg: 36, speed: 0.8, chase: 1.5, color: 0xd0762e, scale: 1.6, score: 7,
     siege: true,
+    // Plated for the walk in. Shock finds the seams; kinetic mostly does not.
+    resist: { kinetic: 0.3, shock: -0.3 },
     desc: 'Walks past your army and eats your buildings. Intercept it.',
   },
   caller: {
     hp: 96, dmg: 6, speed: 1.25, chase: 2.4, color: 0x4ec9a8, scale: 1.18, score: 6,
     call: { radius: 8.5, dmg: 0.4, speed: 0.3 },
+    // Whatever is doing the goading is barely here. Void unmakes it.
+    resist: { void: -0.35, kinetic: 0.2 },
     desc: 'Goads everything nearby into a frenzy. Kill it first.',
   },
 };
@@ -628,16 +649,104 @@ export const LOOT_PICKUP_RADIUS = 1.6; // walk over it and it is yours
 export const LOOT_REVEAL_RADIUS = 7;   // how close before you spot a hidden cache
 export const LOOT_DROP_COOLDOWN = 2.5; // seconds before a dropped item can be picked up again
 
-const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'range', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
+// The stat vocabulary lives in `items.js` so the gear layer and the authored
+// table cannot drift apart. One list, one source.
+export const MOD_KEYS = GEAR_MOD_KEYS;
+export {
+  rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines,
+  DAMAGE_TYPES, DAMAGE_TYPE_INFO, RESIST_CAP, VOID_ARMOR_SHARE, ATTRIBUTES,
+  WEAPON_SETS, setSlots, EQUIP_SLOTS, equippedKeys, slotsForPool, latticeMods, latticeDoctrines,
+} from './items.js';
+
+// Two kinds of key reach this function and both are legal:
+//   'oath_blade'                  an authored item from ITEMS above
+//   'scatter_mk2:7f3a91:62:2'     a rolled item, generated from the key itself
+// Authored keys resolve from the table. Rolled keys resolve through
+// `resolveItem()`, which is pure — so this stays a plain sum with no state.
+// ---------- Weapons ----------
+//
+// The weapon used to BE the hero. `HEROES.scott` carried dmg, range, rof,
+// shotgun and splash directly, which meant nothing else could ever be a
+// weapon. The weapon block now lives on its own, and a hero references one.
+//
+// A hero's SIGNATURE weapon is generated from that hero's own definition, so
+// an unequipped hero fights with exactly the numbers they always had. This is
+// deliberate: introducing weapons must not move a single balance value. New
+// weapon bases in `items.js` are new content on top, not a rebalance
+// underneath.
+export function signatureWeapon(heroKey) {
+  const d = HEROES[heroKey];
+  if (!d) return null;
+  return {
+    key: `sig_${heroKey}`, name: `${d.name.split(' ')[0]}'s ${d.melee ? 'Blade' : 'Gun'}`,
+    icon: d.icon, class: 'signature', signature: true, heroKey,
+    dmg: d.dmg, rof: d.rof, range: d.range,
+    splash: d.splash || 0, shotgun: !!d.shotgun, melee: !!d.melee, noise: d.noise || 0,
+    critChance: d.critChance || 0, critMult: d.critMult || 1.75,
+    types: { kinetic: 1 },
+  };
+}
+
+export const SIGNATURE_WEAPONS = Object.fromEntries(
+  Object.keys(HEROES).map((key) => [key, signatureWeapon(key)]),
+);
+
+// What this hero is actually swinging. An equipped weapon replaces the
+// signature outright; the hero keeps levelDmg, hp, aura and ability.
+// `equipment` is the character's slot map, and an empty one is the norm.
+export function weaponFor(heroKey, equipment = null, set = 0) {
+  const slot = setSlots(set).weapon;
+  const equipped = equipment && equipment[slot];
+  if (equipped) {
+    const item = itemInfo(equipped);
+    if (item && item.weapon) return item.weapon;
+  }
+  return SIGNATURE_WEAPONS[heroKey] || null;
+}
+
+// Does this character have a second set worth swapping to? A swap that lands
+// on the same signature weapon is a wasted button, so the HUD asks first.
+export function hasSecondSet(equipment = null) {
+  return !!(equipment && (equipment.weapon2 || equipment.offhand2));
+}
+
 export function itemMods(items) {
   const m = {};
   for (const k of MOD_KEYS) m[k] = 0;
   for (const key of items || []) {
+    const rolled = isRolledKey(key) ? resolveItem(key) : null;
+    if (rolled) {
+      for (const k of MOD_KEYS) if (rolled.mods[k]) m[k] += rolled.mods[k];
+      continue;
+    }
+    if (!hasOwn(ITEMS, key)) continue;
     const it = ITEMS[key];
-    if (!it) continue;
     for (const k of MOD_KEYS) if (it[k]) m[k] += it[k];
   }
   return m;
+}
+
+// An authored item's stat keys, and nothing else.
+function authoredMods(it) {
+  const out = {};
+  for (const key of MOD_KEYS) if (it[key]) out[key] = it[key];
+  return out;
+}
+
+// One accessor for "what is this key", whichever kind it is. The UI and the
+// simulation both go through here instead of reaching for ITEMS directly.
+export function itemInfo(key) {
+  const rolled = isRolledKey(key) ? resolveItem(key) : null;
+  if (rolled) return rolled;
+  if (!hasOwn(ITEMS, key)) return null;
+  const it = ITEMS[key];
+  return {
+    key, baseKey: key, base: it, slot: it.slot || null, name: it.name, icon: it.icon,
+    ilvl: 0, rarity: 4, rarityName: 'Signature', rarityColor: '#d8a13a',
+    // Only the stat keys. Handing the whole definition over as a mod bag made
+    // itemLines() emit "+Oath Blade name" and "+🗡️ icon" into every tooltip.
+    req: null, affixes: [], mods: authoredMods(it), local: {}, weapon: null, rolled: false, desc: it.desc,
+  };
 }
 
 // ---------- Campaign: retaking EARTH — 5 fronts, 5 maps, 5 bosses ----------

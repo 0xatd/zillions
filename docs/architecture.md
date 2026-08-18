@@ -48,6 +48,10 @@ module already owns that rule.
 | `src/multiplayer-pacing.js` | Adaptive buffer targets and repair history |
 | `src/multiplayer-readiness.js` | Direct connection readiness |
 | `src/multiplayer-eligibility.js` | Campaign unlock eligibility |
+| `src/items.js` | Item bases, weapon blocks, affix pools, damage types, and deterministic item generation from a key |
+| `src/skilltree.js` | The Lattice: sector table, seeded tree generation, allocation rules, and the resolved payload |
+| `src/keybinds.js` | The control scheme: every action, its default key, and rebinding |
+| `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |
 | `src/meta.js` | Persistent meta-progression: run payouts, the upgrade tree, and the bonus payload a run starts with |
 
 Simulation code must produce the same result on every peer. Add all new state
@@ -189,6 +193,32 @@ Each world has a kind. A standard world is a campaign landing. A holdout runs
 the survival rules with fewer hives and higher pressure. A derelict carries a
 labyrinth hulk on its surface. `src/config.js` derives the kind from the planet
 number, so the simulation and the galaxy map always agree.
+
+`src/items.js` owns gear. An item is a string, and the string can be a seed:
+`scatter_mk2:7f3a91:62:2` is base, roll seed, item level, and rarity.
+`resolveItem()` turns the key back into the full item and is pure, so the same
+key produces the same affixes on every peer and every reload. Nothing is stored
+but the key, which is why rolled loot needed no change to the snapshot, the
+hero pack, the drop command, or the profile blob. A key with no `:` resolves
+from the authored `ITEMS` table in `src/config.js`; those items are the
+signatures of the system and every profile written before it keeps working.
+
+Local and global mods stay apart. A weapon's own `+% damage` scales that
+weapon; the same roll on a coat scales the hero. `applyLocal()` folds the local
+bag into the weapon exactly once.
+
+`src/skilltree.js` owns the Lattice, the shared passive tree every MMO
+character allocates into. The tree is generated from a fixed seed and a
+nine-sector table rather than hand-authored, the same way `terrain.js`,
+`lanes.js` and `galaxy.js` generate their structures. Traces, relays and
+attribute nodes are bags of numbers on the mod keys `itemMods()` already
+speaks. Doctrines are flags: `src/game.js` owns each rule in simulation code,
+because a node cannot ship behaviour without breaking snapshot restore and
+lockstep.
+
+Both modules resolve to numbers before a run starts. `characterCamp()` folds
+gear, the Lattice, and each weapon set into flat bags, and the simulation never
+queries an item, an affix, or a tree node while it runs.
 
 `src/meta.js` owns what a player keeps between runs. `runScore()` in
 `src/game.js` folds a finished run into one score. `awardRun()` converts that

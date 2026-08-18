@@ -23,6 +23,7 @@ Choose the document that matches your task:
 | Change maps or fortresses | `docs/thronefall-map-engine.md` and `docs/fortress-inspiration.md` |
 | Change unit or building art | `docs/art-direction.md` and `docs/art-pipeline.md` |
 | Plan future systems | `docs/design-vision.md` |
+| Change gear, weapons, or the Lattice | `docs/weapons-and-items.md` and `docs/skill-tree-integration.md` |
 | Give an agent compact context | `llms.txt` |
 
 Use this source order when documents disagree:
@@ -100,25 +101,104 @@ levels grant tapered stat growth.
 
 `src/config.js` is the source of truth for hero stats and abilities.
 
+## Characters, Gear and the Lattice
+
+### Why This Exists
+
+The goal was to give persistent characters real build depth, by merging the
+galaxy character system with an action-RPG passive tree.
+
+The reference is the Path of Exile 2 passive tree. The rule that governed every
+decision: **copy structure, never content.** One shared graph with per-class
+start positions, four node grades, a point budget far smaller than the node
+count, legality by connectivity, paid respec, and separate damage types are all
+mechanics, and mechanics are free to learn from. Node names, descriptions,
+icons, coordinates and exported tree data are not. None of that was imported.
+The Lattice is generated from a seed and a sector table written for this game,
+and every term in it is a Zillions term.
+
+The system earned its place because the plumbing was already half built and
+doing nothing. `grantMmoExperience()` had granted one talent point per level
+since MMO characters shipped, and nothing ever spent one — a level 40 character
+held 39 dead points. The Lattice is the spend surface those points always
+needed.
+
+Weapons and damage types came before the tree on purpose. With one damage
+number, every affix and every tree node collapses into `+X% damage`, and 646
+nodes would all feel the same. Types are what make a roll a decision.
+
+Four constraints shaped the implementation, and a change here has to keep them:
+
+- The tactical minute stays readable. Gear, the Lattice and weapon sets all
+  resolve to flat numbers before a run starts. The simulation never queries an
+  item, an affix or a tree node while it runs.
+- The simulation stays deterministic, and snapshot and restore keep working.
+- Lockstep co-op keeps agreeing. Equipment, doctrines and the drawn weapon set
+  reach the state hash, so mismatched peers fail before window 0.
+- Nothing already saved breaks. Item keys without a `:` still resolve to the
+  authored items, and a reshaped tree refunds rather than bricking a character.
+
+`docs/weapons-and-items.md` and `docs/skill-tree-integration.md` record what was
+built, the rules a change has to respect, and what was deliberately left out.
+
+### What A Character Carries
+
+A galaxy character carries its own build between adventures.
+
+Gear is rolled. An item is a key such as `scatter_mk2:7f3a91:62:2` — base, roll
+seed, item level and rarity — and it resolves to the same item on every machine
+without storing anything but the key. Item level comes from the world, so loot
+gets better the further out you travel. Five slots are worn, and the weapon and
+off-hand exist twice: press X to draw the other set mid-fight.
+
+The Lattice is one shared 646-node passive tree. All thirteen classes allocate
+into the same tree from thirteen different starting positions, so a class
+decides where you begin, not what you can become. You earn one point per level
+plus campaign points, and 122 points against 646 nodes means every build leaves
+most of the tree behind. Nodes can be pinned to one weapon set.
+
+Weapons carry the damage numbers, split across kinetic, thermal, shock and
+void. Enemies resist some and are vulnerable to others. A hero with nothing
+equipped fights with their signature weapon, which is exactly the numbers that
+hero always had.
+
+`src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
+
 ## Controls
+
+The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
+system it does not. Every key below can be rebound in **Settings → Controls**,
+which reads the same table the game dispatches through.
 
 | Input | Action |
 | --- | --- |
 | W, A, S, D | Move in world and minimap directions |
-| C | Open or close the character and equipment screen in the persistent world |
 | Shift | Gallop at full health |
-| Alt | Change Space between Build mode and Fight mode |
-| Space | Found, build, or cast, based on the current mode |
+| Space | Dodge roll — a burst out of danger, briefly untouchable |
+| Q | Primary ability (your hero special) |
+| E, R | Ability II and III — reserved; heroes carry one ability today |
+| X | Draw the other weapon set |
+| Ctrl | Secondary ability bar — reserved |
+| 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Build, upgrade, repair, or rebuild |
-| Q | Cast the hero special |
+| Alt | Change the primary input between Build mode and Fight mode |
+| F1, F2, F3 | Set Defend, Follow, or Push stance |
 | T | Change the nearest tower target rule |
-| G | Drop the newest field item |
-| 1, 2, 3 | Set Defend, Follow, or Push stance |
+| Z | Drop the newest field item |
+| C | Character and equipment screen |
+| G | The Lattice |
+| Enter | Team chat |
 | P | Pause a solo game |
-| Esc | Open the game menu |
 | M | Mute audio |
+| Esc | Open the game menu |
 
 Movement is not camera-relative. W always moves north on the minimap.
+
+Two places deviate from Path of Exile deliberately. Army stances take F1–F3
+rather than the number row, because Zillions commands squads and Path of Exile
+does not — that freed 1 and 2 for a future consumable system. And Alt still
+toggles build mode, because founding and funding a colony is the half of this
+game an action-RPG layout has no opinion about.
 
 ## Local Development
 

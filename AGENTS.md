@@ -55,6 +55,34 @@ economy, and army systems, and never let its wins advance campaign progress.
 - Read `docs/thronefall-map-engine.md` before you change terrain rendering.
 - Read `docs/fortress-inspiration.md` before you change colony generation.
 
+### Controls
+
+- Declare an action in `src/keybinds.js`. Never dispatch on a key literal.
+- Two actions whose scopes overlap may not share a key. Scope is where an
+  action listens, not the group it is displayed under. Alternates count.
+- Update the README controls table with any binding change. `keybind-check`
+  compares them and fails on a mismatch in either direction.
+- Army stances stay off the number row. 1 and 2 are reserved for consumables.
+
+### Gear and the Lattice
+
+Read "Why This Exists" in `README.md` before reviewing a change here. It records
+what this system was for and the boundary it was built under: the structure is
+learned from an action-RPG passive tree, none of that game's content was
+imported, and four constraints — a readable tactical minute, deterministic
+simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
+
+- An item is a key. Rolled keys resolve through `resolveItem()`; authored keys
+  resolve from `ITEMS`. Read either through `itemInfo()`, never `ITEMS[key]`.
+- Keep item generation pure and off the simulation random source.
+- Keep local weapon mods out of the global mod bag.
+- Keep Lattice effects as data. A rule-changing node is a flag, and the rule
+  lives in `src/game.js` with a committed check.
+- Resolve gear and the Lattice at run start. Never query them during a run.
+- Prune allocations on load. A tree that changes shape must refund, not break.
+- Keep equipment, doctrines and the drawn weapon set in the lockstep hash.
+- Every hero's signature weapon must stay identical to that hero's own stats.
+
 ### Heroes
 
 - Keep this roster: Scott English, Alexander Thomas, Danny Donovan, Turtle
@@ -94,6 +122,10 @@ economy, and army systems, and never let its wins advance campaign progress.
 - `src/terrain.js`: terrain field and terrain-derived sites.
 - `src/galaxy.js`: procedural star systems, world kinds, and world descriptors.
 - `src/factions.js`: faction roster, presence archetypes, and ownership.
+- `src/items.js`: item bases, weapons, affixes, damage types, and item generation.
+- `src/skilltree.js`: the Lattice — sectors, tree generation, allocation, payload.
+- `src/lockstep-hash.js`: the per-window state hash every peer compares.
+- `src/keybinds.js`: the control scheme — actions, defaults, and rebinding.
 - `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
