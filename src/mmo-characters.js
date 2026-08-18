@@ -3,6 +3,9 @@
 // equipment, appearance and last world between instances.
 
 import { EQUIP_SLOTS, slotPool, isRolledKey } from './items.js';
+import {
+  pruneAlloc, latticePoints, treeBonuses, canAllocate, canDeallocate, LATTICE_VERSION,
+} from './skilltree.js';
 import { itemInfo } from './config.js';
 
 export const MAX_MMO_CHARACTERS = 8;
@@ -66,6 +69,9 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
     level: 1,
     xp: 0,
     talentPoints: 0,
+    questPoints: 0,
+    latticeV: LATTICE_VERSION,
+    lattice: [],
     items: [],
     equipment: {},
     upgrades: {},
@@ -86,6 +92,16 @@ export function normalizeMmoCharacters(profile) {
     character.xp = Math.max(0, Number(character.xp) || 0);
     character.items = (Array.isArray(character.items) ? character.items : []).slice(0, STASH_SLOTS);
     character.equipment = normalizeEquipment(character.equipment);
+    // The Lattice prunes on every load. A tree that changed shape between
+    // releases must never brick a character — unknown and unreachable nodes are
+    // dropped and their points come straight back.
+    character.questPoints = Math.max(0, Math.min(30, Number(character.questPoints) || 0));
+    character.latticeV = LATTICE_VERSION;
+    character.lattice = pruneAlloc(
+      character.lattice, character.classKey,
+      latticePoints(character.level, character.questPoints),
+    );
+    character.talentPoints = Math.max(0, latticePoints(character.level, character.questPoints) - character.lattice.length);
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
     character.lastWorld = character.lastWorld || profile.lastWorld || 'earth';
@@ -121,21 +137,60 @@ export function grantMmoExperience(character, amount) {
   while (character.level < 100 && character.xp >= xpToMmoLevel(character.level)) {
     character.xp -= xpToMmoLevel(character.level);
     character.level++;
-    character.talentPoints = (character.talentPoints || 0) + 1;
+    character.talentPoints = Math.max(0, latticePoints(character.level, character.questPoints)
+      - (Array.isArray(character.lattice) ? character.lattice.length : 0));
     levels.push(character.level);
   }
   return levels;
 }
 
+// The camp is where the between-runs layer resolves into numbers. The Lattice
+// is folded to a flat bag and a list of doctrine flags HERE, once, so the
+// simulation never queries a tree node while it runs.
 export function characterCamp(character, relics = []) {
+  const tree = treeBonuses(character?.lattice, character?.classKey);
   return {
     level: character?.level || 1,
     xp: character?.xp || 0,
     items: [...(character?.items || [])],
     equipment: normalizeEquipment(character?.equipment),
     upgrades: { ...(character?.upgrades || {}) },
+    lattice: [...(character?.lattice || [])],
+    treeMods: tree.mods,
+    doctrines: tree.doctrines,
     relics: [...relics],
   };
+}
+
+// Spend and refund. Both go through the tree's own legality rules, so the
+// screen, the profile and any future server all agree on what a build is.
+export function allocateLatticeNode(character, nodeId) {
+  if (!character) return false;
+  const budget = latticePoints(character.level, character.questPoints);
+  const owned = Array.isArray(character.lattice) ? character.lattice : [];
+  if (owned.length >= budget) return false;
+  if (!canAllocate(owned, nodeId, character.classKey)) return false;
+  character.lattice = [...owned, nodeId].sort();
+  character.talentPoints = Math.max(0, budget - character.lattice.length);
+  return true;
+}
+
+export function deallocateLatticeNode(character, nodeId) {
+  if (!character) return false;
+  const owned = Array.isArray(character.lattice) ? character.lattice : [];
+  if (!canDeallocate(owned, nodeId, character.classKey)) return false;
+  character.lattice = owned.filter((id) => id !== nodeId).sort();
+  character.talentPoints = Math.max(0, latticePoints(character.level, character.questPoints) - character.lattice.length);
+  return true;
+}
+
+// Rewire: hand every point back at once.
+export function rewireLattice(character) {
+  if (!character) return 0;
+  const spent = (character.lattice || []).length;
+  character.lattice = [];
+  character.talentPoints = latticePoints(character.level, character.questPoints);
+  return spent;
 }
 
 export function recordMmoInstance(character, { won = false, kills = 0, xp = 0, world = null, items = [] } = {}) {

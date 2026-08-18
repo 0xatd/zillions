@@ -82,6 +82,8 @@ export class Game {
     this.coins = [];             // physical coins on the ground
     this.loot = [];              // items lying on the frontier, most of them hidden
     this._lootSerial = 0;        // per-game roll counter — see _scatterLoot()
+    this._doctrineScorched = false;  // resolved by _refreshDoctrines()
+    this._doctrineHollow = false;
     this.site = -1;              // chosen city site index (-1 = not founded yet)
     this.plots = [];             // generated when the city is founded
     this.buildings = [];
@@ -2228,6 +2230,10 @@ export class Game {
     // so an unequipped hero fights exactly as they did before weapons existed.
     const equipment = camp && camp.equipment ? { ...camp.equipment } : {};
     const weapon = weaponFor(key, equipment);
+    // The Lattice arrives already resolved: a flat bag of numbers and a list of
+    // rule flags. Nothing here queries a tree node, now or during the run.
+    const treeMods = (camp && camp.treeMods) || null;
+    const doctrines = (camp && camp.doctrines) ? [...camp.doctrines] : [];
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
@@ -2235,7 +2241,7 @@ export class Game {
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
-      equipment, weapon,
+      equipment, weapon, treeMods, doctrines,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -2243,6 +2249,7 @@ export class Game {
     this.units.push(h);
     this.heroes.push(h);
     if (!this.hero) this.hero = h;
+    this._refreshDoctrines();
     return h;
   }
 
@@ -2265,6 +2272,13 @@ export class Game {
     const passiveMods = this._heroPassiveMods(h);
     const mods = { ...h.itemMods };
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
+    // The Lattice folds in here, beside gear and hero passives, on the same
+    // additive keys. One bag, one place, one rule.
+    if (h.treeMods) {
+      for (const [key, value] of Object.entries(h.treeMods)) {
+        if (value) mods[key] = (mods[key] || 0) + value;
+      }
+    }
     const forge = this._heroForgeMods();
     mods.dmg = (mods.dmg || 0) + forge.dmg;
     mods.hp = (mods.hp || 0) + forge.hp;
@@ -2906,6 +2920,23 @@ export class Game {
 
   // ---------- damage ----------
 
+  // Does any hero in this game carry a doctrine? Doctrines are global rules
+  // rather than per-hero stats, so in co-op one player's pact changes the war
+  // for everybody. Resolved from the flags the camp carried in.
+  hasDoctrine(id) {
+    for (const h of this.heroes) {
+      if (h.doctrines && h.doctrines.includes(id)) return true;
+    }
+    return false;
+  }
+
+  // Rule-bearing doctrines are read on every hit, so they are resolved to
+  // plain booleans whenever the roster changes rather than searched each time.
+  _refreshDoctrines() {
+    this._doctrineScorched = this.hasDoctrine('scorched_supply');
+    this._doctrineHollow = this.hasDoctrine('hollow_pact');
+  }
+
   // Armour and per-type resistance, resolved together. Void is the exception
   // the type table promises: it ignores most armour, which is what makes a
   // psi-focus worth carrying into a plated horde.
@@ -2915,14 +2946,21 @@ export class Game {
       return zb.armor ? dmg * (1 - zb.armor) : dmg;
     }
     const resist = zb.resist || (zb.def && zb.def.resist) || null;
+    // Doctrine: Scorched Supply. Your fire renders everything, so a resistance
+    // only counts for half. A vulnerability is not halved — this doctrine is a
+    // promise about what you burn through, not a penalty on what burns easy.
+    const resistScale = this._doctrineScorched ? 0.5 : 1;
+    // Doctrine: Hollow Pact. Void ignores armour outright rather than mostly.
+    const voidArmor = this._doctrineHollow ? 0 : VOID_ARMOR_SHARE;
     let total = 0;
     for (const type of DAMAGE_TYPES) {
       const share = types[type] || 0;
       if (!share) continue;
       let part = dmg * share;
-      const armor = type === 'void' ? (zb.armor || 0) * VOID_ARMOR_SHARE : (zb.armor || 0);
+      const armor = type === 'void' ? (zb.armor || 0) * voidArmor : (zb.armor || 0);
       if (armor) part *= 1 - armor;
-      const r = resist ? (resist[type] || 0) : 0;
+      let r = resist ? (resist[type] || 0) : 0;
+      if (r > 0) r *= resistScale;
       if (r) part *= 1 - Math.max(-1, Math.min(RESIST_CAP, r));
       total += part;
     }
