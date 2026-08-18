@@ -103,6 +103,46 @@ levels grant tapered stat growth.
 
 ## Characters, Gear and the Lattice
 
+### Why This Exists
+
+The goal was to give persistent characters real build depth, by merging the
+galaxy character system with an action-RPG passive tree.
+
+The reference is the Path of Exile 2 passive tree. The rule that governed every
+decision: **copy structure, never content.** One shared graph with per-class
+start positions, four node grades, a point budget far smaller than the node
+count, legality by connectivity, paid respec, and separate damage types are all
+mechanics, and mechanics are free to learn from. Node names, descriptions,
+icons, coordinates and exported tree data are not. None of that was imported.
+The Lattice is generated from a seed and a sector table written for this game,
+and every term in it is a Zillions term.
+
+The system earned its place because the plumbing was already half built and
+doing nothing. `grantMmoExperience()` had granted one talent point per level
+since MMO characters shipped, and nothing ever spent one — a level 40 character
+held 39 dead points. The Lattice is the spend surface those points always
+needed.
+
+Weapons and damage types came before the tree on purpose. With one damage
+number, every affix and every tree node collapses into `+X% damage`, and 646
+nodes would all feel the same. Types are what make a roll a decision.
+
+Four constraints shaped the implementation, and a change here has to keep them:
+
+- The tactical minute stays readable. Gear, the Lattice and weapon sets all
+  resolve to flat numbers before a run starts. The simulation never queries an
+  item, an affix or a tree node while it runs.
+- The simulation stays deterministic, and snapshot and restore keep working.
+- Lockstep co-op keeps agreeing. Equipment, doctrines and the drawn weapon set
+  reach the state hash, so mismatched peers fail before window 0.
+- Nothing already saved breaks. Item keys without a `:` still resolve to the
+  authored items, and a reshaped tree refunds rather than bricking a character.
+
+`docs/weapons-and-items.md` and `docs/skill-tree-integration.md` record what was
+built, the rules a change has to respect, and what was deliberately left out.
+
+### What A Character Carries
+
 A galaxy character carries its own build between adventures.
 
 Gear is rolled. An item is a key such as `scatter_mk2:7f3a91:62:2` — base, roll

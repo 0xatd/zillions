@@ -57,6 +57,12 @@ economy, and army systems, and never let its wins advance campaign progress.
 
 ### Gear and the Lattice
 
+Read "Why This Exists" in `README.md` before reviewing a change here. It records
+what this system was for and the boundary it was built under: the structure is
+learned from an action-RPG passive tree, none of that game's content was
+imported, and four constraints — a readable tactical minute, deterministic
+simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
+
 - An item is a key. Rolled keys resolve through `resolveItem()`; authored keys
   resolve from `ITEMS`. Read either through `itemInfo()`, never `ITEMS[key]`.
 - Keep item generation pure and off the simulation random source.
