@@ -6,12 +6,12 @@ import {
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
-import { Game } from './game.js';
+import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility } from './online.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
@@ -25,13 +25,15 @@ import { HordeArt, buildCorpseGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
+import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
+import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
 } from './mmo-characters.js';
 import {
   stitchOverworld, Overworld, gateState,
-  earthWorldDescriptor, galaxyWorldDescriptor, galaxyDestinations, overworldChannel,
+  earthWorldDescriptor, overworldChannel,
   OVERWORLD_SIZE, OVERWORLD_GHOSTS,
 } from './overworld.js';
 import {
@@ -57,7 +59,7 @@ class OverworldMap extends GameMap {
   constructor(campaign = 0, worldId = 'earth') {
     // The planet is a descriptor: Earth today, other servers' universes
     // tomorrow — same stitch, same renderer, different data.
-    const world = galaxyWorldDescriptor(worldId, campaign);
+    const world = descriptorForWorldId(knownGalaxy(), worldId, campaign);
     super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
     this._owWorld = world;
     // super() stitched with a zero-campaign descriptor (the ladder is not
@@ -198,6 +200,10 @@ class App {
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
       onLobbyOpen: () => this._openLobby(),
+      onCustomOpen: () => this._openCustomGames(),
+      onCustomRefresh: () => this._openCustomGames(true),
+      onCustomCreate: (options) => this.createCustomGame(options),
+      onCustomJoin: (room) => this.joinOnlineGame(room),
       onChatSend: (text) => this._sendLobbyChat(text),
       onRoomChatSend: (text) => this._sendRoomChat(text, 'room'),
       onGameChatSend: (text) => this._sendGameChat(text),
@@ -275,6 +281,8 @@ class App {
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
     this.profile = this._loadProfile();
+    this.meta = loadMeta();
+    this.profile.metaCurrency = this.meta.currency;
     normalizeMmoCharacters(this.profile);
     const initialCharacter = selectedMmoCharacter(this.profile);
     if (initialCharacter) {
@@ -567,11 +575,13 @@ class App {
 
   _openGalaxyMap() {
     const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
-    this.ui.showGalaxy(galaxyDestinations(this.profile.campaign || 0), currentWorld);
+    const depth = 12 + metaBonuses().unlock.galaxyDepth;
+    this.ui.showGalaxy(galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth), currentWorld);
   }
 
   _travelToWorld(worldId) {
-    const destination = galaxyDestinations(this.profile.campaign || 0, 12)
+    const depth = 12 + metaBonuses().unlock.galaxyDepth;
+    const destination = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth)
       .find((world) => world.id === worldId);
     if (!destination || !destination.unlocked) {
       this.audio.deny();
@@ -731,6 +741,10 @@ class App {
     }
     this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
     if (ev.gate.portal) {
+      if (ev.gate.action === 'custom') {
+        this._openCustomGames();
+        return;
+      }
       this._openGalaxyMap();
       return;
     }
@@ -1523,6 +1537,9 @@ class App {
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
     p.lastHero = this.ui.selectedHero;
+    const metaAward = awardRun({ ...runScore(this.game), won: !!won });
+    this.meta = metaAward.meta;
+    p.metaCurrency = metaAward.currency;
 
     // WC3-style persistence: the campaign hero keeps every level and item —
     // and quest/boss rewards granted here await them on the next map.
@@ -2029,7 +2046,12 @@ class App {
         if (m.channel === 'game') this.ui.gameChatAdd(m);
         else this.ui.roomChatAdd(m);
       },
-      onGames: (g) => { this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id); this.ui.hubGames(g); },
+      onGames: (g) => {
+        this.ui.lobbyGames(g, (row) => this.joinOnlineGame(row), (row) => this.watchOnlineGame(row), this.lobby?.me?.id);
+        this.ui.hubGames(g);
+        this._customGames = g;
+        if (this.ui._lastScreen === 'custom') this._renderCustomBrowser();
+      },
       onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
       onFriends: (friends) => this.ui.lobbyFriends(friends),
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
@@ -2350,6 +2372,44 @@ class App {
       this.ui.showBanner('⚔️ Invite sent.', '', 2200);
     } catch (e) {
       this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
+    }
+  }
+
+  _renderCustomBrowser() {
+    const games = (this._customGames || []).filter(isCustomGame);
+    this.ui.showCustomBrowser({ games, offline: !this.lobby?.connected, hostName: this._publicName() });
+  }
+
+  _openCustomGames() {
+    this.ui._showScreen('custom');
+    this._renderCustomBrowser();
+    this._openLobby().then((lobby) => {
+      if (lobby?.connected) lobby.refreshGames().catch(() => this._renderCustomBrowser());
+      else this._renderCustomBrowser();
+    }).catch(() => this._renderCustomBrowser());
+  }
+
+  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
+    const lobby = await this._openLobby();
+    if (!lobby?.connected) {
+      this.ui.showBanner('📡 The lobby is unreachable — Custom Games needs the server.', 'bad', 4500);
+      return;
+    }
+    if (lobby.game) {
+      this.ui.showBanner('Leave your current room before hosting another.', 'bad', 4000);
+      return;
+    }
+    this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
+    try {
+      const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
+      await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
+      const room = lobby.game || game;
+      this.ui.showSetup({ online: room, mode: room.mode });
+      this._onRoomUpdate(room);
+      this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
+    } catch (error) {
+      this.ui.showBanner(`❌ Could not create the game: ${error.message}`, 'bad', 5000);
+      this.mpRole = null; this.onlineMode = false;
     }
   }
 

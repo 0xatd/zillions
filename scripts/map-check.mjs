@@ -161,7 +161,9 @@ for (const level of LEVELS) {
     const hq = plots.find((p) => p.kind === 'hq');
     assert.ok(hq, `${label} site ${i} has no Keep`);
     assert.equal(hq.plan.key, planKey, `${label} site ${i} did not build its level's city plan`);
-    assert.ok(plots.length >= 44, `${label} site ${i} laid out only ${plots.length} plots`);
+    // Every building has a designed home and no filler to top the city up, so
+    // the floor is what the plans actually author — not what a dice roll hid.
+    assert.ok(plots.length >= 40, `${label} site ${i} laid out only ${plots.length} plots`);
     assert.ok(hq.plan.entrances >= 2,
       `${label} site ${i} has ${hq.plan.entrances} entrances — a city needs somewhere to sortie from`);
     assert.equal(hq.plan.entrances, hq.plan.gates.length,
@@ -218,17 +220,68 @@ for (const level of LEVELS) {
       assert.ok(camps >= 1, `${label} site ${i}: ${w.name} has no muster camp to hold or push from`);
     }
 
-    // Outer works, where the land offered a gap: a fence plus a tower behind it.
-    for (const w of walls.filter((p) => p.role === 'outer')) {
-      assert.ok(w.tiles.length >= 2, `${label} site ${i}: ${w.name} spans nothing`);
-      const towers = plots.filter((p) => p.kind === 'tower'
-        && Math.hypot(p.cx - w.cx, p.cz - w.cz) < 8).length;
-      assert.ok(towers >= 1, `${label} site ${i}: ${w.name} has no tower behind it`);
+    // --- the pad: inside its disc, the ground is the founders', not the
+    // landform's. 100% walkable and buildable, no exceptions, no rounding
+    // charity — this is the whole promise of the pad system.
+    {
+      const R = site.padR;
+      assert.ok(R >= 22 && R <= 30, `${label} site ${i} pad radius ${R} is off-spec`);
+      let bad = 0;
+      for (let dz = -R; dz <= R; dz++) {
+        for (let dx = -R; dx <= R; dx++) {
+          if (dx * dx + dz * dz > R * R) continue;
+          const x = Math.round(site.x) + dx, z = Math.round(site.z) + dz;
+          if (!map.inBounds(x, z)) { bad++; continue; }
+          if (!map.isWalkable(x, z) || !map.isBuildable(x, z)) bad++;
+        }
+      }
+      assert.equal(bad, 0,
+        `${label} site ${i}: ${bad} tiles inside its own pad are not flat buildable ground`);
     }
-    siteStats.push({ natural: (hq.plan.naturalShare * 100) | 0, outer: hq.plan.outerWorks });
+
+    // --- every slot on real ground: a plot footprint the land refuses is a
+    // promise the city cannot keep. Zero exceptions.
+    for (const p of plots) {
+      if (p.kind === 'wall') continue;   // walls may stand on the rim by design
+      for (let dz = 0; dz < p.size; dz++) {
+        for (let dx = 0; dx < p.size; dx++) {
+          assert.ok(scratch.isBuildable(p.x + dx, p.z + dz) && scratch.isWalkable(p.x + dx, p.z + dz),
+            `${label} site ${i}: a ${p.kind} plot at ${p.x},${p.z} stands on unbuildable ground`);
+        }
+      }
+    }
+
+    // --- every outpost keep reachable from the city it answers to, and every
+    // keep a real one: palisade arcs with a gate and a tower behind it.
+    {
+      const S = scratch.size;
+      const seen = new Uint8Array(S * S);
+      const stack = [Math.round(site.z) * S + Math.round(site.x)];
+      seen[stack[0]] = 1;
+      while (stack.length) {
+        const k = stack.pop();
+        const x = k % S, z = (k / S) | 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= S || nz >= S || seen[nz * S + nx]) continue;
+          if (!scratch.isWalkable(nx, nz)) continue;
+          seen[nz * S + nx] = 1; stack.push(nz * S + nx);
+        }
+      }
+      for (const w of walls.filter((p) => p.role === 'outer')) {
+        assert.ok(w.tiles.length >= 2, `${label} site ${i}: ${w.name} spans nothing`);
+        assert.ok(w.gate, `${label} site ${i}: ${w.name} has no gate — a fence against yourself`);
+        assert.ok(seen[Math.round(w.keep ? w.keep[1] : w.cz) * S + Math.round(w.keep ? w.keep[0] : w.cx)],
+          `${label} site ${i}: ${w.name} is unreachable from the city — a keep with no road`);
+        const towers = plots.filter((p) => p.kind === 'tower'
+          && Math.hypot(p.cx - w.cx, p.cz - w.cz) < 9).length;
+        assert.ok(towers >= 1, `${label} site ${i}: ${w.name} has no tower behind it`);
+      }
+    }
+    siteStats.push({ pad: 100, outer: hq.plan.outerWorks });
     perSite.push({
       plots: plots.length, entrances: hq.plan.entrances,
-      natural: (hq.plan.naturalShare * 100) | 0,
+      pad: 100, keeps: hq.plan.outerWorks,
       inner: hq.plan.inner ? 1 : 0,
       outer: hq.plan.outerWorks,
       towers: plots.filter((p) => p.kind === 'tower').length,
@@ -407,8 +460,11 @@ for (const level of LEVELS) {
   }
 
   // --- no two planets may read the same ------------------------------------
+  // The buckets are fine (1/50th of the map) because the pads now clear a
+  // known few percent of every planet — a coarse bucket would read two
+  // genuinely different planets as one.
   const sig = [
-    (hist.WATER * 20) | 0, (hist.MOUNTAIN * 20) | 0, (hist.FOREST * 20) | 0,
+    (hist.WATER * 50) | 0, (hist.MOUNTAIN * 50) | 0, (hist.FOREST * 50) | 0,
   ].join('/');
   const clash = signatures.get(sig);
   assert.ok(!clash, `${label} has the same terrain signature (${sig}) as ${clash}`);
@@ -421,11 +477,12 @@ for (const level of LEVELS) {
     console.log(`  sites   ${map.sites.map((s) => `${s.name} [${s.kind}]`).join(' | ')}`);
     console.log(`  hives   ${map.nestSpots.map(([x, z]) => `${x},${z}`).join(' ')}`);
     console.log(`  nodes   ${map.nodeSpots.length}: ${[...kinds].join(', ')}`);
-    console.log(`  city    ${perSite.map((p) => `${p.plots}plots ${p.entrances}gates ${p.natural}% natural ${p.outer}outer${p.inner ? ' +ward' : ''}`).join(' | ')}`);
+    console.log(`  city    ${perSite.map((p) => `${p.plots}plots ${p.entrances}gates ${p.outer}keep-arcs${p.inner ? ' +ward' : ''}`).join(' | ')}`);
     console.log(`  loot    ${lootStats.caches} hidden caches, pack holds ${PACK_SLOTS}`);
     console.log(`  forts   ${nodeForts.nodes} expansion sites, ${nodeForts.palisades} with a natural pinch to fence`);
     console.log(`  siege   ${sortie.units} troops (${sortie.out} pushed out), ${sortie.zombies} dead afoot, threat ${sortie.threat} after 2min`);
-    console.log(`  chokes  ${map.chokeSpots.length} natural gaps: ${map.chokeSpots.slice(0, 5).map((c) => `${c.name} (${c.width} wide)`).join(', ')}`);
+    console.log(`  pads    ${map.sites.map((s) => `${s.name} r${s.padR}`).join(' | ')}`);
+    console.log(`  keeps   ${map.outpostSpots.map((o) => `${o.name} ${o.x | 0},${o.z | 0}`).join(' · ')}`);
   }
 }
 
@@ -469,21 +526,14 @@ galaxy — first frontier worlds:`);
   }
 }
 
-// The whole point of anchoring on terrain is that the ground changes the base.
-// If almost no site is using its landform as wall, the feature has regressed to
-// "a ring, everywhere, again".
-const anchored = siteStats.filter((s) => s.natural >= 10).length;
-assert.ok(anchored >= siteStats.length * 0.4,
-  `only ${anchored}/${siteStats.length} city sites let the terrain be part of the wall`);
-assert.ok(siteStats.some((s) => s.natural >= 35),
-  'no site anywhere in the campaign is genuinely terrain-anchored');
-// ...and the other way: a site where the ground does nearly all the walling is
-// a bye, so `MAX_NATURAL_SHARE` has to keep cutting extra approaches.
-const walledOff = siteStats.filter((s) => s.natural > 80);
-assert.equal(walledOff.length, 0,
-  `${walledOff.length} city sites are ${walledOff.map((s) => s.natural).join('/')}% natural — nothing left to defend`);
+// The whole point of the pad is that the ground under a city is authored, so
+// every site owes the same three things: a perfect pad, keeps that are real
+// forts, and no building the land can refuse. If any site anywhere in the
+// campaign falls short, the pad has regressed to "a ring, everywhere, again".
+assert.equal(siteStats.filter((s) => s.pad >= 100).length, siteStats.length,
+  'a city site shipped without a fully buildable pad');
 assert.ok(siteStats.every((s) => s.outer >= 1),
-  'a site was offered no outer chokepoint works at all');
+  'a site was offered no outer keep at all');
 
 // Every archetype and every city plan has to be in the campaign — an unused
 // one is an untested one. The labyrinth landform belongs to the Labyrinth

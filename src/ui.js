@@ -172,6 +172,23 @@ export class UI {
           </div>
         </div>
 
+        <div id="screen-custom" class="setup hidden">
+          <div class="setuphead"><button class="tbtn" id="cu-back">← Back</button><h2>🜁 CUSTOM GAMES</h2><span class="gamesub">any map · any host · named heroes</span></div>
+          <div class="custommain">
+            <div id="cu-list" class="lobbygames"></div>
+            <div class="customactions"><button class="diffbtn" id="cu-create">+ CREATE GAME</button><button class="diffbtn" id="cu-refresh">↻ REFRESH</button></div>
+            <div class="mphint" id="cu-note"></div>
+          </div>
+          <div id="cu-create-panel" class="charcreate hidden">
+            <div class="cchead"><b>CREATE GAME</b><button class="tbtn" id="cu-cancel">✕</button></div>
+            <label class="field-label" for="cu-name">Game name</label><input id="cu-name" maxlength="32" placeholder="Friday night siege" autocomplete="off">
+            <label class="field-label">Map</label><select id="cu-map" class="cumap"></select>
+            <label class="field-label">Difficulty</label><div class="diffseg" id="cu-diff"></div>
+            <label class="field-label">Max players</label><div class="diffseg" id="cu-max"></div>
+            <button class="menubtn primary" id="cu-confirm">CREATE GAME</button>
+          </div>
+        </div>
+
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
@@ -355,7 +372,7 @@ export class UI {
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
     q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
-    q('#a-custom').onclick = () => this._showScreen('solo');
+    q('#a-custom').onclick = () => this.cb.onCustomOpen && this.cb.onCustomOpen();
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
@@ -380,7 +397,18 @@ export class UI {
         appearance: this._creatorAppearance || 'iron',
       });
     };
-    q('#m-custom').onclick = () => this._showScreen('solo');
+    q('#m-custom').onclick = () => this.cb.onCustomOpen && this.cb.onCustomOpen();
+    q('#cu-back').onclick = () => this._showScreen(this._overworldMode ? 'main' : 'main');
+    q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
+    q('#cu-create').onclick = () => this.customCreatePanel(true);
+    q('#cu-cancel').onclick = () => this.customCreatePanel(false);
+    q('#cu-confirm').onclick = () => {
+      const map = this._customMaps?.find((entry) => entry.value === q('#cu-map').value) || this._customMaps?.[0];
+      if (!map) return;
+      const name = q('#cu-name').value.trim() || `${this._customHost || 'Host'}'s game`;
+      this.customCreatePanel(false);
+      this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 3 });
+    };
     q('#m-logout').onclick = () => this._showScreen('account');
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#custom-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
@@ -729,9 +757,46 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'character-create', 'solo', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    for (const id of ['account', 'main', 'character-create', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
+    this._customHost = hostName;
+    const box = this.root.querySelector('#cu-list');
+    const note = this.root.querySelector('#cu-note');
+    box.innerHTML = '';
+    note.textContent = offline ? '📡 Offline — Custom Games needs the lobby server.' : 'Named Zillions heroes are selected when the host starts the match.';
+    note.classList.toggle('offline', offline);
+    if (!games.length) box.innerHTML = '<div class="mphint gameempty">No custom games — create one.</div>';
+    for (const [title, rows] of [['Open games', games.filter((game) => game.status === 'open')], ['Started', games.filter((game) => game.status !== 'open')]]) {
+      if (!rows.length) continue;
+      const heading = document.createElement('div'); heading.className = 'gamegrouphead'; heading.textContent = `${title} · ${rows.length}`; box.appendChild(heading);
+      for (const game of rows) {
+        const row = document.createElement('div'); row.className = `gamerow ${game.status === 'open' ? 'open' : 'active'}`;
+        const incompatible = game.protocol_compatible === false;
+        row.innerHTML = `<span class="gamestate">${incompatible ? 'UPDATE' : game.status === 'open' ? 'OPEN' : 'STARTED'}</span><span class="gmain"><b class="gname"></b><small class="gplayers"></small></span><span class="ginfo"></span><button class="tbtn gjoin" ${incompatible || game.status !== 'open' ? 'disabled' : ''}>${game.status === 'open' ? 'JOIN' : '—'}</button>`;
+        row.querySelector('.gname').textContent = game.name;
+        row.querySelector('.gplayers').textContent = `host @${game.host_name}`;
+        row.querySelector('.ginfo').textContent = `${game.mapName || '?'} · ${game.players}/${game.max_players || 3}`;
+        if (!incompatible && game.status === 'open') row.querySelector('.gjoin').onclick = () => this.cb.onCustomJoin?.(game);
+        box.appendChild(row);
+      }
+    }
+  }
+
+  customCreatePanel(open) {
+    this.root.querySelector('#cu-create-panel').classList.toggle('hidden', !open);
+    if (!open) return;
+    this._customMaps = [...LABYRINTH_LEVELS.map((level) => ({ value: `lab-${level.id}`, level: level.id, mode: 'labyrinth', name: `🌀 ${level.name}` })), ...LEVELS.map((level) => ({ value: `lv-${level.id}`, level: level.id, mode: 'campaign', name: `⚔️ ${level.name}` }))];
+    this.root.querySelector('#cu-map').innerHTML = this._customMaps.map((map) => `<option value="${map.value}">${map.name}</option>`).join('');
+    const diff = this.root.querySelector('#cu-diff'); diff.innerHTML = '';
+    for (const [key, value] of Object.entries(DIFFICULTY)) { const button = document.createElement('button'); button.className = `diffbtn${key === 'normal' ? ' sel' : ''}`; button.textContent = value.label; button.onclick = () => { this._cuDiff = key; for (const other of diff.children) other.classList.toggle('sel', other === button); }; diff.appendChild(button); }
+    this._cuDiff = 'normal';
+    const max = this.root.querySelector('#cu-max'); max.innerHTML = '';
+    for (const count of [1, 2, 3]) { const button = document.createElement('button'); button.className = `diffbtn${count === 3 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
+    this._cuMax = 3; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
   }
 
   _buildCharacterCreator() {
@@ -1701,7 +1766,7 @@ export class UI {
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games
-        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: Threat ${p.bestDay}`
+        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · ⬡ ${(p.metaCurrency || 0).toLocaleString()} Alloy · best: Threat ${p.bestDay}`
         : 'first deployment';
     }
     this.refreshHeroBadges(p);

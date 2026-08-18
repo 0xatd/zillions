@@ -92,6 +92,9 @@ economy, and army systems, and never let its wins advance campaign progress.
 - `src/config.js`: balance, heroes, levels, plots, items, and siege constants.
 - `src/game.js`: deterministic simulation and snapshots.
 - `src/terrain.js`: terrain field and terrain-derived sites.
+- `src/galaxy.js`: procedural star systems, world kinds, and world descriptors.
+- `src/factions.js`: faction roster, presence archetypes, and ownership.
+- `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
 - `src/lanes.js`: deterministic lane graph.
