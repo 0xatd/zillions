@@ -11,6 +11,7 @@
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
   NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor,
   rollLootKey, worldItemLevel,
@@ -2905,9 +2906,36 @@ export class Game {
 
   // ---------- damage ----------
 
-  damageZombie(zb, dmg, sx, sz) {
+  // Armour and per-type resistance, resolved together. Void is the exception
+  // the type table promises: it ignores most armour, which is what makes a
+  // psi-focus worth carrying into a plated horde.
+  _resolveTypedDamage(zb, dmg, types) {
+    if (!types) {
+      // The pre-types path, kept exact.
+      return zb.armor ? dmg * (1 - zb.armor) : dmg;
+    }
+    const resist = zb.resist || (zb.def && zb.def.resist) || null;
+    let total = 0;
+    for (const type of DAMAGE_TYPES) {
+      const share = types[type] || 0;
+      if (!share) continue;
+      let part = dmg * share;
+      const armor = type === 'void' ? (zb.armor || 0) * VOID_ARMOR_SHARE : (zb.armor || 0);
+      if (armor) part *= 1 - armor;
+      const r = resist ? (resist[type] || 0) : 0;
+      if (r) part *= 1 - Math.max(-1, Math.min(RESIST_CAP, r));
+      total += part;
+    }
+    return total;
+  }
+
+  // `types` is a weapon's damage split — { thermal: 0.8, kinetic: 0.2 }. Pass
+  // nothing and the hit is pure kinetic against no resistance, which is
+  // exactly how every damage source behaved before types existed. That default
+  // is why adding this axis moved no balance number.
+  damageZombie(zb, dmg, sx, sz, types = null) {
     if (zb.hp <= 0) return;
-    if (zb.armor) dmg *= 1 - zb.armor;
+    dmg = this._resolveTypedDamage(zb, dmg, types);
     zb.hp -= dmg;
     const bcfg = zb.cfg;
     if (zb.boss && bcfg && bcfg.enrage && !zb.enraged && zb.hp < zb.maxHp * bcfg.enrage) {
@@ -3574,13 +3602,13 @@ export class Game {
           u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = hitDmg();
-          this.damageZombie(zb, dmg, u.x, u.z);
+          this.damageZombie(zb, dmg, u.x, u.z, w.types || null);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (w.splash) {
             const s2 = w.splash * w.splash;
             for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, w.splash)) {
               if (zb2 === zb || zb2.dead) continue;
-              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z);
+              if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z, w.types || null);
             }
           }
           const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;

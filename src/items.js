@@ -44,6 +44,12 @@ export const MOD_KEYS = [
 // introducing the axis changes no existing number.
 export const DAMAGE_TYPES = ['kinetic', 'thermal', 'shock', 'void'];
 
+// A resistance can never make a target immune. The cap is what keeps a
+// resistant enemy a reason to switch weapons rather than a wall.
+export const RESIST_CAP = 0.75;
+// How much armour void damage still has to chew through.
+export const VOID_ARMOR_SHARE = 0.35;
+
 export const DAMAGE_TYPE_INFO = {
   kinetic: { name: 'Kinetic', icon: '⦿', color: '#c9cdd6', desc: 'Mass and velocity. Nothing exotic, nothing resisted.' },
   thermal: { name: 'Thermal', icon: '🔥', color: '#e08a4b', desc: 'Burn-through. Strong against massed soft targets.' },

@@ -8,6 +8,7 @@ import { makeRNG } from './utils.js';
 import {
   MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
   rollLootKey, rollLootKeyForSlot, worldItemLevel,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
 } from './items.js';
 
 export const MAP_SIZE = 120;
@@ -291,10 +292,13 @@ export const UNITS = {
 export const ZOMBIES = {
   walker:  { hp: 32,  dmg: 5,  speed: 1.15, chase: 2.3, color: 0x86c24e, scale: 1.0,  score: 1 },
   runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xd0c052, scale: 0.92, score: 2 },
-  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8 },
+  // Bone and bulk. Fire renders it; shock earths out through all that meat.
+  brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8,
+    resist: { thermal: -0.25, shock: 0.3 } },
   spitter: {
     hp: 42, dmg: 11, speed: 1.05, chase: 1.95, color: 0xc9d84e, scale: 1.05, score: 3,
     ranged: 8.5, rof: 0.5,
+    resist: { thermal: -0.2 },
     desc: 'Spits acid from beyond your wall. You cannot turtle it out.',
   },
   burrower: {
@@ -305,11 +309,15 @@ export const ZOMBIES = {
   sieger: {
     hp: 320, dmg: 36, speed: 0.8, chase: 1.5, color: 0xd0762e, scale: 1.6, score: 7,
     siege: true,
+    // Plated for the walk in. Shock finds the seams; kinetic mostly does not.
+    resist: { kinetic: 0.3, shock: -0.3 },
     desc: 'Walks past your army and eats your buildings. Intercept it.',
   },
   caller: {
     hp: 96, dmg: 6, speed: 1.25, chase: 2.4, color: 0x4ec9a8, scale: 1.18, score: 6,
     call: { radius: 8.5, dmg: 0.4, speed: 0.3 },
+    // Whatever is doing the goading is barely here. Void unmakes it.
+    resist: { void: -0.35, kinetic: 0.2 },
     desc: 'Goads everything nearby into a frenzy. Kill it first.',
   },
 };
@@ -635,7 +643,10 @@ export const LOOT_DROP_COOLDOWN = 2.5; // seconds before a dropped item can be p
 // The stat vocabulary lives in `items.js` so the gear layer and the authored
 // table cannot drift apart. One list, one source.
 export const MOD_KEYS = GEAR_MOD_KEYS;
-export { rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines } from './items.js';
+export {
+  rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines,
+  DAMAGE_TYPES, DAMAGE_TYPE_INFO, RESIST_CAP, VOID_ARMOR_SHARE, ATTRIBUTES,
+} from './items.js';
 
 // Two kinds of key reach this function and both are legal:
 //   'oath_blade'                  an authored item from ITEMS above
