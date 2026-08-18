@@ -1196,9 +1196,8 @@ body::after {
 .character-row > span:last-child { display: flex; flex-direction: column; }
 .character-row b { font-size: 12px; }
 .character-row small { margin-top: 2px; color: #9fb4c8; font-size: 9px; }
-.enter-world, .character-custom, .character-create { min-height: 48px; border-radius: 4px; font-weight: 900; letter-spacing: .12em; cursor: pointer; }
+.enter-world, .character-create { min-height: 48px; border-radius: 4px; font-weight: 900; letter-spacing: .12em; cursor: pointer; }
 .enter-world { color: #161006; background: linear-gradient(#ffe48a, #c99528); border: 1px solid #ffe9a7; box-shadow: 0 0 24px rgba(255,196,61,.25); }
-.character-custom { color: #d8e8f8; background: rgba(6,14,26,.88); border: 1px solid rgba(147,190,255,.35); }
 .character-create { color: #dff4ff; background: linear-gradient(90deg, rgba(26,69,94,.95), rgba(18,42,64,.95)); border: 1px solid rgba(105,204,255,.5); }
 .character-create:disabled, .enter-world:disabled { opacity: .4; cursor: not-allowed; }
 .character-row > span:first-child { color: #fff; background: radial-gradient(circle, var(--character-color, #8493a6), rgba(8,13,21,.9) 72%); }

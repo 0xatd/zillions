@@ -550,7 +550,11 @@ class App {
   // run through the same onStart path the setup screen uses.
 
   _enterOverworld(worldId = null) {
-    if (this.game || this.ow) return;
+    if (this.game) return;
+    // Already on the planet — the hub's ENTER WORLD means "resume the walk",
+    // not a no-op. It used to early-return with the overlay still up, which
+    // read as a dead button inside the custom-games loop (QA 2026-08-18).
+    if (this.ow) { this.ui.hideOverlay(); return; }
     const character = selectedMmoCharacter(this.profile);
     if (!character) {
       this.ui.setProfile(this.profile);
@@ -864,6 +868,11 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
+    // Remember launches that came off the walkable planet: victory's
+    // "Return to world" keys off this, because the profile's character may
+    // not be hydrated by the time the button is clicked — and losing the
+    // relay dumped returning commanders on the title screen (QA 2026-08-18).
+    this._runFromOverworld = !!this.ow;
     this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
@@ -1299,12 +1308,21 @@ class App {
     this.ui.setAccount(this.authStatus);
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
-      setTimeout(() => this._enterOverworld(selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      // Returning from a finished run: back onto the planet you launched
+      // from. No character yet (created mid-session edge)? Land on the
+      // roster, one click from making one — never a dead title screen.
+      const returning = selectedMmoCharacter(this.profile) || this.profile.lastWorld;
+      if (returning) setTimeout(() => this._enterOverworld(
+        selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      else setTimeout(() => this.ui._showScreen('main'), 0);
     }
   }
 
   _restartOrReturn() {
-    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+    // Any campaign run that came off the planet — or belongs to a character —
+    // returns to the world, not the title screen.
+    if (this.game?.over && this.game.mode === 'campaign'
+      && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
     }
     location.reload();

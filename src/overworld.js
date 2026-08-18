@@ -58,25 +58,11 @@ export function earthWorldDescriptor(campaignCleared = 0) {
   const N = OVERWORLD_SIZE;
   const gatePos = (i) => Math.round(N * (0.16 + i * 0.19));
   const regions = [];
-  // The custom-games arch: a stone gate off the causeway near spawn, first
-  // band of the diagonal. Portals do not start levels — they carry an
-  // `action` the walk-in trigger reads (the renderer opens the WC3-style
-  // browser for this one; other worlds may yet aim portals at the stars).
-  {
-    const g = gatePos(0);
-    regions.push({
-      id: 'earth-custom',
-      kind: 'portal',
-      action: 'custom',
-      label: 'Custom Games',
-      blurb: 'Stone arch, borrowed wars. Any map, any host.',
-      palette: { grass: 0x5e6b4f, water: 0x3d6e8a, sand: 0x9c8f6a, forest: 0x39502f, mountain: 0x5c5a58 },
-      terrain: 'moor',
-      gate: { x: g + 7, z: g - 7 },
-      locked: false,
-      cleared: false,
-    });
-  }
+  // The walkable planet is the MMO's place: campaign fronts, the labyrinth
+  // and the way off-world. Custom Games live on the title screen's utilities
+  // row, where they belong — an arch on the planet was a trap ten steps from
+  // spawn (QA 2026-08-18: players walked into it over and over trying to
+  // leave, and the browser's Back landed on the hub instead of the stars).
   regions.push(...LEVELS.map((lv, i) => {
     const g = gatePos(i);
     return {
