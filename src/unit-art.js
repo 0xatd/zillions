@@ -12,7 +12,7 @@ import { applyRim } from './tactical-visuals.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
 const M = (c, e = 0) => applyRim(
-  new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
+  new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.38, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
   { color: 0xfff3e0, power: 2.2, strength: 0.42 },
 );
 

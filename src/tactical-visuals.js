@@ -46,7 +46,7 @@ const GradeShader = {
     }`,
 };
 
-// Rim (fresnel) lighting injected into MeshLambertMaterial via
+// Rim (fresnel) lighting injected into Lambert/Standard materials via
 // onBeforeCompile — a soft edge glow that separates units and heroes from
 // same-coloured ground, which is the single biggest readability win at
 // gameplay zoom. Pure display-side: no sim state, no lockstep impact.

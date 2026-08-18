@@ -19,7 +19,10 @@ export class FlowField {
 
   // occ: Int32Array of building ids per tile, 0 = empty. gateIds: building ids
   // that are gates — cheaper to path through, so hordes funnel at chokepoints.
-  compute(occ, sourceTiles, gateIds = null) {
+  // impassableWalls: friendlies mode — stone is stone, not something to chew;
+  // non-gate buildings become truly blocking and the field reads "how does a
+  // living squad reach a gate" instead of "how does a horde reach the keep".
+  compute(occ, sourceTiles, gateIds = null, impassableWalls = false) {
     const { map } = this;
     const N = map.size, n = N * N;
     const dist = this.dist, cost = this.cost;
@@ -29,7 +32,7 @@ export class FlowField {
       const t = map.tiles[i];
       if (!TILE_INFO[t].walk) { cost[i] = Infinity; continue; }
       let c = t === TILE.FOREST ? 1.6 : 1;
-      if (occ[i] > 0) c = gateIds && gateIds.has(occ[i]) ? GATE_COST : WALL_COST;
+      if (occ[i] > 0) c = gateIds && gateIds.has(occ[i]) ? GATE_COST : (impassableWalls ? Infinity : WALL_COST);
       cost[i] = c;
     }
 

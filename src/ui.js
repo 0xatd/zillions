@@ -154,7 +154,7 @@ export class UI {
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-custom" id="m-custom">CUSTOM GAMES</button></aside>
+          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
@@ -433,7 +433,7 @@ export class UI {
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
     q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
-    q('#a-custom').onclick = () => this.cb.onCustomOpen && this.cb.onCustomOpen();
+    q('#a-custom').onclick = () => { this._customFrom = 'account'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
@@ -463,8 +463,13 @@ export class UI {
         appearance: this._creatorAppearance || 'iron',
       });
     };
-    q('#m-custom').onclick = () => this.cb.onCustomOpen && this.cb.onCustomOpen();
-    q('#cu-back').onclick = () => this._showScreen(this._overworldMode ? 'main' : 'main');
+    // Back out of the browser to where you walked in from — the title
+    // utilities row, or (if a portal ever reopens it in-world) straight back
+    // to the walk. Landing on the hub from everywhere was its own loop.
+    q('#cu-back').onclick = () => {
+      if (this._overworldMode) { this.hideOverlay(); return; }
+      this._showScreen(this._customFrom || 'main');
+    };
     q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
     q('#cu-create').onclick = () => this.customCreatePanel(true);
     q('#cu-cancel').onclick = () => this.customCreatePanel(false);

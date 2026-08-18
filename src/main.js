@@ -104,7 +104,7 @@ class App {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.1;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
@@ -376,7 +376,7 @@ class App {
     group.name = 'planet-edge-title';
     const planet = new THREE.Mesh(
       new THREE.SphereGeometry(185, 48, 24),
-      new THREE.MeshLambertMaterial({ color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
     );
     planet.position.set(MAP_SIZE / 2, -185, MAP_SIZE / 2 + 18);
     group.add(planet);
@@ -558,7 +558,11 @@ class App {
   // run through the same onStart path the setup screen uses.
 
   _enterOverworld(worldId = null) {
-    if (this.game || this.ow) return;
+    if (this.game) return;
+    // Already on the planet — the hub's ENTER WORLD means "resume the walk",
+    // not a no-op. It used to early-return with the overlay still up, which
+    // read as a dead button inside the custom-games loop (QA 2026-08-18).
+    if (this.ow) { this.ui.hideOverlay(); return; }
     const character = selectedMmoCharacter(this.profile);
     if (!character) {
       this.ui.setProfile(this.profile);
@@ -634,7 +638,7 @@ class App {
   _makeOverworldGate(gate) {
     const st = gateState(gate);
     const gr = new THREE.Group();
-    const wood = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
+    const wood = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 });
     for (const dx of [-1.5, 1.5]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
       post.position.set(dx, 1.7, 0);
@@ -648,7 +652,7 @@ class App {
     const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
     const banner = new THREE.Mesh(
       new THREE.PlaneGeometry(2.2, 1.1),
-      new THREE.MeshLambertMaterial({ color: bannerColor, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: bannerColor, side: THREE.DoubleSide }),
     );
     banner.position.y = 2.6;
     gr.add(banner);
@@ -874,6 +878,11 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
+    // Remember launches that came off the walkable planet: victory's
+    // "Return to world" keys off this, because the profile's character may
+    // not be hydrated by the time the button is clicked — and losing the
+    // relay dumped returning commanders on the title screen (QA 2026-08-18).
+    this._runFromOverworld = !!this.ow;
     this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
@@ -983,7 +992,7 @@ class App {
     const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
       squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
-      new THREE.MeshLambertMaterial({ color: 0xa6a091 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
@@ -998,7 +1007,7 @@ class App {
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     g.add(ring);
-    const laneMat = new THREE.MeshLambertMaterial({ color: 0xb3ad9e });
+    const laneMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
@@ -1031,10 +1040,10 @@ class App {
       ring.position.set(s.x, 0.06, s.z);
       gr.add(ring);
       gr.userData.ring = ring;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), new THREE.MeshLambertMaterial({ color: 0x3a3228 }));
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), new THREE.MeshLambertMaterial({ color: 0xc9a44a }));
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xc9a44a }));
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
@@ -1090,13 +1099,13 @@ class App {
     const g = new THREE.Group();
     const vid = (n.id || 0) * 7919;
     const rot = (k) => ((vid >> k) % 628) / 100;
-    const mat = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const mat = (c, e = 0) => new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
     const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
 
     // Churned dead-earth ring.
     const ringGeo = new THREE.CircleGeometry(3.1, 20);
     ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshLambertMaterial({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
     ring.position.y = 0.03;
     ring.receiveShadow = true;
     g.add(ring);
@@ -1190,7 +1199,7 @@ class App {
         mesh = new THREE.Group();
         const gem = new THREE.Mesh(
           new THREE.OctahedronGeometry(0.34, 0),
-          new THREE.MeshLambertMaterial({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+          new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
         );
         gem.castShadow = true;
         mesh.add(gem);
@@ -1309,12 +1318,21 @@ class App {
     this.ui.setAccount(this.authStatus);
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
-      setTimeout(() => this._enterOverworld(selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      // Returning from a finished run: back onto the planet you launched
+      // from. No character yet (created mid-session edge)? Land on the
+      // roster, one click from making one — never a dead title screen.
+      const returning = selectedMmoCharacter(this.profile) || this.profile.lastWorld;
+      if (returning) setTimeout(() => this._enterOverworld(
+        selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      else setTimeout(() => this.ui._showScreen('main'), 0);
     }
   }
 
   _restartOrReturn() {
-    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+    // Any campaign run that came off the planet — or belongs to a character —
+    // returns to the world, not the title screen.
+    if (this.game?.over && this.game.mode === 'campaign'
+      && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
     }
     location.reload();
@@ -2725,7 +2743,7 @@ class App {
     // Cel look: one warm sun sitting LOW so every tree and tower throws a
     // long graphic shadow; shadows are filled with saturated cool ambient
     // (navy, never black) — the reference's colored-shadow trick.
-    this.sun = new THREE.DirectionalLight(0xfff0cf, 2.6);
+    this.sun = new THREE.DirectionalLight(0xfff0cf, 2.2);
     this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -2735,9 +2753,9 @@ class App {
     this.scene.add(this.sun, this.sun.target);
     // Warm earth bounce from below, cool sky from above — the two-tone fill
     // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.85);
+    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.58);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x33406e, 0.5);
+    this.amb = new THREE.AmbientLight(0x33406e, 0.2);
     this.scene.add(this.amb);
     this.scene.fog = new THREE.FogExp2(0xa8cfc4, 0.0045);
     this.scene.background = new THREE.Color(0xa8cfc4);
@@ -2816,7 +2834,7 @@ class App {
   _spawnPayCoins(fx, fz, tx, tz, n) {
     if (!this._payCoinGeo) {
       this._payCoinGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.05, 10);
-      this._payCoinMat = new THREE.MeshLambertMaterial({ color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
+      this._payCoinMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
     }
     for (let i = 0; i < n; i++) {
       if (this.payCoins.length >= 48) return;
@@ -3168,7 +3186,7 @@ class App {
   _setupCoins() {
     const MAXC = 400;
     const geo = new THREE.CylinderGeometry(0.22, 0.22, 0.07, 12);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
     this.coinMesh = new THREE.InstancedMesh(geo, mat, MAXC);
     this.coinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.coinMesh.castShadow = true;
@@ -3213,7 +3231,7 @@ class App {
     // A real felled body (limbs splayed, baked gore) instead of a tumbling
     // crate — instance color still tints it per type.
     const geo = buildCorpseGeometry();
-    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MAXC);
+    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
     this.corpseMesh.frustumCulled = false;
@@ -3432,14 +3450,14 @@ class App {
     const grp = new THREE.Group();
     const pylon = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.11, 0.55, 6),
-      new THREE.MeshLambertMaterial({ color: 0x565c60 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x565c60 }),
     );
     pylon.position.set(x, 0.28, z);
     pylon.castShadow = true;
     grp.add(pylon);
     const gem = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.17, 0),
-      new THREE.MeshLambertMaterial({ color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
     );
     gem.position.set(x, 0.95, z);
     grp.add(gem);
@@ -4068,10 +4086,10 @@ class App {
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
         gr.add(ring);
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshLambertMaterial({ color: 0x39332a }));
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
         gr.add(pole);
-        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshLambertMaterial({ color: 0xd8c07a }));
+        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xd8c07a }));
         flag.position.set(node.x + 0.75, 3.8, node.z);
         gr.add(flag);
         const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());

@@ -96,6 +96,9 @@ export class Game {
     this.occ = new Int32Array(map.size * map.size); // building id per tile
     this.gateIds = new Set();    // building ids friendlies may pass through
     this.flow = new FlowField(map);
+    // The mirror field for the living: walls block, gates are the way through.
+    // A squad caught inside its own rampart descends this to the nearest gate.
+    this.exitField = new FlowField(map);
     this.flowDirty = true;
     this.flowTimer = 0;
 
@@ -231,6 +234,9 @@ export class Game {
         node: u.targetNodeId != null ? u.targetNodeId : -1, gi: u.targetGi ?? -1,
         route: snapRoute(u.route), routeI: u.routeI || 0, routeStuck: snapNum(u.routeStuck || 0),
         routeBest: Number.isFinite(u.routeBest) ? snapNum(u.routeBest) : null, repathT: snapNum(u.repathT || 0),
+        gateExit: u.gateExit ? 1 : 0, gateCool: snapNum(u.gateCool || 0),
+        exitDx: u.exitDx != null ? snapNum(u.exitDx) : null,
+        exitDz: u.exitDz != null ? snapNum(u.exitDz) : null,
         shield: snapNum(u.shieldHp || 0),
         squad: u.squadId || null, squadI: u.squadIndex ?? -1, squadN: u.squadSize || 0,
         // Temporary allies (Tiger's clones, Aaron's spirit) carry a lifespan and
@@ -402,6 +408,10 @@ export class Game {
       u.routeStuck = us.routeStuck || 0;
       u.routeBest = us.routeBest == null ? Infinity : us.routeBest;
       u.repathT = us.repathT || 0;
+      u.gateExit = !!us.gateExit;
+      u.gateCool = us.gateCool || 0;
+      u.exitDx = us.exitDx ?? null;
+      u.exitDz = us.exitDz ?? null;
       u.shieldHp = us.shield || 0;
       u.squadId = us.squad || null;
       u.squadIndex = us.squadI ?? -1;
@@ -532,6 +542,12 @@ export class Game {
       this._restoreLabyrinthDoors();
       this._flowSeeds = [...snap.flowSeeds];
       this.flow.compute(this.occ, this._flowSeeds, this.gateIds);
+      const restoreGateTiles = [];
+      for (let i = 0; i < this.occ.length; i++) {
+        const id = this.occ[i];
+        if (id !== 0 && this.gateIds.has(id)) restoreGateTiles.push(i);
+      }
+      this.exitField.compute(this.occ, restoreGateTiles, this.gateIds, true);
       this.flowDirty = false;
       this.flowTimer = snap.flowT ?? 0;
     }
@@ -1293,6 +1309,57 @@ export class Game {
     return this.map.isWalkable(x | 0, z | 0) && (id === 0 || id === undefined || this.gateIds.has(id));
   }
 
+  // Does the straight line from (x0,z0) to (x1,z1) cross a friendly wall or
+  // building? Fixed sample stride, capped length — deterministic, cheap, and
+  // only ever a hint: it decides whether a squad should take the gate, never
+  // where it steps. Gates do not count as walls (they are the way through).
+  _wallBetween(x0, z0, x1, z1) {
+    const N = this.map.size;
+    const d = Math.hypot(x1 - x0, z1 - z0);
+    const steps = Math.min(80, Math.ceil(d * 2));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const idx = ((z0 + (z1 - z0) * t) | 0) * N + ((x0 + (x1 - x0) * t) | 0);
+      const id = this.occ[idx];
+      if (id !== 0 && !this.gateIds.has(id)) return true;
+    }
+    return false;
+  }
+
+  // Gate discipline with hysteresis: a squad standing IN the arch retriggers
+  // the wall test the moment it clears the exit (the line from the gate to
+  // the next objective often clips a wall tangent) and vibrates on the
+  // threshold. After a completed exit the squad is immune for a couple of
+  // seconds — long enough to walk through the door and let normal routing
+  // take over from the other side.
+  _wantsGate(actor, tx, tz) {
+    if ((actor.gateCool || 0) > 0) return false;
+    return this._wallBetween(actor.x, actor.z, tx, tz);
+  }
+
+  // A squad mid-descent can wedge into a concave building corner: every
+  // strictly-lower neighbour is diagonal and its flanking tiles are stone,
+  // so dirAt has nothing legal to offer. Shove it onto the nearest tile that
+  // is strictly closer to a gate — fixed ring order, deterministic, and at
+  // most three tiles (the same charity _ejectActor already extends).
+  _exitUnstick(x, z) {
+    const here = this.exitField.distAt(x, z);
+    for (let r = 1; r <= 3; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= this.map.size || nz >= this.map.size) continue;
+          const id = this.occ[nz * this.map.size + nx];
+          if (id !== 0 && !this.gateIds.has(id)) continue;
+          if (!this.map.isWalkable(nx, nz)) continue;
+          if (this.exitField.distAt(nx, nz) < here) return [nx, nz];
+        }
+      }
+    }
+    return null;
+  }
+
   // Deterministic nearest-safe-tile scan: expanding square rings, the
   // _ejectActor pattern generalized. Validates positions coming back from
   // old saves and guarantees stance fallbacks never land inside a footprint
@@ -1845,12 +1912,18 @@ export class Game {
   // Walk `actor` onto the lanes and out to `gi`. Returns false if unreachable.
   _routeTo(actor, gi) {
     if (!this.laneGraph || gi < 0) return false;
+    // Only player squads take the gate discipline — raider zombies route by
+    // the same lanes but keep their wall-chewing flow field for exits.
+    const friendly = !actor.hero && this.units.includes(actor);
     // Close enough to see it? Go straight there. Lanes exist to cross terrain,
     // and forcing a short hop back out through a lane node is how squads used
     // to circle an objective they were already standing next to.
     const [gx, gz] = this._giPoint(gi);
     if (dist2(actor.x, actor.z, gx, gz) < DIRECT_APPROACH_R * DIRECT_APPROACH_R) {
       actor.route = null;
+      // The direct approach has no watchdog at all — if stone stands between
+      // the squad and the objective, take the gate before the grinding starts.
+      if (friendly && this._wantsGate(actor, gx, gz)) actor.gateExit = true;
       return true;
     }
     const from = this._nearestGi(actor.x, actor.z);
@@ -1870,6 +1943,19 @@ export class Game {
     for (let i = 0; i < pts.length; i++) {
       const d = dist2(actor.x, actor.z, pts[i][0], pts[i][1]);
       if (d < bd) { bd = d; start = i; }
+    }
+    // A route whose destination lies across stone is the stuck-loop from the
+    // QA logs: the lanes ignore buildings, the repath is identical every
+    // time, and rank churn hands the squad a fresh route before the watchdog
+    // can even time out. This also catches the subtler trap — a lane node
+    // INSIDE the compound keeps the first leg wall-free, so the squad ferries
+    // between the node and the rampart forever. Hand it to the gate-exit
+    // descent instead.
+    if (friendly && (this._wantsGate(actor, tx, tz)
+      || this._wantsGate(actor, pts[start][0], pts[start][1]))) {
+      actor.route = null;
+      actor.gateExit = true;
+      return false;
     }
     actor.route = pts;
     actor.routeI = start;
@@ -1913,6 +1999,13 @@ export class Game {
         actor.routeBest = Infinity;
         actor.route = null;
         actor.repathT = 0;
+        // A friendly squad that ground to a halt with a wall across its line
+        // is inside its own rampart (or a forward fort's). Repathing produces
+        // the identical terrain-only lane route, so the loop never ends — walk
+        // it out the gate first (QA 2026-08-17: squads stuck in every base).
+        if (!zombie && !actor.hero && this._wantsGate(actor, wx, wz)) {
+          actor.gateExit = true;
+        }
         return false;
       }
     }
@@ -2266,7 +2359,7 @@ export class Game {
     if (st === this.stance && st !== 'defend') return;
     this.stance = st;
     if (st === 'defend') this._anchorDefense();
-    if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; }
+    if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; u.gateExit = false; }
     const who = h && h.def ? h.def.name.split(' ')[0] : null;
     this.msg(st === 'defend'
       ? `🛡️ ${who ? who + ' anchors the defense' : 'The army falls back'} — hold the line at the Keep.`
@@ -3337,6 +3430,16 @@ export class Game {
       // Skipping it would leave the buffer's initial zeros — every idle creep
       // on the map would read "the objective is right here" and wake.
       this.flow.compute(this.occ, sources, this.gateIds);
+      // The friendly gate-exit field rides the same clock: same Dijkstra,
+      // but stone is impassable — only the gates let a squad through. Seeded
+      // from every open gate tile (the arch), so descending it from anywhere
+      // walks a stuck squad out the nearest gate instead of grinding the wall.
+      const gateTiles = [];
+      for (let i = 0; i < this.occ.length; i++) {
+        const id = this.occ[i];
+        if (id !== 0 && this.gateIds.has(id)) gateTiles.push(i);
+      }
+      this.exitField.compute(this.occ, gateTiles, this.gateIds, true);
       this.flowDirty = false;
       this.flowTimer = this.mode === 'labyrinth' ? 0.8 : 2.5;
     }
@@ -3706,6 +3809,12 @@ export class Game {
           const d = dist2(u.x, u.z, zb.x, zb.z);
           if (d < bd) { bd = d; best = zb; }
         }
+        // Hunting troops do not acquire contacts through stone: a squad
+        // sealed behind its own rampart would stand at the wall firing at a
+        // zombie it can never reach on foot, looking stuck in base forever
+        // (QA 2026-08-17). Wall-less sight stays for defenders — firing over
+        // the rampart from a hold point is legal defense, not a trap.
+        if (hunting && best && this._wallBetween(u.x, u.z, best.x, best.z)) best = null;
         u.target = best;
         // Siege priority. A squad that has marched all the way to a hive must
         // shoot the HIVE, not the endless garrison around it — otherwise the
@@ -3789,22 +3898,93 @@ export class Game {
     if (u.target && !u.target.dead) {
       const d = Math.hypot(u.target.x - u.x, u.target.z - u.z);
       if (d > u.def.range * 0.85) {
-        this._moveActor(u, (u.target.x - u.x) / d, (u.target.z - u.z) / d, u.def.speed, dt);
-        u.facing = Math.atan2(u.target.x - u.x, u.target.z - u.z);
-        u.moving = true;
+        // Chasing a contact that stands on the far side of stone is the
+        // quiet version of the sealed-base bug: the squad grinds the wall
+        // forever because the retarget cycle re-acquires the same zombie
+        // through the rampart. Drop it and let the push (and the gate exit)
+        // take over; standing fire over walls stays legal below.
+        if (this._wallBetween(u.x, u.z, u.target.x, u.target.z)) {
+          u.target = null;
+          u.retargetT = Math.max(u.retargetT || 0, 1); // walk a beat before re-acquiring
+        } else {
+          this._moveActor(u, (u.target.x - u.x) / d, (u.target.z - u.z) / d, u.def.speed, dt);
+          u.facing = Math.atan2(u.target.x - u.x, u.target.z - u.z);
+          u.moving = true;
+        }
       } else u.moving = false;
-      return;
+      if (u.target) return;
     }
     if (u.targetNest && u.targetNest.alive) {
       const n = u.targetNest;
       const dx = n.x - u.x, dz = n.z - u.z;
       const d = Math.hypot(dx, dz) || 1;
       if (d > u.def.range + 1.2) {
-        this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
-        u.facing = Math.atan2(dx, dz);
-        u.moving = true;
+        if (this._wallBetween(u.x, u.z, n.x, n.z)) {
+          // The hive is behind our own wall — route to it, don't grind at it.
+          u.targetNest = null;
+        } else {
+          this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
+          u.facing = Math.atan2(dx, dz);
+          u.moving = true;
+        }
       } else u.moving = false;
-      return;
+      if (u.targetNest) return;
+    }
+
+    // Gate-exit: a squad caught inside its own walls walks the exit field
+    // down to the nearest gate. dirAt goes null exactly on the gate tile
+    // (it is the field's minimum) — that is "out", and normal routing
+    // resumes from the threshold instead of from behind the rampart.
+    if (u.gateCool > 0) u.gateCool -= dt;
+    if (u.gateExit) {
+      const ex = u.x | 0, ez = u.z | 0;
+      const d = this.exitField.distAt(ex, ez);
+      const dir = this.exitField.dirAt(ex, ez);
+      if (d === 0) {
+        // On the gate itself — the field's minimum. Out. Return now: the
+        // repath below this block would otherwise assign a lane route whose
+        // nearest node is back inside, and the beeline would never run.
+        u.gateExit = false;
+        u.gateCool = 2;             // beeline straight through the door below
+        u.route = null;
+        u.repathT = 0;
+        return;
+      } else if (dir) {
+        // Remember the march: the last descent step points through the arch,
+        // and the cooldown beeline below reuses it. Repathing during the
+        // cooldown instead hands the squad a wall-crossing lane route whose
+        // nearest node is INSIDE the compound — it would walk straight back
+        // in and oscillate on the threshold forever.
+        u.exitDx = dir[0]; u.exitDz = dir[1];
+        this._moveActor(u, dir[0], dir[1], u.def.speed, dt);
+        u.facing = Math.atan2(dir[0], dir[1]);
+        u.moving = true;
+        return;
+      } else {
+        // Wedged in a corner with distance still to walk: shove past it.
+        // dirAt null here is NOT arrival — treating it as such is the
+        // oscillation that kept squads bouncing off their own junctions.
+        const spot = this._exitUnstick(ex, ez);
+        if (spot) { u.x = spot[0] + 0.5; u.z = spot[1] + 0.5; u.moving = true; return; }
+        u.gateExit = false;         // truly wedged — let lane routing try a way around
+        u.gateCool = 1;
+        u.route = null;
+        u.repathT = 0;
+      }
+    } else if (u.gateCool > 0 && u.exitDx != null) {
+      // Fresh off the gate: keep walking the way the arch pointed — do NOT
+      // repath while the nearest lane node may still be inside the walls.
+      const moved = this._moveActor(u, u.exitDx, u.exitDz, u.def.speed, dt);
+      u.facing = Math.atan2(u.exitDx, u.exitDz);
+      u.moving = true;
+      if (!moved || u.gateCool <= 0) u.exitDx = u.exitDz = null;
+      else return;
+    } else if (u.targetGi >= 0 && !u.route) {
+      // The direct approach has no route and therefore no watchdog — a squad
+      // marching straight at an objective across a wall would grind it forever
+      // without ever tripping the stuck timer. Check before it starts.
+      const [tx, tz] = this._giPoint(u.targetGi);
+      if (this._wantsGate(u, tx, tz)) u.gateExit = true;
     }
 
     // Re-pick a destination when we have none, or when ours went friendly.

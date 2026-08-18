@@ -216,7 +216,7 @@ export class GameMap extends TerrainField {
       grainTex.colorSpace = THREE.SRGBColorSpace;
       grainTex.anisotropy = 4;
     }
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grainTex });
+    const mat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, vertexColors: true, map: grainTex });
     const terrain = new THREE.Mesh(geo, mat);
     terrain.receiveShadow = true;
     terrain.name = 'terrain';
@@ -224,7 +224,7 @@ export class GameMap extends TerrainField {
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = new THREE.MeshLambertMaterial({
+    const waterMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0,
       color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
       transparent: true, opacity: 0.85,
       ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
@@ -245,10 +245,10 @@ export class GameMap extends TerrainField {
 
   _buildLabyrinthLandmarks() {
     const group = new THREE.Group();
-    const stone = new THREE.MeshLambertMaterial({ color: 0x373442 });
-    const bone = new THREE.MeshLambertMaterial({ color: 0xb8ad98 });
-    const red = new THREE.MeshLambertMaterial({ color: 0x842f35, emissive: 0x4a1018, emissiveIntensity: 0.8 });
-    const blue = new THREE.MeshLambertMaterial({ color: 0x527a91, emissive: 0x183b52, emissiveIntensity: 0.7 });
+    const stone = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x373442 });
+    const bone = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xb8ad98 });
+    const red = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x842f35, emissive: 0x4a1018, emissiveIntensity: 0.8 });
+    const blue = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x527a91, emissive: 0x183b52, emissiveIntensity: 0.7 });
     const addBox = (x, z, sx, sy, sz, mat, y = 0) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
       mesh.position.set(x, this.groundY(x, z) + sy / 2 + y, z);
@@ -289,7 +289,7 @@ export class GameMap extends TerrainField {
     // Room seals are visible energy walls. The simulation closes the matching
     // corridor tiles; these meshes make that state readable to the player.
     this.labyrinthDoorMeshes = [];
-    const sealMat = new THREE.MeshLambertMaterial({
+    const sealMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0,
       color: 0xb93b4b, emissive: 0x8a1728, emissiveIntensity: 1.2,
       transparent: true, opacity: 0.72,
     });
@@ -375,9 +375,9 @@ export class GameMap extends TerrainField {
     const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
     const g = new THREE.Group();
     const trunkGeo = new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0xcbbfa0 });
+    const trunkMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xcbbfa0 });
     const canopyGeo = new THREE.ConeGeometry(0.52, 1.3, 7);
-    const canopyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const canopyMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xffffff });
     const lobeGeo = new THREE.SphereGeometry(0.42, 7, 5);
     const lobeMat = canopyMat; // same program: instance color does the varying
 
@@ -425,7 +425,7 @@ export class GameMap extends TerrainField {
     if (spores.length) {
       const pods = new THREE.InstancedMesh(
         new THREE.OctahedronGeometry(0.07, 0),
-        new THREE.MeshLambertMaterial({ color: 0x5fd8c8, emissive: 0x3fb8a8, emissiveIntensity: 0.9 }),
+        new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x5fd8c8, emissive: 0x3fb8a8, emissiveIntensity: 0.9 }),
         spores.length,
       );
       q.identity();
@@ -487,7 +487,7 @@ export class GameMap extends TerrainField {
     if (teeth.length) {
       const mesh = new THREE.InstancedMesh(
         new THREE.ConeGeometry(0.4, 1.5, 5),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }),
+        new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xffffff }),
         teeth.length,
       );
       mesh.castShadow = true;
@@ -509,7 +509,7 @@ export class GameMap extends TerrainField {
     if (scree.length) {
       const mesh = new THREE.InstancedMesh(
         new THREE.DodecahedronGeometry(0.13, 0),
-        new THREE.MeshLambertMaterial({ color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex() }),
+        new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex() }),
         scree.length,
       );
       scree.forEach((s, i) => {
@@ -525,7 +525,7 @@ export class GameMap extends TerrainField {
     if (boulders.length) {
       const mesh = new THREE.InstancedMesh(
         new THREE.DodecahedronGeometry(0.4, 0),
-        new THREE.MeshLambertMaterial({ color: cragCol }),
+        new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: cragCol }),
         boulders.length,
       );
       mesh.castShadow = true;
@@ -548,7 +548,7 @@ export class GameMap extends TerrainField {
       const spots = this._scatter(tile, (rng) => 1 + (rng() < 0.5 ? 1 : 0));
       if (!spots.length) continue;
       const geo = new THREE.OctahedronGeometry(0.16, 0);
-      const mat = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.25 });
+      const mat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color, emissive: color, emissiveIntensity: 0.25 });
       const mesh = new THREE.InstancedMesh(geo, mat, spots.length);
       mesh.castShadow = true;
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
@@ -727,7 +727,7 @@ export class GameMap extends TerrainField {
 
     // Tufts: a squat 4-sided cone reads as a grass clump in the cel style.
     const tuftMesh = bake(tufts, new THREE.ConeGeometry(0.16, 0.34, 4),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xffffff }), (s) => {
         eul.set(0, s.ry, 0); q.setFromEuler(eul);
         sc.set(s.s, s.s, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.15 * s.s, s.z);
@@ -742,21 +742,21 @@ export class GameMap extends TerrainField {
     }
 
     bake(pebbles, new THREE.DodecahedronGeometry(0.09, 0),
-      new THREE.MeshLambertMaterial({ color: stoneHex }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: stoneHex }), (s) => {
         eul.set(0, s.ry, 0); q.setFromEuler(eul);
         sc.set(s.s, s.s * 0.7, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.04, s.z);
       });
 
     bake(boulders, new THREE.DodecahedronGeometry(0.5, 0),
-      new THREE.MeshLambertMaterial({ color: stoneHex }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: stoneHex }), (s) => {
         eul.set(0, s.ry, 0); q.setFromEuler(eul);
         sc.set(s.s, s.s * 0.75, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.2 * s.s, s.z);
       });
 
     const slabMesh = bake(slabs, new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0xffffff }), (s) => {
         eul.set(s.tilt || 0, s.ry, 0); q.setFromEuler(eul);
         sc.set(s.sx, s.sy, s.sz);
         pos.set(s.x, this.groundY(s.x, s.z) + s.sy / 2 + (s.lift || 0), s.z);
@@ -767,7 +767,7 @@ export class GameMap extends TerrainField {
     }
 
     bake(posts, new THREE.CylinderGeometry(0.07, 0.1, 1.0, 5),
-      new THREE.MeshLambertMaterial({ color: 0x6b5a44 }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x6b5a44 }), (s) => {
         eul.set(s.tilt || 0, s.ry, (s.tilt || 0) * 0.6); q.setFromEuler(eul);
         sc.set(s.s, s.s, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.45 * s.s, s.z);
@@ -775,7 +775,7 @@ export class GameMap extends TerrainField {
 
     // --- the glow layer: saturated light accents in the dark places ---
     const polypMesh = bake(polyps, new THREE.SphereGeometry(0.09, 7, 5),
-      new THREE.MeshLambertMaterial({ color: 0x5fd8c8, emissive: 0x2fa898, emissiveIntensity: 0.9 }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x5fd8c8, emissive: 0x2fa898, emissiveIntensity: 0.9 }), (s) => {
         q.identity();
         sc.set(s.s, s.s * 1.3, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.08 * s.s, s.z);
@@ -783,7 +783,7 @@ export class GameMap extends TerrainField {
     if (polypMesh) polypMesh.castShadow = false;
 
     const pustuleMesh = bake(pustules, new THREE.SphereGeometry(0.11, 7, 5),
-      new THREE.MeshLambertMaterial({ color: 0x9a4dd8, emissive: 0x7a2db8, emissiveIntensity: 1.1 }), (s) => {
+      new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0, color: 0x9a4dd8, emissive: 0x7a2db8, emissiveIntensity: 1.1 }), (s) => {
         q.identity();
         sc.set(s.s, s.s * 0.6, s.s);
         pos.set(s.x, this.groundY(s.x, s.z) + 0.05 * s.s, s.z);
