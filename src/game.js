@@ -38,6 +38,8 @@ const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
 const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, it's a sealed pocket
 const COMBAT_CELL = 8;            // broad-phase bucket width for uncapped armies
+const FIRST_SIEGE_KINDS = new Set(['house', 'farm', 'tower', 'camp_militia']);
+const FIRST_SIEGE_REWARD = 24;
 
 let nextId = 1000;
 const getNextId = () => nextId;
@@ -128,6 +130,12 @@ export class Game {
     this.time = 0;
     this.threat = 0;             // the clock that replaced nightfall
     this.threatLevel = 1;
+    // Campaign onboarding is a state machine, not a stack of timed tooltips.
+    // It narrows the first build choice, names the first attack before it
+    // arrives, and pays off the first defense. The state is lockstep-safe.
+    this.firstSiege = this.mode === 'campaign' && this.levelId === 1
+      ? { stage: 'opening', nestId: null, waveIds: [], reward: FIRST_SIEGE_REWARD }
+      : null;
     this.phase = 'found';
     this.finalStand = false;     // every hive razed — the counterattack is coming
     this.over = false;
@@ -191,6 +199,10 @@ export class Game {
       gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
+      firstSiege: this.firstSiege ? {
+        stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
+        waveIds: [...this.firstSiege.waveIds], reward: this.firstSiege.reward,
+      } : null,
       relics: [...this.relics],
       // Labyrinth run state. Offers are snapshotted so a save restored
       // mid-choice reproduces the exact same three options.
@@ -303,6 +315,10 @@ export class Game {
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
+    this.firstSiege = snap.firstSiege ? {
+      stage: snap.firstSiege.stage || 'opening', nestId: snap.firstSiege.nestId ?? null,
+      waveIds: [...(snap.firstSiege.waveIds || [])], reward: snap.firstSiege.reward || FIRST_SIEGE_REWARD,
+    } : null;
     if (this.site >= 0) {
       this.plots = generatePlots(this.map, this.map.sites[this.site], { levelId: this.levelId, siteIdx: this.site });
       this._claimed = true; // ownership comes from the save, not a fresh roll
@@ -747,13 +763,51 @@ export class Game {
       } else { h.x = this.hq.cx; h.z = this.hq.cz; this._ejectActor(h, this.hq); }
     });
     this.phase = 'live';
+    if (this.firstSiege) {
+      const reachable = this.nests.filter((n) => n.alive && !n.offMap);
+      const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
+      const closest = live.sort((a, b) => dist2(a.x, a.z, site.x, site.z) - dist2(b.x, b.z, site.x, site.z))[0];
+      this.firstSiege.nestId = closest?.id ?? null;
+      for (const nest of live) nest.musterT = nest === closest ? 24 : Math.max(nest.musterT, 38 + nest.id * 3);
+    }
     this.flowDirty = true;
     this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
     const founder = this.heroes[p];
     const plan = hqPlot && hqPlot.plan;
     const where = site.name ? ` at ${site.name}` : '';
     const shape = plan ? ` The plan is a ${plan.label}: ${plan.blurb}` : '';
-    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city${where}!${shape} The hives are already mustering — build, then push out and take the lanes.`, 'info');
+    this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city${where}!${shape} Choose your opening: Economy, Defense, or Army.`, 'info');
+  }
+
+  firstSiegePlotVisible(plot) {
+    if (!this.firstSiege || this.firstSiege.stage !== 'opening' || plot.tier > 0) return true;
+    return FIRST_SIEGE_KINDS.has(plot.kind);
+  }
+
+  firstSiegePlotActionable(plot) {
+    if (!this.firstSiege || this.firstSiege.stage !== 'opening') return true;
+    return plot.tier === 0 && FIRST_SIEGE_KINDS.has(plot.kind);
+  }
+
+  firstSiegeStatus() {
+    if (!this.firstSiege) return null;
+    if (this.firstSiege.stage === 'opening') return {
+      title: 'CHOOSE YOUR OPENING',
+      detail: 'Economy: Cottage or Field · Defense: Tower · Army: Militia Camp',
+    };
+    if (this.firstSiege.stage === 'warning') {
+      const nest = this.nests[this.firstSiege.nestId];
+      return {
+        title: `FIRST SIEGE · ${Math.max(0, Math.ceil(nest?.musterT || 0))}s`,
+        detail: 'The marked hive is mustering walkers for your city. Prepare the nearest gate.',
+        nest,
+      };
+    }
+    if (this.firstSiege.stage === 'defend') return {
+      title: `DEFEND THE CITY · ${this.firstSiege.waveIds.length} remain`,
+      detail: 'Break the marked wave. Your army fights automatically.',
+    };
+    return null;
   }
 
   // Wire the planet's lane graph: capture nodes, then the hives, then the city.
@@ -1038,6 +1092,7 @@ export class Game {
   buildTargetFor(h) {
     let best = null, bd = PAY_RADIUS * PAY_RADIUS, bestAct = null, bestPoint = null;
     for (const plot of this.plots) {
+      if (!this.firstSiegePlotActionable(plot)) continue;
       const act = this.plotAction(plot);
       if (!act || act.mode === 'branch') continue;
       const [px, pz] = this.payPoint(plot, h);
@@ -1201,6 +1256,10 @@ export class Game {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s.${guard} 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
       } else {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
+      }
+      if (this.firstSiege?.stage === 'opening' && plot.tier === 1 && FIRST_SIEGE_KINDS.has(plot.kind)) {
+        this.firstSiege.stage = 'warning';
+        this.msg('⚠️ Opening chosen. The first hive is marked — watch its countdown and prepare the gate.', 'warn');
       }
     }
     return true;
@@ -1757,17 +1816,31 @@ export class Game {
   }
 
   _updateHives(dt) {
+    // The first decision is safe. The countdown starts only after the player
+    // commits to Economy, Defense, or Army; no unseen wave can invalidate it.
+    if (this.firstSiege?.stage === 'opening') return;
     for (const n of this.nests) {
       if (!n.alive) continue;
       n.musterT -= dt;
       if (n.musterT <= 0) {
         n.musterT = hiveInterval(this.threat);
-        this._hiveMuster(n, 1);
+        const first = this.firstSiege?.stage === 'warning' && n.id === this.firstSiege.nestId;
+        this._hiveMuster(n, 1, first);
+      }
+    }
+    if (this.firstSiege?.stage === 'defend') {
+      this.firstSiege.waveIds = this.firstSiege.waveIds.filter((id) => this.zombies.some((z) => z.id === id && !z.dead));
+      if (!this.firstSiege.waveIds.length) {
+        this.gold += this.firstSiege.reward;
+        this.stats.coins += this.firstSiege.reward;
+        this.firstSiege.stage = 'complete';
+        this.msg(`🏆 FIRST SIEGE BROKEN · +${this.firstSiege.reward} gold. The full city plan is revealed — build your war.`, 'good');
+        this.emit({ type: 'firstsiege', x: this.hq?.cx || 0, z: this.hq?.cz || 0, reward: this.firstSiege.reward });
       }
     }
   }
 
-  _hiveMuster(nest, mult) {
+  _hiveMuster(nest, mult, firstSiege = false) {
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
     const share = 3 / Math.max(3, this.nests.length);
     const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure * coopMult * mult * share);
@@ -1785,10 +1858,17 @@ export class Game {
         const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 4;
         const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
         if (!this.map.isWalkable(x | 0, z | 0)) continue;
-        if (this._spawnZombie(this._pickHiveType(w.types), x, z, true, true)) spawned++;
+        const zombie = this._spawnZombie(this._pickHiveType(w.types), x, z, true, true);
+        if (zombie) { spawned++; if (firstSiege) this.firstSiege.waveIds.push(zombie.id); }
       }
     }
+    const before = new Set(this.zombies.map((z) => z.id));
     spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
+    if (firstSiege) {
+      for (const zombie of this.zombies) if (!before.has(zombie.id)) this.firstSiege.waveIds.push(zombie.id);
+      this.firstSiege.stage = 'defend';
+      this.msg(`⚔️ FIRST SIEGE · ${this.firstSiege.waveIds.length} enemies marching on the city. Hold the gate!`, 'bad');
+    }
     if (spawned) this.emit({ type: 'hivemuster', x: nest.x, z: nest.z, n: spawned });
   }
 

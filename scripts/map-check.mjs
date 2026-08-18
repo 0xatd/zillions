@@ -310,6 +310,7 @@ for (const level of LEVELS) {
     }
     const game = new Game(live, 'normal', 'alexander', null, level.id, 'campaign');
     game.foundCity(0, 0);
+    if (game.firstSiege) game.firstSiege.stage = 'complete';
     const hqReach = game.plots.find((p) => p.kind === 'hq').plan.reach;
     assert.ok(game.laneGraph && game.laneGraph.size > 0, `${label} built no lane graph on its real terrain`);
 
