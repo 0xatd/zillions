@@ -14,6 +14,8 @@ export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fun
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
 export const UPGRADE_PAY_RATE = 50;    // upgrades finish quickly; the cost, not a long hold, is the commitment
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
+export const CITY_PAD_R = 27;         // the founders' pad: flat, buildable disc stamped at a city site
+export const OUTPOST_PAD_R = 8;       // a road keep's pad: small, round, on the war road itself
 
 // ---------- Siege: the constants that replaced day and night ----------
 export const SIEGE = {
