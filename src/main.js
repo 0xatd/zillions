@@ -122,8 +122,8 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    // Alt only changes which construction affordances are visible. Inputs are
-    // never contextual: Space dodges, Q casts, and B builds.
+    // Build and fight are distinct action contexts. Movement is shared, but
+    // Space builds in Build mode and dodges in Fight mode.
     this.controlMode = 'build';
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
@@ -4317,15 +4317,19 @@ class App {
       switch (act) {
         case 'dodge': {
           e.preventDefault();
-          // Space has one meaning. Before the city is founded there is no live
-          // dodge yet, but it must not silently become the build key.
+          // The mode owns Space. Held-input turns it into payment in Build
+          // mode; only Fight mode may dispatch a dodge command.
+          if (this.controlMode !== 'fight') {
+            if (this.game.phase === 'found') this._tryFound();
+            break;
+          }
           if (this.game.phase === 'found') break;
           const dir = this.lastDir || { x: 0, z: 0 };
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
         case 'ability1':
-          if (this.controlMode === 'fight' || this.game.phase !== 'found') this.tryCast();
+          if (this.controlMode === 'fight') this.tryCast();
           break;
         case 'build_mode':
           e.preventDefault();
@@ -4413,13 +4417,14 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Hold-to-build has one keyboard owner: the configured build action. The
-    // on-screen construction button may also hold payment, but dodge never can.
+    // Build mode owns construction input. Space is the mode-primary action;
+    // the configured Build key remains an accessible secondary binding.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
     const buttonPays = canPay && this.buttonPay;
-    const pay = isHeld(bindsNow, this.keys, 'build') || buttonPays;
+    const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
+    const pay = this.controlMode === 'build' && canPay && (buildHeld || buttonPays);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -4489,7 +4494,7 @@ class App {
   toggleControlMode() {
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
-    if (this.lastPay && !isHeld(this.binds(), this.keys, 'build')) {
+    if (this.lastPay && this.controlMode === 'fight') {
       this.lastPay = false;
       this.issue({ t: 'pay', p: this.myPlayer, on: false });
     }
@@ -5386,11 +5391,14 @@ class App {
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
             const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
-            const buildKey = keyLabel(this.binds().build);
+            const buildKey = keyLabel(this.binds().dodge);
+            const buildAltKey = keyLabel(this.binds().build);
             const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
               ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-              : `<div>Hold <kbd>${buildKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} ${buildMode ? 'hides' : 'shows'} construction markers.</div>`;
+              : buildMode
+                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
+                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
           }
         }
       }

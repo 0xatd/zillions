@@ -20,15 +20,16 @@ assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authen
 assert.match(main, /_createMmoCharacter[\s\S]*const worldId = character\.lastWorld \|\| 'earth'[\s\S]*this\._enterOverworld\(worldId\)/,
   'character creation must enter Earth instead of bouncing to the roster');
 
-// Space, Q, and B have one meaning each. The old contextual-Space path caused
-// one press to dodge on keydown and fund a building on the held-input frame.
+// Build and Fight are explicit action contexts. Space builds in Build mode and
+// dodges in Fight mode; Q only casts in Fight mode. Movement stays shared.
 const inputUpdate = main.slice(main.indexOf('_updateHeroInput()'), main.indexOf('\n  myHero()', main.indexOf('_updateHeroInput()')));
-assert.ok(!/isHeld\([^\n]*'dodge'\)/.test(inputUpdate), 'held dodge must never pay for construction');
-assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'build'\)/, 'held Build must own construction payment');
-assert.match(main, /case 'dodge':[\s\S]*issue\(\{ t: 'dodge'/, 'Space must dispatch dodge');
-assert.match(main, /case 'ability1':[\s\S]*tryCast\(\)/, 'Q must dispatch the primary ability');
+assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'dodge'\)[\s\S]*controlMode === 'build'/, 'Build mode must let held Space fund construction');
+assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'build'\)/, 'B must remain a secondary Build-mode binding');
+assert.match(main, /case 'dodge':[\s\S]*controlMode !== 'fight'[\s\S]*case 'ability1'/, 'Space must be blocked from dodging in Build mode');
+assert.match(main, /case 'dodge':[\s\S]*issue\(\{ t: 'dodge'/, 'Space must dispatch dodge in Fight mode');
+assert.match(main, /case 'ability1':[\s\S]*controlMode === 'fight'[\s\S]*tryCast\(\)/, 'Q must cast only in Fight mode');
 assert.match(main, /case 'build':[\s\S]*_tryFound\(\)/, 'Build must found the city');
-assert.match(keybinds, /Toggle construction markers/, 'Alt must describe marker visibility, not contextual controls');
+assert.match(keybinds, /Toggle Build \/ Fight mode/, 'Alt must describe the contextual mode switch');
 
 for (const stale of ['SPACE/Q', 'Hold SPACE/B', 'Space fires the hero special', 'Space/B builds', 'ALT fight', 'Press <kbd>3</kbd>']) {
   assert.ok(!ui.includes(stale), `UI still advertises the removed control contract: ${stale}`);
@@ -53,4 +54,4 @@ assert.match(ui, /creator-cancel[\s\S]*mmoCharacters[\s\S]*_backOverlay/, 'manda
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
 
-console.log('stabilization check passed: one front door; Space/Q/B controls are unambiguous');
+console.log('stabilization check passed: one front door; Build/Fight contexts are explicit');

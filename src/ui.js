@@ -87,7 +87,7 @@ export class UI {
           <div class="rallyhints" id="stancebar">
             <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
           </div>
-          <button class="mode-toggle build" id="mode-toggle" title="Show or hide construction markers"><b data-bind-label="build_mode"></b><span>Construction shown</span></button>
+          <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
         <div class="actionmain">
@@ -261,7 +261,7 @@ export class UI {
           </div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">2 · Your hero <small>— auto-attacks on his own; move with WASD, dodge with <span data-bind-label="dodge"></span>, and use the special with <span data-bind-label="ability1"></span></small></div>
+          <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
           <div class="steplabel diff-label">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
@@ -334,13 +334,13 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only), <kbd data-bind-label="dodge"></kbd> to dodge roll out of danger. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD always moves. In Fight mode, <kbd data-bind-label="dodge"></kbd> dodge-rolls and <kbd data-bind-label="ability1"></kbd> uses your special.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> Hold <kbd data-bind-label="build"></kbd> at a glowing foundation — coins fly from your purse until it rises. Use <kbd data-bind-label="build_mode"></kbd> to show or hide construction markers.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Use <kbd data-bind-label="build_mode"></kbd> for Build mode, then hold <kbd data-bind-label="dodge"></kbd> or <kbd data-bind-label="build"></kbd> at a glowing foundation.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> Hold <kbd data-bind-label="build"></kbd> to build, repair, or rebuild. <kbd data-bind-label="dodge"></kbd> always dodges. <kbd data-bind-label="ability1"></kbd> always fires your special. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> build, repair, or rebuild. Fight mode makes it dodge and enables <kbd data-bind-label="ability1"></kbd>. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
@@ -2064,12 +2064,14 @@ export class UI {
   setControlMode(mode = 'build') {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
-    const hidden = mode === 'fight';
-    chip.classList.toggle('fight', hidden);
-    chip.classList.toggle('build', !hidden);
+    const fighting = mode === 'fight';
+    chip.classList.toggle('fight', fighting);
+    chip.classList.toggle('build', !fighting);
     const label = chip.querySelector('span');
-    if (label) label.textContent = hidden ? 'Construction hidden' : 'Construction shown';
-    chip.title = `${this._keyLabel('build_mode')} ${hidden ? 'shows' : 'hides'} construction markers. ${this._keyLabel('build')} always builds; ${this._keyLabel('ability1')} always uses the special.`;
+    if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
+    chip.title = fighting
+      ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
+      : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
   }
 
   update(game, p = 0, controls = {}) {
@@ -2209,12 +2211,12 @@ export class UI {
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
           big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} hide</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`;
           big.disabled = h.dead;
         } else {
           this._bigMode = 'idle';
           big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Construction shown<small>Auto-attacks on · ride to a plot · ${this._keyLabel('build_mode')} hide</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`;
           big.disabled = true;
         }
       } else {

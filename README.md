@@ -174,14 +174,14 @@ which reads the same table the game dispatches through.
 | --- | --- |
 | W, A, S, D | Move in world and minimap directions |
 | Shift | Gallop at full health |
-| Space | Dodge roll — a burst out of danger, briefly untouchable |
-| Q | Primary ability (your hero special) |
+| Space | Build mode: build/pay. Fight mode: dodge roll |
+| Q | Fight mode: primary ability (your hero special) |
 | E, R | Ability II and III — reserved; heroes carry one ability today |
 | X | Draw the other weapon set |
 | Ctrl | Secondary ability bar — reserved |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
-| B | Build, upgrade, repair, or rebuild |
-| Alt | Show or hide vacant construction markers |
+| B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
+| Alt | Switch between Build mode and Fight mode |
 | F1, F2, F3 | Set Defend, Follow, or Push stance |
 | T | Change the nearest tower target rule |
 | Z | Drop the newest field item |
@@ -196,11 +196,10 @@ Movement is not camera-relative. W always moves north on the minimap.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
-does not — that freed 1 and 2 for a future consumable system. Alt controls
-construction-marker visibility because founding and funding a colony is the
-half of this game an action-RPG layout has no opinion about. It does not change
-the controls: Space always dodges, Q always uses the primary ability, and B
-always builds.
+does not — that freed 1 and 2 for a future consumable system. Alt switches the
+action context because founding and funding a colony is the half of this game
+an action-RPG layout has no opinion about. WASD remains shared. In Build mode,
+Space and B build. In Fight mode, Space dodges and Q uses the primary ability.
 
 ## Local Development
 

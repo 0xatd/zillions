@@ -52,8 +52,8 @@ export const ACTIONS = [
 
   // ---- combat ----
   {
-    id: 'dodge', name: 'Dodge roll', scopes: ['battle'], context: 'combat', default: ' ',
-    desc: 'A short burst out of danger. Briefly untouchable, then a cooldown.',
+    id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: ' ',
+    desc: 'Build mode: hold to build. Fight mode: dodge with brief invulnerability.',
   },
   {
     id: 'ability1', name: 'Primary ability', scopes: ['battle'], context: 'combat', default: 'q',
@@ -88,11 +88,11 @@ export const ACTIONS = [
   // ---- army and colony ----
   {
     id: 'build', name: 'Build, upgrade, repair', scopes: ['battle'], context: 'army', default: 'b', held: true,
-    desc: 'Hold at a foundation. Gold streams out until it rises.',
+    desc: 'Secondary Build-mode binding. Hold at a foundation until it rises.',
   },
   {
-    id: 'build_mode', name: 'Toggle construction markers', scopes: ['battle'], context: 'army', default: 'alt',
-    desc: 'Shows or hides vacant construction markers. It never changes what Space, Q, or B do.',
+    id: 'build_mode', name: 'Toggle Build / Fight mode', scopes: ['battle'], context: 'army', default: 'alt',
+    desc: 'Build mode enables construction. Fight mode enables dodge and hero abilities.',
   },
   {
     id: 'stance_defend', name: 'Stance: defend city', scopes: ['battle'], context: 'army', default: 'f1',
