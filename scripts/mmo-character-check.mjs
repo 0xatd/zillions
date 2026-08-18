@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, grantMmoExperience, recordMmoInstance,
@@ -49,5 +50,15 @@ const cloudProfile = auth.profileFromBundle({
 assert.equal(cloudProfile.mmoCharacterId, vanguard.id, 'signed-in auth must restore the selected MMO character');
 assert.deepEqual(cloudProfile.mmoCharacters, [vanguard], 'signed-in auth must restore the MMO roster');
 assert.equal(cloudProfile.lastWorld, 'frontier-7', 'signed-in auth must restore the character world');
+
+const mainSource = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+assert.match(mainSource, /const titleCharacter = selectedMmoCharacter\(this\.profile\);/,
+  'the title stage must be driven by the created MMO roster');
+assert.match(mainSource, /titleHero\.visible = !!titleCharacter;/,
+  'an empty MMO roster must not show a legacy named hero on the character screen');
+assert.match(mainSource, /const showTitleCharacter = !!selectedMmoCharacter\(this\.profile\);/,
+  'the title stage must react when cloud auth restores a created character');
+assert.doesNotMatch(mainSource, /const heroKey = this\.profile\.lastHero \|\| this\.ui\.selectedHero/,
+  'the title stage must not fall back to Custom Games heroes');
 
 console.log('MMO character check passed: 13 classes, persistent Vanguard, level-100 cap, loot extraction');

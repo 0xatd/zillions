@@ -478,19 +478,24 @@ class App {
       group.add(streak); streaks.push(streak);
     }
 
-    // Diablo-style account presence: the commander's last-used hero watches
-    // the world from the starship deck while the distress feed plays behind.
-    const heroKey = this.profile.lastHero || this.ui.selectedHero || Object.keys(HEROES)[0];
+    // Diablo-style account presence belongs only to a created MMO character.
+    // Legacy named heroes remain in Custom Games and must never impersonate an
+    // empty persistent roster.
+    const titleCharacter = selectedMmoCharacter(this.profile);
+    const heroKey = titleCharacter?.proxyHero || Object.keys(HEROES)[0];
     const heroDef = HEROES[heroKey] || HEROES[Object.keys(HEROES)[0]];
     const titleHero = this._makeUnitMesh({ hero: true, key: heroKey, def: heroDef, auraRadius: 1.3 });
     titleHero.scale.setScalar(2.65);
+    titleHero.visible = !!titleCharacter;
     group.add(titleHero);
     const heroPedestal = new THREE.Mesh(
       new THREE.CircleGeometry(3.1, 40),
       new THREE.MeshBasicMaterial({ color: heroDef.color || 0x65a9ff, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
     );
+    heroPedestal.visible = !!titleCharacter;
     group.add(heroPedestal);
     const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
+    heroLight.visible = !!titleCharacter;
     group.add(heroLight);
     group.userData = { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
     this.titleSpace = group;
@@ -503,6 +508,10 @@ class App {
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
     const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
+    const showTitleCharacter = !!selectedMmoCharacter(this.profile);
+    titleHero.visible = showTitleCharacter;
+    heroPedestal.visible = showTitleCharacter;
+    heroLight.visible = showTitleCharacter;
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
