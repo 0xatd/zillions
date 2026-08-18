@@ -19,7 +19,7 @@ const tileHash = (f) =>
 
 // 1. Deterministic: the same descriptor stitches the same planet byte for
 // byte. The reference includes Earth's authored Orbital Lift terrace.
-const EARTH_HASH = 'PENDING_CUSTOM_GATE_HASH';
+const EARTH_HASH = 'f4e5e549701eb1aed4bd3ecf3b2052181373806a9f4bf12ca6c16309a83dd032';
 const a = new OverworldField(earthWorldDescriptor(0));
 const b = new OverworldField(earthWorldDescriptor(0));
 assert.equal(tileHash(a), EARTH_HASH, 'Earth tiles are byte-stable across the descriptor refactor');
@@ -53,8 +53,9 @@ for (const g of [...layout.gates, layout.cave]) {
 
 // Each region keeps real walkable ground of its own, not just the road.
 for (let r = 0; r < LEVELS.length; r++) {
+  const regionIndex = a.overworldWorld.regions.findIndex((region) => region.levelId === LEVELS[r].id);
   let walk = 0;
-  for (let i = 0; i < a.tiles.length; i++) if (a.region[i] === r) {
+  for (let i = 0; i < a.tiles.length; i++) if (a.region[i] === regionIndex) {
     const t = a.tiles[i];
     if (t === 0 || t === 4 || t === 5 || t === 6 || t === 7) walk++; // grass/sand/gold/stone/path
   }
@@ -62,23 +63,25 @@ for (let r = 0; r < LEVELS.length; r++) {
 }
 
 // 4. Lock state: the campaign ladder, honestly reported at the gates.
-assert.deepEqual(gateState(layout.gates[0]), { locked: false, cleared: false }, 'front 1 is always open');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(0)).gates[1]), { locked: true, cleared: false }, 'front 2 locked on a fresh profile');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(1)).gates[1]), { locked: false, cleared: false }, 'winning front 1 opens front 2');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(1)).gates[0]), { locked: false, cleared: true }, 'cleared fronts read cleared');
-assert.deepEqual(gateState(overworldLayout(earthWorldDescriptor(4)).gates[4]), { locked: false, cleared: false }, 'the last front opens last');
+const campaignGates = (cleared) => overworldLayout(earthWorldDescriptor(cleared)).gates.filter((gate) => !gate.portal);
+assert.deepEqual(gateState(campaignGates(0)[0]), { locked: false, cleared: false }, 'front 1 is always open');
+assert.deepEqual(gateState(campaignGates(0)[1]), { locked: true, cleared: false }, 'front 2 locked on a fresh profile');
+assert.deepEqual(gateState(campaignGates(1)[1]), { locked: false, cleared: false }, 'winning front 1 opens front 2');
+assert.deepEqual(gateState(campaignGates(1)[0]), { locked: false, cleared: true }, 'cleared fronts read cleared');
+assert.deepEqual(gateState(campaignGates(4)[4]), { locked: false, cleared: false }, 'the last front opens last');
 assert.deepEqual(gateState(layout.cave), { locked: false, cleared: false }, 'the labyrinth is its own door');
 
 // 5. Walk-in triggers: stepping into a gate ring fires the right level id,
 // movement collides with impassable tiles, and ghosts expire.
 const ow = new Overworld(a, { world: a.overworldWorld });
 let sawLevel1 = false, sawLocked = false;
-ow.hero.x = layout.gates[0].x + 0.5; ow.hero.z = layout.gates[0].z + 0.5;
+ow.hero.x = campaignGates(0)[0].x + 0.5; ow.hero.z = campaignGates(0)[0].z + 0.5;
 for (const ev of ow.update(0.016)) {
   if (ev.t === 'gate' && ev.gate.levelId === 1 && !ev.state.locked) sawLevel1 = true;
 }
 const lockedLayout = overworldLayout(earthWorldDescriptor(0));
-ow.hero.x = lockedLayout.gates[1].x + 0.5; ow.hero.z = lockedLayout.gates[1].z + 0.5;
+const lockedCampaignGates = lockedLayout.gates.filter((gate) => !gate.portal);
+ow.hero.x = lockedCampaignGates[1].x + 0.5; ow.hero.z = lockedCampaignGates[1].z + 0.5;
 for (const ev of ow.update(0.016)) {
   if (ev.t === 'gate' && ev.gate.levelId === 2 && ev.state.locked) sawLocked = true;
 }

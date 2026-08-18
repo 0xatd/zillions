@@ -1766,7 +1766,7 @@ export class UI {
     const st = this.root.querySelector('#prof-stats');
     if (st) {
       st.textContent = p.games
-        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · best: Threat ${p.bestDay}`
+        ? `${p.wins}W / ${p.games - p.wins}L · ${p.kills.toLocaleString()} kills · ⬡ ${(p.metaCurrency || 0).toLocaleString()} Alloy · best: Threat ${p.bestDay}`
         : 'first deployment';
     }
     this.refreshHeroBadges(p);

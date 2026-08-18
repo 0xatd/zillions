@@ -1,9 +1,9 @@
 # Galaxy and Meta-Progression Integration
 
-`src/galaxy.js` and `src/meta.js` ship complete, headless, and validated by
-`scripts/galaxy-check.mjs`. Nothing in the shell calls them yet. This page is
-the wiring list for the follow-up change. It touches `src/main.js` and
-`src/ui.js` only.
+`src/galaxy.js` and `src/meta.js` are validated by `scripts/galaxy-check.mjs`
+and connected to the game shell. The galaxy screen reads the deterministic
+generated destination list. Completed runs award Salvage Alloy. The remaining
+items in this document describe later UI and gameplay-bonus work.
 
 ## What each module owns
 
@@ -17,6 +17,9 @@ twelve-node upgrade tree, and the bonus payload a run starts with. Node effects
 are data, never behavior.
 
 ## Galaxy wiring
+
+Status: complete for world resolution, destination display, travel, and chart
+depth.
 
 `src/overworld.js` keeps its current shape and is not modified. The galaxy
 module produces the same descriptors and the same destination fields, so the
@@ -77,6 +80,10 @@ Two things stay deliberately unwired:
   arguments so it can move unchanged.
 
 ## Meta wiring
+
+Status: run scoring, Alloy awards, persistence, and the roster balance display
+are complete. The upgrade-tree purchase screen and application of economy and
+hero bonuses remain future work.
 
 Four calls, all in `src/main.js`:
 

@@ -6,7 +6,7 @@ import {
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
-import { Game } from './game.js';
+import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, assetClone, assetPart } from './assets.js';
@@ -25,13 +25,15 @@ import { HordeArt, buildCorpseGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
+import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
+import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
 } from './mmo-characters.js';
 import {
   stitchOverworld, Overworld, gateState,
-  earthWorldDescriptor, galaxyWorldDescriptor, galaxyDestinations, overworldChannel,
+  earthWorldDescriptor, overworldChannel,
   OVERWORLD_SIZE, OVERWORLD_GHOSTS,
 } from './overworld.js';
 import {
@@ -57,7 +59,7 @@ class OverworldMap extends GameMap {
   constructor(campaign = 0, worldId = 'earth') {
     // The planet is a descriptor: Earth today, other servers' universes
     // tomorrow — same stitch, same renderer, different data.
-    const world = galaxyWorldDescriptor(worldId, campaign);
+    const world = descriptorForWorldId(knownGalaxy(), worldId, campaign);
     super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
     this._owWorld = world;
     // super() stitched with a zero-campaign descriptor (the ladder is not
@@ -279,6 +281,8 @@ class App {
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
     this.profile = this._loadProfile();
+    this.meta = loadMeta();
+    this.profile.metaCurrency = this.meta.currency;
     normalizeMmoCharacters(this.profile);
     const initialCharacter = selectedMmoCharacter(this.profile);
     if (initialCharacter) {
@@ -571,11 +575,13 @@ class App {
 
   _openGalaxyMap() {
     const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
-    this.ui.showGalaxy(galaxyDestinations(this.profile.campaign || 0), currentWorld);
+    const depth = 12 + metaBonuses().unlock.galaxyDepth;
+    this.ui.showGalaxy(galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth), currentWorld);
   }
 
   _travelToWorld(worldId) {
-    const destination = galaxyDestinations(this.profile.campaign || 0, 12)
+    const depth = 12 + metaBonuses().unlock.galaxyDepth;
+    const destination = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth)
       .find((world) => world.id === worldId);
     if (!destination || !destination.unlocked) {
       this.audio.deny();
@@ -1531,6 +1537,9 @@ class App {
     p.kills += this.game.stats.kills;
     p.bestDay = Math.max(p.bestDay, this.game.threatLevel);
     p.lastHero = this.ui.selectedHero;
+    const metaAward = awardRun({ ...runScore(this.game), won: !!won });
+    this.meta = metaAward.meta;
+    p.metaCurrency = metaAward.currency;
 
     // WC3-style persistence: the campaign hero keeps every level and item —
     // and quest/boss rewards granted here await them on the next map.
