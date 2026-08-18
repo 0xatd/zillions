@@ -76,8 +76,21 @@ export const RARITY_BY_KEY = { normal: 1, magic: 2, rare: 3 };
 export const SLOTS = ['weapon', 'offhand', 'armor', 'implant'];
 
 // Where a character can put each slot. Two implant sockets share one pool.
-export const EQUIP_SLOTS = ['weapon', 'offhand', 'armor', 'implant1', 'implant2'];
-export const slotPool = (equipSlot) => (equipSlot === 'implant1' || equipSlot === 'implant2' ? 'implant' : equipSlot);
+// Two weapon sets, one body. Armour and implants are worn once; the weapon and
+// off-hand exist twice, and a character swaps between them mid-fight.
+export const EQUIP_SLOTS = ['weapon', 'offhand', 'weapon2', 'offhand2', 'armor', 'implant1', 'implant2'];
+export const WEAPON_SETS = [
+  { index: 0, weapon: 'weapon', offhand: 'offhand', name: 'SET I' },
+  { index: 1, weapon: 'weapon2', offhand: 'offhand2', name: 'SET II' },
+];
+export const slotPool = (equipSlot) => {
+  if (equipSlot === 'implant1' || equipSlot === 'implant2') return 'implant';
+  if (equipSlot === 'weapon2') return 'weapon';
+  if (equipSlot === 'offhand2') return 'offhand';
+  return equipSlot;
+};
+// Which slots belong to a given weapon set — used to decide what a swap swaps.
+export const setSlots = (set) => WEAPON_SETS[set === 1 ? 1 : 0];
 
 // ---------- bases ----------
 //

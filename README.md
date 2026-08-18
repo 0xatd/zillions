@@ -114,6 +114,7 @@ levels grant tapered stat growth.
 | Q | Cast the hero special |
 | T | Change the nearest tower target rule |
 | G | Drop the newest field item |
+| X | Draw the other weapon set |
 | 1, 2, 3 | Set Defend, Follow, or Push stance |
 | P | Pause a solo game |
 | Esc | Open the game menu |

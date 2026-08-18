@@ -4,7 +4,8 @@
 
 import { EQUIP_SLOTS, slotPool, isRolledKey, meetsRequirement } from './items.js';
 import {
-  pruneAlloc, latticePoints, treeBonuses, canAllocate, canDeallocate, LATTICE_VERSION,
+  pruneAlloc, latticePoints, treeBonuses, treeBonusesForSet, normalizeSetSpec,
+  canAllocate, canDeallocate, LATTICE_VERSION,
 } from './skilltree.js';
 import { itemInfo, itemMods } from './config.js';
 
@@ -127,6 +128,8 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
     questPoints: 0,
     latticeV: LATTICE_VERSION,
     lattice: [],
+    latticeSets: {},
+    activeSet: 0,
     items: [],
     equipment: {},
     upgrades: {},
@@ -157,6 +160,8 @@ export function normalizeMmoCharacters(profile) {
       latticePoints(character.level, character.questPoints),
     );
     character.talentPoints = Math.max(0, latticePoints(character.level, character.questPoints) - character.lattice.length);
+    character.latticeSets = normalizeSetSpec(character.latticeSets, character.lattice);
+    character.activeSet = character.activeSet === 1 ? 1 : 0;
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
     character.lastWorld = character.lastWorld || profile.lastWorld || 'earth';
@@ -213,6 +218,12 @@ export function characterCamp(character, relics = []) {
     lattice: [...(character?.lattice || [])],
     treeMods: tree.mods,
     doctrines: tree.doctrines,
+    // One resolved bag per weapon set. Swapping in the field is then a lookup,
+    // never a tree walk — the simulation still never queries a node.
+    treeSets: [0, 1].map((set) => treeBonusesForSet(
+      character?.lattice, character?.classKey, character?.latticeSets, set,
+    ).mods),
+    activeSet: character?.activeSet === 1 ? 1 : 0,
     relics: [...relics],
   };
 }
@@ -240,10 +251,21 @@ export function deallocateLatticeNode(character, nodeId) {
 }
 
 // Rewire: hand every point back at once.
+// Pin an allocated node to one weapon set, or release it back to both.
+export function setLatticeNodeSet(character, nodeId, set) {
+  if (!character || !(character.lattice || []).includes(nodeId)) return false;
+  const spec = { ...(character.latticeSets || {}) };
+  if (set === 0 || set === 1) spec[nodeId] = set;
+  else delete spec[nodeId];
+  character.latticeSets = normalizeSetSpec(spec, character.lattice);
+  return true;
+}
+
 export function rewireLattice(character) {
   if (!character) return 0;
   const spent = (character.lattice || []).length;
   character.lattice = [];
+  character.latticeSets = {};
   character.talentPoints = latticePoints(character.level, character.questPoints);
   return spent;
 }

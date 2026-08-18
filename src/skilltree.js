@@ -589,6 +589,42 @@ export function pruneAlloc(alloc, classKey, points = POINT_CAP) {
 //
 // The one thing the simulation ever reads. Resolved once at run start into a
 // flat bag plus a list of doctrine flags. Nothing here is called during a run.
+// A node can be pinned to one weapon set. Pinned nodes only count while that
+// set is drawn, which is what makes two sets two builds rather than two guns.
+// `spec` maps node id -> 0 or 1; anything unlisted is always active.
+export function treeBonusesForSet(alloc, classKey, spec = null, set = 0) {
+  const tree = buildLattice();
+  const mods = {};
+  for (const key of MOD_KEYS) mods[key] = 0;
+  const doctrines = [];
+  for (const id of pruneAlloc(alloc, classKey)) {
+    const node = tree.byId.get(id);
+    if (!node) continue;
+    const pinned = spec ? spec[id] : undefined;
+    if (pinned === 0 || pinned === 1) {
+      if (pinned !== (set === 1 ? 1 : 0)) continue;
+    }
+    for (const [key, value] of Object.entries(node.mods || {})) {
+      mods[key] = (mods[key] || 0) + value;
+    }
+    if (node.doctrine) doctrines.push(node.doctrine);
+  }
+  return { mods, doctrines };
+}
+
+// Only a node that is actually allocated can be pinned, and a pin to anything
+// other than a real set is dropped.
+export function normalizeSetSpec(spec, alloc) {
+  const owned = new Set(alloc || []);
+  const out = {};
+  for (const [id, set] of Object.entries(spec || {})) {
+    if (!owned.has(id)) continue;
+    const n = Number(set);
+    if (n === 0 || n === 1) out[id] = n;
+  }
+  return out;
+}
+
 export function treeBonuses(alloc, classKey) {
   const tree = buildLattice();
   const mods = {};

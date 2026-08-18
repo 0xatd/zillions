@@ -1891,6 +1891,7 @@ class App {
         if (key) h = (h * 31 + hashString(key)) | 0;
       }
       for (const id of hr.doctrines || []) h = (h * 31 + hashString(id)) | 0;
+      h = (h * 31 + (hr.activeSet || 0) * 977) | 0;
       const w = hr.weapon;
       if (w) {
         h = (h * 31 + Math.round(w.dmg * 16) + Math.round(w.rof * 64) * 3 + Math.round(w.range * 16) * 7) | 0;
@@ -4168,6 +4169,7 @@ class App {
       else if (k === '3') this.issue({ t: 'stance', s: 'attack', p: this.myPlayer });
       else if (k === 't') this.issue({ t: 'towerpri', p: this.myPlayer });
       else if (k === 'g') this.issue({ t: 'drop', p: this.myPlayer, i: -1 });
+      else if (k === 'x') this.issue({ t: 'swapset', p: this.myPlayer });
       else if (k === 'm') { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); }
       else if (k === 'h') { this.togglePauseMenu(true); }
       else if (k === 'escape') this.togglePauseMenu();

@@ -8,7 +8,7 @@ import { makeRNG } from './utils.js';
 import {
   MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey,
   rollLootKey, rollLootKeyForSlot, worldItemLevel,
-  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
+  DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE, setSlots, WEAPON_SETS,
 } from './items.js';
 
 export const MAP_SIZE = 120;
@@ -17,6 +17,7 @@ export const COIN_CAP = 360;           // max coin entities on the ground
 export const COIN_RADIUS = 3.0;        // heroes hoover coins within this range
 export const PAY_RADIUS = 1.7;         // stand this close to a pay plate to fund it
 export const PAY_RATE = 20;            // gold per second streamed into a plot (hold B)
+export const WEAPON_SWAP_CD = 4;       // seconds between weapon-set swaps — a decision, not a toggle
 export const UPGRADE_PAY_RATE = 50;    // upgrades finish quickly; the cost, not a long hold, is the commitment
 export const CITY_WALL_R = 15.6;       // rampart ring radius around the Keep
 export const CITY_PAD_R = 27;         // the founders' pad: flat, buildable disc stamped at a city site
@@ -646,6 +647,7 @@ export const MOD_KEYS = GEAR_MOD_KEYS;
 export {
   rollLootKey, rollLootKeyForSlot, worldItemLevel, itemLines,
   DAMAGE_TYPES, DAMAGE_TYPE_INFO, RESIST_CAP, VOID_ARMOR_SHARE, ATTRIBUTES,
+  WEAPON_SETS, setSlots, EQUIP_SLOTS,
 } from './items.js';
 
 // Two kinds of key reach this function and both are legal:
@@ -684,13 +686,20 @@ export const SIGNATURE_WEAPONS = Object.fromEntries(
 // What this hero is actually swinging. An equipped weapon replaces the
 // signature outright; the hero keeps levelDmg, hp, aura and ability.
 // `equipment` is the character's slot map, and an empty one is the norm.
-export function weaponFor(heroKey, equipment = null) {
-  const equipped = equipment && equipment.weapon;
+export function weaponFor(heroKey, equipment = null, set = 0) {
+  const slot = setSlots(set).weapon;
+  const equipped = equipment && equipment[slot];
   if (equipped) {
     const item = itemInfo(equipped);
     if (item && item.weapon) return item.weapon;
   }
   return SIGNATURE_WEAPONS[heroKey] || null;
+}
+
+// Does this character have a second set worth swapping to? A swap that lands
+// on the same signature weapon is a wasted button, so the HUD asks first.
+export function hasSecondSet(equipment = null) {
+  return !!(equipment && (equipment.weapon2 || equipment.offhand2));
 }
 
 export function itemMods(items) {

@@ -18,6 +18,7 @@ import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.
 import {
   MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
+  setLatticeNodeSet,
 } from './mmo-characters.js';
 import {
   buildLattice, frontier, pathTo, canAllocate, canDeallocate, latticePoints,
@@ -327,6 +328,7 @@ export class UI {
             <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE fires your special and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>1</b> DEFEND city, <b>2</b> FOLLOW hero, <b>3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
+            <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
             <div><b>☠️ Threat is the clock.</b> It rises on its own, faster while hives stand, and every whole level makes every hive muster at once. If the Keep falls, all is lost.</div>
           </div>
         </div>
@@ -1002,7 +1004,11 @@ export class UI {
   _renderGearPanel(character) {
     const slots = this.root.querySelector('#gear-slots');
     const attrs = this._sheetAttributes(character);
-    const label = { weapon: 'WEAPON', offhand: 'OFF-HAND', armor: 'ARMOUR', implant1: 'IMPLANT I', implant2: 'IMPLANT II' };
+    const label = {
+      weapon: 'SET I · WEAPON', offhand: 'SET I · OFF-HAND',
+      weapon2: 'SET II · WEAPON', offhand2: 'SET II · OFF-HAND',
+      armor: 'ARMOUR', implant1: 'IMPLANT I', implant2: 'IMPLANT II',
+    };
     slots.innerHTML = EQUIP_SLOTS.map((slot) => {
       const key = (character.equipment || {})[slot];
       const item = key ? itemInfo(key) : null;
@@ -1059,7 +1065,7 @@ export class UI {
     for (const [key, value] of Object.entries(gear)) total[key] = (total[key] || 0) + value;
     for (const [key, value] of Object.entries(tree.mods)) total[key] = (total[key] || 0) + value;
 
-    const weaponKey = (character.equipment || {}).weapon;
+    const weaponKey = (character.equipment || {})[character.activeSet === 1 ? 'weapon2' : 'weapon'];
     const weapon = weaponKey ? itemInfo(weaponKey)?.weapon : null;
     const rows = [];
     rows.push(`<div class="gear-attr">${Object.values(ATTRIBUTES).map((a) =>
@@ -1362,6 +1368,7 @@ export class UI {
     const sector = SECTORS[node.sector];
     const path = owned ? [] : (pathTo(character.lattice, node.id, character.classKey) || []);
     const doctrine = node.doctrine ? DOCTRINES[node.doctrine] : null;
+    const pinned = (character.latticeSets || {})[node.id];
     const lines = itemLines({ mods: node.mods || {}, affixes: [] });
     box.innerHTML = `
       <h3>${node.icon && node.icon !== '·' ? `${node.icon} ` : ''}${node.name}</h3>
@@ -1371,7 +1378,18 @@ export class UI {
       ${sector ? `<p class="lattice-blurb">${sector.desc}</p>` : ''}
       <p class="lattice-route">${owned ? 'ALLOCATED — shift-click to sell back'
         : path.length ? `${path.length} point${path.length === 1 ? '' : 's'} to reach`
-        : 'No route from your build'}</p>`;
+        : 'No route from your build'}</p>
+      ${owned ? `<div class="lattice-pin"><h4>ACTIVE WITH</h4>
+        <button data-set="both" class="${pinned === undefined ? 'sel' : ''}">BOTH SETS</button>
+        <button data-set="0" class="${pinned === 0 ? 'sel' : ''}">SET I</button>
+        <button data-set="1" class="${pinned === 1 ? 'sel' : ''}">SET II</button></div>` : ''}`;
+    for (const button of box.querySelectorAll('.lattice-pin button')) {
+      button.onclick = () => {
+        const value = button.dataset.set === 'both' ? null : Number(button.dataset.set);
+        setLatticeNodeSet(character, node.id, value);
+        this._sheetChanged();
+      };
+    }
   }
 
   // ----- overworld: the campaign map behind the war-council overlay -----

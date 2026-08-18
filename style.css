@@ -1465,3 +1465,10 @@ body::after {
   #sheet-panel-gear { grid-template-columns: 1fr; }
   #sheet-panel-lattice { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
 }
+.lattice-pin { margin-top: 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+.lattice-pin h4 { width: 100%; margin: 0 0 4px; }
+.lattice-pin button {
+  flex: 1; min-width: 74px; cursor: pointer; font: inherit; font-size: 10px; letter-spacing: 0.1em;
+  background: rgba(20, 26, 36, 0.9); color: #cfd6e4; border: 1px solid rgba(200, 210, 230, 0.2); padding: 6px 4px;
+}
+.lattice-pin button.sel { background: rgba(240, 214, 140, 0.2); border-color: rgba(240, 214, 140, 0.7); color: #f4e9c8; }

@@ -13,7 +13,8 @@ import {
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor,
+  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, itemLines, weaponFor, hasSecondSet,
+  WEAPON_SWAP_CD,
   rollLootKey, worldItemLevel,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
@@ -256,6 +257,10 @@ export class Game {
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
         equip: { ...(h.equipment || {}) },
+        set: h.activeSet || 0, swapCd: snapNum(h.swapCd || 0),
+        treeMods: h.treeMods ? { ...h.treeMods } : null,
+        treeSets: h.treeSets ? h.treeSets.map((bag) => ({ ...bag })) : null,
+        doctrines: [...(h.doctrines || [])],
         blessings: [...(h.blessings || [])],
         fallen: h.fallen ? 1 : 0,
         upgrades: { ...h.upgrades },
@@ -410,6 +415,10 @@ export class Game {
       const h = this._spawnHero(hs.k, hs.x, hs.z, {
         level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
         equipment: hs.equip || {},
+        treeMods: hs.treeMods || null,
+        treeSets: hs.treeSets || null,
+        doctrines: hs.doctrines || [],
+        activeSet: hs.set || 0,
       });
       if (hs.id) h.id = hs.id;
       if (hs.blessings && hs.blessings.length) {
@@ -417,6 +426,7 @@ export class Game {
         this._refreshPackMods(h); // blessings count toward mods before hp lands
       }
       h.fallen = !!hs.fallen;
+      h.swapCd = hs.swapCd || 0;
       // Old saves can restore heroes into crag/water or inside fresh
       // footprints — reseat to the nearest safe tile, frontier fallback if
       // the whole area is sealed. Same guarantee the launch path has.
@@ -2104,6 +2114,21 @@ export class Game {
     this.msg(`${it ? it.icon : '📦'} Dropped the ${it ? it.name : 'find'}.`, 'info');
   }
 
+  // Draw the other weapon set. A command like any other, so it travels the
+  // lockstep path and every peer swaps on the same tick.
+  swapWeaponSet(p = 0) {
+    const h = this.heroes[p];
+    if (!h || h.dead) return;
+    if (!hasSecondSet(h.equipment)) { this.emit({ type: 'deny' }); return; }
+    if (h.swapCd > 0) { this.emit({ type: 'deny' }); return; }
+    h.activeSet = h.activeSet === 1 ? 0 : 1;
+    h.swapCd = WEAPON_SWAP_CD;
+    this._refreshHeroDerived(h);
+    const w = h.weapon;
+    this.msg(`🔁 ${h.def.name} draws ${w && w.name ? w.name : 'the other weapon'}.`, 'info');
+    this.emit({ type: 'swapset', x: h.x, z: h.z, set: h.activeSet, heroKey: h.key });
+  }
+
   _refreshPackMods(h) {
     h.itemMods = itemMods([...(h.items || []), ...(h.pack || []), ...(h.blessings || [])]);
     this._refreshHeroDerived(h);
@@ -2229,11 +2254,15 @@ export class Game {
     // hero's signature weapon, which carries that hero's original numbers —
     // so an unequipped hero fights exactly as they did before weapons existed.
     const equipment = camp && camp.equipment ? { ...camp.equipment } : {};
-    const weapon = weaponFor(key, equipment);
+    const weapon = weaponFor(key, equipment, camp && camp.activeSet === 1 ? 1 : 0);
     // The Lattice arrives already resolved: a flat bag of numbers and a list of
     // rule flags. Nothing here queries a tree node, now or during the run.
     const treeMods = (camp && camp.treeMods) || null;
     const doctrines = (camp && camp.doctrines) ? [...camp.doctrines] : [];
+    // One resolved tree bag per weapon set, so a swap is a lookup rather than
+    // anything that has to walk a graph mid-run.
+    const treeSets = (camp && camp.treeSets) || null;
+    const activeSet = camp && camp.activeSet === 1 ? 1 : 0;
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
@@ -2241,7 +2270,7 @@ export class Game {
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
-      equipment, weapon, treeMods, doctrines,
+      equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -2274,8 +2303,11 @@ export class Game {
     for (const [key, value] of Object.entries(passiveMods)) mods[key] = (mods[key] || 0) + value;
     // The Lattice folds in here, beside gear and hero passives, on the same
     // additive keys. One bag, one place, one rule.
-    if (h.treeMods) {
-      for (const [key, value] of Object.entries(h.treeMods)) {
+    // The drawn set decides which tree bag applies. A node pinned to set II is
+    // simply not in set I's bag, so nothing here has to know about pinning.
+    const treeBag = (h.treeSets && h.treeSets[h.activeSet || 0]) || h.treeMods;
+    if (treeBag) {
+      for (const [key, value] of Object.entries(treeBag)) {
         if (value) mods[key] = (mods[key] || 0) + value;
       }
     }
@@ -2286,7 +2318,7 @@ export class Game {
     h.mods = mods;
     // Equipment can change between runs and, later, between weapon sets. The
     // resolved weapon is rebuilt here so every derived stat reads one source.
-    h.weapon = weaponFor(h.key, h.equipment) || h.weapon;
+    h.weapon = weaponFor(h.key, h.equipment, h.activeSet || 0) || h.weapon;
     h.maxHp = h.def.hp + h.def.levelHp * heroGrowthUnits(h.level) + h.mods.hp;
     h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
     h.auraRank = h.upgrades.aura || 0;
@@ -2415,6 +2447,7 @@ export class Game {
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
       case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
+      case 'swapset': this.swapWeaponSet(c.p || 0); break;
       case 'blessing': this.chooseBlessing(c.p || 0, c.i ?? -1); break;
     }
   }
@@ -3584,6 +3617,7 @@ export class Game {
 
       // Auto-attack — units fire even while moving. A weaving hero is a blade
       // between worlds: no gunfire until the threads release him.
+      if (u.hero && u.swapCd > 0) u.swapCd = Math.max(0, u.swapCd - dt);
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
       if (u.retargetT <= 0 || (u.target && u.target.dead)) {
         u.retargetT = 0.25;
