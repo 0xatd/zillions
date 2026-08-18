@@ -11,7 +11,7 @@
 // is a rift with two passes through it. The archetype decides the pattern; the
 // coverage quantiles decide how much of it there is, so a map is playable no
 // matter how the noise landed.
-import { MAP_SIZE, TILE, TILE_INFO } from './config.js';
+import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R } from './config.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -204,12 +204,17 @@ export class TerrainField {
       return;
     }
     this._carveRivers(shape.rivers || 0, elev);
-    this._clearSiteFootprints();
     const ore = shape.ore || {};
     this._orePatches(TILE.GOLDORE, ore.gold ?? 9);
     this._orePatches(TILE.STONEORE, ore.stone ?? 10);
+    // The pad comes AFTER everything that can put water, crag or ore on the
+    // ground: what the founders level stays levelled. The biome keeps every
+    // tile OUTSIDE the pad, so two planets still never read the same — only
+    // the ground the city is raised on stops being a negotiation.
+    this._stampCityPads(elev);
     this.nestSpots = this._pickNests();
     this._carveWarRoads();
+    this._carveOutpostPads();
     // Lane nodes are read BEFORE the frontier connector runs, so the connector
     // can guarantee they are reachable — a node marooned behind water or crag
     // is a broken map, not flavor. Chokes are read AFTER every terrain pass
@@ -304,6 +309,8 @@ export class TerrainField {
     this.sites = [{ ...rooms[0], name: rooms[0].label, hint: 'The only safe ground behind you.' }];
     this.nodeSpots = [];
     this.chokeSpots = [];
+    this.roadPaths = [];
+    this.outpostSpots = [];
     const encounters = [
       { room: 2, from: [1], nest: 0, key: 'ash_bridge', kind: 'bridge', choice: 'first', waves: 2 },
       { room: 3, from: [1], nest: 1, key: 'red_reliquary', kind: 'seals', choice: 'first', waves: 2 },
@@ -479,15 +486,53 @@ export class TerrainField {
     }
   }
 
-  _clearSiteFootprints() {
+  // The PAD: a perfect geometric disc of grass, stamped over whatever the
+  // landform put there — water, crag, wood, ore, all of it. Terrain character
+  // is only allowed OUTSIDE the pad; inside, every tile is walkable and
+  // buildable, so the city plan is drawn, not negotiated with a hillside.
+  // The disc is levelled to the site's own ground (the shelf above the plain,
+  // the shore below it) with a short rim blend, so the keep still reads as
+  // high or low country — it just reads as AUTHORED high or low country.
+  _stampCityPads(elev) {
     const N = this.size;
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        for (const s of this.sites) {
-          if (Math.hypot(x - s.x, z - s.z) < 10) { this.tiles[this.idx(x, z)] = TILE.GRASS; break; }
+    this.sites.forEach((s, i) => {
+      const sx = Math.round(s.x), sz = Math.round(s.z);
+      // A pad never runs under another site's pad, nor off the edge of the
+      // world: clamp the disc to its neighbours and the coast.
+      let r = CITY_PAD_R;
+      for (const o of this.sites) {
+        if (o === s) continue;
+        r = Math.min(r, Math.hypot(o.x - s.x, o.z - s.z) / 2 - 2);
+      }
+      r = Math.min(r, Math.min(sx, sz, N - 1 - sx, N - 1 - sz) - 3);
+      r = Math.max(22, Math.min(CITY_PAD_R, r));
+      s.padR = Math.round(r);
+      // The site's own level, softened toward mid (same as _flattenSites) so
+      // the pad is a terrace, not a pit or a tower.
+      const e0 = elev ? elev[sz * N + sx] : 0.5;
+      const target = e0 * 0.6 + 0.5 * 0.4;
+      const R = r;
+      // Integer loop bounds (a clamped radius can be fractional, and a
+      // fractional index on a typed array writes a property, not a tile).
+      const RI = Math.ceil(R);
+      for (let dz = -RI - 4; dz <= RI + 4; dz++) {
+        for (let dx = -RI - 4; dx <= RI + 4; dx++) {
+          const d = Math.hypot(dx, dz);
+          if (d > R + 4) continue;
+          const x = sx + dx, z = sz + dz;
+          if (!this.inBounds(x, z)) continue;
+          const k = this.idx(x, z);
+          // Tiles are cleared to the ROUNDED disc, so the guarantee the map
+          // makes — every tile within padR is grass — is exactly measurable.
+          if (d <= s.padR) this.tiles[k] = TILE.GRASS;
+          if (elev) {
+            // Flat to the rim, then a quick cosmetic blend into the country.
+            const w = clamp((R + 2 - d) / 4, 0, 1);
+            elev[k] = elev[k] * (1 - w) + target * w;
+          }
         }
       }
-    }
+    });
   }
 
   // ---- city sites -------------------------------------------------------
@@ -680,9 +725,12 @@ export class TerrainField {
   }
 
   // Forests and crags are impassable, so every hive gets a road to war: a
-  // meandering pass carved from the nest toward the nearest city site.
+  // meandering pass carved from the nest toward the nearest city site. The
+  // road's polyline is kept — the outpost pads are anchored on it, so a road
+  // keep stands ON the way to the hive, not somewhere scenic beside it.
   _carveWarRoads() {
     const N = this.size;
+    this.roadPaths = [];
     for (const [x, z] of this.nestSpots) {
       let target = this.sites[0];
       let bd = Infinity;
@@ -691,10 +739,12 @@ export class TerrainField {
         if (d < bd) { bd = d; target = s; }
       }
       let px = x, pz = z, guard = 0;
+      const pts = [[px | 0, pz | 0]];
       while (Math.hypot(px - target.x, pz - target.z) > 8 && guard++ < N * 3) {
         const ang = Math.atan2(target.z - pz, target.x - px) + (this.rng() - 0.5) * 0.7;
         px = clamp(px + Math.cos(ang) * 1.2, 2, N - 3);
         pz = clamp(pz + Math.sin(ang) * 1.2, 2, N - 3);
+        pts.push([px | 0, pz | 0]);
         for (let dz = -1; dz <= 1; dz++) {
           for (let dx = -1; dx <= 1; dx++) {
             const k = this.idx((px | 0) + dx, (pz | 0) + dz);
@@ -703,6 +753,71 @@ export class TerrainField {
             else if (t === TILE.WATER) this.tiles[k] = TILE.SAND; // a causeway
           }
         }
+      }
+      this.roadPaths.push({ nest: [x, z], site: [target.x, target.z], pts });
+    }
+  }
+
+  // OUTPOST PADS: a small keep on the road to the hive. At 60% and 85% of the
+  // way down each war road, an authored anchor gets its own little geometric
+  // pad — a round clearing of flat, buildable ground — so the outer works are
+  // drawn on the line the horde actually walks, instead of wherever the crags
+  // happened to pinch. The anchors sit on carved road, so they are reachable
+  // from the city by construction; the fallback (a wild chokepoint) only
+  // exists for maps that shipped no roads at all.
+  _carveOutpostPads() {
+    const N = this.size;
+    this.outpostSpots = [];
+    const NAMES = ['Wardstone', 'Milehouse', 'The Halfway Camp', 'Ashpost',
+      'The Long Watch', 'Coldhearth', 'Gallowgate', 'The Last Camp'];
+    let ni = 0;
+    const stamp = (x, z, road) => {
+      let eSum = 0, eN = 0;
+      for (let dz = -OUTPOST_PAD_R; dz <= OUTPOST_PAD_R; dz++) {
+        for (let dx = -OUTPOST_PAD_R; dx <= OUTPOST_PAD_R; dx++) {
+          if (dx * dx + dz * dz > OUTPOST_PAD_R * OUTPOST_PAD_R) continue;
+          const tx = x + dx, tz = z + dz;
+          if (!this.inBounds(tx, tz)) continue;
+          const k = this.idx(tx, tz);
+          if (this.elev) { eSum += this.elev[k]; eN++; }
+          this.tiles[k] = TILE.GRASS;
+        }
+      }
+      if (this.elev && eN) {
+        const target = eSum / eN;
+        for (let dz = -OUTPOST_PAD_R - 3; dz <= OUTPOST_PAD_R + 3; dz++) {
+          for (let dx = -OUTPOST_PAD_R - 3; dx <= OUTPOST_PAD_R + 3; dx++) {
+            const d = Math.hypot(dx, dz);
+            const tx = x + dx, tz = z + dz;
+            if (d > OUTPOST_PAD_R + 3 || !this.inBounds(tx, tz)) continue;
+            const k = this.idx(tx, tz);
+            const w = clamp((OUTPOST_PAD_R + 2 - d) / 4, 0, 1);
+            this.elev[k] = this.elev[k] * (1 - w) + target * w;
+          }
+        }
+      }
+      // The keep faces down the road it stands on: gate toward the city, and
+      // the road runs on toward the hive through the far side.
+      const site = road.site;
+      this.outpostSpots.push({
+        x, z, name: NAMES[ni++ % NAMES.length],
+        gateAng: Math.atan2(site[1] - z, site[0] - x),
+      });
+    };
+    for (const road of this.roadPaths || []) {
+      const L = road.pts.length;
+      if (L < 12) continue;
+      // At 60% and 85% of the way from the city to the hive. The road points
+      // run nest→site, so those anchors sit at 40% and 15% of the array —
+      // far enough out to guard the march, near enough to be the city's.
+      for (const frac of [0.4, 0.15]) {
+        const [x, z] = road.pts[Math.min(L - 1, Math.round(L * frac))];
+        // Not on top of the city this road marches from, and not on top of a
+        // hive — anywhere else on the road is exactly where a keep belongs.
+        if (Math.hypot(x - road.site[0], z - road.site[1]) < CITY_PAD_R + 10) continue;
+        if (this.nestSpots.some(([ex, ez]) => Math.hypot(x - ex, z - ez) < 12)) continue;
+        if (this.outpostSpots.some((o) => Math.hypot(x - o.x, z - o.z) < 16)) continue;
+        stamp(x, z, road);
       }
     }
   }
@@ -731,19 +846,18 @@ export class TerrainField {
     }
   }
 
-  // Outposts are anchored exactly on their flags and use the 2x2 footprint
-  // whose north-west corner is (node - 1). Reachability alone is not enough:
-  // a ford or forest node can be easy to walk to while its future fort still
-  // overlaps water, trees, or crag. Clear only that foundation so the flag
-  // stays where the terrain reader placed it and the authored feature around
-  // it remains intact.
+  // Outposts are anchored exactly on their flags and stand on a small pad of
+  // their own: a round clearing (radius 4) of walkable, buildable ground, so
+  // the fort the flag grows into never half-overlaps water, trees or crag —
+  // and it reads, from a distance, as a prepared foundation rather than a
+  // flag stuck wherever the terrain reader happened to be looking.
   _prepareNodeFoundations() {
     for (const node of this.nodeSpots || []) {
-      const x0 = (node.x | 0) - 1;
-      const z0 = (node.z | 0) - 1;
-      for (let dz = 0; dz < 2; dz++) {
-        for (let dx = 0; dx < 2; dx++) {
-          const x = x0 + dx, z = z0 + dz;
+      const nx = node.x | 0, nz = node.z | 0;
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let dx = -4; dx <= 4; dx++) {
+          if (dx * dx + dz * dz > 16) continue;
+          const x = nx + dx, z = nz + dz;
           if (!this.inBounds(x, z) || this.isBuildable(x, z)) continue;
           const i = this.idx(x, z);
           this.tiles[i] = this.tiles[i] === TILE.WATER ? TILE.SAND : TILE.GRASS;
@@ -923,7 +1037,8 @@ export class TerrainField {
           const nx = x + dx, nz = z + dz;
           if (nx < 4 || nz < 4 || nx > N - 5 || nz > N - 5) continue;
           if (!this.isWalkable(nx, nz)) continue;
-          if (this.sites.some((s) => Math.hypot(nx - s.x, nz - s.z) < 26)) continue;
+          if (this.sites.some((s) => Math.hypot(nx - s.x, nz - s.z) < (s.padR || 26) + 3)) continue;
+          if ((this.outpostSpots || []).some((o) => Math.hypot(nx - o.x, nz - o.z) < 13)) continue;
           if (this.nestSpots.some(([ex, ez]) => Math.hypot(nx - ex, nz - ez) < 9)) continue;
           return [nx, nz];
         }
@@ -1103,7 +1218,8 @@ export class TerrainField {
     for (const c of cands) {
       if (kept.length >= 16) break;
       if (kept.some((k) => Math.hypot(k.x - c.x, k.z - c.z) < 12)) continue;
-      if (this.sites.some((s) => Math.hypot(c.x - s.x, c.z - s.z) < 12)) continue;
+      if (this.sites.some((s) => Math.hypot(c.x - s.x, c.z - s.z) < (s.padR || 26))) continue;
+      if ((this.outpostSpots || []).some((o) => Math.hypot(c.x - o.x, c.z - o.z) < 14)) continue;
       if (this.nestSpots.some(([x, z]) => Math.hypot(c.x - x, c.z - z) < 11)) continue;
       c.name = NAMES[kept.length % NAMES.length];
       kept.push(c);
