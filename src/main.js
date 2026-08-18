@@ -207,6 +207,7 @@ class App {
       onGalaxyOpen: () => this._openGalaxyMap(),
       onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
       onSignIn: () => this._signIn(),
+      onSignOut: () => this._signOut(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
       onLobbyOpen: () => this._openLobby(),
@@ -1455,6 +1456,19 @@ class App {
       await this.auth.signInWithGoogle();
     } catch (err) {
       this.ui.setAccount({ ...this.auth.status(), error: err.message || 'Google sign-in failed.' });
+    }
+  }
+
+  async _signOut() {
+    try {
+      this._authenticatedEntryHandled = false;
+      this._clearOverworld();
+      this.ui.setOverworldMode(false);
+      this.showMenuBackdrop(this.ui.selectedLevel || 1);
+      await this.auth.signOut();
+      await this._applyAuth(this.auth.status());
+    } catch (err) {
+      this.ui.showBanner(err.message || 'Could not log out. Try again.', 'bad', 3600);
     }
   }
 

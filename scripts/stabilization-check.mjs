@@ -14,11 +14,16 @@ const css = read('style.css');
 // ENTER WORLD is the login/start action, not a chain of roster confirmations.
 assert.match(ui, /id="a-google">ENTER WORLD</, 'the signed-out front door must say ENTER WORLD');
 assert.match(ui, /id="a-enter">RESUME WORLD</, 'a signed-in title return must say RESUME WORLD');
-assert.match(ui, /id="m-enter-world">RESUME WORLD</, 'the optional roster must resume, not re-enter');
+assert.match(ui, /id="m-enter-world">RETURN TO WORLD</, 'the optional roster must return to the live world, not re-enter');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*character\.lastWorld[\s\S]*showCharacterCreator\(\)/,
   'authenticated entry must resume a character or open creation');
 assert.match(main, /_createMmoCharacter[\s\S]*const worldId = character\.lastWorld \|\| 'earth'[\s\S]*this\._enterOverworld\(worldId\)/,
   'character creation must enter Earth instead of bouncing to the roster');
+assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an explicit logout action');
+assert.match(ui, /#m-logout'\)\.onclick = \(\) => this\.cb\.onSignOut/, 'logout must call auth instead of repainting the title');
+assert.match(main, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'the shell must sign out of the account backend');
+assert.match(ui, /id="fight-kit"[\s\S]*d\.aura[\s\S]*d\.passives[\s\S]*d\.ability/, 'Fight mode must render the hero aura, passives, and active ability');
+assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting\)/, 'the complete hero kit must appear in Fight mode');
 
 // Build and Fight are explicit action contexts. Space builds in Build mode and
 // dodges in Fight mode; Q only casts in Fight mode. Movement stays shared.

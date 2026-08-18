@@ -72,7 +72,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
-      <button id="ow-menu" class="tbtn owmenu hidden" title="War council (Esc)">⚙</button>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="Characters and account (Esc)">☰ CHARACTERS</button>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -102,6 +102,7 @@ export class UI {
             </div>
           </div>
           <div id="herostats" class="herostats"></div>
+          <div id="fight-kit" class="fight-kit hidden" aria-label="Hero abilities"></div>
           <div id="upgradepanel" class="hidden"></div>
           <button id="bigaction" class="bigaction"></button>
         </div>
@@ -156,8 +157,8 @@ export class UI {
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">RESUME WORLD</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">RETURN TO WORLD</button></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -488,7 +489,7 @@ export class UI {
       this.customCreatePanel(false);
       this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 4 });
     };
-    q('#m-logout').onclick = () => this._showScreen('account');
+    q('#m-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#custom-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
@@ -2033,6 +2034,19 @@ export class UI {
     if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
     const d = h.def;
+    const kit = this.root.querySelector('#fight-kit');
+    if (kit) {
+      const entries = [
+        d.aura ? { kind: 'AURA', icon: d.aura.icon, name: d.aura.name, desc: d.aura.desc } : null,
+        ...(d.passives || []).map((passive, index) => ({
+          kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
+        })),
+        { kind: this._keyLabel('ability1'), icon: d.ability.icon, name: d.ability.name, desc: d.ability.desc, active: true },
+      ].filter(Boolean);
+      kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
+        <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
+      </div>`).join('');
+    }
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
     face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
@@ -2069,6 +2083,8 @@ export class UI {
     chip.classList.toggle('build', !fighting);
     const label = chip.querySelector('span');
     if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
+    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting);
+    this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
     chip.title = fighting
       ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;

@@ -203,7 +203,7 @@ const uiSource = read('src/ui.js');
 assert.match(uiSource, /id="a-custom">CUSTOM GAMES/, 'the title screen must expose Custom Games');
 assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must expose Cinematics');
 assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
-assert.match(uiSource, /id="m-enter-world">RESUME WORLD/, 'the roster must resume rather than repeat ENTER WORLD');
+assert.match(uiSource, /id="m-enter-world">RETURN TO WORLD/, 'the roster must return to the live world rather than repeat ENTER WORLD');
 assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Resume World must open the overworld');
 assert.match(uiSource, /id="screen-solo"/, 'custom games must have their own mode screen');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
@@ -221,6 +221,8 @@ assert.doesNotMatch(mainSource, /moonRing/, 'title orbit must not restore the di
 // the dispatch rather than the letter, and keybind-check pins the default to C.
 assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'the character screen must be reachable from the persistent world');
 assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
+assert.match(uiSource, /id="m-logout">LOG OUT/, 'the signed-in character screen must expose logout');
+assert.match(mainSource, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'logout must terminate the account session');
 assert.match(uiSource, /this\._mmExploredGame !== game[\s\S]*document\.createElement\('canvas'\)/, 'minimap exploration memory must reset per match and use a cached mask');
 assert.match(uiSource, /game\.heroes\[this\._p\] === u/, 'the minimap must identify the local co-op hero, not always player one');
 
