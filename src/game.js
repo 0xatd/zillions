@@ -12,7 +12,7 @@ import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
-  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods,
+  NEST_HP_BASE, NEST_HP_LEVEL_SHARE, DROPS, itemMods, itemInfo, weaponFor,
   ITEMS, FIELD_LOOT, PACK_SLOTS, LOOT_PICKUP_RADIUS, LOOT_REVEAL_RADIUS, LOOT_DROP_COOLDOWN,
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
@@ -250,6 +250,7 @@ export class Game {
         summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
+        equip: { ...(h.equipment || {}) },
         blessings: [...(h.blessings || [])],
         fallen: h.fallen ? 1 : 0,
         upgrades: { ...h.upgrades },
@@ -403,6 +404,7 @@ export class Game {
     for (const hs of snap.heroes) {
       const h = this._spawnHero(hs.k, hs.x, hs.z, {
         level: hs.level, xp: hs.xp, items: hs.items || [], pack: hs.pack || [], upgrades: hs.upgrades || {},
+        equipment: hs.equip || {},
       });
       if (hs.id) h.id = hs.id;
       if (hs.blessings && hs.blessings.length) {
@@ -2199,6 +2201,11 @@ export class Game {
     const itemModsOnly = itemMods([...items, ...pack]);
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
+    // What this hero is swinging. An empty equipment map resolves to the
+    // hero's signature weapon, which carries that hero's original numbers —
+    // so an unequipped hero fights exactly as they did before weapons existed.
+    const equipment = camp && camp.equipment ? { ...camp.equipment } : {};
+    const weapon = weaponFor(key, equipment);
     const h = {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
@@ -2206,6 +2213,7 @@ export class Game {
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
+      equipment, weapon,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
@@ -2240,6 +2248,9 @@ export class Game {
     mods.hp = (mods.hp || 0) + forge.hp;
     mods.cdr = (mods.cdr || 0) + forge.cdr;
     h.mods = mods;
+    // Equipment can change between runs and, later, between weapon sets. The
+    // resolved weapon is rebuilt here so every derived stat reads one source.
+    h.weapon = weaponFor(h.key, h.equipment) || h.weapon;
     h.maxHp = h.def.hp + h.def.levelHp * heroGrowthUnits(h.level) + h.mods.hp;
     h.skillPoints = heroUnspentUpgrades(h.level, h.upgrades);
     h.auraRank = h.upgrades.aura || 0;
@@ -2261,7 +2272,8 @@ export class Game {
   }
 
   heroRange(h) {
-    return h.def.range + ((h.mods && h.mods.range) || 0);
+    const w = h.weapon || h.def;
+    return w.range + ((h.mods && h.mods.range) || 0);
   }
 
   heroUltDamageMult(h) {
@@ -2299,7 +2311,7 @@ export class Game {
     return {
       damage: this.heroDmg(h),
       range: this.heroRange(h),
-      rate: h.def.rof * (1 + ((h.mods && h.mods.rof) || 0)),
+      rate: (h.weapon || h.def).rof * (1 + ((h.mods && h.mods.rof) || 0)),
       speed: h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + ((h.mods && h.mods.speed) || 0)),
       regen: h.def.regen + 0.25 * (h.level - 1) + ((h.mods && h.mods.regen) || 0),
       cooldown: h.def.ability.cd * Math.max(0.15, cdMult),
@@ -2372,7 +2384,10 @@ export class Game {
   }
 
   heroDmg(h) {
-    return (h.def.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
+    // Base damage comes from the WEAPON. Growth per level stays on the hero,
+    // because levelling the character is not levelling the gun.
+    const w = h.weapon || h.def;
+    return (w.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
   }
 
   addXp(h, amount) {
@@ -2490,7 +2505,8 @@ export class Game {
           const x = h.x + Math.cos(a) * 1.4, z = h.z + Math.sin(a) * 1.4;
           const u = this._spawnUnit('tiger_clone', x, z, null);
           const hp = Math.round(h.maxHp * mult);
-          u.def = { ...UNITS.tiger_clone, hp, dmg: Math.round(baseDmg * mult * ultMult), range: h.def.range, rof: h.def.rof, speed: h.def.speed, color: h.def.color };
+          const hw = h.weapon || h.def;
+          u.def = { ...UNITS.tiger_clone, hp, dmg: Math.round(baseDmg * mult * ultMult), range: hw.range, rof: hw.rof, speed: h.def.speed, color: h.def.color };
           u.hp = hp; u.maxHp = hp;
           u.holdX = x; u.holdZ = z;
           u.temp = true; u.expireT = dur; u.ownerHeroId = h.id;
@@ -3516,6 +3532,9 @@ export class Game {
       // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
       // squad troops too), not just heroes self-buffing.
       const rofMult = (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);
+      // A hero swings their equipped weapon; a squad trooper swings their unit
+      // definition. Both answer the same questions, so one accessor serves.
+      const w = u.weapon || u.def;
       const attackRange = u.hero ? this.heroRange(u) : u.def.range;
       // Crit: a hero's own chance (base + passives) plus whatever an aura is
       // granting right now (John's Reckless Bravado reaches squad troops too).
@@ -3524,38 +3543,38 @@ export class Game {
       // regardless of how often each client's HUD happens to re-render.
       const hitDmg = () => {
         let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
-        const critChance = (u.hero ? (u.def.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
-        if (critChance > 0 && this.rng() < critChance) dmg *= (u.hero && u.def.critMult) || 1.75;
+        const critChance = (u.hero ? (w.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
+        if (critChance > 0 && this.rng() < critChance) dmg *= (u.hero && w.critMult) || 1.75;
         return dmg;
       };
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= attackRange * attackRange) {
-          u.cooldown = 1 / (u.def.rof * rofMult);
+          u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = hitDmg();
           this.damageZombie(zb, dmg, u.x, u.z);
           // Shotgun spread: the blast mauls everything packed around the target.
-          if (u.def.splash) {
-            const s2 = u.def.splash * u.def.splash;
-            for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, u.def.splash)) {
+          if (w.splash) {
+            const s2 = w.splash * w.splash;
+            for (const zb2 of nearbyBuckets(this._zombieBuckets, this.zombies, zb.x, zb.z, w.splash)) {
               if (zb2 === zb || zb2.dead) continue;
               if (dist2(zb.x, zb.z, zb2.x, zb2.z) <= s2) this.damageZombie(zb2, dmg * 0.55, u.x, u.z);
             }
           }
-          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
+          const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale });
-          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+          if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
         const n = u.targetNest;
         if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 2.5) ** 2) {
-          u.cooldown = 1 / (u.def.rof * rofMult);
+          u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
           this._damageNest(n, hitDmg());
-          const kind = u.hero ? (u.def.melee ? 'melee' : u.def.shotgun ? 'shotgun' : 'hero') : u.key;
+          const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
           this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7, targetKind: 'nest' });
-          if (u.def.noise > 0) this.wakeZombies(u.x, u.z, u.def.noise);
+          if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       }
     }

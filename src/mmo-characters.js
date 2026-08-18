@@ -2,6 +2,9 @@
 // heroes remain in Custom Games; MMO characters carry their own class, level,
 // equipment, appearance and last world between instances.
 
+import { EQUIP_SLOTS, slotPool } from './items.js';
+import { itemInfo } from './config.js';
+
 export const MAX_MMO_CHARACTERS = 8;
 
 export const MMO_CLASSES = {
@@ -29,6 +32,23 @@ export const APPEARANCES = {
   forest: { name: 'Forest', color: '#4f785d' },
 };
 
+// The five things a character can have on. A slot holding a key that no
+// longer resolves is dropped rather than honoured, the same way normalizeMeta
+// drops a node whose prerequisites went missing.
+export function normalizeEquipment(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const slot of EQUIP_SLOTS) {
+    const key = raw[slot];
+    if (typeof key !== 'string' || !key) continue;
+    const item = itemInfo(key);
+    if (!item) continue;
+    if (item.slot && item.slot !== slotPool(slot)) continue;
+    out[slot] = key;
+  }
+  return out;
+}
+
 const cleanName = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 18);
 
 export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron') {
@@ -44,6 +64,7 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
     xp: 0,
     talentPoints: 0,
     items: [],
+    equipment: {},
     upgrades: {},
     lastWorld: 'earth',
     createdAt: now,
@@ -61,6 +82,7 @@ export function normalizeMmoCharacters(profile) {
     character.level = Math.max(1, Math.min(100, Number(character.level) || 1));
     character.xp = Math.max(0, Number(character.xp) || 0);
     character.items = Array.isArray(character.items) ? character.items : [];
+    character.equipment = normalizeEquipment(character.equipment);
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
     character.lastWorld = character.lastWorld || profile.lastWorld || 'earth';
@@ -107,6 +129,7 @@ export function characterCamp(character, relics = []) {
     level: character?.level || 1,
     xp: character?.xp || 0,
     items: [...(character?.items || [])],
+    equipment: normalizeEquipment(character?.equipment),
     upgrades: { ...(character?.upgrades || {}) },
     relics: [...relics],
   };

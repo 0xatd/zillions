@@ -638,6 +638,46 @@ export const MOD_KEYS = GEAR_MOD_KEYS;
 //   'scatter_mk2:7f3a91:62:2'     a rolled item, generated from the key itself
 // Authored keys resolve from the table. Rolled keys resolve through
 // `resolveItem()`, which is pure — so this stays a plain sum with no state.
+// ---------- Weapons ----------
+//
+// The weapon used to BE the hero. `HEROES.scott` carried dmg, range, rof,
+// shotgun and splash directly, which meant nothing else could ever be a
+// weapon. The weapon block now lives on its own, and a hero references one.
+//
+// A hero's SIGNATURE weapon is generated from that hero's own definition, so
+// an unequipped hero fights with exactly the numbers they always had. This is
+// deliberate: introducing weapons must not move a single balance value. New
+// weapon bases in `items.js` are new content on top, not a rebalance
+// underneath.
+export function signatureWeapon(heroKey) {
+  const d = HEROES[heroKey];
+  if (!d) return null;
+  return {
+    key: `sig_${heroKey}`, name: `${d.name.split(' ')[0]}'s ${d.melee ? 'Blade' : 'Gun'}`,
+    icon: d.icon, class: 'signature', signature: true, heroKey,
+    dmg: d.dmg, rof: d.rof, range: d.range,
+    splash: d.splash || 0, shotgun: !!d.shotgun, melee: !!d.melee, noise: d.noise || 0,
+    critChance: d.critChance || 0, critMult: d.critMult || 1.75,
+    types: { kinetic: 1 },
+  };
+}
+
+export const SIGNATURE_WEAPONS = Object.fromEntries(
+  Object.keys(HEROES).map((key) => [key, signatureWeapon(key)]),
+);
+
+// What this hero is actually swinging. An equipped weapon replaces the
+// signature outright; the hero keeps levelDmg, hp, aura and ability.
+// `equipment` is the character's slot map, and an empty one is the norm.
+export function weaponFor(heroKey, equipment = null) {
+  const equipped = equipment && equipment.weapon;
+  if (equipped) {
+    const item = itemInfo(equipped);
+    if (item && item.weapon) return item.weapon;
+  }
+  return SIGNATURE_WEAPONS[heroKey] || null;
+}
+
 export function itemMods(items) {
   const m = {};
   for (const k of MOD_KEYS) m[k] = 0;
