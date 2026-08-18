@@ -91,6 +91,7 @@ assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'np
 assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run check must validate production GLBs');
 assert.ok(packageJson.scripts?.check?.includes('art-state-check.mjs'), 'npm run check must validate presentation states');
 assert.ok(packageJson.scripts?.check?.includes('fog-of-war-check.mjs'), 'npm run check must validate fog-of-war source rules');
+assert.ok(packageJson.scripts?.check?.includes('galaxy-check.mjs'), 'npm run check must validate the galaxy and meta-progression layers');
 assert.ok(read('src/main.js').includes('this._updateFogOfWar()'), 'main renderer must update the tactical vision shroud');
 assert.ok(read('src/ui.js').includes('fogVisionSources(game)'), 'minimap must use the same allied vision sources');
 assert.ok(read('art-slice.html').includes('State review'), 'art review page must expose state inspection');

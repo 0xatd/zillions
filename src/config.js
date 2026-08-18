@@ -757,8 +757,36 @@ const GALAXY_BLURBS = {
 };
 const GALAXY_BOSS_EPITHETS = ['Elder', 'Vast', 'Twice-Born', 'Howling', 'Crowned', 'Blighted', 'Ancient'];
 
+// A frontier world is one of three kinds, and the kind is a property of the
+// planet NUMBER — so every player's galaxy holds the same holdouts and the
+// same derelicts, and `levelById()` stays the one source of truth for what a
+// world is. The cycle repeats every eight planets: five campaign worlds, two
+// holdouts, one derelict, never two of a kind side by side.
+export const GALAXY_WORLD_KINDS = {
+  standard: {
+    key: 'standard', label: 'Frontier world', icon: '\u{1F30D}',
+    desc: 'A hive-held planet. Found a colony, take the lanes, raze every hive.',
+  },
+  holdout: {
+    key: 'holdout', label: 'Holdout', icon: '\u{1F6E1}\uFE0F',
+    desc: 'A world you outlast. Fewer hives, harder pressure, and the ground is the objective.',
+  },
+  derelict: {
+    key: 'derelict', label: 'Derelict', icon: '\u{1F6F0}\uFE0F',
+    desc: 'A stripped hulk of a planet. Poor ground, poorer treasury, and something worth finding inside it.',
+  },
+};
+
+export function galaxyWorldKind(id) {
+  const n = (id | 0) - LEVELS.length;
+  if (n <= 0) return 'standard';
+  const cycle = n % 8;
+  return cycle === 3 || cycle === 6 ? 'holdout' : cycle === 5 ? 'derelict' : 'standard';
+}
+
 // Shift a 0xRRGGBB colour around the hue wheel without pulling in three.js.
-function shiftHue(hex, deg) {
+// Exported because the galaxy layer varies a world's palette the same way.
+export function shiftHue(hex, deg) {
   const r = (hex >> 16 & 255) / 255, g = (hex >> 8 & 255) / 255, b = (hex & 255) / 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
   let h = 0;
@@ -833,6 +861,54 @@ export function isLabyrinthLevel(id) {
 
 export function isGalaxyLevel(id) { return (id | 0) > LEVELS.length && !isLabyrinthLevel(id); }
 
+const GALAXY_KIND_BLURBS = {
+  standard: 'Hive-held, and the hives are the war.',
+  holdout: 'The hives here are few and the ground is the prize — hold it.',
+  derelict: 'Stripped long before you landed. Whatever is left is buried.',
+};
+
+// The kind bends the treasury, not the difficulty curve: `mult` stays the one
+// monotonic ladder so a world further out is always the harder world.
+function galaxyEconomy(n, kind) {
+  const startGold = Math.min(140, 96 + n * 4);
+  const income = Math.min(1.25, 1.16 + n * 0.01);
+  const pressure = Math.min(1.15, 1.08 + n * 0.01);
+  if (kind === 'holdout') {
+    return { startGold: Math.min(140, startGold + 12), income, pressure: Math.min(1.15, pressure + 0.04) };
+  }
+  if (kind === 'derelict') {
+    return { startGold: Math.max(48, startGold - 24), income: Math.max(0.9, income - 0.1), pressure };
+  }
+  return { startGold, income, pressure };
+}
+
+// Every kind keeps three quests so the end screen reads the same everywhere;
+// what they ask for is what the kind is about.
+function galaxyQuests(id, kind, { kills, held, nests }) {
+  const raze = { id: `g${id}q3`, name: 'Liberation', desc: 'Raze every hive', reward: null, check: (g) => g.stats.nests >= nests };
+  if (kind === 'holdout') {
+    const threat = 6 + (nests * 2);
+    return [
+      { id: `g${id}q1`, name: 'The Long Watch', desc: `Reach Threat ${threat}`, reward: null, check: (g) => g.threatLevel >= threat },
+      { id: `g${id}q2`, name: 'Not One Step', desc: `Hold ${held} lane nodes at once`, reward: null, check: (g) => g.stats.bestHeld >= held },
+      raze,
+    ];
+  }
+  if (kind === 'derelict') {
+    const salvage = 200 + nests * 60;
+    return [
+      { id: `g${id}q1`, name: 'Salvage Rights', desc: `Collect ${salvage} gold in one landing`, reward: null, check: (g) => g.stats.coins >= salvage },
+      { id: `g${id}q2`, name: 'Nothing Left Standing', desc: `Slay ${Math.round(kills * 0.6)} of the dead`, reward: null, check: (g) => g.stats.kills >= Math.round(kills * 0.6) },
+      raze,
+    ];
+  }
+  return [
+    { id: `g${id}q1`, name: 'Deeper Still', desc: `Slay ${kills} of the dead`, reward: null, check: (g) => g.stats.kills >= kills },
+    { id: `g${id}q2`, name: 'Ground Held', desc: `Hold ${held} lane nodes at once`, reward: null, check: (g) => g.stats.bestHeld >= held },
+    raze,
+  ];
+}
+
 // Planet n of the galaxy, the same for everyone, forever.
 export function galaxyLevel(id) {
   const n = id - LEVELS.length;           // 1st, 2nd, ... galaxy planet
@@ -857,27 +933,25 @@ export function galaxyLevel(id) {
     hp: Math.round(baseBoss.hp * (1 + n * 0.18)),
     dmg: Math.round(baseBoss.dmg * (1 + n * 0.06)),
   };
+  const kind = galaxyWorldKind(id);
   const kills = 800 + n * 200;
   const held = Math.min(9, 5 + (n >> 1));
-  const nests = Math.min(7, 4 + (n >> 2));
+  // Holdouts and derelicts both field fewer hives than a campaign world: a
+  // holdout because the pressure comes from the ground you must keep, a
+  // derelict because the planet is already picked over.
+  const nests = kind === 'standard'
+    ? Math.min(7, 4 + (n >> 2))
+    : Math.max(3, Math.min(7, 4 + (n >> 2)) - 1);
   // Frontier worlds are big and get bigger: more ground between you and the
   // hives, longer lanes, more room for the front to be a place. Capped where
   // the flow-field and mesh still stay comfortable.
   const size = Math.min(248, 192 + n * 6);
   return {
     id, name, galaxy: true, seed: (77000 + id * 613) >>> 0,
-    mult, size, nests,
-    economy: {
-      startGold: Math.min(140, 96 + n * 4),
-      income: Math.min(1.25, 1.16 + n * 0.01),
-      pressure: Math.min(1.15, 1.08 + n * 0.01),
-    },
-    quests: [
-      { id: `g${id}q1`, name: 'Deeper Still', desc: `Slay ${kills} of the dead`, reward: null, check: (g) => g.stats.kills >= kills },
-      { id: `g${id}q2`, name: 'Ground Held', desc: `Hold ${held} lane nodes at once`, reward: null, check: (g) => g.stats.bestHeld >= held },
-      { id: `g${id}q3`, name: 'Liberation', desc: 'Raze every hive', reward: null, check: (g) => g.stats.nests >= nests },
-    ],
-    blurb: `${GALAXY_BLURBS[terrain]} Frontier world ${n} — the war goes on.`,
+    mult, size, nests, worldKind: kind,
+    economy: galaxyEconomy(n, kind),
+    quests: galaxyQuests(id, kind, { kills, held, nests }),
+    blurb: `${GALAXY_BLURBS[terrain]} ${GALAXY_KIND_BLURBS[kind]} Frontier world ${n} — the war goes on.`,
     theme: { terrain, city, palette },
     boss,
   };

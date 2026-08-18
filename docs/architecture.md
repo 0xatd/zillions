@@ -48,6 +48,7 @@ module already owns that rule.
 | `src/multiplayer-pacing.js` | Adaptive buffer targets and repair history |
 | `src/multiplayer-readiness.js` | Direct connection readiness |
 | `src/multiplayer-eligibility.js` | Campaign unlock eligibility |
+| `src/meta.js` | Persistent meta-progression: run payouts, the upgrade tree, and the bonus payload a run starts with |
 
 Simulation code must produce the same result on every peer. Add all new state
 to snapshots when the state can affect later simulation.
@@ -60,6 +61,7 @@ to snapshots when the state can affect later simulation.
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/overworld.js` | Headless persistent worlds: galaxy catalog, world descriptors, stitched biomes, instance gates, Orbital Lifts, hero controller, ghost presence |
+| `src/galaxy.js` | Headless galaxy generation: spiral star systems, world kinds, threat tiers, and generated world descriptors |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
@@ -170,6 +172,34 @@ galaxy and world descriptors must not assume that future destinations use the
 same art, siege objectives, or encounter format.
 
 Do not move production social state back to Vercel Blob.
+
+## Galaxy Generation and Meta-Progression
+
+`src/galaxy.js` generates the galaxy from one seed. Star systems sit on spiral
+arms with Sol at the hub. Each system carries one to three worlds, and each
+world resolves to a world descriptor in the shape `src/overworld.js` defines.
+
+Level identifiers are handed out in distance order, so the world further from
+Earth is always the harder world. A world reads its landform, palette, hives,
+boss and difficulty from `levelById()`. `src/galaxy.js` never invents level
+data; it decides where a world sits and what kind of world it is.
+
+Each world has a kind. A standard world is a campaign landing. A holdout runs
+the survival rules with fewer hives and higher pressure. A derelict carries a
+labyrinth hulk on its surface. `src/config.js` derives the kind from the planet
+number, so the simulation and the galaxy map always agree.
+
+`src/meta.js` owns what a player keeps between runs. `runScore()` in
+`src/game.js` folds a finished run into one score. `awardRun()` converts that
+score into Salvage Alloy, `spend()` buys nodes from a twelve-node tree, and
+`metaBonuses()` returns the data payload a run reads at start. Node effects are
+data only. Local storage holds the state today under the `zillions_meta` key,
+and `setMetaBackend()` is the seam a server takes later.
+
+`scripts/galaxy-check.mjs` builds every generated world, walks every sampled
+world descriptor, and drives the award and spend math.
+
+The galaxy and meta modules are wired into the shell in a follow-up change.
 
 ## Save and Restore
 
