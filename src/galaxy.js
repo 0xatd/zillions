@@ -22,8 +22,23 @@
 //   standard  — a campaign world: found a colony, take the lanes, raze hives.
 //   holdout   — a survival world: fewer hives, harder pressure, hold ground.
 //   derelict  — an exploration world: a labyrinth hulk sits on its surface.
+//
+// Factions (`src/factions.js`) occupy the galaxy in two different ways, and
+// the difference is structural rather than cosmetic. A faction that holds
+// ground owns WORLDS, and a world is a level id — a rung on the difficulty
+// ladder. A faction that has no ground — a fleet, a drifting bloom — occupies
+// a system's `presence[]` instead, which deliberately consumes no level id:
+// an anchorage is not a landing and must never become one, or the campaign
+// ladder ends up gated behind content nobody can stand on.
+//
+// System ownership is a PROJECTION (`systemOwner()`), never a stored field.
+// Ownership changes with progress; the galaxy's structure hash must not.
 import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyWorldKind, GALAXY_WORLD_KINDS, shiftHue } from './config.js';
 import { earthWorldDescriptor } from './overworld.js';
+import {
+  factionById, factionByKey, factionForWorld, factionForPresence,
+  presenceSiteKind, systemOwner, holdsWorlds, isMobile,
+} from './factions.js';
 import { makeRNG, clamp } from './utils.js';
 
 // The known galaxy: one seed, one galaxy, the same for every player and every
@@ -76,6 +91,67 @@ export function threatTierInfo(tier) {
   return THREAT_TIERS[clamp(tier | 0, 0, THREAT_TIERS.length - 1)];
 }
 
+// How often a star has someone parked in it who owns none of it, and how often
+// there are two of them. Roamers are common enough to read as a real presence
+// on the map and rare enough that a system still means its worlds.
+export const PRESENCE_CHANCE = 0.38;
+export const PRESENCE_SECOND_CHANCE = 0.22;
+
+// How many roamers are parked at this star, derived from the system's own seed
+// so it is independent of the galaxy walk.
+function presenceCountFor(system) {
+  const rng = makeRNG(((system.seed >>> 0) ^ 0x5eed17) >>> 0);
+  if (rng() >= PRESENCE_CHANCE) return 0;
+  return rng() < PRESENCE_SECOND_CHANCE ? 2 : 1;
+}
+
+// One roaming site: an anchorage a fleet keeps, or a bloom passing through.
+// It carries NO level id on purpose. An anchorage is not a landing.
+function makePresence(system, slot) {
+  const faction = factionForPresence(system.seed, slot);
+  const kind = presenceSiteKind(faction);
+  const rng = makeRNG(((system.seed >>> 0) ^ Math.imul(slot + 7, 0xc2b2ae35)) >>> 0);
+  const angle = rng() * Math.PI * 2;
+  const spread = 0.035 + rng() * 0.02;
+  return {
+    id: `${system.id}-${kind}-${slot}`,
+    kind,
+    label: kind === 'bloom' ? `${faction.short} bloom` : `${faction.short} anchorage`,
+    systemId: system.id,
+    factionId: faction.id,
+    faction,
+    mobile: isMobile(faction),
+    // The anchor point. A mobile roamer's ACTUAL position is a function of the
+    // epoch — see presencePositionAt() — and is deliberately not stored.
+    position: {
+      x: system.position.x + Math.cos(angle) * spread,
+      y: system.position.y + Math.sin(angle) * spread,
+      z: system.position.z,
+    },
+    drift: { angle, radius: spread, rate: 0.18 + rng() * 0.5 },
+  };
+}
+
+// Where a roaming site actually is at a given epoch.
+//
+// A fleet and a bloom MOVE, and the structure hash must not. Motion is derived
+// on read from the site's own drift parameters and an epoch both peers agree
+// on (campaign progress works; a wall clock does not — it would desync every
+// peer instantly). Nothing here is stored and nothing here is hashed.
+export function presencePositionAt(site, epoch = 0) {
+  if (!site) return null;
+  if (!site.mobile) return { ...site.position };
+  const t = Number.isFinite(epoch) ? epoch : 0;
+  const angle = site.drift.angle + t * site.drift.rate;
+  const centre = { x: site.position.x - Math.cos(site.drift.angle) * site.drift.radius,
+    y: site.position.y - Math.sin(site.drift.angle) * site.drift.radius };
+  return {
+    x: centre.x + Math.cos(angle) * site.drift.radius,
+    y: centre.y + Math.sin(angle) * site.drift.radius,
+    z: site.position.z,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
@@ -104,9 +180,11 @@ export function generateGalaxy(seed = GALAXY_SEED, opts = {}) {
     seed: seed >>> 0, position: { x: 0, y: 0, z: 0 }, polar: { r: 0, theta: 0 },
     threatTier: 0, worlds: [],
   };
+  const remnant = factionByKey('remnant');
   const earth = {
     id: 'earth', name: 'Earth', systemId: sol.id, systemName: sol.name,
     levelId: null, seed: seed >>> 0, kind: 'home',
+    factionId: remnant.id, faction: remnant,
     kindLabel: 'Homeworld', kindIcon: '\u{1F30D}',
     index: 0, orbit: 0, distance: 0, threatTier: 0, threatLabel: THREAT_TIERS[0].label,
     mult: 2, size: null, nests: 0, terrain: LEVELS[0].theme.terrain, city: LEVELS[0].theme.city,
@@ -115,6 +193,9 @@ export function generateGalaxy(seed = GALAXY_SEED, opts = {}) {
     position: { x: 0, y: 0, z: 0 },
   };
   sol.worlds.push(earth);
+  sol.presence = [];
+  sol.faction = remnant;
+  sol.factionId = remnant.id;
   systems.push(sol);
   worlds.push(earth);
 
@@ -141,7 +222,7 @@ export function generateGalaxy(seed = GALAXY_SEED, opts = {}) {
     const system = {
       id: `sys-${i}`, name, designation, index: i, arm, ring,
       seed: (seed ^ (i * 0x9e3779b1)) >>> 0,
-      position, polar: { r, theta }, threatTier: 0, worlds: [],
+      position, polar: { r, theta }, threatTier: 0, worlds: [], presence: [],
     };
     for (let w = 0; w < worldCount; w++) {
       const levelId = nextLevelId++;
@@ -154,6 +235,21 @@ export function generateGalaxy(seed = GALAXY_SEED, opts = {}) {
       }));
     }
     system.threatTier = system.worlds[0].threatTier;
+    // Roamers: whoever is parked at this star without owning any of it. These
+    // are sites, not worlds — no level id, nothing to land on, and a mobile
+    // one is only here for this epoch.
+    //
+    // Rolled from the SYSTEM's seed, never from the galaxy walk's rng. Drawing
+    // from the shared stream would mean that changing anything about roamers
+    // reshuffles every world count downstream of it; this way the two are
+    // independent and the world layout is stable against roamer changes.
+    for (let slot = 0; slot < presenceCountFor(system); slot++) {
+      system.presence.push(makePresence(system, slot));
+    }
+    // Ownership is computed, never stored as truth — see systemOwner().
+    const owner = systemOwner(system);
+    system.faction = owner;
+    system.factionId = owner ? owner.id : null;
     systems.push(system);
     worlds.push(...system.worlds);
   }
@@ -161,6 +257,7 @@ export function generateGalaxy(seed = GALAXY_SEED, opts = {}) {
   const galaxy = {
     seed: seed >>> 0, arms, rings,
     systems, worlds,
+    presence: systems.flatMap((s) => s.presence || []),
     worldCount: worlds.length,
     frontierCount: worlds.length - 1,
     firstLevelId: LEVELS.length + 1,
@@ -177,6 +274,9 @@ function makeWorld(levelId, system, orbit, position) {
   const kind = level.worldKind || galaxyWorldKind(levelId);
   const kindInfo = GALAXY_WORLD_KINDS[kind] || GALAXY_WORLD_KINDS.standard;
   const tier = threatTierFor(level.mult);
+  // The kind and the holder explain each other: a derelict is a Cenotaph tomb,
+  // and a holdout is a holdout because humans are still standing on it.
+  const faction = factionForWorld(levelId - LEVELS.length, kind);
   return {
     id: `frontier-${levelId}`,
     name: level.name,
@@ -185,6 +285,8 @@ function makeWorld(levelId, system, orbit, position) {
     levelId,
     seed: level.seed,
     kind,
+    factionId: faction.id,
+    faction,
     kindLabel: kindInfo.label,
     kindIcon: kindInfo.icon,
     kindDesc: kindInfo.desc,
@@ -276,6 +378,12 @@ export function galaxyDestinationList(galaxy, campaignCleared = 0, depth = Infin
       kind: world.kind,
       kindLabel: world.kindLabel,
       kindIcon: world.kindIcon,
+      factionId: world.factionId,
+      faction: world.faction.short,
+      factionName: world.faction.name,
+      factionIcon: world.faction.icon,
+      factionColor: world.faction.color,
+      hostile: !!world.faction.war.hostile,
       system: world.systemName,
       systemId: world.systemId,
       position: world.position,
@@ -364,6 +472,8 @@ export function descriptorForWorld(world, campaignCleared = 0) {
     kind: world.kind,
     kindLabel: world.kindLabel,
     mode: worldMissionMode(world),
+    factionId: world.factionId,
+    factionName: world.faction.name,
     levelId: world.levelId,
     systemId: world.systemId,
     systemName: world.systemName,
@@ -396,7 +506,13 @@ export function galaxyHash(galaxy) {
       + `:${system.position.x.toFixed(5)}:${system.position.y.toFixed(5)}:${system.position.z.toFixed(5)}`);
     for (const world of system.worlds) {
       parts.push(`w:${world.id}:${world.name}:${world.kind}:${world.levelId}:${world.seed}`
-        + `:${world.threatTier}:${world.mult.toFixed(3)}`);
+        + `:${world.threatTier}:${world.mult.toFixed(3)}:${world.factionId}`);
+    }
+    // Roaming sites are structure — who is parked where. Their MOTION is not,
+    // which is why the anchor point is hashed and presencePositionAt() is not.
+    for (const site of system.presence || []) {
+      parts.push(`p:${site.id}:${site.kind}:${site.factionId}`
+        + `:${site.position.x.toFixed(5)}:${site.position.y.toFixed(5)}`);
     }
   }
   let h = 0x811c9dc5;

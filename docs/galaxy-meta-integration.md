@@ -50,6 +50,32 @@ A derelict world's descriptor carries a bounded `labyrinth` region. It reaches
 `overworldLayout()` as `layout.cave` with the existing trials attached, exactly
 like Earth's labyrinth mouth, so the current cave handler already covers it.
 
+## Factions
+
+`src/factions.js` ships seven authored factions and mints more from their
+number. A world carries `factionId` and `faction`; a system carries the same
+plus `presence[]`, its roaming occupants.
+
+The rule that matters at the call site: **presence sites are not worlds.** They
+carry no level id and nothing to land on. A galaxy map draws them; a travel
+handler must not try to resolve one into a world descriptor. Filter on
+`system.worlds` for destinations and `system.presence` for decoration.
+
+`galaxyDestinationList()` now carries `factionId`, `faction`, `factionName`,
+`factionIcon`, `factionColor` and `hostile`, so a map can colour by owner with
+no extra lookup.
+
+Two things stay deliberately unwired:
+
+- **Ownership state.** `systemOwner()` is a projection over the baseline. When
+  the player takes a world, that belongs in `meta.js` as a delta beside
+  `cleared`, applied at read time — not written back onto the generated galaxy.
+- **Faction on the battlefield.** Nothing a faction declares reaches the sim
+  yet. When it does, faction assignment must move into `src/config.js` keyed by
+  the level id, exactly like `galaxyWorldKind(id)`, so `levelById()` stays the
+  one lookup the simulation uses. `factionForWorld()` is already pure in its
+  arguments so it can move unchanged.
+
 ## Meta wiring
 
 Four calls, all in `src/main.js`:

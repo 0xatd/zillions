@@ -35,6 +35,7 @@ Default branch: main
 - src/map.js renders terrain relief and set dressing.
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
 - src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
+- src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
 - src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
