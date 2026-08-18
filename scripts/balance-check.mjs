@@ -74,6 +74,7 @@ function assertUpgradeReachFromAllSides(level) {
   const map = fakeMap(level);
   const game = new Game(map, 'normal', 'alexander', null, level.id || 1, 'campaign');
   game.foundCity(0, 0);
+  if (game.firstSiege) game.firstSiege.stage = 'complete';
   const plot = game.plots.find((p) => p.kind === 'house');
   assert.ok(plot, `${level.name} did not generate a house plot`);
   game._construct(plot, true);
@@ -147,6 +148,7 @@ function assertSiegeLoop(level) {
   const game = new Game(map, 'normal', 'alexander', null, level.id || 1, 'campaign');
   game.foundCity(0, 0);
   assert.equal(game.phase, 'live', `${level.name} did not enter the live siege after founding`);
+  if (game.firstSiege) game.firstSiege.stage = 'complete';
   assert.ok(game.laneGraph && game.laneGraph.size > 0, `${level.name} built no lane graph`);
   assert.ok(game.nodes.length > 0, `${level.name} generated no lane nodes`);
   assertLaneWaypointsAreSteppable(game, level.name);

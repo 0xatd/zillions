@@ -2057,6 +2057,7 @@ export class UI {
           ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · choose a marked route and reach the Sunless Throne`
           : '❤️ <b>No lives left</b> — the next fall is final.';
     } else {
+      const firstSiege = game.firstSiegeStatus?.();
       const army = game.units.filter((u) => !u.hero && !u.dead).length;
       const squads = new Set(game.units.filter((u) => !u.hero && !u.dead && u.squadId).map((u) => u.squadId)).size;
       const stanceText = {
@@ -2064,7 +2065,9 @@ export class UI {
         guard: 'following your hero',
         attack: 'pushing the lanes',
       }[game.stance] || 'awaiting orders';
-      q('#army-status').innerHTML = army
+      q('#army-status').innerHTML = firstSiege
+        ? `<b>${firstSiege.title}</b> · ${firstSiege.detail}`
+        : army
         ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
@@ -2951,6 +2954,7 @@ export class UI {
     // Plots: ghost outlines; built plots solid.
     for (const p of game.plots) {
       if (p.kind === 'wall') continue;
+      if (!game.firstSiegePlotVisible(p)) continue;
       ctx.fillStyle = p.tier > 0 ? '#efeadb' : 'rgba(255,235,170,0.35)';
       ctx.fillRect(p.x, p.z, p.size, p.size);
     }
@@ -2984,10 +2988,16 @@ export class UI {
     }
 
     // Hive nests: living hives glow violet; tonight's spawners pulse red.
+    const firstSiegeNest = game.firstSiegeStatus?.()?.nest;
     for (const n of game.nests || []) {
       if (!n.alive) continue;
-      ctx.fillStyle = '#b44dff';
-      ctx.fillRect(n.x - 2, n.z - 2, 4, 4);
+      const warned = firstSiegeNest?.id === n.id;
+      ctx.fillStyle = warned ? '#ff3c2e' : '#b44dff';
+      ctx.fillRect(n.x - (warned ? 3 : 2), n.z - (warned ? 3 : 2), warned ? 6 : 4, warned ? 6 : 4);
+      if (warned) {
+        ctx.strokeStyle = '#ffd75e';
+        ctx.strokeRect(n.x - 4, n.z - 4, 8, 8);
+      }
     }
     // Lane nodes: yours green, the hive's red, unclaimed amber. Contested
     // nodes pulse — this is the front line, read at a glance.
