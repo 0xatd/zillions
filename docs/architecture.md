@@ -50,6 +50,7 @@ module already owns that rule.
 | `src/multiplayer-eligibility.js` | Campaign unlock eligibility |
 | `src/items.js` | Item bases, weapon blocks, affix pools, damage types, and deterministic item generation from a key |
 | `src/skilltree.js` | The Lattice: sector table, seeded tree generation, allocation rules, and the resolved payload |
+| `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |
 | `src/meta.js` | Persistent meta-progression: run payouts, the upgrade tree, and the bonus payload a run starts with |
 
 Simulation code must produce the same result on every peer. Add all new state

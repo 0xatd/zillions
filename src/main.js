@@ -27,7 +27,7 @@ import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
-import { EQUIP_SLOTS, hashString } from './items.js';
+import { stateHash } from './lockstep-hash.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
@@ -1880,36 +1880,7 @@ class App {
   }
 
   _stateHash() {
-    const g = this.game;
-    let h = 7;
-    h = (h * 31 + Math.round(g.gold)) | 0;
-    h = (h * 31 + g.coins.length) | 0;
-    h = (h * 31 + g.zombies.length) | 0;
-    h = (h * 31 + g.units.length) | 0;
-    h = (h * 31 + g.buildings.length) | 0;
-    h = (h * 31 + g.stats.kills) | 0;
-    for (const hr of g.heroes) {
-      h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
-      for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;
-      // Gear and the Lattice reach the hash too. Two peers holding different
-      // weapons or different builds must fail the check before window 0
-      // rather than drift apart at minute six, and a forged item key cannot
-      // survive a peer regenerating the same key and getting something else.
-      for (const slot of EQUIP_SLOTS) {
-        const key = (hr.equipment || {})[slot];
-        if (key) h = (h * 31 + hashString(key)) | 0;
-      }
-      for (const id of hr.doctrines || []) h = (h * 31 + hashString(id)) | 0;
-      h = (h * 31 + (hr.activeSet || 0) * 977) | 0;
-      const w = hr.weapon;
-      if (w) {
-        h = (h * 31 + Math.round(w.dmg * 16) + Math.round(w.rof * 64) * 3 + Math.round(w.range * 16) * 7) | 0;
-        for (const [type, share] of Object.entries(w.types || {})) {
-          h = (h * 31 + hashString(type) + Math.round(share * 1000)) | 0;
-        }
-      }
-    }
-    return h;
+    return stateHash(this.game);
   }
 
   // ---------------- lockstep engine ----------------

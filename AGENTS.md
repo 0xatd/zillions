@@ -109,6 +109,7 @@ economy, and army systems, and never let its wins advance campaign progress.
 - `src/factions.js`: faction roster, presence archetypes, and ownership.
 - `src/items.js`: item bases, weapons, affixes, damage types, and item generation.
 - `src/skilltree.js`: the Lattice — sectors, tree generation, allocation, payload.
+- `src/lockstep-hash.js`: the per-window state hash every peer compares.
 - `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
