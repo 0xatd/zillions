@@ -1,18 +1,21 @@
 # Macro Layer — Persistent Galaxy Design
 
-## V0 — The KISS Cut (build this first)
+## V0 — Shared War Map
 
-Four pieces. Everything else in this document is later decoration.
+The first safe slice is deliberately small:
 
 1. **Shared ownership map.** Worlds carry an owner (`hive` | `free`).
    One column, rendered on the existing star map, readable by everyone.
-2. **Battle results write ownership.** Beat a world's siege -> a single
-   validated write flips the owner. The only state-changing bridge from
-   battles to the galaxy.
-3. **Hive tick.** A slow timer (cron or lazy evaluation) lets the Hive
-   reclaim unowned frontier worlds. Opening the map must always answer
-   "what changed while I was away."
-4. **Frontier exploration + AI hub DM.** See the two sections below.
+2. **Immutable battle events.** A server-only writer records each trusted
+   battle result once. The public client cannot declare its own victory.
+3. **Visible history.** The existing star map reads shared ownership and the
+   latest war changes. If the service is unavailable, travel still works.
+
+Zillions does not yet have a trusted match authority. Therefore, the live
+client does not receive the galaxy write secret and does not report battle
+results directly. Add that bridge only when a server can validate match
+eligibility and completion. The Hive tick, exploration, and AI hub DM remain
+destination work below. They are not part of V0.
 
 The AI DM never mutates state directly. Pattern:
 

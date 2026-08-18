@@ -1543,17 +1543,23 @@ export class UI {
     this.root.querySelector('#m-galaxy').classList.toggle('hidden', !on);
   }
 
-  showGalaxy(destinations, currentWorld = 'earth') {
+  showGalaxy(destinations, currentWorld = 'earth', macro = null) {
     const map = this.root.querySelector('#galaxy-map');
     const detail = this.root.querySelector('#galaxy-detail');
+    const ownership = macro?.worlds || {};
+    const recent = (macro?.events || []).slice(0, 3);
     map.innerHTML = '';
     const select = (destination) => {
       for (const node of map.querySelectorAll('.galaxy-node')) node.classList.toggle('sel', node.dataset.world === destination.id);
+      const owner = ownership[destination.id]?.owner;
       const state = destination.id === currentWorld ? 'CURRENT LOCATION'
+        : owner === 'free' ? 'FREE WORLD'
+        : owner === 'hive' ? 'HIVE OCCUPIED'
         : destination.cleared ? 'LIBERATED'
         : destination.unlocked ? 'ROUTE AVAILABLE' : 'ROUTE LOCKED';
       detail.innerHTML = `<span>${state}</span><h2>${destination.name}</h2><p>${destination.subtitle}</p>
         ${destination.threat ? `<small>FRONTIER DEPTH ${destination.threat}</small>` : '<small>ORIGIN WORLD</small>'}
+        ${recent.length ? `<div class="galaxy-events"><b>RECENT WAR CHANGES</b>${recent.map((event) => `<span>${event.outcome === 'liberated' ? '✓' : '·'} ${escapeHtml(event.worldId)} · ${escapeHtml(event.outcome)}</span>`).join('')}</div>` : ''}
         <button id="galaxy-travel" class="menubtn primary" ${!destination.unlocked || destination.id === currentWorld ? 'disabled' : ''}>
           ${destination.id === currentWorld ? 'YOU ARE HERE' : destination.unlocked ? 'TRAVEL' : 'LOCKED'}
         </button>`;
@@ -1562,11 +1568,12 @@ export class UI {
     };
     destinations.forEach((destination, index) => {
       const node = document.createElement('button');
-      node.className = `galaxy-node${destination.unlocked ? '' : ' locked'}${destination.cleared ? ' cleared' : ''}`;
+      const owner = ownership[destination.id]?.owner;
+      node.className = `galaxy-node${destination.unlocked ? '' : ' locked'}${owner ? ` owner-${owner}` : destination.cleared ? ' cleared' : ''}`;
       node.dataset.world = destination.id;
       node.style.setProperty('--gx', `${12 + ((index * 31) % 74)}%`);
       node.style.setProperty('--gy', `${18 + ((index * 47) % 62)}%`);
-      node.innerHTML = `<i></i><b>${destination.name}</b><small>${destination.id === currentWorld ? 'YOU ARE HERE' : destination.cleared ? 'LIBERATED' : destination.unlocked ? 'AVAILABLE' : 'LOCKED'}</small>`;
+      node.innerHTML = `<i></i><b>${destination.name}</b><small>${destination.id === currentWorld ? 'YOU ARE HERE' : owner === 'free' ? 'FREE' : owner === 'hive' ? 'HIVE' : destination.cleared ? 'LIBERATED' : destination.unlocked ? 'AVAILABLE' : 'LOCKED'}</small>`;
       node.onclick = () => select(destination);
       map.appendChild(node);
     });
