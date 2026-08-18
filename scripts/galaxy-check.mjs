@@ -19,7 +19,7 @@
 // Run `node scripts/galaxy-check.mjs --report` for a readout of the galaxy.
 import assert from 'node:assert/strict';
 import {
-  GALAXY_SEED, generateGalaxy, knownGalaxy, galaxyHash,
+  GALAXY_SEED, generateGalaxy, knownGalaxy, galaxyHash, presencePositionAt,
   descriptorForWorld, descriptorForWorldId, galaxyDestinationList, galaxyProgress,
   findWorld, findSystem, worldByLevelId, worldUnlocked, worldCleared, worldMissionMode,
   threatTierFor, THREAT_TIERS,
@@ -30,6 +30,10 @@ import {
   loadMeta, awardRun, spend, metaBonuses, setMetaBackend, memoryBackend, resetMeta,
 } from '../src/meta.js';
 import { LEVELS, LABYRINTH_LEVELS, levelById, GALAXY_WORLD_KINDS, galaxyWorldKind } from '../src/config.js';
+import {
+  FACTIONS, FACTION_PRESENCE, FACTION_ORIGINS, factionById, factionByKey,
+  factionForWorld, proceduralFaction, holdsWorlds, isMobile, systemOwner,
+} from '../src/factions.js';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { OverworldField, overworldReachable, overworldLayout } from '../src/overworld.js';
 import { Game, runScore } from '../src/game.js';
@@ -65,7 +69,7 @@ function flood(map, sx, sz) {
 // The shipped galaxy's structure hash. It is pinned for the same reason
 // overworld-check pins Earth's tile hash: the layout is content, and content
 // must not move by accident.
-const GALAXY_HASH = 'a40d5f39';
+const GALAXY_HASH = '2d0626e7';
 
 const galaxy = generateGalaxy(GALAXY_SEED);
 const twin = generateGalaxy(GALAXY_SEED);
@@ -207,11 +211,170 @@ assert.equal(worldMissionMode(frontier.find((w) => w.kind === 'derelict')), 'cam
     for (const key of ['id', 'name', 'subtitle', 'levelId', 'unlocked', 'cleared', 'threat']) {
       assert.ok(key in d, `destination ${d.id} is missing "${key}" — the existing galaxy UI reads it`);
     }
+    for (const key of ['factionId', 'faction', 'factionName', 'hostile']) {
+      assert.ok(key in d, `destination ${d.id} is missing "${key}" — a galaxy map colours by owner`);
+    }
   }
   assert.equal(list.filter((d) => d.cleared).length, 3, 'Earth and the two taken worlds must read as cleared');
   assert.equal(list.filter((d) => d.unlocked).length, 4, 'Earth, two cleared worlds and the next one are open');
   const shallow = galaxyDestinationList(galaxy, LEVELS.length, 4);
   assert.equal(shallow.length, 5, 'a depth-limited chart shows Earth plus that many worlds');
+}
+
+// ---------------------------------------------------------------------------
+// 2b. Factions
+// ---------------------------------------------------------------------------
+// The roster ships seven authored factions and mints the rest from their
+// number. The rule the rest of this section exists to protect: a faction with
+// no ground must never end up owning ground.
+assert.equal(FACTIONS.length, 7, 'the authored roster is seven factions');
+assert.equal(FACTIONS.filter((f) => f.origin === 'human').length, 3, 'three of the seven are human');
+assert.equal(FACTIONS.filter((f) => f.origin === 'xeno').length, 4, 'four of the seven are xeno');
+{
+  const keys = new Set(), ids = new Set(), names = new Set();
+  for (const faction of FACTIONS) {
+    assert.ok(!keys.has(faction.key), `duplicate faction key ${faction.key}`);
+    assert.ok(!ids.has(faction.id), `duplicate faction id ${faction.id}`);
+    assert.ok(!names.has(faction.name), `duplicate faction name ${faction.name}`);
+    keys.add(faction.key); ids.add(faction.id); names.add(faction.name);
+    assert.ok(FACTION_ORIGINS[faction.origin], `${faction.key} has no origin`);
+    assert.ok(FACTION_PRESENCE[faction.presence], `${faction.key} has no presence archetype`);
+    assert.ok(faction.name && faction.short && faction.blurb, `${faction.key} has no player-facing copy`);
+    assert.ok(Number.isInteger(faction.color) && faction.color >= 0 && faction.color <= 0xffffff,
+      `${faction.key} has no map colour`);
+    assert.equal(typeof faction.war.hostile, 'boolean', `${faction.key} must declare a posture`);
+    assert.ok(faction.war.aggression >= 0 && faction.war.aggression <= 1, `${faction.key} aggression out of range`);
+    // `war` is data. A faction that carried behaviour could change the sim.
+    for (const value of Object.values(faction.war)) {
+      assert.ok(typeof value !== 'function', `${faction.key} carries behaviour in war — factions must be data`);
+    }
+    assert.equal(factionById(faction.id), faction, `${faction.key} must resolve by id`);
+    assert.equal(factionByKey(faction.key), faction, `${faction.key} must resolve by key`);
+  }
+  // Every presence archetype is represented, or the taxonomy is theoretical.
+  for (const presence of Object.keys(FACTION_PRESENCE)) {
+    assert.ok(FACTIONS.some((f) => f.presence === presence),
+      `no authored faction uses the "${presence}" presence`);
+  }
+  // The three the design turns on: someone human holds ground, someone flies
+  // without any, and something drifts.
+  assert.ok(FACTIONS.some((f) => f.origin === 'human' && f.presence === 'worlds'), 'a human faction must hold worlds');
+  assert.ok(FACTIONS.some((f) => f.presence === 'fleets' && !holdsWorlds(f)), 'a fleet faction must hold no worlds');
+  assert.ok(FACTIONS.some((f) => f.presence === 'drift' && isMobile(f)), 'a drifting faction must be mobile');
+  assert.equal(holdsWorlds(factionByKey('courts')), false, 'the Salvage Courts must never hold ground');
+  assert.equal(holdsWorlds(factionByKey('gyre')), false, 'the Gyre must never hold ground');
+  assert.equal(holdsWorlds(factionByKey('bloom')), false, 'the Bloom must never hold ground');
+}
+
+// Zillions of factions: past the authored seven they are minted from a number,
+// deterministically, forever.
+{
+  for (const id of [8, 9, 40, 999, 12345, 1000000]) {
+    const a = factionById(id), b = proceduralFaction(id);
+    assert.equal(a.name, b.name, `faction ${id} is not deterministic`);
+    assert.equal(a.presence, b.presence, `faction ${id} presence is not deterministic`);
+    assert.equal(a.color, b.color, `faction ${id} colour is not deterministic`);
+    assert.ok(FACTION_PRESENCE[a.presence], `faction ${id} has no presence archetype`);
+    assert.ok(FACTION_ORIGINS[a.origin], `faction ${id} has no origin`);
+    assert.ok(a.procedural, `faction ${id} must be marked procedural`);
+    assert.equal(factionById(id), factionById(id), `faction ${id} must be cached, not rebuilt`);
+  }
+  // Names are two words over a few hundred combinations and WILL repeat; the
+  // catalogue designation is what has to be unique, because that is what tells
+  // two unnamed factions apart on a map.
+  const designations = new Set();
+  for (let id = FACTIONS.length + 1; id <= FACTIONS.length + 4000; id++) {
+    const faction = factionById(id);
+    assert.ok(!designations.has(faction.designation),
+      `procedural faction designation ${faction.designation} collides at id ${id}`);
+    designations.add(faction.designation);
+    assert.ok(faction.label.includes(faction.designation), `faction ${id} must show its designation`);
+  }
+  // All four presences keep appearing as the roster scales.
+  const presences = new Set();
+  for (let id = FACTIONS.length + 1; id <= FACTIONS.length + 40; id++) presences.add(factionById(id).presence);
+  assert.equal(presences.size, Object.keys(FACTION_PRESENCE).length, 'procedural factions must span every presence');
+}
+
+// Assignment: pure, deterministic, and it never gives ground to a faction that
+// has none.
+{
+  for (const kind of ['standard', 'holdout', 'derelict']) {
+    for (const n of [1, 2, 3, 12, 25, 33, 44, 55, 110, 400]) {
+      const a = factionForWorld(n, kind), b = factionForWorld(n, kind);
+      assert.equal(a.id, b.id, `world ${n}/${kind} faction is not deterministic`);
+      assert.ok(holdsWorlds(a), `world ${n}/${kind} was given to ${a.name}, which holds no ground`);
+    }
+  }
+  assert.equal(factionForWorld(9, 'derelict').key, 'cenotaph', 'a derelict is a Cenotaph tomb');
+  assert.equal(factionForWorld(400, 'derelict').key, 'cenotaph', 'every derelict is a Cenotaph tomb');
+  assert.ok(['remnant', 'creed'].includes(factionForWorld(8, 'holdout').key),
+    'a holdout is held by humans — that is why it is a holdout');
+  // Two deep worlds must not walk onto the same unknown faction.
+  const deep = [33, 44, 55, 66, 77, 88].map((n) => factionForWorld(n, 'standard').id);
+  assert.equal(new Set(deep).size, deep.length, 'deep frontier worlds collapsed onto one unknown faction');
+}
+
+// In the shipped galaxy: every world has a holder, every roamer has none, and
+// system ownership is a projection that agrees with the worlds under it.
+{
+  for (const world of galaxy.worlds) {
+    assert.ok(world.faction && world.factionId, `${world.name} has no faction`);
+    assert.equal(world.faction.id, world.factionId, `${world.name} faction id disagrees with its record`);
+    assert.ok(holdsWorlds(world.faction), `${world.name} is held by ${world.faction.name}, which holds no ground`);
+  }
+  assert.equal(galaxy.worlds[0].faction.key, 'remnant', 'Earth is held by the Remnant');
+  const holders = new Set(galaxy.worlds.map((w) => w.faction.key));
+  assert.ok(holders.has('brood'), 'the Brood must hold worlds in the shipped galaxy');
+  assert.ok(holders.has('cenotaph'), 'the Cenotaph must hold derelicts in the shipped galaxy');
+  assert.ok(holders.size >= 4, `only ${holders.size} factions hold ground — the map reads as one war`);
+
+  assert.ok(galaxy.presence.length > 0, 'the shipped galaxy must have roamers in it');
+  const roamers = new Set();
+  for (const site of galaxy.presence) {
+    assert.ok(site.faction && site.factionId, `${site.id} has no faction`);
+    assert.equal(holdsWorlds(site.faction), false,
+      `${site.id} is a roaming site owned by ${site.faction.name}, which holds ground`);
+    assert.ok(['anchorage', 'bloom'].includes(site.kind), `${site.id} has an unknown site kind`);
+    // The invariant that keeps the campaign ladder honest.
+    assert.ok(!('levelId' in site), `${site.id} consumes a level id — an anchorage is not a landing`);
+    assert.ok(findSystem(galaxy, site.systemId), `${site.id} belongs to no system`);
+    roamers.add(site.faction.key);
+  }
+  assert.ok(roamers.has('bloom') || roamers.has('courts') || roamers.has('gyre'),
+    'the shipped galaxy must show an authored roaming faction');
+
+  // Roaming sites take no level ids: the ladder is still contiguous with them
+  // in the galaxy, which is the whole reason they are not worlds.
+  assert.equal(galaxy.lastLevelId - galaxy.firstLevelId + 1, frontier.length,
+    'roaming sites must not consume level ids');
+
+  for (const system of galaxy.systems) {
+    const owner = systemOwner(system);
+    assert.equal(system.factionId, owner ? owner.id : null, `${system.name} owner is not the computed projection`);
+    if (system.worlds.length) {
+      assert.ok(system.worlds.some((w) => w.factionId === system.factionId),
+        `${system.name} is owned by a faction that holds none of its worlds`);
+    }
+  }
+}
+
+// Mobility: a roamer moves, and moving does not touch the structure hash.
+{
+  const mobile = galaxy.presence.find((s) => s.mobile);
+  assert.ok(mobile, 'the shipped galaxy must contain a mobile roamer');
+  const at0 = presencePositionAt(mobile, 0);
+  const at0Again = presencePositionAt(mobile, 0);
+  const at5 = presencePositionAt(mobile, 5);
+  assert.deepEqual(at0, at0Again, 'a roamer position must be deterministic for an epoch');
+  assert.notDeepEqual(at0, at5, 'a mobile roamer must actually move between epochs');
+  assert.equal(galaxyHash(galaxy), GALAXY_HASH, 'reading a roamer position must not change the structure hash');
+
+  const anchored = galaxy.presence.find((s) => !s.mobile);
+  if (anchored) {
+    assert.deepEqual(presencePositionAt(anchored, 0), presencePositionAt(anchored, 99),
+      'an anchored roamer must not drift');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +724,16 @@ if (REPORT) {
       + `  ${system.worlds.map((w) => `${w.name} [${w.kind}] x${w.mult.toFixed(2)}`).join(' · ')}`);
   }
   console.log(`  kinds: ${Object.entries(kindCounts).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  const holders = {}, roamers = {};
+  for (const w of galaxy.worlds) holders[w.faction.short] = (holders[w.faction.short] || 0) + 1;
+  for (const p of galaxy.presence) roamers[`${p.faction.short} ${p.kind}`] = (roamers[`${p.faction.short} ${p.kind}`] || 0) + 1;
+  console.log(`  holders: ${Object.entries(holders).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  console.log(`  roamers: ${Object.entries(roamers).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  console.log('\nfactions:');
+  for (const f of FACTIONS) {
+    console.log(`  ${f.icon} ${f.name.padEnd(20)} ${f.origin.padEnd(5)} ${FACTION_PRESENCE[f.presence].label.padEnd(14)}`
+      + `${f.war.hostile ? 'hostile' : 'not hostile'}`);
+  }
   console.log(`  walkable: ${(buildStats.reduce((s, b) => s + b.walkFrac, 0) / buildStats.length * 100).toFixed(1)}% average`);
   console.log('\nmeta tree:');
   for (const branch of metaTreeView(emptyMeta()).branches) {
@@ -569,4 +742,5 @@ if (REPORT) {
 }
 
 console.log(`galaxy check passed: ${galaxy.systems.length} systems, ${frontier.length} worlds built and walked, `
+  + `${FACTIONS.length} authored factions (+procedural) over ${galaxy.presence.length} roaming sites, `
   + `${META_NODES.length} meta nodes across ${Object.keys(META_BRANCHES).length} branches, award/spend math held`);

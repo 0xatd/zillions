@@ -62,6 +62,7 @@ to snapshots when the state can affect later simulation.
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/overworld.js` | Headless persistent worlds: galaxy catalog, world descriptors, stitched biomes, instance gates, Orbital Lifts, hero controller, ghost presence |
 | `src/galaxy.js` | Headless galaxy generation: spiral star systems, world kinds, threat tiers, and generated world descriptors |
+| `src/factions.js` | Faction roster, presence archetypes, and deterministic ownership assignment |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
@@ -196,8 +197,39 @@ score into Salvage Alloy, `spend()` buys nodes from a twelve-node tree, and
 data only. Local storage holds the state today under the `zillions_meta` key,
 and `setMetaBackend()` is the seam a server takes later.
 
+## Factions
+
+`src/factions.js` holds seven authored factions, three human and four xeno, and
+mints the rest from their number the way `galaxyLevel()` mints planets. It is a
+leaf module. It imports `src/utils.js` and nothing else, so `src/config.js` can
+import it later without an import cycle.
+
+A faction declares how it occupies space, and the difference is structural:
+
+| Presence | Holds worlds | Moves | Example |
+| --- | --- | --- | --- |
+| `worlds` | yes | no | The Remnant, The Brood |
+| `fleets` | no | yes | The Salvage Courts, The Gyre |
+| `drift` | no | yes | The Bloom |
+| `ruins` | derelicts only | no | The Cenotaph |
+
+A faction that holds ground owns worlds, and a world is a level id. A faction
+with no ground occupies a system's `presence[]` instead. A roaming site never
+carries a level id. An anchorage is not a landing, and giving one a level id
+would gate the campaign ladder behind content nobody can stand on.
+
+System ownership is a projection. `systemOwner()` computes it from the worlds
+under a system at read time. Do not store ownership on a generated system.
+Ownership changes with progress, and the galaxy's structure hash must not.
+
+Roaming positions work the same way. `presencePositionAt(site, epoch)` derives
+where a fleet or a bloom is from the site's drift parameters and an epoch every
+peer agrees on. The structure hash covers the anchor point only. Motion stays
+out of it.
+
 `scripts/galaxy-check.mjs` builds every generated world, walks every sampled
-world descriptor, and drives the award and spend math.
+world descriptor, asserts no groundless faction ever holds a world, and drives
+the award and spend math.
 
 The galaxy and meta modules are wired into the shell in a follow-up change.
 
