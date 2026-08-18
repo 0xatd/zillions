@@ -174,9 +174,11 @@ export class OnlineLobby {
       this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
       // Poll the games list too: realtime events on rooms depend on the
       // supabase_realtime publication, so the browse list must self-heal even
-      // when no postgres_changes event arrives.
+      // when no postgres_changes event arrives. QA BUG-MP-4: 15s was slow
+      // enough to feel broken ("took 20s to show the person who joined").
+      // 5s keeps the list honest even with realtime dead.
       this.refreshGames().catch(() => {});
-    }, 15 * 1000);
+    }, 5 * 1000);
 
     this.sb.channel('zl-rooms-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { if (!this.matchActive) this.refreshGames(); })

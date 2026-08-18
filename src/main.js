@@ -3538,17 +3538,15 @@ class App {
     const mh = this.myHero();
     const buildMode = this.controlMode !== 'fight';
     if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
-    // Pips belong to ONE plot: the nearest fundable one within reach.
+    // Pips belong to ONE plot: the one buildTargetFor would actually pay —
+    // not just the nearest ring (QA BUG-SOLO-1: "pay the nearest yellow ring"
+    // funded farms behind the player while they stared at a house). Mirrors
+    // game.buildTargetFor's pick exactly, so the highlighted ring is always
+    // the ring Space will fund.
     let pipPlotId = -1;
-    if (buildMode && mh && !mh.dead) {
-      let bd = 4.5 * 4.5;
-      for (const plot of g.plots) {
-        const act = g.firstSiegePlotActionable(plot) ? g.plotAction(plot) : null;
-        if (!act || act.mode === 'branch') continue;
-        const [px, pz] = g.payPoint(plot, mh);
-        const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
-        if (d < bd) { bd = d; pipPlotId = plot.id; }
-      }
+    if (buildMode && g.buildTargetFor && mh && !mh.dead) {
+      const target = g.buildTargetFor(mh);
+      if (target) pipPlotId = target.plot.id;
     }
     for (const plot of g.plots) {
       if (!g.firstSiegePlotVisible(plot)) {
@@ -3884,6 +3882,31 @@ class App {
       rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
+      // Client-side local-lead for YOUR OWN hero (QA BUG-MP-2): in lockstep,
+      // the guest's WASD waits on confirmed sim state, so movement feels like
+      // remote desktop. Render-only extrapolation: while input is held, lead
+      // the mesh slightly ahead of the confirmed position (target offset =
+      // dir * speed * lookahead). The sim stays the single source of truth —
+      // this changes pixels, never gameplay state, so determinism is intact.
+      // Everyone else (peers, troops, zombies) renders from sim exactly as
+      // before — interpolation for other people is a later, separate fix.
+      if (u.hero && this.mpRole === 'guest' && !u.dead && this.lastDir) {
+        if (this._leadX === undefined) { this._leadX = 0; this._leadZ = 0; }
+        const spd = (u.def.speed || 3.5) * (u.sprintMul || 1);
+        const look = 0.16; // ~2.5 sim ticks of lookahead
+        const tX = (this.lastDir.x || 0) * spd * look;
+        const tZ = (this.lastDir.z || 0) * spd * look;
+        const k = 1 - Math.exp(-12 * (dt || 0.016)); // fast approach, fast release
+        this._leadX += (tX - this._leadX) * k;
+        this._leadZ += (tZ - this._leadZ) * k;
+        // Snap if state jumped (spawn, teleport, rejoin): never drag the mesh.
+        if (Math.abs(this._leadX) > 3 || Math.abs(this._leadZ) > 3) { this._leadX = 0; this._leadZ = 0; }
+        rec.mesh.position.set(
+          u.x + this._leadX,
+          this.map.groundY(u.x + this._leadX, u.z + this._leadZ),
+          u.z + this._leadZ,
+        );
+      }
       let attackPulse = 0;
       let attackKind = '';
       if (rec.attack) {
