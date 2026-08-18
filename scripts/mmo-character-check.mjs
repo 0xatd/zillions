@@ -3,6 +3,7 @@ import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, grantMmoExperience, recordMmoInstance,
 } from '../src/mmo-characters.js';
+import { AuthClient } from '../src/auth.js';
 
 assert.equal(Object.keys(MMO_CLASSES).length, 13, 'the MMO must expose all thirteen renamed class families');
 assert.equal(MMO_CLASSES.vanguard.ready, true, 'Vanguard must be the first complete class slice');
@@ -34,5 +35,19 @@ assert.equal(vanguard.stats.kills, 200);
 assert.equal(vanguard.lastWorld, 'frontier-7');
 assert.equal(vanguard.items.length, before + 1, 'instance extraction must deduplicate equipment');
 assert.deepEqual(result.items, ['optic']);
+
+const auth = new AuthClient();
+auth.session = { user: { user_metadata: {
+  last_world: 'frontier-7',
+  mmo_character_id: vanguard.id,
+  mmo_characters: [vanguard],
+} } };
+const cloudProfile = auth.profileFromBundle({
+  profile: { handle: 'nova', username_set: true },
+  stats: { games_played: 2 },
+});
+assert.equal(cloudProfile.mmoCharacterId, vanguard.id, 'signed-in auth must restore the selected MMO character');
+assert.deepEqual(cloudProfile.mmoCharacters, [vanguard], 'signed-in auth must restore the MMO roster');
+assert.equal(cloudProfile.lastWorld, 'frontier-7', 'signed-in auth must restore the character world');
 
 console.log('MMO character check passed: 13 classes, persistent Vanguard, level-100 cap, loot extraction');
