@@ -6,14 +6,14 @@
 // to build on, and the number of ways in all change with the plan, so no two
 // campaign levels feel like the same base with a different colour.
 //
-// And the plan is only half of it: the GROUND finishes the design. Where the
-// rampart line crosses crag, deep water or thick wood, nothing is built there —
-// the land is already a wall. Walls are raised across the gaps between those
-// anchors, and only the gaps can hold a gate. That is how real fortification
-// has always worked: a promontory fort walls the neck and lets the cliffs do
-// the rest, Dún Aonghasa runs its wall cliff to cliff, Great Zimbabwe spans
-// between granite boulders, and field armies anchored their lines on a marsh
-// or a ridge and built across what was left. See docs/fortress-inspiration.md.
+// And since the pad system, the plan is the WHOLE design. The terrain levels a
+// flat, buildable disc under the city before the first stone, so the rampart
+// line is not negotiated with crag and water — it is an authored arc or a
+// straight wall, bought in segments, standing on purpose. What the land
+// contributes now is the APPROACH: the biome outside the pad, the shore the
+// city looks over, the canyon it sits at the mouth of. The one place the old
+// bargain survives is the Labyrinth, where the mountain IS the architecture
+// and the plan still leans on it.
 //
 // What every plan guarantees, because the game depends on it:
 //   - a Keep at the centre, on levelled ground
@@ -33,9 +33,9 @@ const TAU = Math.PI * 2;
 // Ward camps are handed out cheapest-first, so a two-gate city can still afford
 // to man both entrances early.
 const CAMP_KINDS = ['camp_ranger', 'camp_militia', 'camp_sniper'];
-// Past this much free wall the site stops being a bargain and starts being a
-// bye — the founders cut another approach rather than ship an unassailable city.
-const MAX_NATURAL_SHARE = 0.72;
+// The old ceiling on how much wall the land could close for free. Kept only as
+// history: on a pad the land closes nothing, and the Labyrinth — the one map
+// still allowed to lean on its mountain — is authored by hand instead.
 
 // A square silhouette, clamped so the corners cannot run away to infinity.
 const square = (t, R) => Math.min(R * 1.33, R / Math.max(Math.abs(Math.cos(t)), Math.abs(Math.sin(t))));
@@ -277,9 +277,12 @@ export function generatePlots(map, anchor = null, opts = {}) {
 
   const wallIdBase = nextId;
   // --- A ring of rampart. Walk the silhouette one tile at a time so the line
-  // stays 4-connected however sharply it turns, then let the terrain decide
-  // which parts of it actually have to be built.
-  const traceRing = (radiusFn, gateAngles, { role, useTerrain, ox = cx, oz = cz }) => {
+  // stays 4-connected however sharply it turns. On a pad the wall is drawn,
+  // not bargained for: every tile of every arc gets its stone. The one
+  // exception is the Labyrinth, where the plan still leans on the mountain
+  // the map is carved from — there the impassable ground closes the line.
+  const naturalWalls = map.terrainKind === 'labyrinth';
+  const traceRing = (radiusFn, gateAngles, { role, useTerrain, ox = cx, oz = cz, spin = facing }) => {
     const ringTiles = [];
     const seen = new Set();
     let last = null;
@@ -303,7 +306,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     const steps = 2400;
     for (let s = 0; s < steps; s++) {
       const t = (s / steps) * TAU - Math.PI;
-      const world = t + facing;
+      const world = t + spin;
       const r = radiusFn(t);
       walkTo(Math.round(ox + Math.cos(world) * r), Math.round(oz + Math.sin(world) * r), t);
     }
@@ -341,7 +344,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
         }
       }
       const mid = gateTile || open[open.length >> 1];
-      const world = mid.ang + facing;
+      const world = mid.ang + spin;
       const p = {
         id: nextId++, kind: 'wall', role,
         name: `${compassName(world)} ${role === 'inner' ? 'Ward' : gateTile ? 'Gate' : 'Wall'}`,
@@ -370,12 +373,12 @@ export function generatePlots(map, anchor = null, opts = {}) {
   };
 
   const gateAngles = [...plan.gates];
-  let rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: true });
-  // Ground that closes almost the whole line leaves nothing to defend and
-  // nothing to pay for. A sheltered site should be a real advantage, not a bye,
-  // so past a point the founders cut one more way in — through the rock if they
-  // have to. That is another gate to hold as well as another way out.
-  if (rampart.length && (rampart.natural / rampart.length > MAX_NATURAL_SHARE || rampart.gates.length < 2)) {
+  let rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: naturalWalls });
+  // A plan whose gates the ground closed entirely (only possible in the
+  // Labyrinth now) is a city with no way out. The founders cut one more way
+  // in — through the rock if they have to — in the widest stretch of wall
+  // with no gate on it.
+  if (rampart.gates.length < 2) {
     // Put it in the widest stretch of wall with no gate on it.
     const sorted = [...gateAngles].map((t) => Math.atan2(Math.sin(t), Math.cos(t))).sort((a, b) => a - b);
     let bestGap = -1, bestMid = Math.PI / 2;
@@ -390,7 +393,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
     plots = plots.filter((pl) => pl.kind !== 'wall');
     nextId = wallIdBase;
-    rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: true });
+    rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: naturalWalls });
   }
   const gates = rampart.gates;
   // Every gate's exit is a road out. A gate that opens onto a pocket of crag
@@ -557,42 +560,60 @@ export function generatePlots(map, anchor = null, opts = {}) {
     if (mine) add('tower', mine.x + 3, mine.z, 2);
   }
 
-  // --- Outer works: the land's own chokepoints, out on the approaches. A fence
-  // between two crags is cheap (a barrier costs by the tile) and it turns a gap
-  // into a gate you own. A tower behind it makes the gap a killing ground.
-  const outer = pickOuterWorks(map, cx, cz, facing, reach);
-  outer.forEach((c, i) => {
-    const usable = c.tiles.filter(([x, z]) => map.isBuildable(x, z) && !taken.has(z * N + x));
-    if (usable.length < 2) return;
-    const mid = usable[usable.length >> 1];
-    const p = {
-      id: nextId++, kind: 'wall', role: 'outer', wild: true,
-      name: `${c.name} Palisade`,
-      x: usable[0][0], z: usable[0][1], size: 1,
-      cx: mid[0] + 0.5, cz: mid[1] + 0.5,
-      // Always a gate: your own squads have to be able to march out through
-      // your own fence, and a gate is where the horde funnels — under the
-      // tower behind it. A fence with no way through is a wall you built
-      // against yourself.
-      tiles: usable, gate: mid,
-      anchor: [mid[0], mid[1]],
-      tier: 0, paid: 0, branch: null,
-    };
-    for (const [x, z] of usable) taken.add(z * N + x);
-    plots.push(p);
-    // A watchtower behind the fence, on the city side of the gap.
-    const toCity = Math.atan2(cz - mid[1], cx - mid[0]);
-    add('tower', Math.round(mid[0] + Math.cos(toCity) * 3 - 1), Math.round(mid[1] + Math.sin(toCity) * 3 - 1), 2, {}, 4);
-  });
+  // --- Outer works: KEEPS ON THE WAR ROADS. Not a fence wherever the crags
+  // happened to pinch — a small geometric fort on the road to the hive, at the
+  // anchors the terrain stamped: a round palisade with a gate facing the city
+  // and a gate facing the hive (the road runs through it), and a tower behind
+  // the city gate. Bought in two arcs, so it is paid for the same way a city
+  // wall is: gate first, ring second. The wild-choke picker survives only as
+  // a fallback for maps that shipped no road anchors at all.
+  const keepAnchors = pickOutpostKeeps(map, cx, cz, reach);
+  for (const a of keepAnchors) {
+    const KR = 6.4;
+    const ox = Math.round(a.x), oz = Math.round(a.z);
+    // A wild fallback anchor gets the same treatment the terrain gives the
+    // road anchors: a small pad, so the keep is a drawn thing on levelled
+    // ground, not a sketch over a crag.
+    if (a.wild) {
+      for (let dz = -7; dz <= 7; dz++) {
+        for (let dx = -7; dx <= 7; dx++) {
+          if (dx * dx + dz * dz > KR * KR + 1 || !map.inBounds(ox + dx, oz + dz)) continue;
+          map.tiles[map.idx(ox + dx, oz + dz)] = TILE.GRASS;
+        }
+      }
+    }
+    const ring = traceRing(() => KR, [0, Math.PI],
+      { role: 'outer', useTerrain: false, ox, oz, spin: a.gateAng });
+    for (const p of plots) {
+      if (p.role === 'outer' && !p.keep) { p.keep = [ox, oz]; p.wild = !!a.wild; }
+    }
+    for (const g of ring.gates) {
+      // The tower stands just inside its gate, covering the road through it.
+      add('tower', Math.round(ox + Math.cos(g.ang) * (KR - 3) - 1),
+        Math.round(oz + Math.sin(g.ang) * (KR - 3) - 1), 2, {}, 2);
+    }
+    // A keep is a destination, not a picture: if the flood from the city
+    // cannot reach its centre, cut a causeway — a promise is a road.
+    if (!map._floodWalkable(Math.round(cx), Math.round(cz))[oz * N + ox]) {
+      map._bridge(Math.round(cx), Math.round(cz), ox, oz);
+    }
+  }
 
-  // --- Top up: a plan may lose plots to bad ground, and a half-empty city is
-  // not a city. Fill the remaining interior with housing and fields.
-  const filler = ['house', 'farm'];
-  let guard = 0;
-  while (plots.length < 46 && guard++ < 300) {
-    const t = rng() * TAU;
-    const r = 5.5 + rng() * Math.max(1, radiusAt(t) - 7.5);
-    add(filler[plots.length % filler.length], ...spot(r, t), 2, {}, 3);
+  // --- The terrace rows. A plan may leave ring-miles unclaimed, and a
+  // half-empty city is not a city — but neither is a city of dice rolls. What
+  // is left goes to the LATTICE: concentric rows, houses and fields alternating
+  // row by row, each building born on a designed cell of its own terrace.
+  // Nothing scatters, nothing hugs terrain (there is no terrain left to hug
+  // inside a pad) — the city simply fills the way a drawn city fills.
+  for (let row = 0; plots.length < 48 && row < 12; row++) {
+    const r = 5.4 + row * 2.3;
+    const kind = row % 2 ? 'farm' : 'house';
+    const count = Math.max(6, Math.round((TAU * r) / 4.0));
+    for (let i = 0; i < count && plots.length < 48; i++) {
+      const t = ((i + (row % 2) / 2) / count) * TAU;
+      if (r > radiusAt(t) - 3.2) continue;
+      add(kind, ...spot(r, t), 2, {}, 0);
+    }
   }
 
   if (hq) {
@@ -665,9 +686,29 @@ export function surveySite(map, site, opts = {}) {
   return { plan, natural: total ? natural / total : 0 };
 }
 
-// Which of the land's chokepoints are worth offering the player: close enough
-// to the city to matter, out on the side the horde comes from, and spread out
-// so they are three separate decisions rather than one wall in three pieces.
+// Which ground the outer works stand on. The default read is a KEEP ON THE
+// ROAD — the anchors the terrain stamped at 60% and 85% of the way to each
+// hive, nearest first. Only when a map shipped no road anchors at all (the
+// Labyrinth, a skirmish scratch) does the old wild-choke picker get a turn.
+function pickOutpostKeeps(map, cx, cz, reach) {
+  const anchors = (map.outpostSpots || [])
+    .map((o) => ({ ...o, d: Math.hypot(o.x - cx, o.z - cz) }))
+    .filter((o) => o.d > reach + 8 && o.d < 64)
+    .sort((a, b) => (a.d - b.d) || (a.x - b.x) || (a.z - b.z));
+  if (anchors.length) return anchors.slice(0, 3).map((o) => ({
+    x: o.x, z: o.z, name: o.name, gateAng: o.gateAng,
+  }));
+  const facing = cityFacing(map, cx, cz);
+  return pickOuterWorks(map, cx, cz, facing, reach).map((c) => ({
+    x: c.x, z: c.z, name: c.name, wild: true,
+    gateAng: Math.atan2(cz - c.z, cx - c.x),
+  }));
+}
+
+// The fallback: when no road anchors exist, the land's own chokepoints —
+// close enough to the city to matter, on the side the horde comes from, and
+// spread out so they are three separate decisions rather than one wall in
+// three pieces.
 function pickOuterWorks(map, cx, cz, facing, reach) {
   const spots = map.chokeSpots || [];
   if (!spots.length) return [];
