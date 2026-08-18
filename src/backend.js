@@ -2,6 +2,20 @@ const PLAYER_KEY = 'zillions_player_id';
 const API = '/api/state';
 const LOBBY_API = '/api/lobby';
 const GALAXY_API = '/api/galaxy-state';
+let accountSession = null;
+
+export function setBackendSession(session) {
+  accountSession = session || null;
+}
+
+function accountPlayerId() {
+  return accountSession?.user?.id || getPlayerId();
+}
+
+function accountHeaders(extra = {}) {
+  const token = accountSession?.access_token;
+  return { ...extra, ...(token ? { authorization: `Bearer ${token}` } : {}) };
+}
 
 export function backendEnabled() {
   const { hostname, protocol, search } = location;
@@ -31,8 +45,8 @@ export function getPlayerId() {
 
 export async function getRemoteState() {
   if (!backendEnabled()) return null;
-  const response = await fetch(`${API}?playerId=${encodeURIComponent(getPlayerId())}`, {
-    headers: { accept: 'application/json' },
+  const response = await fetch(`${API}?playerId=${encodeURIComponent(accountPlayerId())}`, {
+    headers: accountHeaders({ accept: 'application/json' }),
     cache: 'no-store',
   });
   if (!response.ok) return null;
@@ -53,8 +67,8 @@ export async function putState(kind, id, data) {
   if (!backendEnabled()) return null;
   const response = await fetch(API, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ playerId: getPlayerId(), kind, id, data }),
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify({ playerId: accountPlayerId(), kind, id, data }),
   });
   if (!response.ok) return null;
   return response.json();
@@ -62,8 +76,8 @@ export async function putState(kind, id, data) {
 
 export async function deleteState(kind, id) {
   if (!backendEnabled()) return null;
-  const qs = new URLSearchParams({ playerId: getPlayerId(), kind, id });
-  const response = await fetch(`${API}?${qs}`, { method: 'DELETE', headers: { accept: 'application/json' } });
+  const qs = new URLSearchParams({ playerId: accountPlayerId(), kind, id });
+  const response = await fetch(`${API}?${qs}`, { method: 'DELETE', headers: accountHeaders({ accept: 'application/json' }) });
   if (!response.ok) return null;
   return response.json();
 }

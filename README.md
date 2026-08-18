@@ -78,7 +78,7 @@ their soft vision circles is almost black, including the minimap.
 - **Story Campaign** contains the five Earth missions and later frontier worlds.
 - **Survival** is an endless siege with a boss every fifth Threat level.
 
-Online matches support up to three players. Each player controls one hero. The
+Online matches support up to four players. Each player controls one hero. The
 players share gold, colony buildings, the enemy force, and the win condition.
 
 Supabase stores accounts, usernames, rooms, chat, saves, and match history.

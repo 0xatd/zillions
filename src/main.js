@@ -588,6 +588,15 @@ class App {
     this.scene.fog.density = 0.0045;
     this.owMap = map;
     this.ow = new Overworld(map, { world: map.overworldWorld });
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('zillions-overworld-return') || 'null');
+      if (saved?.worldId === map.overworldWorld.id && Number.isFinite(saved.x) && Number.isFinite(saved.z)) {
+        this.ow.hero.x = saved.x;
+        this.ow.hero.z = saved.z;
+        this.ow.hero.facing = Number(saved.facing) || 0;
+        sessionStorage.removeItem('zillions-overworld-return');
+      }
+    } catch { /* unavailable or corrupt session storage: use world spawn */ }
     this.owTerrain = map.buildTerrain();
     this.scene.add(this.owTerrain);
     this.owGates = [];
@@ -766,6 +775,11 @@ class App {
   }
 
   _onOverworldEvent(ev) {
+    if (ev.t === 'gateleave') {
+      this.ui.hideGatePrompt();
+      this._leaveGateRally().catch(() => {});
+      return;
+    }
     if (ev.t !== 'gate') return;
     if (ev.state.locked) {
       this.shake = 0.35;
@@ -785,22 +799,78 @@ class App {
     this.ui.showGateConfirm({
       gate: ev.gate,
       diff: this.ui.selectedDiff,
+      onLeave: () => this._leaveGateRally().catch(() => {}),
       onEnter: (diff) => {
         if (ev.gate.cave) {
-          // The trial ledger IS the labyrinth flow: the setup screen lists
-          // the trials, exactly as Play Solo → The Labyrinth does.
           this.ui.selectedMode = 'labyrinth';
           this.ui.showSetup({ mode: 'labyrinth' });
           return;
         }
-        // Same path the setup screen's START button takes; only the level
-        // selection is made by geography instead of a card click.
-        this.ui.selectedMode = 'campaign';
-        this.ui.selectedLevel = ev.gate.levelId;
-        this.ui.selectedDiff = diff;
-        this.ui.cb.onStart(diff, this.ui.selectedHero);
+        this._joinGateRally(ev.gate, diff);
       },
     });
+  }
+
+  _launchGateMission(gate, diff) {
+    this.ui.selectedMode = gate.cave ? 'labyrinth' : 'campaign';
+    this.ui.selectedLevel = gate.levelId || 1;
+    this.ui.selectedDiff = diff;
+    this.ui.cb.onStart(diff, this.ui.selectedHero);
+  }
+
+  async _joinGateRally(gate, diff) {
+    const lobby = await this._openLobby().catch(() => null);
+    if (!lobby?.connected) {
+      this._launchGateMission(gate, diff);
+      return;
+    }
+    const worldId = this.ow?.world?.id || 'earth';
+    const gateKey = gate.cave ? `labyrinth:${gate.levelId || 1}` : `level:${gate.levelId}`;
+    const matches = (await lobby.refreshGames().catch(() => []))
+      .filter((game) => game.rally && game.status === 'open'
+        && game.rallyWorldId === worldId && game.rallyGateKey === gateKey);
+
+    if (lobby.game?.rally && lobby.game.rallyWorldId === worldId && lobby.game.rallyGateKey === gateKey) {
+      const game = lobby.game;
+      if (this.mpRole === 'host') {
+        const readiness = roomLaunchReadiness(game, this.peers.length + 1);
+        if (readiness.ready) this._launchGateMission(gate, diff);
+      } else {
+        await this._setRoomReady(true);
+      }
+      return;
+    }
+
+    if (matches[0]) {
+      await this.joinOnlineGame(matches[0], { compact: true });
+      await this._setRoomReady(true);
+      this.ui.setGateRally({ players: this.lobby?.game?.players || matches[0].players, maxPlayers: matches[0].max_players, role: 'guest', ready: true });
+      return;
+    }
+
+    this.audio.init();
+    this.mpRole = 'host';
+    this.onlineMode = true;
+    this.onlinePending = new Map();
+    const game = await lobby.createGame({
+      visibility: 'public', level: gate.levelId || 1, mode: gate.cave ? 'labyrinth' : 'campaign',
+      difficulty: diff, unlockedLevel: highestUnlockedLevel(this.profile.campaign),
+      name: `${gate.name || 'Mission'} rally`, maxPlayers: 4, kind: 'rally',
+      mapName: gate.name || 'Mission', worldId, gateKey,
+    });
+    await lobby.updateRoomPlayer({ hero: this.ui.selectedHero, ready: true }).catch(() => {});
+    this._onRoomUpdate(lobby.game || game);
+  }
+
+  async _leaveGateRally() {
+    if (!this.lobby?.game?.rally || this.netMode) return;
+    await this.lobby.leaveRoom();
+    for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
+    try { this.net?.destroy(); } catch { /* closed */ }
+    this.peers = [];
+    this.net = null;
+    this.mpRole = null;
+    this.onlineMode = false;
   }
 
   // ----- multiplayer ghosts: presence garnish, never game netcode -----
@@ -882,6 +952,7 @@ class App {
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
+    this.ui.hideGatePrompt();
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
@@ -894,6 +965,16 @@ class App {
     // not be hydrated by the time the button is clicked — and losing the
     // relay dumped returning commanders on the title screen (QA 2026-08-18).
     this._runFromOverworld = !!this.ow;
+    if (this.ow) {
+      const point = {
+        worldId: this.ow.world?.id || 'earth',
+        x: this.ow.hero.x,
+        z: this.ow.hero.z,
+        facing: this.ow.hero.facing || 0,
+      };
+      try { sessionStorage.setItem('zillions-overworld-return', JSON.stringify(point)); } catch { /* blocked storage */ }
+      this.ui.shell.enterMission(point);
+    }
     this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
@@ -1363,6 +1444,7 @@ class App {
     if (this.game?.over && this.game.mode === 'campaign'
       && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+      this.ui.shell.finishMission();
     }
     location.reload();
   }
@@ -1428,7 +1510,10 @@ class App {
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    if (!this.game && this.ow) this._makeOverworldHero();
+    if (!this.game && this.ow) {
+      if (this.ow.world?.id !== character.lastWorld) this._travelToWorld(character.lastWorld || 'earth');
+      else this._makeOverworldHero();
+    }
   }
 
   _createMmoCharacter({ name, classKey, appearance } = {}) {
@@ -1541,7 +1626,7 @@ class App {
     if (this.mpRole !== 'host' && this.mpRole !== 'guest') return;
     const players = this._manualRosterPlayers();
     this.ui.roomRoster(players, {
-      maxPlayers: 3,
+      maxPlayers: 4,
       isHost: this.mpRole === 'host',
       mode: this.ui.selectedMode || 'campaign',
     });
@@ -1774,7 +1859,7 @@ class App {
       this.pendingPeer = null;
       const players = this._manualRosterPlayers();
       peer.send({ t: 'lobby', n: this.peers.length + 1, players });
-      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
@@ -1797,7 +1882,7 @@ class App {
       if (this.netMode) return; // reconnecting player mid-game — roster is locked
       this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       const players = this._manualRosterPlayers();
-      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
     }
     else if (m.t === 'startReady') {
@@ -2145,7 +2230,7 @@ class App {
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost, mode: game.mode || 'campaign' });
     this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
-      maxPlayers: game.max_players || 3,
+      maxPlayers: game.max_players || 4,
       isHost,
       code: game.join_code,
       mode: game.mode || this.ui.selectedMode || 'campaign',
@@ -2186,6 +2271,15 @@ class App {
       title: 'Only the host can launch this room.',
     });
     const self = (game._players || []).find((player) => player.user_id === this.lobby?.me?.id);
+    if (game.rally) {
+      this.ui.setGateRally({
+        players: game.players || expectedPlayers,
+        maxPlayers: game.max_players || 4,
+        role: isHost ? 'host' : 'guest',
+        ready: !!self?.ready,
+        canLaunch: isHost && ready && compatible,
+      });
+    }
     this.ui.setRoomReady({
       visible: !isHost && !isSpectator && game.status === 'open',
       ready: !!self?.ready,
@@ -2506,7 +2600,7 @@ class App {
     const rejoinIdx = this.peerUserIds.indexOf(sig.from);
     const rejoining = this.netMode && this.game && !this.game.over && rejoinIdx >= 0;
     if (this.netMode && !rejoining) return;           // mid-game seats are not open to strangers
-    if (!this.netMode && this.peers.length >= 2) return;
+    if (!this.netMode && this.peers.length >= 3) return;
     if (this.onlinePending.has(sig.from)) return;
     const peer = new NetSession(this.lobby?.iceServers);
     this._attachNetDiagnostics(peer);
@@ -2690,7 +2784,7 @@ class App {
     }, wait);
   }
 
-  async joinOnlineGame(row) {
+  async joinOnlineGame(row, { compact = false } = {}) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || this.netMode) return;
     const compatibility = roomCompatibility(row);
@@ -2708,7 +2802,10 @@ class App {
       this.ui.showBanner('This war is already in progress. Use Watch unless you already hold a player seat.', 'bad', 5000);
       return;
     }
-    this.ui.showSetup({ online: row, mode: row.mode });
+    this.ui.selectedMode = row.mode || 'campaign';
+    this.ui.selectedLevel = row.level || 1;
+    this.ui.selectedDiff = row.difficulty || 'normal';
+    if (!compact) this.ui.showSetup({ online: row, mode: row.mode });
     this.ui.onlineStatus(rejoining ? '🔌 War in progress — rejoining…' : '🔗 Knocking on the host\'s gate…');
     this.ui.setStartButton({
       text: rejoining ? '🔌  REJOINING THE WAR…' : '⏳  WAITING FOR HOST TO START',

@@ -290,6 +290,10 @@ accounts, or rooms.
 
 WebRTC still owns match transport. The server is not authoritative yet.
 
+Mission rooms support one to four players. Physical mission gates create or
+join a rally room. Walking away closes the prompt and leaves the rally. The
+mission returns each player to the saved overworld planet and coordinates.
+
 ## Non-Negotiables
 
 - Preserve the production account backend when porting gameplay.

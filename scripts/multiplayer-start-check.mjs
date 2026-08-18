@@ -15,6 +15,8 @@ assert.equal(inboxForMatchStart('host', staleHostInbox).size, 0, 'host startup m
 assert.equal(matchStartReady(2, 0), false, 'host must hold before either guest loads');
 assert.equal(matchStartReady(2, 1), false, 'host must hold until every connected guest loads');
 assert.equal(matchStartReady(2, 2), true, 'host may emit window zero after every guest reports ready');
+assert.equal(matchStartReady(3, 2), false, 'a four-player host must wait for the third guest');
+assert.equal(matchStartReady(3, 3), true, 'a four-player party may start after all three guests load');
 assert.equal(matchStartReady(0, 0), true, 'a solo host needs no startup barrier');
 
 console.log('Multiplayer start check passed.');

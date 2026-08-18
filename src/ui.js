@@ -31,6 +31,7 @@ import {
 import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
+import { ShellState, SHELL_BASES } from './shell-state.js';
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -43,6 +44,7 @@ export class UI {
   constructor(root, cb) {
     this.root = root;
     this.cb = cb;
+    this.shell = new ShellState();
     this.msgSeen = 0;
     this.pauseOpen = false;
     this._buildDOM();
@@ -457,7 +459,10 @@ export class UI {
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
-    q('#creator-cancel').onclick = () => this._showScreen('main');
+    q('#creator-cancel').onclick = () => {
+      if (!(this._profile?.mmoCharacters || []).length) return;
+      this._backOverlay('main');
+    };
     q('#character-create-form').onsubmit = (event) => {
       event.preventDefault();
       if (this.cb.onCharacterCreate) this.cb.onCharacterCreate({
@@ -481,7 +486,7 @@ export class UI {
       if (!map) return;
       const name = q('#cu-name').value.trim() || `${this._customHost || 'Host'}'s game`;
       this.customCreatePanel(false);
-      this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 3 });
+      this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 4 });
     };
     q('#m-logout').onclick = () => this._showScreen('account');
     q('#solo-back').onclick = () => this._showScreen('main');
@@ -501,7 +506,7 @@ export class UI {
     };
     q('#l-back').onclick = () => this._showScreen('main');
     q('#galaxy-back').onclick = () => this._overworldMode ? this.hideOverlay() : this._showScreen('main');
-    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._showScreen(this._accountAccepted ? 'main' : 'account');
+    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._backOverlay();
 
     // ----- lobby -----
     for (const t of this.root.querySelectorAll('.ltab')) {
@@ -532,7 +537,7 @@ export class UI {
     q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
-      else this._showScreen('main');
+      else this._backOverlay();
     };
 
     // ----- settings -----
@@ -540,10 +545,7 @@ export class UI {
     q('#m-heroes').onclick = () => this._showScreen('heroes');
     q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
-    q('#set-back').onclick = () => {
-      if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
-      else this._showScreen(this._settingsReturn || 'main');
-    };
+    q('#set-back').onclick = () => this._backOverlay();
     for (const t of this.root.querySelectorAll('.stab')) {
       t.onclick = () => {
         for (const o of this.root.querySelectorAll('.stab')) o.classList.toggle('sel', o === t);
@@ -833,9 +835,31 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
+    if (name === 'account') this.shell.enterBase(SHELL_BASES.AUTH);
+    else if (name === 'main' && !this._overworldMode) this.shell.enterBase(SHELL_BASES.CHARACTER_SELECT);
+    else this.shell.openOverlay(name);
+    this._paintScreen(name);
+  }
+
+  _paintScreen(name) {
     for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+  }
+
+  _backOverlay(fallback = 'main') {
+    const target = this.shell.returnOverlay;
+    this.shell.closeOverlay();
+    if (target) {
+      this._lastScreen = target;
+      this._paintScreen(target);
+      return;
+    }
+    if (this.shell.base === SHELL_BASES.OVERWORLD) {
+      this.hideOverlay();
+      return;
+    }
+    this._showScreen(this.shell.base === SHELL_BASES.AUTH ? 'account' : fallback);
   }
 
   showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
@@ -855,7 +879,7 @@ export class UI {
         row.innerHTML = `<span class="gamestate">${incompatible ? 'UPDATE' : game.status === 'open' ? 'OPEN' : 'STARTED'}</span><span class="gmain"><b class="gname"></b><small class="gplayers"></small></span><span class="ginfo"></span><button class="tbtn gjoin" ${incompatible || game.status !== 'open' ? 'disabled' : ''}>${game.status === 'open' ? 'JOIN' : '—'}</button>`;
         row.querySelector('.gname').textContent = game.name;
         row.querySelector('.gplayers').textContent = `host @${game.host_name}`;
-        row.querySelector('.ginfo').textContent = `${game.mapName || '?'} · ${game.players}/${game.max_players || 3}`;
+        row.querySelector('.ginfo').textContent = `${game.mapName || '?'} · ${game.players}/${game.max_players || 4}`;
         if (!incompatible && game.status === 'open') row.querySelector('.gjoin').onclick = () => this.cb.onCustomJoin?.(game);
         box.appendChild(row);
       }
@@ -871,8 +895,8 @@ export class UI {
     for (const [key, value] of Object.entries(DIFFICULTY)) { const button = document.createElement('button'); button.className = `diffbtn${key === 'normal' ? ' sel' : ''}`; button.textContent = value.label; button.onclick = () => { this._cuDiff = key; for (const other of diff.children) other.classList.toggle('sel', other === button); }; diff.appendChild(button); }
     this._cuDiff = 'normal';
     const max = this.root.querySelector('#cu-max'); max.innerHTML = '';
-    for (const count of [1, 2, 3]) { const button = document.createElement('button'); button.className = `diffbtn${count === 3 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
-    this._cuMax = 3; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
+    for (const count of [1, 2, 3, 4]) { const button = document.createElement('button'); button.className = `diffbtn${count === 4 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
+    this._cuMax = 4; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
   }
 
   _buildCharacterCreator() {
@@ -921,6 +945,8 @@ export class UI {
   _showCharacterCreator() {
     if ((this._profile?.mmoCharacters || []).length >= MAX_MMO_CHARACTERS) return;
     const name = this.root.querySelector('#creator-name');
+    const cancel = this.root.querySelector('#creator-cancel');
+    if (cancel) cancel.classList.toggle('hidden', !(this._profile?.mmoCharacters || []).length);
     if (name) name.value = '';
     this._showScreen('character-create');
     setTimeout(() => name?.focus(), 0);
@@ -1553,6 +1579,7 @@ export class UI {
   // walkable planet; Esc (or the ⚙ button) opens the council over it.
   setOverworldMode(on) {
     this._overworldMode = !!on;
+    if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
     this.root.querySelector('#m-galaxy').classList.toggle('hidden', !on);
@@ -1602,6 +1629,8 @@ export class UI {
 
   hideOverlay() {
     this.root.querySelector('#overlay').classList.add('hidden');
+    this.shell.overlay = null;
+    this.shell.returnOverlay = null;
   }
 
   toggleOverlay() {
@@ -1711,12 +1740,12 @@ export class UI {
   // Walking into a gate asks before it commits you to a front: the panel
   // carries the level's blurb and the difficulty choice, and Enter takes the
   // same onStart path the setup screen's START button uses.
-  showGateConfirm({ gate, diff = 'normal', onEnter }) {
+  showGateConfirm({ gate, diff = 'normal', onEnter, onLeave }) {
     let modal = this.root.querySelector('#gate-confirm');
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'gate-confirm';
-      modal.className = 'roomconfirm';
+      modal.className = 'gateprompt hidden';
       this.root.appendChild(modal);
     }
     const cave = !!gate.cave;
@@ -1725,8 +1754,8 @@ export class UI {
       <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
         `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
     modal.innerHTML = `
-      <div class="roomconfirmcard">
-        <span class="roomeyebrow">The road onward</span>
+      <div class="gatepromptcard">
+        <span class="roomeyebrow">Mission rally · 1–4 players</span>
         <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
         <p>${cave
           ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
@@ -1734,12 +1763,12 @@ export class UI {
         ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
         ${diffSeg}
         <div class="roomconfirmactions">
-          <button class="tbtn" id="gate-back">NOT YET</button>
-          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN THE TRIAL LEDGER' : 'ENTER'}</button>
+          <button class="tbtn" id="gate-back">CLOSE</button>
+          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN TRIALS' : 'READY / ENTER'}</button>
         </div>
       </div>`;
     const close = () => modal.classList.add('hidden');
-    modal.querySelector('#gate-back').onclick = close;
+    modal.querySelector('#gate-back').onclick = () => { close(); onLeave && onLeave(); };
     let chosen = diff;
     for (const b of modal.querySelectorAll('.gate-diff .diffbtn')) {
       b.onclick = () => {
@@ -1747,8 +1776,27 @@ export class UI {
         for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
       };
     }
-    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
+    modal.querySelector('#gate-go').onclick = () => { if (cave) close(); onEnter && onEnter(chosen); };
     modal.classList.remove('hidden');
+  }
+
+  setGateRally({ players = 1, maxPlayers = 4, role = 'solo', ready = false, canLaunch = false } = {}) {
+    const modal = this.root.querySelector('#gate-confirm');
+    const eyebrow = modal?.querySelector('.roomeyebrow');
+    const go = modal?.querySelector('#gate-go');
+    if (eyebrow) eyebrow.textContent = `Mission rally · ${players}/${maxPlayers} players`;
+    if (!go) return;
+    if (role === 'host') {
+      go.textContent = canLaunch ? `LAUNCH PARTY (${players})` : `WAITING FOR PARTY (${players})`;
+      go.disabled = !canLaunch;
+    } else if (role === 'guest') {
+      go.textContent = ready ? 'READY — WAITING FOR HOST' : 'MARK READY';
+      go.disabled = ready;
+    }
+  }
+
+  hideGatePrompt() {
+    this.root.querySelector('#gate-confirm')?.classList.add('hidden');
   }
 
   _reflectQuality(q) {
@@ -1801,7 +1849,7 @@ export class UI {
           </div>
         </div>`;
       this.roomRoster(this._playersFromOnlineGame(online), {
-        maxPlayers: online.max_players || 3,
+        maxPlayers: online.max_players || 4,
         isHost: false,
         code: online.join_code,
         mode: online.mode || mode,
@@ -2589,7 +2637,7 @@ export class UI {
   }
 
   roomRoster(players = [], {
-    maxPlayers = 3,
+    maxPlayers = 4,
     isHost = false,
     code = '',
     mode = 'campaign',
@@ -2932,7 +2980,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
+        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 4}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible

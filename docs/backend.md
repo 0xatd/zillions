@@ -26,7 +26,7 @@ username. They must not show the email address or a Google account name.
 
 Vercel serves the game and same-origin API routes:
 
-- `api/state.js` stores and reads JSON state in Vercel Blob.
+- `api/state.js` stores and reads authenticated JSON state in private Vercel Blob storage.
 - `api/lobby.js` stores legacy short-lived lobby presence/chat in Vercel Blob
   for compatibility only.
 - `api/auth-config.js` exposes only browser-safe Supabase config.
@@ -78,6 +78,8 @@ separate future project.
 ### Vercel Blob State Mirror
 
 `/api/state` accepts `profile`, `settings`, `save`, and `game`.
+The route requires a Supabase access token. The token user must own the
+`playerId`. The route rejects anonymous requests and mismatched player IDs.
 
 Blob paths use this shape:
 
@@ -88,8 +90,8 @@ players/<playerId>/save/latest.json
 players/<playerId>/game/<id>.json
 ```
 
-This is compatibility storage for guest/offline profiles and smoke tests. It is
-not the long-term account source of truth once Supabase is fully wired.
+This is compatibility storage for signed-in account mirrors and smoke tests.
+Blob objects use private access. Supabase remains the account source of truth.
 
 ### Vercel Blob Legacy Lobby
 

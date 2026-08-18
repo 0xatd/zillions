@@ -1,4 +1,4 @@
-import { backendEnabled } from './backend.js';
+import { backendEnabled, setBackendSession } from './backend.js';
 import { THREAT_PERIOD } from './config.js';
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 
@@ -109,6 +109,7 @@ export class AuthClient {
     const { data, error } = await this.client.auth.getSession();
     if (error) this.error = error.message || 'Could not load cloud profile.';
     this.session = data?.session || null;
+    setBackendSession(this.session);
     this.ready = true;
     return this.status();
   }
@@ -117,6 +118,7 @@ export class AuthClient {
     if (!this.client) return null;
     const { data } = this.client.auth.onAuthStateChange((_event, session) => {
       this.session = session || null;
+      setBackendSession(this.session);
       callback(this.status());
     });
     return data?.subscription || null;
@@ -140,6 +142,7 @@ export class AuthClient {
     const { error } = await this.client.auth.signOut();
     if (error) throw error;
     this.session = null;
+    setBackendSession(null);
   }
 
   profileFromBundle(bundle) {

@@ -388,6 +388,7 @@ export class Overworld {
     this.target = null;
     this.ghosts = new Map();  // id -> {x, z, hero, name, seen}
     this._cool = new Map();
+    this._activeGate = null;
     this.time = 0;
   }
 
@@ -429,13 +430,20 @@ export class Overworld {
     const events = [];
     const all = [...this.map.overworldLayout.gates];
     if (this.map.overworldLayout.cave) all.push(this.map.overworldLayout.cave);
+    let nearby = null;
     for (const g of all) {
       const d = Math.hypot(this.hero.x - g.x, this.hero.z - g.z);
+      if (d < GATE_RADIUS) nearby = g;
       const cool = this._cool.get(g.name) || 0;
-      if (d < GATE_RADIUS && this.time > cool) {
+      if (d < GATE_RADIUS && this._activeGate !== g.name && this.time > cool) {
         this._cool.set(g.name, this.time + GATE_COOLDOWN);
+        this._activeGate = g.name;
         events.push({ t: 'gate', gate: g, state: gateState(g) });
       }
+    }
+    if (!nearby && this._activeGate) {
+      events.push({ t: 'gateleave', gateName: this._activeGate });
+      this._activeGate = null;
     }
     return events;
   }

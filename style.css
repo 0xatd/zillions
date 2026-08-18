@@ -831,6 +831,18 @@ body::after {
 .roomconfirmcard h2 { margin: 7px 0 8px; color: #fff2bd; }
 .roomconfirmcard p { margin: 0 0 20px; color: #d8ecff; line-height: 1.5; }
 .roomconfirmactions { display: flex; justify-content: flex-end; gap: 8px; }
+.gateprompt {
+  position: fixed; left: 50%; bottom: 26px; z-index: 42;
+  width: min(520px, calc(100vw - 28px)); transform: translateX(-50%);
+  pointer-events: none;
+}
+.gatepromptcard {
+  pointer-events: auto; padding: 14px 16px; border: 1px solid rgba(137, 194, 232, .34);
+  border-radius: 14px; background: rgba(7, 14, 23, .88); backdrop-filter: blur(12px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+}
+.gatepromptcard h2 { margin: 4px 0 6px; font-size: 19px; color: #fff2bd; }
+.gatepromptcard p { margin: 0 0 10px; color: #cfe4f4; line-height: 1.35; font-size: 13px; }
 .tbtn.danger, .roomexit.danger { color: #ffaaa3; border-color: rgba(255, 93, 82, 0.55); }
 #waitind {
   position: absolute; top: 64px; left: 50%; transform: translateX(-50%);

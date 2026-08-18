@@ -46,7 +46,10 @@ assert.match(main, /u === g\.heroes\[this\.myPlayer\] && this\.mpRole === 'guest
   'local movement lead must apply only to this guest player');
 assert.doesNotMatch(main, /if \(u\.hero && this\.mpRole === 'guest'/,
   'local movement lead must not shift every hero on a guest client');
-assert.match(online, /}, 5 \* 1000\);/, 'the lobby fallback must self-heal within five seconds');
+assert.match(online, /this\._presenceBeat = setInterval[\s\S]*}, 15 \* 1000\);/, 'presence writes must stay on the slower heartbeat');
+assert.match(online, /this\._gamesPoll = setInterval[\s\S]*refreshGames\(\)[\s\S]*}, 5 \* 1000\);/, 'the read-only lobby fallback must self-heal within five seconds');
+assert.match(main, /this\.ow\.world\?\.id !== character\.lastWorld[\s\S]*_travelToWorld/, 'character switching must move to that character’s world');
+assert.match(ui, /creator-cancel[\s\S]*mmoCharacters[\s\S]*_backOverlay/, 'mandatory character creation must not cancel into an empty roster');
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
 

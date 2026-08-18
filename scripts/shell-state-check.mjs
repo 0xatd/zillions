@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { ShellState, SHELL_BASES } from '../src/shell-state.js';
+
+const shell = new ShellState();
+assert.equal(shell.base, SHELL_BASES.AUTH);
+shell.enterBase(SHELL_BASES.CHARACTER_SELECT);
+shell.enterBase(SHELL_BASES.OVERWORLD);
+shell.openOverlay('main');
+assert.equal(shell.closeOverlay().base, SHELL_BASES.OVERWORLD, 'character roster must close back to the world');
+shell.openOverlay('help');
+assert.deepEqual(shell.closeOverlay(), { base: SHELL_BASES.OVERWORLD, overlay: null, returnOverlay: null });
+shell.openOverlay('mission-browser');
+shell.openOverlay('settings');
+assert.equal(shell.closeOverlay().overlay, 'mission-browser');
+const point = { worldId: 'earth', x: 12.5, z: 9.5 };
+shell.enterMission(point);
+assert.deepEqual(shell.finishMission(), point);
+assert.equal(shell.base, SHELL_BASES.OVERWORLD);
+assert.throws(() => shell.enterBase('title'), /invalid_shell_base/);
+console.log('shell state check passed');
