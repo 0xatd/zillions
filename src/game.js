@@ -3741,3 +3741,49 @@ export class Game {
     return n;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Run scoring (read-only)
+// ---------------------------------------------------------------------------
+// The simulation has always kept the numbers a run is judged by — kills, coins,
+// hives razed, nodes taken, the Threat it reached. This is the one place that
+// folds them into a single score, so the end screen, the profile and the
+// meta-progression layer (`src/meta.js`) all read the SAME number instead of
+// each inventing one. It reads the game and writes nothing: calling it mid-run
+// is legal and cannot perturb the sim or a lockstep hash.
+export const RUN_SCORE_WEIGHTS = {
+  kill: 1, coin: 0.5, nest: 150, node: 40, built: 5, lost: -10, threat: 25,
+  boss: 200, win: 1.5, loss: 0.6,
+};
+
+export function runScore(game) {
+  const stats = (game && game.stats) || {};
+  const num = (v) => (Number.isFinite(v) ? v : 0);
+  const W = RUN_SCORE_WEIGHTS;
+  const level = game && game.level ? game.level : null;
+  const mult = level && Number.isFinite(level.mult) ? level.mult : 1;
+  const won = !!(game && game.won);
+  const bossKilled = stats.bossKillT != null;
+  const raw = num(stats.kills) * W.kill
+    + num(stats.coins) * W.coin
+    + num(stats.nests) * W.nest
+    + num(stats.nodes) * W.node
+    + num(stats.built) * W.built
+    + num(stats.lost) * W.lost
+    + Math.max(0, num(game && game.threatLevel) - 1) * W.threat
+    + (bossKilled ? W.boss : 0);
+  // A loss still scores — half a war is still a war — but never below zero,
+  // whatever the building losses did to the raw total.
+  const score = Math.max(0, Math.round(raw * mult * (won ? W.win : W.loss)));
+  return {
+    score, won, bossKilled,
+    mode: (game && game.mode) || 'campaign',
+    levelId: (game && game.levelId) || 0,
+    worldKind: (level && level.worldKind) || (level && level.labyrinth ? 'labyrinth' : 'earth'),
+    mult, threatLevel: num(game && game.threatLevel),
+    time: num(game && game.time),
+    kills: num(stats.kills), coins: num(stats.coins), nests: num(stats.nests),
+    nodes: num(stats.nodes), built: num(stats.built), lost: num(stats.lost),
+    bestHeld: num(stats.bestHeld), heroDeaths: num(stats.heroDeaths),
+  };
+}

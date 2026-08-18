@@ -58,6 +58,16 @@ the galaxy map opens deterministic frontier planets. Each planet currently
 contains a Zillions-style warzone instance and a route back to orbit. Future
 destinations can use other art and adventure structures.
 
+`src/galaxy.js` generates the galaxy itself: star systems on spiral arms, Sol
+at the hub, and worlds that get harder the further out you travel. A world is
+one of three kinds. A standard world is a campaign landing, a holdout runs the
+survival rules, and a derelict carries a labyrinth hulk on its surface.
+
+`src/meta.js` holds what a run leaves behind. Each landing pays Salvage Alloy
+against its score, and Alloy buys permanent nodes across supply, warband, and
+command branches. Both modules are headless and validated by
+`scripts/galaxy-check.mjs`. The shell wiring lands in a follow-up change.
+
 Living allied heroes and troops reveal the battlefield. The world outside
 their soft vision circles is almost black, including the minimap.
 
@@ -144,8 +154,9 @@ npm run check
 ```
 
 The command checks syntax, balance invariants, deterministic restore, all five
-maps, hero abilities, multiplayer signaling, room lifecycle, lobby behavior,
-and repository documentation.
+maps, every generated galaxy world, meta-progression math, hero abilities,
+multiplayer signaling, room lifecycle, lobby behavior, and repository
+documentation.
 
 Also run these checks before you open a pull request:
 

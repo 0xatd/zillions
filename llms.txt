@@ -15,6 +15,7 @@ Default branch: main
 - docs/review-guide.md: pull request review gate
 - docs/art-direction.md: 3D shape language, scale, names, sockets, and budgets
 - docs/art-pipeline.md: Blender source, GLB export, runtime fallback, and review
+- docs/galaxy-meta-integration.md: how the galaxy and meta-progression modules wire into the shell
 
 ## Source of truth
 
@@ -33,6 +34,8 @@ Default branch: main
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
+- src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
+- src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
