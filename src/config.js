@@ -5,6 +5,7 @@
 // the two flows meet.
 
 import { makeRNG } from './utils.js';
+import { MOD_KEYS as GEAR_MOD_KEYS, resolveItem, isRolledKey } from './items.js';
 
 export const MAP_SIZE = 120;
 export const SIM_DT = 1 / 30;          // fixed simulation timestep
@@ -628,16 +629,43 @@ export const LOOT_PICKUP_RADIUS = 1.6; // walk over it and it is yours
 export const LOOT_REVEAL_RADIUS = 7;   // how close before you spot a hidden cache
 export const LOOT_DROP_COOLDOWN = 2.5; // seconds before a dropped item can be picked up again
 
-const MOD_KEYS = ['hp', 'regen', 'magnet', 'dmg', 'rof', 'range', 'speed', 'cdr', 'auraR', 'troopDmg', 'towerDmg', 'buildingHp', 'income'];
+// The stat vocabulary lives in `items.js` so the gear layer and the authored
+// table cannot drift apart. One list, one source.
+export const MOD_KEYS = GEAR_MOD_KEYS;
+
+// Two kinds of key reach this function and both are legal:
+//   'oath_blade'                  an authored item from ITEMS above
+//   'scatter_mk2:7f3a91:62:2'     a rolled item, generated from the key itself
+// Authored keys resolve from the table. Rolled keys resolve through
+// `resolveItem()`, which is pure — so this stays a plain sum with no state.
 export function itemMods(items) {
   const m = {};
   for (const k of MOD_KEYS) m[k] = 0;
   for (const key of items || []) {
+    const rolled = isRolledKey(key) ? resolveItem(key) : null;
+    if (rolled) {
+      for (const k of MOD_KEYS) if (rolled.mods[k]) m[k] += rolled.mods[k];
+      continue;
+    }
     const it = ITEMS[key];
     if (!it) continue;
     for (const k of MOD_KEYS) if (it[k]) m[k] += it[k];
   }
   return m;
+}
+
+// One accessor for "what is this key", whichever kind it is. The UI and the
+// simulation both go through here instead of reaching for ITEMS directly.
+export function itemInfo(key) {
+  const rolled = isRolledKey(key) ? resolveItem(key) : null;
+  if (rolled) return rolled;
+  const it = ITEMS[key];
+  if (!it) return null;
+  return {
+    key, baseKey: key, base: it, slot: it.slot || null, name: it.name, icon: it.icon,
+    ilvl: 0, rarity: 4, rarityName: 'Signature', rarityColor: '#d8a13a',
+    req: null, affixes: [], mods: it, local: {}, weapon: null, rolled: false, desc: it.desc,
+  };
 }
 
 // ---------- Campaign: retaking EARTH — 5 fronts, 5 maps, 5 bosses ----------
