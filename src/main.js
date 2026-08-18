@@ -2755,12 +2755,45 @@ class App {
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun, this.sun.target);
-    // Warm earth bounce from below, cool sky from above — the two-tone fill
-    // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.58);
+    // Warm earth bounce from below, cool sky from above — reduced from the
+    // pre-IBL values (0.58/0.2) because scene.environment now supplies part of
+    // that fill; keeping both at full strength washed out the shadows.
+    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.42);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x33406e, 0.2);
+    this.amb = new THREE.AmbientLight(0x33406e, 0.12);
     this.scene.add(this.amb);
+    // Phase 2 — image-based lighting: a procedural gradient sky run through
+    // PMREM so every PBR surface (ivory plate, cyan power cores, graphite
+    // frames) picks up soft sky/ground reflections. No HDR download: the
+    // gradient is generated in-engine and tuned to the existing palette so
+    // the cel-lighting look leads and the environment only fills.
+    const skyScene = new THREE.Scene();
+    skyScene.add(new THREE.Mesh(
+      new THREE.SphereGeometry(50, 24, 12),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        uniforms: {
+          top: { value: new THREE.Color(0xbcd8e2) },      // muted cool sky
+          horizon: { value: new THREE.Color(0xa8cfc4) },  // matches fog
+          bottom: { value: new THREE.Color(0x6e5f4a) },   // warm earth bounce
+        },
+        vertexShader: 'varying vec3 vP; void main() { vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: [
+          'varying vec3 vP;',
+          'uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom;',
+          'void main() {',
+          '  float h = normalize(vP).y;',
+          '  vec3 c = h > 0.0',
+          '    ? mix(horizon, top, pow(min(1.0, h), 0.75))',
+          '    : mix(horizon, bottom, pow(min(1.0, -h), 0.6));',
+          '  gl_FragColor = vec4(c, 1.0);',
+          '}',
+        ].join('\n'),
+      }),
+    ));
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(skyScene, 0.04).texture;
+    pmrem.dispose();
     this.scene.fog = new THREE.FogExp2(0xa8cfc4, 0.0045);
     this.scene.background = new THREE.Color(0xa8cfc4);
   }
