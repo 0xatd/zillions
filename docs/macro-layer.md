@@ -17,7 +17,7 @@ results directly. Add that bridge only when a server can validate match
 eligibility and completion. The Hive tick, exploration, and AI hub DM remain
 destination work below. They are not part of V0.
 
-The AI DM never mutates state directly. Pattern:
+Future AI DM work must never mutate state directly. Pattern:
 
 ```
 player (freeform text)
@@ -30,7 +30,7 @@ player (freeform text)
 
 The DM is the translator and the theater. The referee stays code.
 
-### Frontier Exploration (V0)
+### Frontier Exploration (Future)
 
 The galaxy is deterministic from seed, so the map is effectively infinite
 on paper and only *revealed* where players have explored:
@@ -50,7 +50,7 @@ on paper and only *revealed* where players have explored:
   at 11 ly and lethal at 13 ly) is flavor on top of the curve, not a
   replacement for it.
 
-### AI DM Endpoint Contract (V0)
+### AI DM Endpoint Contract (Future)
 
 Server-side Vercel route. Never touches the battle engine.
 
@@ -68,7 +68,7 @@ Request:
 Server composes context (world ownership, recent tick events, player
 reputation, inventory) and calls the LLM with a fixed system prompt that
 includes the **action vocabulary** — the closed list of actions the DM may
-request (v0: `repair`, `trade`, `take_contract`, `launch_exploration`).
+request (initial proposal: `repair`, `trade`, `take_contract`, `launch_exploration`).
 
 Response (validated before any state write):
 
