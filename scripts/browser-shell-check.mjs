@@ -126,6 +126,36 @@ try {
     document.querySelector('#cu-join').click();
     return !!live && liveEmpty && maps.length >= 6 && playable && !document.querySelector('#screen-setup').classList.contains('hidden');
   })()`), true, 'Custom Games must separate live rooms from a playable Arcade catalog');
+  assert.equal(await evaluate(`(() => {
+    const avatar = document.querySelector('#character-avatar');
+    const loadout = document.querySelectorAll('#character-loadout span');
+    return !!avatar && avatar.dataset.class === 'vanguard'
+      && document.querySelectorAll('#character-avatar .avatar-body > span').length >= 7
+      && loadout.length === 4;
+  })()`), true, 'Character Select must stage a full character silhouette and visible loadout, not only a class icon');
+  assert.equal(await evaluate(`(() => {
+    const ui = window.__app.ui;
+    const room = { join_code: 'ABC123', visibility: 'public', mode: 'campaign', level: 1, difficulty: 'normal', max_players: 4 };
+    const players = [
+      { seat: 1, name: 'Host', host: true, hero: 'scott', state: 'connected', ready: true },
+      { seat: 2, name: 'Journey Test', you: true, hero: 'maya', state: 'connected', ready: false },
+    ];
+    ui.showSetup({ online: room, mode: 'campaign' });
+    ui.setRoomSettings({ level: 1, difficulty: 'normal', isHost: false, mode: 'campaign' });
+    ui.roomRoster(players, { maxPlayers: 4, isHost: false, code: room.join_code, mode: room.mode, level: room.level, difficulty: room.difficulty });
+    ui.setRoomReady({ visible: true, ready: false });
+    const guestLocked = [...document.querySelectorAll('#levelrow .levelcard')].every((node) => node.disabled)
+      && [...document.querySelectorAll('#diffseg .diffbtn')].every((node) => node.disabled);
+    const guestState = document.querySelector('#screen-setup').classList.contains('room-guest')
+      && document.querySelectorAll('.roomslot').length === 4
+      && !document.querySelector('#room-ready').classList.contains('hidden')
+      && !!document.querySelector('.room-commandbar')
+      && !!document.querySelector('#roomchat-input');
+    ui.setRoomSettings({ level: 1, difficulty: 'normal', isHost: true, mode: 'campaign' });
+    const hostEditable = [...document.querySelectorAll('#diffseg .diffbtn')].some((node) => !node.disabled)
+      && document.querySelector('#screen-setup').classList.contains('room-host');
+    return guestLocked && guestState && hostEditable;
+  })()`), true, 'Staging lobby must expose four seats, chat, guest-ready state, and host-only room controls');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

@@ -151,7 +151,17 @@ export class UI {
         <div id="screen-main" class="mainmenu character-select">
           <div class="character-heading"><span>GALAXY ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment, level and last world persist between adventures. Press C in the world to return here.</small></div>
           <div id="character-stage" class="character-stage">
-            <div id="character-sigil" class="character-sigil"></div>
+            <div id="character-avatar" class="character-avatar" aria-label="Selected character">
+              <div class="avatar-backlight"></div>
+              <div class="avatar-body">
+                <span class="avatar-head"></span><span class="avatar-torso"></span>
+                <span class="avatar-arm left"></span><span class="avatar-arm right"></span>
+                <span class="avatar-leg left"></span><span class="avatar-leg right"></span>
+                <span class="avatar-weapon" id="character-weapon"></span>
+                <span id="character-sigil" class="character-sigil"></span>
+              </div>
+              <div class="avatar-loadout" id="character-loadout"></div>
+            </div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
@@ -867,6 +877,9 @@ export class UI {
     if (mode && (this.selectedMode || 'campaign') !== mode) this.applySetupMode(mode);
     this.selectedLevel = Number(level) || 1;
     this.selectedDiff = difficulty;
+    const setup = this.root.querySelector('#screen-setup');
+    setup?.classList.toggle('room-host', !!isHost);
+    setup?.classList.toggle('room-guest', !isHost);
     for (const chip of this.root.querySelectorAll('#modeseg .modechip')) {
       chip.disabled = !isHost;
       if (!isHost) chip.title = 'The host controls the war mode.';
@@ -1130,11 +1143,14 @@ export class UI {
       this.root.querySelector('#character-tagline').textContent = 'Choose a class and begin on Earth.';
       this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
       this.root.querySelector('#character-sigil').textContent = '✦';
+      this.root.querySelector('#character-loadout').innerHTML = '';
+      this.root.querySelector('#character-weapon').textContent = '';
       return;
     }
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
     const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
-    const gear = (character.items || []).map((itemKey) => itemInfo(itemKey)).filter(Boolean);
+    const equipped = legalEquipment(character);
+    const gear = EQUIP_SLOTS.map((slot) => equipped[slot] ? itemInfo(equipped[slot]) : null).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
       row.classList.toggle('sel', row.dataset.id === character.id);
     }
@@ -1143,6 +1159,18 @@ export class UI {
     sigil.style.backgroundImage = '';
     sigil.classList.remove('has-portrait');
     sigil.style.setProperty('--hero-color', appearance.color);
+    const avatar = this.root.querySelector('#character-avatar');
+    avatar.style.setProperty('--hero-color', appearance.color);
+    avatar.dataset.class = character.classKey || 'vanguard';
+    const weapon = equipped[character.activeSet === 1 ? 'weapon2' : 'weapon'];
+    const weaponItem = weapon ? itemInfo(weapon) : null;
+    this.root.querySelector('#character-weapon').textContent = weaponItem?.icon || '⚔';
+    this.root.querySelector('#character-loadout').innerHTML = [
+      ['HEAD', klass.icon],
+      ['ARMOUR', equipped.armor ? itemInfo(equipped.armor)?.icon : '◇'],
+      ['WEAPON', weaponItem?.icon || '◇'],
+      ['IMPLANT', equipped.implant1 ? itemInfo(equipped.implant1)?.icon : '◇'],
+    ].map(([label, icon]) => `<span><i>${icon}</i><small>${label}</small></span>`).join('');
     this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
     this.root.querySelector('#character-tagline').textContent = `${klass.name} — ${klass.role} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP · ${character.talentPoints || 0} talent points`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
@@ -2089,7 +2117,9 @@ export class UI {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._showScreen('setup');
-    this.root.querySelector('#screen-setup').classList.toggle('roommode', !!online);
+    const setupScreen = this.root.querySelector('#screen-setup');
+    setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
@@ -2098,6 +2128,12 @@ export class UI {
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
+    const fieldLabel = setupScreen.querySelector('.field-label');
+    const heroLabel = setupScreen.querySelector('.hero-label');
+    const diffLabel = setupScreen.querySelector('.diff-label');
+    if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : '1 · Battlefield <span id="warstatus" class="warstatus"></span>';
+    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : '2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
+    if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : '3 · Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
     this._renderModeSeg(mode, coop || !!online);
@@ -2108,7 +2144,8 @@ export class UI {
     if (online) {
       mp.dataset.init = '1';
       mp.innerHTML = `
-        <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
+        <div class="room-commandbar"><span><b>STAGING LOBBY</b><small>Seats, readiness, map rules, and chat are authoritative here.</small></span><strong>${online.visibility === 'private' ? '🔒 PRIVATE' : '🌐 PUBLIC'} · ${online.join_code}</strong></div>
+        <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b>.</span></div>
         <div id="room-roster" class="roomroster"></div>
         <button class="diffbtn roomready hidden" id="room-ready">READY FOR BATTLE</button>
         <button class="diffbtn hidden" id="room-reconnect">RECONNECT TO HOST</button>
