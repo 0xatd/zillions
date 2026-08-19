@@ -4,7 +4,7 @@
 // It validates an authority-owned item snapshot and returns one atomic mutation
 // proposal. The authority layer must apply the proposal once, in a transaction.
 
-import { hashString } from './items.js';
+import { hashString, MOD_KEYS } from './items.js';
 import { itemInfo } from './config.js';
 
 export const CRAFTING_SCHEMA = 'zillions.crafting.v1';
@@ -20,13 +20,13 @@ export const CRAFTING_MATERIALS = {
 };
 
 export const COMPONENTS = {
-  frame_drive: { id: 'frame_drive', name: 'Bulwark Drive', type: 'drive', color: 'frame', maxRank: 5 },
-  reflex_drive: { id: 'reflex_drive', name: 'Vector Drive', type: 'drive', color: 'reflex', maxRank: 5 },
-  signal_drive: { id: 'signal_drive', name: 'Relay Drive', type: 'drive', color: 'signal', maxRank: 5 },
-  kinetic_optic: { id: 'kinetic_optic', name: 'Kinetic Optic', type: 'optic', color: 'reflex', maxRank: 5 },
-  thermal_optic: { id: 'thermal_optic', name: 'Thermal Optic', type: 'optic', color: 'signal', maxRank: 5 },
-  bulwark_ward: { id: 'bulwark_ward', name: 'Bulwark Ward', type: 'ward', color: 'frame', maxRank: 5 },
-  phase_ward: { id: 'phase_ward', name: 'Phase Ward', type: 'ward', color: 'signal', maxRank: 5 },
+  frame_drive: { id: 'frame_drive', name: 'Bulwark Drive', type: 'drive', color: 'frame', maxRank: 5, perRank: { frame: 2 } },
+  reflex_drive: { id: 'reflex_drive', name: 'Vector Drive', type: 'drive', color: 'reflex', maxRank: 5, perRank: { reflex: 2 } },
+  signal_drive: { id: 'signal_drive', name: 'Relay Drive', type: 'drive', color: 'signal', maxRank: 5, perRank: { signal: 2 } },
+  kinetic_optic: { id: 'kinetic_optic', name: 'Kinetic Optic', type: 'optic', color: 'reflex', maxRank: 5, perRank: { critChance: 0.01 } },
+  thermal_optic: { id: 'thermal_optic', name: 'Thermal Optic', type: 'optic', color: 'signal', maxRank: 5, perRank: { thermal: 0.025 } },
+  bulwark_ward: { id: 'bulwark_ward', name: 'Bulwark Ward', type: 'ward', color: 'frame', maxRank: 5, perRank: { armor: 0.012 } },
+  phase_ward: { id: 'phase_ward', name: 'Phase Ward', type: 'ward', color: 'signal', maxRank: 5, perRank: { evadeChance: 0.008 } },
 };
 
 export const RECIPES = {
@@ -76,6 +76,36 @@ const cloneSockets = (sockets = []) => sockets.map((socket) => ({
   type: socket.type,
   component: socket.component ? { ...socket.component } : null,
 }));
+
+const emptyComponentMods = () => Object.fromEntries(MOD_KEYS.map((key) => [key, 0]));
+
+export function componentMods(componentOrId, rank = 1) {
+  const component = typeof componentOrId === 'string' ? COMPONENTS[componentOrId] : COMPONENTS[componentOrId?.id];
+  if (!component) return emptyComponentMods();
+  const boundedRank = Math.max(1, Math.min(component.maxRank, Math.floor(Number(rank ?? componentOrId?.rank) || 1)));
+  const out = emptyComponentMods();
+  for (const [key, value] of Object.entries(component.perRank || {})) out[key] = value * boundedRank;
+  return out;
+}
+
+// Sum installed component effects exactly once. The authority layer normally
+// guarantees unique component ownership. Instance de-duplication here keeps a
+// corrupt or repeated item snapshot from granting the same power twice.
+export function socketComponentMods(items = []) {
+  const out = emptyComponentMods();
+  const seen = new Set();
+  const list = Array.isArray(items) ? items : [items];
+  for (const item of list) {
+    for (const socket of item?.sockets || []) {
+      const installed = socket?.component;
+      if (!installed?.instanceId || seen.has(installed.instanceId)) continue;
+      seen.add(installed.instanceId);
+      const mods = componentMods(installed, installed.rank);
+      for (const key of MOD_KEYS) out[key] += mods[key];
+    }
+  }
+  return out;
+}
 
 export function maxSocketCount(itemOrKey) {
   const item = typeof itemOrKey === 'string' ? itemInfo(itemOrKey) : itemOrKey;
@@ -183,6 +213,10 @@ function success(context, request, item, sockets, action, cost = { materials: {}
       expectedRevision: item.revision,
       nextRevision,
       item: outputItem,
+      components: {
+        consume: [...(extra.consumeComponents || [])],
+        return: [...(extra.returnComponents || [])],
+      },
     },
     provenance: {
       actorId: context.actorId,
@@ -222,6 +256,7 @@ export function evaluateSocketInsert(context, request) {
   return success(context, request, item, sockets, 'insert_component', { alloy: 0, materials: {} }, {
     socketIndex: index,
     inputs: { componentInstanceId: String(componentSnapshot.instanceId), componentId: component.id },
+    consumeComponents: [{ instanceId: String(componentSnapshot.instanceId), componentId: component.id, rank: 1 }],
     message: `${component.name} installed.`,
   });
 }
@@ -243,6 +278,7 @@ export function evaluateSocketRemove(context, request) {
   return success(context, request, item, sockets, 'remove_component', { alloy: 0, materials: {} }, {
     socketIndex: index,
     outputs: { returnedComponent: removed },
+    returnComponents: [{ instanceId: removed.instanceId, componentId: removed.id, rank: removed.rank }],
     message: `${COMPONENTS[removed.id].name} removed.`,
   });
 }

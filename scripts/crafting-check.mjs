@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import {
   COMPONENTS, CRAFT_ERRORS, CRAFTING_MATERIALS, RECIPES, SOCKET_COLORS, SOCKET_TYPES,
   evaluateRecipe, evaluateSocketInsert, evaluateSocketRemove, initialSockets, maxSocketCount,
-  normalizeCraftItem, socketColor, socketTypeForItem,
+  normalizeCraftItem, socketColor, socketTypeForItem, componentMods, socketComponentMods,
 } from '../src/crafting.js';
-import { resolveItem, rollItemKey } from '../src/items.js';
+import { MOD_KEYS, resolveItem, rollItemKey } from '../src/items.js';
 
 const key = rollItemKey('scatter_mk3', 'craft-check', 70, 3);
 const actorId = 'character-1';
@@ -60,6 +60,8 @@ if (item.sockets[0].color === 'frame') insertItem = { ...item, sockets: [{ ...it
 const inserted = evaluateSocketInsert({ ...insertContext, item: insertItem }, request('insert', { socketIndex: 0 }));
 assert.equal(inserted.ok, true);
 assert.equal(inserted.item.sockets[0].component.instanceId, 'component-1');
+assert.deepEqual(inserted.mutation.components.consume, [{ instanceId: 'component-1', componentId: compatible.id, rank: 1 }]);
+assert.deepEqual(inserted.mutation.components.return, []);
 assert.equal(evaluateSocketInsert({ ...insertContext, component: { ...insertContext.component, ownerId: 'other' }, item: insertItem }, request('foreign-component', { socketIndex: 0 })).error.code, CRAFT_ERRORS.INVALID_COMPONENT);
 
 const wrongComponent = compatible.id === 'kinetic_optic' ? COMPONENTS.thermal_optic : COMPONENTS.kinetic_optic;
@@ -75,6 +77,8 @@ const removeContext = { ...rich, item: installedItem };
 const removed = evaluateSocketRemove(removeContext, { requestId: 'remove', expectedRevision: 5, socketIndex: 0 });
 assert.equal(removed.ok, true);
 assert.equal(removed.provenance.outputs.returnedComponent.instanceId, 'component-1');
+assert.deepEqual(removed.mutation.components.consume, []);
+assert.deepEqual(removed.mutation.components.return, [{ instanceId: 'component-1', componentId: compatible.id, rank: 1 }]);
 assert.equal(evaluateSocketRemove({ ...removeContext, availableComponentSlots: 0 }, { requestId: 'remove-full', expectedRevision: 5, socketIndex: 0 }).error.code, CRAFT_ERRORS.INVENTORY_FULL);
 
 const upgrade = evaluateRecipe(removeContext, { requestId: 'upgrade', expectedRevision: 5, recipeId: 'upgrade_component', socketIndex: 0 });
@@ -89,6 +93,23 @@ const calibratedB = evaluateRecipe(rich, request('calibrate', { recipeId: 'calib
 assert.deepEqual(calibratedA, calibratedB, 'the same request must produce the same proposal');
 const prism = evaluateRecipe(rich, request('prism', { recipeId: 'prism_socket', socketIndex: 0 }));
 assert.equal(prism.item.sockets[0].color, 'prismatic');
+
+// Installed components contribute bounded existing-stat mods. Repeating the
+// same instance through a corrupt snapshot must never double its power.
+for (const component of Object.values(COMPONENTS)) {
+  for (const key of Object.keys(component.perRank)) assert.ok(MOD_KEYS.includes(key), `${component.id} uses unknown mod ${key}`);
+  const rankOne = componentMods(component.id, 1);
+  const max = componentMods(component.id, component.maxRank);
+  const over = componentMods(component.id, 999);
+  assert.deepEqual(over, max, `${component.id} rank must clamp at maxRank`);
+  for (const key of Object.keys(component.perRank)) assert.equal(max[key], rankOne[key] * component.maxRank);
+}
+const installedMods = socketComponentMods([inserted.item]);
+const expectedMods = componentMods(compatible.id, 1);
+assert.deepEqual(installedMods, expectedMods, 'installed component did not reach the resolved stat bag');
+assert.deepEqual(socketComponentMods([inserted.item, inserted.item]), expectedMods, 'one component instance counted twice');
+const upgradedMods = socketComponentMods([upgrade.item]);
+for (const key of Object.keys(compatible.perRank)) assert.equal(upgradedMods[key], expectedMods[key] * 2, 'rank upgrade did not affect the stat bag once');
 
 for (const result of [added, inserted, removed, upgrade, calibratedA, prism]) {
   assert.equal(result.schema, 'zillions.crafting.v1');

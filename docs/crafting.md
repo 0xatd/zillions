@@ -37,13 +37,17 @@ to off-hands and implants.
 
 An item can have one to three sockets. Item slot, item level, and rarity set
 the cap. Components have a stable instance ID, one type, one color, and ranks
-one through five.
+one through five. Each component defines a bounded per-rank effect with the
+existing `MOD_KEYS` vocabulary. `socketComponentMods()` resolves equipped
+component effects and de-duplicates component instance IDs.
 
 ## Authority integration
 
 Call `evaluateRecipe()`, `evaluateSocketInsert()`, or
 `evaluateSocketRemove()`. A successful result contains the expected and next
-revision, the next item snapshot, costs, provenance, and a UI message.
+revision, the next item snapshot, costs, provenance, and a UI message. The
+mutation also declares component `consume` and `return` operations. Insertions
+consume the loose component instance. Removals return that same instance.
 
 The authority layer must apply all inputs and outputs in one transaction. It
 must lock the item revision, verify ownership again, debit costs, consume or
