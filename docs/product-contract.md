@@ -215,6 +215,15 @@ Deeper strategic simulation is not.
   creation and deletion, Character Info, Custom Games, system options, and Log Out.
 - The in-world Game Menu owns Return to World, Character Select, Custom Games,
   system options, and Log Out. It does not reuse Character Select as a pause menu.
+- Character Info uses separate Character, Equipment, Abilities, and Lattice
+  views. Equipment is interactive. The player can inspect and compare items,
+  click or double-click to equip and unequip, drag an item between the stash
+  and a compatible body slot, and drag items to reorder the stash. The model
+  remains the authority for requirements and legal equipment.
+- Custom Games has two primary views. Live Games lists real backend rooms that
+  can be joined or watched. Arcade catalogs prebuilt Zillions maps that a
+  player can play immediately or use to host a room. Recent and Favorites are
+  filters inside Arcade, not separate product sections.
 - Campaign and Survival own their saved runs. Show Resume inside the matching
   solo mode. Do not add a generic Continue button to the home screen.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the

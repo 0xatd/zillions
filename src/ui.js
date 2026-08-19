@@ -174,17 +174,23 @@ export class UI {
             <div class="sheet-ident"><span id="sheet-sigil" class="sheet-sigil"></span>
               <div><h1 id="sheet-name">CHARACTER</h1><p id="sheet-sub"></p></div></div>
             <div class="sheet-tabs">
-              <button class="sheet-tab sel" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
+              <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
             </div>
-            <button class="utilitybtn" id="sheet-close">← ROSTER</button>
+            <button class="utilitybtn" id="sheet-close">← BACK</button>
           </div>
 
-          <div id="sheet-panel-gear" class="sheet-panel">
-            <div class="gear-slots" id="gear-slots"></div>
-            <div class="gear-stash"><h3>STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
-            <div class="gear-stats"><h3>THE HERO THIS BUILDS</h3><div id="gear-stat-list"></div></div>
+          <div id="sheet-panel-character" class="sheet-panel character-overview"></div>
+
+          <div id="sheet-panel-gear" class="sheet-panel hidden">
+            <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div></div>
+            <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
+            <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
           </div>
+
+          <div id="sheet-panel-abilities" class="sheet-panel abilities-overview hidden"></div>
 
           <div id="sheet-panel-lattice" class="sheet-panel hidden">
             <div class="lattice-stage">
@@ -235,14 +241,26 @@ export class UI {
           </div>
         </div>
 
-        <div id="screen-custom" class="setup hidden">
-          <div class="setuphead"><button class="tbtn" id="cu-back">← Back</button><h2>🜁 CUSTOM GAMES</h2><span class="gamesub">any map · any host · named heroes</span></div>
-          <div class="custommain">
-            <div id="cu-list" class="lobbygames"></div>
-            <div class="customactions"><button class="diffbtn" id="cu-create">+ CREATE GAME</button><button class="diffbtn" id="cu-refresh">↻ REFRESH</button></div>
-            <div class="mphint" id="cu-note"></div>
-          </div>
-          <div id="cu-create-panel" class="charcreate hidden">
+        <div id="screen-custom" class="custom-browser hidden">
+          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">PARTY 1/4</small></div></header>
+          <aside class="custom-nav">
+            <button class="custom-primary-tab sel" data-view="live">LIVE GAMES</button>
+            <button class="custom-primary-tab" data-view="arcade">ARCADE</button>
+            <div class="custom-filter-group" id="cu-mode-filters">
+              <span>MODE</span>
+              <button class="custom-filter sel" data-filter="all">ALL</button>
+              <button class="custom-filter" data-filter="campaign">CAMPAIGN</button>
+              <button class="custom-filter" data-filter="survival">SURVIVAL</button>
+              <button class="custom-filter" data-filter="labyrinth">LABYRINTH</button>
+            </div>
+            <label id="cu-status-label">STATUS<select id="cu-status"><option value="open">JOINABLE</option><option value="all">ALL</option><option value="playing">IN PROGRESS</option></select></label>
+            <label>SEARCH<input id="cu-search" placeholder="Game, host, or map" autocomplete="off"></label>
+            <div class="custom-arcade-shortcuts hidden" id="cu-arcade-shortcuts"><button data-arcade="all" class="sel">ALL MAPS</button><button data-arcade="recent">RECENT</button><button data-arcade="favorites">FAVORITES</button></div>
+          </aside>
+          <main class="custom-list-panel"><div class="custom-list-head"><span>GAME</span><span>MAP / MODE</span><span>PLAYERS</span><span>STATUS</span></div><div id="cu-list" class="custom-game-list"></div><div class="mphint" id="cu-note"></div></main>
+          <aside class="custom-detail" id="cu-detail"><span class="modeeyebrow">SELECT A GAME</span><h2>NO GAME SELECTED</h2><p>Choose a game to inspect its map, rules, host, and party.</p></aside>
+          <footer class="custom-actions"><button class="diffbtn" id="cu-refresh">↻ REFRESH</button><button class="menubtn" id="cu-join" disabled>JOIN GAME</button><button class="menubtn primary" id="cu-create">CREATE GAME</button></footer>
+          <div id="cu-create-panel" class="charcreate custom-create-panel hidden">
             <div class="cchead"><b>CREATE GAME</b><button class="tbtn" id="cu-cancel">✕</button></div>
             <label class="field-label" for="cu-name">Game name</label><input id="cu-name" maxlength="32" placeholder="Friday night siege" autocomplete="off">
             <label class="field-label">Map</label><select id="cu-map" class="cumap"></select>
@@ -454,8 +472,8 @@ export class UI {
     };
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => this._showCharacterCreator();
-    q('#m-character-sheet').onclick = () => this.showCharacterSheet();
-    q('#sheet-close').onclick = () => this._showScreen('main');
+    q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
+    q('#sheet-close').onclick = () => this._closeCharacterSheet();
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
@@ -490,7 +508,33 @@ export class UI {
       this._showScreen(this._customFrom || 'main');
     };
     q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
-    q('#cu-create').onclick = () => this.customCreatePanel(true);
+    q('#cu-search').oninput = () => this._renderCustomRows();
+    q('#cu-status').onchange = () => this._renderCustomRows();
+    for (const tab of this.root.querySelectorAll('.custom-primary-tab')) tab.onclick = () => {
+      this._customView = tab.dataset.view;
+      for (const other of this.root.querySelectorAll('.custom-primary-tab')) other.classList.toggle('sel', other === tab);
+      this._selectedCustomGame = null;
+      this._selectedArcadeMap = null;
+      this._renderCustomRows();
+    };
+    for (const filter of this.root.querySelectorAll('.custom-filter')) filter.onclick = () => {
+      this._customFilter = filter.dataset.filter;
+      for (const other of this.root.querySelectorAll('.custom-filter')) other.classList.toggle('sel', other === filter);
+      this._renderCustomRows();
+    };
+    for (const shortcut of this.root.querySelectorAll('#cu-arcade-shortcuts button')) shortcut.onclick = () => {
+      this._arcadeFilter = shortcut.dataset.arcade;
+      for (const other of this.root.querySelectorAll('#cu-arcade-shortcuts button')) other.classList.toggle('sel', other === shortcut);
+      this._renderCustomRows();
+    };
+    q('#cu-join').onclick = () => {
+      if (this._customView === 'arcade') {
+        if (this._selectedArcadeMap) this.cb.onCustomPlay?.(this._selectedArcadeMap);
+      } else if (this._selectedCustomGame) this.cb.onCustomJoin?.(this._selectedCustomGame);
+    };
+    q('#cu-create').onclick = () => {
+      this.customCreatePanel(true, this._customView === 'arcade' ? this._selectedArcadeMap : null);
+    };
     q('#cu-cancel').onclick = () => this.customCreatePanel(false);
     q('#cu-confirm').onclick = () => {
       const map = this._customMaps?.find((entry) => entry.value === q('#cu-map').value) || this._customMaps?.[0];
@@ -874,33 +918,117 @@ export class UI {
 
   showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
     this._customHost = hostName;
-    const box = this.root.querySelector('#cu-list');
-    const note = this.root.querySelector('#cu-note');
-    box.innerHTML = '';
-    note.textContent = offline ? '📡 Offline — Custom Games needs the lobby server.' : 'Named Zillions heroes are selected when the host starts the match.';
-    note.classList.toggle('offline', offline);
-    if (!games.length) box.innerHTML = '<div class="mphint gameempty">No custom games — create one.</div>';
-    for (const [title, rows] of [['Open games', games.filter((game) => game.status === 'open')], ['Started', games.filter((game) => game.status !== 'open')]]) {
-      if (!rows.length) continue;
-      const heading = document.createElement('div'); heading.className = 'gamegrouphead'; heading.textContent = `${title} · ${rows.length}`; box.appendChild(heading);
-      for (const game of rows) {
-        const row = document.createElement('div'); row.className = `gamerow ${game.status === 'open' ? 'open' : 'active'}`;
-        const incompatible = game.protocol_compatible === false;
-        row.innerHTML = `<span class="gamestate">${incompatible ? 'UPDATE' : game.status === 'open' ? 'OPEN' : 'STARTED'}</span><span class="gmain"><b class="gname"></b><small class="gplayers"></small></span><span class="ginfo"></span><button class="tbtn gjoin" ${incompatible || game.status !== 'open' ? 'disabled' : ''}>${game.status === 'open' ? 'JOIN' : '—'}</button>`;
-        row.querySelector('.gname').textContent = game.name;
-        row.querySelector('.gplayers').textContent = `host @${game.host_name}`;
-        row.querySelector('.ginfo').textContent = `${game.mapName || '?'} · ${game.players}/${game.max_players || 4}`;
-        if (!incompatible && game.status === 'open') row.querySelector('.gjoin').onclick = () => this.cb.onCustomJoin?.(game);
-        box.appendChild(row);
-      }
-    }
+    this._customGames = games;
+    this._customOffline = offline;
+    this._customView = this._customView || 'live';
+    this._customFilter = this._customFilter || 'all';
+    this._arcadeFilter = this._arcadeFilter || 'all';
+    const character = this._sheetCharacter();
+    this.root.querySelector('#cu-character').textContent = character
+      ? `${character.name} · ${MMO_CLASSES[character.classKey]?.name || 'Commander'}`
+      : hostName ? `@${hostName}` : 'COMMANDER';
+    this.root.querySelector('#cu-party').textContent = 'PARTY 1/4';
+    this._renderCustomRows();
   }
 
-  customCreatePanel(open) {
+  _arcadeMaps() {
+    return [
+      ...LEVELS.map((level) => ({
+        id: `campaign-${level.id}`, level: level.id, mode: 'campaign', name: level.name,
+        icon: '⚔️', author: 'Zillions', players: '1–4', difficulty: 'Normal',
+        description: level.blurb || level.desc || 'Take the planet in a continuous siege.',
+      })),
+      ...LABYRINTH_LEVELS.map((level) => ({
+        id: `labyrinth-${level.id}`, level: level.id, mode: 'labyrinth', name: level.name,
+        icon: '🌀', author: 'Zillions', players: '1–4', difficulty: 'Normal',
+        description: level.blurb || level.desc || 'Descend into a compact hero trial.',
+      })),
+      {
+        id: 'survival-1', level: 1, mode: 'survival', name: 'Endless Siege', icon: '💀',
+        author: 'Zillions', players: '1–4', difficulty: 'Scaling',
+        description: 'Hold the frontier while Threat rises without limit.',
+      },
+    ];
+  }
+
+  _renderCustomRows() {
+    const box = this.root.querySelector('#cu-list');
+    const note = this.root.querySelector('#cu-note');
+    const detail = this.root.querySelector('#cu-detail');
+    const join = this.root.querySelector('#cu-join');
+    const create = this.root.querySelector('#cu-create');
+    const live = this._customView !== 'arcade';
+    this.root.querySelector('#cu-status-label').classList.toggle('hidden', !live);
+    this.root.querySelector('#cu-arcade-shortcuts').classList.toggle('hidden', live);
+    this.root.querySelector('#cu-refresh').classList.toggle('hidden', !live);
+    for (const tab of this.root.querySelectorAll('.custom-primary-tab')) tab.classList.toggle('sel', tab.dataset.view === this._customView);
+    box.innerHTML = '';
+    const query = this.root.querySelector('#cu-search').value.trim().toLowerCase();
+    if (!live) {
+      const maps = this._arcadeMaps().filter((map) => {
+        if (this._customFilter !== 'all' && map.mode !== this._customFilter) return false;
+        if (query && !`${map.name} ${map.mode} ${map.author}`.toLowerCase().includes(query)) return false;
+        if (this._arcadeFilter === 'favorites') return (this._arcadeFavorites || []).includes(map.id);
+        if (this._arcadeFilter === 'recent') return (this._arcadeRecent || []).includes(map.id);
+        return true;
+      });
+      note.textContent = maps.length ? `${maps.length} prebuilt maps · select one to play or host` : 'No maps match these filters.';
+      note.classList.remove('offline');
+      for (const map of maps) {
+        const row = document.createElement('button');
+        row.className = `custom-map-row${this._selectedArcadeMap?.id === map.id ? ' selected' : ''}`;
+        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
+        row.onclick = () => { this._selectedArcadeMap = map; this._selectedCustomGame = null; this._renderCustomRows(); };
+        box.appendChild(row);
+      }
+      const map = this._selectedArcadeMap;
+      detail.innerHTML = map
+        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
+        : '<span class="modeeyebrow">ARCADE</span><h2>CHOOSE A MAP</h2><p>Browse Zillions maps, then play immediately or host a lobby.</p>';
+      join.textContent = 'PLAY NOW';
+      join.disabled = !map;
+      create.textContent = 'HOST GAME';
+      create.disabled = !map;
+      return;
+    }
+
+    const games = (this._customGames || []).filter((game) => {
+      const status = this.root.querySelector('#cu-status').value;
+      if (this._customFilter !== 'all' && game.mode !== this._customFilter) return false;
+      if (status === 'open' && game.status !== 'open') return false;
+      if (status === 'playing' && game.status === 'open') return false;
+      return !query || `${game.name} ${game.host_name} ${game.mapName || ''} ${game.mode || ''}`.toLowerCase().includes(query);
+    });
+    note.textContent = this._customOffline
+      ? '📡 Offline — Live Games needs the lobby server.'
+      : games.length ? `${games.length} live games found` : 'No joinable games. Host one or browse Arcade.';
+    note.classList.toggle('offline', this._customOffline);
+    for (const game of games) {
+      const incompatible = game.protocol_compatible === false;
+      const row = document.createElement('button');
+      row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
+      row.disabled = incompatible;
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}<small>${String(game.mode || 'campaign').toUpperCase()}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
+      box.appendChild(row);
+    }
+    const game = this._selectedCustomGame;
+    detail.innerHTML = game
+      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${game.mode === 'labyrinth' ? '🌀' : game.mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${String(game.difficulty || 'normal').toUpperCase()}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
+      : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
+    join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
+    join.disabled = !game || game.protocol_compatible === false;
+    create.textContent = 'CREATE GAME';
+    create.disabled = false;
+  }
+
+  customCreatePanel(open, selectedMap = null) {
     this.root.querySelector('#cu-create-panel').classList.toggle('hidden', !open);
     if (!open) return;
     this._customMaps = [...LABYRINTH_LEVELS.map((level) => ({ value: `lab-${level.id}`, level: level.id, mode: 'labyrinth', name: `🌀 ${level.name}` })), ...LEVELS.map((level) => ({ value: `lv-${level.id}`, level: level.id, mode: 'campaign', name: `⚔️ ${level.name}` }))];
+    this._customMaps.push({ value: 'survival-1', level: 1, mode: 'survival', name: '💀 Endless Siege' });
     this.root.querySelector('#cu-map').innerHTML = this._customMaps.map((map) => `<option value="${map.value}">${map.name}</option>`).join('');
+    if (selectedMap) this.root.querySelector('#cu-map').value = `${selectedMap.mode === 'labyrinth' ? 'lab' : selectedMap.mode === 'campaign' ? 'lv' : 'survival'}-${selectedMap.level}`;
     const diff = this.root.querySelector('#cu-diff'); diff.innerHTML = '';
     for (const [key, value] of Object.entries(DIFFICULTY)) { const button = document.createElement('button'); button.className = `diffbtn${key === 'normal' ? ' sel' : ''}`; button.textContent = value.label; button.onclick = () => { this._cuDiff = key; for (const other of diff.children) other.classList.toggle('sel', other === button); }; diff.appendChild(button); }
     this._cuDiff = 'normal';
@@ -1142,10 +1270,17 @@ export class UI {
 
   showCharacterSheet(tab = null) {
     if (!this._sheetCharacter()) return;
+    this._sheetReturn = this._overworldMode ? 'overworld' : (this._lastScreen === 'world-menu' ? 'world-menu' : 'main');
     if (tab) this._sheetTab = tab;
-    this._sheetTab = this._sheetTab || 'gear';
+    this._sheetTab = this._sheetTab || 'character';
+    this._sheetSelection = null;
     this._showScreen('character-sheet');
     this._renderCharacterSheet();
+  }
+
+  _closeCharacterSheet() {
+    if (this._sheetReturn === 'overworld') this.hideOverlay();
+    else this._showScreen(this._sheetReturn || 'main');
   }
 
   _renderCharacterSheet() {
@@ -1163,11 +1298,34 @@ export class UI {
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
-    this.root.querySelector('#sheet-panel-gear').classList.toggle('hidden', this._sheetTab !== 'gear');
-    this.root.querySelector('#sheet-panel-lattice').classList.toggle('hidden', this._sheetTab !== 'lattice');
+    for (const tab of ['character', 'gear', 'abilities', 'lattice']) {
+      this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', this._sheetTab !== tab);
+    }
 
-    if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    if (this._sheetTab === 'character') this._renderCharacterOverview(character);
+    else if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    else if (this._sheetTab === 'abilities') this._renderAbilitiesOverview(character);
     else this._renderLatticePanel(character);
+  }
+
+  _renderCharacterOverview(character) {
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
+    const attrs = characterAttributes(character);
+    const stats = character.stats || {};
+    this.root.querySelector('#sheet-panel-character').innerHTML = `
+      <section class="character-paperdoll" style="--character-color:${appearance.color}"><div class="paperdoll-aura"></div><div class="paperdoll-hero">${klass.icon}</div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
+      <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
+      <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
+  }
+
+  _renderAbilitiesOverview(character) {
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const hero = HEROES[character.proxyHero || klass.proxy] || HEROES.scott;
+    const cards = [
+      ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
+    ];
+    this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
   }
 
   // What a character is wearing, what is in the stash, and what the two add up
@@ -1200,7 +1358,27 @@ export class UI {
       </button>`;
     }).join('');
     for (const button of slots.querySelectorAll('.gear-slot')) {
-      button.onclick = () => this._unequip(character, button.dataset.slot);
+      const slot = button.dataset.slot;
+      const key = (character.equipment || {})[slot] || null;
+      button.draggable = !!key;
+      button.classList.toggle('selected', this._sheetSelection?.kind === 'slot' && this._sheetSelection.slot === button.dataset.slot);
+      button.onclick = () => {
+        this._sheetSelection = { kind: 'slot', slot: button.dataset.slot, key: (character.equipment || {})[button.dataset.slot] || null };
+        this._renderGearPanel(character);
+      };
+      button.ondblclick = () => this._unequip(character, button.dataset.slot);
+      button.ondragstart = (event) => this._beginItemDrag(event, { kind: 'slot', slot, key });
+      button.ondragover = (event) => {
+        if (this._draggedItem?.kind !== 'stash') return;
+        event.preventDefault();
+        button.classList.toggle('drop-target', canEquip(character, this._draggedItem.key, slot));
+      };
+      button.ondragleave = () => button.classList.remove('drop-target');
+      button.ondrop = (event) => {
+        event.preventDefault(); button.classList.remove('drop-target');
+        if (this._draggedItem?.kind === 'stash') this._equipFromStash(character, this._draggedItem.index, slot);
+        this._endItemDrag();
+      };
     }
 
     const stash = (character.items || []);
@@ -1220,10 +1398,93 @@ export class UI {
       }).join('')
       : '<span class="empty-gear">Nothing recovered yet. The frontier is hiding it.</span>';
     for (const button of list.querySelectorAll('.stash-item')) {
-      button.onclick = () => this._equipFromStash(character, Number(button.dataset.index));
+      const index = Number(button.dataset.index);
+      const key = (character.items || [])[index] || null;
+      button.draggable = true;
+      button.classList.toggle('selected', this._sheetSelection?.kind === 'stash' && this._sheetSelection.index === Number(button.dataset.index));
+      button.onclick = () => {
+        this._sheetSelection = { kind: 'stash', index: Number(button.dataset.index), key: (character.items || [])[Number(button.dataset.index)] || null };
+        this._renderGearPanel(character);
+      };
+      button.ondblclick = () => this._equipFromStash(character, Number(button.dataset.index));
+      button.ondragstart = (event) => this._beginItemDrag(event, { kind: 'stash', index, key });
+      button.ondragover = (event) => { event.preventDefault(); button.classList.add('drop-target'); };
+      button.ondragleave = () => button.classList.remove('drop-target');
+      button.ondrop = (event) => {
+        event.preventDefault(); button.classList.remove('drop-target');
+        if (this._draggedItem?.kind === 'slot') this._unequip(character, this._draggedItem.slot);
+        else if (this._draggedItem?.kind === 'stash') this._moveStashItem(character, this._draggedItem.index, index);
+        this._endItemDrag();
+      };
     }
 
+    list.ondragover = (event) => { if (this._draggedItem?.kind === 'slot') event.preventDefault(); };
+    list.ondrop = (event) => {
+      if (event.target.closest('.stash-item')) return;
+      event.preventDefault();
+      if (this._draggedItem?.kind === 'slot') this._unequip(character, this._draggedItem.slot);
+      this._endItemDrag();
+    };
+
+    this._renderItemDetail(character);
     this._renderGearStats(character, attrs);
+  }
+
+  _renderItemDetail(character) {
+    const detail = this.root.querySelector('#gear-item-detail');
+    const selection = this._sheetSelection;
+    const key = selection?.key;
+    const item = key ? itemInfo(key) : null;
+    if (!item) {
+      detail.innerHTML = '<p>Select an item to inspect it. Double-click a stash item to equip it; double-click equipped gear to unequip it.</p>';
+      return;
+    }
+    const targetSlots = item.slot ? slotsForPool(item.slot) : [];
+    const target = selection.kind === 'slot' ? selection.slot : (targetSlots.find((slot) => !(character.equipment || {})[slot]) || targetSlots[0]);
+    const equippedKey = target ? (character.equipment || {})[target] : null;
+    const equipped = equippedKey && equippedKey !== key ? itemInfo(equippedKey) : null;
+    let comparison = '';
+    let legal = true;
+    if (selection.kind === 'stash' && target) {
+      legal = canEquip(character, key, target);
+      const preview = { ...character, equipment: { ...(character.equipment || {}), [target]: key } };
+      const before = characterAttributes(character);
+      const after = characterAttributes(preview);
+      comparison = Object.values(ATTRIBUTES).map((attr) => {
+        const delta = Math.round((after[attr.key] || 0) - (before[attr.key] || 0));
+        return `<span>${attr.icon} ${attr.name} <b class="${delta > 0 ? 'positive' : delta < 0 ? 'negative' : ''}">${delta > 0 ? '+' : ''}${delta}</b></span>`;
+      }).join('');
+    }
+    detail.innerHTML = `<div class="item-card" style="--rarity:${item.rarityColor}"><span class="item-rarity">${item.rarityName || 'ITEM'} ${item.ilvl ? `· ITEM LEVEL ${item.ilvl}` : ''}</span><h2>${item.icon} ${item.name}</h2>${item.desc ? `<p>${item.desc}</p>` : ''}<ul>${itemLines(item).map((line) => `<li>${line}</li>`).join('') || '<li>No modifiers</li>'}</ul>${item.req ? `<small class="${legal ? '' : 'invalid'}">Requires ${requirementText(item)}</small>` : ''}</div>${equipped ? `<div class="compare-card"><span>CURRENTLY EQUIPPED</span><b>${equipped.icon} ${equipped.name}</b>${itemLines(equipped).map((line) => `<small>${line}</small>`).join('')}</div>` : ''}${comparison ? `<div class="item-deltas">${comparison}</div>` : ''}<div class="item-actions">${selection.kind === 'stash' && item.slot ? `<button class="menubtn primary" id="gear-action-equip" ${legal ? '' : 'disabled'}>EQUIP${target ? ` TO ${target.toUpperCase()}` : ''}</button>` : selection.kind === 'slot' ? '<button class="menubtn" id="gear-action-unequip">UNEQUIP</button>' : ''}</div>`;
+    detail.querySelector('#gear-action-equip')?.addEventListener('click', () => this._equipFromStash(character, selection.index, target));
+    detail.querySelector('#gear-action-unequip')?.addEventListener('click', () => this._unequip(character, selection.slot));
+  }
+
+  _beginItemDrag(event, item) {
+    if (!item?.key) { event.preventDefault(); return; }
+    this._draggedItem = item;
+    event.currentTarget.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', item.key);
+    event.currentTarget.addEventListener('dragend', () => this._endItemDrag(), { once: true });
+  }
+
+  _endItemDrag() {
+    this._draggedItem = null;
+    for (const element of this.root.querySelectorAll('.dragging, .drop-target')) {
+      element.classList.remove('dragging', 'drop-target');
+    }
+  }
+
+  _moveStashItem(character, from, to) {
+    if (from === to || from < 0 || to < 0) return;
+    const items = [...(character.items || [])];
+    if (from >= items.length || to >= items.length) return;
+    const [item] = items.splice(from, 1);
+    items.splice(to, 0, item);
+    character.items = items;
+    this._sheetSelection = { kind: 'stash', index: to, key: item };
+    this._sheetChanged();
   }
 
   // Attributes come from gear and the Lattice together, and they are what gate
@@ -1264,7 +1525,7 @@ export class UI {
     this.root.querySelector('#gear-stat-list').innerHTML = rows.join('');
   }
 
-  _equipFromStash(character, index) {
+  _equipFromStash(character, index, preferredSlot = null) {
     const key = (character.items || [])[index];
     const item = key ? itemInfo(key) : null;
     if (!item || !item.slot) return;
@@ -1275,7 +1536,9 @@ export class UI {
     // so hasSecondSet() was never true and X always denied.
     const candidates = slotsForPool(item.slot);
     const equipment = character.equipment || {};
-    const slot = candidates.find((s) => !equipment[s]) || candidates[0];
+    const slot = preferredSlot && candidates.includes(preferredSlot)
+      ? preferredSlot
+      : candidates.find((s) => !equipment[s]) || candidates[0];
     // Ask the model. It refuses an item that could only meet its requirement by
     // counting itself, or by borrowing from the sheathed weapon set.
     if (!canEquip(character, key, slot)) {
@@ -1287,6 +1550,7 @@ export class UI {
     character.items = (character.items || []).filter((_, i) => i !== index);
     if (previous) character.items.push(previous);
     character.equipment = normalizeEquipment(character.equipment);
+    this._sheetSelection = { kind: 'slot', slot, key };
     this._sheetChanged();
   }
 
@@ -1301,6 +1565,7 @@ export class UI {
     delete next[slot];
     character.equipment = next;
     character.items = [...(character.items || []), key];
+    this._sheetSelection = { kind: 'stash', index: character.items.length - 1, key };
     this._sheetChanged();
   }
 

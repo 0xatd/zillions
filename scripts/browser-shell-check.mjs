@@ -111,6 +111,21 @@ try {
     document.querySelector('#h-back').click();
     return app.ui.shell.base === 'overworld' && app.ui.overlayHidden();
   })()`), true, 'Help must close back to the overworld');
+  assert.equal(await evaluate(`(() => {
+    const app = window.__app;
+    app.ui._customFrom = 'world-menu';
+    app.ui.showCustomBrowser({ games: [], offline: true, hostName: 'journey' });
+    app.ui._showScreen('custom');
+    const live = [...document.querySelectorAll('.custom-primary-tab')].find((button) => button.dataset.view === 'live');
+    const arcade = [...document.querySelectorAll('.custom-primary-tab')].find((button) => button.dataset.view === 'arcade');
+    const liveEmpty = document.querySelector('#cu-note').textContent.includes('Offline');
+    arcade.click();
+    const maps = document.querySelectorAll('.custom-map-row');
+    maps[0].click();
+    const playable = !document.querySelector('#cu-join').disabled && document.querySelector('#cu-join').textContent === 'PLAY NOW';
+    document.querySelector('#cu-join').click();
+    return !!live && liveEmpty && maps.length >= 6 && playable && !document.querySelector('#screen-setup').classList.contains('hidden');
+  })()`), true, 'Custom Games must separate live rooms from a playable Arcade catalog');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

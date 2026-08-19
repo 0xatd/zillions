@@ -42,6 +42,14 @@ last planetary location, Orbital Lift, and galaxy map. Each planet is a persiste
 shared hub with its own presence channel and entrances to playable instances.
 The profile remembers the last world.
 
+Character Info separates the character overview, equipment, abilities, and the
+Lattice. Equipment supports item inspection, comparisons, click actions, and
+drag-and-drop between compatible body slots and the persistent stash.
+
+Custom Games separates Live Games from Arcade. Live Games shows real player
+rooms that can be joined or watched. Arcade lists prebuilt campaign, Survival,
+and Labyrinth maps that can be played directly or used to host a room.
+
 Zillions uses a continuous siege loop. There is no day, night, or bell phase.
 
 1. Pick a hero and a city site.

@@ -216,6 +216,7 @@ class App {
       onCustomRefresh: () => this._openCustomGames(true),
       onCustomCreate: (options) => this.createCustomGame(options),
       onCustomJoin: (room) => this.joinOnlineGame(room),
+      onCustomPlay: (map) => this.playArcadeMap(map),
       onChatSend: (text) => this._sendLobbyChat(text),
       onRoomChatSend: (text) => this._sendRoomChat(text, 'room'),
       onGameChatSend: (text) => this._sendGameChat(text),
@@ -2562,6 +2563,19 @@ class App {
       if (lobby?.connected) lobby.refreshGames().catch(() => this._renderCustomBrowser());
       else this._renderCustomBrowser();
     }).catch(() => this._renderCustomBrowser());
+  }
+
+  playArcadeMap(map) {
+    if (!map) return;
+    this.ui.selectedMode = map.mode || 'campaign';
+    this.ui.selectedLevel = Number(map.level) || 1;
+    this.ui.showSetup({ mode: this.ui.selectedMode });
+    this.ui.setRoomSettings({
+      level: this.ui.selectedLevel,
+      difficulty: 'normal',
+      isHost: true,
+      mode: this.ui.selectedMode,
+    });
   }
 
   async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
