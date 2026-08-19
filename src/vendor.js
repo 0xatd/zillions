@@ -1,16 +1,35 @@
-// Deterministic hub vendor. Stock is a function of rotation + character level,
-// so every client renders the same offers. Transactions update the existing
-// persistent Salvage Alloy ledger and the selected character stash. The
-// mutation helpers at the bottom are OFFLINE ONLY. Signed-in play must use
-// /api/economy so a browser cannot mint items or edit currency.
-import { BASES_BY_SLOT, SLOTS, hashString, rollItemKey, resolveItem } from './items.js';
+// Specialist vendor catalogue and transaction contracts.
+//
+// This module is deliberately pure. It can quote stock and build mutation
+// requests, but only an injected authority may purchase or sell an item.
+// Browser state is never an economic authority.
+import { BASES_BY_SLOT, hashString, rollItemKey, resolveItem } from './items.js';
 import { itemInfo } from './config.js';
-import { loadMeta, saveMeta, charge } from './meta.js';
-import { STASH_SLOTS } from './mmo-characters.js';
 
-export const VENDOR_SIZE = 12;
 export const VENDOR_BUY_MULT = 2.4;
 export const VENDOR_SELL_MULT = 0.22;
+
+export const VENDORS = Object.freeze({
+  quartermaster: {
+    id: 'quartermaster', name: 'Frontier Quartermaster', icon: '🛡️', minLevel: 1,
+    description: 'Weapons and field support for every expedition.',
+    slots: ['weapon', 'offhand'], size: 8, restockHours: 24,
+  },
+  outfitter: {
+    id: 'outfitter', name: 'Voidline Outfitter', icon: '🧥', minLevel: 1,
+    description: 'Visible armor assembled for hostile-world work.',
+    slots: ['head', 'armor', 'hands', 'legs', 'boots'], size: 10, restockHours: 24,
+  },
+  cyberneticist: {
+    id: 'cyberneticist', name: 'Chassis Laboratory', icon: '⚛️', minLevel: 12,
+    description: 'Implants for experienced Humans and Robots.',
+    slots: ['implant'], size: 6, restockHours: 72,
+  },
+});
+
+const clampLevel = (value) => Math.max(1, Math.min(100, Math.floor(Number(value) || 1)));
+const clampSize = (value, fallback) => Math.max(1, Math.min(30, Math.floor(Number(value) || fallback)));
+const safeId = (value) => String(value || '').trim().slice(0, 128);
 
 export function itemValue(itemOrKey) {
   const item = typeof itemOrKey === 'string' ? itemInfo(itemOrKey) : itemOrKey;
@@ -23,50 +42,93 @@ export function itemValue(itemOrKey) {
 export const vendorBuyPrice = (itemOrKey) => Math.max(1, Math.round(itemValue(itemOrKey) * VENDOR_BUY_MULT));
 export const vendorSellPrice = (itemOrKey) => Math.max(1, Math.round(itemValue(itemOrKey) * VENDOR_SELL_MULT));
 
-export function vendorStock(rotation = 'launch', characterLevel = 1, size = VENDOR_SIZE) {
-  const level = Math.max(1, Math.min(100, Math.floor(Number(characterLevel) || 1)));
-  const pools = SLOTS.filter((slot) => BASES_BY_SLOT[slot]?.some((key) => (resolveItem(`${key}:1:${level}:1`)?.base?.ilvl || 999) <= level));
+export function vendorEligibility(vendorId, character = {}) {
+  const vendor = VENDORS[vendorId];
+  if (!vendor) return { ok: false, reason: 'unknown_vendor' };
+  const level = clampLevel(character.level);
+  if (level < vendor.minLevel) return { ok: false, reason: 'level', requiredLevel: vendor.minLevel };
+  return { ok: true, vendor, level };
+}
+
+export function vendorRotation(vendorId, timestamp = Date.now()) {
+  const vendor = VENDORS[vendorId];
+  if (!vendor) return null;
+  const epoch = Math.floor(Number(timestamp) / (vendor.restockHours * 60 * 60 * 1000));
+  return `${vendorId}:${Number.isFinite(epoch) ? epoch : 0}`;
+}
+
+export function vendorStock(vendorId = 'quartermaster', rotation = 'launch', characterLevel = 1, requestedSize) {
+  // Backward-compatible read-only signature: vendorStock(rotation, level).
+  if (!VENDORS[vendorId]) {
+    requestedSize = arguments.length >= 3 ? characterLevel : undefined;
+    characterLevel = rotation;
+    rotation = vendorId;
+    vendorId = 'quartermaster';
+  }
+  const vendor = VENDORS[vendorId];
+  const level = clampLevel(characterLevel);
+  if (level < vendor.minLevel) return [];
+  const size = clampSize(requestedSize, vendor.size);
+  const pools = vendor.slots.filter((slot) => BASES_BY_SLOT[slot]?.some((key) => ITEM_LEVEL(key) <= level));
+  if (!pools.length) return [];
   const out = [];
-  for (let i = 0; i < Math.max(1, Math.min(30, size)); i++) {
-    const seed = `${rotation}:${level}:${i}`;
+  for (let i = 0; i < size; i++) {
+    const seed = `${vendorId}:${rotation}:${level}:${i}`;
     const pool = pools[hashString(`${seed}:pool`) % pools.length];
-    const bases = BASES_BY_SLOT[pool].filter((key) => {
-      const probe = resolveItem(`${key}:1:${level}:1`);
-      return probe && probe.base.ilvl <= level;
-    });
+    const bases = BASES_BY_SLOT[pool].filter((key) => ITEM_LEVEL(key) <= level);
     const base = bases[hashString(`${seed}:base`) % bases.length];
     const rarityRoll = hashString(`${seed}:rarity`) % 100;
     const rarity = rarityRoll < 8 ? 3 : rarityRoll < 42 ? 2 : 1;
     const key = rollItemKey(base, seed, level, rarity);
-    if (key) out.push({ key, item: resolveItem(key), price: vendorBuyPrice(key) });
+    const item = key && resolveItem(key);
+    if (item) out.push(Object.freeze({
+      id: `${vendorId}:${rotation}:${i}:${hashString(key).toString(36)}`,
+      vendorId, rotation, key, item, price: vendorBuyPrice(item), currency: 'salvage_alloy',
+    }));
   }
   return out;
 }
 
-export function buyOfflineVendorItem(character, offer) {
-  if (!character || !offer?.key || !itemInfo(offer.key)) return { ok: false, reason: 'invalid' };
-  if ((character.items || []).length >= STASH_SLOTS) return { ok: false, reason: 'full' };
-  const paid = charge(Math.max(1, Number(offer.price) || vendorBuyPrice(offer.key)));
-  if (!paid.ok) return { ok: false, reason: 'poor', short: paid.short };
-  character.items = [...(character.items || []), offer.key];
-  return { ok: true, currency: paid.currency, key: offer.key };
+function ITEM_LEVEL(key) {
+  return resolveItem(`${key}:1:1:1`)?.base?.ilvl || 999;
 }
 
-export function sellOfflineVendorItem(character, index) {
-  if (!character || !Array.isArray(character.items)) return { ok: false, reason: 'invalid' };
-  const position = Math.floor(Number(index));
-  const key = character.items[position];
-  if (!key || !itemInfo(key)) return { ok: false, reason: 'invalid' };
-  const value = vendorSellPrice(key);
-  character.items.splice(position, 1);
-  const meta = loadMeta();
-  meta.currency += value;
-  meta.lifetime.earned += value;
-  saveMeta(meta);
-  return { ok: true, currency: meta.currency, value, key };
+export function purchaseRequest({ requestId, actorId, characterId, vendorId, offer } = {}) {
+  if (!safeId(requestId) || !safeId(actorId) || !safeId(characterId)) return { ok: false, reason: 'invalid_identity' };
+  if (!VENDORS[vendorId] || !offer?.id || offer.vendorId !== vendorId || !itemInfo(offer.key)) {
+    return { ok: false, reason: 'invalid_offer' };
+  }
+  return { ok: true, request: Object.freeze({
+    version: 1, action: 'vendor_purchase', requestId: safeId(requestId), actorId: safeId(actorId),
+    characterId: safeId(characterId), vendorId, offerId: offer.id, rotation: offer.rotation,
+    itemKey: offer.key, quotedPrice: Math.max(1, Math.floor(offer.price)), currency: 'salvage_alloy',
+  }) };
 }
 
-// Compatibility names for static builds. Online UI code selects these only
-// when no authenticated economy callback is present.
-export const buyVendorItem = buyOfflineVendorItem;
-export const sellVendorItem = sellOfflineVendorItem;
+export function saleRequest({ requestId, actorId, characterId, vendorId, itemInstanceId, itemKey } = {}) {
+  if (!safeId(requestId) || !safeId(actorId) || !safeId(characterId) || !safeId(itemInstanceId)) {
+    return { ok: false, reason: 'invalid_identity' };
+  }
+  if (!VENDORS[vendorId] || !itemInfo(itemKey)) return { ok: false, reason: 'invalid_item' };
+  return { ok: true, request: Object.freeze({
+    version: 1, action: 'vendor_sale', requestId: safeId(requestId), actorId: safeId(actorId),
+    characterId: safeId(characterId), vendorId, itemInstanceId: safeId(itemInstanceId), itemKey,
+    quotedPrice: vendorSellPrice(itemKey), currency: 'salvage_alloy',
+  }) };
+}
+
+export async function submitVendorMutation(authority, contractResult) {
+  if (!contractResult?.ok) return contractResult || { ok: false, reason: 'invalid_request' };
+  if (!authority || typeof authority.executeVendorMutation !== 'function') {
+    return { ok: false, reason: 'authority_unavailable' };
+  }
+  return authority.executeVendorMutation(contractResult.request);
+}
+
+// Compatibility exports now require authority and never edit character/meta.
+export const buyVendorItem = (_character, offer, authority, identity = {}) => submitVendorMutation(
+  authority, purchaseRequest({ ...identity, vendorId: offer?.vendorId || 'quartermaster', offer }),
+);
+export const sellVendorItem = (_character, item, authority, identity = {}) => submitVendorMutation(
+  authority, saleRequest({ ...identity, vendorId: identity.vendorId || 'quartermaster', ...item }),
+);
