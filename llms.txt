@@ -36,6 +36,8 @@ Default branch: main
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
 - src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
 - src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
+- src/crafting.js owns pure recipes, socket rules, component upgrades, and
+  authority-ready mutation proposals.
 - src/items.js owns item bases, weapons, affixes, damage types, and deterministic
   item generation. An item is a key; "base:seed:ilvl:rarity" resolves to a rolled
   item, a bare key resolves to an authored one.
