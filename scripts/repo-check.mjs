@@ -200,16 +200,20 @@ assert.match(mainSource, /localStorage\.removeItem\('zillions_save'\)/, 'corrupt
 assert.match(mainSource, /this\.ui\.setContinue\(null\)/, 'corrupt saves must be removed from the menu');
 
 const uiSource = read('src/ui.js');
-assert.match(uiSource, /id="a-custom">CUSTOM GAMES/, 'the title screen must expose Custom Games');
+assert.doesNotMatch(uiSource, /id="a-custom"/, 'the signed-out login screen must not expose account game modes');
 assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must expose Cinematics');
 assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
-assert.match(uiSource, /id="m-enter-world">RETURN TO WORLD/, 'the roster must return to the live world rather than repeat ENTER WORLD');
-assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Resume World must open the overworld');
+assert.match(uiSource, /id="m-enter-world">ENTER WORLD/, 'Character Select must use the traditional Enter World action');
+assert.match(uiSource, /id="m-custom">CUSTOM GAMES/, 'Character Select must retain Custom Games');
+assert.match(uiSource, /id="m-delete-character">DELETE CHARACTER/, 'Character Select must expose confirmed character deletion');
+assert.match(uiSource, /id="screen-world-menu"/, 'the overworld must have a separate Game Menu');
+assert.match(uiSource, /id="ow-characters">CHARACTER SELECT/, 'the Game Menu must expose Character Select explicitly');
+assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open the overworld');
 assert.match(uiSource, /id="screen-solo"/, 'custom games must have their own mode screen');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
 assert.doesNotMatch(uiSource, /id="m-play"/, 'Campaign must not return as the primary home-screen action');
-assert.match(mainSource, /this\.showMenuBackdrop\(this\.ui\.selectedLevel \|\| 1\);[\s\S]*this\.renderer\.setAnimationLoop/, 'startup must preserve the authored first menu');
+assert.doesNotMatch(mainSource.slice(mainSource.indexOf('constructor('), mainSource.indexOf('// ---------------- title diorama')), /this\.showMenuBackdrop/, 'startup must not boot the old vignette');
 assert.doesNotMatch(mainSource, /Boot straight onto the overworld/, 'startup must not bypass the first menu');
 assert.match(mainSource, /name = 'planet-edge-title'/, 'title scene must identify its planet-edge orbital layer');
 assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live last-stand simulation');
@@ -219,7 +223,7 @@ assert.doesNotMatch(mainSource, /moonRing/, 'title orbit must not restore the di
 // The character screen must stay reachable from the persistent world. The key
 // is no longer a literal — it comes from the binding table — so this asserts
 // the dispatch rather than the letter, and keybind-check pins the default to C.
-assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet' && this\.ow[\s\S]*this\.ui\.toggleCharacterScreen\(\)/, 'the character screen must be reachable from the persistent world');
+assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet' && this\.ow[\s\S]*this\.ui\.showCharacterSheet\('gear'\)/, 'Character Info must be reachable from the persistent world');
 assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
 assert.match(uiSource, /id="m-logout">LOG OUT/, 'the signed-in character screen must expose logout');
 assert.match(mainSource, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'logout must terminate the account session');

@@ -101,8 +101,10 @@ try {
     create.click();
     name.value = 'Journey Test';
     form.requestSubmit();
-    return app.ui.shell.base === 'overworld' && app.ui.overlayHidden() && app.ow?.world?.id === 'earth';
-  })()`), true, 'new account must create a character and enter Earth');
+    const selected = !document.querySelector('#screen-main').classList.contains('hidden');
+    document.querySelector('#m-enter-world').click();
+    return selected && app.ui.shell.base === 'overworld' && app.ui.overlayHidden() && app.ow?.world?.id === 'earth';
+  })()`), true, 'new account must create a character, return to Character Select, and enter Earth');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     app.ui._showScreen('help');

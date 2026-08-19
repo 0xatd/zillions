@@ -209,8 +209,12 @@ Deeper strategic simulation is not.
 ## Production UX Rules
 
 - Production must be account-first.
-- The signed-in home screen is multiplayer-first. `Play Online` is the primary
-  action. `Play Solo` contains Story Campaign, Survival, and The Labyrinth.
+- Signed-out players see the login screen. Signed-in players see Character
+  Select. The generic marketing title is not an account home.
+- Character Select shows the complete roster and owns `Enter World`, character
+  creation and deletion, Character Info, Custom Games, system options, and Log Out.
+- The in-world Game Menu owns Return to World, Character Select, Custom Games,
+  system options, and Log Out. It does not reuse Character Select as a pause menu.
 - Campaign and Survival own their saved runs. Show Resume inside the matching
   solo mode. Do not add a generic Continue button to the home screen.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the

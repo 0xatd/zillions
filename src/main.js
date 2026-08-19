@@ -188,6 +188,7 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
+      onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
@@ -343,9 +344,10 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // The authored title screen remains the front door. Story Campaign opens
-    // the walkable overworld after the player deliberately chooses it.
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    // Traditional menus own startup. The renderer stays parked behind an
+    // opaque login/character-select shell until the player enters a world.
+    this.scene.background = new THREE.Color(0x030711);
+    this.scene.fog.color.setHex(0x030711);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
@@ -1426,15 +1428,12 @@ class App {
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
-    // ENTER WORLD is the only front door. Once authentication and profile
-    // hydration finish, do not make the player pass through a second roster
-    // confirmation. Existing characters resume their last world; a new
-    // account goes directly to creation and enters Earth after submit.
+    // WoW grammar: authentication ends at Character Select. The player chooses
+    // who enters; the generic signed-out title never doubles as account home.
     if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
       this._authenticatedEntryHandled = true;
-      const character = selectedMmoCharacter(this.profile);
-      if (character) setTimeout(() => this._enterOverworld(
-        character.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      this.ui._accountAccepted = true;
+      if (selectedMmoCharacter(this.profile)) setTimeout(() => this.ui._showScreen('main'), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
     }
   }
@@ -1464,7 +1463,6 @@ class App {
       this._authenticatedEntryHandled = false;
       this._clearOverworld();
       this.ui.setOverworldMode(false);
-      this.showMenuBackdrop(this.ui.selectedLevel || 1);
       await this.auth.signOut();
       await this._applyAuth(this.auth.status());
     } catch (err) {
@@ -1548,9 +1546,22 @@ class App {
     this.ui.setProfile(this.profile);
     const klass = MMO_CLASSES[character.classKey];
     this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
-    const worldId = character.lastWorld || 'earth';
-    if (this.ow && this.ow.world?.id !== worldId) this._travelToWorld(worldId);
-    else this._enterOverworld(worldId);
+    this.ui._showScreen('main');
+  }
+
+  _deleteMmoCharacter(id) {
+    normalizeMmoCharacters(this.profile);
+    const index = this.profile.mmoCharacters.findIndex((entry) => entry.id === id);
+    if (index < 0) return;
+    const [removed] = this.profile.mmoCharacters.splice(index, 1);
+    const next = this.profile.mmoCharacters[Math.min(index, this.profile.mmoCharacters.length - 1)] || null;
+    this.profile.mmoCharacterId = next?.id || null;
+    this.profile.lastHero = next?.proxyHero || null;
+    this.profile.lastWorld = next?.lastWorld || 'earth';
+    this.ui.selectedHero = next?.proxyHero || 'alexander';
+    this._saveProfile();
+    this.ui.setProfile(this.profile);
+    this.ui.showBanner(`${removed.name} was deleted.`, '', 2400);
   }
 
   // The WC3-style persistent campaign hero this profile brings into a run.
@@ -4296,11 +4307,16 @@ class App {
         this.ui.openGameChat();
         return;
       }
-      // The persistent world uses MMO grammar: C opens the selected hero's
-      // character/equipment screen and returns to the world when pressed again.
+      // Character info is not Character Select. The latter is reached from
+      // the Game Menu, matching traditional MMO navigation.
       if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ow) {
         e.preventDefault();
-        this.ui.toggleCharacterScreen();
+        this.ui.showCharacterSheet('gear');
+        return;
+      }
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ow) {
+        e.preventDefault();
+        this.ui.showCharacterSheet('lattice');
         return;
       }
       // Dota grammar: Tab opens the hero library from anywhere in the menu.
@@ -4619,41 +4635,7 @@ class App {
       this.sun.target.position.set(this.focus.x, 0, this.focus.z);
       return;
     }
-    if (!this.game) {
-      // Starship director: orbit until a distress light is acquired, dive to
-      // the active stand, then pull back when the signal dies.
-      this.menuYaw += dt * 0.018;
-      const shot = this.menuShow?.cameraState();
-      const dive = shot?.phase === 'run' ? shot.progress : 0;
-      const surfaceVisible = dive > 0.18;
-      if (this.menuTerrain) this.menuTerrain.visible = surfaceVisible;
-      this.menuShow?.setSurfaceVisible(surfaceVisible);
-      const tx = shot?.x ?? MAP_SIZE / 2;
-      const tz = shot?.z ?? MAP_SIZE / 2;
-      const k = 1 - Math.exp(-1.35 * dt);
-      this.focus.x += (lerp(MAP_SIZE / 2, tx, dive) - this.focus.x) * k;
-      this.focus.z += (lerp(MAP_SIZE / 2 - 8, tz, dive) - this.focus.z) * k;
-      this.focus.y += (lerp(2.5, this.menuMap?.groundY(tx, tz) || 0, dive) - this.focus.y) * k;
-      const dist = lerp(105, 28, dive);
-      const elev = lerp(0.58, 0.72, dive);
-      this.camera.position.set(
-        this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
-        Math.sin(elev) * dist,
-        this.focus.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
-      );
-      this.camera.lookAt(this.focus);
-      const title = document.querySelector('.title-screen');
-      if (title && shot) {
-        const ndc = this._menuProjV.set(tx, this.menuMap?.groundY(tx, tz) || 0, tz).project(this.camera);
-        title.style.setProperty('--signal-x', `${clamp((ndc.x * .5 + .5) * 100, 8, 72)}%`);
-        title.style.setProperty('--signal-y', `${clamp((-ndc.y * .5 + .5) * 100, 12, 88)}%`);
-        title.style.setProperty('--fog-alpha', surfaceVisible ? '.88' : '0');
-      }
-      const telemetry = document.querySelector('#title-telemetry');
-      if (telemetry && shot) telemetry.innerHTML = `<b>${shot.scenario}</b><span>SIGNAL ${String(shot.observed).padStart(4, '0')} · ${shot.phase === 'run' ? `${shot.survivors} SURVIVORS` : 'SEARCHING'}</span>`;
-      if (shot?.observed) localStorage.setItem('zillions-title-stands', String(shot.observed));
-      return;
-    }
+    if (!this.game) return;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
     const h = this.myHero();
@@ -5436,10 +5418,6 @@ class App {
     }
 
     if (!this.game && this.ow) this._updateOverworld(dt, t);
-    if (!this.game && !this.ow) {
-      this.menuShow?.update(dt, t);
-      this._updateTitleSpace(t);
-    }
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

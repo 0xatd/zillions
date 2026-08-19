@@ -72,7 +72,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
-      <button id="ow-menu" class="tbtn owmenu hidden" title="Characters and account (Esc)">☰ CHARACTERS</button>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="Game menu (Esc)">☰ MENU</button>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -125,10 +125,8 @@ export class UI {
             <h1 class="gametitle">ZILLIONS</h1>
             <p class="gamesub">Every world is a battlefield.</p>
           </div>
-          <div id="title-telemetry" class="title-telemetry"><b>ORBITAL WATCH</b><span>SEARCHING FOR DISTRESS SIGNAL</span></div>
           <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary hidden" id="a-enter">RESUME WORLD</button>
             <button class="menubtn primary" id="a-google">ENTER WORLD</button>
             <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
@@ -142,7 +140,6 @@ export class UI {
             </form>
           </div>
           <nav class="title-utilities" aria-label="Title menu">
-            <button id="a-custom">CUSTOM GAMES</button>
             <button id="a-cinematics">CINEMATICS</button>
             <button id="a-credits">CREDITS</button>
             <button id="a-settings">SETTINGS</button>
@@ -157,8 +154,19 @@ export class UI {
             <div id="character-sigil" class="character-sigil"></div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">RETURN TO WORLD</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+        </div>
+
+        <div id="screen-world-menu" class="world-menu hidden">
+          <div class="world-menu-card">
+            <span class="world-menu-eyebrow">ZILLIONS</span><h1>GAME MENU</h1>
+            <button class="menubtn primary" id="ow-resume">RETURN TO WORLD</button>
+            <button class="menubtn" id="ow-characters">CHARACTER SELECT</button>
+            <button class="menubtn" id="ow-custom">CUSTOM GAMES</button>
+            <button class="menubtn" id="ow-settings">SYSTEM</button>
+            <button class="menubtn danger" id="ow-logout">LOG OUT</button>
+          </div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -198,7 +206,7 @@ export class UI {
             <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
             <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
             <div id="creator-summary" class="creator-summary"></div>
-            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE &amp; ENTER</button></div>
+            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
           </form>
         </div>
 
@@ -434,12 +442,7 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
-    q('#a-enter').onclick = () => {
-      this._accountAccepted = true;
-      if (this.cb.onCampaignMap) this.cb.onCampaignMap();
-    };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
-    q('#a-custom').onclick = () => { this._customFrom = 'account'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
@@ -449,10 +452,6 @@ export class UI {
       const input = q('#a-username');
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
-    q('#m-solo').onclick = () => this._showScreen('solo');
-    q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
-    q('#m-help').onclick = () => this._showScreen('help');
-    q('#m-galaxy').onclick = () => this.cb.onGalaxyOpen && this.cb.onGalaxyOpen();
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => this._showCharacterCreator();
     q('#m-character-sheet').onclick = () => this.showCharacterSheet();
@@ -460,6 +459,17 @@ export class UI {
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
+    q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
+    q('#m-delete-character').onclick = () => {
+      const character = this._sheetCharacter();
+      if (!character) return;
+      if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
+    };
+    q('#ow-resume').onclick = () => this.hideOverlay();
+    q('#ow-characters').onclick = () => this._showScreen('main');
+    q('#ow-custom').onclick = () => { this._customFrom = 'world-menu'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
+    q('#ow-settings').onclick = () => { this._settingsReturn = 'world-menu'; this._showScreen('settings'); };
+    q('#ow-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
     q('#creator-cancel').onclick = () => {
       if (!(this._profile?.mmoCharacters || []).length) return;
       this._backOverlay('main');
@@ -543,7 +553,6 @@ export class UI {
 
     // ----- settings -----
     q('#m-settings').onclick = () => { this._settingsReturn = 'main'; this._showScreen('settings'); };
-    q('#m-heroes').onclick = () => this._showScreen('heroes');
     q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
     q('#set-back').onclick = () => this._backOverlay();
@@ -843,7 +852,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    for (const id of ['account', 'main', 'world-menu', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -1583,7 +1592,6 @@ export class UI {
     if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
-    this.root.querySelector('#m-galaxy').classList.toggle('hidden', !on);
   }
 
   showGalaxy(destinations, currentWorld = 'earth', macro = null) {
@@ -1635,9 +1643,7 @@ export class UI {
   }
 
   toggleOverlay() {
-    // Esc always brings up the hub home — the deep screens (lobby, settings)
-    // are one click from its buttons, and the walk is the point.
-    if (this.overlayHidden()) this._showScreen('main');
+    if (this.overlayHidden()) this._showScreen('world-menu');
     else this.hideOverlay();
   }
 
@@ -2437,7 +2443,6 @@ export class UI {
 
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
-    const enter = this.root.querySelector('#a-enter');
     const google = this.root.querySelector('#a-google');
     const offline = this.root.querySelector('#a-offline');
     const usernameForm = this.root.querySelector('#a-username-form');
@@ -2453,7 +2458,6 @@ export class UI {
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
-    if (enter) enter.classList.toggle('hidden', !state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {

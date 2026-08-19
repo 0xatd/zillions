@@ -13,12 +13,12 @@ const css = read('style.css');
 
 // ENTER WORLD is the login/start action, not a chain of roster confirmations.
 assert.match(ui, /id="a-google">ENTER WORLD</, 'the signed-out front door must say ENTER WORLD');
-assert.match(ui, /id="a-enter">RESUME WORLD</, 'a signed-in title return must say RESUME WORLD');
-assert.match(ui, /id="m-enter-world">RETURN TO WORLD</, 'the optional roster must return to the live world, not re-enter');
-assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*character\.lastWorld[\s\S]*showCharacterCreator\(\)/,
-  'authenticated entry must resume a character or open creation');
-assert.match(main, /_createMmoCharacter[\s\S]*const worldId = character\.lastWorld \|\| 'earth'[\s\S]*this\._enterOverworld\(worldId\)/,
-  'character creation must enter Earth instead of bouncing to the roster');
+assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never become signed-in account home');
+assert.match(ui, /id="m-enter-world">ENTER WORLD</, 'Character Select must own Enter World');
+assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,
+  'authenticated entry must open Character Select or character creation');
+assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
+  'character creation must return to Character Select');
 assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an explicit logout action');
 assert.match(ui, /#m-logout'\)\.onclick = \(\) => this\.cb\.onSignOut/, 'logout must call auth instead of repainting the title');
 assert.match(main, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'the shell must sign out of the account backend');
