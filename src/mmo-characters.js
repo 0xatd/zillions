@@ -98,6 +98,51 @@ export const APPEARANCES = {
   forest: { name: 'Forest', color: '#4f785d' },
 };
 
+// Species are balanced sidegrades. They are available to every account.
+// Keep their combat payload small and resolve it before a run starts.
+export const MMO_RACES = {
+  human: {
+    name: 'Human', icon: '◉',
+    desc: 'Adaptable frontier survivors. Recover quickly and learn every discipline.',
+    passive: 'Frontier Instinct', mods: { regen: 0.8, reflex: 1 },
+  },
+  robot: {
+    name: 'Robot', icon: '⬡',
+    desc: 'Synthetic explorers built for hostile worlds and sustained operations.',
+    passive: 'Hardened Chassis', mods: { armor: 0.025, frame: 1 },
+  },
+};
+
+export const CREATOR_PARTS = {
+  human: {
+    face: ['sentinel', 'ranger', 'veteran', 'nomad'],
+    body: ['light', 'standard', 'heavy'],
+    head: ['cropped', 'swept', 'shaved', 'hooded'],
+    legs: ['field', 'armored', 'scout'],
+  },
+  robot: {
+    face: ['optic', 'visor', 'tri-eye', 'faceless'],
+    body: ['strider', 'warden', 'bulwark'],
+    head: ['dish', 'crest', 'antenna', 'smooth'],
+    legs: ['biped', 'reverse-joint', 'heavy'],
+  },
+};
+
+const creatorChoice = (raceKey, part, value) => {
+  const values = CREATOR_PARTS[raceKey]?.[part] || [];
+  return values.includes(value) ? value : values[0];
+};
+
+export function normalizeCustomization(raceKey = 'human', raw = {}) {
+  const race = MMO_RACES[raceKey] ? raceKey : 'human';
+  return {
+    face: creatorChoice(race, 'face', raw?.face),
+    body: creatorChoice(race, 'body', raw?.body),
+    head: creatorChoice(race, 'head', raw?.head),
+    legs: creatorChoice(race, 'legs', raw?.legs),
+  };
+}
+
 // The five things a character can have on. A slot holding a key that no
 // longer resolves is dropped rather than honoured, the same way normalizeMeta
 // drops a node whose prerequisites went missing.
@@ -118,7 +163,7 @@ export function normalizeEquipment(raw) {
 // The slots worn at the same time as a given one. A sheathed weapon is not on
 // the character while the other set is drawn, so it cannot help qualify
 // anything in that set.
-const SHARED_SLOTS = ['armor', 'implant1', 'implant2'];
+const SHARED_SLOTS = ['head', 'armor', 'hands', 'legs', 'boots', 'implant1', 'implant2'];
 function slotsWornWith(set) {
   const { weapon, offhand } = setSlots(set);
   return [weapon, offhand, ...SHARED_SLOTS];
@@ -179,7 +224,7 @@ export function canEquip(character, key, slot) {
 
 const cleanName = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 18);
 
-export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron') {
+export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron', raceKey = 'human', customization = {}) {
   const klass = MMO_CLASSES[classKey] || MMO_CLASSES.vanguard;
   const now = Date.now();
   return {
@@ -187,6 +232,9 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
     name: cleanName(name) || 'Nameless',
     classKey: MMO_CLASSES[classKey] ? classKey : 'vanguard',
     appearance: APPEARANCES[appearance] ? appearance : 'iron',
+    raceKey: MMO_RACES[raceKey] ? raceKey : 'human',
+    customization: normalizeCustomization(raceKey, customization),
+    entitlements: { tier: 'free', owned: [] },
     proxyHero: klass.proxy,
     level: 1,
     xp: 0,
@@ -212,6 +260,14 @@ export function normalizeMmoCharacters(profile) {
   for (const character of profile.mmoCharacters) {
     const klass = MMO_CLASSES[character.classKey];
     character.proxyHero = klass.proxy;
+    character.raceKey = MMO_RACES[character.raceKey] ? character.raceKey : 'human';
+    character.customization = normalizeCustomization(character.raceKey, character.customization);
+    character.entitlements = {
+      tier: character.entitlements?.tier === 'subscriber' ? 'subscriber' : 'free',
+      owned: Array.isArray(character.entitlements?.owned)
+        ? character.entitlements.owned.filter((id) => typeof id === 'string').slice(0, 200)
+        : [],
+    };
     character.level = Math.max(1, Math.min(100, Number(character.level) || 1));
     character.xp = Math.max(0, Number(character.xp) || 0);
     character.items = (Array.isArray(character.items) ? character.items : []).slice(0, STASH_SLOTS);
@@ -275,6 +331,9 @@ export function grantMmoExperience(character, amount) {
 // simulation never queries a tree node while it runs.
 export function characterCamp(character, relics = []) {
   const tree = treeBonuses(character?.lattice, character?.classKey);
+  const raceMods = MMO_RACES[character?.raceKey]?.mods || MMO_RACES.human.mods;
+  const resolvedTreeMods = { ...tree.mods };
+  for (const [key, value] of Object.entries(raceMods)) resolvedTreeMods[key] = (resolvedTreeMods[key] || 0) + value;
   return {
     level: character?.level || 1,
     xp: character?.xp || 0,
@@ -289,7 +348,7 @@ export function characterCamp(character, relics = []) {
     equipment: legalEquipment(character),
     upgrades: { ...(character?.upgrades || {}) },
     lattice: [...(character?.lattice || [])],
-    treeMods: tree.mods,
+    treeMods: resolvedTreeMods,
     doctrines: tree.doctrines,
     // One resolved payload per weapon set — mods AND doctrines. Carrying only
     // the mods per set left a doctrine pinned to set II active while set I was
@@ -298,9 +357,17 @@ export function characterCamp(character, relics = []) {
       const resolved = treeBonusesForSet(
         character?.lattice, character?.classKey, character?.latticeSets, set,
       );
-      return { mods: resolved.mods, doctrines: resolved.doctrines };
+      const mods = { ...resolved.mods };
+      for (const [key, value] of Object.entries(raceMods)) mods[key] = (mods[key] || 0) + value;
+      return { mods, doctrines: resolved.doctrines };
     }),
     activeSet: character?.activeSet === 1 ? 1 : 0,
+    characterStyle: {
+      raceKey: MMO_RACES[character?.raceKey] ? character.raceKey : 'human',
+      appearance: APPEARANCES[character?.appearance] ? character.appearance : 'iron',
+      customization: normalizeCustomization(character?.raceKey, character?.customization),
+      equipment: legalEquipment(character),
+    },
     relics: [...relics],
   };
 }

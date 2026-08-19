@@ -16,7 +16,7 @@ import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
 import {
-  MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
+  MMO_CLASSES, MMO_RACES, CREATOR_PARTS, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
@@ -32,6 +32,7 @@ import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
 import { ShellState, SHELL_BASES } from './shell-state.js';
+import { vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -197,6 +198,7 @@ export class UI {
             <div class="sheet-tabs">
               <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
               <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">MARKET</button>
               <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
             </div>
@@ -209,6 +211,12 @@ export class UI {
             <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div></div>
             <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
             <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
+          </div>
+
+          <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
+            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2>QUARTERMASTER IONA</h2><p>Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
+            <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
+            <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
           </div>
 
           <div id="sheet-panel-abilities" class="sheet-panel abilities-overview hidden"></div>
@@ -227,11 +235,16 @@ export class UI {
         </div>
 
         <div id="screen-character-create" class="character-create-screen hidden">
-          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>CHOOSE YOUR PATH</h1><p>All thirteen class identities are available. Vanguard is the first class with its complete combat progression; the others currently use prototype combat rigs while their full kits come online.</p></div>
-          <form id="character-create-form" class="creator-form">
-            <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
-            <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
-            <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
+          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
+          <form id="character-create-form" class="creator-form creator-xl">
+            <section class="creator-preview" id="creator-preview" aria-label="Character preview"><div class="creator-avatar"><i class="avatar-head"></i><i class="avatar-face"></i><i class="avatar-body"></i><i class="avatar-legs"></i></div><strong id="creator-preview-race">HUMAN</strong><span>Live equipment changes this silhouette.</span></section>
+            <div class="creator-controls">
+              <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
+              <fieldset><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
+              <div class="creator-parts" id="creator-parts"></div>
+              <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
+              <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
+            </div>
             <div id="creator-summary" class="creator-summary"></div>
             <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
           </form>
@@ -523,6 +536,8 @@ export class UI {
         name: q('#creator-name').value,
         classKey: this._creatorClass || 'vanguard',
         appearance: this._creatorAppearance || 'iron',
+        raceKey: this._creatorRace || 'human',
+        customization: { ...(this._creatorParts || {}) },
       });
     };
     // Back out of the browser to where you walked in from — the title
@@ -1072,9 +1087,26 @@ export class UI {
   _buildCharacterCreator() {
     const classes = this.root.querySelector('#creator-classes');
     const appearances = this.root.querySelector('#creator-appearance');
-    if (!classes || !appearances) return;
+    const races = this.root.querySelector('#creator-races');
+    if (!classes || !appearances || !races) return;
     this._creatorClass = 'vanguard';
     this._creatorAppearance = 'iron';
+    this._creatorRace = 'human';
+    this._creatorParts = {};
+    for (const [key, race] of Object.entries(MMO_RACES)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `creator-race${key === this._creatorRace ? ' sel' : ''}`;
+      button.innerHTML = `<i>${race.icon}</i><span><b>${race.name}</b><small>${race.passive} · ${race.desc}</small></span>`;
+      button.onclick = () => {
+        this._creatorRace = key;
+        this._creatorParts = {};
+        for (const entry of races.children) entry.classList.toggle('sel', entry === button);
+        this._buildCreatorParts();
+        this._renderCreatorSummary();
+      };
+      races.appendChild(button);
+    }
     for (const [key, klass] of Object.entries(MMO_CLASSES)) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -1102,14 +1134,52 @@ export class UI {
       };
       appearances.appendChild(button);
     }
+    this._buildCreatorParts();
     this._renderCreatorSummary();
+  }
+
+  _buildCreatorParts() {
+    const root = this.root.querySelector('#creator-parts');
+    if (!root) return;
+    root.innerHTML = '';
+    const defs = CREATOR_PARTS[this._creatorRace || 'human'];
+    for (const [part, values] of Object.entries(defs)) {
+      const field = document.createElement('fieldset');
+      field.innerHTML = `<legend>${part.toUpperCase()}</legend><div class="creator-part-options"></div>`;
+      const row = field.querySelector('div');
+      this._creatorParts[part] = values.includes(this._creatorParts[part]) ? this._creatorParts[part] : values[0];
+      for (const value of values) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `creator-part${value === this._creatorParts[part] ? ' sel' : ''}`;
+        button.textContent = value.replace(/-/g, ' ');
+        button.onclick = () => {
+          this._creatorParts[part] = value;
+          for (const entry of row.children) entry.classList.toggle('sel', entry === button);
+          this._renderCreatorSummary();
+        };
+        row.appendChild(button);
+      }
+      root.appendChild(field);
+    }
   }
 
   _renderCreatorSummary() {
     const klass = MMO_CLASSES[this._creatorClass || 'vanguard'];
     const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
+    const race = MMO_RACES[this._creatorRace || 'human'];
     const summary = this.root.querySelector('#creator-summary');
-    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal ${this._keyLabel('build')} construction</small>`;
+    if (summary) summary.innerHTML = `<b>${race.icon} ${race.name} ${klass.name}</b><span>${klass.role}</span><small>${race.passive} · ${klass.resource} resource · ${appearance.name} armor · all launch options free</small>`;
+    const preview = this.root.querySelector('#creator-preview');
+    if (preview) {
+      preview.dataset.race = this._creatorRace || 'human';
+      preview.dataset.body = this._creatorParts?.body || '';
+      preview.dataset.head = this._creatorParts?.head || '';
+      preview.dataset.legs = this._creatorParts?.legs || '';
+      preview.style.setProperty('--creator-color', appearance.color);
+    }
+    const raceLabel = this.root.querySelector('#creator-preview-race');
+    if (raceLabel) raceLabel.textContent = race.name.toUpperCase();
   }
 
   _showCharacterCreator() {
@@ -1345,12 +1415,13 @@ export class UI {
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
-    for (const tab of ['character', 'gear', 'abilities', 'lattice']) {
+    for (const tab of ['character', 'gear', 'shop', 'abilities', 'lattice']) {
       this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', this._sheetTab !== tab);
     }
 
     if (this._sheetTab === 'character') this._renderCharacterOverview(character);
     else if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    else if (this._sheetTab === 'shop') this._renderMarketPanel(character);
     else if (this._sheetTab === 'abilities') this._renderAbilitiesOverview(character);
     else this._renderLatticePanel(character);
   }
@@ -1375,6 +1446,40 @@ export class UI {
     this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
   }
 
+  _renderMarketPanel(character) {
+    const balance = this.root.querySelector('#market-balance');
+    const meta = loadMeta();
+    if (balance) balance.textContent = `${META_CURRENCY.icon} ${meta.currency.toLocaleString()} ${META_CURRENCY.name}`;
+    const rotation = new Date().toISOString().slice(0, 10);
+    const stock = vendorStock(rotation, character.level || 1);
+    const stockRoot = this.root.querySelector('#market-stock');
+    stockRoot.innerHTML = stock.map((offer, index) => `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl}</small></div><button data-buy="${index}">${META_CURRENCY.icon} ${offer.price}</button></article>`).join('');
+    for (const button of stockRoot.querySelectorAll('[data-buy]')) {
+      button.onclick = () => {
+        const result = buyVendorItem(character, stock[Number(button.dataset.buy)]);
+        if (!result.ok) {
+          this.showBanner(result.reason === 'full' ? 'Your stash is full.' : `You need ${result.short || 0} more ${META_CURRENCY.name}.`, 'bad', 2400);
+          return;
+        }
+        this._sheetChanged();
+        this.showBanner('Item purchased and moved to your stash.', '', 1800);
+      };
+    }
+    const sellRoot = this.root.querySelector('#market-sell');
+    sellRoot.innerHTML = (character.items || []).map((key, index) => {
+      const item = itemInfo(key);
+      return item ? `<article class="market-item compact" style="--rarity:${item.rarityColor}"><span>${item.icon}</span><div><b>${item.name}</b><small>${item.rarityName}</small></div><button data-sell="${index}">SELL · ${META_CURRENCY.icon} ${vendorSellPrice(key)}</button></article>` : '';
+    }).join('') || '<span class="empty-gear">Your stash has nothing the quartermaster can buy.</span>';
+    for (const button of sellRoot.querySelectorAll('[data-sell]')) {
+      button.onclick = () => {
+        const result = sellVendorItem(character, Number(button.dataset.sell));
+        if (!result.ok) return;
+        this._sheetChanged();
+        this.showBanner(`Sold for ${result.value} ${META_CURRENCY.name}.`, '', 1800);
+      };
+    }
+  }
+
   // What a character is wearing, what is in the stash, and what the two add up
   // to. The totals are the same call the simulation makes, so the screen can
   // never disagree with the battlefield.
@@ -1387,7 +1492,8 @@ export class UI {
     const label = {
       weapon: 'SET I · WEAPON', offhand: 'SET I · OFF-HAND',
       weapon2: 'SET II · WEAPON', offhand2: 'SET II · OFF-HAND',
-      armor: 'ARMOUR', implant1: 'IMPLANT I', implant2: 'IMPLANT II',
+      head: 'HEAD', armor: 'CHEST', hands: 'HANDS', legs: 'LEGS', boots: 'BOOTS',
+      implant1: 'IMPLANT I', implant2: 'IMPLANT II',
     };
     slots.innerHTML = EQUIP_SLOTS.map((slot) => {
       const key = (character.equipment || {})[slot];

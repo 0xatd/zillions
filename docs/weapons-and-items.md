@@ -120,8 +120,10 @@ twenty-minute run has no room for stack management.
 
 ## Slots
 
-Weapon, off-hand, armour, and two implants. Five. The field pack stays at
-`PACK_SLOTS = 4` and keeps its current job: what this run picked up.
+Head, chest, hands, legs, boots, weapon, off-hand, and two implants. Weapon and
+off-hand also have a second set. Eleven equipment positions are available.
+The field pack stays at `PACK_SLOTS = 4` and keeps its current job: what this
+run picked up.
 
 The equipment screen is a stub today. `src/ui.js:887` still renders
 `No persistent equipment yet`. That stub is the place this lands.
@@ -208,3 +210,14 @@ second set became a real decision and the feature earned its cost.
   would turn one player's cheating into everyone's problem, and it must wait
   for a server that owns item creation.
 - Ailment stacks.
+
+## Hub Vendor
+
+The Orbital Exchange uses deterministic rotating stock. Item value is derived
+from item level, rarity, and affix count. The buy multiplier is higher than the
+sell multiplier, so a player cannot create Alloy by buying and reselling.
+`src/vendor.js` owns this rule. `scripts/vendor-check.mjs` proves stable stock,
+insufficient-funds rejection, stash limits, and the no-flip invariant.
+
+The current transaction path is the offline/local implementation. Do not turn
+on trade or paid inventory until the same contract is enforced by a server.

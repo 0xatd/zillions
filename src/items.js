@@ -73,12 +73,13 @@ export const RARITIES = {
 };
 export const RARITY_BY_KEY = { normal: 1, magic: 2, rare: 3 };
 
-export const SLOTS = ['weapon', 'offhand', 'armor', 'implant'];
+export const VISIBLE_ARMOR_SLOTS = ['head', 'armor', 'hands', 'legs', 'boots'];
+export const SLOTS = ['weapon', 'offhand', ...VISIBLE_ARMOR_SLOTS, 'implant'];
 
 // Where a character can put each slot. Two implant sockets share one pool.
 // Two weapon sets, one body. Armour and implants are worn once; the weapon and
 // off-hand exist twice, and a character swaps between them mid-fight.
-export const EQUIP_SLOTS = ['weapon', 'offhand', 'weapon2', 'offhand2', 'armor', 'implant1', 'implant2'];
+export const EQUIP_SLOTS = ['head', 'armor', 'hands', 'legs', 'boots', 'weapon', 'offhand', 'weapon2', 'offhand2', 'implant1', 'implant2'];
 export const WEAPON_SETS = [
   { index: 0, weapon: 'weapon', offhand: 'offhand', name: 'SET I' },
   { index: 1, weapon: 'weapon2', offhand: 'offhand2', name: 'SET II' },
@@ -116,7 +117,7 @@ export function latticeDoctrines(treeSets, set = 0, fallback = null) {
 export function equippedKeys(equipment, set = 0) {
   if (!equipment) return [];
   const { weapon, offhand } = setSlots(set);
-  return [equipment[weapon], equipment[offhand], equipment.armor, equipment.implant1, equipment.implant2]
+  return [equipment[weapon], equipment[offhand], ...VISIBLE_ARMOR_SLOTS.map((slot) => equipment[slot]), equipment.implant1, equipment.implant2]
     .filter(Boolean);
 }
 
@@ -238,6 +239,20 @@ export const ITEM_BASES = {
   powered_shell: { slot: 'armor', name: 'Powered Shell', icon: '🤖', ilvl: 40, req: { frame: 34 }, implicit: { hp: 220, armor: 0.09, speed: -0.05 } },
   signal_shroud: { slot: 'armor', name: 'Signal Shroud', icon: '👘', ilvl: 28, req: { signal: 26 }, implicit: { hp: 70, cdr: 0.06 } },
 
+  // --- visible modular armour ---
+  frontier_helm: { slot: 'head', name: 'Frontier Helm', icon: '⛑️', ilvl: 1, visual: 'frontier', implicit: { hp: 18 } },
+  sentinel_helm: { slot: 'head', name: 'Sentinel Helm', icon: '🪖', ilvl: 30, visual: 'sentinel', req: { frame: 26 }, implicit: { armor: 0.035 } },
+  ghost_hood: { slot: 'head', name: 'Ghost Hood', icon: '🥷', ilvl: 26, visual: 'ghost', req: { reflex: 24 }, implicit: { evadeChance: 0.035 } },
+  field_gauntlets: { slot: 'hands', name: 'Field Gauntlets', icon: '🧤', ilvl: 1, visual: 'field', implicit: { rof: 0.025 } },
+  siege_gauntlets: { slot: 'hands', name: 'Siege Gauntlets', icon: '🥊', ilvl: 32, visual: 'siege', req: { frame: 28 }, implicit: { dmg: 0.045 } },
+  relay_gloves: { slot: 'hands', name: 'Relay Gloves', icon: '🧤', ilvl: 28, visual: 'relay', req: { signal: 25 }, implicit: { cdr: 0.035 } },
+  field_greaves: { slot: 'legs', name: 'Field Greaves', icon: '👖', ilvl: 1, visual: 'field', implicit: { hp: 24 } },
+  strider_greaves: { slot: 'legs', name: 'Strider Greaves', icon: '🦿', ilvl: 28, visual: 'strider', req: { reflex: 25 }, implicit: { speed: 0.035 } },
+  bulwark_greaves: { slot: 'legs', name: 'Bulwark Greaves', icon: '🦿', ilvl: 34, visual: 'bulwark', req: { frame: 30 }, implicit: { armor: 0.04, speed: -0.015 } },
+  trail_boots: { slot: 'boots', name: 'Trail Boots', icon: '🥾', ilvl: 1, visual: 'trail', implicit: { speed: 0.025 } },
+  phase_boots: { slot: 'boots', name: 'Phase Boots', icon: '👢', ilvl: 30, visual: 'phase', req: { signal: 26 }, implicit: { speed: 0.04, evadeChance: 0.02 } },
+  siege_boots: { slot: 'boots', name: 'Siege Boots', icon: '🥾', ilvl: 30, visual: 'siege', req: { frame: 26 }, implicit: { hp: 35 } },
+
   // --- implants ---
   neural_shunt: { slot: 'implant', name: 'Neural Shunt', icon: '🧠', ilvl: 1, implicit: { rof: 0.05 } },
   servo_spine: { slot: 'implant', name: 'Servo Spine', icon: '🦿', ilvl: 1, implicit: { speed: 0.05 } },
@@ -261,7 +276,7 @@ export const WEAPON_CLASSES = {
 };
 
 export const BASES_BY_SLOT = (() => {
-  const out = { weapon: [], offhand: [], armor: [], implant: [] };
+  const out = Object.fromEntries(SLOTS.map((slot) => [slot, []]));
   for (const [key, base] of Object.entries(ITEM_BASES)) {
     if (out[base.slot]) out[base.slot].push(key);
   }
@@ -281,6 +296,8 @@ export const BASES_BY_SLOT = (() => {
 // `group` stops one item rolling the same concept twice.
 
 const P = 'prefix', S = 'suffix';
+const GLOBAL_GEAR = ['offhand', ...VISIBLE_ARMOR_SLOTS, 'implant'];
+const DEFENSIVE_GEAR = ['offhand', ...VISIBLE_ARMOR_SLOTS];
 
 export const AFFIXES = [
   // --- weapon prefixes (local) ---
@@ -306,37 +323,37 @@ export const AFFIXES = [
     t: [[14, { splash: 0.3 }], [40, { splash: 0.55 }]] },
 
   // --- global prefixes ---
-  { id: 'g_plated', kind: P, group: 'ghp', slots: ['offhand', 'armor', 'implant'], word: 'Plated',
+  { id: 'g_plated', kind: P, group: 'ghp', slots: GLOBAL_GEAR, word: 'Plated',
     t: [[1, { hp: 45 }], [16, { hp: 85 }], [38, { hp: 140 }], [62, { hp: 210 }]] },
-  { id: 'g_braced', kind: P, group: 'garmor', slots: ['offhand', 'armor'], word: 'Braced',
+  { id: 'g_braced', kind: P, group: 'garmor', slots: DEFENSIVE_GEAR, word: 'Braced',
     t: [[10, { armor: 0.04 }], [32, { armor: 0.07 }], [56, { armor: 0.1 }]] },
   { id: 'g_wired', kind: P, group: 'grof', slots: ['implant', 'offhand'], word: 'Wired',
     t: [[1, { rof: 0.06 }], [22, { rof: 0.1 }], [48, { rof: 0.15 }]] },
-  { id: 'g_savage', kind: P, group: 'gdmg', slots: ['offhand', 'armor', 'implant'], word: 'Savage',
+  { id: 'g_savage', kind: P, group: 'gdmg', slots: GLOBAL_GEAR, word: 'Savage',
     t: [[6, { dmg: 0.07 }], [26, { dmg: 0.12 }], [52, { dmg: 0.18 }]] },
-  { id: 'g_hardened', kind: P, group: 'gregen', slots: ['armor', 'implant'], word: 'Hardened',
+  { id: 'g_hardened', kind: P, group: 'gregen', slots: [...VISIBLE_ARMOR_SLOTS, 'implant'], word: 'Hardened',
     t: [[1, { regen: 1.2 }], [24, { regen: 2.4 }], [50, { regen: 4 }]] },
 
   // --- global suffixes ---
-  { id: 'g_of_haste', kind: S, group: 'gspeed', slots: ['offhand', 'armor', 'implant'], word: 'of Haste',
+  { id: 'g_of_haste', kind: S, group: 'gspeed', slots: GLOBAL_GEAR, word: 'of Haste',
     t: [[1, { speed: 0.04 }], [20, { speed: 0.07 }], [46, { speed: 0.11 }]] },
-  { id: 'g_of_focus', kind: S, group: 'gcdr', slots: ['offhand', 'armor', 'implant'], word: 'of Focus',
+  { id: 'g_of_focus', kind: S, group: 'gcdr', slots: GLOBAL_GEAR, word: 'of Focus',
     t: [[8, { cdr: 0.06 }], [28, { cdr: 0.1 }], [54, { cdr: 0.15 }]] },
   { id: 'g_of_greed', kind: S, group: 'gmagnet', slots: ['offhand', 'implant'], word: 'of Greed',
     t: [[1, { magnet: 1 }], [26, { magnet: 2 }]] },
-  { id: 'g_of_ghosts', kind: S, group: 'gevade', slots: ['armor', 'offhand'], word: 'of Ghosts',
+  { id: 'g_of_ghosts', kind: S, group: 'gevade', slots: DEFENSIVE_GEAR, word: 'of Ghosts',
     t: [[12, { evadeChance: 0.04 }], [36, { evadeChance: 0.07 }]] },
-  { id: 'g_of_thorns', kind: S, group: 'gthorns', slots: ['armor', 'offhand'], word: 'of Thorns',
+  { id: 'g_of_thorns', kind: S, group: 'gthorns', slots: DEFENSIVE_GEAR, word: 'of Thorns',
     t: [[16, { thorns: 0.12 }], [44, { thorns: 0.22 }]] },
   { id: 'g_of_the_beacon', kind: S, group: 'gaura', slots: ['implant', 'offhand'], word: 'of the Beacon',
     t: [[10, { auraR: 0.15 }], [38, { auraR: 0.25 }]] },
-  { id: 'g_of_the_host', kind: S, group: 'gtroop', slots: ['armor', 'implant'], word: 'of the Host',
+  { id: 'g_of_the_host', kind: S, group: 'gtroop', slots: [...VISIBLE_ARMOR_SLOTS, 'implant'], word: 'of the Host',
     t: [[14, { troopDmg: 0.08 }], [42, { troopDmg: 0.14 }]] },
-  { id: 'g_of_the_frame', kind: S, group: 'gattr', slots: ['armor', 'offhand', 'implant', 'weapon'], word: 'of the Frame',
+  { id: 'g_of_the_frame', kind: S, group: 'gattr', slots: [...VISIBLE_ARMOR_SLOTS, 'offhand', 'implant', 'weapon'], word: 'of the Frame',
     t: [[1, { frame: 6 }], [24, { frame: 12 }], [50, { frame: 20 }]] },
-  { id: 'g_of_reflex', kind: S, group: 'gattr', slots: ['armor', 'offhand', 'implant', 'weapon'], word: 'of Reflex',
+  { id: 'g_of_reflex', kind: S, group: 'gattr', slots: [...VISIBLE_ARMOR_SLOTS, 'offhand', 'implant', 'weapon'], word: 'of Reflex',
     t: [[1, { reflex: 6 }], [24, { reflex: 12 }], [50, { reflex: 20 }]] },
-  { id: 'g_of_signal', kind: S, group: 'gattr', slots: ['armor', 'offhand', 'implant', 'weapon'], word: 'of Signal',
+  { id: 'g_of_signal', kind: S, group: 'gattr', slots: [...VISIBLE_ARMOR_SLOTS, 'offhand', 'implant', 'weapon'], word: 'of Signal',
     t: [[1, { signal: 6 }], [24, { signal: 12 }], [50, { signal: 20 }]] },
 ];
 

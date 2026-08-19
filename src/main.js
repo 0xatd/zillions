@@ -725,8 +725,11 @@ class App {
     if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
     const key = this.ui.selectedHero || 'alexander';
     const def = HEROES[key] || HEROES.alexander;
-    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
     const character = selectedMmoCharacter(this.profile);
+    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
+      raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+    } : null });
     const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
       : character.appearance === 'cobalt' ? '4679b8'
       : character.appearance === 'bone' ? 'b7aa8c'
@@ -1558,13 +1561,13 @@ class App {
     }
   }
 
-  _createMmoCharacter({ name, classKey, appearance } = {}) {
+  _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
     const clean = String(name || '').trim();
     if (!clean) {
       this.ui.showBanner('Choose a character name.', 'bad', 2200);
       return;
     }
-    const character = makeMmoCharacter(clean, classKey, appearance);
+    const character = makeMmoCharacter(clean, classKey, appearance, raceKey, customization);
     if (!addMmoCharacter(this.profile, character)) {
       this.ui.showBanner('The character roster is full.', 'bad', 2200);
       return;
@@ -3943,7 +3946,7 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const authored = u.key === 'scott' ? assetClone('heroScott') : null;
+      const authored = u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
         // existing collision/readability scale; visual meshes never change

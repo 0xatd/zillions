@@ -9,6 +9,7 @@
 // the production-art rules keep alive — now worth looking at.
 import * as THREE from 'three';
 import { applyRim } from './tactical-visuals.js';
+import { itemInfo } from './config.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
 const M = (c, e = 0) => applyRim(
@@ -379,10 +380,54 @@ function genericHero(d) {
   return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
 }
 
+const APPEARANCE_COLORS = {
+  iron: 0x8493a6, crimson: 0xb94b51, cobalt: 0x4679b8,
+  bone: 0xb7aa8c, void: 0x6d568f, forest: 0x4f785d,
+};
+
+function playerHero(u) {
+  const style = u.characterStyle || {};
+  const race = style.raceKey === 'robot' ? 'robot' : 'human';
+  const custom = style.customization || {};
+  const color = APPEARANCE_COLORS[style.appearance] || u.def.color || 0x8493a6;
+  const body = custom.body || (race === 'robot' ? 'strider' : 'standard');
+  const bulk = ['heavy', 'bulwark'].includes(body) ? 1.36 : ['light', 'strider'].includes(body) ? 0.94 : 1.12;
+  const rig = humanoid({
+    armor: color, cloth: race === 'robot' ? shade(color, .48) : 0x33383e,
+    shell: race === 'robot' ? 0xb8c4ca : 0xd8c6ad,
+    bulk, tall: race === 'robot' ? 1.08 : 1.03,
+    visor: race === 'robot' ? 0x5ee8ff : 0x8fd0ff,
+    visorWide: ['visor', 'faceless'].includes(custom.face),
+  });
+  const weapons = [];
+  // Identity parts stay visible beneath gear.
+  if (custom.head === 'crest') box(rig.head, M(0xe4bf55), .045, .13, .16, 0, .14, -.02);
+  if (custom.head === 'antenna' || custom.head === 'dish') {
+    box(rig.head, M(0x343a40), .025, .22, .025, .07, .18, 0, 0, 0, .15);
+    if (custom.head === 'dish') sph(rig.head, M(0x6fc8e8, .55), .055, .07, .29, 0, 1.4, .35, 1.4);
+  }
+  if (custom.head === 'hooded') cone(rig.head, M(0x252c35), .145, .2, 0, .08, -.04, -.35, 0, 0, 7);
+  if (custom.face === 'tri-eye') for (const x of [-.055, 0, .055]) sph(rig.head, M(0x5ee8ff, 1), .018, x, .045, .105);
+
+  const equipment = style.equipment || u.equipment || {};
+  const visual = (slot) => itemInfo(equipment[slot])?.base?.visual || '';
+  if (visual('head')) {
+    const helm = visual('head');
+    sph(rig.head, M(shade(color, helm === 'ghost' ? .5 : .82)), .125, 0, .035, 0, 1.08, 1.05, 1.02);
+    if (helm === 'sentinel') box(rig.head, M(0xe4bf55), .18, .025, .03, 0, .12, .02);
+  }
+  if (visual('hands')) for (const arm of [rig.limbs.armL, rig.limbs.armR]) box(arm, M(shade(color, .7)), .11, .13, .12, 0, -.34, .02);
+  if (visual('legs')) for (const leg of [rig.limbs.legL, rig.limbs.legR]) box(leg, M(shade(color, .68)), .105, .2, .1, 0, -.25, .01);
+  if (visual('boots')) for (const leg of [rig.limbs.legL, rig.limbs.legR]) box(leg, M(0x25282c), .12, .1, .18, 0, -.4, .05);
+  rifle(rig.root, weapons, { len: .72, y: .58 });
+  return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
+}
+
 // ---------------- entry point ----------------
 
 export function buildUnitModel(u) {
   const d = u.def;
+  if (u.hero && u.characterStyle) return playerHero(u);
   if (u.hero) return (HEROES[u.key] || genericHero)(d);
   return (TROOPS[u.key] || soldierModel)(d);
 }
