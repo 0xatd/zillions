@@ -48,6 +48,7 @@ Default branch: main
 - src/lockstep-hash.js owns the per-window state hash peers compare. It is a pure
   function over a Game so it can be checked headless.
 - src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
+- src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
@@ -60,7 +61,8 @@ Default branch: main
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
 - src/building-art.js owns building meshes, walls and gates (presentation only).
-- api/ contains Vercel server routes.
+- api/ contains Vercel server routes. api/economy.js is the authenticated,
+  server-authoritative inventory and currency boundary.
 - supabase/schema.sql is the database schema source.
 
 ## Critical rules

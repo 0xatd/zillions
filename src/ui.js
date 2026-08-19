@@ -1449,14 +1449,21 @@ export class UI {
   _renderMarketPanel(character) {
     const balance = this.root.querySelector('#market-balance');
     const meta = loadMeta();
-    if (balance) balance.textContent = `${META_CURRENCY.icon} ${meta.currency.toLocaleString()} ${META_CURRENCY.name}`;
+    const marketCurrency = Number.isFinite(character.authoritativeBalance) ? character.authoritativeBalance : meta.currency;
+    if (balance) balance.textContent = `${META_CURRENCY.icon} ${marketCurrency.toLocaleString()} ${META_CURRENCY.name}`;
     const rotation = new Date().toISOString().slice(0, 10);
     const stock = vendorStock(rotation, character.level || 1);
     const stockRoot = this.root.querySelector('#market-stock');
     stockRoot.innerHTML = stock.map((offer, index) => `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl}</small></div><button data-buy="${index}">${META_CURRENCY.icon} ${offer.price}</button></article>`).join('');
     for (const button of stockRoot.querySelectorAll('[data-buy]')) {
-      button.onclick = () => {
-        const result = buyVendorItem(character, stock[Number(button.dataset.buy)]);
+      button.onclick = async () => {
+        button.disabled = true;
+        const expectedValue = vendorSellPrice((character.items || [])[Number(button.dataset.sell)]);
+        let result;
+        try { result = await this.cb.onMarketBuy?.(character, rotation, Number(button.dataset.buy)); }
+        catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
+        if (!result) result = buyVendorItem(character, stock[Number(button.dataset.buy)]);
+        button.disabled = false;
         if (!result.ok) {
           this.showBanner(result.reason === 'full' ? 'Your stash is full.' : `You need ${result.short || 0} more ${META_CURRENCY.name}.`, 'bad', 2400);
           return;
@@ -1471,11 +1478,16 @@ export class UI {
       return item ? `<article class="market-item compact" style="--rarity:${item.rarityColor}"><span>${item.icon}</span><div><b>${item.name}</b><small>${item.rarityName}</small></div><button data-sell="${index}">SELL · ${META_CURRENCY.icon} ${vendorSellPrice(key)}</button></article>` : '';
     }).join('') || '<span class="empty-gear">Your stash has nothing the quartermaster can buy.</span>';
     for (const button of sellRoot.querySelectorAll('[data-sell]')) {
-      button.onclick = () => {
-        const result = sellVendorItem(character, Number(button.dataset.sell));
+      button.onclick = async () => {
+        button.disabled = true;
+        let result;
+        try { result = await this.cb.onMarketSell?.(character, Number(button.dataset.sell)); }
+        catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
+        if (!result) result = sellVendorItem(character, Number(button.dataset.sell));
+        button.disabled = false;
         if (!result.ok) return;
         this._sheetChanged();
-        this.showBanner(`Sold for ${result.value} ${META_CURRENCY.name}.`, '', 1800);
+        this.showBanner(`Sold for ${result.mutation?.value || result.value || expectedValue} ${META_CURRENCY.name}.`, '', 1800);
       };
     }
   }
@@ -1678,7 +1690,7 @@ export class UI {
     this.root.querySelector('#gear-stat-list').innerHTML = rows.join('');
   }
 
-  _equipFromStash(character, index, preferredSlot = null) {
+  async _equipFromStash(character, index, preferredSlot = null) {
     const key = (character.items || [])[index];
     const item = key ? itemInfo(key) : null;
     if (!item || !item.slot) return;
@@ -1698,6 +1710,17 @@ export class UI {
       this.showBanner(`✋ ${item.name} needs ${requirementText(item)}.`, '', 2600);
       return;
     }
+    try {
+      const authoritative = await this.cb.onAuthorityEquip?.(character, index, slot);
+      if (authoritative) {
+        this._sheetSelection = { kind: 'slot', slot, key };
+        this._sheetChanged();
+        return;
+      }
+    } catch (error) {
+      this.showBanner(`✋ ${error?.result?.error || error?.message || 'Equipment update failed.'}`, 'bad', 2600);
+      return;
+    }
     const previous = (character.equipment || {})[slot];
     character.equipment = { ...(character.equipment || {}), [slot]: key };
     character.items = (character.items || []).filter((_, i) => i !== index);
@@ -1707,11 +1730,22 @@ export class UI {
     this._sheetChanged();
   }
 
-  _unequip(character, slot) {
+  async _unequip(character, slot) {
     const key = (character.equipment || {})[slot];
     if (!key) return;
     if ((character.items || []).length >= STASH_SLOTS) {
       this.showBanner('✋ The stash is full.', '', 2400);
+      return;
+    }
+    try {
+      const authoritative = await this.cb.onAuthorityUnequip?.(character, slot);
+      if (authoritative) {
+        this._sheetSelection = { kind: 'stash', index: character.items.length - 1, key };
+        this._sheetChanged();
+        return;
+      }
+    } catch (error) {
+      this.showBanner(`✋ ${error?.result?.error || error?.message || 'Equipment update failed.'}`, 'bad', 2600);
       return;
     }
     const next = { ...(character.equipment || {}) };

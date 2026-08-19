@@ -83,6 +83,9 @@ Use continuous siege on a lane graph as the gameplay base:
   the hero aura, one of two passive paths, or ult damage. The HUD must show
   derived hero stats and whether the aura is affecting allies or enemies.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
+- Signed-in inventory, equipment, item creation, and Salvage Alloy are
+  server-owned. Economic requests are atomic, idempotent, revision-checked,
+  and audited. Static local play cannot change the online economy.
 
 Do not turn Survival back into a generic RTS or a debug launcher.
 

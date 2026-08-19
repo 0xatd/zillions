@@ -13,6 +13,10 @@ import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
+import {
+  applyEconomySnapshot, buyAuthoritativeItem, equipAuthoritativeItem, loadAuthoritativeEconomy,
+  migrateLegacyEconomy, sellAuthoritativeItem, unequipAuthoritativeItem,
+} from './economy.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -192,6 +196,10 @@ class App {
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
+      onMarketBuy: (character, rotation, offerIndex) => this._marketBuy(character, rotation, offerIndex),
+      onMarketSell: (character, itemIndex) => this._marketSell(character, itemIndex),
+      onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
+      onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
@@ -1580,6 +1588,60 @@ class App {
     const klass = MMO_CLASSES[character.classKey];
     this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
     this.ui._showScreen('main');
+  }
+
+  async _ensureAuthoritativeEconomy(character) {
+    if (!this.auth?.isSignedIn()) return null;
+    let result;
+    try {
+      result = await loadAuthoritativeEconomy(character);
+    } catch (error) {
+      if (!String(error?.message || '').includes('character_not_found')) throw error;
+      result = await migrateLegacyEconomy(character, loadMeta().currency);
+    }
+    if (result?.ok) {
+      applyEconomySnapshot(character, result);
+      this.profile.metaCurrency = character.authoritativeBalance;
+      this._saveProfile();
+    }
+    return result;
+  }
+
+  async _marketBuy(character, rotation, offerIndex) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const result = await buyAuthoritativeItem(character, rotation, offerIndex);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _marketSell(character, itemIndex) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const itemId = character.itemInstances?.[Number(itemIndex)]?.id;
+    if (!itemId) throw new Error('item_not_found');
+    const result = await sellAuthoritativeItem(character, itemId);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _authorityEquip(character, itemIndex, slot) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const instance = character.itemInstances?.[Number(itemIndex)];
+    if (!instance) throw new Error('item_not_found');
+    const result = await equipAuthoritativeItem(character, instance.id, slot, instance.revision);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _authorityUnequip(character, slot) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const revision = character.equipmentInstanceRevisions?.[slot] ?? null;
+    const result = await unequipAuthoritativeItem(character, slot, revision);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
   }
 
   _deleteMmoCharacter(id) {

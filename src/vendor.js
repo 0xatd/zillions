@@ -1,6 +1,8 @@
 // Deterministic hub vendor. Stock is a function of rotation + character level,
 // so every client renders the same offers. Transactions update the existing
-// persistent Salvage Alloy ledger and the selected character stash.
+// persistent Salvage Alloy ledger and the selected character stash. The
+// mutation helpers at the bottom are OFFLINE ONLY. Signed-in play must use
+// /api/economy so a browser cannot mint items or edit currency.
 import { BASES_BY_SLOT, SLOTS, hashString, rollItemKey, resolveItem } from './items.js';
 import { itemInfo } from './config.js';
 import { loadMeta, saveMeta, charge } from './meta.js';
@@ -41,7 +43,7 @@ export function vendorStock(rotation = 'launch', characterLevel = 1, size = VEND
   return out;
 }
 
-export function buyVendorItem(character, offer) {
+export function buyOfflineVendorItem(character, offer) {
   if (!character || !offer?.key || !itemInfo(offer.key)) return { ok: false, reason: 'invalid' };
   if ((character.items || []).length >= STASH_SLOTS) return { ok: false, reason: 'full' };
   const paid = charge(Math.max(1, Number(offer.price) || vendorBuyPrice(offer.key)));
@@ -50,7 +52,7 @@ export function buyVendorItem(character, offer) {
   return { ok: true, currency: paid.currency, key: offer.key };
 }
 
-export function sellVendorItem(character, index) {
+export function sellOfflineVendorItem(character, index) {
   if (!character || !Array.isArray(character.items)) return { ok: false, reason: 'invalid' };
   const position = Math.floor(Number(index));
   const key = character.items[position];
@@ -63,3 +65,8 @@ export function sellVendorItem(character, index) {
   saveMeta(meta);
   return { ok: true, currency: meta.currency, value, key };
 }
+
+// Compatibility names for static builds. Online UI code selects these only
+// when no authenticated economy callback is present.
+export const buyVendorItem = buyOfflineVendorItem;
+export const sellVendorItem = sellOfflineVendorItem;

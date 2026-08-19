@@ -46,6 +46,8 @@ The profile remembers the last world.
 Character Info separates the character overview, equipment, abilities, and the
 Lattice. Equipment supports item inspection, comparisons, click actions, and
 drag-and-drop between compatible body slots and the persistent stash.
+Signed-in shop transactions use the server-owned inventory and Salvage Alloy
+ledger. Static local play keeps a separate offline-only ledger.
 
 Custom Games separates Live Games from Arcade. Live Games shows real player
 rooms that can be joined or watched. Arcade lists prebuilt campaign, Survival,

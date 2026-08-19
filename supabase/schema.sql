@@ -4,6 +4,228 @@
 
 create extension if not exists pgcrypto;
 
+-- Authoritative character economy. Browser profile blobs remain readable for
+-- legacy/offline play, but signed-in mutations pass through economy_mutate().
+create table if not exists public.game_characters (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  client_character_id text not null,
+  name text not null,
+  class_key text not null,
+  race_key text not null check (race_key in ('human', 'robot')),
+  level integer not null default 1 check (level between 1 and 100),
+  customization jsonb not null default '{}'::jsonb,
+  revision bigint not null default 1 check (revision > 0),
+  legacy_imported_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, client_character_id),
+  check (length(client_character_id) between 1 and 96),
+  check (length(name) between 1 and 40)
+);
+
+create table if not exists public.player_wallets (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  salvage_alloy bigint not null default 0 check (salvage_alloy >= 0),
+  revision bigint not null default 1 check (revision > 0),
+  legacy_imported_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.item_instances (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  character_id uuid not null references public.game_characters(id) on delete cascade,
+  legacy_key text not null,
+  base_id text not null,
+  slot_pool text not null,
+  item_level integer not null check (item_level between 1 and 100),
+  rarity integer not null check (rarity between 1 and 3),
+  affixes jsonb not null default '[]'::jsonb,
+  sockets jsonb not null default '[]'::jsonb,
+  binding text not null default 'account' check (binding in ('account', 'character')),
+  location text not null default 'stash' check (location in ('stash', 'equipped')),
+  equip_slot text,
+  economy_data jsonb not null default '{}'::jsonb,
+  provenance jsonb not null,
+  revision bigint not null default 1 check (revision > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check ((location = 'stash' and equip_slot is null) or (location = 'equipped' and equip_slot is not null))
+);
+
+create unique index if not exists item_instances_one_equipped_slot
+on public.item_instances(character_id, equip_slot) where location = 'equipped';
+create index if not exists item_instances_owner_character_idx
+on public.item_instances(owner_user_id, character_id, created_at);
+
+create table if not exists public.economy_requests (
+  actor_user_id uuid not null references auth.users(id) on delete cascade,
+  request_id text not null,
+  action text not null,
+  request_payload jsonb not null,
+  response_payload jsonb,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz,
+  primary key (actor_user_id, request_id),
+  check (length(request_id) between 1 and 64)
+);
+
+create table if not exists public.economy_audit_events (
+  id bigint generated always as identity primary key,
+  actor_user_id uuid not null references auth.users(id) on delete cascade,
+  character_id uuid references public.game_characters(id) on delete set null,
+  request_id text not null,
+  action text not null,
+  inputs jsonb not null,
+  outputs jsonb not null,
+  created_at timestamptz not null default now(),
+  unique (actor_user_id, request_id)
+);
+
+alter table public.game_characters enable row level security;
+alter table public.player_wallets enable row level security;
+alter table public.item_instances enable row level security;
+alter table public.economy_requests enable row level security;
+alter table public.economy_audit_events enable row level security;
+
+drop policy if exists game_characters_read_self on public.game_characters;
+create policy game_characters_read_self on public.game_characters for select to authenticated using (auth.uid() = user_id);
+drop policy if exists player_wallets_read_self on public.player_wallets;
+create policy player_wallets_read_self on public.player_wallets for select to authenticated using (auth.uid() = user_id);
+drop policy if exists item_instances_read_self on public.item_instances;
+create policy item_instances_read_self on public.item_instances for select to authenticated using (auth.uid() = owner_user_id);
+drop policy if exists economy_requests_read_self on public.economy_requests;
+create policy economy_requests_read_self on public.economy_requests for select to authenticated using (auth.uid() = actor_user_id);
+drop policy if exists economy_audit_read_self on public.economy_audit_events;
+create policy economy_audit_read_self on public.economy_audit_events for select to authenticated using (auth.uid() = actor_user_id);
+
+create or replace function public.economy_mutate(
+  p_actor uuid, p_request_id text, p_action text, p_payload jsonb
+) returns jsonb
+language plpgsql security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_existing jsonb; v_character public.game_characters%rowtype; v_item public.item_instances%rowtype;
+  v_wallet public.player_wallets%rowtype; v_result jsonb; v_entry jsonb; v_price bigint; v_count integer;
+begin
+  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then raise exception 'service_role_required'; end if;
+  if p_actor is null or p_request_id is null or length(p_request_id) not between 1 and 64 then raise exception 'invalid_request'; end if;
+
+  select response_payload into v_existing from public.economy_requests
+  where actor_user_id = p_actor and request_id = p_request_id;
+  if found then
+    if v_existing is null then raise exception 'request_in_progress'; end if;
+    return v_existing || jsonb_build_object('duplicate', true);
+  end if;
+  insert into public.economy_requests(actor_user_id, request_id, action, request_payload)
+  values (p_actor, p_request_id, p_action, p_payload);
+
+  if p_action = 'migrate_legacy' then
+    insert into public.game_characters(user_id, client_character_id, name, class_key, race_key, level, customization)
+    values (p_actor, p_payload#>>'{character,client_character_id}', p_payload#>>'{character,name}',
+      p_payload#>>'{character,class_key}', p_payload#>>'{character,race_key}',
+      (p_payload#>>'{character,level}')::integer, coalesce(p_payload#>'{character,customization}', '{}'::jsonb))
+    on conflict (user_id, client_character_id) do update set updated_at = now()
+    returning * into v_character;
+    if v_character.legacy_imported_at is not null then raise exception 'legacy_already_imported'; end if;
+    insert into public.player_wallets(user_id, salvage_alloy, legacy_imported_at)
+    values (p_actor, greatest(0, (p_payload->>'balance')::bigint), now())
+    on conflict (user_id) do update set
+      salvage_alloy = case when public.player_wallets.legacy_imported_at is null then excluded.salvage_alloy else public.player_wallets.salvage_alloy end,
+      legacy_imported_at = coalesce(public.player_wallets.legacy_imported_at, excluded.legacy_imported_at),
+      revision = public.player_wallets.revision + case when public.player_wallets.legacy_imported_at is null then 1 else 0 end,
+      updated_at = now();
+    for v_entry in select value from jsonb_array_elements(coalesce(p_payload->'items', '[]'::jsonb)) loop
+      insert into public.item_instances(owner_user_id, character_id, legacy_key, base_id, slot_pool, item_level, rarity,
+        affixes, sockets, binding, location, equip_slot, economy_data, provenance)
+      values (p_actor, v_character.id, v_entry->>'legacy_key', v_entry->>'base_id', v_entry->>'slot_pool', (v_entry->>'item_level')::integer,
+        (v_entry->>'rarity')::integer, coalesce(v_entry->'affixes','[]'), coalesce(v_entry->'sockets','[]'),
+        coalesce(v_entry->>'binding','account'), v_entry->>'location', nullif(v_entry->>'equip_slot',''),
+        coalesce(v_entry->'economy_data','{}'), jsonb_build_object('kind','legacy_import','request_id',p_request_id,'imported_at',now()));
+    end loop;
+    update public.game_characters set legacy_imported_at = now(), revision = revision + 1 where id = v_character.id returning * into v_character;
+  else
+    select * into v_character from public.game_characters where user_id = p_actor
+      and client_character_id = p_payload->>'client_character_id' for update;
+    if not found then raise exception 'character_not_found'; end if;
+    if p_payload->>'expected_character_revision' is not null
+      and (p_payload->>'expected_character_revision')::bigint <> v_character.revision then raise exception 'stale_revision'; end if;
+    insert into public.player_wallets(user_id) values (p_actor) on conflict do nothing;
+  end if;
+
+  if p_action = 'buy_vendor' then
+    select count(*) into v_count from public.item_instances where character_id = v_character.id and location = 'stash';
+    if v_count >= 60 then raise exception 'inventory_full'; end if;
+    v_price := (p_payload->>'price')::bigint;
+    update public.player_wallets set salvage_alloy = salvage_alloy - v_price, revision = revision + 1, updated_at = now()
+      where user_id = p_actor and salvage_alloy >= v_price returning * into v_wallet;
+    if not found then raise exception 'insufficient_funds'; end if;
+    v_entry := p_payload->'item';
+    insert into public.item_instances(owner_user_id, character_id, legacy_key, base_id, slot_pool, item_level, rarity, affixes, sockets,
+      binding, location, economy_data, provenance)
+    values (p_actor, v_character.id, v_entry->>'legacy_key', v_entry->>'base_id', v_entry->>'slot_pool', (v_entry->>'item_level')::integer,
+      (v_entry->>'rarity')::integer, coalesce(v_entry->'affixes','[]'), coalesce(v_entry->'sockets','[]'),
+      coalesce(v_entry->>'binding','account'), 'stash', coalesce(v_entry->'economy_data','{}'),
+      jsonb_build_object('kind','vendor_purchase','rotation',p_payload->>'rotation','offer_index',p_payload->>'offer_index','request_id',p_request_id));
+    update public.game_characters set revision = revision + 1, updated_at = now() where id = v_character.id returning * into v_character;
+  elsif p_action = 'sell_vendor' then
+    select * into v_item from public.item_instances where id = (p_payload->>'item_id')::uuid and owner_user_id = p_actor
+      and character_id = v_character.id and location = 'stash' for update;
+    if not found then raise exception 'unauthorized_ownership'; end if;
+    v_price := greatest(1, coalesce((v_item.economy_data->>'sell_price')::bigint, 1));
+    delete from public.item_instances where id = v_item.id;
+    update public.player_wallets set salvage_alloy = salvage_alloy + v_price, revision = revision + 1, updated_at = now()
+      where user_id = p_actor returning * into v_wallet;
+    update public.game_characters set revision = revision + 1, updated_at = now() where id = v_character.id returning * into v_character;
+  elsif p_action in ('equip','unequip') then
+    if p_action = 'equip' then
+      select * into v_item from public.item_instances where id = (p_payload->>'item_id')::uuid and owner_user_id = p_actor
+        and character_id = v_character.id for update;
+      if not found then raise exception 'unauthorized_ownership'; end if;
+      if p_payload->>'expected_item_revision' is not null and (p_payload->>'expected_item_revision')::bigint <> v_item.revision then raise exception 'stale_revision'; end if;
+      if not (
+        (v_item.slot_pool = p_payload->>'equip_slot') or
+        (v_item.slot_pool = 'weapon' and p_payload->>'equip_slot' in ('weapon','weapon2')) or
+        (v_item.slot_pool = 'offhand' and p_payload->>'equip_slot' in ('offhand','offhand2')) or
+        (v_item.slot_pool = 'implant' and p_payload->>'equip_slot' in ('implant1','implant2'))
+      ) then raise exception 'invalid_equipment_slot'; end if;
+      update public.item_instances set location='stash', equip_slot=null, revision=revision+1, updated_at=now()
+        where character_id=v_character.id and equip_slot=p_payload->>'equip_slot' and location='equipped';
+      update public.item_instances set location='equipped', equip_slot=p_payload->>'equip_slot', revision=revision+1, updated_at=now() where id=v_item.id;
+    else
+      select count(*) into v_count from public.item_instances where character_id=v_character.id and location='stash';
+      if v_count >= 60 then raise exception 'inventory_full'; end if;
+      select * into v_item from public.item_instances where character_id=v_character.id
+        and equip_slot=p_payload->>'equip_slot' and location='equipped' for update;
+      if not found then raise exception 'item_not_found'; end if;
+      if p_payload->>'expected_item_revision' is not null and (p_payload->>'expected_item_revision')::bigint <> v_item.revision then raise exception 'stale_revision'; end if;
+      update public.item_instances set location='stash', equip_slot=null, revision=revision+1, updated_at=now()
+        where id=v_item.id returning * into v_item;
+    end if;
+    update public.game_characters set revision=revision+1, updated_at=now() where id=v_character.id returning * into v_character;
+  elsif p_action not in ('migrate_legacy','snapshot') then raise exception 'invalid_action';
+  end if;
+
+  select * into v_wallet from public.player_wallets where user_id=p_actor;
+  v_result := jsonb_build_object('ok',true,'duplicate',false,
+    'character',jsonb_build_object('id',v_character.id,'clientCharacterId',v_character.client_character_id,'revision',v_character.revision),
+    'wallet',jsonb_build_object('balance',coalesce(v_wallet.salvage_alloy,0),'revision',coalesce(v_wallet.revision,1)),
+    'mutation',jsonb_build_object('action',p_action,'value',coalesce(v_price,0),'itemId',v_item.id),
+    'items',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'legacyKey',legacy_key,'baseId',base_id,'slotPool',slot_pool,'location',location,'equipSlot',equip_slot,'revision',revision) order by created_at),'[]'::jsonb) from public.item_instances where character_id=v_character.id));
+  update public.economy_requests set response_payload=v_result, completed_at=now() where actor_user_id=p_actor and request_id=p_request_id;
+  insert into public.economy_audit_events(actor_user_id,character_id,request_id,action,inputs,outputs)
+  values(p_actor,v_character.id,p_request_id,p_action,p_payload,v_result);
+  return v_result;
+exception when others then
+  raise;
+end;
+$$;
+
+revoke all on function public.economy_mutate(uuid,text,text,jsonb) from public, anon, authenticated;
+grant execute on function public.economy_mutate(uuid,text,text,jsonb) to service_role;
+
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
