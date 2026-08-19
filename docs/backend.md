@@ -31,6 +31,8 @@ Vercel serves the game and same-origin API routes:
 - `api/lobby.js` stores legacy short-lived lobby presence/chat in Vercel Blob
   for compatibility only.
 - `api/auth-config.js` exposes only browser-safe Supabase config.
+- `api/economy.js` authenticates the player, validates item and vendor inputs,
+  and calls the atomic Supabase economy function. The service key stays on the server.
 
 Do not put server-only secrets in responses. The Supabase anon key is browser
 configuration, but service-role keys and Blob tokens must stay in Vercel env.
@@ -207,6 +209,33 @@ The next backend step is to make the Multiplayer hub feel like a conquest map:
   done.
 - For live backend changes, smoke test `/api/state`, `/api/lobby`, and Google
   account flow when relevant.
+
+## Authoritative Economy
+
+Signed-in characters, item instances, equipment, and Salvage Alloy are
+server-owned. `game_characters` owns character identity and its optimistic
+revision. `player_wallets` owns the non-negative account balance.
+`item_instances` gives every copy a stable UUID, immutable legacy item key,
+roll data, location, revision, and provenance.
+
+`economy_mutate` commits the request, currency, item, character revision, and
+audit event in one transaction. Request IDs are unique per actor, so a replay
+returns the first result. The function rejects stale revisions, insufficient
+funds, full stashes, and items owned by another player. RLS permits players to
+read their own rows. Only the server service role can mutate them.
+
+The API derives the current UTC vendor rotation and the authoritative character
+level. A browser cannot seed-search another stock date. Sold items become
+hidden tombstones instead of being deleted. The audit output keeps their full
+pre-sale key, base, affixes, sockets, price, and revision data. The request
+shape leaves room for a future server-defined `vendor_id` and stock version.
+
+The first signed-in request registers character identity only. It starts the
+authoritative character at level 1 with a one-time account grant of 500 Alloy and no items. Browser-owned
+legacy currency and item keys stay in an offline, read-only archive marked
+`pending_audited_migration`. They never enter authoritative tables without a
+future server-derived snapshot or one-time server-issued migration ticket.
+Static local play cannot change authoritative state.
 
 ## Known Limits
 

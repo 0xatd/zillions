@@ -54,6 +54,9 @@ module already owns that rule.
 | `src/multiplayer-readiness.js` | Direct connection readiness |
 | `src/multiplayer-eligibility.js` | Campaign unlock eligibility |
 | `src/items.js` | Item bases, weapon blocks, affix pools, damage types, and deterministic item generation from a key |
+| `src/vendor.js` | Deterministic stock and valuation; mutation helpers are offline-only |
+| `src/economy.js` | Signed-in economy client, fail-closed mutations, offline legacy archive, and snapshot projection |
+| `src/crafting.js` | Pure crafting recipes, socket rules, revision checks, costs, and mutation proposals |
 | `src/skilltree.js` | The Lattice: sector table, seeded tree generation, allocation rules, and the resolved payload |
 | `src/keybinds.js` | The control scheme: every action, its default key, and rebinding |
 | `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |

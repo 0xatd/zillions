@@ -36,6 +36,8 @@ Default branch: main
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
 - src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
 - src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
+- src/crafting.js owns pure recipes, socket rules, component upgrades, and
+  authority-ready mutation proposals.
 - src/items.js owns item bases, weapons, affixes, damage types, and deterministic
   item generation. An item is a key; "base:seed:ilvl:rarity" resolves to a rolled
   item, a bare key resolves to an authored one.
@@ -48,6 +50,7 @@ Default branch: main
 - src/lockstep-hash.js owns the per-window state hash peers compare. It is a pure
   function over a Game so it can be checked headless.
 - src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
+- src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
@@ -60,7 +63,8 @@ Default branch: main
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
 - src/building-art.js owns building meshes, walls and gates (presentation only).
-- api/ contains Vercel server routes.
+- api/ contains Vercel server routes. api/economy.js is the authenticated,
+  server-authoritative inventory and currency boundary.
 - supabase/schema.sql is the database schema source.
 
 ## Critical rules

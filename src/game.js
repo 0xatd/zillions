@@ -278,6 +278,7 @@ export class Game {
         items: [...(h.items || [])],
         pack: [...(h.pack || [])],
         equip: { ...(h.equipment || {}) },
+        style: h.characterStyle ? structuredClone(h.characterStyle) : null,
         set: h.activeSet || 0, swapCd: snapNum(h.swapCd || 0),
         dodgeT: snapNum(h.dodgeT || 0), dodgeIT: snapNum(h.dodgeIT || 0),
         dodgeCd: snapNum(h.dodgeCd || 0),
@@ -451,6 +452,7 @@ export class Game {
         treeSets: hs.treeSets || null,
         doctrines: hs.doctrines || [],
         activeSet: hs.set || 0,
+        characterStyle: hs.style || null,
       });
       if (hs.id) h.id = hs.id;
       if (hs.blessings && hs.blessings.length) {
@@ -2465,6 +2467,9 @@ export class Game {
     // the weapon, so wearing armour was strictly worse than leaving it in the
     // stash — the stash was being summed and the body was not.
     const itemModsOnly = itemMods([...items, ...pack, ...equippedKeys(equipmentIn, setIn)]);
+    // Socket components are already de-duplicated by instance at the authority
+    // snapshot boundary. Fold that one bag in once; never re-read sockets here.
+    for (const [mod, value] of Object.entries(camp?.socketMods || {})) itemModsOnly[mod] = (itemModsOnly[mod] || 0) + value;
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
     // What this hero is swinging. An empty equipment map resolves to the
@@ -2487,6 +2492,7 @@ export class Game {
       level, xp: (camp && camp.xp) || 0, abilCd: 0,
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
       equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
+      characterStyle: camp?.characterStyle ? structuredClone(camp.characterStyle) : null,
       dodgeT: 0, dodgeIT: 0, dodgeCd: 0, dodgeX: 0, dodgeZ: 0,
       reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},

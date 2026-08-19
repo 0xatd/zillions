@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
+  MMO_CLASSES, MMO_RACES, CREATOR_PARTS, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, grantMmoExperience, recordMmoInstance,
 } from '../src/mmo-characters.js';
 import { AuthClient } from '../src/auth.js';
 
 assert.equal(Object.keys(MMO_CLASSES).length, 13, 'the MMO must expose all thirteen renamed class families');
 assert.equal(MMO_CLASSES.vanguard.ready, true, 'Vanguard must be the first complete class slice');
+assert.deepEqual(Object.keys(MMO_RACES), ['human', 'robot'], 'character creation must offer only Humans and Robots');
+assert.ok(CREATOR_PARTS.human.face.length >= 4 && CREATOR_PARTS.robot.face.length >= 4,
+  'both races need meaningful face choices');
 
 const profile = { mmoCharacters: [], mmoCharacterId: null, relics: ['relic'] };
 normalizeMmoCharacters(profile);
@@ -16,6 +19,11 @@ assert.equal(selectedMmoCharacter(profile), null, 'new accounts must create a ch
 const vanguard = makeMmoCharacter('  Nova   Vale  ', 'vanguard', 'crimson');
 assert.equal(vanguard.name, 'Nova Vale');
 assert.equal(vanguard.proxyHero, 'scott');
+assert.equal(vanguard.raceKey, 'human');
+assert.equal(vanguard.entitlements.tier, 'free');
+const robot = makeMmoCharacter('Unit Seven', 'engineer', 'cobalt', 'robot', { face: 'tri-eye', body: 'bulwark' });
+assert.equal(robot.raceKey, 'robot');
+assert.equal(robot.customization.face, 'tri-eye');
 assert.ok(addMmoCharacter(profile, vanguard));
 assert.equal(selectedMmoCharacter(profile), vanguard);
 

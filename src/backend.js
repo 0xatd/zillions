@@ -2,6 +2,7 @@ const PLAYER_KEY = 'zillions_player_id';
 const API = '/api/state';
 const LOBBY_API = '/api/lobby';
 const GALAXY_API = '/api/galaxy-state';
+const ECONOMY_API = '/api/economy';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -80,6 +81,18 @@ export async function deleteState(kind, id) {
   const response = await fetch(`${API}?${qs}`, { method: 'DELETE', headers: accountHeaders({ accept: 'application/json' }) });
   if (!response.ok) return null;
   return response.json();
+}
+
+export async function economyRequest(action, payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) return null;
+  const response = await fetch(ECONOMY_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'economy_request_failed'), { status: response.status, result });
+  return result;
 }
 
 export async function getLobby(mode = 'survival') {

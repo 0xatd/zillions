@@ -16,7 +16,7 @@ const ok = (cond, msg) => { if (!cond) fail(msg); };
 for (const [key, base] of Object.entries(ITEM_BASES)) {
   ok(base.name, `${key}: no name`);
   ok(base.icon, `${key}: no icon`);
-  ok(['weapon', 'offhand', 'armor', 'implant'].includes(base.slot), `${key}: bad slot ${base.slot}`);
+  ok(['weapon', 'offhand', 'head', 'armor', 'hands', 'legs', 'boots', 'implant'].includes(base.slot), `${key}: bad slot ${base.slot}`);
   ok(Number.isFinite(base.ilvl) && base.ilvl >= 1, `${key}: bad base ilvl`);
   if (base.slot === 'weapon') {
     ok(base.w, `${key}: weapon base with no weapon block`);
@@ -34,7 +34,7 @@ for (const [key, base] of Object.entries(ITEM_BASES)) {
     ok(['frame', 'reflex', 'signal'].includes(k), `${key}: requires unknown attribute ${k}`);
   }
 }
-for (const slot of ['weapon', 'offhand', 'armor', 'implant']) {
+for (const slot of ['weapon', 'offhand', 'head', 'armor', 'hands', 'legs', 'boots', 'implant']) {
   ok(BASES_BY_SLOT[slot].length > 0, `no bases for slot ${slot}`);
 }
 
@@ -209,7 +209,7 @@ for (const ilvl of [1, 5, 20, 50, 100]) {
     ok(rollLootKey(`w${ilvl}`, ilvl, 2, roll) === key, 'rollLootKey is not deterministic');
   }
 }
-for (const slot of ['weapon', 'offhand', 'armor', 'implant']) {
+for (const slot of ['weapon', 'offhand', 'head', 'armor', 'hands', 'legs', 'boots', 'implant']) {
   const key = rollLootKeyForSlot(slot, 'slotroll', 100, 3, 0.5);
   ok(key && resolveItem(key).slot === slot, `rollLootKeyForSlot returned the wrong slot for ${slot}`);
 }

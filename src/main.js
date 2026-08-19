@@ -13,6 +13,11 @@ import { loadAssets, assetClone, assetPart } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
+import {
+  applyEconomySnapshot, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
+  loadAuthoritativeEconomy, quarantineForAuthoritativeLoad, registerAuthoritativeCharacter,
+  sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
+} from './economy.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -192,9 +197,19 @@ class App {
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
+      onMarketBuy: (character, vendorId, offerIndex) => this._marketBuy(character, vendorId, offerIndex),
+      onMarketSell: (character, itemIndex) => this._marketSell(character, itemIndex),
+      onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
+      onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
+      onAuthoritySync: (character) => this._ensureAuthoritativeEconomy(character),
+      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, () => buyCraftMaterial(character, materialId)),
+      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, () => buyCraftComponent(character, componentId)),
+      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, () => craftAuthoritative(character, action, itemId, revision, details)),
+      useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
+      onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
@@ -725,8 +740,11 @@ class App {
     if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
     const key = this.ui.selectedHero || 'alexander';
     const def = HEROES[key] || HEROES.alexander;
-    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3 });
     const character = selectedMmoCharacter(this.profile);
+    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
+      raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+    } : null });
     const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
       : character.appearance === 'cobalt' ? '4679b8'
       : character.appearance === 'bone' ? 'b7aa8c'
@@ -736,6 +754,44 @@ class App {
     mesh.scale.setScalar(1.0);
     this.owHero = mesh;
     this.scene.add(mesh);
+  }
+
+  _setCharacterPreview(style) {
+    const canvas = document.getElementById(style.canvasId || 'creator-preview-canvas');
+    if (!canvas) return;
+    this.characterPreviews ||= new Map();
+    let p = this.characterPreviews.get(canvas.id);
+    if (!p || p.canvas !== canvas) {
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(32, 1, .1, 20);
+      camera.position.set(2.5, 1.45, 3.4);
+      camera.lookAt(0, .65, 0);
+      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 2.2));
+      const key = new THREE.DirectionalLight(0xffe2b5, 2.4); key.position.set(3, 4, 4); scene.add(key);
+      p = { renderer, scene, camera, canvas, model: null };
+      this.characterPreviews.set(canvas.id, p);
+    }
+    if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
+    const key = style.proxyHero || 'scott';
+    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style }).node;
+    p.model.scale.setScalar(1.45);
+    p.model.position.y = -.02;
+    p.scene.add(p.model);
+  }
+
+  _renderCharacterPreview(t) {
+    for (const [id, p] of this.characterPreviews || []) {
+      if (!p.canvas.isConnected) { p.renderer.dispose(); this.characterPreviews.delete(id); continue; }
+      if (!p.model || p.canvas.offsetParent === null) continue;
+      const w = Math.max(1, p.canvas.clientWidth), h = Math.max(1, p.canvas.clientHeight);
+      if (p.canvas.width !== Math.round(w * p.renderer.getPixelRatio()) || p.canvas.height !== Math.round(h * p.renderer.getPixelRatio())) {
+        p.renderer.setSize(w, h, false); p.camera.aspect = w / h; p.camera.updateProjectionMatrix();
+      }
+      p.model.rotation.y = Math.sin(t * .55) * .35;
+      p.renderer.render(p.scene, p.camera);
+    }
   }
 
   _updateOverworld(dt, t) {
@@ -1412,17 +1468,20 @@ class App {
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
-        normalizeMmoCharacters(this.profile);
-        const character = selectedMmoCharacter(this.profile);
-        if (character) {
-          this.ui.selectedHero = character.proxyHero;
-          this.profile.lastHero = character.proxyHero;
-        }
-        this._saveProfile();
-        this.ui.setProfile(this.profile);
-        this.ui.setCampaign(this.profile.campaign || 0);
-        if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
       }
+      normalizeMmoCharacters(this.profile);
+      for (const entry of this.profile.mmoCharacters || []) quarantineForAuthoritativeLoad(entry);
+      const character = selectedMmoCharacter(this.profile);
+      if (character) {
+        this.ui.selectedHero = character.proxyHero;
+        this.profile.lastHero = character.proxyHero;
+        try { await this._ensureAuthoritativeEconomy(character); }
+        catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
+      }
+      this._saveProfile();
+      this.ui.setProfile(this.profile);
+      this.ui.setCampaign(this.profile.campaign || 0);
+      if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
       const cloudSave = await this.auth.loadLatestSave();
       if (cloudSave?.snap) {
         try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
@@ -1542,7 +1601,7 @@ class App {
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
   }
 
-  _selectMmoCharacter(id) {
+  async _selectMmoCharacter(id) {
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
@@ -1550,6 +1609,12 @@ class App {
     this.profile.lastHero = character.proxyHero;
     this.profile.lastWorld = character.lastWorld || this.profile.lastWorld || 'earth';
     this.ui.selectedHero = character.proxyHero;
+    if (this.auth?.isSignedIn() && !Number.isFinite(character.authoritativeBalance)) {
+      try { await this._ensureAuthoritativeEconomy(character); }
+      catch {
+        this.ui.showBanner('Online inventory is unavailable. This character is using no persistent gear.', 'bad', 3000);
+      }
+    }
     this._saveProfile();
     this.ui.setProfile(this.profile);
     if (!this.game && this.ow) {
@@ -1558,13 +1623,13 @@ class App {
     }
   }
 
-  _createMmoCharacter({ name, classKey, appearance } = {}) {
+  _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
     const clean = String(name || '').trim();
     if (!clean) {
       this.ui.showBanner('Choose a character name.', 'bad', 2200);
       return;
     }
-    const character = makeMmoCharacter(clean, classKey, appearance);
+    const character = makeMmoCharacter(clean, classKey, appearance, raceKey, customization);
     if (!addMmoCharacter(this.profile, character)) {
       this.ui.showBanner('The character roster is full.', 'bad', 2200);
       return;
@@ -1577,6 +1642,69 @@ class App {
     const klass = MMO_CLASSES[character.classKey];
     this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
     this.ui._showScreen('main');
+  }
+
+  async _ensureAuthoritativeEconomy(character) {
+    if (!this.auth?.isSignedIn()) return null;
+    let result;
+    try {
+      result = await loadAuthoritativeEconomy(character);
+    } catch (error) {
+      if (!String(error?.message || '').includes('character_not_found')) throw error;
+      archiveLegacyOfflineEconomy(character);
+      result = await registerAuthoritativeCharacter(character);
+    }
+    if (result?.ok) {
+      applyEconomySnapshot(character, result);
+      this.profile.metaCurrency = character.authoritativeBalance;
+      this._saveProfile();
+    }
+    return result;
+  }
+
+  async _marketBuy(character, vendorId, offerIndex) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const result = await buyAuthoritativeItem(character, vendorId, offerIndex);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _marketSell(character, itemIndex) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const itemId = character.itemInstances?.[Number(itemIndex)]?.id;
+    if (!itemId) throw new Error('item_not_found');
+    const result = await sellAuthoritativeItem(character, itemId);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _authorityEquip(character, itemIndex, slot) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const instance = character.itemInstances?.[Number(itemIndex)];
+    if (!instance) throw new Error('item_not_found');
+    const result = await equipAuthoritativeItem(character, instance.id, slot, instance.revision);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _authorityUnequip(character, slot) {
+    if (!this.auth?.isSignedIn()) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    const revision = character.equipmentInstanceRevisions?.[slot] ?? null;
+    const result = await unequipAuthoritativeItem(character, slot, revision);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _craftMutation(character, mutation) {
+    if (!this.auth?.isSignedIn()) throw new Error('sign_in_required');
+    await this._ensureAuthoritativeEconomy(character);
+    const result = await mutation();
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
   }
 
   _deleteMmoCharacter(id) {
@@ -3943,7 +4071,7 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const authored = u.key === 'scott' ? assetClone('heroScott') : null;
+      const authored = u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
         // existing collision/readability scale; visual meshes never change
@@ -5473,6 +5601,7 @@ class App {
     this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
     this.tacticalVisuals.render();
+    this._renderCharacterPreview(t);
   }
 }
 
