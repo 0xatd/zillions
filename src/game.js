@@ -582,7 +582,7 @@ export class Game {
     this.heroSetups.forEach((e, i) => this._spawnHero(e.k, spawns[i][0], spawns[i][1], e.camp));
     this._scatterCreeps();
     this._scatterLoot();
-    this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and press SPACE to found your city.', 'info');
+    this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and use Build to found your city.', 'info');
   }
 
   // ---------- labyrinth setup ----------

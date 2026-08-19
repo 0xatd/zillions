@@ -23,13 +23,18 @@ The startup flow is:
 index.html
   -> src/main.js
      -> account gate
-     -> character roster
-     -> last planetary location or starting world
-     -> Orbital Lift / galaxy map / destination world
-     -> planetary gate, custom setup, or online lobby
-     -> deterministic Game instance
+     -> selected character or character creation
+     -> persistent overworld location
+     -> optional menu, galaxy map, or physical mission rally
+     -> deterministic mission instance
+     -> saved overworld location
      -> Three.js render loop
 ```
+
+`src/shell-state.js` owns the shell base state and temporary overlay state.
+The overworld is the normal signed-in base state. Menus are temporary overlays.
+Mission launch stores the planet and coordinates. Mission completion restores
+that location.
 
 `src/main.js` composes the system. Keep domain rules in smaller modules when a
 module already owns that rule.
@@ -88,6 +93,7 @@ procedural renderer and must not stop a match from starting.
 | --- | --- |
 | `src/main.js` | Runtime composition, render loop, input, save flow, co-op sequencing, and Watch |
 | `src/ui.js` | Main menu, setup, lobby, room, HUD, and overlays |
+| `src/shell-state.js` | Auth, character, overworld, mission, overlay, and return state |
 | `src/runtime-guard.js` | Fatal frame-loop recovery |
 | `style.css` | Application layout and visual styles |
 
@@ -105,6 +111,10 @@ procedural renderer and must not stop a match from starting.
 | `api/lobby.js` | Legacy lobby compatibility route |
 
 `supabase/schema.sql` defines the durable schema.
+
+Physical mission gates use Supabase rooms as rally groups. A rally supports
+one to four players. The first player hosts the room. Other players at the same
+planetary gate can join the room. The mission still uses WebRTC lockstep.
 
 ## Deterministic Simulation
 

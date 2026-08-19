@@ -31,6 +31,7 @@ import {
 import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
+import { ShellState, SHELL_BASES } from './shell-state.js';
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -43,6 +44,7 @@ export class UI {
   constructor(root, cb) {
     this.root = root;
     this.cb = cb;
+    this.shell = new ShellState();
     this.msgSeen = 0;
     this.pauseOpen = false;
     this._buildDOM();
@@ -51,7 +53,7 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold Space in Build mode, or B anytime, to spend at a foundation">🪙 <b>0</b></div>
+        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend">🪙 <b>0</b></div>
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
         <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
@@ -70,7 +72,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
-      <button id="ow-menu" class="tbtn owmenu hidden" title="War council (Esc)">⚙</button>
+      <button id="ow-menu" class="tbtn owmenu hidden" title="Game menu (Esc)">☰ MENU</button>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -85,7 +87,7 @@ export class UI {
           <div class="rallyhints" id="stancebar">
             <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
           </div>
-          <button class="mode-toggle build" id="mode-toggle" title="Alt toggles Space between build and special ability"><b>ALT</b><span>Build mode</span></button>
+          <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
         </div>
         <div class="actionmain">
@@ -100,6 +102,7 @@ export class UI {
             </div>
           </div>
           <div id="herostats" class="herostats"></div>
+          <div id="fight-kit" class="fight-kit hidden" aria-label="Hero abilities"></div>
           <div id="upgradepanel" class="hidden"></div>
           <button id="bigaction" class="bigaction"></button>
         </div>
@@ -122,11 +125,9 @@ export class UI {
             <h1 class="gametitle">ZILLIONS</h1>
             <p class="gamesub">Every world is a battlefield.</p>
           </div>
-          <div id="title-telemetry" class="title-telemetry"><b>ORBITAL WATCH</b><span>SEARCHING FOR DISTRESS SIGNAL</span></div>
           <div class="accountcard title-login">
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary hidden" id="a-enter">ENTER WORLD</button>
-            <button class="menubtn primary" id="a-google">ENTER WITH GOOGLE</button>
+            <button class="menubtn primary" id="a-google">ENTER WORLD</button>
             <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
               <label for="a-username">Public username</label>
@@ -139,7 +140,6 @@ export class UI {
             </form>
           </div>
           <nav class="title-utilities" aria-label="Title menu">
-            <button id="a-custom">CUSTOM GAMES</button>
             <button id="a-cinematics">CINEMATICS</button>
             <button id="a-credits">CREDITS</button>
             <button id="a-settings">SETTINGS</button>
@@ -151,11 +151,32 @@ export class UI {
         <div id="screen-main" class="mainmenu character-select">
           <div class="character-heading"><span>GALAXY ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment, level and last world persist between adventures. Press C in the world to return here.</small></div>
           <div id="character-stage" class="character-stage">
-            <div id="character-sigil" class="character-sigil"></div>
+            <div id="character-avatar" class="character-avatar" aria-label="Selected character">
+              <div class="avatar-backlight"></div>
+              <div class="avatar-body">
+                <span class="avatar-head"></span><span class="avatar-torso"></span>
+                <span class="avatar-arm left"></span><span class="avatar-arm right"></span>
+                <span class="avatar-leg left"></span><span class="avatar-leg right"></span>
+                <span class="avatar-weapon" id="character-weapon"></span>
+                <span id="character-sigil" class="character-sigil"></span>
+              </div>
+              <div class="avatar-loadout" id="character-loadout"></div>
+            </div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="character-create" id="m-create-character">CREATE CHARACTER</button><button class="character-sheet-open" id="m-character-sheet">CHARACTER SHEET</button><button class="enter-world" id="m-enter-world">ENTER WORLD</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn hidden" id="m-galaxy">GALAXY MAP</button><button class="utilitybtn" id="m-logout">← TITLE SCREEN</button><button class="utilitybtn" id="m-settings">SETTINGS</button><button class="utilitybtn" id="m-help">HOW TO PLAY</button><button class="utilitybtn hidden" id="m-online">ONLINE</button><button class="utilitybtn hidden" id="m-solo">SOLO</button><button class="utilitybtn hidden" id="m-heroes">HEROES</button></div>
+          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+        </div>
+
+        <div id="screen-world-menu" class="world-menu hidden">
+          <div class="world-menu-card">
+            <span class="world-menu-eyebrow">ZILLIONS</span><h1>GAME MENU</h1>
+            <button class="menubtn primary" id="ow-resume">RETURN TO WORLD</button>
+            <button class="menubtn" id="ow-characters">CHARACTER SELECT</button>
+            <button class="menubtn" id="ow-custom">CUSTOM GAMES</button>
+            <button class="menubtn" id="ow-settings">SYSTEM</button>
+            <button class="menubtn danger" id="ow-logout">LOG OUT</button>
+          </div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -163,17 +184,23 @@ export class UI {
             <div class="sheet-ident"><span id="sheet-sigil" class="sheet-sigil"></span>
               <div><h1 id="sheet-name">CHARACTER</h1><p id="sheet-sub"></p></div></div>
             <div class="sheet-tabs">
-              <button class="sheet-tab sel" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
+              <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
             </div>
-            <button class="utilitybtn" id="sheet-close">← ROSTER</button>
+            <button class="utilitybtn" id="sheet-close">← BACK</button>
           </div>
 
-          <div id="sheet-panel-gear" class="sheet-panel">
-            <div class="gear-slots" id="gear-slots"></div>
-            <div class="gear-stash"><h3>STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
-            <div class="gear-stats"><h3>THE HERO THIS BUILDS</h3><div id="gear-stat-list"></div></div>
+          <div id="sheet-panel-character" class="sheet-panel character-overview"></div>
+
+          <div id="sheet-panel-gear" class="sheet-panel hidden">
+            <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div></div>
+            <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
+            <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
           </div>
+
+          <div id="sheet-panel-abilities" class="sheet-panel abilities-overview hidden"></div>
 
           <div id="sheet-panel-lattice" class="sheet-panel hidden">
             <div class="lattice-stage">
@@ -224,14 +251,26 @@ export class UI {
           </div>
         </div>
 
-        <div id="screen-custom" class="setup hidden">
-          <div class="setuphead"><button class="tbtn" id="cu-back">← Back</button><h2>🜁 CUSTOM GAMES</h2><span class="gamesub">any map · any host · named heroes</span></div>
-          <div class="custommain">
-            <div id="cu-list" class="lobbygames"></div>
-            <div class="customactions"><button class="diffbtn" id="cu-create">+ CREATE GAME</button><button class="diffbtn" id="cu-refresh">↻ REFRESH</button></div>
-            <div class="mphint" id="cu-note"></div>
-          </div>
-          <div id="cu-create-panel" class="charcreate hidden">
+        <div id="screen-custom" class="custom-browser hidden">
+          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">PARTY 1/4</small></div></header>
+          <aside class="custom-nav">
+            <button class="custom-primary-tab sel" data-view="live">LIVE GAMES</button>
+            <button class="custom-primary-tab" data-view="arcade">ARCADE</button>
+            <div class="custom-filter-group" id="cu-mode-filters">
+              <span>MODE</span>
+              <button class="custom-filter sel" data-filter="all">ALL</button>
+              <button class="custom-filter" data-filter="campaign">CAMPAIGN</button>
+              <button class="custom-filter" data-filter="survival">SURVIVAL</button>
+              <button class="custom-filter" data-filter="labyrinth">LABYRINTH</button>
+            </div>
+            <label id="cu-status-label">STATUS<select id="cu-status"><option value="open">JOINABLE</option><option value="all">ALL</option><option value="playing">IN PROGRESS</option></select></label>
+            <label>SEARCH<input id="cu-search" placeholder="Game, host, or map" autocomplete="off"></label>
+            <div class="custom-arcade-shortcuts hidden" id="cu-arcade-shortcuts"><button data-arcade="all" class="sel">ALL MAPS</button><button data-arcade="recent">RECENT</button><button data-arcade="favorites">FAVORITES</button></div>
+          </aside>
+          <main class="custom-list-panel"><div class="custom-list-head"><span>GAME</span><span>MAP / MODE</span><span>PLAYERS</span><span>STATUS</span></div><div id="cu-list" class="custom-game-list"></div><div class="mphint" id="cu-note"></div></main>
+          <aside class="custom-detail" id="cu-detail"><span class="modeeyebrow">SELECT A GAME</span><h2>NO GAME SELECTED</h2><p>Choose a game to inspect its map, rules, host, and party.</p></aside>
+          <footer class="custom-actions"><button class="diffbtn" id="cu-refresh">↻ REFRESH</button><button class="menubtn" id="cu-join" disabled>JOIN GAME</button><button class="menubtn primary" id="cu-create">CREATE GAME</button></footer>
+          <div id="cu-create-panel" class="charcreate custom-create-panel hidden">
             <div class="cchead"><b>CREATE GAME</b><button class="tbtn" id="cu-cancel">✕</button></div>
             <label class="field-label" for="cu-name">Game name</label><input id="cu-name" maxlength="32" placeholder="Friday night siege" autocomplete="off">
             <label class="field-label">Map</label><select id="cu-map" class="cumap"></select>
@@ -259,7 +298,7 @@ export class UI {
           </div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">2 · Your hero <small>— auto-attacks on his own; you steer with WASD and fire the special with SPACE/Q</small></div>
+          <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
           <div class="steplabel diff-label">3 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
@@ -332,13 +371,13 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD to move, SHIFT to gallop (full health only), <kbd>SPACE</kbd> to dodge roll out of danger. You auto-attack anything in range, and a passive aura hums around you — just ride.</div>
+            <div><b>🕹️ You are the hero.</b> WASD always moves. In Fight mode, <kbd data-bind-label="dodge"></kbd> dodge-rolls and <kbd data-bind-label="ability1"></kbd> uses your special.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
-            <div><b>🏗️ The city is pre-planned.</b> ALT toggles Build and Fight mode. In Build mode, hold <b>SPACE</b> or <b>B</b> at a glowing foundation — coins fly from your purse until it rises. Same to upgrade. Fight mode hides vacant build markers so combat stays clear.</div>
-            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd>3</kbd> and those squads push the lanes together — no unit micro.</div>
+            <div><b>🏗️ The city is pre-planned.</b> Use <kbd data-bind-label="build_mode"></kbd> for Build mode, then hold <kbd data-bind-label="dodge"></kbd> or <kbd data-bind-label="build"></kbd> at a glowing foundation.</div>
+            <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> ALT toggles Build/Fight mode. In Build mode, hold SPACE or B to build, repair, or rebuild. In Fight mode, SPACE dodges, <kbd>Q</kbd> fires your special, and B still builds. Press <kbd>T</kbd> beside a tower to change what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> build, repair, or rebuild. Fight mode makes it dodge and enables <kbd data-bind-label="ability1"></kbd>. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
@@ -431,9 +470,7 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
-    q('#a-enter').onclick = () => { this._accountAccepted = true; this._showScreen('main'); };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
-    q('#a-custom').onclick = () => { this._customFrom = 'account'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
@@ -443,18 +480,28 @@ export class UI {
       const input = q('#a-username');
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
-    q('#m-solo').onclick = () => this._showScreen('solo');
-    q('#m-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
-    q('#m-help').onclick = () => this._showScreen('help');
-    q('#m-galaxy').onclick = () => this.cb.onGalaxyOpen && this.cb.onGalaxyOpen();
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => this._showCharacterCreator();
-    q('#m-character-sheet').onclick = () => this.showCharacterSheet();
-    q('#sheet-close').onclick = () => this._showScreen('main');
+    q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
+    q('#sheet-close').onclick = () => this._closeCharacterSheet();
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
-    q('#creator-cancel').onclick = () => this._showScreen('main');
+    q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
+    q('#m-delete-character').onclick = () => {
+      const character = this._sheetCharacter();
+      if (!character) return;
+      if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
+    };
+    q('#ow-resume').onclick = () => this.hideOverlay();
+    q('#ow-characters').onclick = () => this._showScreen('main');
+    q('#ow-custom').onclick = () => { this._customFrom = 'world-menu'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
+    q('#ow-settings').onclick = () => { this._settingsReturn = 'world-menu'; this._showScreen('settings'); };
+    q('#ow-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
+    q('#creator-cancel').onclick = () => {
+      if (!(this._profile?.mmoCharacters || []).length) return;
+      this._backOverlay('main');
+    };
     q('#character-create-form').onsubmit = (event) => {
       event.preventDefault();
       if (this.cb.onCharacterCreate) this.cb.onCharacterCreate({
@@ -471,16 +518,42 @@ export class UI {
       this._showScreen(this._customFrom || 'main');
     };
     q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
-    q('#cu-create').onclick = () => this.customCreatePanel(true);
+    q('#cu-search').oninput = () => this._renderCustomRows();
+    q('#cu-status').onchange = () => this._renderCustomRows();
+    for (const tab of this.root.querySelectorAll('.custom-primary-tab')) tab.onclick = () => {
+      this._customView = tab.dataset.view;
+      for (const other of this.root.querySelectorAll('.custom-primary-tab')) other.classList.toggle('sel', other === tab);
+      this._selectedCustomGame = null;
+      this._selectedArcadeMap = null;
+      this._renderCustomRows();
+    };
+    for (const filter of this.root.querySelectorAll('.custom-filter')) filter.onclick = () => {
+      this._customFilter = filter.dataset.filter;
+      for (const other of this.root.querySelectorAll('.custom-filter')) other.classList.toggle('sel', other === filter);
+      this._renderCustomRows();
+    };
+    for (const shortcut of this.root.querySelectorAll('#cu-arcade-shortcuts button')) shortcut.onclick = () => {
+      this._arcadeFilter = shortcut.dataset.arcade;
+      for (const other of this.root.querySelectorAll('#cu-arcade-shortcuts button')) other.classList.toggle('sel', other === shortcut);
+      this._renderCustomRows();
+    };
+    q('#cu-join').onclick = () => {
+      if (this._customView === 'arcade') {
+        if (this._selectedArcadeMap) this.cb.onCustomPlay?.(this._selectedArcadeMap);
+      } else if (this._selectedCustomGame) this.cb.onCustomJoin?.(this._selectedCustomGame);
+    };
+    q('#cu-create').onclick = () => {
+      this.customCreatePanel(true, this._customView === 'arcade' ? this._selectedArcadeMap : null);
+    };
     q('#cu-cancel').onclick = () => this.customCreatePanel(false);
     q('#cu-confirm').onclick = () => {
       const map = this._customMaps?.find((entry) => entry.value === q('#cu-map').value) || this._customMaps?.[0];
       if (!map) return;
       const name = q('#cu-name').value.trim() || `${this._customHost || 'Host'}'s game`;
       this.customCreatePanel(false);
-      this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 3 });
+      this.cb.onCustomCreate?.({ name, mapId: map.level, mode: map.mode, mapName: map.name, difficulty: this._cuDiff || 'normal', maxPlayers: this._cuMax || 4 });
     };
-    q('#m-logout').onclick = () => this._showScreen('account');
+    q('#m-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
     q('#solo-back').onclick = () => this._showScreen('main');
     q('#custom-online').onclick = () => { this._showScreen('lobby'); if (this.cb.onLobbyOpen) this.cb.onLobbyOpen(); };
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
@@ -498,7 +571,7 @@ export class UI {
     };
     q('#l-back').onclick = () => this._showScreen('main');
     q('#galaxy-back').onclick = () => this._overworldMode ? this.hideOverlay() : this._showScreen('main');
-    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._showScreen(this._accountAccepted ? 'main' : 'account');
+    for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._backOverlay();
 
     // ----- lobby -----
     for (const t of this.root.querySelectorAll('.ltab')) {
@@ -529,18 +602,14 @@ export class UI {
     q('#l-manual').onclick = (e) => { e.preventDefault(); this.showSetup({ coop: true }); };
     q('#h-back').onclick = () => {
       if (this.pauseOpen) this._showScreen('pause');
-      else this._showScreen('main');
+      else this._backOverlay();
     };
 
     // ----- settings -----
     q('#m-settings').onclick = () => { this._settingsReturn = 'main'; this._showScreen('settings'); };
-    q('#m-heroes').onclick = () => this._showScreen('heroes');
     q('#hero-back').onclick = () => this._showScreen('main');
     q('#p-settings').onclick = () => { this._settingsFromPause = true; this._showScreen('settings'); };
-    q('#set-back').onclick = () => {
-      if (this._settingsFromPause) { this._settingsFromPause = false; this._showScreen('pause'); }
-      else this._showScreen(this._settingsReturn || 'main');
-    };
+    q('#set-back').onclick = () => this._backOverlay();
     for (const t of this.root.querySelectorAll('.stab')) {
       t.onclick = () => {
         for (const o of this.root.querySelectorAll('.stab')) o.classList.toggle('sel', o === t);
@@ -808,6 +877,9 @@ export class UI {
     if (mode && (this.selectedMode || 'campaign') !== mode) this.applySetupMode(mode);
     this.selectedLevel = Number(level) || 1;
     this.selectedDiff = difficulty;
+    const setup = this.root.querySelector('#screen-setup');
+    setup?.classList.toggle('room-host', !!isHost);
+    setup?.classList.toggle('room-guest', !isHost);
     for (const chip of this.root.querySelectorAll('#modeseg .modechip')) {
       chip.disabled = !isHost;
       if (!isHost) chip.title = 'The host controls the war mode.';
@@ -830,46 +902,152 @@ export class UI {
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    if (name === 'account') this.shell.enterBase(SHELL_BASES.AUTH);
+    else if (name === 'main' && !this._overworldMode) this.shell.enterBase(SHELL_BASES.CHARACTER_SELECT);
+    else this.shell.openOverlay(name);
+    this._paintScreen(name);
+  }
+
+  _paintScreen(name) {
+    for (const id of ['account', 'main', 'world-menu', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
 
-  showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
-    this._customHost = hostName;
-    const box = this.root.querySelector('#cu-list');
-    const note = this.root.querySelector('#cu-note');
-    box.innerHTML = '';
-    note.textContent = offline ? '📡 Offline — Custom Games needs the lobby server.' : 'Named Zillions heroes are selected when the host starts the match.';
-    note.classList.toggle('offline', offline);
-    if (!games.length) box.innerHTML = '<div class="mphint gameempty">No custom games — create one.</div>';
-    for (const [title, rows] of [['Open games', games.filter((game) => game.status === 'open')], ['Started', games.filter((game) => game.status !== 'open')]]) {
-      if (!rows.length) continue;
-      const heading = document.createElement('div'); heading.className = 'gamegrouphead'; heading.textContent = `${title} · ${rows.length}`; box.appendChild(heading);
-      for (const game of rows) {
-        const row = document.createElement('div'); row.className = `gamerow ${game.status === 'open' ? 'open' : 'active'}`;
-        const incompatible = game.protocol_compatible === false;
-        row.innerHTML = `<span class="gamestate">${incompatible ? 'UPDATE' : game.status === 'open' ? 'OPEN' : 'STARTED'}</span><span class="gmain"><b class="gname"></b><small class="gplayers"></small></span><span class="ginfo"></span><button class="tbtn gjoin" ${incompatible || game.status !== 'open' ? 'disabled' : ''}>${game.status === 'open' ? 'JOIN' : '—'}</button>`;
-        row.querySelector('.gname').textContent = game.name;
-        row.querySelector('.gplayers').textContent = `host @${game.host_name}`;
-        row.querySelector('.ginfo').textContent = `${game.mapName || '?'} · ${game.players}/${game.max_players || 3}`;
-        if (!incompatible && game.status === 'open') row.querySelector('.gjoin').onclick = () => this.cb.onCustomJoin?.(game);
-        box.appendChild(row);
-      }
+  _backOverlay(fallback = 'main') {
+    const target = this.shell.returnOverlay;
+    this.shell.closeOverlay();
+    if (target) {
+      this._lastScreen = target;
+      this._paintScreen(target);
+      return;
     }
+    if (this.shell.base === SHELL_BASES.OVERWORLD) {
+      this.hideOverlay();
+      return;
+    }
+    this._showScreen(this.shell.base === SHELL_BASES.AUTH ? 'account' : fallback);
   }
 
-  customCreatePanel(open) {
+  showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
+    this._customHost = hostName;
+    this._customGames = games;
+    this._customOffline = offline;
+    this._customView = this._customView || 'live';
+    this._customFilter = this._customFilter || 'all';
+    this._arcadeFilter = this._arcadeFilter || 'all';
+    const character = this._sheetCharacter();
+    this.root.querySelector('#cu-character').textContent = character
+      ? `${character.name} · ${MMO_CLASSES[character.classKey]?.name || 'Commander'}`
+      : hostName ? `@${hostName}` : 'COMMANDER';
+    this.root.querySelector('#cu-party').textContent = 'PARTY 1/4';
+    this._renderCustomRows();
+  }
+
+  _arcadeMaps() {
+    return [
+      ...LEVELS.map((level) => ({
+        id: `campaign-${level.id}`, level: level.id, mode: 'campaign', name: level.name,
+        icon: '⚔️', author: 'Zillions', players: '1–4', difficulty: 'Normal',
+        description: level.blurb || level.desc || 'Take the planet in a continuous siege.',
+      })),
+      ...LABYRINTH_LEVELS.map((level) => ({
+        id: `labyrinth-${level.id}`, level: level.id, mode: 'labyrinth', name: level.name,
+        icon: '🌀', author: 'Zillions', players: '1–4', difficulty: 'Normal',
+        description: level.blurb || level.desc || 'Descend into a compact hero trial.',
+      })),
+      {
+        id: 'survival-1', level: 1, mode: 'survival', name: 'Endless Siege', icon: '💀',
+        author: 'Zillions', players: '1–4', difficulty: 'Scaling',
+        description: 'Hold the frontier while Threat rises without limit.',
+      },
+    ];
+  }
+
+  _renderCustomRows() {
+    const box = this.root.querySelector('#cu-list');
+    const note = this.root.querySelector('#cu-note');
+    const detail = this.root.querySelector('#cu-detail');
+    const join = this.root.querySelector('#cu-join');
+    const create = this.root.querySelector('#cu-create');
+    const live = this._customView !== 'arcade';
+    this.root.querySelector('#cu-status-label').classList.toggle('hidden', !live);
+    this.root.querySelector('#cu-arcade-shortcuts').classList.toggle('hidden', live);
+    this.root.querySelector('#cu-refresh').classList.toggle('hidden', !live);
+    for (const tab of this.root.querySelectorAll('.custom-primary-tab')) tab.classList.toggle('sel', tab.dataset.view === this._customView);
+    box.innerHTML = '';
+    const query = this.root.querySelector('#cu-search').value.trim().toLowerCase();
+    if (!live) {
+      const maps = this._arcadeMaps().filter((map) => {
+        if (this._customFilter !== 'all' && map.mode !== this._customFilter) return false;
+        if (query && !`${map.name} ${map.mode} ${map.author}`.toLowerCase().includes(query)) return false;
+        if (this._arcadeFilter === 'favorites') return (this._arcadeFavorites || []).includes(map.id);
+        if (this._arcadeFilter === 'recent') return (this._arcadeRecent || []).includes(map.id);
+        return true;
+      });
+      note.textContent = maps.length ? `${maps.length} prebuilt maps · select one to play or host` : 'No maps match these filters.';
+      note.classList.remove('offline');
+      for (const map of maps) {
+        const row = document.createElement('button');
+        row.className = `custom-map-row${this._selectedArcadeMap?.id === map.id ? ' selected' : ''}`;
+        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
+        row.onclick = () => { this._selectedArcadeMap = map; this._selectedCustomGame = null; this._renderCustomRows(); };
+        box.appendChild(row);
+      }
+      const map = this._selectedArcadeMap;
+      detail.innerHTML = map
+        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
+        : '<span class="modeeyebrow">ARCADE</span><h2>CHOOSE A MAP</h2><p>Browse Zillions maps, then play immediately or host a lobby.</p>';
+      join.textContent = 'PLAY NOW';
+      join.disabled = !map;
+      create.textContent = 'HOST GAME';
+      create.disabled = !map;
+      return;
+    }
+
+    const games = (this._customGames || []).filter((game) => {
+      const status = this.root.querySelector('#cu-status').value;
+      if (this._customFilter !== 'all' && game.mode !== this._customFilter) return false;
+      if (status === 'open' && game.status !== 'open') return false;
+      if (status === 'playing' && game.status === 'open') return false;
+      return !query || `${game.name} ${game.host_name} ${game.mapName || ''} ${game.mode || ''}`.toLowerCase().includes(query);
+    });
+    note.textContent = this._customOffline
+      ? '📡 Offline — Live Games needs the lobby server.'
+      : games.length ? `${games.length} live games found` : 'No joinable games. Host one or browse Arcade.';
+    note.classList.toggle('offline', this._customOffline);
+    for (const game of games) {
+      const incompatible = game.protocol_compatible === false;
+      const row = document.createElement('button');
+      row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
+      row.disabled = incompatible;
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}<small>${String(game.mode || 'campaign').toUpperCase()}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
+      box.appendChild(row);
+    }
+    const game = this._selectedCustomGame;
+    detail.innerHTML = game
+      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${game.mode === 'labyrinth' ? '🌀' : game.mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${String(game.difficulty || 'normal').toUpperCase()}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
+      : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
+    join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
+    join.disabled = !game || game.protocol_compatible === false;
+    create.textContent = 'CREATE GAME';
+    create.disabled = false;
+  }
+
+  customCreatePanel(open, selectedMap = null) {
     this.root.querySelector('#cu-create-panel').classList.toggle('hidden', !open);
     if (!open) return;
     this._customMaps = [...LABYRINTH_LEVELS.map((level) => ({ value: `lab-${level.id}`, level: level.id, mode: 'labyrinth', name: `🌀 ${level.name}` })), ...LEVELS.map((level) => ({ value: `lv-${level.id}`, level: level.id, mode: 'campaign', name: `⚔️ ${level.name}` }))];
+    this._customMaps.push({ value: 'survival-1', level: 1, mode: 'survival', name: '💀 Endless Siege' });
     this.root.querySelector('#cu-map').innerHTML = this._customMaps.map((map) => `<option value="${map.value}">${map.name}</option>`).join('');
+    if (selectedMap) this.root.querySelector('#cu-map').value = `${selectedMap.mode === 'labyrinth' ? 'lab' : selectedMap.mode === 'campaign' ? 'lv' : 'survival'}-${selectedMap.level}`;
     const diff = this.root.querySelector('#cu-diff'); diff.innerHTML = '';
     for (const [key, value] of Object.entries(DIFFICULTY)) { const button = document.createElement('button'); button.className = `diffbtn${key === 'normal' ? ' sel' : ''}`; button.textContent = value.label; button.onclick = () => { this._cuDiff = key; for (const other of diff.children) other.classList.toggle('sel', other === button); }; diff.appendChild(button); }
     this._cuDiff = 'normal';
     const max = this.root.querySelector('#cu-max'); max.innerHTML = '';
-    for (const count of [1, 2, 3]) { const button = document.createElement('button'); button.className = `diffbtn${count === 3 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
-    this._cuMax = 3; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
+    for (const count of [1, 2, 3, 4]) { const button = document.createElement('button'); button.className = `diffbtn${count === 4 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
+    this._cuMax = 4; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
   }
 
   _buildCharacterCreator() {
@@ -912,15 +1090,21 @@ export class UI {
     const klass = MMO_CLASSES[this._creatorClass || 'vanguard'];
     const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
     const summary = this.root.querySelector('#creator-summary');
-    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal Alt construction</small>`;
+    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal ${this._keyLabel('build')} construction</small>`;
   }
 
   _showCharacterCreator() {
     if ((this._profile?.mmoCharacters || []).length >= MAX_MMO_CHARACTERS) return;
     const name = this.root.querySelector('#creator-name');
+    const cancel = this.root.querySelector('#creator-cancel');
+    if (cancel) cancel.classList.toggle('hidden', !(this._profile?.mmoCharacters || []).length);
     if (name) name.value = '';
     this._showScreen('character-create');
     setTimeout(() => name?.focus(), 0);
+  }
+
+  showCharacterCreator() {
+    this._showCharacterCreator();
   }
 
   _buildCharacterSelect() {
@@ -959,11 +1143,14 @@ export class UI {
       this.root.querySelector('#character-tagline').textContent = 'Choose a class and begin on Earth.';
       this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
       this.root.querySelector('#character-sigil').textContent = '✦';
+      this.root.querySelector('#character-loadout').innerHTML = '';
+      this.root.querySelector('#character-weapon').textContent = '';
       return;
     }
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
     const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
-    const gear = (character.items || []).map((itemKey) => itemInfo(itemKey)).filter(Boolean);
+    const equipped = legalEquipment(character);
+    const gear = EQUIP_SLOTS.map((slot) => equipped[slot] ? itemInfo(equipped[slot]) : null).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
       row.classList.toggle('sel', row.dataset.id === character.id);
     }
@@ -972,6 +1159,18 @@ export class UI {
     sigil.style.backgroundImage = '';
     sigil.classList.remove('has-portrait');
     sigil.style.setProperty('--hero-color', appearance.color);
+    const avatar = this.root.querySelector('#character-avatar');
+    avatar.style.setProperty('--hero-color', appearance.color);
+    avatar.dataset.class = character.classKey || 'vanguard';
+    const weapon = equipped[character.activeSet === 1 ? 'weapon2' : 'weapon'];
+    const weaponItem = weapon ? itemInfo(weapon) : null;
+    this.root.querySelector('#character-weapon').textContent = weaponItem?.icon || '⚔';
+    this.root.querySelector('#character-loadout').innerHTML = [
+      ['HEAD', klass.icon],
+      ['ARMOUR', equipped.armor ? itemInfo(equipped.armor)?.icon : '◇'],
+      ['WEAPON', weaponItem?.icon || '◇'],
+      ['IMPLANT', equipped.implant1 ? itemInfo(equipped.implant1)?.icon : '◇'],
+    ].map(([label, icon]) => `<span><i>${icon}</i><small>${label}</small></span>`).join('');
     this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
     this.root.querySelector('#character-tagline').textContent = `${klass.name} — ${klass.role} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP · ${character.talentPoints || 0} talent points`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
@@ -990,6 +1189,11 @@ export class UI {
     if (!this.root.querySelector('#set-pane-controls').classList.contains('hidden')) this._renderKeybinds();
   }
 
+  _keyLabel(id) {
+    const binds = this._binds || loadBinds();
+    return keyLabel(binds[id]);
+  }
+
   // Any HUD element carrying data-bind shows the key currently bound to it, so
   // a rebind is visible on the stance bar without a reload.
   _refreshBindLabels() {
@@ -997,6 +1201,9 @@ export class UI {
     for (const el of this.root.querySelectorAll('[data-bind]')) {
       const slot = el.querySelector('b');
       if (slot) slot.textContent = keyLabel(binds[el.dataset.bind]);
+    }
+    for (const el of this.root.querySelectorAll('[data-bind-label]')) {
+      el.textContent = keyLabel(binds[el.dataset.bindLabel]);
     }
   }
 
@@ -1091,10 +1298,17 @@ export class UI {
 
   showCharacterSheet(tab = null) {
     if (!this._sheetCharacter()) return;
+    this._sheetReturn = this._overworldMode ? 'overworld' : (this._lastScreen === 'world-menu' ? 'world-menu' : 'main');
     if (tab) this._sheetTab = tab;
-    this._sheetTab = this._sheetTab || 'gear';
+    this._sheetTab = this._sheetTab || 'character';
+    this._sheetSelection = null;
     this._showScreen('character-sheet');
     this._renderCharacterSheet();
+  }
+
+  _closeCharacterSheet() {
+    if (this._sheetReturn === 'overworld') this.hideOverlay();
+    else this._showScreen(this._sheetReturn || 'main');
   }
 
   _renderCharacterSheet() {
@@ -1112,11 +1326,34 @@ export class UI {
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
-    this.root.querySelector('#sheet-panel-gear').classList.toggle('hidden', this._sheetTab !== 'gear');
-    this.root.querySelector('#sheet-panel-lattice').classList.toggle('hidden', this._sheetTab !== 'lattice');
+    for (const tab of ['character', 'gear', 'abilities', 'lattice']) {
+      this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', this._sheetTab !== tab);
+    }
 
-    if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    if (this._sheetTab === 'character') this._renderCharacterOverview(character);
+    else if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    else if (this._sheetTab === 'abilities') this._renderAbilitiesOverview(character);
     else this._renderLatticePanel(character);
+  }
+
+  _renderCharacterOverview(character) {
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
+    const attrs = characterAttributes(character);
+    const stats = character.stats || {};
+    this.root.querySelector('#sheet-panel-character').innerHTML = `
+      <section class="character-paperdoll" style="--character-color:${appearance.color}"><div class="paperdoll-aura"></div><div class="paperdoll-hero">${klass.icon}</div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
+      <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
+      <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
+  }
+
+  _renderAbilitiesOverview(character) {
+    const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
+    const hero = HEROES[character.proxyHero || klass.proxy] || HEROES.scott;
+    const cards = [
+      ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
+    ];
+    this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
   }
 
   // What a character is wearing, what is in the stash, and what the two add up
@@ -1149,7 +1386,27 @@ export class UI {
       </button>`;
     }).join('');
     for (const button of slots.querySelectorAll('.gear-slot')) {
-      button.onclick = () => this._unequip(character, button.dataset.slot);
+      const slot = button.dataset.slot;
+      const key = (character.equipment || {})[slot] || null;
+      button.draggable = !!key;
+      button.classList.toggle('selected', this._sheetSelection?.kind === 'slot' && this._sheetSelection.slot === button.dataset.slot);
+      button.onclick = () => {
+        this._sheetSelection = { kind: 'slot', slot: button.dataset.slot, key: (character.equipment || {})[button.dataset.slot] || null };
+        this._renderGearPanel(character);
+      };
+      button.ondblclick = () => this._unequip(character, button.dataset.slot);
+      button.ondragstart = (event) => this._beginItemDrag(event, { kind: 'slot', slot, key });
+      button.ondragover = (event) => {
+        if (this._draggedItem?.kind !== 'stash') return;
+        event.preventDefault();
+        button.classList.toggle('drop-target', canEquip(character, this._draggedItem.key, slot));
+      };
+      button.ondragleave = () => button.classList.remove('drop-target');
+      button.ondrop = (event) => {
+        event.preventDefault(); button.classList.remove('drop-target');
+        if (this._draggedItem?.kind === 'stash') this._equipFromStash(character, this._draggedItem.index, slot);
+        this._endItemDrag();
+      };
     }
 
     const stash = (character.items || []);
@@ -1169,10 +1426,93 @@ export class UI {
       }).join('')
       : '<span class="empty-gear">Nothing recovered yet. The frontier is hiding it.</span>';
     for (const button of list.querySelectorAll('.stash-item')) {
-      button.onclick = () => this._equipFromStash(character, Number(button.dataset.index));
+      const index = Number(button.dataset.index);
+      const key = (character.items || [])[index] || null;
+      button.draggable = true;
+      button.classList.toggle('selected', this._sheetSelection?.kind === 'stash' && this._sheetSelection.index === Number(button.dataset.index));
+      button.onclick = () => {
+        this._sheetSelection = { kind: 'stash', index: Number(button.dataset.index), key: (character.items || [])[Number(button.dataset.index)] || null };
+        this._renderGearPanel(character);
+      };
+      button.ondblclick = () => this._equipFromStash(character, Number(button.dataset.index));
+      button.ondragstart = (event) => this._beginItemDrag(event, { kind: 'stash', index, key });
+      button.ondragover = (event) => { event.preventDefault(); button.classList.add('drop-target'); };
+      button.ondragleave = () => button.classList.remove('drop-target');
+      button.ondrop = (event) => {
+        event.preventDefault(); button.classList.remove('drop-target');
+        if (this._draggedItem?.kind === 'slot') this._unequip(character, this._draggedItem.slot);
+        else if (this._draggedItem?.kind === 'stash') this._moveStashItem(character, this._draggedItem.index, index);
+        this._endItemDrag();
+      };
     }
 
+    list.ondragover = (event) => { if (this._draggedItem?.kind === 'slot') event.preventDefault(); };
+    list.ondrop = (event) => {
+      if (event.target.closest('.stash-item')) return;
+      event.preventDefault();
+      if (this._draggedItem?.kind === 'slot') this._unequip(character, this._draggedItem.slot);
+      this._endItemDrag();
+    };
+
+    this._renderItemDetail(character);
     this._renderGearStats(character, attrs);
+  }
+
+  _renderItemDetail(character) {
+    const detail = this.root.querySelector('#gear-item-detail');
+    const selection = this._sheetSelection;
+    const key = selection?.key;
+    const item = key ? itemInfo(key) : null;
+    if (!item) {
+      detail.innerHTML = '<p>Select an item to inspect it. Double-click a stash item to equip it; double-click equipped gear to unequip it.</p>';
+      return;
+    }
+    const targetSlots = item.slot ? slotsForPool(item.slot) : [];
+    const target = selection.kind === 'slot' ? selection.slot : (targetSlots.find((slot) => !(character.equipment || {})[slot]) || targetSlots[0]);
+    const equippedKey = target ? (character.equipment || {})[target] : null;
+    const equipped = equippedKey && equippedKey !== key ? itemInfo(equippedKey) : null;
+    let comparison = '';
+    let legal = true;
+    if (selection.kind === 'stash' && target) {
+      legal = canEquip(character, key, target);
+      const preview = { ...character, equipment: { ...(character.equipment || {}), [target]: key } };
+      const before = characterAttributes(character);
+      const after = characterAttributes(preview);
+      comparison = Object.values(ATTRIBUTES).map((attr) => {
+        const delta = Math.round((after[attr.key] || 0) - (before[attr.key] || 0));
+        return `<span>${attr.icon} ${attr.name} <b class="${delta > 0 ? 'positive' : delta < 0 ? 'negative' : ''}">${delta > 0 ? '+' : ''}${delta}</b></span>`;
+      }).join('');
+    }
+    detail.innerHTML = `<div class="item-card" style="--rarity:${item.rarityColor}"><span class="item-rarity">${item.rarityName || 'ITEM'} ${item.ilvl ? `· ITEM LEVEL ${item.ilvl}` : ''}</span><h2>${item.icon} ${item.name}</h2>${item.desc ? `<p>${item.desc}</p>` : ''}<ul>${itemLines(item).map((line) => `<li>${line}</li>`).join('') || '<li>No modifiers</li>'}</ul>${item.req ? `<small class="${legal ? '' : 'invalid'}">Requires ${requirementText(item)}</small>` : ''}</div>${equipped ? `<div class="compare-card"><span>CURRENTLY EQUIPPED</span><b>${equipped.icon} ${equipped.name}</b>${itemLines(equipped).map((line) => `<small>${line}</small>`).join('')}</div>` : ''}${comparison ? `<div class="item-deltas">${comparison}</div>` : ''}<div class="item-actions">${selection.kind === 'stash' && item.slot ? `<button class="menubtn primary" id="gear-action-equip" ${legal ? '' : 'disabled'}>EQUIP${target ? ` TO ${target.toUpperCase()}` : ''}</button>` : selection.kind === 'slot' ? '<button class="menubtn" id="gear-action-unequip">UNEQUIP</button>' : ''}</div>`;
+    detail.querySelector('#gear-action-equip')?.addEventListener('click', () => this._equipFromStash(character, selection.index, target));
+    detail.querySelector('#gear-action-unequip')?.addEventListener('click', () => this._unequip(character, selection.slot));
+  }
+
+  _beginItemDrag(event, item) {
+    if (!item?.key) { event.preventDefault(); return; }
+    this._draggedItem = item;
+    event.currentTarget.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', item.key);
+    event.currentTarget.addEventListener('dragend', () => this._endItemDrag(), { once: true });
+  }
+
+  _endItemDrag() {
+    this._draggedItem = null;
+    for (const element of this.root.querySelectorAll('.dragging, .drop-target')) {
+      element.classList.remove('dragging', 'drop-target');
+    }
+  }
+
+  _moveStashItem(character, from, to) {
+    if (from === to || from < 0 || to < 0) return;
+    const items = [...(character.items || [])];
+    if (from >= items.length || to >= items.length) return;
+    const [item] = items.splice(from, 1);
+    items.splice(to, 0, item);
+    character.items = items;
+    this._sheetSelection = { kind: 'stash', index: to, key: item };
+    this._sheetChanged();
   }
 
   // Attributes come from gear and the Lattice together, and they are what gate
@@ -1213,7 +1553,7 @@ export class UI {
     this.root.querySelector('#gear-stat-list').innerHTML = rows.join('');
   }
 
-  _equipFromStash(character, index) {
+  _equipFromStash(character, index, preferredSlot = null) {
     const key = (character.items || [])[index];
     const item = key ? itemInfo(key) : null;
     if (!item || !item.slot) return;
@@ -1224,7 +1564,9 @@ export class UI {
     // so hasSecondSet() was never true and X always denied.
     const candidates = slotsForPool(item.slot);
     const equipment = character.equipment || {};
-    const slot = candidates.find((s) => !equipment[s]) || candidates[0];
+    const slot = preferredSlot && candidates.includes(preferredSlot)
+      ? preferredSlot
+      : candidates.find((s) => !equipment[s]) || candidates[0];
     // Ask the model. It refuses an item that could only meet its requirement by
     // counting itself, or by borrowing from the sheathed weapon set.
     if (!canEquip(character, key, slot)) {
@@ -1236,6 +1578,7 @@ export class UI {
     character.items = (character.items || []).filter((_, i) => i !== index);
     if (previous) character.items.push(previous);
     character.equipment = normalizeEquipment(character.equipment);
+    this._sheetSelection = { kind: 'slot', slot, key };
     this._sheetChanged();
   }
 
@@ -1250,6 +1593,7 @@ export class UI {
     delete next[slot];
     character.equipment = next;
     character.items = [...(character.items || []), key];
+    this._sheetSelection = { kind: 'stash', index: character.items.length - 1, key };
     this._sheetChanged();
   }
 
@@ -1538,9 +1882,9 @@ export class UI {
   // walkable planet; Esc (or the ⚙ button) opens the council over it.
   setOverworldMode(on) {
     this._overworldMode = !!on;
+    if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
-    this.root.querySelector('#m-galaxy').classList.toggle('hidden', !on);
   }
 
   showGalaxy(destinations, currentWorld = 'earth', macro = null) {
@@ -1587,12 +1931,12 @@ export class UI {
 
   hideOverlay() {
     this.root.querySelector('#overlay').classList.add('hidden');
+    this.shell.overlay = null;
+    this.shell.returnOverlay = null;
   }
 
   toggleOverlay() {
-    // Esc always brings up the hub home — the deep screens (lobby, settings)
-    // are one click from its buttons, and the walk is the point.
-    if (this.overlayHidden()) this._showScreen('main');
+    if (this.overlayHidden()) this._showScreen('world-menu');
     else this.hideOverlay();
   }
 
@@ -1696,12 +2040,12 @@ export class UI {
   // Walking into a gate asks before it commits you to a front: the panel
   // carries the level's blurb and the difficulty choice, and Enter takes the
   // same onStart path the setup screen's START button uses.
-  showGateConfirm({ gate, diff = 'normal', onEnter }) {
+  showGateConfirm({ gate, diff = 'normal', onEnter, onLeave }) {
     let modal = this.root.querySelector('#gate-confirm');
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'gate-confirm';
-      modal.className = 'roomconfirm';
+      modal.className = 'gateprompt hidden';
       this.root.appendChild(modal);
     }
     const cave = !!gate.cave;
@@ -1710,8 +2054,8 @@ export class UI {
       <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
         `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
     modal.innerHTML = `
-      <div class="roomconfirmcard">
-        <span class="roomeyebrow">The road onward</span>
+      <div class="gatepromptcard">
+        <span class="roomeyebrow">Mission rally · 1–4 players</span>
         <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
         <p>${cave
           ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
@@ -1719,12 +2063,12 @@ export class UI {
         ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
         ${diffSeg}
         <div class="roomconfirmactions">
-          <button class="tbtn" id="gate-back">NOT YET</button>
-          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN THE TRIAL LEDGER' : 'ENTER'}</button>
+          <button class="tbtn" id="gate-back">CLOSE</button>
+          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN TRIALS' : 'READY / ENTER'}</button>
         </div>
       </div>`;
     const close = () => modal.classList.add('hidden');
-    modal.querySelector('#gate-back').onclick = close;
+    modal.querySelector('#gate-back').onclick = () => { close(); onLeave && onLeave(); };
     let chosen = diff;
     for (const b of modal.querySelectorAll('.gate-diff .diffbtn')) {
       b.onclick = () => {
@@ -1732,8 +2076,27 @@ export class UI {
         for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
       };
     }
-    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
+    modal.querySelector('#gate-go').onclick = () => { if (cave) close(); onEnter && onEnter(chosen); };
     modal.classList.remove('hidden');
+  }
+
+  setGateRally({ players = 1, maxPlayers = 4, role = 'solo', ready = false, canLaunch = false } = {}) {
+    const modal = this.root.querySelector('#gate-confirm');
+    const eyebrow = modal?.querySelector('.roomeyebrow');
+    const go = modal?.querySelector('#gate-go');
+    if (eyebrow) eyebrow.textContent = `Mission rally · ${players}/${maxPlayers} players`;
+    if (!go) return;
+    if (role === 'host') {
+      go.textContent = canLaunch ? `LAUNCH PARTY (${players})` : `WAITING FOR PARTY (${players})`;
+      go.disabled = !canLaunch;
+    } else if (role === 'guest') {
+      go.textContent = ready ? 'READY — WAITING FOR HOST' : 'MARK READY';
+      go.disabled = ready;
+    }
+  }
+
+  hideGatePrompt() {
+    this.root.querySelector('#gate-confirm')?.classList.add('hidden');
   }
 
   _reflectQuality(q) {
@@ -1754,7 +2117,9 @@ export class UI {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._showScreen('setup');
-    this.root.querySelector('#screen-setup').classList.toggle('roommode', !!online);
+    const setupScreen = this.root.querySelector('#screen-setup');
+    setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
@@ -1763,6 +2128,12 @@ export class UI {
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
       : 'Choose your battle';
     this.root.querySelector('#s-title').textContent = title;
+    const fieldLabel = setupScreen.querySelector('.field-label');
+    const heroLabel = setupScreen.querySelector('.hero-label');
+    const diffLabel = setupScreen.querySelector('.diff-label');
+    if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : '1 · Battlefield <span id="warstatus" class="warstatus"></span>';
+    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : '2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
+    if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : '3 · Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
     this._renderModeSeg(mode, coop || !!online);
@@ -1773,7 +2144,8 @@ export class UI {
     if (online) {
       mp.dataset.init = '1';
       mp.innerHTML = `
-        <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b> from the lobby.</span></div>
+        <div class="room-commandbar"><span><b>STAGING LOBBY</b><small>Seats, readiness, map rules, and chat are authoritative here.</small></span><strong>${online.visibility === 'private' ? '🔒 PRIVATE' : '🌐 PUBLIC'} · ${online.join_code}</strong></div>
+        <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b>.</span></div>
         <div id="room-roster" class="roomroster"></div>
         <button class="diffbtn roomready hidden" id="room-ready">READY FOR BATTLE</button>
         <button class="diffbtn hidden" id="room-reconnect">RECONNECT TO HOST</button>
@@ -1786,7 +2158,7 @@ export class UI {
           </div>
         </div>`;
       this.roomRoster(this._playersFromOnlineGame(online), {
-        maxPlayers: online.max_players || 3,
+        maxPlayers: online.max_players || 4,
         isHost: false,
         code: online.join_code,
         mode: online.mode || mode,
@@ -1952,7 +2324,7 @@ export class UI {
     return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
       (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       (passives ? `${passives}<br>` : '') +
-      `<span class="tfx">${a.icon} <b>${a.name}</b> — SPACE/Q, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
+      `<span class="tfx">${a.icon} <b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
       `<br><span class="tdesc">Level-ups grant upgrade points for Aura, Passive I, Passive II, or Ult Damage.</span>`;
   }
 
@@ -1970,6 +2342,19 @@ export class UI {
     if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
     const d = h.def;
+    const kit = this.root.querySelector('#fight-kit');
+    if (kit) {
+      const entries = [
+        d.aura ? { kind: 'AURA', icon: d.aura.icon, name: d.aura.name, desc: d.aura.desc } : null,
+        ...(d.passives || []).map((passive, index) => ({
+          kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
+        })),
+        { kind: this._keyLabel('ability1'), icon: d.ability.icon, name: d.ability.name, desc: d.ability.desc, active: true },
+      ].filter(Boolean);
+      kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
+        <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
+      </div>`).join('');
+    }
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
     face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
@@ -2001,14 +2386,16 @@ export class UI {
   setControlMode(mode = 'build') {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
-    const fight = mode === 'fight';
-    chip.classList.toggle('fight', fight);
-    chip.classList.toggle('build', !fight);
+    const fighting = mode === 'fight';
+    chip.classList.toggle('fight', fighting);
+    chip.classList.toggle('build', !fighting);
     const label = chip.querySelector('span');
-    if (label) label.textContent = fight ? 'Fight mode' : 'Build mode';
-    chip.title = fight
-      ? 'Fight mode: Space fires the hero special. Hold B to build. Alt toggles.'
-      : 'Build mode: Space/B builds. Auto-attacks still run. Alt toggles.';
+    if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
+    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting);
+    this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
+    chip.title = fighting
+      ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
+      : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
   }
 
   update(game, p = 0, controls = {}) {
@@ -2136,7 +2523,7 @@ export class UI {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>SPACE</small></span>`;
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
         big.disabled = !near || h.dead;
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
@@ -2148,12 +2535,12 @@ export class UI {
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
           big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold SPACE/B · ${cost}🪙 · ALT fight</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`;
           big.disabled = h.dead;
         } else {
           this._bigMode = 'idle';
           big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Auto-attacks on · ride to a plot · ALT fight</small></span>`;
+          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`;
           big.disabled = true;
         }
       } else {
@@ -2162,7 +2549,7 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · SPACE${controlMode === 'fight' ? ' · ALT build' : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
@@ -2358,7 +2745,6 @@ export class UI {
 
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
-    const enter = this.root.querySelector('#a-enter');
     const google = this.root.querySelector('#a-google');
     const offline = this.root.querySelector('#a-offline');
     const usernameForm = this.root.querySelector('#a-username-form');
@@ -2374,7 +2760,6 @@ export class UI {
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
-    if (enter) enter.classList.toggle('hidden', !state.signedIn);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {
@@ -2576,7 +2961,7 @@ export class UI {
   }
 
   roomRoster(players = [], {
-    maxPlayers = 3,
+    maxPlayers = 4,
     isHost = false,
     code = '',
     mode = 'campaign',
@@ -2919,7 +3304,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 3}</span>
+        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 4}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible

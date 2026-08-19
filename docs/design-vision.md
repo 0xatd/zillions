@@ -59,7 +59,7 @@ factions spreading between worlds is not shipped.
 - Threat as the visible pressure clock
 - autonomous squads and global stances
 - persistent heroes, equipment, relics, and campaign progress
-- three-player WebRTC co-op and read-only Watch
+- four-player WebRTC co-op and read-only Watch
 
 Do not rebuild these systems as future work. Extend the current code.
 

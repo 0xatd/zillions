@@ -27,7 +27,10 @@ function storagePath(playerId, kind, id) {
 }
 
 async function readJsonBlob(blob) {
-  const response = await fetch(blob.url, { cache: 'no-store' });
+  const response = await fetch(blob.url, {
+    cache: 'no-store',
+    headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+  });
   if (!response.ok) throw new Error(`blob_read_${response.status}`);
   return response.json();
 }
@@ -76,22 +79,39 @@ async function parseBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+async function authenticatedUser(req) {
+  const authorization = String(req.headers.authorization || '');
+  if (!authorization.startsWith('Bearer ')) return null;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('auth_backend_not_configured');
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: { authorization, apikey: key },
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
 export default async function handler(req, res) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return send(res, 503, { ok: false, error: 'blob_backend_not_configured' });
     }
+    const user = await authenticatedUser(req);
+    if (!user?.id) return send(res, 401, { ok: false, error: 'sign_in_required' });
 
     if (req.method === 'GET') {
       const url = new URL(req.url, `https://${req.headers.host || 'zillions.local'}`);
       const playerId = url.searchParams.get('playerId');
       if (!playerId) return send(res, 400, { ok: false, error: 'missing_player_id' });
+      if (cleanId(playerId) !== cleanId(user.id)) return send(res, 403, { ok: false, error: 'player_mismatch' });
       return send(res, 200, { ok: true, backend: 'vercel-blob', state: await readPlayerState(playerId) });
     }
 
     if (req.method === 'POST') {
       const body = await parseBody(req);
       const playerId = cleanId(body.playerId);
+      if (playerId !== cleanId(user.id)) return send(res, 403, { ok: false, error: 'player_mismatch' });
       const kind = cleanId(body.kind);
       if (!VALID_KINDS.has(kind)) return send(res, 400, { ok: false, error: 'invalid_kind' });
       const id = SINGLETON_KINDS.has(kind) ? 'current' : cleanId(body.id, kind === 'save' ? 'latest' : Date.now());
@@ -105,7 +125,7 @@ export default async function handler(req, res) {
         uploadedAt: new Date().toISOString(),
       };
       const blob = await put(storagePath(playerId, kind, id), JSON.stringify(envelope, null, 2), {
-        access: 'public',
+        access: 'private',
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: 'application/json; charset=utf-8',
@@ -118,6 +138,7 @@ export default async function handler(req, res) {
       const playerId = url.searchParams.get('playerId');
       const kind = cleanId(url.searchParams.get('kind'));
       if (!playerId || !VALID_KINDS.has(kind)) return send(res, 400, { ok: false, error: 'bad_delete_request' });
+      if (cleanId(playerId) !== cleanId(user.id)) return send(res, 403, { ok: false, error: 'player_mismatch' });
       const id = SINGLETON_KINDS.has(kind) ? 'current' : cleanId(url.searchParams.get('id'), kind === 'save' ? 'latest' : '');
       if (!id) return send(res, 400, { ok: false, error: 'missing_id' });
       await del(storagePath(playerId, kind, id));

@@ -37,10 +37,18 @@ Use this source order when documents disagree:
 
 ## Current Playable Game
 
-Normal play now moves through the title screen, character roster, last
-planetary location, Orbital Lift, and galaxy map. Each planet is a persistent
+Normal play uses a traditional MMO flow: login, character select, Enter World,
+last planetary location, Orbital Lift, and galaxy map. Each planet is a persistent
 shared hub with its own presence channel and entrances to playable instances.
 The profile remembers the last world.
+
+Character Info separates the character overview, equipment, abilities, and the
+Lattice. Equipment supports item inspection, comparisons, click actions, and
+drag-and-drop between compatible body slots and the persistent stash.
+
+Custom Games separates Live Games from Arcade. Live Games shows real player
+rooms that can be joined or watched. Arcade lists prebuilt campaign, Survival,
+and Labyrinth maps that can be played directly or used to host a room.
 
 Zillions uses a continuous siege loop. There is no day, night, or bell phase.
 
@@ -78,7 +86,7 @@ their soft vision circles is almost black, including the minimap.
 - **Story Campaign** contains the five Earth missions and later frontier worlds.
 - **Survival** is an endless siege with a boss every fifth Threat level.
 
-Online matches support up to three players. Each player controls one hero. The
+Online matches support up to four players. Each player controls one hero. The
 players share gold, colony buildings, the enemy force, and the win condition.
 
 Supabase stores accounts, usernames, rooms, chat, saves, and match history.
@@ -174,14 +182,14 @@ which reads the same table the game dispatches through.
 | --- | --- |
 | W, A, S, D | Move in world and minimap directions |
 | Shift | Gallop at full health |
-| Space | Dodge roll — a burst out of danger, briefly untouchable |
-| Q | Primary ability (your hero special) |
+| Space | Build mode: build/pay. Fight mode: dodge roll |
+| Q | Fight mode: primary ability (your hero special) |
 | E, R | Ability II and III — reserved; heroes carry one ability today |
 | X | Draw the other weapon set |
 | Ctrl | Secondary ability bar — reserved |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
-| B | Build, upgrade, repair, or rebuild |
-| Alt | Change the primary input between Build mode and Fight mode |
+| B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
+| Alt | Switch between Build mode and Fight mode |
 | F1, F2, F3 | Set Defend, Follow, or Push stance |
 | T | Change the nearest tower target rule |
 | Z | Drop the newest field item |
@@ -196,9 +204,10 @@ Movement is not camera-relative. W always moves north on the minimap.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
-does not — that freed 1 and 2 for a future consumable system. And Alt still
-toggles build mode, because founding and funding a colony is the half of this
-game an action-RPG layout has no opinion about.
+does not — that freed 1 and 2 for a future consumable system. Alt switches the
+action context because founding and funding a colony is the half of this game
+an action-RPG layout has no opinion about. WASD remains shared. In Build mode,
+Space and B build. In Fight mode, Space dodges and Q uses the primary ability.
 
 ## Local Development
 

@@ -11,8 +11,9 @@ const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 // Every element the sheet renders into must exist in the markup.
 for (const id of [
   'screen-character-sheet', 'sheet-sigil', 'sheet-name', 'sheet-sub', 'sheet-close',
-  'sheet-tab-gear', 'sheet-tab-lattice', 'sheet-panel-gear', 'sheet-panel-lattice',
-  'gear-slots', 'gear-stash-list', 'gear-stash-count', 'gear-stat-list',
+  'sheet-tab-character', 'sheet-tab-gear', 'sheet-tab-abilities', 'sheet-tab-lattice',
+  'sheet-panel-character', 'sheet-panel-gear', 'sheet-panel-abilities', 'sheet-panel-lattice',
+  'gear-slots', 'gear-stash-list', 'gear-stash-count', 'gear-item-detail', 'gear-stat-list',
   'lattice-canvas', 'lattice-detail', 'lattice-points', 'lattice-search', 'lattice-rewire',
   'm-character-sheet',
 ]) {
@@ -50,6 +51,17 @@ assert.doesNotMatch(ui, /meetsRequirement\(item, this\._sheetAttributes/,
   'the screen must not decide equip legality from its own attribute sum');
 assert.match(ui, /const worn = legalEquipment\(character\)/,
   'the gear panel must mark slots illegal the same way the run does');
+
+// Equipment is an interaction surface, not a read-only report. Click must
+// inspect, double-click must equip/unequip, and drag/drop must move between
+// stash and body slots without bypassing canEquip().
+assert.match(ui, /button\.draggable = !!key/, 'equipped items must be draggable');
+assert.match(ui, /button\.ondragstart = \(event\) => this\._beginItemDrag/, 'items must start a drag operation');
+assert.match(ui, /button\.ondrop = \(event\) =>/, 'equipment and stash need drop targets');
+assert.match(ui, /_moveStashItem\(character, this\._draggedItem\.index, index\)/,
+  'dragging within the stash must reorder items');
+assert.match(ui, /this\._equipFromStash\(character, this\._draggedItem\.index, slot\)/,
+  'dropping a stash item on a body slot must equip that slot');
 
 // Rolled items must render through itemInfo everywhere in the UI. A direct
 // ITEMS[key] lookup shows a blank for anything the world rolled.

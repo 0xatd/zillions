@@ -134,14 +134,17 @@ The control scheme follows Path of Exile 2's WASD mode, because that is the
 grammar a player arriving from an action RPG already has in their hands.
 
 - Movement is WASD and is never camera-relative.
-- Space is the dodge roll. It is a real simulation mechanic: a committed burst
-  with a short invulnerable window and a cooldown longer than the roll, issued
-  as a lockstep command and carried in the snapshot.
-- Q, E and R are the ability slots. Only Q is used today, because a hero has
+- Build and Fight are explicit input contexts. WASD movement is shared.
+- In Build mode, Space builds, upgrades, repairs, or rebuilds. B is a secondary
+  accessible build binding. Space cannot dodge and Q cannot cast.
+- In Fight mode, Space is the dodge roll. It is a committed burst with a short
+  invulnerable window and a cooldown longer than the roll, issued as a lockstep
+  command and carried in the snapshot. Construction input is disabled.
+- Q, E and R are the Fight-mode ability slots. Only Q is used today, because a hero has
   one controlled ability; E and R are declared and shown as reserved rather
   than hidden, so the layout does not shift when a second ability lands.
 - X draws the other weapon set.
-- Alt still toggles build mode. Founding and funding a colony is the half of
+- Alt toggles Build and Fight mode. Founding and funding a colony is the half of
   this game an action-RPG layout has no opinion about, and it keeps its key.
 - Army stances take F1–F3. They moved off 1/2/3 deliberately: Path of Exile
   puts consumables there, Zillions commands squads and Path of Exile does not,
@@ -206,8 +209,21 @@ Deeper strategic simulation is not.
 ## Production UX Rules
 
 - Production must be account-first.
-- The signed-in home screen is multiplayer-first. `Play Online` is the primary
-  action. `Play Solo` contains Story Campaign, Survival, and The Labyrinth.
+- Signed-out players see the login screen. Signed-in players see Character
+  Select. The generic marketing title is not an account home.
+- Character Select shows the complete roster and owns `Enter World`, character
+  creation and deletion, Character Info, Custom Games, system options, and Log Out.
+- The in-world Game Menu owns Return to World, Character Select, Custom Games,
+  system options, and Log Out. It does not reuse Character Select as a pause menu.
+- Character Info uses separate Character, Equipment, Abilities, and Lattice
+  views. Equipment is interactive. The player can inspect and compare items,
+  click or double-click to equip and unequip, drag an item between the stash
+  and a compatible body slot, and drag items to reorder the stash. The model
+  remains the authority for requirements and legal equipment.
+- Custom Games has two primary views. Live Games lists real backend rooms that
+  can be joined or watched. Arcade catalogs prebuilt Zillions maps that a
+  player can play immediately or use to host a room. Recent and Favorites are
+  filters inside Arcade, not separate product sections.
 - Campaign and Survival own their saved runs. Show Resume inside the matching
   solo mode. Do not add a generic Continue button to the home screen.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the
@@ -289,6 +305,10 @@ state mirror data. It is not the source of truth for signed-in chat, friends,
 accounts, or rooms.
 
 WebRTC still owns match transport. The server is not authoritative yet.
+
+Mission rooms support one to four players. Physical mission gates create or
+join a rally room. Walking away closes the prompt and leaves the rally. The
+mission returns each player to the saved overworld planet and coordinates.
 
 ## Non-Negotiables
 

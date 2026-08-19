@@ -90,6 +90,8 @@ assert.ok(sawLocked, 'rotmire gate reports locked on a fresh profile');
 
 // No trigger outside the ring, and no double-trigger inside the cooldown.
 assert.equal(ow.update(0.016).length, 0, 'gate respects its cooldown');
+ow.hero.x = 1; ow.hero.z = 1;
+assert.ok(ow.update(0.016).some((event) => event.t === 'gateleave'), 'walking away dismisses the gate rally');
 
 // WASD walk with collision: point the hero at the nearest impassable tile
 // and it must stop against it, not pass through.

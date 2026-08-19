@@ -28,7 +28,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
-import { loadBinds, saveBinds, resetBinds, actionFor, isHeld } from './keybinds.js';
+import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
@@ -122,7 +122,9 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    this.controlMode = 'build'; // Alt toggles whether Space builds or fires the special.
+    // Build and fight are distinct action contexts. Movement is shared, but
+    // Space builds in Build mode and dodges in Fight mode.
+    this.controlMode = 'build';
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
@@ -186,6 +188,7 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
+      onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
@@ -205,6 +208,7 @@ class App {
       onGalaxyOpen: () => this._openGalaxyMap(),
       onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
       onSignIn: () => this._signIn(),
+      onSignOut: () => this._signOut(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
       onLobbyOpen: () => this._openLobby(),
@@ -212,6 +216,7 @@ class App {
       onCustomRefresh: () => this._openCustomGames(true),
       onCustomCreate: (options) => this.createCustomGame(options),
       onCustomJoin: (room) => this.joinOnlineGame(room),
+      onCustomPlay: (map) => this.playArcadeMap(map),
       onChatSend: (text) => this._sendLobbyChat(text),
       onRoomChatSend: (text) => this._sendRoomChat(text, 'room'),
       onGameChatSend: (text) => this._sendGameChat(text),
@@ -288,6 +293,7 @@ class App {
     // a development/offline mirror.
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
+    this._authenticatedEntryHandled = false;
     this.profile = this._loadProfile();
     this.meta = loadMeta();
     this.profile.metaCurrency = this.meta.currency;
@@ -339,9 +345,10 @@ class App {
     this.resize();
     this.clock = new THREE.Clock();
 
-    // The authored title screen remains the front door. Story Campaign opens
-    // the walkable overworld after the player deliberately chooses it.
-    this.showMenuBackdrop(this.ui.selectedLevel || 1);
+    // Traditional menus own startup. The renderer stays parked behind an
+    // opaque login/character-select shell until the player enters a world.
+    this.scene.background = new THREE.Color(0x030711);
+    this.scene.fog.color.setHex(0x030711);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
   }
@@ -563,11 +570,15 @@ class App {
     // Already on the planet — the hub's ENTER WORLD means "resume the walk",
     // not a no-op. It used to early-return with the overlay still up, which
     // read as a dead button inside the custom-games loop (QA 2026-08-18).
-    if (this.ow) { this.ui.hideOverlay(); return; }
+    if (this.ow) {
+      this._makeOverworldHero();
+      this.ui.hideOverlay();
+      return;
+    }
     const character = selectedMmoCharacter(this.profile);
     if (!character) {
       this.ui.setProfile(this.profile);
-      this.ui.showBanner('Create a character before entering the galaxy.', 'bad', 2600);
+      this.ui.showCharacterCreator();
       return;
     }
     this.ui.selectedHero = character.proxyHero;
@@ -581,6 +592,15 @@ class App {
     this.scene.fog.density = 0.0045;
     this.owMap = map;
     this.ow = new Overworld(map, { world: map.overworldWorld });
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('zillions-overworld-return') || 'null');
+      if (saved?.worldId === map.overworldWorld.id && Number.isFinite(saved.x) && Number.isFinite(saved.z)) {
+        this.ow.hero.x = saved.x;
+        this.ow.hero.z = saved.z;
+        this.ow.hero.facing = Number(saved.facing) || 0;
+        sessionStorage.removeItem('zillions-overworld-return');
+      }
+    } catch { /* unavailable or corrupt session storage: use world spawn */ }
     this.owTerrain = map.buildTerrain();
     this.scene.add(this.owTerrain);
     this.owGates = [];
@@ -759,6 +779,11 @@ class App {
   }
 
   _onOverworldEvent(ev) {
+    if (ev.t === 'gateleave') {
+      this.ui.hideGatePrompt();
+      this._leaveGateRally().catch(() => {});
+      return;
+    }
     if (ev.t !== 'gate') return;
     if (ev.state.locked) {
       this.shake = 0.35;
@@ -778,22 +803,78 @@ class App {
     this.ui.showGateConfirm({
       gate: ev.gate,
       diff: this.ui.selectedDiff,
+      onLeave: () => this._leaveGateRally().catch(() => {}),
       onEnter: (diff) => {
         if (ev.gate.cave) {
-          // The trial ledger IS the labyrinth flow: the setup screen lists
-          // the trials, exactly as Play Solo → The Labyrinth does.
           this.ui.selectedMode = 'labyrinth';
           this.ui.showSetup({ mode: 'labyrinth' });
           return;
         }
-        // Same path the setup screen's START button takes; only the level
-        // selection is made by geography instead of a card click.
-        this.ui.selectedMode = 'campaign';
-        this.ui.selectedLevel = ev.gate.levelId;
-        this.ui.selectedDiff = diff;
-        this.ui.cb.onStart(diff, this.ui.selectedHero);
+        this._joinGateRally(ev.gate, diff);
       },
     });
+  }
+
+  _launchGateMission(gate, diff) {
+    this.ui.selectedMode = gate.cave ? 'labyrinth' : 'campaign';
+    this.ui.selectedLevel = gate.levelId || 1;
+    this.ui.selectedDiff = diff;
+    this.ui.cb.onStart(diff, this.ui.selectedHero);
+  }
+
+  async _joinGateRally(gate, diff) {
+    const lobby = await this._openLobby().catch(() => null);
+    if (!lobby?.connected) {
+      this._launchGateMission(gate, diff);
+      return;
+    }
+    const worldId = this.ow?.world?.id || 'earth';
+    const gateKey = gate.cave ? `labyrinth:${gate.levelId || 1}` : `level:${gate.levelId}`;
+    const matches = (await lobby.refreshGames().catch(() => []))
+      .filter((game) => game.rally && game.status === 'open'
+        && game.rallyWorldId === worldId && game.rallyGateKey === gateKey);
+
+    if (lobby.game?.rally && lobby.game.rallyWorldId === worldId && lobby.game.rallyGateKey === gateKey) {
+      const game = lobby.game;
+      if (this.mpRole === 'host') {
+        const readiness = roomLaunchReadiness(game, this.peers.length + 1);
+        if (readiness.ready) this._launchGateMission(gate, diff);
+      } else {
+        await this._setRoomReady(true);
+      }
+      return;
+    }
+
+    if (matches[0]) {
+      await this.joinOnlineGame(matches[0], { compact: true });
+      await this._setRoomReady(true);
+      this.ui.setGateRally({ players: this.lobby?.game?.players || matches[0].players, maxPlayers: matches[0].max_players, role: 'guest', ready: true });
+      return;
+    }
+
+    this.audio.init();
+    this.mpRole = 'host';
+    this.onlineMode = true;
+    this.onlinePending = new Map();
+    const game = await lobby.createGame({
+      visibility: 'public', level: gate.levelId || 1, mode: gate.cave ? 'labyrinth' : 'campaign',
+      difficulty: diff, unlockedLevel: highestUnlockedLevel(this.profile.campaign),
+      name: `${gate.name || 'Mission'} rally`, maxPlayers: 4, kind: 'rally',
+      mapName: gate.name || 'Mission', worldId, gateKey,
+    });
+    await lobby.updateRoomPlayer({ hero: this.ui.selectedHero, ready: true }).catch(() => {});
+    this._onRoomUpdate(lobby.game || game);
+  }
+
+  async _leaveGateRally() {
+    if (!this.lobby?.game?.rally || this.netMode) return;
+    await this.lobby.leaveRoom();
+    for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
+    try { this.net?.destroy(); } catch { /* closed */ }
+    this.peers = [];
+    this.net = null;
+    this.mpRole = null;
+    this.onlineMode = false;
   }
 
   // ----- multiplayer ghosts: presence garnish, never game netcode -----
@@ -875,6 +956,7 @@ class App {
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
+    this.ui.hideGatePrompt();
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
@@ -887,6 +969,16 @@ class App {
     // not be hydrated by the time the button is clicked — and losing the
     // relay dumped returning commanders on the title screen (QA 2026-08-18).
     this._runFromOverworld = !!this.ow;
+    if (this.ow) {
+      const point = {
+        worldId: this.ow.world?.id || 'earth',
+        x: this.ow.hero.x,
+        z: this.ow.hero.z,
+        facing: this.ow.hero.facing || 0,
+      };
+      try { sessionStorage.setItem('zillions-overworld-return', JSON.stringify(point)); } catch { /* blocked storage */ }
+      this.ui.shell.enterMission(point);
+    }
     this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
@@ -967,7 +1059,7 @@ class App {
     // left on the minimap. The menu can orbit, but a run must not inherit it.
     this.camYaw = 0;
     this.lastDir = { x: 0, z: 0, s: false };
-    // The labyrinth has nothing to build, so Space is always the special.
+    // The labyrinth has nothing to build, so construction markers stay hidden.
     if (mode === 'labyrinth') {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
@@ -1091,7 +1183,7 @@ class App {
       // generic "open on every side" flavour when the wall line says otherwise.
       const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
       this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
-        `A ${survey.plan.label} would stand here · SPACE to found the city`, 5600);
+        `A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`, 5600);
     });
   }
 
@@ -1256,15 +1348,19 @@ class App {
   }
 
   _startTutorial() {
+    const binds = this.binds();
+    const build = keyLabel(binds.build);
+    const push = keyLabel(binds.stance_push);
+    const tower = keyLabel(binds.tower_priority);
     const steps = [
       [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
-      [5, '🏳️ This land is unclaimed! Ride to a flagged site and press SPACE to found your city.'],
-      [14, '💰 Walk to a glowing foundation and HOLD SPACE or B — your coins build it. ALT toggles Space between Build and Fight.'],
-      [24, '⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press 3 and those squads push out along the lanes on their own.'],
+      [5, `🏳️ This land is unclaimed! Ride to a flagged site and press ${build} to found your city.`],
+      [14, `💰 Walk to a glowing foundation and HOLD ${build} — your coins build it.`],
+      [24, `⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press ${push} and those squads push out along the lanes on their own.`],
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, '🔧 Nothing repairs itself — hold SPACE/B in Build mode, or hold B in Fight mode. Press T beside a tower to change what it shoots.'],
+      [62, `🔧 Nothing repairs itself — hold ${build} to repair. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -1317,6 +1413,7 @@ class App {
       }
     } else if (status.enabled) {
       this.lobby = null;
+      this._authenticatedEntryHandled = false;
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
@@ -1325,10 +1422,20 @@ class App {
       // Returning from a finished run: back onto the planet you launched
       // from. No character yet (created mid-session edge)? Land on the
       // roster, one click from making one — never a dead title screen.
-      const returning = selectedMmoCharacter(this.profile) || this.profile.lastWorld;
+      const returning = selectedMmoCharacter(this.profile);
+      this._authenticatedEntryHandled = true;
       if (returning) setTimeout(() => this._enterOverworld(
-        selectedMmoCharacter(this.profile)?.lastWorld || this.profile.lastWorld || 'earth'), 0);
-      else setTimeout(() => this.ui._showScreen('main'), 0);
+        returning.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      else setTimeout(() => this.ui.showCharacterCreator(), 0);
+      return;
+    }
+    // WoW grammar: authentication ends at Character Select. The player chooses
+    // who enters; the generic signed-out title never doubles as account home.
+    if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
+      this._authenticatedEntryHandled = true;
+      this.ui._accountAccepted = true;
+      if (selectedMmoCharacter(this.profile)) setTimeout(() => this.ui._showScreen('main'), 0);
+      else setTimeout(() => this.ui.showCharacterCreator(), 0);
     }
   }
 
@@ -1338,6 +1445,7 @@ class App {
     if (this.game?.over && this.game.mode === 'campaign'
       && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+      this.ui.shell.finishMission();
     }
     location.reload();
   }
@@ -1348,6 +1456,18 @@ class App {
       await this.auth.signInWithGoogle();
     } catch (err) {
       this.ui.setAccount({ ...this.auth.status(), error: err.message || 'Google sign-in failed.' });
+    }
+  }
+
+  async _signOut() {
+    try {
+      this._authenticatedEntryHandled = false;
+      this._clearOverworld();
+      this.ui.setOverworldMode(false);
+      await this.auth.signOut();
+      await this._applyAuth(this.auth.status());
+    } catch (err) {
+      this.ui.showBanner(err.message || 'Could not log out. Try again.', 'bad', 3600);
     }
   }
 
@@ -1403,7 +1523,10 @@ class App {
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    if (!this.game && this.ow) this._makeOverworldHero();
+    if (!this.game && this.ow) {
+      if (this.ow.world?.id !== character.lastWorld) this._travelToWorld(character.lastWorld || 'earth');
+      else this._makeOverworldHero();
+    }
   }
 
   _createMmoCharacter({ name, classKey, appearance } = {}) {
@@ -1422,9 +1545,24 @@ class App {
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    this.ui._showScreen('main');
     const klass = MMO_CLASSES[character.classKey];
     this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
+    this.ui._showScreen('main');
+  }
+
+  _deleteMmoCharacter(id) {
+    normalizeMmoCharacters(this.profile);
+    const index = this.profile.mmoCharacters.findIndex((entry) => entry.id === id);
+    if (index < 0) return;
+    const [removed] = this.profile.mmoCharacters.splice(index, 1);
+    const next = this.profile.mmoCharacters[Math.min(index, this.profile.mmoCharacters.length - 1)] || null;
+    this.profile.mmoCharacterId = next?.id || null;
+    this.profile.lastHero = next?.proxyHero || null;
+    this.profile.lastWorld = next?.lastWorld || 'earth';
+    this.ui.selectedHero = next?.proxyHero || 'alexander';
+    this._saveProfile();
+    this.ui.setProfile(this.profile);
+    this.ui.showBanner(`${removed.name} was deleted.`, '', 2400);
   }
 
   // The WC3-style persistent campaign hero this profile brings into a run.
@@ -1514,7 +1652,7 @@ class App {
     if (this.mpRole !== 'host' && this.mpRole !== 'guest') return;
     const players = this._manualRosterPlayers();
     this.ui.roomRoster(players, {
-      maxPlayers: 3,
+      maxPlayers: 4,
       isHost: this.mpRole === 'host',
       mode: this.ui.selectedMode || 'campaign',
     });
@@ -1747,7 +1885,7 @@ class App {
       this.pendingPeer = null;
       const players = this._manualRosterPlayers();
       peer.send({ t: 'lobby', n: this.peers.length + 1, players });
-      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
     };
     peer.onMessage = (m) => this._onHostMsg(idx, m);
@@ -1770,7 +1908,7 @@ class App {
       if (this.netMode) return; // reconnecting player mid-game — roster is locked
       this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       const players = this._manualRosterPlayers();
-      this.ui.mpLobby(this.peers.length, this.peers.length < 2, players, { mode: this.ui.selectedMode || 'campaign' });
+      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
     }
     else if (m.t === 'startReady') {
@@ -2118,7 +2256,7 @@ class App {
     this.ui.setRoomSettings({ level: game.level || 1, difficulty: game.difficulty || 'normal', isHost, mode: game.mode || 'campaign' });
     this.ui.setRoomExit({ isHost });
     this.ui.roomRoster(this._roomRosterFromGame(game), {
-      maxPlayers: game.max_players || 3,
+      maxPlayers: game.max_players || 4,
       isHost,
       code: game.join_code,
       mode: game.mode || this.ui.selectedMode || 'campaign',
@@ -2159,6 +2297,15 @@ class App {
       title: 'Only the host can launch this room.',
     });
     const self = (game._players || []).find((player) => player.user_id === this.lobby?.me?.id);
+    if (game.rally) {
+      this.ui.setGateRally({
+        players: game.players || expectedPlayers,
+        maxPlayers: game.max_players || 4,
+        role: isHost ? 'host' : 'guest',
+        ready: !!self?.ready,
+        canLaunch: isHost && ready && compatible,
+      });
+    }
     this.ui.setRoomReady({
       visible: !isHost && !isSpectator && game.status === 'open',
       ready: !!self?.ready,
@@ -2418,6 +2565,19 @@ class App {
     }).catch(() => this._renderCustomBrowser());
   }
 
+  playArcadeMap(map) {
+    if (!map) return;
+    this.ui.selectedMode = map.mode || 'campaign';
+    this.ui.selectedLevel = Number(map.level) || 1;
+    this.ui.showSetup({ mode: this.ui.selectedMode });
+    this.ui.setRoomSettings({
+      level: this.ui.selectedLevel,
+      difficulty: 'normal',
+      isHost: true,
+      mode: this.ui.selectedMode,
+    });
+  }
+
   async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
     const lobby = await this._openLobby();
     if (!lobby?.connected) {
@@ -2479,7 +2639,7 @@ class App {
     const rejoinIdx = this.peerUserIds.indexOf(sig.from);
     const rejoining = this.netMode && this.game && !this.game.over && rejoinIdx >= 0;
     if (this.netMode && !rejoining) return;           // mid-game seats are not open to strangers
-    if (!this.netMode && this.peers.length >= 2) return;
+    if (!this.netMode && this.peers.length >= 3) return;
     if (this.onlinePending.has(sig.from)) return;
     const peer = new NetSession(this.lobby?.iceServers);
     this._attachNetDiagnostics(peer);
@@ -2663,7 +2823,7 @@ class App {
     }, wait);
   }
 
-  async joinOnlineGame(row) {
+  async joinOnlineGame(row, { compact = false } = {}) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || this.netMode) return;
     const compatibility = roomCompatibility(row);
@@ -2681,7 +2841,10 @@ class App {
       this.ui.showBanner('This war is already in progress. Use Watch unless you already hold a player seat.', 'bad', 5000);
       return;
     }
-    this.ui.showSetup({ online: row, mode: row.mode });
+    this.ui.selectedMode = row.mode || 'campaign';
+    this.ui.selectedLevel = row.level || 1;
+    this.ui.selectedDiff = row.difficulty || 'normal';
+    if (!compact) this.ui.showSetup({ online: row, mode: row.mode });
     this.ui.onlineStatus(rejoining ? '🔌 War in progress — rejoining…' : '🔗 Knocking on the host\'s gate…');
     this.ui.setStartButton({
       text: rejoining ? '🔌  REJOINING THE WAR…' : '⏳  WAITING FOR HOST TO START',
@@ -3538,17 +3701,13 @@ class App {
     const mh = this.myHero();
     const buildMode = this.controlMode !== 'fight';
     if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
-    // Pips belong to ONE plot: the nearest fundable one within reach.
+    // Pips belong to the exact plot that Build would fund. A second nearest-
+    // ring search can disagree with game.buildTargetFor() and highlight one
+    // building while paying another.
     let pipPlotId = -1;
-    if (buildMode && mh && !mh.dead) {
-      let bd = 4.5 * 4.5;
-      for (const plot of g.plots) {
-        const act = g.firstSiegePlotActionable(plot) ? g.plotAction(plot) : null;
-        if (!act || act.mode === 'branch') continue;
-        const [px, pz] = g.payPoint(plot, mh);
-        const d = (mh.x - px) ** 2 + (mh.z - pz) ** 2;
-        if (d < bd) { bd = d; pipPlotId = plot.id; }
-      }
+    if (buildMode && g.buildTargetFor && mh && !mh.dead) {
+      const target = g.buildTargetFor(mh);
+      if (target) pipPlotId = target.plot.id;
     }
     for (const plot of g.plots) {
       if (!g.firstSiegePlotVisible(plot)) {
@@ -3884,6 +4043,28 @@ class App {
       rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
+      // Render-only local lead makes a guest's own hero answer immediately
+      // while lockstep catches up. Never apply this to the host or another
+      // guest: their meshes must stay on confirmed simulation positions.
+      if (u === g.heroes[this.myPlayer] && this.mpRole === 'guest' && !u.dead && this.lastDir) {
+        if (this._leadX === undefined) { this._leadX = 0; this._leadZ = 0; }
+        const spd = (u.def.speed || 3.5) * (u.sprintMul || 1);
+        const look = 0.16;
+        const targetX = (this.lastDir.x || 0) * spd * look;
+        const targetZ = (this.lastDir.z || 0) * spd * look;
+        const response = 1 - Math.exp(-12 * (dt || 0.016));
+        this._leadX += (targetX - this._leadX) * response;
+        this._leadZ += (targetZ - this._leadZ) * response;
+        if (Math.abs(this._leadX) > 3 || Math.abs(this._leadZ) > 3) {
+          this._leadX = 0;
+          this._leadZ = 0;
+        }
+        rec.mesh.position.set(
+          u.x + this._leadX,
+          this.map.groundY(u.x + this._leadX, u.z + this._leadZ),
+          u.z + this._leadZ,
+        );
+      }
       let attackPulse = 0;
       let attackKind = '';
       if (rec.attack) {
@@ -4140,11 +4321,16 @@ class App {
         this.ui.openGameChat();
         return;
       }
-      // The persistent world uses MMO grammar: C opens the selected hero's
-      // character/equipment screen and returns to the world when pressed again.
+      // Character info is not Character Select. The latter is reached from
+      // the Game Menu, matching traditional MMO navigation.
       if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ow) {
         e.preventDefault();
-        this.ui.toggleCharacterScreen();
+        this.ui.showCharacterSheet('gear');
+        return;
+      }
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ow) {
+        e.preventDefault();
+        this.ui.showCharacterSheet('lattice');
         return;
       }
       // Dota grammar: Tab opens the hero library from anywhere in the menu.
@@ -4175,19 +4361,26 @@ class App {
       switch (act) {
         case 'dodge': {
           e.preventDefault();
-          // Founding a colony still owns the primary input while the phase is
-          // waiting for it — there is nothing to dodge yet.
-          if (this.game.phase === 'found') { this._tryFound(); break; }
+          // The mode owns Space. Held-input turns it into payment in Build
+          // mode; only Fight mode may dispatch a dodge command.
+          if (this.controlMode !== 'fight') {
+            if (this.game.phase === 'found') this._tryFound();
+            break;
+          }
+          if (this.game.phase === 'found') break;
           const dir = this.lastDir || { x: 0, z: 0 };
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
         case 'ability1':
-          if (this.controlMode === 'fight' || this.game.phase !== 'found') this.tryCast();
+          if (this.controlMode === 'fight') this.tryCast();
           break;
         case 'build_mode':
           e.preventDefault();
           this.toggleControlMode();
+          break;
+        case 'build':
+          if (this.game.phase === 'found') this._tryFound();
           break;
         case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
         case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
@@ -4268,14 +4461,14 @@ class App {
       this.lastDir = { x: dx, z: dz, s };
       this.issue({ t: 'hdir', p: this.myPlayer, x: dx, z: dz, s });
     }
-    // Hold-to-build: B always pays. Space/button pay only in Build mode, so the
-    // player can toggle into Fight mode when they want the special to win.
+    // Build mode owns construction input. Space is the mode-primary action;
+    // the configured Build key remains an accessible secondary binding.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
-    const buildModePays = this.controlMode === 'build' && canPay
-      && (isHeld(bindsNow, this.keys, 'dodge') || this.buttonPay);
-    const pay = isHeld(bindsNow, this.keys, 'build') || buildModePays;
+    const buttonPays = canPay && this.buttonPay;
+    const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
+    const pay = this.controlMode === 'build' && canPay && (buildHeld || buttonPays);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
@@ -4345,7 +4538,7 @@ class App {
   toggleControlMode() {
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
-    if (this.lastPay && !isHeld(this.binds(), this.keys, 'build')) {
+    if (this.lastPay && this.controlMode === 'fight') {
       this.lastPay = false;
       this.issue({ t: 'pay', p: this.myPlayer, on: false });
     }
@@ -4456,41 +4649,7 @@ class App {
       this.sun.target.position.set(this.focus.x, 0, this.focus.z);
       return;
     }
-    if (!this.game) {
-      // Starship director: orbit until a distress light is acquired, dive to
-      // the active stand, then pull back when the signal dies.
-      this.menuYaw += dt * 0.018;
-      const shot = this.menuShow?.cameraState();
-      const dive = shot?.phase === 'run' ? shot.progress : 0;
-      const surfaceVisible = dive > 0.18;
-      if (this.menuTerrain) this.menuTerrain.visible = surfaceVisible;
-      this.menuShow?.setSurfaceVisible(surfaceVisible);
-      const tx = shot?.x ?? MAP_SIZE / 2;
-      const tz = shot?.z ?? MAP_SIZE / 2;
-      const k = 1 - Math.exp(-1.35 * dt);
-      this.focus.x += (lerp(MAP_SIZE / 2, tx, dive) - this.focus.x) * k;
-      this.focus.z += (lerp(MAP_SIZE / 2 - 8, tz, dive) - this.focus.z) * k;
-      this.focus.y += (lerp(2.5, this.menuMap?.groundY(tx, tz) || 0, dive) - this.focus.y) * k;
-      const dist = lerp(105, 28, dive);
-      const elev = lerp(0.58, 0.72, dive);
-      this.camera.position.set(
-        this.focus.x + Math.sin(this.menuYaw) * Math.cos(elev) * dist,
-        Math.sin(elev) * dist,
-        this.focus.z + Math.cos(this.menuYaw) * Math.cos(elev) * dist,
-      );
-      this.camera.lookAt(this.focus);
-      const title = document.querySelector('.title-screen');
-      if (title && shot) {
-        const ndc = this._menuProjV.set(tx, this.menuMap?.groundY(tx, tz) || 0, tz).project(this.camera);
-        title.style.setProperty('--signal-x', `${clamp((ndc.x * .5 + .5) * 100, 8, 72)}%`);
-        title.style.setProperty('--signal-y', `${clamp((-ndc.y * .5 + .5) * 100, 12, 88)}%`);
-        title.style.setProperty('--fog-alpha', surfaceVisible ? '.88' : '0');
-      }
-      const telemetry = document.querySelector('#title-telemetry');
-      if (telemetry && shot) telemetry.innerHTML = `<b>${shot.scenario}</b><span>SIGNAL ${String(shot.observed).padStart(4, '0')} · ${shot.phase === 'run' ? `${shot.survivors} SURVIVORS` : 'SEARCHING'}</span>`;
-      if (shot?.observed) localStorage.setItem('zillions-title-stands', String(shot.observed));
-      return;
-    }
+    if (!this.game) return;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
     const h = this.myHero();
@@ -5242,12 +5401,14 @@ class App {
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
             const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
-            const buildKeys = buildMode
-              ? '<kbd>SPACE</kbd> or <kbd>B</kbd>'
-              : '<kbd>B</kbd>';
+            const buildKey = keyLabel(this.binds().dodge);
+            const buildAltKey = keyLabel(this.binds().build);
+            const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
               ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-              : `<div>Hold ${buildKeys} — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}${buildMode ? ' · Alt toggles Fight mode.' : ' · Fight mode: Space fires your special. Alt toggles.'}</div>`;
+              : buildMode
+                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
+                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
           }
         }
       }
@@ -5271,10 +5432,6 @@ class App {
     }
 
     if (!this.game && this.ow) this._updateOverworld(dt, t);
-    if (!this.game && !this.ow) {
-      this.menuShow?.update(dt, t);
-      this._updateTitleSpace(t);
-    }
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

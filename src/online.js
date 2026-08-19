@@ -10,7 +10,7 @@ const CURRENT_RULES = 'survival-plots';
 // v4: the Labyrinth mode — a new room mode older builds would simulate as a
 // founding campaign run, a new lockstep `blessing` command they would drop,
 // and changed found-phase flow-field semantics.
-export const LOBBY_PROTOCOL_VERSION = 4;
+export const LOBBY_PROTOCOL_VERSION = 5;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
@@ -76,11 +76,14 @@ function roomToGame(row) {
     difficulty: row.difficulty || 'normal',
     // Custom games (the WC3 browser) ride the same rooms with a kind tag.
     custom: metadata.kind === 'custom',
+    rally: metadata.kind === 'rally',
+    rallyWorldId: metadata.worldId || null,
+    rallyGateKey: metadata.gateKey || null,
     mapName: metadata.mapName || null,
     // A selected roster is authoritative. metadata.players is only a legacy
     // fallback for rows fetched without the nested relation.
     players: Math.max(1, hasRoster ? players.length : Number(metadata.players || 1)),
-    max_players: row.max_players || 3,
+    max_players: row.max_players || 4,
     status: row.status,
     updated_at: row.updated_at || row.last_seen_at,
     _players: players,
@@ -172,11 +175,12 @@ export class OnlineLobby {
         return;
       }
       this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
-      // Poll the games list too: realtime events on rooms depend on the
-      // supabase_realtime publication, so the browse list must self-heal even
-      // when no postgres_changes event arrives.
-      this.refreshGames().catch(() => {});
     }, 15 * 1000);
+    // Realtime is the fast path. This read-only fallback only refreshes the
+    // room browser; it must not multiply presence writes for every player.
+    this._gamesPoll = setInterval(() => {
+      if (!this.matchActive) this.refreshGames().catch(() => {});
+    }, 5 * 1000);
 
     this.sb.channel('zl-rooms-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { if (!this.matchActive) this.refreshGames(); })
@@ -483,7 +487,7 @@ export class OnlineLobby {
   // the portal filter to these. (See isCustomGame at module level.)
 
   async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1,
-    name = null, maxPlayers = 3, kind = null, mapName = null } = {}) {
+    name = null, maxPlayers = 4, kind = null, mapName = null, worldId = null, gateKey = null } = {}) {
     const metadata = {
       level,
       mode,
@@ -492,6 +496,8 @@ export class OnlineLobby {
       protocolVersion: LOBBY_PROTOCOL_VERSION,
       clientVersion: CLIENT_VERSION,
       ...(kind ? { kind, mapName: mapName || null } : {}),
+      ...(worldId ? { worldId } : {}),
+      ...(gateKey ? { gateKey } : {}),
     };
     const { data, error } = await this.sb.from('rooms').insert({
       name: name || `${this.me.name}'s frontier`,
@@ -499,7 +505,7 @@ export class OnlineLobby {
       visibility,
       rules: CURRENT_RULES,
       difficulty,
-      max_players: Math.max(1, Math.min(3, Number(maxPlayers) || 3)),
+      max_players: Math.max(1, Math.min(4, Number(maxPlayers) || 4)),
       metadata,
       last_seen_at: new Date().toISOString(),
     }).select('id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at').single();
