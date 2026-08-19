@@ -107,6 +107,25 @@ try {
   })()`), true, 'new account must create a character, return to Character Select, and enter Earth');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
+    let customOpened = 0;
+    app.ui.cb.onCustomOpen = () => { customOpened++; };
+    const custom = document.querySelector('#ow-custom-quick');
+    custom.click();
+    return !!custom && !custom.classList.contains('hidden') && customOpened === 1;
+  })()`), true, 'the overworld HUD must keep Custom Games directly visible and actionable');
+  assert.equal(await evaluate(`(() => {
+    const app = window.__app;
+    const gate = app.owMap.overworldLayout.gates.find((entry) => !entry.portal && entry.levelId === 1);
+    let launches = 0;
+    let rallies = 0;
+    app._launchGateMission = () => { launches++; };
+    app._joinGateRally = () => { rallies++; };
+    app._onOverworldEvent({ t: 'gate', gate, state: { locked: false, cleared: false } });
+    document.querySelector('#gate-go').click();
+    return launches === 1 && rallies === 0 && document.querySelector('#gate-confirm').classList.contains('hidden');
+  })()`), true, 'ENTER MISSION must launch the selected map in one click instead of silently creating a rally');
+  assert.equal(await evaluate(`(() => {
+    const app = window.__app;
     app.ui._showScreen('help');
     document.querySelector('#h-back').click();
     return app.ui.shell.base === 'overworld' && app.ui.overlayHidden();

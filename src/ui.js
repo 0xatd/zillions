@@ -72,7 +72,10 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="messages"></div>
-      <button id="ow-menu" class="tbtn owmenu hidden" title="Game menu (Esc)">☰ MENU</button>
+      <div id="ow-quick-actions" class="owquick hidden">
+        <button id="ow-custom-quick" class="tbtn" title="Browse live and arcade games">CUSTOM GAMES</button>
+        <button id="ow-menu" class="tbtn" title="Game menu (Esc)">☰ MENU</button>
+      </div>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -708,6 +711,10 @@ export class UI {
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
     q('#ow-menu').onclick = () => this.toggleOverlay();
+    q('#ow-custom-quick').onclick = () => {
+      this._customFrom = 'overworld';
+      if (this.cb.onCustomOpen) this.cb.onCustomOpen();
+    };
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -1896,7 +1903,7 @@ export class UI {
     this._overworldMode = !!on;
     if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
-    this.root.querySelector('#ow-menu').classList.toggle('hidden', !on);
+    this.root.querySelector('#ow-quick-actions').classList.toggle('hidden', !on);
   }
 
   showGalaxy(destinations, currentWorld = 'earth', macro = null) {
@@ -2067,7 +2074,7 @@ export class UI {
         `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
     modal.innerHTML = `
       <div class="gatepromptcard">
-        <span class="roomeyebrow">Mission rally · 1–4 players</span>
+        <span class="roomeyebrow">Mission · Solo deployment</span>
         <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
         <p>${cave
           ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
@@ -2076,7 +2083,7 @@ export class UI {
         ${diffSeg}
         <div class="roomconfirmactions">
           <button class="tbtn" id="gate-back">CLOSE</button>
-          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN TRIALS' : 'READY / ENTER'}</button>
+          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN TRIALS' : 'ENTER MISSION'}</button>
         </div>
       </div>`;
     const close = () => modal.classList.add('hidden');
@@ -2088,7 +2095,7 @@ export class UI {
         for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
       };
     }
-    modal.querySelector('#gate-go').onclick = () => { if (cave) close(); onEnter && onEnter(chosen); };
+    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
     modal.classList.remove('hidden');
   }
 
@@ -3064,7 +3071,7 @@ export class UI {
 
   hideStart() {
     this.root.querySelector('#overlay').classList.add('hidden');
-    this.root.querySelector('#ow-menu')?.classList.add('hidden');
+    this.root.querySelector('#ow-quick-actions')?.classList.add('hidden');
     this.pauseOpen = false;
   }
 

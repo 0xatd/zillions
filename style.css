@@ -1153,8 +1153,11 @@ body::after {
 
 /* ---------- overworld ---------- */
 /* The explicit character/account menu over the walkable planet. */
-.owmenu {
+.owquick {
   position: absolute; top: 14px; right: 14px; z-index: 60;
+  display: flex; gap: 8px;
+}
+.owquick .tbtn {
   width: auto; height: 40px; padding: 0 13px; font-size: 10px; font-weight: 900; letter-spacing: .11em;
 }
 /* Overworld boots: the hub is a translucent overlay, never a wall. */
