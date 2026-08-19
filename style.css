@@ -1538,6 +1538,7 @@ body::after {
 
 .sheet-screen {
   position: absolute; inset: 0; display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr; gap: 18px; padding: 26px 30px 24px;
   /* The menu vignette runs behind every screen. The sheet is dense text and
      needs to sit on something solid, not on a moving battlefield. */
@@ -1719,6 +1720,13 @@ body::after {
 }
 
 @media (max-width: 520px) {
+  .sheet-head,.sheet-tabs { width: 100%; min-width: 0; max-width: 100%; }
+  .sheet-tabs { overflow-x: auto; padding-bottom: 4px; }
+  .sheet-tab { flex: 0 0 auto; }
+  .crafting-panel { width: 100%; max-width: 100%; min-width: 0; overflow: visible; grid-auto-rows: max-content; }
+  .crafting-panel>section { min-width: 0; overflow: visible; overflow-wrap: anywhere; }
+  .crafting-panel .market-item { width: 100%; min-width: 0; grid-template-columns: 32px minmax(0,1fr); }
+  .crafting-panel button { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   #screen-custom {
     display: flex; overflow-y: auto;
   }

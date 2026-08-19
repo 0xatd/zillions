@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { evaluateAuthorityCraft, CRAFT_VENDOR } from '../api/economy.js';
+import handler, { evaluateAuthorityCraft, CRAFT_VENDOR } from '../api/economy.js';
 import { socketComponentMods } from '../src/crafting.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -22,6 +22,9 @@ assert.match(schema, /player_wallets\(user_id, salvage_alloy\) values \(p_actor,
 assert.match(api, /authorityCraftSnapshot[\s\S]*evaluateAuthorityCraft/);
 assert.doesNotMatch(api, /alloyBalance:\s*body\./);
 assert.doesNotMatch(api, /materials:\s*body\./);
+assert.match(api, /crafting_material_balances\?select=material_id,quantity[^`]+character_id=eq\.\$\{authoritativeCharacterId\}/);
+assert.match(api, /component_instances\?select=id,owner_user_id,character_id,component_id,rank,location[^`]+character_id=eq\.\$\{authoritativeCharacterId\}/);
+assert.match(schema, /component_id text not null check \(component_id in \('frame_drive'[\s\S]*'phase_ward'\)\)/);
 assert.equal(CRAFT_VENDOR.materials.alloy_shard, 8);
 
 const actor = '11111111-1111-1111-1111-111111111111';
@@ -72,4 +75,37 @@ assert.equal(ledger.materials.alloy_shard, 10, 'stale craft must roll back mater
 const removeCommit = evaluateAuthorityCraft('socket_remove', { ...authority, item: { ...authority.item, revision: ledger.revision, sockets: ledger.sockets }, componentInventoryCount: 0 }, { requestId: 'return-live', itemRevision: ledger.revision, socketIndex: 0 }, actor);
 commit(removeCommit);
 assert.equal(ledger.loose.has(componentId), true, 'remove returns the same component instance');
+
+const makeResponse = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
+const makeRequest = (body) => ({ method: 'POST', headers: { authorization: 'Bearer player' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); } });
+process.env.SUPABASE_URL = 'https://zillions.invalid';
+process.env.SUPABASE_ANON_KEY = 'anon';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'service';
+const originalFetch = globalThis.fetch;
+const stored = { ok: true, duplicate: false, character: { revision: 8 }, wallet: { balance: 377 }, items: [], materials: {}, components: [] };
+let unexpectedAuthorityRead = false;
+globalThis.fetch = async (url) => {
+  const target = String(url);
+  if (target.endsWith('/auth/v1/user')) return { ok: true, json: async () => ({ id: actor }) };
+  if (target.includes('/game_characters?')) return { ok: true, json: async () => ([{ id: '55555555-5555-5555-5555-555555555555', revision: 8 }]) };
+  if (target.includes('/economy_requests?')) return { ok: true, json: async () => ([{ request_id: 'same-request', response_payload: stored }]) };
+  unexpectedAuthorityRead = true; return { ok: false, json: async () => ({}) };
+};
+const replayResponse = makeResponse();
+await handler(makeRequest({ action: 'craft_recipe', requestId: 'same-request', characterId: 'char-1', itemId, itemRevision: 4, recipeId: 'add_socket' }), replayResponse);
+assert.equal(replayResponse.status, 200);
+assert.deepEqual(replayResponse.body, { ...stored, duplicate: true }, 'completed replay must return the stored exact result');
+assert.equal(unexpectedAuthorityRead, false, 'completed replay must not re-read or mutate authority state');
+globalThis.fetch = async (url) => {
+  const target = String(url);
+  if (target.endsWith('/auth/v1/user')) return { ok: true, json: async () => ({ id: actor }) };
+  if (target.includes('/game_characters?')) return { ok: true, json: async () => ([{ id: '55555555-5555-5555-5555-555555555555', revision: 8 }]) };
+  if (target.includes('/economy_requests?')) return { ok: true, json: async () => ([{ request_id: 'busy-request', response_payload: null }]) };
+  return { ok: false, json: async () => ({}) };
+};
+const busyResponse = makeResponse();
+await handler(makeRequest({ action: 'craft_recipe', requestId: 'busy-request', characterId: 'char-1', itemId, itemRevision: 4, recipeId: 'add_socket' }), busyResponse);
+assert.equal(busyResponse.status, 409);
+assert.equal(busyResponse.body.error, 'request_in_progress');
+globalThis.fetch = originalFetch;
 console.log('crafting-authority-check: authority, replay, revisions, ownership, debits, components, provenance, and stats hold');

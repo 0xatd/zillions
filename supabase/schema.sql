@@ -96,7 +96,7 @@ create table if not exists public.component_instances (
   id uuid primary key default gen_random_uuid(),
   owner_user_id uuid not null references auth.users(id) on delete cascade,
   character_id uuid not null references public.game_characters(id) on delete cascade,
-  component_id text not null,
+  component_id text not null check (component_id in ('frame_drive','reflex_drive','signal_drive','kinetic_optic','thermal_optic','bulwark_ward','phase_ward')),
   rank integer not null default 1 check (rank between 1 and 5),
   location text not null default 'inventory' check (location in ('inventory','socketed')),
   item_instance_id uuid references public.item_instances(id) on delete set null,

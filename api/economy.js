@@ -107,22 +107,30 @@ async function authorityCraftSnapshot(url, serviceKey, actorId, body) {
   const characterId = cleanText(body.characterId, 96);
   const itemId = cleanText(body.itemId, 64);
   const componentId = cleanText(body.componentId, 64);
-  const [characters, items, wallet, materials, components, requests] = await Promise.all([
+  const [characters, requests] = await Promise.all([
     fetch(`${url}/rest/v1/game_characters?select=id,revision&user_id=eq.${actorId}&client_character_id=eq.${encodeURIComponent(characterId)}&limit=1`, { headers }),
-    fetch(`${url}/rest/v1/item_instances?select=id,owner_user_id,character_id,legacy_key,revision,sockets&id=eq.${itemId}&owner_user_id=eq.${actorId}&limit=1`, { headers }),
-    fetch(`${url}/rest/v1/player_wallets?select=salvage_alloy&user_id=eq.${actorId}&limit=1`, { headers }),
-    fetch(`${url}/rest/v1/crafting_material_balances?select=material_id,quantity&user_id=eq.${actorId}`, { headers }),
-    componentId ? fetch(`${url}/rest/v1/component_instances?select=id,owner_user_id,character_id,component_id,rank,location&id=eq.${componentId}&owner_user_id=eq.${actorId}&limit=1`, { headers }) : Promise.resolve(null),
-    fetch(`${url}/rest/v1/economy_requests?select=request_id&actor_user_id=eq.${actorId}&request_id=eq.${encodeURIComponent(cleanText(body.requestId, 64))}`, { headers }),
+    fetch(`${url}/rest/v1/economy_requests?select=request_id,response_payload&actor_user_id=eq.${actorId}&request_id=eq.${encodeURIComponent(cleanText(body.requestId, 64))}`, { headers }),
   ]);
-  const parsed = await Promise.all([characters, items, wallet, materials, components, requests].map((response) => response ? response.json().catch(() => []) : []));
-  const [characterRows, itemRows, walletRows, materialRows, componentRows, requestRows] = parsed;
-  if (!characterRows[0] || !itemRows[0] || itemRows[0].character_id !== characterRows[0].id) throw Object.assign(new Error('unauthorized_ownership'), { status: 403 });
+  const [characterRows, requestRows] = await Promise.all([characters.json().catch(() => []), requests.json().catch(() => [])]);
+  if (requestRows[0]) {
+    if (requestRows[0].response_payload == null) throw Object.assign(new Error('request_in_progress'), { status: 409 });
+    return { duplicateResponse: { ...requestRows[0].response_payload, duplicate: true } };
+  }
+  if (!characterRows[0]) throw Object.assign(new Error('unauthorized_ownership'), { status: 403 });
+  const authoritativeCharacterId = characterRows[0].id;
+  const [items, wallet, materials, components] = await Promise.all([
+    fetch(`${url}/rest/v1/item_instances?select=id,owner_user_id,character_id,legacy_key,revision,sockets&id=eq.${itemId}&owner_user_id=eq.${actorId}&character_id=eq.${authoritativeCharacterId}&limit=1`, { headers }),
+    fetch(`${url}/rest/v1/player_wallets?select=salvage_alloy&user_id=eq.${actorId}&limit=1`, { headers }),
+    fetch(`${url}/rest/v1/crafting_material_balances?select=material_id,quantity&user_id=eq.${actorId}&character_id=eq.${authoritativeCharacterId}`, { headers }),
+    componentId ? fetch(`${url}/rest/v1/component_instances?select=id,owner_user_id,character_id,component_id,rank,location&id=eq.${componentId}&owner_user_id=eq.${actorId}&character_id=eq.${authoritativeCharacterId}&limit=1`, { headers }) : Promise.resolve(null),
+  ]);
+  const [itemRows, walletRows, materialRows, componentRows] = await Promise.all([items, wallet, materials, components].map((response) => response ? response.json().catch(() => []) : []));
+  if (!itemRows[0]) throw Object.assign(new Error('unauthorized_ownership'), { status: 403 });
   const inventoryResponse = await fetch(`${url}/rest/v1/component_instances?select=id&character_id=eq.${characterRows[0].id}&location=eq.inventory`, { headers });
   const inventory = await inventoryResponse.json().catch(() => []);
   return { character: characterRows[0], item: itemRows[0], wallet: walletRows[0], component: componentRows?.[0],
     materials: Object.fromEntries(materialRows.map((row) => [row.material_id, row.quantity])), componentInventoryCount: inventory.length,
-    processedRequestIds: requestRows.map((row) => row.request_id) };
+    processedRequestIds: [] };
 }
 
 export default async function handler(req, res) {
@@ -152,6 +160,7 @@ export default async function handler(req, res) {
     }
     if (['craft_recipe','socket_insert','socket_remove'].includes(action)) {
       const authority = await authorityCraftSnapshot(url, serviceKey, user.id, body);
+      if (authority.duplicateResponse) return send(res, 200, authority.duplicateResponse);
       craftProposal = evaluateAuthorityCraft(action, authority, body, user.id);
       if (!craftProposal.ok) return send(res, ['stale_revision','duplicate_request'].includes(craftProposal.error.code) ? 409 : 400, craftProposal);
     }
