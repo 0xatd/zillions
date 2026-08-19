@@ -5,6 +5,7 @@ import { socketComponentMods } from '../src/crafting.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const schema = read('supabase/schema.sql');
+const migration = read('supabase/migrations/20260819233500_authoritative_economy.sql');
 const api = read('api/economy.js');
 const economy = read('src/economy.js');
 const game = read('src/game.js');
@@ -25,6 +26,12 @@ assert.doesNotMatch(api, /materials:\s*body\./);
 assert.match(api, /crafting_material_balances\?select=material_id,quantity[^`]+character_id=eq\.\$\{authoritativeCharacterId\}/);
 assert.match(api, /component_instances\?select=id,owner_user_id,character_id,component_id,rank,location[^`]+character_id=eq\.\$\{authoritativeCharacterId\}/);
 assert.match(schema, /component_id text not null check \(component_id in \('frame_drive'[\s\S]*'phase_ward'\)\)/);
+assert.match(schema, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/, 'RPC authority must use the current Supabase role helper');
+for (const marker of ['pg_advisory_xact_lock', 'idempotency_conflict', 'grant execute on function public.economy_mutate']) {
+  assert.match(migration, new RegExp(marker), `versioned economy migration is missing ${marker}`);
+}
+assert.match(schema, /pg_advisory_xact_lock\(hashtextextended\(p_actor::text \|\| ':' \|\| p_request_id, 0\)\)/, 'request keys must serialize concurrent retries');
+assert.match(schema, /v_existing_request\.action <> p_action or v_existing_request\.request_payload <> p_payload[\s\S]*idempotency_conflict/, 'reused request IDs must bind to the original action and payload');
 assert.equal(CRAFT_VENDOR.materials.alloy_shard, 8);
 
 const actor = '11111111-1111-1111-1111-111111111111';

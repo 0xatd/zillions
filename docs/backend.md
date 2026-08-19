@@ -231,7 +231,7 @@ pre-sale key, base, affixes, sockets, price, and revision data. The request
 shape leaves room for a future server-defined `vendor_id` and stock version.
 
 The first signed-in request registers character identity only. It starts the
-authoritative character at level 1 with zero Alloy and no items. Browser-owned
+authoritative character at level 1 with a one-time account grant of 500 Alloy and no items. Browser-owned
 legacy currency and item keys stay in an offline, read-only archive marked
 `pending_audited_migration`. They never enter authoritative tables without a
 future server-derived snapshot or one-time server-issued migration ticket.
