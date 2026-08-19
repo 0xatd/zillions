@@ -137,6 +137,22 @@ export class AuthClient {
     if (error) throw error;
   }
 
+  async signInWithEmail(email) {
+    if (!this.client) await this.init();
+    if (!this.client || !this.enabled) throw new Error('Cloud profile is not configured.');
+    const address = String(email || '').trim().toLowerCase();
+    if (!address || !address.includes('@')) throw new Error('Enter a valid email address.');
+    const { error } = await this.client.auth.signInWithOtp({
+      email: address,
+      options: {
+        emailRedirectTo: `${location.origin}/`,
+        shouldCreateUser: true,
+      },
+    });
+    if (error) throw error;
+    return address;
+  }
+
   async signOut() {
     if (!this.client) return;
     const { error } = await this.client.auth.signOut();

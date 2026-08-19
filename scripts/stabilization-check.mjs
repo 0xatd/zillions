@@ -9,10 +9,18 @@ const ui = read('src/ui.js');
 const game = read('src/game.js');
 const keybinds = read('src/keybinds.js');
 const online = read('src/online.js');
+const auth = read('src/auth.js');
 const css = read('style.css');
 
-// ENTER WORLD is the login/start action, not a chain of roster confirmations.
-assert.match(ui, /id="a-google">ENTER WORLD</, 'the signed-out front door must say ENTER WORLD');
+// The signed-out front door uses standard provider labels. Enter World belongs
+// to Character Select after authentication.
+assert.match(ui, /id="a-google"[\s\S]*Continue with Google/, 'the signed-out front door must name the Google provider');
+assert.match(ui, /id="a-email-form"[\s\S]*Continue with email/, 'the signed-out front door must support passwordless email sign-in');
+assert.match(main, /showLoginBackdrop\(\)/, 'the login screen must start the animated orbital backdrop');
+assert.match(main, /!this\.game && !this\.ow && this\.titleSpace[\s\S]*_updateTitleSpace\(t\)/,
+  'the orbital title backdrop must animate while no world or battle is active');
+assert.match(auth, /signInWithEmail\(email\)[\s\S]*signInWithOtp\([\s\S]*emailRedirectTo: `\$\{location\.origin\}\/`/,
+  'email sign-in must use a same-origin passwordless magic link');
 assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never become signed-in account home');
 assert.match(ui, /id="m-enter-world">ENTER WORLD</, 'Character Select must own Enter World');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,

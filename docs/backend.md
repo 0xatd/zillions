@@ -13,9 +13,10 @@ this file.
 - Legacy/cloud mirror: Vercel Blob through same-origin Vercel API routes
 - Match networking: browser WebRTC DataChannels, host-sequenced lockstep
 
-Production is account-first. On `zillions.taborlin.co`, the game shell is gated
-by Google/Supabase sign-in. Static local play can remain for development and
-offline smoke tests, but it must not be presented as a production profile.
+Production is account-first. On `zillions.taborlin.co`, the game shell requires
+Google or passwordless email sign-in through Supabase. Static local play can
+remain for development and offline smoke tests. Do not present static play as
+a production profile.
 After Google sign-in, players claim a public username for the email-backed
 account. Public profile, lobby, chat, room, and invite surfaces use that
 username. They must not show the email address or a Google account name.
@@ -150,12 +151,12 @@ RLS policy intent:
 3. Profile, settings, and latest save stay local.
 4. This is not the production identity model.
 
-### Google Profile
+### Account Profile
 
 1. Browser checks `/api/auth-config`.
 2. If Supabase config is enabled, `src/auth.js` loads `@supabase/supabase-js`
    from ESM.
-3. The account modal starts Google OAuth.
+3. The account modal starts Google OAuth or sends a passwordless email link.
 4. Supabase Auth returns to `https://zillions.taborlin.co/`.
 5. The browser creates a private fallback handle if the profile is missing.
 6. If `username_set` is false, the account gate asks the player to claim a
