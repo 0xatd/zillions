@@ -823,7 +823,11 @@ class App {
           this.ui.showSetup({ mode: 'labyrinth' });
           return;
         }
-        this._joinGateRally(ev.gate, diff);
+        // A campaign gate is the direct single-player door. Party formation
+        // belongs in Custom Games, where players can see and control the room
+        // they are joining. Do not turn this button into a hidden two-click
+        // public rally flow.
+        this._launchGateMission(ev.gate, diff);
       },
     });
   }
