@@ -11,10 +11,25 @@ import * as THREE from 'three';
 import { applyRim } from './tactical-visuals.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
-const M = (c, e = 0) => applyRim(
-  new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.38, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
+// Phase-2 material pass: three distinct finishes so a rig reads as ARMOR on
+// a CLOTH body with METAL guns — not one flat plastic. art-direction.md:
+// "faction color as a controlled secondary panel, not a full-body tint," so
+// the hull is the shared ivory/graphite family and faction color lands on
+// pauldrons, chest chevrons, and trim where it reads at gameplay zoom.
+const M_ARMOR = (c) => applyRim(
+  new THREE.MeshStandardMaterial({ roughness: 0.38, metalness: 0.55, color: c }),
   { color: 0xfff3e0, power: 2.2, strength: 0.42 },
-);
+); // plate: satin metal
+const M_CLOTH = (c) => applyRim(
+  new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.02, color: c }),
+  { color: 0xfff3e0, power: 2.2, strength: 0.3 },
+); // weave: near-matte
+const M_METAL = (c, e = 0) => applyRim(
+  new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.78, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
+  { color: 0xfff3e0, power: 2.2, strength: 0.42 },
+); // guns: bright steel
+const M = (c, e = 0) => M_METAL(c, e); // legacy signature — weapons/kit
+const M_HULL = () => M_ARMOR(0xd9d3c3); // shared ivory plate family
 
 const shade = (hex, f) => new THREE.Color(hex).multiplyScalar(f).getHex();
 
@@ -29,13 +44,13 @@ function mesh(parent, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
 const box = (parent, mat, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) =>
   mesh(parent, new THREE.BoxGeometry(w, h, d), mat, x, y, z, rx, ry, rz);
 const sph = (parent, mat, r, x, y, z, sx = 1, sy = 1, sz = 1) => {
-  const m = mesh(parent, new THREE.SphereGeometry(r, 10, 8), mat, x, y, z);
+  const m = mesh(parent, new THREE.SphereGeometry(r, 16, 12), mat, x, y, z);
   m.scale.set(sx, sy, sz);
   return m;
 };
 // Capsule: the body-part primitive. Along +Y before rotation; smooth normals.
 const cap = (parent, mat, r, len, x, y, z, rx = 0, ry = 0, rz = 0) =>
-  mesh(parent, new THREE.CapsuleGeometry(r, len, 4, 10), mat, x, y, z, rx, ry, rz);
+  mesh(parent, new THREE.CapsuleGeometry(r, len, 6, 16), mat, x, y, z, rx, ry, rz);
 const cyl = (parent, mat, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 8) =>
   mesh(parent, new THREE.CylinderGeometry(r1, r2, h, seg), mat, x, y, z, rx, ry, rz);
 const cone = (parent, mat, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
@@ -54,8 +69,16 @@ function humanoid({
 }) {
   const root = new THREE.Group();
   const W = bulk, H = tall;
-  const armorM = M(armor), clothM = M(cloth ?? shade(armor, 0.55)), bootM = M(boot);
-  const shellM = M(shell), packM = M(pack);
+  // Phase-2 hull/accent split: the BODY wears the shared ivory-plate family
+  // (metallic satin), the FACTION COLOR lands on pauldrons + chest chevron
+  // where it reads at zoom — art-direction.md's "controlled secondary panel,
+  // not a full-body tint." Cloth stays matte weave; boots/pack stay dark kit.
+  const armorM = M_ARMOR(shell);
+  const accentM = M_ARMOR(armor);
+  const clothM = M_CLOTH(cloth ?? shade(shell, 0.62));
+  const bootM = M_CLOTH(boot);
+  const shellM = M_METAL(shell);
+  const packM = M_CLOTH(pack);
 
   const limbs = {};
   if (!legless) {
@@ -76,13 +99,13 @@ function humanoid({
   cap(torso, armorM, 0.135 * W, 0.14 * H, 0, 0.16 * H, 0);                  // cuirass core
   const cuirass = sph(torso, armorM, 0.15 * W, 0, 0.2 * H, 0, 1.15, 1.05, 0.78); // barrel chest
   cuirass.castShadow = true;
-  box(torso, shellM, 0.2 * W, 0.13 * H, 0.045, 0, 0.2 * H, 0.1 * W + 0.025); // chest plate
+  box(torso, accentM, 0.2 * W, 0.13 * H, 0.045, 0, 0.2 * H, 0.1 * W + 0.025); // chest plate — faction panel
   if (skirt) cone(torso, clothM, 0.26 * W, 0.5 * H, 0, -0.16 * H, 0, 0, 0, 0, 10);
 
   for (const s of [-1, 1]) {
     const arm = new THREE.Group();
     arm.position.set(s * 0.2 * W, 0.78 * H, 0);
-    sph(arm, armorM, 0.095 * W, s * 0.025 * W, 0.02, 0);                   // pauldron
+    sph(arm, accentM, 0.095 * W, s * 0.025 * W, 0.02, 0);                  // pauldron — faction accent
     cap(arm, armorM, 0.042 * W, 0.1 * H, 0, -0.11 * H, 0);                 // upper arm
     cap(arm, clothM, 0.037 * W, 0.1 * H, 0, -0.27 * H, 0.015);             // forearm
     sph(arm, bootM, 0.048 * W, 0, -0.37 * H, 0.02, 1, 0.8, 1.15);          // glove
