@@ -1434,7 +1434,12 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
-    if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
+    // A finished run returns to the planet it launched from. Offline/static
+    // builds never sign in, so gating on signedIn stranded the local
+    // commander on the title screen after a victory (QA 2026-08-19).
+    const returningFromRun = (status.signedIn || !status.enabled)
+      && sessionStorage.getItem('zillions-return-to-world') === '1';
+    if (returningFromRun) {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: back onto the planet you launched
       // from. No character yet (created mid-session edge)? Land on the
