@@ -37,7 +37,8 @@ Use this source order when documents disagree:
 
 ## Current Playable Game
 
-Normal play uses a traditional MMO flow: login, character select, Enter World,
+Normal play uses a traditional MMO flow: login with Google or an email magic
+link, character select, Enter World,
 last planetary location, Orbital Lift, and galaxy map. Each planet is a persistent
 shared hub with its own presence channel and entrances to playable instances.
 The profile remembers the last world.

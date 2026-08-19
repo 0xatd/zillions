@@ -208,6 +208,7 @@ class App {
       onGalaxyOpen: () => this._openGalaxyMap(),
       onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
       onSignIn: () => this._signIn(),
+      onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
       onOfflineContinue: () => this.ui.setAccount({ ready: true, enabled: false, signedIn: false, reason: 'static', name: this.profile.name }),
       onUsername: (username) => this._claimUsername(username),
@@ -326,19 +327,23 @@ class App {
     // Failures stay silent — solo play must never feel blocked by the lobby.
     this._hubChatLog = [];
     this._hubChatDirty = false;
-    setTimeout(() => this._openLobby().then((l) => {
-      if (!l || !l.connected) return;
-      l.loadChat().then((rows) => {
-        this._hubChatLog = rows || [];
-        this.ui.hubChat(this._hubChatLog);
-        this.root?.querySelector?.('#hub-panel')?.classList.remove('hidden');
+    setTimeout(() => {
+      if (!this.auth?.isSignedIn()) return;
+      this._openLobby().then((l) => {
+        if (!l || !l.connected) return;
+        l.loadChat().then((rows) => {
+          this._hubChatLog = rows || [];
+          this.ui.hubChat(this._hubChatLog);
+          this.root?.querySelector?.('#hub-panel')?.classList.remove('hidden');
+        }).catch(() => {});
       }).catch(() => {});
-    }).catch(() => {}), 1500);
+    }, 1500);
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
+    this.showLoginBackdrop();
     this._initAuth();
 
     window.addEventListener('resize', () => this.resize());
@@ -376,6 +381,14 @@ class App {
       project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
       initialCount: Number.parseInt(localStorage.getItem('zillions-title-stands') || '0', 10) || 0,
     });
+    this._buildTitleSpace();
+  }
+
+  showLoginBackdrop() {
+    if (this.game || this.ow || this.titleSpace) return;
+    this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
+    this.camera.position.set(MAP_SIZE / 2 + 22, 27, MAP_SIZE / 2 + 35);
+    this.camera.lookAt(this.focus);
     this._buildTitleSpace();
   }
 
@@ -1456,6 +1469,18 @@ class App {
       await this.auth.signInWithGoogle();
     } catch (err) {
       this.ui.setAccount({ ...this.auth.status(), error: err.message || 'Google sign-in failed.' });
+    }
+  }
+
+  async _signInWithEmail(email) {
+    try {
+      this.audio.init();
+      const address = await this.auth.signInWithEmail(email);
+      this.ui.showBanner(`Check ${address} for your secure sign-in link.`, '', 8000);
+      const status = this.ui.root.querySelector('#account-status');
+      if (status) status.textContent = 'Sign-in link sent. Check your email to continue.';
+    } catch (error) {
+      this.ui.showBanner(`Sign-in failed: ${error.message}`, 'bad', 6000);
     }
   }
 
@@ -5250,6 +5275,10 @@ class App {
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);
+
+    if (!this.game && !this.ow && this.titleSpace) {
+      this._updateTitleSpace(t);
+    }
 
     if (this.game) {
       this._updateHeroInput();

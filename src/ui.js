@@ -126,8 +126,16 @@ export class UI {
             <p class="gamesub">Every world is a battlefield.</p>
           </div>
           <div class="accountcard title-login">
+            <div class="login-heading"><span>ACCOUNT LOGIN</span><h2>Welcome to Zillions</h2><p>Sign in to continue to your characters and worlds.</p></div>
             <div class="accountstatus" id="account-status">Checking account…</div>
-            <button class="menubtn primary" id="a-google">ENTER WORLD</button>
+            <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
+            <div class="login-divider" id="a-login-divider"><span>OR</span></div>
+            <form class="email-login" id="a-email-form">
+              <label for="a-email">Email address</label>
+              <input id="a-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+              <button class="menubtn" id="a-email-submit" type="submit">Continue with email</button>
+              <small>We will email you a secure sign-in link. No password required.</small>
+            </form>
             <button class="menubtn hidden" id="a-offline">ENTER OFFLINE</button>
             <form class="usernameform hidden" id="a-username-form">
               <label for="a-username">Public username</label>
@@ -470,6 +478,10 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    q('#a-email-form').onsubmit = (event) => {
+      event.preventDefault();
+      if (this.cb.onEmailSignIn) this.cb.onEmailSignIn(q('#a-email').value);
+    };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-credits').onclick = () => this._showScreen('credits');
@@ -2746,6 +2758,8 @@ export class UI {
   setAccount(state = {}) {
     const status = this.root.querySelector('#account-status');
     const google = this.root.querySelector('#a-google');
+    const emailForm = this.root.querySelector('#a-email-form');
+    const loginDivider = this.root.querySelector('#a-login-divider');
     const offline = this.root.querySelector('#a-offline');
     const usernameForm = this.root.querySelector('#a-username-form');
     const usernameInput = this.root.querySelector('#a-username');
@@ -2760,6 +2774,8 @@ export class UI {
       else status.textContent = state.error || 'Use your Zillions account to play.';
     }
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
+    if (emailForm) emailForm.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
+    if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {
