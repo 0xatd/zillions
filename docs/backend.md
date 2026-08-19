@@ -224,11 +224,18 @@ returns the first result. The function rejects stale revisions, insufficient
 funds, full stashes, and items owned by another player. RLS permits players to
 read their own rows. Only the server service role can mutate them.
 
-The first signed-in request imports a legacy string-key stash and equipment.
-Each key stays readable in `legacy_key`, while each copy receives a stable item
-UUID. Item migration runs once per character. Currency migration runs once per
-account. Static local play uses a separate offline-only ledger and cannot
-change authoritative state.
+The API derives the current UTC vendor rotation and the authoritative character
+level. A browser cannot seed-search another stock date. Sold items become
+hidden tombstones instead of being deleted. The audit output keeps their full
+pre-sale key, base, affixes, sockets, price, and revision data. The request
+shape leaves room for a future server-defined `vendor_id` and stock version.
+
+The first signed-in request registers character identity only. It starts the
+authoritative character at level 1 with zero Alloy and no items. Browser-owned
+legacy currency and item keys stay in an offline, read-only archive marked
+`pending_audited_migration`. They never enter authoritative tables without a
+future server-derived snapshot or one-time server-issued migration ticket.
+Static local play cannot change authoritative state.
 
 ## Known Limits
 

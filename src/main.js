@@ -14,8 +14,9 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
 import {
-  applyEconomySnapshot, buyAuthoritativeItem, equipAuthoritativeItem, loadAuthoritativeEconomy,
-  migrateLegacyEconomy, sellAuthoritativeItem, unequipAuthoritativeItem,
+  applyEconomySnapshot, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
+  loadAuthoritativeEconomy, quarantineForAuthoritativeLoad, registerAuthoritativeCharacter,
+  sellAuthoritativeItem, unequipAuthoritativeItem,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
@@ -200,6 +201,8 @@ class App {
       onMarketSell: (character, itemIndex) => this._marketSell(character, itemIndex),
       onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
       onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
+      onAuthoritySync: (character) => this._ensureAuthoritativeEconomy(character),
+      useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
@@ -1423,17 +1426,20 @@ class App {
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
-        normalizeMmoCharacters(this.profile);
-        const character = selectedMmoCharacter(this.profile);
-        if (character) {
-          this.ui.selectedHero = character.proxyHero;
-          this.profile.lastHero = character.proxyHero;
-        }
-        this._saveProfile();
-        this.ui.setProfile(this.profile);
-        this.ui.setCampaign(this.profile.campaign || 0);
-        if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
       }
+      normalizeMmoCharacters(this.profile);
+      for (const entry of this.profile.mmoCharacters || []) quarantineForAuthoritativeLoad(entry);
+      const character = selectedMmoCharacter(this.profile);
+      if (character) {
+        this.ui.selectedHero = character.proxyHero;
+        this.profile.lastHero = character.proxyHero;
+        try { await this._ensureAuthoritativeEconomy(character); }
+        catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
+      }
+      this._saveProfile();
+      this.ui.setProfile(this.profile);
+      this.ui.setCampaign(this.profile.campaign || 0);
+      if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
       const cloudSave = await this.auth.loadLatestSave();
       if (cloudSave?.snap) {
         try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
@@ -1553,7 +1559,7 @@ class App {
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
   }
 
-  _selectMmoCharacter(id) {
+  async _selectMmoCharacter(id) {
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
@@ -1561,6 +1567,12 @@ class App {
     this.profile.lastHero = character.proxyHero;
     this.profile.lastWorld = character.lastWorld || this.profile.lastWorld || 'earth';
     this.ui.selectedHero = character.proxyHero;
+    if (this.auth?.isSignedIn() && !Number.isFinite(character.authoritativeBalance)) {
+      try { await this._ensureAuthoritativeEconomy(character); }
+      catch {
+        this.ui.showBanner('Online inventory is unavailable. This character is using no persistent gear.', 'bad', 3000);
+      }
+    }
     this._saveProfile();
     this.ui.setProfile(this.profile);
     if (!this.game && this.ow) {
@@ -1597,7 +1609,8 @@ class App {
       result = await loadAuthoritativeEconomy(character);
     } catch (error) {
       if (!String(error?.message || '').includes('character_not_found')) throw error;
-      result = await migrateLegacyEconomy(character, loadMeta().currency);
+      archiveLegacyOfflineEconomy(character);
+      result = await registerAuthoritativeCharacter(character);
     }
     if (result?.ok) {
       applyEconomySnapshot(character, result);

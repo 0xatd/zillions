@@ -219,5 +219,8 @@ sell multiplier, so a player cannot create Alloy by buying and reselling.
 `src/vendor.js` owns this rule. `scripts/vendor-check.mjs` proves stable stock,
 insufficient-funds rejection, stash limits, and the no-flip invariant.
 
-The current transaction path is the offline/local implementation. Do not turn
-on trade or paid inventory until the same contract is enforced by a server.
+Signed-in transactions use `api/economy.js` and the atomic Supabase economy
+function. The server derives the current UTC stock rotation and prices. Static
+development keeps the separate offline/local implementation. Do not turn on
+trade until trusted match rewards and player-to-player transfers use the same
+authority boundary.

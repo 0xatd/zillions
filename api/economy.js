@@ -4,8 +4,8 @@ import { vendorSellPrice, vendorStock } from '../src/vendor.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const BODY_LIMIT = 64 * 1024;
-const ACTIONS = new Set(['migrate_legacy', 'buy_vendor', 'sell_vendor', 'equip', 'unequip', 'snapshot']);
-const EQUIP_SLOTS = new Set(['head', 'armor', 'hands', 'legs', 'boots', 'weapon', 'offhand', 'weapon2', 'offhand2', 'implant1', 'implant2']);
+const ACTIONS = new Set(['register_character', 'buy_vendor', 'sell_vendor', 'equip', 'unequip', 'snapshot']);
+export const serverRotation = (now = new Date()) => new Date(now).toISOString().slice(0, 10);
 
 const send = (res, status, body) => { res.writeHead(status, JSON_HEADERS); res.end(JSON.stringify(body)); };
 const cleanText = (value, max = 128) => String(value || '').replace(/[^a-zA-Z0-9_:\-.]/g, '').slice(0, max);
@@ -37,24 +37,14 @@ function itemPayload(key) {
   };
 }
 
-function migrationPayload(body) {
-  const stash = Array.isArray(body.stash) ? body.stash.slice(0, 60) : [];
-  const equipment = body.equipment && typeof body.equipment === 'object' ? body.equipment : {};
-  const items = [];
-  for (const key of stash) { const item = itemPayload(key); if (item) items.push({ ...item, location: 'stash', equip_slot: null }); }
-  for (const [slot, key] of Object.entries(equipment)) {
-    if (!EQUIP_SLOTS.has(slot)) continue;
-    const item = itemPayload(key);
-    if (item) items.push({ ...item, location: 'equipped', equip_slot: slot });
-  }
+function registrationPayload(body) {
   return {
     character: {
       client_character_id: cleanText(body.characterId, 96), name: String(body.character?.name || 'Commander').trim().slice(0, 40),
       class_key: cleanText(body.character?.classKey || 'vanguard', 48), race_key: ['human', 'robot'].includes(body.character?.raceKey) ? body.character.raceKey : 'human',
-      level: Math.max(1, Math.min(100, Number(body.character?.level) || 1)), customization: body.character?.customization || {},
+      level: 1, customization: body.character?.customization || {},
     },
-    // One-time legacy import. The database refuses a second import.
-    balance: Math.max(0, Math.min(1000000, Math.floor(Number(body.currency) || 0))), items,
+    legacy_state: 'offline_pending_audited_migration',
   };
 }
 
@@ -63,9 +53,9 @@ function mutationPayload(action, body, authoritativeLevel = null) {
     client_character_id: cleanText(body.characterId, 96),
     expected_character_revision: Number.isInteger(body.characterRevision) ? body.characterRevision : null,
   };
-  if (action === 'migrate_legacy') return migrationPayload(body);
+  if (action === 'register_character') return registrationPayload(body);
   if (action === 'buy_vendor') {
-    const rotation = cleanText(body.rotation, 32);
+    const rotation = serverRotation();
     const index = Math.floor(Number(body.offerIndex));
     const offer = vendorStock(rotation, Math.max(1, Number(authoritativeLevel) || 1), 12)[index];
     if (!offer) throw Object.assign(new Error('invalid_stock'), { status: 400 });

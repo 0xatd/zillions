@@ -16,7 +16,7 @@ create table if not exists public.game_characters (
   level integer not null default 1 check (level between 1 and 100),
   customization jsonb not null default '{}'::jsonb,
   revision bigint not null default 1 check (revision > 0),
-  legacy_imported_at timestamptz,
+  registered_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, client_character_id),
@@ -28,7 +28,6 @@ create table if not exists public.player_wallets (
   user_id uuid primary key references auth.users(id) on delete cascade,
   salvage_alloy bigint not null default 0 check (salvage_alloy >= 0),
   revision bigint not null default 1 check (revision > 0),
-  legacy_imported_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
@@ -44,14 +43,14 @@ create table if not exists public.item_instances (
   affixes jsonb not null default '[]'::jsonb,
   sockets jsonb not null default '[]'::jsonb,
   binding text not null default 'account' check (binding in ('account', 'character')),
-  location text not null default 'stash' check (location in ('stash', 'equipped')),
+  location text not null default 'stash' check (location in ('stash', 'equipped', 'sold')),
   equip_slot text,
   economy_data jsonb not null default '{}'::jsonb,
   provenance jsonb not null,
   revision bigint not null default 1 check (revision > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check ((location = 'stash' and equip_slot is null) or (location = 'equipped' and equip_slot is not null))
+  check ((location in ('stash', 'sold') and equip_slot is null) or (location = 'equipped' and equip_slot is not null))
 );
 
 create unique index if not exists item_instances_one_equipped_slot
@@ -109,6 +108,7 @@ as $$
 declare
   v_existing jsonb; v_character public.game_characters%rowtype; v_item public.item_instances%rowtype;
   v_wallet public.player_wallets%rowtype; v_result jsonb; v_entry jsonb; v_price bigint; v_count integer;
+  v_target_count integer; v_sold_snapshot jsonb;
 begin
   if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then raise exception 'service_role_required'; end if;
   if p_actor is null or p_request_id is null or length(p_request_id) not between 1 and 64 then raise exception 'invalid_request'; end if;
@@ -122,30 +122,16 @@ begin
   insert into public.economy_requests(actor_user_id, request_id, action, request_payload)
   values (p_actor, p_request_id, p_action, p_payload);
 
-  if p_action = 'migrate_legacy' then
+  if p_action = 'register_character' then
     insert into public.game_characters(user_id, client_character_id, name, class_key, race_key, level, customization)
     values (p_actor, p_payload#>>'{character,client_character_id}', p_payload#>>'{character,name}',
       p_payload#>>'{character,class_key}', p_payload#>>'{character,race_key}',
       (p_payload#>>'{character,level}')::integer, coalesce(p_payload#>'{character,customization}', '{}'::jsonb))
     on conflict (user_id, client_character_id) do update set updated_at = now()
     returning * into v_character;
-    if v_character.legacy_imported_at is not null then raise exception 'legacy_already_imported'; end if;
-    insert into public.player_wallets(user_id, salvage_alloy, legacy_imported_at)
-    values (p_actor, greatest(0, (p_payload->>'balance')::bigint), now())
-    on conflict (user_id) do update set
-      salvage_alloy = case when public.player_wallets.legacy_imported_at is null then excluded.salvage_alloy else public.player_wallets.salvage_alloy end,
-      legacy_imported_at = coalesce(public.player_wallets.legacy_imported_at, excluded.legacy_imported_at),
-      revision = public.player_wallets.revision + case when public.player_wallets.legacy_imported_at is null then 1 else 0 end,
-      updated_at = now();
-    for v_entry in select value from jsonb_array_elements(coalesce(p_payload->'items', '[]'::jsonb)) loop
-      insert into public.item_instances(owner_user_id, character_id, legacy_key, base_id, slot_pool, item_level, rarity,
-        affixes, sockets, binding, location, equip_slot, economy_data, provenance)
-      values (p_actor, v_character.id, v_entry->>'legacy_key', v_entry->>'base_id', v_entry->>'slot_pool', (v_entry->>'item_level')::integer,
-        (v_entry->>'rarity')::integer, coalesce(v_entry->'affixes','[]'), coalesce(v_entry->'sockets','[]'),
-        coalesce(v_entry->>'binding','account'), v_entry->>'location', nullif(v_entry->>'equip_slot',''),
-        coalesce(v_entry->'economy_data','{}'), jsonb_build_object('kind','legacy_import','request_id',p_request_id,'imported_at',now()));
-    end loop;
-    update public.game_characters set legacy_imported_at = now(), revision = revision + 1 where id = v_character.id returning * into v_character;
+    insert into public.player_wallets(user_id, salvage_alloy) values (p_actor, 0) on conflict (user_id) do nothing;
+    update public.game_characters set registered_at = coalesce(registered_at, now()), revision = revision + 1
+      where id = v_character.id returning * into v_character;
   else
     select * into v_character from public.game_characters where user_id = p_actor
       and client_character_id = p_payload->>'client_character_id' for update;
@@ -175,14 +161,17 @@ begin
       and character_id = v_character.id and location = 'stash' for update;
     if not found then raise exception 'unauthorized_ownership'; end if;
     v_price := greatest(1, coalesce((v_item.economy_data->>'sell_price')::bigint, 1));
-    delete from public.item_instances where id = v_item.id;
+    v_sold_snapshot := to_jsonb(v_item) || jsonb_build_object('sale_price',v_price,'sold_at',now());
+    update public.item_instances set location='sold', equip_slot=null, revision=revision+1, updated_at=now(),
+      provenance=provenance || jsonb_build_object('sale',jsonb_build_object('request_id',p_request_id,'price',v_price,'sold_at',now()))
+      where id = v_item.id returning * into v_item;
     update public.player_wallets set salvage_alloy = salvage_alloy + v_price, revision = revision + 1, updated_at = now()
       where user_id = p_actor returning * into v_wallet;
     update public.game_characters set revision = revision + 1, updated_at = now() where id = v_character.id returning * into v_character;
   elsif p_action in ('equip','unequip') then
     if p_action = 'equip' then
       select * into v_item from public.item_instances where id = (p_payload->>'item_id')::uuid and owner_user_id = p_actor
-        and character_id = v_character.id for update;
+        and character_id = v_character.id and location in ('stash','equipped') for update;
       if not found then raise exception 'unauthorized_ownership'; end if;
       if p_payload->>'expected_item_revision' is not null and (p_payload->>'expected_item_revision')::bigint <> v_item.revision then raise exception 'stale_revision'; end if;
       if not (
@@ -191,6 +180,12 @@ begin
         (v_item.slot_pool = 'offhand' and p_payload->>'equip_slot' in ('offhand','offhand2')) or
         (v_item.slot_pool = 'implant' and p_payload->>'equip_slot' in ('implant1','implant2'))
       ) then raise exception 'invalid_equipment_slot'; end if;
+      select count(*) into v_target_count from public.item_instances where character_id=v_character.id
+        and equip_slot=p_payload->>'equip_slot' and location='equipped' and id<>v_item.id;
+      if v_item.location <> 'stash' and v_target_count > 0 then
+        select count(*) into v_count from public.item_instances where character_id=v_character.id and location='stash';
+        if v_count >= 60 then raise exception 'inventory_full'; end if;
+      end if;
       update public.item_instances set location='stash', equip_slot=null, revision=revision+1, updated_at=now()
         where character_id=v_character.id and equip_slot=p_payload->>'equip_slot' and location='equipped';
       update public.item_instances set location='equipped', equip_slot=p_payload->>'equip_slot', revision=revision+1, updated_at=now() where id=v_item.id;
@@ -205,15 +200,15 @@ begin
         where id=v_item.id returning * into v_item;
     end if;
     update public.game_characters set revision=revision+1, updated_at=now() where id=v_character.id returning * into v_character;
-  elsif p_action not in ('migrate_legacy','snapshot') then raise exception 'invalid_action';
+  elsif p_action not in ('register_character','snapshot') then raise exception 'invalid_action';
   end if;
 
   select * into v_wallet from public.player_wallets where user_id=p_actor;
   v_result := jsonb_build_object('ok',true,'duplicate',false,
     'character',jsonb_build_object('id',v_character.id,'clientCharacterId',v_character.client_character_id,'revision',v_character.revision),
     'wallet',jsonb_build_object('balance',coalesce(v_wallet.salvage_alloy,0),'revision',coalesce(v_wallet.revision,1)),
-    'mutation',jsonb_build_object('action',p_action,'value',coalesce(v_price,0),'itemId',v_item.id),
-    'items',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'legacyKey',legacy_key,'baseId',base_id,'slotPool',slot_pool,'location',location,'equipSlot',equip_slot,'revision',revision) order by created_at),'[]'::jsonb) from public.item_instances where character_id=v_character.id));
+    'mutation',jsonb_build_object('action',p_action,'value',coalesce(v_price,0),'itemId',v_item.id,'soldItem',v_sold_snapshot),
+    'items',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'legacyKey',legacy_key,'baseId',base_id,'slotPool',slot_pool,'location',location,'equipSlot',equip_slot,'revision',revision) order by created_at),'[]'::jsonb) from public.item_instances where character_id=v_character.id and location <> 'sold'));
   update public.economy_requests set response_payload=v_result, completed_at=now() where actor_user_id=p_actor and request_id=p_request_id;
   insert into public.economy_audit_events(actor_user_id,character_id,request_id,action,inputs,outputs)
   values(p_actor,v_character.id,p_request_id,p_action,p_payload,v_result);

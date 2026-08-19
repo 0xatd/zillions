@@ -5,25 +5,50 @@ const requestId = () => globalThis.crypto?.randomUUID?.()
 
 export const authoritativeEconomyEnabled = () => backendEnabled();
 
+export async function runEconomyMutation({ authoritative, remote, offline }) {
+  if (!authoritative) return offline();
+  const result = await remote();
+  if (!result) throw new Error('authority_unavailable');
+  return result;
+}
+
 export async function loadAuthoritativeEconomy(character) {
   return economyRequest('snapshot', { requestId: requestId(), characterId: character.id });
 }
 
-export async function migrateLegacyEconomy(character, currency = 0) {
-  return economyRequest('migrate_legacy', {
+export async function registerAuthoritativeCharacter(character) {
+  return economyRequest('register_character', {
     requestId: requestId(),
     characterId: character.id,
     character: {
       name: character.name,
       classKey: character.classKey,
       raceKey: character.raceKey,
-      level: character.level,
       customization: character.customization || {},
     },
-    currency,
-    stash: [...(character.items || [])],
-    equipment: { ...(character.equipment || {}) },
   });
+}
+
+export function archiveLegacyOfflineEconomy(character) {
+  if (character.legacyOfflineEconomy) return character.legacyOfflineEconomy;
+  character.legacyOfflineEconomy = {
+    status: 'pending_audited_migration',
+    items: [...(character.items || [])],
+    equipment: { ...(character.equipment || {}) },
+  };
+  return character.legacyOfflineEconomy;
+}
+
+export function quarantineForAuthoritativeLoad(character) {
+  archiveLegacyOfflineEconomy(character);
+  character.items = [];
+  character.equipment = {};
+  character.itemInstances = [];
+  character.equipmentInstances = {};
+  character.equipmentInstanceRevisions = {};
+  delete character.authoritativeBalance;
+  delete character.authorityRevision;
+  return character;
 }
 
 export async function buyAuthoritativeItem(character, rotation, offerIndex) {

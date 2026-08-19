@@ -33,6 +33,7 @@ import {
 } from './items.js';
 import { ShellState, SHELL_BASES } from './shell-state.js';
 import { vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
+import { runEconomyMutation } from './economy.js';
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -1448,6 +1449,27 @@ export class UI {
 
   _renderMarketPanel(character) {
     const balance = this.root.querySelector('#market-balance');
+    const authoritative = !!this.cb.useAuthoritativeEconomy?.();
+    if (authoritative && !Number.isFinite(character.authoritativeBalance)) {
+      if (balance) balance.textContent = `${META_CURRENCY.icon} Syncing online ledger…`;
+      this.root.querySelector('#market-stock').innerHTML = '<span class="empty-gear">Online inventory is loading.</span>';
+      this.root.querySelector('#market-sell').innerHTML = '';
+      if (!this._marketSyncing) {
+        this._marketSyncing = true;
+        Promise.resolve(this.cb.onAuthoritySync?.(character))
+          .then((result) => {
+            if (!result) throw new Error('authority_unavailable');
+            this._marketSyncing = false;
+            this._renderCharacterSheet();
+          })
+          .catch(() => {
+            this._marketSyncing = false;
+            if (balance) balance.textContent = `${META_CURRENCY.icon} Online ledger unavailable`;
+            this.showBanner('Online inventory is unavailable. No changes were made.', 'bad', 2800);
+          });
+      }
+      return;
+    }
     const meta = loadMeta();
     const marketCurrency = Number.isFinite(character.authoritativeBalance) ? character.authoritativeBalance : meta.currency;
     if (balance) balance.textContent = `${META_CURRENCY.icon} ${marketCurrency.toLocaleString()} ${META_CURRENCY.name}`;
@@ -1458,14 +1480,22 @@ export class UI {
     for (const button of stockRoot.querySelectorAll('[data-buy]')) {
       button.onclick = async () => {
         button.disabled = true;
-        const expectedValue = vendorSellPrice((character.items || [])[Number(button.dataset.sell)]);
         let result;
-        try { result = await this.cb.onMarketBuy?.(character, rotation, Number(button.dataset.buy)); }
+        try {
+          result = await runEconomyMutation({
+            authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+            remote: () => this.cb.onMarketBuy?.(character, rotation, Number(button.dataset.buy)),
+            offline: () => buyVendorItem(character, stock[Number(button.dataset.buy)]),
+          });
+        }
         catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
-        if (!result) result = buyVendorItem(character, stock[Number(button.dataset.buy)]);
         button.disabled = false;
         if (!result.ok) {
-          this.showBanner(result.reason === 'full' ? 'Your stash is full.' : `You need ${result.short || 0} more ${META_CURRENCY.name}.`, 'bad', 2400);
+          const message = result.reason === 'authority_unavailable' ? 'Online inventory is unavailable. No changes were made.'
+            : ['full', 'inventory_full'].includes(result.reason) ? 'Your stash is full.'
+              : result.reason === 'insufficient_funds' ? `You do not have enough ${META_CURRENCY.name}.`
+                : 'The purchase could not be completed.';
+          this.showBanner(message, 'bad', 2400);
           return;
         }
         this._sheetChanged();
@@ -1480,12 +1510,22 @@ export class UI {
     for (const button of sellRoot.querySelectorAll('[data-sell]')) {
       button.onclick = async () => {
         button.disabled = true;
+        const expectedValue = vendorSellPrice((character.items || [])[Number(button.dataset.sell)]);
         let result;
-        try { result = await this.cb.onMarketSell?.(character, Number(button.dataset.sell)); }
+        try {
+          result = await runEconomyMutation({
+            authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+            remote: () => this.cb.onMarketSell?.(character, Number(button.dataset.sell)),
+            offline: () => sellVendorItem(character, Number(button.dataset.sell)),
+          });
+        }
         catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
-        if (!result) result = sellVendorItem(character, Number(button.dataset.sell));
         button.disabled = false;
-        if (!result.ok) return;
+        if (!result.ok) {
+          this.showBanner(result.reason === 'authority_unavailable'
+            ? 'Online inventory is unavailable. No changes were made.' : 'The sale could not be completed.', 'bad', 2400);
+          return;
+        }
         this._sheetChanged();
         this.showBanner(`Sold for ${result.mutation?.value || result.value || expectedValue} ${META_CURRENCY.name}.`, '', 1800);
       };
@@ -1711,8 +1751,12 @@ export class UI {
       return;
     }
     try {
-      const authoritative = await this.cb.onAuthorityEquip?.(character, index, slot);
-      if (authoritative) {
+      const result = await runEconomyMutation({
+        authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+        remote: () => this.cb.onAuthorityEquip?.(character, index, slot),
+        offline: () => null,
+      });
+      if (result) {
         this._sheetSelection = { kind: 'slot', slot, key };
         this._sheetChanged();
         return;
@@ -1738,8 +1782,12 @@ export class UI {
       return;
     }
     try {
-      const authoritative = await this.cb.onAuthorityUnequip?.(character, slot);
-      if (authoritative) {
+      const result = await runEconomyMutation({
+        authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+        remote: () => this.cb.onAuthorityUnequip?.(character, slot),
+        offline: () => null,
+      });
+      if (result) {
         this._sheetSelection = { kind: 'stash', index: character.items.length - 1, key };
         this._sheetChanged();
         return;
@@ -1855,6 +1903,10 @@ export class UI {
     this.root.querySelector('#lattice-rewire').onclick = () => {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
+      if (this.cb.useAuthoritativeEconomy?.()) {
+        this.showBanner('✋ Lattice rewiring is unavailable until its server transaction is enabled.', 'bad', 3200);
+        return;
+      }
       const cost = rewireCost((character.lattice || []).length);
       const held = loadMeta().currency;
       if (held < cost) {
