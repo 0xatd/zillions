@@ -51,9 +51,9 @@ export function quarantineForAuthoritativeLoad(character) {
   return character;
 }
 
-export async function buyAuthoritativeItem(character, rotation, offerIndex) {
+export async function buyAuthoritativeItem(character, vendorId, offerIndex) {
   return economyRequest('buy_vendor', {
-    requestId: requestId(), characterId: character.id, rotation, offerIndex,
+    requestId: requestId(), characterId: character.id, vendorId, offerIndex,
     characterRevision: character.authorityRevision ?? null, characterLevel: character.level || 1,
   });
 }

@@ -197,7 +197,7 @@ class App {
       // The sheet edits the character object the profile owns, so persisting is
       // all that is left to do once it has changed something.
       onProfileDirty: () => this._saveProfile(),
-      onMarketBuy: (character, rotation, offerIndex) => this._marketBuy(character, rotation, offerIndex),
+      onMarketBuy: (character, vendorId, offerIndex) => this._marketBuy(character, vendorId, offerIndex),
       onMarketSell: (character, itemIndex) => this._marketSell(character, itemIndex),
       onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
       onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
@@ -1620,10 +1620,10 @@ class App {
     return result;
   }
 
-  async _marketBuy(character, rotation, offerIndex) {
+  async _marketBuy(character, vendorId, offerIndex) {
     if (!this.auth?.isSignedIn()) return null;
     await this._ensureAuthoritativeEconomy(character);
-    const result = await buyAuthoritativeItem(character, rotation, offerIndex);
+    const result = await buyAuthoritativeItem(character, vendorId, offerIndex);
     if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
     return result;
   }

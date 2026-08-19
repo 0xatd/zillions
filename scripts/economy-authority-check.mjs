@@ -24,7 +24,7 @@ assert.doesNotMatch(schema, /delete from public\.item_instances/, 'sold items mu
 assert.match(schema, /location in \('stash','equipped'\) for update/, 'sold tombstones must never be equipped');
 assert.match(schema, /provenance jsonb not null/, 'items must retain provenance');
 assert.match(schema, /grant execute[\s\S]*service_role/, 'only the server role may execute economic mutations');
-assert.match(vendor, /OFFLINE ONLY/, 'local vendor mutations must be marked offline-only');
+assert.match(vendor, /Browser state is never an economic authority/, 'vendor domain must not own browser mutations');
 assert.match(ui, /onMarketBuy/, 'signed-in market buys must cross the server callback');
 assert.match(ui, /onMarketSell/, 'signed-in market sales must cross the server callback');
 assert.match(ui, /onAuthorityEquip/, 'signed-in equip must cross the server callback');
@@ -99,8 +99,9 @@ globalThis.fetch = async (url, options = {}) => {
   return { ok: true, json: async () => ({ ok: true, character: { revision: 2 }, wallet: { balance: 0 }, items: [] }) };
 };
 const seededRotation = response();
-await handler(request({ action: 'buy_vendor', requestId: 'buy-1', characterId: 'local-c2', rotation: '2099-12-31', offerIndex: 0 }, 'Bearer player-token'), seededRotation);
+await handler(request({ action: 'buy_vendor', requestId: 'buy-1', characterId: 'local-c2', vendorId: 'quartermaster', rotation: '2099-12-31', offerIndex: 0 }, 'Bearer player-token'), seededRotation);
 assert.equal(seededRotation.status, 200);
-assert.equal(rpcBody.p_payload.rotation, serverRotation(), 'server must replace browser-supplied vendor rotations');
+assert.equal(rpcBody.p_payload.vendor_id, 'quartermaster');
+assert.equal(rpcBody.p_payload.rotation, serverRotation('quartermaster'), 'server must replace browser-supplied vendor rotations');
 globalThis.fetch = originalFetch;
 console.log('economy authority check passed');

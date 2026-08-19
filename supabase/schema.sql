@@ -154,7 +154,7 @@ begin
     values (p_actor, v_character.id, v_entry->>'legacy_key', v_entry->>'base_id', v_entry->>'slot_pool', (v_entry->>'item_level')::integer,
       (v_entry->>'rarity')::integer, coalesce(v_entry->'affixes','[]'), coalesce(v_entry->'sockets','[]'),
       coalesce(v_entry->>'binding','account'), 'stash', coalesce(v_entry->'economy_data','{}'),
-      jsonb_build_object('kind','vendor_purchase','rotation',p_payload->>'rotation','offer_index',p_payload->>'offer_index','request_id',p_request_id));
+      jsonb_build_object('kind','vendor_purchase','vendor_id',p_payload->>'vendor_id','rotation',p_payload->>'rotation','offer_index',p_payload->>'offer_index','request_id',p_request_id));
     update public.game_characters set revision = revision + 1, updated_at = now() where id = v_character.id returning * into v_character;
   elsif p_action = 'sell_vendor' then
     select * into v_item from public.item_instances where id = (p_payload->>'item_id')::uuid and owner_user_id = p_actor

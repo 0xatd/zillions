@@ -1,11 +1,11 @@
 import { itemInfo } from '../src/config.js';
 import { resolveItem } from '../src/items.js';
-import { vendorSellPrice, vendorStock } from '../src/vendor.js';
+import { VENDORS, vendorRotation, vendorSellPrice, vendorStock } from '../src/vendor.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const BODY_LIMIT = 64 * 1024;
 const ACTIONS = new Set(['register_character', 'buy_vendor', 'sell_vendor', 'equip', 'unequip', 'snapshot']);
-export const serverRotation = (now = new Date()) => new Date(now).toISOString().slice(0, 10);
+export const serverRotation = (vendorId = 'quartermaster', now = Date.now()) => vendorRotation(vendorId, now);
 
 const send = (res, status, body) => { res.writeHead(status, JSON_HEADERS); res.end(JSON.stringify(body)); };
 const cleanText = (value, max = 128) => String(value || '').replace(/[^a-zA-Z0-9_:\-.]/g, '').slice(0, max);
@@ -55,11 +55,13 @@ function mutationPayload(action, body, authoritativeLevel = null) {
   };
   if (action === 'register_character') return registrationPayload(body);
   if (action === 'buy_vendor') {
-    const rotation = serverRotation();
+    const vendorId = cleanText(body.vendorId, 32);
+    if (!VENDORS[vendorId]) throw Object.assign(new Error('unknown_vendor'), { status: 400 });
+    const rotation = serverRotation(vendorId);
     const index = Math.floor(Number(body.offerIndex));
-    const offer = vendorStock(rotation, Math.max(1, Number(authoritativeLevel) || 1), 12)[index];
+    const offer = vendorStock(vendorId, rotation, Math.max(1, Number(authoritativeLevel) || 1))[index];
     if (!offer) throw Object.assign(new Error('invalid_stock'), { status: 400 });
-    return { ...base, rotation, offer_index: index, price: offer.price, item: itemPayload(offer.key) };
+    return { ...base, vendor_id: vendorId, rotation, offer_index: index, price: offer.price, item: itemPayload(offer.key) };
   }
   if (action === 'sell_vendor') return { ...base, item_id: cleanText(body.itemId, 64), sell_price: null };
   if (action === 'equip') return { ...base, item_id: cleanText(body.itemId, 64), equip_slot: cleanText(body.equipSlot, 24), expected_item_revision: body.itemRevision ?? null };

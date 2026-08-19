@@ -32,7 +32,7 @@ import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
 import { ShellState, SHELL_BASES } from './shell-state.js';
-import { vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
+import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
 
 // A player-authored name is the only free text in this UI. Names are written
@@ -215,7 +215,8 @@ export class UI {
           </div>
 
           <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
-            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2>QUARTERMASTER IONA</h2><p>Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
+            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
+            <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
             <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
             <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
           </div>
@@ -1473,8 +1474,21 @@ export class UI {
     const meta = loadMeta();
     const marketCurrency = Number.isFinite(character.authoritativeBalance) ? character.authoritativeBalance : meta.currency;
     if (balance) balance.textContent = `${META_CURRENCY.icon} ${marketCurrency.toLocaleString()} ${META_CURRENCY.name}`;
-    const rotation = new Date().toISOString().slice(0, 10);
-    const stock = vendorStock(rotation, character.level || 1);
+    this._marketVendor = VENDORS[this._marketVendor] ? this._marketVendor : 'quartermaster';
+    const vendorNav = this.root.querySelector('#market-vendors');
+    vendorNav.innerHTML = Object.values(VENDORS).map((vendor) => {
+      const eligibility = vendorEligibility(vendor.id, character);
+      return `<button data-vendor="${vendor.id}" class="${vendor.id === this._marketVendor ? 'sel' : ''}" ${eligibility.ok ? '' : 'disabled'}>${vendor.icon} ${vendor.name}${eligibility.ok ? '' : ` · LV ${eligibility.requiredLevel}`}</button>`;
+    }).join('');
+    for (const button of vendorNav.querySelectorAll('[data-vendor]')) button.onclick = () => {
+      this._marketVendor = button.dataset.vendor;
+      this._renderMarketPanel(character);
+    };
+    const vendor = VENDORS[this._marketVendor];
+    this.root.querySelector('#market-vendor-name').textContent = vendor.name.toUpperCase();
+    this.root.querySelector('#market-vendor-description').textContent = vendor.description;
+    const rotation = vendorRotation(vendor.id);
+    const stock = vendorStock(vendor.id, rotation, character.level || 1);
     const stockRoot = this.root.querySelector('#market-stock');
     stockRoot.innerHTML = stock.map((offer, index) => `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl}</small></div><button data-buy="${index}">${META_CURRENCY.icon} ${offer.price}</button></article>`).join('');
     for (const button of stockRoot.querySelectorAll('[data-buy]')) {
@@ -1484,7 +1498,7 @@ export class UI {
         try {
           result = await runEconomyMutation({
             authoritative: !!this.cb.useAuthoritativeEconomy?.(),
-            remote: () => this.cb.onMarketBuy?.(character, rotation, Number(button.dataset.buy)),
+            remote: () => this.cb.onMarketBuy?.(character, vendor.id, Number(button.dataset.buy)),
             offline: () => buyVendorItem(character, stock[Number(button.dataset.buy)]),
           });
         }
