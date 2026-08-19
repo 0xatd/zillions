@@ -34,6 +34,9 @@ import {
 import { ShellState, SHELL_BASES } from './shell-state.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
+import { COMPONENTS, CRAFTING_MATERIALS, RECIPES } from './crafting.js';
+
+const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -200,6 +203,7 @@ export class UI {
               <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
               <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
               <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">MARKET</button>
+              <button class="sheet-tab" id="sheet-tab-crafting" data-tab="crafting">FORGE</button>
               <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
             </div>
@@ -219,6 +223,12 @@ export class UI {
             <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
             <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
             <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
+          </div>
+
+          <div id="sheet-panel-crafting" class="sheet-panel crafting-panel hidden">
+            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>All actions use the online ledger. Failed or repeated requests never consume resources.</p><div id="craft-resources"></div><div id="craft-vendor"></div></section>
+            <section><h3>SELECT ITEM</h3><div id="craft-items" class="market-grid"></div></section>
+            <section><h3>WORKBENCH</h3><div id="craft-workbench"><p>Select an item.</p></div><div id="craft-status" role="status"></div></section>
           </div>
 
           <div id="sheet-panel-abilities" class="sheet-panel abilities-overview hidden"></div>
@@ -1424,13 +1434,14 @@ export class UI {
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
-    for (const tab of ['character', 'gear', 'shop', 'abilities', 'lattice']) {
+    for (const tab of ['character', 'gear', 'shop', 'crafting', 'abilities', 'lattice']) {
       this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', this._sheetTab !== tab);
     }
 
     if (this._sheetTab === 'character') this._renderCharacterOverview(character);
     else if (this._sheetTab === 'gear') this._renderGearPanel(character);
     else if (this._sheetTab === 'shop') this._renderMarketPanel(character);
+    else if (this._sheetTab === 'crafting') this._renderCraftingPanel(character);
     else if (this._sheetTab === 'abilities') this._renderAbilitiesOverview(character);
     else this._renderLatticePanel(character);
   }
@@ -1554,6 +1565,51 @@ export class UI {
         this.showBanner(`Sold for ${result.mutation?.value || result.value || expectedValue} ${META_CURRENCY.name}.`, '', 1800);
       };
     }
+  }
+
+  _renderCraftingPanel(character) {
+    const resources = this.root.querySelector('#craft-resources');
+    const vendor = this.root.querySelector('#craft-vendor');
+    const itemRoot = this.root.querySelector('#craft-items');
+    const bench = this.root.querySelector('#craft-workbench');
+    const status = this.root.querySelector('#craft-status');
+    const materials = character.craftingMaterials || {};
+    resources.innerHTML = `<b>${META_CURRENCY.icon} ${character.authoritativeBalance ?? '—'} ${META_CURRENCY.name}</b>${Object.values(CRAFTING_MATERIALS).map((m) => `<span>${m.icon} ${m.name}: <b>${materials[m.id] || 0}</b></span>`).join('')}`;
+    vendor.innerHTML = `<h3>FORGE SUPPLIES</h3>${Object.values(CRAFTING_MATERIALS).map((m) => `<button data-material="${m.id}">${m.icon} BUY ${m.name} · ${CRAFT_VENDOR_PRICES[m.id]}</button>`).join('')}<h3>RANK I COMPONENTS</h3>${Object.values(COMPONENTS).map((c) => `<button data-component="${c.id}">◇ ${c.name} · 45</button>`).join('')}`;
+    const transact = async (button, task) => {
+      button.disabled = true; status.textContent = 'Processing securely…'; status.className = 'loading';
+      try {
+        const result = await task();
+        if (!result?.ok) throw Object.assign(new Error(result?.error?.message || result?.error || 'Crafting failed.'), { result });
+        status.textContent = result.mutation?.action ? 'Crafting complete.' : 'Supply purchased.'; status.className = 'ok';
+        this._renderCraftingPanel(character);
+      } catch (error) {
+        const detail = error?.result?.error; status.textContent = detail?.message || (typeof detail === 'string' ? detail.replaceAll('_', ' ') : error.message); status.className = 'bad';
+      } finally { button.disabled = false; }
+    };
+    for (const button of vendor.querySelectorAll('[data-material]')) button.onclick = () => transact(button, () => this.cb.onCraftBuyMaterial?.(character, button.dataset.material));
+    for (const button of vendor.querySelectorAll('[data-component]')) button.onclick = () => transact(button, () => this.cb.onCraftBuyComponent?.(character, button.dataset.component));
+    const instances = [
+      ...(character.itemInstances || []).map((item) => ({ ...item, location: 'stash' })),
+      ...Object.entries(character.equipmentItemInstances || {}).map(([slot, item]) => ({ ...item, id: item.id, key: item.legacyKey, location: slot })),
+    ];
+    if (!instances.some((item) => item.id === this._craftItemId)) this._craftItemId = instances[0]?.id || null;
+    itemRoot.innerHTML = instances.map((instance) => {
+      const item = itemInfo(instance.key || instance.legacyKey); const sockets = instance.sockets || [];
+      return `<button data-craft-item="${instance.id}" class="market-item ${instance.id === this._craftItemId ? 'sel' : ''}"><span>${item?.icon || '◈'}</span><div><b>${item?.name || 'Unknown item'}</b><small>${instance.location} · revision ${instance.revision} · ${sockets.length} socket${sockets.length === 1 ? '' : 's'}</small></div></button>`;
+    }).join('') || '<span class="empty-gear">Buy an item before using the forge.</span>';
+    for (const button of itemRoot.querySelectorAll('[data-craft-item]')) button.onclick = () => { this._craftItemId = button.dataset.craftItem; this._craftSocket = 0; this._renderCraftingPanel(character); };
+    const selected = instances.find((item) => item.id === this._craftItemId);
+    if (!selected) { bench.innerHTML = '<p>Select an item.</p>'; return; }
+    const sockets = selected.sockets || []; const components = (character.craftingComponents || []).filter((c) => c.location === 'inventory');
+    bench.innerHTML = `<div class="craft-sockets">${sockets.map((socket, index) => `<button data-socket="${index}" class="${index === (this._craftSocket || 0) ? 'sel' : ''}">${socket.color} ${socket.type}<small>${socket.component ? `${COMPONENTS[socket.component.id]?.name || socket.component.id} · rank ${socket.component.rank}` : 'empty'}</small></button>`).join('') || '<p>No sockets. Add one below.</p>'}</div>
+      <div class="craft-recipes">${Object.values(RECIPES).map((recipe) => `<button data-recipe="${recipe.id}">${recipe.name}<small>${recipe.cost.alloy} Alloy</small></button>`).join('')}</div>
+      <div class="craft-components">${components.map((component) => `<button data-insert="${component.id}">INSTALL ${COMPONENTS[component.componentId]?.name || component.componentId}</button>`).join('') || '<p>No loose components. Buy one from Forge Supplies.</p>'}${sockets[this._craftSocket || 0]?.component ? '<button data-remove>REMOVE COMPONENT</button>' : ''}</div>`;
+    for (const button of bench.querySelectorAll('[data-socket]')) button.onclick = () => { this._craftSocket = Number(button.dataset.socket); this._renderCraftingPanel(character); };
+    const run = (button, action, details) => transact(button, () => this.cb.onCraftAction?.(character, action, selected.id, selected.revision, { socketIndex: this._craftSocket || 0, ...details }));
+    for (const button of bench.querySelectorAll('[data-recipe]')) button.onclick = () => run(button, 'craft_recipe', { recipeId: button.dataset.recipe });
+    for (const button of bench.querySelectorAll('[data-insert]')) button.onclick = () => run(button, 'socket_insert', { componentId: button.dataset.insert });
+    bench.querySelector('[data-remove]')?.addEventListener('click', (event) => run(event.currentTarget, 'socket_remove', {}));
   }
 
   // What a character is wearing, what is in the stash, and what the two add up

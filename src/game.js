@@ -2467,6 +2467,9 @@ export class Game {
     // the weapon, so wearing armour was strictly worse than leaving it in the
     // stash — the stash was being summed and the body was not.
     const itemModsOnly = itemMods([...items, ...pack, ...equippedKeys(equipmentIn, setIn)]);
+    // Socket components are already de-duplicated by instance at the authority
+    // snapshot boundary. Fold that one bag in once; never re-read sockets here.
+    for (const [mod, value] of Object.entries(camp?.socketMods || {})) itemModsOnly[mod] = (itemModsOnly[mod] || 0) + value;
     const upgrades = normalizeHeroUpgrades((camp && camp.upgrades) || {});
     const level = Math.min(HERO_MAX_LEVEL, (camp && camp.level) || 1);
     // What this hero is swinging. An empty equipment map resolves to the

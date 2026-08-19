@@ -82,11 +82,42 @@ create table if not exists public.economy_audit_events (
   unique (actor_user_id, request_id)
 );
 
+create table if not exists public.crafting_material_balances (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  character_id uuid not null references public.game_characters(id) on delete cascade,
+  material_id text not null check (material_id in ('alloy_shard','phase_flux','prism_dust','ascendant_core')),
+  quantity integer not null default 0 check (quantity >= 0),
+  revision bigint not null default 1 check (revision > 0),
+  updated_at timestamptz not null default now(),
+  primary key (character_id, material_id)
+);
+
+create table if not exists public.component_instances (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  character_id uuid not null references public.game_characters(id) on delete cascade,
+  component_id text not null,
+  rank integer not null default 1 check (rank between 1 and 5),
+  location text not null default 'inventory' check (location in ('inventory','socketed')),
+  item_instance_id uuid references public.item_instances(id) on delete set null,
+  socket_index integer,
+  provenance jsonb not null,
+  revision bigint not null default 1 check (revision > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check ((location='inventory' and item_instance_id is null and socket_index is null) or
+    (location='socketed' and item_instance_id is not null and socket_index is not null))
+);
+create unique index if not exists component_instances_one_socket
+on public.component_instances(item_instance_id, socket_index) where location='socketed';
+
 alter table public.game_characters enable row level security;
 alter table public.player_wallets enable row level security;
 alter table public.item_instances enable row level security;
 alter table public.economy_requests enable row level security;
 alter table public.economy_audit_events enable row level security;
+alter table public.crafting_material_balances enable row level security;
+alter table public.component_instances enable row level security;
 
 drop policy if exists game_characters_read_self on public.game_characters;
 create policy game_characters_read_self on public.game_characters for select to authenticated using (auth.uid() = user_id);
@@ -98,6 +129,10 @@ drop policy if exists economy_requests_read_self on public.economy_requests;
 create policy economy_requests_read_self on public.economy_requests for select to authenticated using (auth.uid() = actor_user_id);
 drop policy if exists economy_audit_read_self on public.economy_audit_events;
 create policy economy_audit_read_self on public.economy_audit_events for select to authenticated using (auth.uid() = actor_user_id);
+drop policy if exists crafting_materials_read_self on public.crafting_material_balances;
+create policy crafting_materials_read_self on public.crafting_material_balances for select to authenticated using (auth.uid() = user_id);
+drop policy if exists components_read_self on public.component_instances;
+create policy components_read_self on public.component_instances for select to authenticated using (auth.uid() = owner_user_id);
 
 create or replace function public.economy_mutate(
   p_actor uuid, p_request_id text, p_action text, p_payload jsonb
@@ -108,7 +143,8 @@ as $$
 declare
   v_existing jsonb; v_character public.game_characters%rowtype; v_item public.item_instances%rowtype;
   v_wallet public.player_wallets%rowtype; v_result jsonb; v_entry jsonb; v_price bigint; v_count integer;
-  v_target_count integer; v_sold_snapshot jsonb;
+  v_target_count integer; v_sold_snapshot jsonb; v_component public.component_instances%rowtype;
+  v_material text; v_quantity integer; v_cost jsonb; v_proposal jsonb; v_socket_index integer;
 begin
   if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then raise exception 'service_role_required'; end if;
   if p_actor is null or p_request_id is null or length(p_request_id) not between 1 and 64 then raise exception 'invalid_request'; end if;
@@ -129,7 +165,10 @@ begin
       (p_payload#>>'{character,level}')::integer, coalesce(p_payload#>'{character,customization}', '{}'::jsonb))
     on conflict (user_id, client_character_id) do update set updated_at = now()
     returning * into v_character;
-    insert into public.player_wallets(user_id, salvage_alloy) values (p_actor, 0) on conflict (user_id) do nothing;
+    -- One account-scoped starter grant makes the free Forge usable without
+    -- trusting match rewards or a browser migration. Re-registering another
+    -- character cannot repeat it because user_id is the wallet primary key.
+    insert into public.player_wallets(user_id, salvage_alloy) values (p_actor, 500) on conflict (user_id) do nothing;
     update public.game_characters set registered_at = coalesce(registered_at, now()), revision = revision + 1
       where id = v_character.id returning * into v_character;
   else
@@ -156,6 +195,65 @@ begin
       coalesce(v_entry->>'binding','account'), 'stash', coalesce(v_entry->'economy_data','{}'),
       jsonb_build_object('kind','vendor_purchase','vendor_id',p_payload->>'vendor_id','rotation',p_payload->>'rotation','offer_index',p_payload->>'offer_index','request_id',p_request_id));
     update public.game_characters set revision = revision + 1, updated_at = now() where id = v_character.id returning * into v_character;
+  elsif p_action = 'buy_craft_material' then
+    v_material := p_payload->>'material_id'; v_quantity := (p_payload->>'quantity')::integer;
+    v_price := (p_payload->>'price')::bigint;
+    if v_material not in ('alloy_shard','phase_flux','prism_dust','ascendant_core') or v_quantity not between 1 and 20 then raise exception 'invalid_crafting_stock'; end if;
+    update public.player_wallets set salvage_alloy=salvage_alloy-v_price, revision=revision+1, updated_at=now()
+      where user_id=p_actor and salvage_alloy>=v_price returning * into v_wallet;
+    if not found then raise exception 'insufficient_funds'; end if;
+    insert into public.crafting_material_balances(user_id,character_id,material_id,quantity)
+      values(p_actor,v_character.id,v_material,v_quantity)
+      on conflict(character_id,material_id) do update set quantity=crafting_material_balances.quantity+excluded.quantity, revision=crafting_material_balances.revision+1, updated_at=now();
+    update public.game_characters set revision=revision+1,updated_at=now() where id=v_character.id returning * into v_character;
+  elsif p_action = 'buy_component' then
+    v_price := (p_payload->>'price')::bigint;
+    update public.player_wallets set salvage_alloy=salvage_alloy-v_price, revision=revision+1,updated_at=now()
+      where user_id=p_actor and salvage_alloy>=v_price returning * into v_wallet;
+    if not found then raise exception 'insufficient_funds'; end if;
+    select count(*) into v_count from public.component_instances where character_id=v_character.id and location='inventory';
+    if v_count>=40 then raise exception 'inventory_full'; end if;
+    insert into public.component_instances(owner_user_id,character_id,component_id,rank,provenance)
+      values(p_actor,v_character.id,p_payload->>'component_id',1,jsonb_build_object('kind','craft_vendor_purchase','request_id',p_request_id));
+    update public.game_characters set revision=revision+1,updated_at=now() where id=v_character.id returning * into v_character;
+  elsif p_action in ('craft_recipe','socket_insert','socket_remove') then
+    v_proposal := p_payload->'proposal'; v_cost := coalesce(v_proposal->'costs','{}'::jsonb);
+    select * into v_item from public.item_instances where id=(p_payload->>'item_id')::uuid and owner_user_id=p_actor
+      and character_id=v_character.id and location in ('stash','equipped') for update;
+    if not found then raise exception 'unauthorized_ownership'; end if;
+    if (v_proposal#>>'{mutation,expectedRevision}')::bigint<>v_item.revision or (p_payload->>'expected_item_revision')::bigint<>v_item.revision then raise exception 'stale_revision'; end if;
+    if v_proposal#>>'{item,instanceId}'<>v_item.id::text or v_proposal#>>'{item,ownerId}'<>p_actor::text or v_proposal#>>'{item,itemKey}'<>v_item.legacy_key then raise exception 'invalid_crafting_proposal'; end if;
+    v_price := coalesce((v_cost->>'alloy')::bigint,0);
+    update public.player_wallets set salvage_alloy=salvage_alloy-v_price,revision=revision+1,updated_at=now()
+      where user_id=p_actor and salvage_alloy>=v_price returning * into v_wallet;
+    if not found then raise exception 'insufficient_funds'; end if;
+    for v_material,v_quantity in select key,value::integer from jsonb_each_text(coalesce(v_cost->'materials','{}'::jsonb)) loop
+      update public.crafting_material_balances set quantity=quantity-v_quantity,revision=revision+1,updated_at=now()
+        where character_id=v_character.id and material_id=v_material and quantity>=v_quantity;
+      if not found then raise exception 'insufficient_materials'; end if;
+    end loop;
+    if p_action='socket_insert' then
+      select * into v_component from public.component_instances where id=(p_payload->>'component_id')::uuid and owner_user_id=p_actor
+        and character_id=v_character.id and location='inventory' for update;
+      if not found then raise exception 'unauthorized_component'; end if;
+      v_socket_index := (p_payload->>'socket_index')::integer;
+      update public.component_instances set location='socketed',item_instance_id=v_item.id,socket_index=v_socket_index,revision=revision+1,updated_at=now() where id=v_component.id;
+    elsif p_action='socket_remove' then
+      v_socket_index := (p_payload->>'socket_index')::integer;
+      select * into v_component from public.component_instances where item_instance_id=v_item.id and socket_index=v_socket_index and owner_user_id=p_actor and location='socketed' for update;
+      if not found then raise exception 'component_not_found'; end if;
+      select count(*) into v_count from public.component_instances where character_id=v_character.id and location='inventory';
+      if v_count>=40 then raise exception 'inventory_full'; end if;
+      update public.component_instances set location='inventory',item_instance_id=null,socket_index=null,revision=revision+1,updated_at=now() where id=v_component.id;
+    elsif v_proposal->>'action'='upgrade_component' then
+      v_socket_index := (p_payload->>'socket_index')::integer;
+      update public.component_instances set rank=rank+1,revision=revision+1,updated_at=now()
+        where item_instance_id=v_item.id and socket_index=v_socket_index and owner_user_id=p_actor and location='socketed';
+      if not found then raise exception 'component_not_found'; end if;
+    end if;
+    update public.item_instances set sockets=v_proposal->'item'->'sockets',revision=(v_proposal#>>'{mutation,nextRevision}')::bigint,
+      provenance=provenance||jsonb_build_object('last_craft',v_proposal->'provenance'),updated_at=now() where id=v_item.id returning * into v_item;
+    update public.game_characters set revision=revision+1,updated_at=now() where id=v_character.id returning * into v_character;
   elsif p_action = 'sell_vendor' then
     select * into v_item from public.item_instances where id = (p_payload->>'item_id')::uuid and owner_user_id = p_actor
       and character_id = v_character.id and location = 'stash' for update;
@@ -208,7 +306,9 @@ begin
     'character',jsonb_build_object('id',v_character.id,'clientCharacterId',v_character.client_character_id,'revision',v_character.revision),
     'wallet',jsonb_build_object('balance',coalesce(v_wallet.salvage_alloy,0),'revision',coalesce(v_wallet.revision,1)),
     'mutation',jsonb_build_object('action',p_action,'value',coalesce(v_price,0),'itemId',v_item.id,'soldItem',v_sold_snapshot),
-    'items',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'legacyKey',legacy_key,'baseId',base_id,'slotPool',slot_pool,'location',location,'equipSlot',equip_slot,'revision',revision) order by created_at),'[]'::jsonb) from public.item_instances where character_id=v_character.id and location <> 'sold'));
+    'items',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'legacyKey',legacy_key,'baseId',base_id,'slotPool',slot_pool,'location',location,'equipSlot',equip_slot,'revision',revision,'sockets',sockets,'provenance',provenance) order by created_at),'[]'::jsonb) from public.item_instances where character_id=v_character.id and location <> 'sold'),
+    'materials',(select coalesce(jsonb_object_agg(material_id,quantity),'{}'::jsonb) from public.crafting_material_balances where character_id=v_character.id),
+    'components',(select coalesce(jsonb_agg(jsonb_build_object('id',id,'componentId',component_id,'rank',rank,'location',location,'itemInstanceId',item_instance_id,'socketIndex',socket_index,'revision',revision,'provenance',provenance) order by created_at),'[]'::jsonb) from public.component_instances where character_id=v_character.id));
   update public.economy_requests set response_payload=v_result, completed_at=now() where actor_user_id=p_actor and request_id=p_request_id;
   insert into public.economy_audit_events(actor_user_id,character_id,request_id,action,inputs,outputs)
   values(p_actor,v_character.id,p_request_id,p_action,p_payload,v_result);

@@ -16,7 +16,7 @@ import { AuthClient } from './auth.js';
 import {
   applyEconomySnapshot, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
   loadAuthoritativeEconomy, quarantineForAuthoritativeLoad, registerAuthoritativeCharacter,
-  sellAuthoritativeItem, unequipAuthoritativeItem,
+  sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
 import { TacticalVisuals } from './tactical-visuals.js';
@@ -202,6 +202,9 @@ class App {
       onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
       onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
       onAuthoritySync: (character) => this._ensureAuthoritativeEconomy(character),
+      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, () => buyCraftMaterial(character, materialId)),
+      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, () => buyCraftComponent(character, componentId)),
+      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, () => craftAuthoritative(character, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
@@ -1692,6 +1695,14 @@ class App {
     await this._ensureAuthoritativeEconomy(character);
     const revision = character.equipmentInstanceRevisions?.[slot] ?? null;
     const result = await unequipAuthoritativeItem(character, slot, revision);
+    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    return result;
+  }
+
+  async _craftMutation(character, mutation) {
+    if (!this.auth?.isSignedIn()) throw new Error('sign_in_required');
+    await this._ensureAuthoritativeEconomy(character);
+    const result = await mutation();
     if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
     return result;
   }

@@ -346,6 +346,7 @@ export function characterCamp(character, relics = []) {
       return item && !item.slot;
     }),
     equipment: legalEquipment(character),
+    socketMods: { ...(character?.socketMods || {}) },
     upgrades: { ...(character?.upgrades || {}) },
     lattice: [...(character?.lattice || [])],
     treeMods: resolvedTreeMods,

@@ -1,4 +1,5 @@
 import { backendEnabled, economyRequest } from './backend.js';
+import { socketComponentMods } from './crafting.js';
 
 const requestId = () => globalThis.crypto?.randomUUID?.()
   || `econ-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -79,15 +80,34 @@ export async function unequipAuthoritativeItem(character, equipSlot, itemRevisio
   });
 }
 
+export async function buyCraftMaterial(character, materialId, quantity = 1) {
+  return economyRequest('buy_craft_material', { requestId: requestId(), characterId: character.id, materialId, quantity,
+    characterRevision: character.authorityRevision ?? null });
+}
+
+export async function buyCraftComponent(character, componentId) {
+  return economyRequest('buy_component', { requestId: requestId(), characterId: character.id, componentId,
+    characterRevision: character.authorityRevision ?? null });
+}
+
+export async function craftAuthoritative(character, action, itemId, itemRevision, details = {}) {
+  return economyRequest(action, { requestId: requestId(), characterId: character.id, itemId, itemRevision,
+    characterRevision: character.authorityRevision ?? null, ...details });
+}
+
 export function applyEconomySnapshot(character, snapshot) {
   if (!snapshot?.character || !Array.isArray(snapshot.items)) return false;
   const stash = snapshot.items.filter((item) => item.location === 'stash');
   const equipped = snapshot.items.filter((item) => item.location === 'equipped');
   character.items = stash.map((item) => item.legacyKey);
-  character.itemInstances = stash.map((item) => ({ id: item.id, key: item.legacyKey, revision: item.revision }));
+  character.itemInstances = stash.map((item) => ({ id: item.id, key: item.legacyKey, revision: item.revision, sockets: item.sockets || [], provenance: item.provenance || {} }));
   character.equipment = Object.fromEntries(equipped.map((item) => [item.equipSlot, item.legacyKey]));
   character.equipmentInstances = Object.fromEntries(equipped.map((item) => [item.equipSlot, item.id]));
   character.equipmentInstanceRevisions = Object.fromEntries(equipped.map((item) => [item.equipSlot, item.revision]));
+  character.equipmentItemInstances = Object.fromEntries(equipped.map((item) => [item.equipSlot, item]));
+  character.craftingMaterials = { ...(snapshot.materials || {}) };
+  character.craftingComponents = [...(snapshot.components || [])];
+  character.socketMods = socketComponentMods(equipped);
   character.authorityRevision = snapshot.character.revision;
   character.authoritativeBalance = snapshot.wallet?.balance ?? 0;
   return true;
