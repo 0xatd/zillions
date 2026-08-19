@@ -34,6 +34,7 @@ const profile = await mkdtemp(join(tmpdir(), 'zillions-browser-'));
 const browser = spawn(chrome, [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
+  '--window-size=1440,900',
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, `http://127.0.0.1:${serverPort}/`,
 ], { stdio: 'ignore' });
 
@@ -181,21 +182,33 @@ try {
     return guestLocked && guestState && hostEditable;
   })()`), true, 'Staging lobby must expose four seats, chat, guest-ready state, and host-only room controls');
   if (process.env.ZILLIONS_VISUAL_QA_DIR) {
-    await evaluate(`(() => { window.__app.ui._showCharacterCreator(); window.scrollTo(0, 0); document.querySelector('#screen-character-create').scrollTop = 0; return true; })()`);
-    await delay(350);
-    await evaluate(`document.querySelector('#screen-character-create').scrollTop = 0`);
-    const human = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    await writeFile(join(process.env.ZILLIONS_VISUAL_QA_DIR, 'character-human.png'), Buffer.from(human.result.data, 'base64'));
-    await evaluate(`(() => {
-      const robot = [...document.querySelectorAll('#creator-races button')].find((node) => node.textContent.includes('Robot'));
-      robot.click();
-      for (const row of document.querySelectorAll('#creator-parts .creator-part-options')) row.lastElementChild.click();
-      return true;
-    })()`);
-    await delay(350);
-    await evaluate(`document.querySelector('#screen-character-create').scrollTop = 0`);
-    const robot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    await writeFile(join(process.env.ZILLIONS_VISUAL_QA_DIR, 'character-robot.png'), Buffer.from(robot.result.data, 'base64'));
+    const capture = async (name, race, parts, equipment = {}) => {
+      await evaluate(`(() => {
+        const ui = window.__app.ui;
+        ui._showCharacterCreator();
+        const wanted = ${JSON.stringify(parts)};
+        ui._creatorRace = ${JSON.stringify(race)};
+        ui._creatorParts = wanted;
+        for (const [index, node] of document.querySelectorAll('#creator-races button').entries()) node.classList.toggle('sel', index === ${race === 'robot' ? 1 : 0});
+        ui._buildCreatorParts();
+        ui._renderCreatorSummary();
+        window.__app._setCharacterPreview({ raceKey: ${JSON.stringify(race)}, appearance: 'cobalt', customization: wanted,
+          equipment: ${JSON.stringify(equipment)}, proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
+        document.querySelector('#character-create-form').scrollIntoView({ block: 'start' });
+        return true;
+      })()`);
+      await delay(180);
+      const shot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      await writeFile(join(process.env.ZILLIONS_VISUAL_QA_DIR, `${name}.png`), Buffer.from(shot.result.data, 'base64'));
+    };
+    for (const face of ['sentinel', 'ranger', 'veteran', 'nomad']) await capture(`human-face-${face}`, 'human', { face, body: 'standard', head: 'cropped', legs: 'field' });
+    for (const face of ['optic', 'visor', 'tri-eye', 'faceless']) await capture(`robot-face-${face}`, 'robot', { face, body: 'warden', head: 'smooth', legs: 'biped' });
+    await capture('human-light-scout-no-gear', 'human', { face: 'ranger', body: 'light', head: 'swept', legs: 'scout' });
+    await capture('human-heavy-armored-no-gear', 'human', { face: 'veteran', body: 'heavy', head: 'hooded', legs: 'armored' });
+    await capture('robot-strider-reverse-joint-no-gear', 'robot', { face: 'optic', body: 'strider', head: 'antenna', legs: 'reverse-joint' });
+    await capture('robot-bulwark-heavy-full-gear', 'robot', { face: 'tri-eye', body: 'bulwark', head: 'crest', legs: 'heavy' }, {
+      head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
+    });
   }
   console.log('browser shell check passed');
 } finally {

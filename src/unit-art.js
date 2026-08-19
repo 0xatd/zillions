@@ -51,7 +51,7 @@ const cone = (parent, mat, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
 function humanoid({
   bulk = 1, tall = 1,
   armor, cloth, boot = 0x26282c, shell = 0xd9d3c3,
-  visor = 0x35ff70, visorWide = false, pack = 0x4a4d52,
+  visor = 0x35ff70, visorWide = false, visorVisible = true, pack = 0x4a4d52,
   skirt = false, legless = false,
 }) {
   const root = new THREE.Group();
@@ -95,7 +95,7 @@ function humanoid({
   head.position.y = 0.94 * H;
   root.add(head);
   sph(head, shellM, 0.105 * W, 0, 0.03, 0, 0.95, 1.05, 0.95);               // dome helmet
-  mesh(head, new THREE.BoxGeometry(visorWide ? 0.15 * W : 0.12 * W, 0.042, 0.03), M(visor, 0.9), 0, 0.035, 0.095 * W);
+  if (visorVisible) mesh(head, new THREE.BoxGeometry(visorWide ? 0.15 * W : 0.12 * W, 0.042, 0.03), M(visor, 0.9), 0, 0.035, 0.095 * W);
   box(root, packM, 0.24 * W, 0.26 * H, 0.12, 0, 0.62 * H, -0.16 * W - 0.03); // life-support pack
 
   return { root, limbs, torso, head, armM: armorM, clothM, shellM, bootM };
@@ -419,12 +419,15 @@ function playerHero(u) {
     bulk, tall: race === 'robot' ? 1.08 : 1.03,
     visor: race === 'robot' ? 0x5ee8ff : 0x8fd0ff,
     visorWide: ['visor', 'faceless'].includes(custom.face),
+    visorVisible: false,
   });
   rig.root.userData.visualState = state;
   const weapons = [];
   // Identity parts stay visible beneath gear.
   if (race === 'human') {
     const skin = M(0xd8c6ad), mark = M(custom.face === 'nomad' ? 0x315b66 : 0x4a3229);
+    for (const x of [-.035, .035]) sph(rig.head, M(0x18212a), .012, x, .048, .104, 1.15, .7, .45);
+    if (custom.face === 'sentinel') { box(rig.head, M(0x3b2d25), .13, .016, .012, 0, .076, .103); box(rig.head, M(0x5c4435), .055, .018, .014, 0, -.032, .105); }
     if (custom.face === 'ranger') box(rig.head, mark, .09, .012, .014, 0, .075, .102, 0, 0, -.12);
     if (custom.face === 'veteran') box(rig.head, M(0xa77969), .012, .09, .012, .04, .02, .103, 0, 0, -.28);
     if (custom.face === 'nomad') { box(rig.head, mark, .18, .018, .012, 0, .055, .103); box(rig.head, skin, .06, .03, .02, 0, -.035, .105); }
