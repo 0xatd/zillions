@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
@@ -71,6 +71,11 @@ try {
       } else resolve(message.result.result.value);
     });
     socket.send(JSON.stringify({ id: requestId, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+  });
+  const command = (method, params = {}) => new Promise((resolve) => {
+    const requestId = ++id;
+    pending.set(requestId, resolve);
+    socket.send(JSON.stringify({ id: requestId, method, params }));
   });
   socket.send(JSON.stringify({ id: ++id, method: 'Runtime.enable' }));
   let appReady = false;
@@ -175,6 +180,23 @@ try {
       && document.querySelector('#screen-setup').classList.contains('room-host');
     return guestLocked && guestState && hostEditable;
   })()`), true, 'Staging lobby must expose four seats, chat, guest-ready state, and host-only room controls');
+  if (process.env.ZILLIONS_VISUAL_QA_DIR) {
+    await evaluate(`(() => { window.__app.ui._showCharacterCreator(); window.scrollTo(0, 0); document.querySelector('#screen-character-create').scrollTop = 0; return true; })()`);
+    await delay(350);
+    await evaluate(`document.querySelector('#screen-character-create').scrollTop = 0`);
+    const human = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    await writeFile(join(process.env.ZILLIONS_VISUAL_QA_DIR, 'character-human.png'), Buffer.from(human.result.data, 'base64'));
+    await evaluate(`(() => {
+      const robot = [...document.querySelectorAll('#creator-races button')].find((node) => node.textContent.includes('Robot'));
+      robot.click();
+      for (const row of document.querySelectorAll('#creator-parts .creator-part-options')) row.lastElementChild.click();
+      return true;
+    })()`);
+    await delay(350);
+    await evaluate(`document.querySelector('#screen-character-create').scrollTop = 0`);
+    const robot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    await writeFile(join(process.env.ZILLIONS_VISUAL_QA_DIR, 'character-robot.png'), Buffer.from(robot.result.data, 'base64'));
+  }
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

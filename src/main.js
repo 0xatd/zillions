@@ -206,6 +206,7 @@ class App {
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
+      onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
@@ -750,6 +751,44 @@ class App {
     mesh.scale.setScalar(1.0);
     this.owHero = mesh;
     this.scene.add(mesh);
+  }
+
+  _setCharacterPreview(style) {
+    const canvas = document.getElementById(style.canvasId || 'creator-preview-canvas');
+    if (!canvas) return;
+    this.characterPreviews ||= new Map();
+    let p = this.characterPreviews.get(canvas.id);
+    if (!p || p.canvas !== canvas) {
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(32, 1, .1, 20);
+      camera.position.set(2.5, 1.45, 3.4);
+      camera.lookAt(0, .65, 0);
+      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 2.2));
+      const key = new THREE.DirectionalLight(0xffe2b5, 2.4); key.position.set(3, 4, 4); scene.add(key);
+      p = { renderer, scene, camera, canvas, model: null };
+      this.characterPreviews.set(canvas.id, p);
+    }
+    if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
+    const key = style.proxyHero || 'scott';
+    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style }).node;
+    p.model.scale.setScalar(1.45);
+    p.model.position.y = -.02;
+    p.scene.add(p.model);
+  }
+
+  _renderCharacterPreview(t) {
+    for (const [id, p] of this.characterPreviews || []) {
+      if (!p.canvas.isConnected) { p.renderer.dispose(); this.characterPreviews.delete(id); continue; }
+      if (!p.model || p.canvas.offsetParent === null) continue;
+      const w = Math.max(1, p.canvas.clientWidth), h = Math.max(1, p.canvas.clientHeight);
+      if (p.canvas.width !== Math.round(w * p.renderer.getPixelRatio()) || p.canvas.height !== Math.round(h * p.renderer.getPixelRatio())) {
+        p.renderer.setSize(w, h, false); p.camera.aspect = w / h; p.camera.updateProjectionMatrix();
+      }
+      p.model.rotation.y = Math.sin(t * .55) * .35;
+      p.renderer.render(p.scene, p.camera);
+    }
   }
 
   _updateOverworld(dt, t) {
@@ -5551,6 +5590,7 @@ class App {
     this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
     this.tacticalVisuals.render();
+    this._renderCharacterPreview(t);
   }
 }
 

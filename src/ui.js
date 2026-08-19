@@ -239,7 +239,7 @@ export class UI {
         <div id="screen-character-create" class="character-create-screen hidden">
           <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
           <form id="character-create-form" class="creator-form creator-xl">
-            <section class="creator-preview" id="creator-preview" aria-label="Character preview"><div class="creator-avatar"><i class="avatar-head"></i><i class="avatar-face"></i><i class="avatar-body"></i><i class="avatar-legs"></i></div><strong id="creator-preview-race">HUMAN</strong><span>Live equipment changes this silhouette.</span></section>
+            <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>The same procedural model appears in the world and in combat.</span></section>
             <div class="creator-controls">
               <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
               <fieldset><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
@@ -1180,6 +1180,13 @@ export class UI {
       preview.dataset.legs = this._creatorParts?.legs || '';
       preview.style.setProperty('--creator-color', appearance.color);
     }
+    this.cb.onCharacterPreview?.({
+      raceKey: this._creatorRace || 'human',
+      appearance: this._creatorAppearance || 'iron',
+      customization: { ...(this._creatorParts || {}) },
+      equipment: {}, canvasId: 'creator-preview-canvas',
+      proxyHero: klass.proxy,
+    });
     const raceLabel = this.root.querySelector('#creator-preview-race');
     if (raceLabel) raceLabel.textContent = race.name.toUpperCase();
   }
@@ -1434,9 +1441,12 @@ export class UI {
     const attrs = characterAttributes(character);
     const stats = character.stats || {};
     this.root.querySelector('#sheet-panel-character').innerHTML = `
-      <section class="character-paperdoll" style="--character-color:${appearance.color}"><div class="paperdoll-aura"></div><div class="paperdoll-hero">${klass.icon}</div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
+      <section class="character-paperdoll" style="--character-color:${appearance.color}"><canvas id="paperdoll-preview-canvas"></canvas><div class="paperdoll-aura"></div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
       <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
       <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
+    this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+      proxyHero: character.proxyHero, canvasId: 'paperdoll-preview-canvas' });
   }
 
   _renderAbilitiesOverview(character) {
@@ -2190,7 +2200,7 @@ export class UI {
         <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
         <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
         ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
-      `;
+    `;
       grid.appendChild(card);
     }
   }

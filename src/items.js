@@ -232,12 +232,12 @@ export const ITEM_BASES = {
   resonator: { slot: 'offhand', name: 'Deep Resonator', icon: '🔋', ilvl: 36, req: { signal: 32 }, implicit: { cdr: 0.13, auraR: 0.1 } },
 
   // --- armour ---
-  flak_plate: { slot: 'armor', name: 'Flak Plate', icon: '🦺', ilvl: 1, req: { frame: 6 }, implicit: { hp: 60 } },
-  siege_plate: { slot: 'armor', name: 'Siege Plate', icon: '🦺', ilvl: 28, req: { frame: 26 }, implicit: { hp: 150, armor: 0.05 } },
-  weave_coat: { slot: 'armor', name: 'Weave Coat', icon: '🧥', ilvl: 1, req: { reflex: 6 }, implicit: { evadeChance: 0.05 } },
-  ghost_coat: { slot: 'armor', name: 'Ghost Coat', icon: '🧥', ilvl: 28, req: { reflex: 26 }, implicit: { evadeChance: 0.09, speed: 0.05 } },
-  powered_shell: { slot: 'armor', name: 'Powered Shell', icon: '🤖', ilvl: 40, req: { frame: 34 }, implicit: { hp: 220, armor: 0.09, speed: -0.05 } },
-  signal_shroud: { slot: 'armor', name: 'Signal Shroud', icon: '👘', ilvl: 28, req: { signal: 26 }, implicit: { hp: 70, cdr: 0.06 } },
+  flak_plate: { slot: 'armor', name: 'Flak Plate', icon: '🦺', ilvl: 1, visual: 'flak', req: { frame: 6 }, implicit: { hp: 60 } },
+  siege_plate: { slot: 'armor', name: 'Siege Plate', icon: '🦺', ilvl: 28, visual: 'siege', req: { frame: 26 }, implicit: { hp: 150, armor: 0.05 } },
+  weave_coat: { slot: 'armor', name: 'Weave Coat', icon: '🧥', ilvl: 1, visual: 'weave', req: { reflex: 6 }, implicit: { evadeChance: 0.05 } },
+  ghost_coat: { slot: 'armor', name: 'Ghost Coat', icon: '🧥', ilvl: 28, visual: 'ghost', req: { reflex: 26 }, implicit: { evadeChance: 0.09, speed: 0.05 } },
+  powered_shell: { slot: 'armor', name: 'Powered Shell', icon: '🤖', ilvl: 40, visual: 'powered', req: { frame: 34 }, implicit: { hp: 220, armor: 0.09, speed: -0.05 } },
+  signal_shroud: { slot: 'armor', name: 'Signal Shroud', icon: '👘', ilvl: 28, visual: 'shroud', req: { signal: 26 }, implicit: { hp: 70, cdr: 0.06 } },
 
   // --- visible modular armour ---
   frontier_helm: { slot: 'head', name: 'Frontier Helm', icon: '⛑️', ilvl: 1, visual: 'frontier', implicit: { hp: 18 } },
