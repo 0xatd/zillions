@@ -3254,6 +3254,9 @@ export class Game {
       this.emit({ type: 'enrage', x: zb.x, z: zb.z });
     }
     zb.hitFlash = 0.15;
+    // Floating damage number for the renderer (QA SOLO-2: "combat is green
+    // dots until something dies"). Presentation-only; pooled client-side.
+    if (dmg >= 1) this.emit({ type: 'zdmg', x: zb.x, z: zb.z, n: Math.round(dmg), boss: !!zb.boss });
     if (zb.state !== AGGRO) zb.state = AGGRO;
     if (zb.hp <= 0) {
       zb.dead = true;
