@@ -729,6 +729,17 @@ body::after {
   box-shadow: 0 -12px 18px -10px rgba(0, 0, 0, 0.7), 0 20px 60px rgba(0, 0, 0, 0.6);
   background: var(--panel); border-radius: 14px;
 }
+.runreview { margin: 14px 0; padding: 14px; text-align: left; border: 1px solid var(--panel-border); border-radius: 12px; background: rgba(0,0,0,.2); }
+.runreview .steplabel { margin-bottom: 10px; }
+.reviewcause { display: flex; align-items: center; gap: 10px; }
+.reviewcause > span { font-size: 28px; }
+.reviewcause div { display: flex; flex-direction: column; gap: 3px; }
+.reviewcause small { opacity: .72; line-height: 1.35; }
+.reviewaction { display: flex; gap: 9px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--panel-border); font-size: 13px; line-height: 1.4; }
+.reviewaction b { flex: 0 0 auto; color: var(--gold); font-size: 10px; letter-spacing: .1em; }
+.endactions { position: sticky; bottom: 0; display: flex; gap: 8px; margin-top: auto; padding-top: 12px; background: var(--panel); }
+.endpanel .endactions .startbtn { position: static; flex: 1; margin: 0; box-shadow: none; }
+.endactions .startbtn.primary { background: var(--gold); color: #17120a; }
 .tagline { opacity: 0.85; margin-bottom: 18px; font-size: 15px; }
 
 /* ---------- hero picker ---------- */
@@ -926,6 +937,22 @@ body::after {
   border-radius: 6px; overflow: hidden;
 }
 #boss-fill { height: 100%; background: linear-gradient(90deg, #7c1f1f, #e6493a); transition: width 0.2s; }
+.combat-alert {
+  position: absolute; top: 92px; right: 16px; z-index: 11; width: min(340px, calc(100vw - 32px));
+  display: flex; gap: 10px; align-items: center; padding: 10px 12px;
+  border: 1px solid rgba(255, 190, 92, .55); border-radius: 10px;
+  background: rgba(19, 15, 10, .88); box-shadow: 0 8px 26px rgba(0,0,0,.4); pointer-events: none;
+}
+.combat-alert > span { font-size: 24px; }
+.combat-alert div { display: flex; flex-direction: column; gap: 2px; }
+.combat-alert b { color: #ffd78a; font-size: 12px; letter-spacing: .12em; }
+.combat-alert small { color: #f0e6d3; font-size: 12px; line-height: 1.35; }
+.combat-alert.critical { border-color: rgba(255,93,82,.75); background: rgba(35,10,9,.92); }
+.combat-alert.critical b { color: #ff8c82; }
+.combat-alert.boss { border-color: rgba(213,134,255,.7); background: rgba(25,10,33,.92); }
+.combat-alert.boss b { color: #e1a8ff; }
+.hpbar.critical { border-color: rgba(255,93,82,.9); box-shadow: 0 0 12px rgba(255,93,82,.45); }
+.hpbar.critical .hpfill { background: linear-gradient(90deg, #ff382e, #ff8b64); }
 
 /* ---------- online lobby ---------- */
 .setup.lobby { width: min(1160px, calc(100vw - 32px)); }

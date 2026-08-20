@@ -12,6 +12,7 @@ import {
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
 } from './config.js';
 import { formatTime } from './utils.js';
+import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
@@ -83,6 +84,7 @@ export class UI {
       <div id="invitetoast" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
+      <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
       <div id="ow-quick-actions" class="owquick hidden">
         <button id="ow-custom-quick" class="tbtn" title="Browse live and arcade games">CUSTOM GAMES</button>
@@ -2824,12 +2826,26 @@ export class UI {
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
+    const alert = combatAlert(game, p);
+    const alertBox = q('#combat-alert');
+    const alertKey = alert?.key || '';
+    if (alertKey !== this._combatAlertKey) {
+      this._combatAlertKey = alertKey;
+      if (alert) {
+        alertBox.className = `combat-alert ${alert.tone}`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}</small></div>`;
+      } else {
+        alertBox.className = 'combat-alert hidden';
+        alertBox.textContent = '';
+      }
+    }
 
     // Hero plate.
     const h = game.heroes[p];
     if (h) {
       q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
       q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+      q('#a-hp').parentElement.classList.toggle('critical', !h.dead && h.hp / h.maxHp <= 0.25);
       const need = xpForLevel(h.level);
       q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
 
@@ -3448,7 +3464,7 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
-  showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null) {
+  showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -3461,6 +3477,7 @@ export class UI {
         <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
     }).join('');
     const grants = (extra && extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
+    const review = runReview({ won, stats, threat, mode, game });
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
@@ -3482,13 +3499,28 @@ export class UI {
           ${labyrinth ? '' : `<div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>`}
           <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
+        <div class="runreview ${won ? 'success' : 'failure'}">
+          <div class="steplabel">${won ? 'WHAT WORKED' : 'WHY THE RUN ENDED'}</div>
+          <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
+          <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
+        </div>
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
         ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${grants.length
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
         ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
-        <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+        <div class="endactions">
+          ${!won && mode === 'campaign' ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+        </div>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+    const retry = ov.querySelector('#b-retry');
+    if (retry) retry.onclick = () => {
+      if (retry.disabled) return;
+      retry.disabled = true;
+      retry.textContent = 'Restarting…';
+      this.cb.onRetry && this.cb.onRetry();
+    };
   }
 
   // ---------- online lobby rendering ----------

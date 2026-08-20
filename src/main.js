@@ -216,6 +216,7 @@ class App {
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
+      onRetry: () => this._retryMission(),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
@@ -1498,6 +1499,19 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    if (status.signedIn && !status.needsUsername) {
+      let retry = null;
+      try { retry = JSON.parse(sessionStorage.getItem('zillions-retry-mission') || 'null'); } catch { /* invalid marker */ }
+      if (retry?.level && retry?.hero) {
+        sessionStorage.removeItem('zillions-retry-mission');
+        this._authenticatedEntryHandled = true;
+        this.ui._accountAccepted = true;
+        this.ui.selectedLevel = retry.level;
+        this.ui.selectedMode = 'campaign';
+        setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
+        return;
+      }
+    }
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: back onto the planet you launched
@@ -1528,6 +1542,20 @@ class App {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
       this.ui.shell.finishMission();
     }
+    location.reload();
+  }
+
+  _retryMission() {
+    if (!this.game?.over || this.game.mode !== 'campaign' || this.netMode) return this._restartOrReturn();
+    // Preserve the exact mission setup across the clean reload. Startup already
+    // owns authentication/profile hydration; the retry marker is consumed once
+    // that entry path is ready instead of trying to reuse stale scene state.
+    try {
+      sessionStorage.setItem('zillions-retry-mission', JSON.stringify({
+        difficulty: this.game.diffKey, hero: this.ui.selectedHero,
+        level: this.game.levelId, mode: this.game.mode,
+      }));
+    } catch { /* blocked storage */ }
     location.reload();
   }
 
@@ -5336,14 +5364,14 @@ class App {
           this.audio.victory();
           this.pause();
           this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
           this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
       }
     }
