@@ -1,4 +1,5 @@
 const API = '/api/living-world';
+const PARTY_API = '/api/living-world-party';
 let session = null;
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
@@ -16,6 +17,20 @@ export async function sendLivingWorldCommand(command) {
   if (!response.ok) throw Object.assign(new Error(result?.error || 'living_world_command_failed'), { status: response.status, result });
   return result;
 }
+export async function getLivingWorldParty() {
+  if (!session?.access_token) return null;
+  const response = await fetch(PARTY_API, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'party_projection_failed'), { status: response.status, result });
+  return result.party;
+}
+export async function sendLivingWorldPartyCommand(command) {
+  if (!session?.access_token) return null;
+  const response = await fetch(PARTY_API, { method: 'POST', headers: headers({ accept: 'application/json', 'content-type': 'application/json' }), body: JSON.stringify(command) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'party_command_failed'), { status: response.status, result });
+  return result;
+}
 
 const point = (position = {}) => [Number(position.x) || 0, Number(position.y ?? position.z) || 0];
 const factionOwner = (party, ownIds, ownFactions) => ownIds.has(party.id) ? 'free'
@@ -24,7 +39,7 @@ const factionOwner = (party, ownIds, ownFactions) => ownIds.has(party.id) ? 'fre
 
 // Convert the filtered server projection into the UI contract. This function
 // never invents world state. Missing authority data remains missing.
-export function livingWorldProjectionToUi(projection = {}, self = {}) {
+export function livingWorldProjectionToUi(projection = {}, self = {}, socialParty = null) {
   const locations = projection.locations || [];
   const byLocation = new Map(locations.map((location) => [location.id, location]));
   const own = projection.ownParties || [];
@@ -54,11 +69,17 @@ export function livingWorldProjectionToUi(projection = {}, self = {}) {
       revision: Number(primary?.revision) || 0,
       locationId: primary?.location_id || null,
       routeId: primary?.route_id || null,
-      members: primary ? [{
+      members: socialParty?.members?.length ? socialParty.members.map((member) => ({ ...member, className: member.role || 'member', self: member.id === self.userId })) : primary ? [{
         id: self.id || 'self', name: self.name || primary.name || 'Commander',
         className: self.className || 'Commander', health: Number(self.health ?? 100),
         status: primary.stance || 'Ready', location: byLocation.get(primary.location_id)?.name || (primary.route_id ? 'Travelling' : 'Unknown'), self: true,
       }] : [],
+      name: socialParty?.name || null,
+      socialPartyId: socialParty?.id || null,
+      socialRevision: Number(socialParty?.revision) || 0,
+      leaderUserId: socialParty?.leaderUserId || null,
+      invites: socialParty?.invites || [],
+      pendingInvites: socialParty?.pendingInvites || [],
     },
     settlements: locations.map((location) => {
       const [x, y] = point(location.position);
