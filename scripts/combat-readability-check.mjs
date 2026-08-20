@@ -19,6 +19,8 @@ const explicitKeep = runReview({ won: false, stats: {}, game: game({ defeatCause
 assert.match(explicitKeep.cause.title, /Keep/, 'authoritative Keep cause wins over live nests');
 const exhausted = runReview({ won: false, stats: { heroDeaths: 3 }, game: game({ defeatCause: 'party_exhausted', liveNests: () => 3 }) });
 assert.match(exhausted.cause.title, /lives/, 'authoritative party exhaustion wins over live nests');
+assert.match(exhausted.cause.detail, /3 hero falls exhausted/);
+assert.match(runReview({ won: false, stats: { heroDeaths: 1 }, game: game({ defeatCause: 'party_exhausted' }) }).cause.detail, /1 hero fall exhausted/);
 const unknown = runReview({ won: false, stats: {}, game: game({ defeatCause: 'future_cause', liveNests: () => 2 }) });
 assert.match(unknown.cause.title, /hives/, 'unknown causes retain legacy evidence fallback');
 const empty = runReview({ won: false, stats: null, game: null });
@@ -28,5 +30,6 @@ const memory = new Map();
 const storage = { setItem: (k, v) => memory.set(k, v), getItem: (k) => memory.get(k) ?? null };
 assert.equal(storeRetry(storage, { level: 2, hero: 'scott', difficulty: 'casual' }), true);
 assert.equal(storeRetry({ setItem: () => { throw new Error('blocked'); }, getItem: () => null }, { level: 2, hero: 'scott' }), false);
+assert.equal(storeRetry({ setItem: () => {}, getItem: () => '{"level":1,"hero":"stale"}' }, { level: 2, hero: 'scott' }), false, 'stale marker is not accepted after a no-op write');
 assert.equal(storeRetry(storage, { level: 2 }), false, 'invalid retry is never persisted');
 console.log('combat readability checks passed');

@@ -27,7 +27,7 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
     return { cause, action: mode === 'campaign' ? 'Review the new rewards, then prepare for the next front.' : 'Continue while this loadout is working.' };
   }
   if (game?.defeatCause === 'party_exhausted') return {
-    cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero ${safe.heroDeaths === 1 ? 'fall exhausted' : 'falls exhausted'} the shared life pool.` },
+    cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero ${safe.heroDeaths === 1 ? 'fall' : 'falls'} exhausted the shared life pool.` },
     action: 'Slow down before sealed encounters and save abilities for the largest wave.',
   };
   if (mode === 'labyrinth' && safe.heroDeaths > 0) return { cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero falls exhausted the shared life pool.` }, action: 'Slow down before sealed encounters and save abilities for the largest wave.' };
@@ -41,9 +41,10 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
 
 export function storeRetry(storage, retry) {
   if (!storage || !retry?.level || !retry?.hero) return false;
+  const serialized = JSON.stringify(retry);
   try {
-    storage.setItem('zillions-retry-mission', JSON.stringify(retry));
-    return storage.getItem('zillions-retry-mission') != null;
+    storage.setItem('zillions-retry-mission', serialized);
+    return storage.getItem('zillions-retry-mission') === serialized;
   } catch {
     return false;
   }
