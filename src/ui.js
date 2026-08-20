@@ -2280,13 +2280,19 @@ export class UI {
   _renderPartyFrames() {
     const box = this.root.querySelector('#ow-party-frames');
     if (!box) return;
-    const members = this._livingWorld.party.members || [];
+    const party = this._livingWorld.party;
+    const members = party.members || [];
+    const self = members.find((member) => member.self);
+    const pending = party.pendingInvites || [];
     box.innerHTML = `<div class="opf-head"><span>PARTY</span><button id="opf-invite">${this._livingWorld.party.id ? '+ INVITE' : '+ CREATE'}</button></div>${members.length ? members.map((member) => {
       const health = Math.max(0, Math.min(100, Number(member.health) || 0));
-      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')}</small></span><strong>${health}%</strong></button>`;
-    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}`;
+      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.role || member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')} · ⚔ ${Number(member.companyStrength) || 0}</small></span><strong>${health}%</strong></button>`;
+    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}${pending.map((invite) => `<button class="opf-invite-card" data-invite="${escapeHtml(invite.id)}">JOIN ${escapeHtml(invite.partyName || 'PARTY')}</button>`).join('')}${party.socialPartyId ? `<div class="opf-actions"><button data-mode="grouped" class="${self?.travelMode === 'grouped' ? 'active' : ''}">TRAVEL TOGETHER</button><button data-mode="split" class="${self?.travelMode === 'split' ? 'active' : ''}">SPLIT</button><button id="opf-leave">LEAVE</button></div>` : ''}`;
     box.querySelector('#opf-invite').onclick = () => this._partyAction();
     for (const button of box.querySelectorAll('[data-member]')) button.onclick = () => this.cb.onPartyMemberLocate?.(button.dataset.member);
+    for (const button of box.querySelectorAll('[data-mode]')) button.onclick = () => this.cb.onPartyTravelMode?.(button.dataset.mode);
+    for (const button of box.querySelectorAll('[data-invite]')) button.onclick = () => this.cb.onPartyInviteAccept?.(pending.find((invite) => invite.id === button.dataset.invite));
+    const leave = box.querySelector('#opf-leave'); if (leave) leave.onclick = () => this.cb.onPartyLeave?.();
   }
 
   openLivingWorldMap() {

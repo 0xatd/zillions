@@ -38,7 +38,7 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
-  getLivingWorldProjection, livingWorldProjectionToUi, sendLivingWorldCommand, setLivingWorldSession,
+  getLivingWorldProjection, getLivingWorldParty, livingWorldProjectionToUi, sendLivingWorldCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
 } from './living-world-client.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
@@ -231,8 +231,11 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._enterOverworld(),
-      onPartyCreate: () => this._livingWorldUnavailable('Party creation'),
+      onPartyCreate: () => this._createLivingWorldParty(),
       onPartyOpen: () => this._openLivingWorldParty(),
+      onPartyLeave: () => this._leaveLivingWorldParty(),
+      onPartyTravelMode: (mode) => this._setLivingWorldPartyTravelMode(mode),
+      onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
       onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
       onLivingWorldOpen: () => this._refreshLivingWorld(),
       onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
@@ -688,9 +691,9 @@ class App {
       return null;
     }
     try {
-      const projection = await getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth');
+      const [projection, socialParty] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth'), getLivingWorldParty()]);
       if (!projection?.shard) throw new Error('world_not_initialized');
-      const state = livingWorldProjectionToUi(projection, this._livingWorldSelf());
+      const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty);
       this.livingWorldState = state;
       this.ui.setLivingWorldState(state);
       return state;
@@ -708,9 +711,39 @@ class App {
   }
 
   _openLivingWorldParty() {
-    const members = this.livingWorldState?.party?.members || [];
-    if (!members.length) return this._livingWorldUnavailable('Party management');
-    this.ui.showBanner(`Party · ${members.map((member) => member.name).join(', ')}`, '', 2600);
+    const party = this.livingWorldState?.party;
+    if (!party?.socialPartyId) return this._createLivingWorldParty();
+    const targetId = globalThis.prompt?.('Invite a player by account UUID:');
+    if (!targetId) return;
+    this._sendLivingWorldPartyAction('invite', { partyId: party.socialPartyId, targetId }).then(() => {
+      this.ui.showBanner('Party invitation sent.', '', 2400); this._refreshLivingWorld();
+    }).catch(() => this.ui.showBanner('The party invitation was rejected.', 'bad', 2600));
+  }
+
+  async _sendLivingWorldPartyAction(action, fields = {}) {
+    return sendLivingWorldPartyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `party-${Date.now().toString(36)}`, action, payload: {}, ...fields });
+  }
+
+  async _createLivingWorldParty() {
+    try { await this._sendLivingWorldPartyAction('create', { payload: { name: `${this._livingWorldSelf().name}'s Party`, shardId: this.livingWorldState?.world?.id || 'earth-1' } }); await this._refreshLivingWorld(); this.ui.showBanner('Party created.', '', 2200); }
+    catch (error) { this.ui.showBanner(error?.message === 'already_in_party' ? 'You already have a party.' : 'Party creation was rejected.', 'bad', 2500); }
+  }
+
+  async _leaveLivingWorldParty() {
+    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId || !globalThis.confirm?.('Leave this party? Your company remains in the world.')) return;
+    try { await this._sendLivingWorldPartyAction('leave', { partyId }); await this._refreshLivingWorld(); this.ui.showBanner('You left the party.', '', 2200); }
+    catch { this.ui.showBanner('Could not leave the party.', 'bad', 2400); }
+  }
+
+  async _setLivingWorldPartyTravelMode(mode) {
+    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId) return;
+    try { await this._sendLivingWorldPartyAction('travel_mode', { partyId, payload: { mode } }); await this._refreshLivingWorld(); this.ui.showBanner(mode === 'grouped' ? 'Your company will travel with the party.' : 'Your company may travel separately.', '', 2400); }
+    catch { this.ui.showBanner('Travel mode was rejected.', 'bad', 2400); }
+  }
+
+  async _acceptLivingWorldPartyInvite(invite) {
+    try { await this._sendLivingWorldPartyAction('accept', { partyId: invite.partyId, inviteId: invite.id }); await this._refreshLivingWorld(); this.ui.showBanner(`Joined ${invite.partyName || 'party'}.`, '', 2400); }
+    catch { this.ui.showBanner('The party invitation could not be accepted.', 'bad', 2600); }
   }
 
   _locateLivingWorldPartyMember(memberId) {
@@ -732,7 +765,11 @@ class App {
     const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
     if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
     try {
-      await sendLivingWorldCommand({
+      const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
+      if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
+        action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
+        partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
+      }); else await sendLivingWorldCommand({
         type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
           || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
         partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id },
