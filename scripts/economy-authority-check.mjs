@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import handler, { serverRotation } from '../api/economy.js';
-import { quarantineForAuthoritativeLoad, runEconomyMutation } from '../src/economy.js';
+import { applyEconomySnapshotToProfile, quarantineForAuthoritativeLoad, runEconomyMutation } from '../src/economy.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const schema = read('supabase/schema.sql');
@@ -49,6 +49,17 @@ assert.deepEqual(legacyCharacter.items, [], 'signed-in load must not leave brows
 assert.deepEqual(legacyCharacter.equipment, {}, 'signed-in load must not leave browser equipment active');
 assert.deepEqual(legacyCharacter.legacyOfflineEconomy.items, ['legacy-item'], 'legacy items must remain in the offline archive');
 assert.equal('authoritativeBalance' in legacyCharacter, false, 'browser balance must be discarded before authority load');
+
+const staleCharacter = { id: 'character-1', items: ['rifle'], equipment: {} };
+const refreshedCharacter = { id: 'character-1', items: ['rifle'], equipment: {} };
+const refreshedProfile = { mmoCharacters: [refreshedCharacter] };
+assert.equal(applyEconomySnapshotToProfile(refreshedProfile, staleCharacter, {
+  character: { revision: 4 }, wallet: { balance: 75 }, materials: {}, components: [],
+  items: [{ id: 'item-1', legacyKey: 'rifle', location: 'equipped', equipSlot: 'weapon', revision: 2 }],
+}), true, 'snapshot must resolve the current profile-owned character');
+assert.deepEqual(refreshedCharacter.items, [], 'equipped item must leave the current character stash');
+assert.equal(refreshedCharacter.equipment.weapon, 'rifle', 'current character must show the equipped item');
+assert.deepEqual(staleCharacter.items, ['rifle'], 'detached character reference must not receive the snapshot');
 
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
 const request = (body, authorization = '') => ({ method: 'POST', headers: { authorization }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); } });
