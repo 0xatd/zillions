@@ -14,6 +14,7 @@ const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const schema = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../supabase/migrations/20260820020000_four_player_rooms.sql', import.meta.url), 'utf8');
+const liveSmoke = readFileSync(new URL('./live-multiplayer-smoke.mjs', import.meta.url), 'utf8');
 assert.match(ui, /activateStart\(\)[\s\S]*this\.cb\.onStart\(this\.selectedDiff, this\.selectedHero\)/,
   'countdown completion must invoke launch even while its display button is disabled');
 assert.match(ui, /if \(this\._startActivated\) return/,
@@ -27,5 +28,8 @@ for (const sql of [schema, migration]) {
 assert.match(schema, /rooms_update_host[\s\S]*auth\.uid\(\) = host_user_id/);
 assert.match(schema, /room_players_insert_self[\s\S]*auth\.uid\(\) = user_id/);
 assert.match(schema, /room_players_update_self_or_host[\s\S]*auth\.uid\(\) = user_id[\s\S]*rooms\.host_user_id = auth\.uid\(\)/);
+assert.doesNotMatch(liveSmoke, /@example\.com/, 'Supabase Admin rejects reserved example.com QA identities');
+assert.match(liveSmoke, /zillions-mp-[\s\S]*@taborlin\.co/, 'live QA identities must use the dedicated Taborlin namespace');
+assert.match(liveSmoke, /refusing unsafe cleanup target/, 'live QA cleanup must fail closed outside its namespace');
 
 console.log('multiplayer lifecycle QA checks passed');

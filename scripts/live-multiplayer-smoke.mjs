@@ -17,12 +17,14 @@ const request = async (path, token, options = {}) => {
   return { response, body };
 };
 async function account(label) {
-  const email = `zillions-mp-${Date.now()}-${label}-${randomUUID().slice(0, 8)}@example.com`;
+  const email = `zillions-mp-${Date.now()}-${label.toLowerCase().replace(/[^a-z]+/g, '-')}-${randomUUID().slice(0, 8)}@taborlin.co`;
   const password = `Z!${randomUUID()}a9`;
   const created = await fetch(`${url}/auth/v1/admin/users`, { method: 'POST', headers: { authorization: `Bearer ${service}`, apikey: service, 'content-type': 'application/json' }, body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { display_name: label } }) });
   const user = await created.json();
   assert.equal(created.status, 200, JSON.stringify(user));
-  users.push(user.id);
+  assert.match(user.id, /^[0-9a-f-]{36}$/i, 'admin returned an unsafe user id');
+  assert.ok(email.startsWith('zillions-mp-') && email.endsWith('@taborlin.co'), 'QA cleanup identity escaped its dedicated namespace');
+  users.push({ id: user.id, email });
   const login = await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: anon, 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
   const session = await login.json();
   assert.equal(login.status, 200, JSON.stringify(session));
@@ -50,5 +52,8 @@ try {
   assert.equal(finish.body?.[0]?.status, 'finished');
   console.log('live multiplayer smoke passed: two accounts, seats, Ready, host authority, cross-account isolation, start/end');
 } finally {
-  await Promise.all(users.map((id) => fetch(`${url}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${service}`, apikey: service } }).catch(() => {})));
+  await Promise.all(users.map(({ id, email }) => {
+    assert.ok(email.startsWith('zillions-mp-') && email.endsWith('@taborlin.co'), `refusing unsafe cleanup target ${email}`);
+    return fetch(`${url}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${service}`, apikey: service } }).catch(() => {});
+  }));
 }
