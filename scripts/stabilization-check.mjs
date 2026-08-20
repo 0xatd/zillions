@@ -23,7 +23,8 @@ assert.match(auth, /signInWithEmail\(email\)[\s\S]*signInWithOtp\([\s\S]*emailRe
   'email sign-in must use a same-origin passwordless magic link');
 assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never become signed-in account home');
 assert.match(ui, /id="m-enter-world">ENTER WORLD</, 'Character Select must own Enter World');
-assert.match(ui, /id="ow-custom-quick"[\s\S]*CUSTOM GAMES/, 'the overworld HUD must expose Custom Games without opening a nested menu');
+assert.match(ui, /id="m-custom">CUSTOM GAMES</, 'Character Select must retain Custom Games');
+assert.doesNotMatch(ui, /id="ow-custom(?:-quick)?"/, 'the overworld HUD must not expose Custom Games');
 assert.match(main, /showGateConfirm\([\s\S]*onEnter: \(diff\)[\s\S]*_launchGateMission\(ev\.gate, diff\)/,
   'a campaign gate must launch the selected map directly from ENTER MISSION');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,

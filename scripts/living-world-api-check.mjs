@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { createLivingWorldHandler, filterProjection } from '../api/living-world.js';
+const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
+const request = (method, body, authorization = 'Bearer valid') => ({ method, url: '/api/living-world?shardId=earth', headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
+const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
+let res = response(); await handler(request('GET', null, ''), res); assert.equal(res.status, 401);
+const base = { type: 'issue_movement', requestId: 'req-1', shardId: 'earth', partyId: '8e604971-848f-4dc1-bfc6-8b29912d677e', expectedRevision: 1, payload: { routeId: '148da2b1-cc8a-41f5-a714-99d78d79fd9e' } };
+res = response(); await handler(request('POST', { ...base, actorId: 'victim' }), res); assert.equal(res.body.error, 'actor_spoof_rejected');
+res = response(); await handler(request('POST', { ...base, payload: { ...base.payload, admin: true } }), res); assert.equal(res.body.error, 'unsupported_payload_field');
+res = response(); await handler(request('POST', { ...base, debug: true }), res); assert.equal(res.body.error, 'unsupported_command_field');
+res = response(); await handler(request('POST', base), res); assert.equal(res.body.actor, 'actor-1');
+const snapshot = { shard: { simulation_tick: 10 }, parties: [{ id: 'mine', owner_user_id: 'actor-1', owner_faction_id: 'blue', location_id: 'home' }, { id: 'ally', owner_faction_id: 'blue', location_id: 'ally-town' }, { id: 'seen', owner_faction_id: 'red', location_id: 'wild', speed: 9 }, { id: 'hidden', owner_faction_id: 'red', location_id: 'secret' }], locations: [{ id: 'home', owner_faction_id: 'blue' }, { id: 'ally-town', owner_faction_id: 'blue' }, { id: 'wild', owner_faction_id: 'red' }, { id: 'secret', owner_faction_id: 'red' }], routes: [{ id: 'known', origin_id: 'home', destination_id: 'ally-town' }, { id: 'leak', origin_id: 'home', destination_id: 'secret' }], markets: [{ location_id: 'home' }, { location_id: 'secret' }], scoutingReports: [{ observer_party_id: 'mine', subject_party_id: 'seen', location_id: 'wild', observed_tick: 8, expires_tick: 12, accuracy: .7, intelligence: { estimate: 20 } }] };
+const projection = filterProjection(snapshot, 'actor-1');
+assert.deepEqual(projection.parties.map((p) => p.id), ['mine', 'ally', 'seen']); assert.equal(projection.parties[2].speed, undefined);
+assert.deepEqual(projection.locations.map((p) => p.id), ['home', 'ally-town', 'wild']); assert.deepEqual(projection.routes.map((p) => p.id), ['known']); assert.deepEqual(projection.markets.map((p) => p.location_id), ['home']);
+console.log('living world API check passed');
