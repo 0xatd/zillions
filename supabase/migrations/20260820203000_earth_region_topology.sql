@@ -85,6 +85,14 @@ insert into public.world_factions(id,planet_id,name,kind) values
   ('rotmire_host','earth','Rotmire Host','hostile');
 
 update public.world_provinces set planet_id='earth' where shard_id='earth-1';
+insert into public.world_provinces(id,shard_id,key,name,bounds,owner_faction_id,planet_id)
+values
+  ('10000000-0000-4000-8000-000000000002','earth-1','ironwood','Ironwood Reach','{"minX":34,"minY":0,"maxX":72,"maxY":52}','ironwood_compact','earth'),
+  ('10000000-0000-4000-8000-000000000003','earth-1','rotmire','Rotmire March','{"minX":60,"minY":45,"maxX":100,"maxY":100}','rotmire_host','earth');
+update public.world_locations set province_id='10000000-0000-4000-8000-000000000002'
+where id='11000000-0000-4000-8000-000000000002';
+update public.world_locations set province_id='10000000-0000-4000-8000-000000000003'
+where id='11000000-0000-4000-8000-000000000003';
 -- Preserve legacy control only when the faction is part of this planet. Unknown
 -- legacy labels become unclaimed instead of preventing the FK from activating.
 update public.world_provinces p set owner_faction_id=null
@@ -128,6 +136,41 @@ alter table public.world_locations
 alter table public.world_routes
   add constraint world_routes_owner_faction_fk foreign key(owner_faction_id) references public.world_factions(id) on delete restrict,
   add constraint world_routes_claimed_faction_fk foreign key(claimed_by_faction_id) references public.world_factions(id) on delete restrict;
+
+create or replace function public.validate_world_control_faction_planet()
+returns trigger language plpgsql set search_path=public,pg_temp as $$
+declare v_planet text;
+begin
+  if tg_table_name='world_provinces' then
+    v_planet:=new.planet_id;
+    if tg_op='UPDATE' and new.planet_id is distinct from old.planet_id and exists(
+      select 1 from public.world_locations l join public.world_factions f
+        on f.id in (l.owner_faction_id,l.claimed_by_faction_id)
+      where l.province_id=new.id and f.planet_id<>new.planet_id
+    ) then raise exception 'region_children_faction_wrong_planet'; end if;
+    if tg_op='UPDATE' and new.planet_id is distinct from old.planet_id and exists(
+      select 1 from public.world_routes r join public.world_factions f
+        on f.id in (r.owner_faction_id,r.claimed_by_faction_id)
+      where (r.origin_region_id=new.id or r.destination_region_id=new.id) and f.planet_id<>new.planet_id
+    ) then raise exception 'region_routes_faction_wrong_planet'; end if;
+  elsif tg_table_name='world_locations' then
+    select planet_id into v_planet from public.world_provinces where id=new.province_id;
+  else
+    select p.planet_id into v_planet from public.world_provinces p where p.id=new.origin_region_id;
+    if not exists(select 1 from public.world_provinces p where p.id=new.destination_region_id and p.planet_id=v_planet)
+      then raise exception 'cross_planet_route_control'; end if;
+  end if;
+  if new.owner_faction_id is not null and not exists(
+    select 1 from public.world_factions f where f.id=new.owner_faction_id and f.planet_id=v_planet
+  ) then raise exception 'owner_faction_wrong_planet'; end if;
+  if new.claimed_by_faction_id is not null and not exists(
+    select 1 from public.world_factions f where f.id=new.claimed_by_faction_id and f.planet_id=v_planet
+  ) then raise exception 'claimed_faction_wrong_planet'; end if;
+  return new;
+end $$;
+create trigger world_provinces_control_faction_planet before insert or update of planet_id,owner_faction_id,claimed_by_faction_id on public.world_provinces for each row execute function public.validate_world_control_faction_planet();
+create trigger world_locations_control_faction_planet before insert or update of province_id,owner_faction_id,claimed_by_faction_id on public.world_locations for each row execute function public.validate_world_control_faction_planet();
+create trigger world_routes_control_faction_planet before insert or update of origin_region_id,destination_region_id,owner_faction_id,claimed_by_faction_id on public.world_routes for each row execute function public.validate_world_control_faction_planet();
 create index world_provinces_planet on public.world_provinces(planet_id,key);
 create index world_parties_region on public.world_parties(region_id,id);
 create index world_routes_regions on public.world_routes(origin_region_id,destination_region_id);
@@ -197,7 +240,11 @@ begin
     values(p_region,p_worker,now()+make_interval(secs=>p_lease_seconds))
   on conflict(region_id) do update set
     worker_id=excluded.worker_id,
-    lease_epoch=case when world_region_worker_leases.worker_id=excluded.worker_id then world_region_worker_leases.lease_epoch else world_region_worker_leases.lease_epoch+1 end,
+    lease_epoch=case
+      when world_region_worker_leases.worker_id=excluded.worker_id and world_region_worker_leases.lease_until>now()
+        then world_region_worker_leases.lease_epoch
+      else world_region_worker_leases.lease_epoch+1
+    end,
     lease_until=excluded.lease_until,
     heartbeat_at=now()
   returning * into v_lease;
@@ -222,12 +269,32 @@ create table public.world_region_control_history (
   changed_at timestamptz not null default now()
 );
 
+create or replace function public.record_world_region_control_history()
+returns trigger language plpgsql set search_path=public,pg_temp as $$
+declare v_context jsonb;
+begin
+  if new.owner_faction_id is not distinct from old.owner_faction_id
+    and new.claimed_by_faction_id is not distinct from old.claimed_by_faction_id
+    and new.control_strength is not distinct from old.control_strength
+    and new.control_state is not distinct from old.control_state then return new; end if;
+  begin v_context:=coalesce(nullif(current_setting('app.world_control_context',true),''),'{}')::jsonb;
+  exception when others then v_context:='{}'::jsonb; end;
+  insert into public.world_region_control_history(
+    region_id,previous_owner_faction_id,owner_faction_id,previous_state,control_state,cause,world_tick,metadata
+  ) values(new.id,old.owner_faction_id,new.owner_faction_id,old.control_state,new.control_state,
+    coalesce(nullif(v_context->>'cause',''),'direct_control_change'),
+    coalesce((v_context->>'worldTick')::bigint,0),coalesce(v_context->'metadata','{}'::jsonb));
+  return new;
+end $$;
+create trigger world_provinces_control_history after update of owner_faction_id,claimed_by_faction_id,control_strength,control_state
+on public.world_provinces for each row execute function public.record_world_region_control_history();
+
 create or replace function public.mutate_world_region_control(
   p_region uuid,p_expected_revision bigint,p_owner_faction text,p_claimed_faction text,
   p_control_strength numeric,p_control_state text,p_cause text,p_world_tick bigint,
-  p_metadata jsonb default '{}'
+  p_worker text,p_lease_epoch bigint,p_metadata jsonb default '{}'
 ) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare v_region public.world_provinces%rowtype;
+declare v_region public.world_provinces%rowtype; v_lease public.world_region_worker_leases%rowtype;
 begin
   if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role_required'; end if;
   if p_expected_revision is null or p_expected_revision < 1
@@ -235,30 +302,29 @@ begin
     or p_control_state is null or p_control_state not in ('controlled','contested','besieged','occupied','unclaimed')
     or p_cause is null or length(trim(p_cause)) not between 1 and 160
     or p_world_tick is null or p_world_tick < 0
+    or p_worker is null or length(p_worker) not between 1 and 96 or p_lease_epoch is null or p_lease_epoch<1
     or coalesce(jsonb_typeof(p_metadata),'null') <> 'object' then raise exception 'invalid_region_control'; end if;
   select * into v_region from public.world_provinces where id=p_region for update;
   if not found then raise exception 'region_not_found'; end if;
   if v_region.revision <> p_expected_revision then raise exception 'stale_region'; end if;
+  select * into v_lease from public.world_region_worker_leases where region_id=p_region for update;
+  if not found or v_lease.worker_id<>p_worker or v_lease.lease_epoch<>p_lease_epoch or v_lease.lease_until<=now()
+    then raise exception 'region_lease_required'; end if;
   if p_owner_faction is not null and not exists (
     select 1 from public.world_factions where id=p_owner_faction and planet_id=v_region.planet_id
   ) then raise exception 'invalid_owner_faction'; end if;
   if p_claimed_faction is not null and not exists (
     select 1 from public.world_factions where id=p_claimed_faction and planet_id=v_region.planet_id
   ) then raise exception 'invalid_claimed_faction'; end if;
+  perform set_config('app.world_control_context',jsonb_build_object('cause',trim(p_cause),'worldTick',p_world_tick,'metadata',p_metadata)::text,true);
   update public.world_provinces set owner_faction_id=p_owner_faction,
     claimed_by_faction_id=p_claimed_faction,control_strength=p_control_strength,
     control_state=p_control_state,control_updated_at=now(),revision=revision+1
   where id=p_region returning * into v_region;
-  insert into public.world_region_control_history(
-    region_id,previous_owner_faction_id,owner_faction_id,previous_state,control_state,cause,world_tick,metadata
-  ) values (v_region.id,(select owner_faction_id from public.world_provinces where id=v_region.id and revision=p_expected_revision),
-    v_region.owner_faction_id,null,v_region.control_state,trim(p_cause),p_world_tick,p_metadata);
-  -- The locked pre-update row supplies the causal before-state.
-  update public.world_region_control_history set previous_owner_faction_id=v_region.owner_faction_id where false;
   return jsonb_build_object('ok',true,'regionId',v_region.id,'revision',v_region.revision);
 end $$;
-revoke all on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,jsonb) from public,anon,authenticated;
-grant execute on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,jsonb) to service_role;
+revoke all on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,text,bigint,jsonb) from public,anon,authenticated;
+grant execute on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,text,bigint,jsonb) to service_role;
 
 create table public.world_region_handoffs (
   id uuid primary key default gen_random_uuid(),
@@ -268,6 +334,8 @@ create table public.world_region_handoffs (
   source_region_id uuid not null references public.world_provinces(id) on delete restrict,
   destination_region_id uuid not null references public.world_provinces(id) on delete restrict,
   destination_location_id uuid not null references public.world_locations(id) on delete restrict,
+  source_worker_id text not null check (length(source_worker_id) between 1 and 96),
+  source_lease_epoch bigint not null check (source_lease_epoch > 0),
   expected_party_revision bigint not null check (expected_party_revision > 0),
   status text not null default 'pending' check (status in ('pending','accepted','cancelled')),
   payload jsonb not null default '{}',
@@ -278,41 +346,46 @@ create table public.world_region_handoffs (
 );
 create unique index world_region_handoff_one_pending on public.world_region_handoffs(party_id) where status='pending';
 
-create or replace function public.request_world_region_handoff(p_party uuid,p_route uuid,p_request_id text,p_expected_revision bigint,p_payload jsonb default '{}')
+create or replace function public.request_world_region_handoff(p_party uuid,p_route uuid,p_request_id text,p_expected_revision bigint,p_source_worker text,p_source_lease_epoch bigint,p_payload jsonb default '{}')
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare v_party public.world_parties%rowtype; v_route public.world_routes%rowtype; v_existing public.world_region_handoffs%rowtype; v_handoff public.world_region_handoffs%rowtype;
+declare v_party public.world_parties%rowtype; v_route public.world_routes%rowtype; v_existing public.world_region_handoffs%rowtype; v_handoff public.world_region_handoffs%rowtype; v_source_lease public.world_region_worker_leases%rowtype;
 begin
   if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role_required'; end if;
-  if p_request_id is null or length(p_request_id) not between 1 and 96 or coalesce(jsonb_typeof(p_payload),'null')<>'object' then raise exception 'invalid_handoff_request'; end if;
+  if p_request_id is null or length(p_request_id) not between 1 and 96 or p_source_worker is null or length(p_source_worker) not between 1 and 96 or p_source_lease_epoch is null or p_source_lease_epoch<=0 or coalesce(jsonb_typeof(p_payload),'null')<>'object' then raise exception 'invalid_handoff_request'; end if;
   perform pg_advisory_xact_lock(hashtextextended('world-region-handoff:'||p_party::text,0));
   select * into v_existing from public.world_region_handoffs where party_id=p_party and request_id=p_request_id;
   if found then
-    if v_existing.route_id<>p_route or v_existing.expected_party_revision<>p_expected_revision or v_existing.payload<>p_payload then raise exception 'idempotency_conflict'; end if;
+    if v_existing.route_id<>p_route or v_existing.expected_party_revision<>p_expected_revision or v_existing.source_worker_id<>p_source_worker or v_existing.source_lease_epoch<>p_source_lease_epoch or v_existing.payload<>p_payload then raise exception 'idempotency_conflict'; end if;
+    select * into v_source_lease from public.world_region_worker_leases where region_id=v_existing.source_region_id for update;
+    if not found or v_source_lease.worker_id<>p_source_worker or v_source_lease.lease_epoch<>p_source_lease_epoch or v_source_lease.lease_until<=now() then raise exception 'source_lease_required'; end if;
     return jsonb_build_object('ok',true,'duplicate',true,'handoffId',v_existing.id,'status',v_existing.status);
   end if;
   select * into v_party from public.world_parties where id=p_party for update;
   if not found or v_party.revision<>p_expected_revision then raise exception 'stale_party'; end if;
   select * into v_route from public.world_routes where id=p_route;
   if not found or v_route.origin_region_id=v_route.destination_region_id or v_route.origin_region_id<>v_party.region_id or v_party.route_id<>v_route.id then raise exception 'invalid_cross_region_route'; end if;
-  insert into public.world_region_handoffs(request_id,party_id,route_id,source_region_id,destination_region_id,destination_location_id,expected_party_revision,payload)
-  values(p_request_id,v_party.id,v_route.id,v_route.origin_region_id,v_route.destination_region_id,v_route.destination_id,v_party.revision,p_payload)
+  select * into v_source_lease from public.world_region_worker_leases where region_id=v_route.origin_region_id for update;
+  if not found or v_source_lease.worker_id<>p_source_worker or v_source_lease.lease_epoch<>p_source_lease_epoch or v_source_lease.lease_until<=now() then raise exception 'source_lease_required'; end if;
+  insert into public.world_region_handoffs(request_id,party_id,route_id,source_region_id,destination_region_id,destination_location_id,source_worker_id,source_lease_epoch,expected_party_revision,payload)
+  values(p_request_id,v_party.id,v_route.id,v_route.origin_region_id,v_route.destination_region_id,v_route.destination_id,p_source_worker,p_source_lease_epoch,v_party.revision,p_payload)
   returning * into v_handoff;
   return jsonb_build_object('ok',true,'duplicate',false,'handoffId',v_handoff.id,'status',v_handoff.status);
 end $$;
-revoke all on function public.request_world_region_handoff(uuid,uuid,text,bigint,jsonb) from public,anon,authenticated;
-grant execute on function public.request_world_region_handoff(uuid,uuid,text,bigint,jsonb) to service_role;
+revoke all on function public.request_world_region_handoff(uuid,uuid,text,bigint,text,bigint,jsonb) from public,anon,authenticated;
+grant execute on function public.request_world_region_handoff(uuid,uuid,text,bigint,text,bigint,jsonb) to service_role;
 
-create or replace function public.complete_world_region_handoff(p_handoff uuid,p_worker text)
+create or replace function public.complete_world_region_handoff(p_handoff uuid,p_destination_worker text,p_destination_lease_epoch bigint)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_handoff public.world_region_handoffs%rowtype; v_party public.world_parties%rowtype; v_lease public.world_region_worker_leases%rowtype;
 begin
   if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role_required'; end if;
+  if p_destination_worker is null or length(p_destination_worker) not between 1 and 96 or p_destination_lease_epoch is null or p_destination_lease_epoch<=0 then raise exception 'destination_lease_required'; end if;
   select * into v_handoff from public.world_region_handoffs where id=p_handoff for update;
   if not found then raise exception 'handoff_not_found'; end if;
+  select * into v_lease from public.world_region_worker_leases where region_id=v_handoff.destination_region_id for update;
+  if not found or v_lease.worker_id<>p_destination_worker or v_lease.lease_epoch<>p_destination_lease_epoch or v_lease.lease_until<=now() then raise exception 'destination_lease_required'; end if;
   if v_handoff.status='accepted' then return jsonb_build_object('ok',true,'duplicate',true,'partyId',v_handoff.party_id,'regionId',v_handoff.destination_region_id); end if;
   if v_handoff.status<>'pending' then raise exception 'handoff_not_pending'; end if;
-  select * into v_lease from public.world_region_worker_leases where region_id=v_handoff.destination_region_id for update;
-  if not found or v_lease.worker_id<>p_worker or v_lease.lease_until<=now() then raise exception 'destination_lease_required'; end if;
   select * into v_party from public.world_parties where id=v_handoff.party_id for update;
   if v_party.region_id<>v_handoff.source_region_id or v_party.revision<>v_handoff.expected_party_revision then raise exception 'stale_handoff'; end if;
   if not exists(select 1 from public.world_locations where id=v_handoff.destination_location_id and province_id=v_handoff.destination_region_id) then raise exception 'invalid_destination'; end if;
@@ -321,8 +394,8 @@ begin
   update public.world_region_handoffs set status='accepted',completed_at=now() where id=v_handoff.id;
   return jsonb_build_object('ok',true,'duplicate',false,'partyId',v_party.id,'regionId',v_party.region_id,'partyRevision',v_party.revision);
 end $$;
-revoke all on function public.complete_world_region_handoff(uuid,text) from public,anon,authenticated;
-grant execute on function public.complete_world_region_handoff(uuid,text) to service_role;
+revoke all on function public.complete_world_region_handoff(uuid,text,bigint) from public,anon,authenticated;
+grant execute on function public.complete_world_region_handoff(uuid,text,bigint) to service_role;
 
 do $$ declare t text; begin foreach t in array array['world_universes','world_star_systems','world_planets','world_factions','world_region_states','world_region_worker_leases','world_region_control_history','world_region_handoffs'] loop execute format('alter table public.%I enable row level security',t); end loop; end $$;
 create policy world_region_handoffs_owner_read on public.world_region_handoffs for select to authenticated using(exists(select 1 from public.world_parties p where p.id=party_id and p.owner_user_id=auth.uid()));
