@@ -33,6 +33,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
+import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
@@ -1867,6 +1868,7 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    persistRunTelemetry(this.game);
     const p = this.profile;
     p.games++;
     if (won && this.game.mode !== 'survival') p.wins++;
