@@ -45,6 +45,12 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+function campaignProgress(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const progress = Number(value);
+  return Number.isFinite(progress) ? Math.max(0, Math.floor(progress)) : fallback;
+}
+
 export class AuthClient {
   constructor() {
     this.client = null;
@@ -168,6 +174,7 @@ export class AuthClient {
     const username = publicName(profile);
     const mmoCharacters = Array.isArray(this.user?.user_metadata?.mmo_characters)
       ? this.user.user_metadata.mmo_characters : null;
+    const campaign = campaignProgress(this.user?.user_metadata?.campaign);
     return {
       name: username,
       username,
@@ -179,6 +186,7 @@ export class AuthClient {
       bestDay: stats.best_day || 0,
       lastHero: profile.selected_hero || stats.favorite_hero || null,
       lastWorld: this.user?.user_metadata?.last_world || 'earth',
+      ...(campaign !== null ? { campaign } : {}),
       ...(mmoCharacters ? {
         mmoCharacters,
         mmoCharacterId: this.user?.user_metadata?.mmo_character_id || mmoCharacters[0]?.id || null,
@@ -276,8 +284,12 @@ export class AuthClient {
     const games = Number(localProfile.games || 0);
     const wins = Number(localProfile.wins || 0);
     const hero = localProfile.lastHero || 'alexander';
+    const campaign = Math.max(
+      campaignProgress(localProfile.campaign, 0),
+      campaignProgress(this.user?.user_metadata?.campaign, 0),
+    );
     await this.ensureProfile(localProfile);
-    const [{ error: profileError }, { error: statsError }, { error: userError }] = await Promise.all([
+    const [{ error: profileError }, { error: statsError }, userResult] = await Promise.all([
       this.client.from('profiles').update({
         selected_hero: hero,
         last_seen_at: isoNow(),
@@ -294,13 +306,19 @@ export class AuthClient {
       }, { onConflict: 'user_id' }),
       this.client.auth.updateUser({ data: {
         last_world: localProfile.lastWorld || 'earth',
+        campaign,
         mmo_character_id: localProfile.mmoCharacterId || null,
         mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 8) : [],
       } }),
     ]);
     if (profileError) throw profileError;
     if (statsError) throw statsError;
+    const { data: userData, error: userError } = userResult;
     if (userError) throw userError;
+    if (userData?.user && this.session) {
+      this.session = { ...this.session, user: userData.user };
+      setBackendSession(this.session);
+    }
   }
 
   async loadLatestSave() {
