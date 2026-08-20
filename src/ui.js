@@ -1092,8 +1092,10 @@ export class UI {
     for (const [key, value] of Object.entries(DIFFICULTY)) { const button = document.createElement('button'); button.className = `diffbtn${key === 'normal' ? ' sel' : ''}`; button.textContent = value.label; button.onclick = () => { this._cuDiff = key; for (const other of diff.children) other.classList.toggle('sel', other === button); }; diff.appendChild(button); }
     this._cuDiff = 'normal';
     const max = this.root.querySelector('#cu-max'); max.innerHTML = '';
-    for (const count of [1, 2, 3, 4]) { const button = document.createElement('button'); button.className = `diffbtn${count === 4 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
-    this._cuMax = 4; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
+    // The rooms table caps max_players at 3 (supabase/schema.sql) — a 4 here
+    // fails room creation with rooms_max_players_check on the server.
+    for (const count of [1, 2, 3]) { const button = document.createElement('button'); button.className = `diffbtn${count === 3 ? ' sel' : ''}`; button.textContent = String(count); button.onclick = () => { this._cuMax = count; for (const other of max.children) other.classList.toggle('sel', other === button); }; max.appendChild(button); }
+    this._cuMax = 3; this.root.querySelector('#cu-name').value = ''; this.root.querySelector('#cu-name').focus();
   }
 
   _buildCharacterCreator() {
