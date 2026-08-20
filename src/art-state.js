@@ -15,7 +15,7 @@ export function unitPose(state, phase, cues = {}) {
   const pulse = clamp(cues.pulse || 0, 0, 1);
   switch (state) {
     case 'run':
-      return { y: Math.abs(cycle) * 0.09, z: 0, pitch: 0.12, roll: cycle * 0.05, stride: cycle * 0.62 };
+      return { y: Math.abs(cycle) * 0.055, z: 0, pitch: 0.1, roll: cycle * 0.035, stride: cycle * 0.54 };
     case 'attack':
       return { y: pulse * 0.08, z: pulse * (cues.melee ? 0.34 : 0.13), pitch: -pulse * (cues.melee ? 0.75 : 0.24), roll: pulse * 0.18, stride: 0 };
     case 'cast':
@@ -25,7 +25,7 @@ export function unitPose(state, phase, cues = {}) {
     case 'down':
       return { y: -0.12, z: 0, pitch: 0, roll: Math.PI * 0.48, stride: 0 };
     default:
-      return { y: cycle * 0.02, z: 0, pitch: 0, roll: cycle * 0.018, stride: 0 };
+      return { y: cycle * 0.012, z: 0, pitch: 0, roll: cycle * 0.012, stride: 0 };
   }
 }
 

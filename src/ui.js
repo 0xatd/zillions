@@ -12,11 +12,12 @@ import {
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
 } from './config.js';
 import { formatTime } from './utils.js';
+import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
 import {
-  MMO_CLASSES, MMO_RACES, CREATOR_PARTS, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
+  MMO_CLASSES, MMO_RACES, CLASS_ATTRS, CREATOR_PARTS, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
@@ -34,9 +35,16 @@ import {
 import { ShellState, SHELL_BASES } from './shell-state.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
-import { COMPONENTS, CRAFTING_MATERIALS, RECIPES } from './crafting.js';
+import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
+import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
+const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
+  `+${value < 1 ? `${Math.round(value * 100)}%` : value} ${key}`).join(' · ') || 'No combat stat change';
+const recipeCost = (recipe) => [
+  `${recipe.cost.alloy} Alloy`,
+  ...Object.entries(recipe.cost.materials || {}).map(([id, count]) => `${count} ${CRAFTING_MATERIALS[id]?.name || id}`),
+].join(' · ');
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -76,6 +84,7 @@ export class UI {
       <div id="invitetoast" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
+      <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
       <div id="ow-quick-actions" class="owquick hidden">
         <button id="ow-custom-quick" class="tbtn" title="Browse live and arcade games">CUSTOM GAMES</button>
@@ -166,6 +175,7 @@ export class UI {
 
         <div id="screen-main" class="mainmenu character-select">
           <div class="character-heading"><span>GALAXY ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment, level and last world persist between adventures. Press C in the world to return here.</small></div>
+          <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
           <div id="character-stage" class="character-stage">
             <div id="character-avatar" class="character-avatar" aria-label="Selected character">
               <div class="avatar-backlight"></div>
@@ -213,20 +223,20 @@ export class UI {
           <div id="sheet-panel-character" class="sheet-panel character-overview"></div>
 
           <div id="sheet-panel-gear" class="sheet-panel hidden">
-            <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div></div>
+            <div class="gear-paperdoll"><h3>EQUIPPED</h3><div id="sheet-guide-gear" class="sheet-guide"></div><div class="gear-slots" id="gear-slots"></div></div>
             <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
             <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
           </div>
 
           <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
-            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
+            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p><div id="sheet-guide-market" class="sheet-guide"></div></div><strong id="market-balance"></strong></section>
             <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
             <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
             <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
           </div>
 
           <div id="sheet-panel-crafting" class="sheet-panel crafting-panel hidden">
-            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>All actions use the online ledger. Failed or repeated requests never consume resources.</p><div id="craft-resources"></div><div id="craft-vendor"></div></section>
+            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>All actions use the online ledger. Failed or repeated requests never consume resources.</p><div id="sheet-guide-forge" class="sheet-guide"></div><div id="craft-resources"></div><div id="craft-vendor"></div></section>
             <section><h3>SELECT ITEM</h3><div id="craft-items" class="market-grid"></div></section>
             <section><h3>WORKBENCH</h3><div id="craft-workbench"><p>Select an item.</p></div><div id="craft-status" role="status"></div></section>
           </div>
@@ -857,7 +867,12 @@ export class UI {
   }
 
   activateStart() {
-    this.root.querySelector('#s-start')?.click();
+    // Countdown presentation deliberately disables the button. HTMLElement
+    // click() is a no-op on a disabled button, so launch through the same
+    // callback directly and guard duplicate countdown completions.
+    if (this._startActivated) return;
+    this._startActivated = true;
+    this.cb.onStart(this.selectedDiff, this.selectedHero);
   }
 
   showLobby() {
@@ -1181,7 +1196,8 @@ export class UI {
     const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
     const race = MMO_RACES[this._creatorRace || 'human'];
     const summary = this.root.querySelector('#creator-summary');
-    if (summary) summary.innerHTML = `<b>${race.icon} ${race.name} ${klass.name}</b><span>${klass.role}</span><small>${race.passive} · ${klass.resource} resource · ${appearance.name} armor · all launch options free</small>`;
+    const raceMods = Object.entries(race.mods || {}).map(([key, value]) => `${value > 0 ? '+' : ''}${value} ${key}`).join(' · ');
+    if (summary) summary.innerHTML = `<b>${race.icon} ${race.name} ${klass.name}</b><span>${klass.role}</span><small>${race.desc} ${race.passive}: ${raceMods}. ${klass.resource} is your combat resource. Appearance choices do not change power.</small>`;
     const preview = this.root.querySelector('#creator-preview');
     if (preview) {
       preview.dataset.race = this._creatorRace || 'human';
@@ -1195,7 +1211,7 @@ export class UI {
       appearance: this._creatorAppearance || 'iron',
       customization: { ...(this._creatorParts || {}) },
       equipment: {}, canvasId: 'creator-preview-canvas',
-      proxyHero: klass.proxy,
+      proxyHero: klass.proxy, classKey: this._creatorClass || 'vanguard',
     });
     const raceLabel = this.root.querySelector('#creator-preview-race');
     if (raceLabel) raceLabel.textContent = race.name.toUpperCase();
@@ -1241,6 +1257,29 @@ export class UI {
     const create = this.root.querySelector('#m-create-character');
     if (create) create.disabled = characters.length >= MAX_MMO_CHARACTERS;
     this._renderSelectedCharacter();
+    this._renderFirstHourGuide();
+  }
+
+  _renderFirstHourGuide() {
+    const root = this.root.querySelector('#first-hour-guide');
+    if (!root) return;
+    const character = this._sheetCharacter();
+    const guide = firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() });
+    if (guide.step === 'complete') { root.classList.add('hidden'); root.innerHTML = ''; return; }
+    root.classList.remove('hidden');
+    root.innerHTML = `<span>FIRST DEPLOYMENT · ${guide.step.toUpperCase()}</span><b>${guide.title}</b><p>${guide.body}</p><div><button class="menubtn primary" data-guide-action>${guide.action}</button>${character ? '<button class="utilitybtn" data-guide-skip>SKIP GUIDE</button>' : ''}</div>`;
+    root.querySelector('[data-guide-action]').onclick = () => {
+      if (guide.step === 'create') this._showCharacterCreator();
+      else if (guide.step === 'market') this.showCharacterSheet('shop');
+      else if (guide.step === 'equip') this.showCharacterSheet('gear');
+      else if (guide.step === 'forge') this.showCharacterSheet('crafting');
+      else this.cb.onCampaignMap?.();
+    };
+    root.querySelector('[data-guide-skip]')?.addEventListener('click', () => {
+      character.firstHourGuideDismissed = true;
+      this.cb.onProfileDirty?.();
+      this._renderFirstHourGuide();
+    });
   }
 
   _renderSelectedCharacter() {
@@ -1457,7 +1496,7 @@ export class UI {
       <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
     this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
       customization: character.customization, equipment: character.equipment,
-      proxyHero: character.proxyHero, canvasId: 'paperdoll-preview-canvas' });
+      proxyHero: character.proxyHero, classKey: character.classKey, canvasId: 'paperdoll-preview-canvas' });
   }
 
   _renderAbilitiesOverview(character) {
@@ -1471,6 +1510,14 @@ export class UI {
 
   _renderMarketPanel(character) {
     const balance = this.root.querySelector('#market-balance');
+    const marketGuide = this.root.querySelector('#sheet-guide-market');
+    if (marketGuide) {
+      const step = firstHourStep(character);
+      marketGuide.innerHTML = step === 'market'
+        ? 'Next: choose one affordable upgrade. Stat impact below is calculated from the loadout the mission will use.'
+        : `${step === 'equip' ? 'Purchase complete. Your item is safe in the stash.' : 'Compare before buying. Purchases move to your stash; nothing equips automatically.'}${step === 'equip' ? ' <button data-next-gear>OPEN EQUIPMENT →</button>' : ''}`;
+      marketGuide.querySelector('[data-next-gear]')?.addEventListener('click', () => { this._sheetTab = 'gear'; this._renderCharacterSheet(); });
+    }
     const authoritative = !!this.cb.useAuthoritativeEconomy?.();
     if (authoritative && !Number.isFinite(character.authoritativeBalance)) {
       if (balance) balance.textContent = `${META_CURRENCY.icon} Syncing online ledger…`;
@@ -1511,7 +1558,11 @@ export class UI {
     const rotation = vendorRotation(vendor.id);
     const stock = vendorStock(vendor.id, rotation, character.level || 1);
     const stockRoot = this.root.querySelector('#market-stock');
-    stockRoot.innerHTML = stock.map((offer, index) => `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl}</small></div><button data-buy="${index}">${META_CURRENCY.icon} ${offer.price}</button></article>`).join('');
+    stockRoot.innerHTML = stock.map((offer, index) => {
+      const preview = equipmentPreview(character, offer.key);
+      const roleMatch = preview.deltas.some((entry) => entry.key === CLASS_ATTRS[character.classKey] && entry.value > 0);
+      return `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}${roleMatch ? ' · ROLE MATCH' : ''}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl} · ${compactDeltas(preview.deltas)}${preview.target ? ` · ${preview.target}` : ''}</small></div><button data-buy="${index}" ${offer.price > marketCurrency ? 'disabled' : ''}>${META_CURRENCY.icon} ${offer.price}</button></article>`;
+    }).join('');
     for (const button of stockRoot.querySelectorAll('[data-buy]')) {
       button.onclick = async () => {
         button.disabled = true;
@@ -1574,8 +1625,16 @@ export class UI {
     const bench = this.root.querySelector('#craft-workbench');
     const status = this.root.querySelector('#craft-status');
     const materials = character.craftingMaterials || {};
+    const forgeGuide = this.root.querySelector('#sheet-guide-forge');
+    if (forgeGuide) {
+      const step = firstHourStep(character);
+      forgeGuide.innerHTML = step === 'forge'
+        ? 'Next: select an owned item, then add a socket or install a matching component. Costs are shown before confirmation.'
+        : `Forge changes persist. A stale or failed request consumes nothing.${step === 'mission' ? ' <button data-next-mission>ENTER WORLD →</button>' : ''}`;
+      forgeGuide.querySelector('[data-next-mission]')?.addEventListener('click', () => { this._closeCharacterSheet(); this.cb.onCampaignMap?.(); });
+    }
     resources.innerHTML = `<b>${META_CURRENCY.icon} ${character.authoritativeBalance ?? '—'} ${META_CURRENCY.name}</b>${Object.values(CRAFTING_MATERIALS).map((m) => `<span>${m.icon} ${m.name}: <b>${materials[m.id] || 0}</b></span>`).join('')}`;
-    vendor.innerHTML = `<h3>FORGE SUPPLIES</h3>${Object.values(CRAFTING_MATERIALS).map((m) => `<button data-material="${m.id}">${m.icon} BUY ${m.name} · ${CRAFT_VENDOR_PRICES[m.id]}</button>`).join('')}<h3>RANK I COMPONENTS</h3>${Object.values(COMPONENTS).map((c) => `<button data-component="${c.id}">◇ ${c.name} · 45</button>`).join('')}`;
+    vendor.innerHTML = `<h3>FORGE SUPPLIES</h3>${Object.values(CRAFTING_MATERIALS).map((m) => `<button data-material="${m.id}">${m.icon} BUY ${m.name} · ${CRAFT_VENDOR_PRICES[m.id]}</button>`).join('')}<h3>RANK I COMPONENTS</h3>${Object.values(COMPONENTS).map((c) => `<button data-component="${c.id}">◇ ${c.name} · 45<small>${modImpact(componentMods(c.id, 1))}</small></button>`).join('')}`;
     const transact = async (button, task) => {
       button.disabled = true; status.textContent = 'Processing securely…'; status.className = 'loading';
       try {
@@ -1600,11 +1659,11 @@ export class UI {
     }).join('') || '<span class="empty-gear">Buy an item before using the forge.</span>';
     for (const button of itemRoot.querySelectorAll('[data-craft-item]')) button.onclick = () => { this._craftItemId = button.dataset.craftItem; this._craftSocket = 0; this._renderCraftingPanel(character); };
     const selected = instances.find((item) => item.id === this._craftItemId);
-    if (!selected) { bench.innerHTML = '<p>Select an item.</p>'; return; }
+    if (!selected) { bench.innerHTML = '<p>Select an item. Buy one in the Market if your stash is empty.</p>'; return; }
     const sockets = selected.sockets || []; const components = (character.craftingComponents || []).filter((c) => c.location === 'inventory');
-    bench.innerHTML = `<div class="craft-sockets">${sockets.map((socket, index) => `<button data-socket="${index}" class="${index === (this._craftSocket || 0) ? 'sel' : ''}">${socket.color} ${socket.type}<small>${socket.component ? `${COMPONENTS[socket.component.id]?.name || socket.component.id} · rank ${socket.component.rank}` : 'empty'}</small></button>`).join('') || '<p>No sockets. Add one below.</p>'}</div>
-      <div class="craft-recipes">${Object.values(RECIPES).map((recipe) => `<button data-recipe="${recipe.id}">${recipe.name}<small>${recipe.cost.alloy} Alloy</small></button>`).join('')}</div>
-      <div class="craft-components">${components.map((component) => `<button data-insert="${component.id}">INSTALL ${COMPONENTS[component.componentId]?.name || component.componentId}</button>`).join('') || '<p>No loose components. Buy one from Forge Supplies.</p>'}${sockets[this._craftSocket || 0]?.component ? '<button data-remove>REMOVE COMPONENT</button>' : ''}</div>`;
+    bench.innerHTML = `<div class="craft-sockets">${sockets.map((socket, index) => `<button data-socket="${index}" class="${index === (this._craftSocket || 0) ? 'sel' : ''}">${socket.color} ${socket.type}<small>${socket.component ? `${COMPONENTS[socket.component.id]?.name || socket.component.id} · rank ${socket.component.rank} · ${modImpact(componentMods(socket.component, socket.component.rank))}` : 'empty · install a matching component for power'}</small></button>`).join('') || '<p>No sockets. Add one below.</p>'}</div>
+      <div class="craft-recipes">${Object.values(RECIPES).map((recipe) => `<button data-recipe="${recipe.id}">${recipe.name}<small>${recipeCost(recipe)}${recipe.id === 'upgrade_component' && sockets[this._craftSocket || 0]?.component ? ` · next rank adds ${modImpact(componentMods(sockets[this._craftSocket || 0].component, 1))}` : ''}</small></button>`).join('')}</div>
+      <div class="craft-components">${components.map((component) => `<button data-insert="${component.id}">INSTALL ${COMPONENTS[component.componentId]?.name || component.componentId}<small>${modImpact(componentMods(component.componentId, 1))}</small></button>`).join('') || '<p>No loose components. Buy one from Forge Supplies.</p>'}${sockets[this._craftSocket || 0]?.component ? '<button data-remove>REMOVE COMPONENT<small>Removes the listed effect and returns the component.</small></button>' : ''}</div>`;
     for (const button of bench.querySelectorAll('[data-socket]')) button.onclick = () => { this._craftSocket = Number(button.dataset.socket); this._renderCraftingPanel(character); };
     const run = (button, action, details) => transact(button, () => this.cb.onCraftAction?.(character, action, selected.id, selected.revision, { socketIndex: this._craftSocket || 0, ...details }));
     for (const button of bench.querySelectorAll('[data-recipe]')) button.onclick = () => run(button, 'craft_recipe', { recipeId: button.dataset.recipe });
@@ -1618,6 +1677,14 @@ export class UI {
   _renderGearPanel(character) {
     const slots = this.root.querySelector('#gear-slots');
     const attrs = this._sheetAttributes(character);
+    const gearGuide = this.root.querySelector('#sheet-guide-gear');
+    if (gearGuide) {
+      const step = firstHourStep(character);
+      gearGuide.innerHTML = step === 'equip'
+        ? 'Next: select a stash item to preview its exact attribute changes, then equip it. Nothing is equipped automatically.'
+        : `Your mission loadout uses only legally equipped items.${step === 'forge' ? ' <button data-next-forge>OPEN FORGE →</button>' : ''}`;
+      gearGuide.querySelector('[data-next-forge]')?.addEventListener('click', () => { this._sheetTab = 'crafting'; this._renderCharacterSheet(); });
+    }
     // What the run will actually use. A slot holding something the character
     // cannot legally wield is shown as illegal rather than quietly counted.
     const worn = legalEquipment(character);
@@ -2340,6 +2407,12 @@ export class UI {
       this.root.appendChild(modal);
     }
     const cave = !!gate.cave;
+    const character = this._sheetCharacter();
+    const level = cave ? null : levelById(gate.levelId || 1);
+    const guide = character ? firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() }) : null;
+    const loadout = character && Object.keys(legalEquipment(character)).length
+      ? 'Loadout ready. Your equipped attributes and socket effects will be applied when the mission starts.'
+      : 'No persistent gear equipped. You can still deploy, or return to Character Info for a field upgrade.';
     const diffSeg = cave ? '' : `
       <div class="steplabel field-label">Difficulty</div>
       <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
@@ -2352,6 +2425,7 @@ export class UI {
           ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
           : gate.blurb}</p>
         ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
+        ${cave ? '' : `<div class="gate-loadout"><b>${loadout}</b><small>Optional mission rewards · ${missionRewardSummary(level)}</small>${guide?.step === 'mission' ? '<em>FIRST DEPLOYMENT READY</em>' : ''}</div>`}
         ${diffSeg}
         <div class="roomconfirmactions">
           <button class="tbtn" id="gate-back">CLOSE</button>
@@ -2757,12 +2831,26 @@ export class UI {
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
     q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
+    const alert = combatAlert(game, p);
+    const alertBox = q('#combat-alert');
+    const alertKey = alert?.key || '';
+    if (alertKey !== this._combatAlertKey) {
+      this._combatAlertKey = alertKey;
+      if (alert) {
+        alertBox.className = `combat-alert ${alert.tone}`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}</small></div>`;
+      } else {
+        alertBox.className = 'combat-alert hidden';
+        alertBox.textContent = '';
+      }
+    }
 
     // Hero plate.
     const h = game.heroes[p];
     if (h) {
       q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
       q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+      q('#a-hp').parentElement.classList.toggle('critical', !h.dead && h.hp / h.maxHp <= 0.25);
       const need = xpForLevel(h.level);
       q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
 
@@ -3381,7 +3469,7 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
-  showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null) {
+  showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -3394,6 +3482,7 @@ export class UI {
         <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
     }).join('');
     const grants = (extra && extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
+    const review = runReview({ won, stats, threat, mode, game });
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
@@ -3415,13 +3504,28 @@ export class UI {
           ${labyrinth ? '' : `<div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>`}
           <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
+        <div class="runreview ${won ? 'success' : 'failure'}">
+          <div class="steplabel">${won ? 'WHAT WORKED' : 'WHY THE RUN ENDED'}</div>
+          <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
+          <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
+        </div>
         ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
         ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${grants.length
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
         ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
-        <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+        <div class="endactions">
+          ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+        </div>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+    const retry = ov.querySelector('#b-retry');
+    if (retry) retry.onclick = () => {
+      if (retry.disabled) return;
+      retry.disabled = true;
+      retry.textContent = 'Restarting…';
+      this.cb.onRetry && this.cb.onRetry();
+    };
   }
 
   // ---------- online lobby rendering ----------

@@ -286,6 +286,7 @@ export function normalizeMmoCharacters(profile) {
     character.activeSet = character.activeSet === 1 ? 1 : 0;
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
+    character.firstHourGuideDismissed = character.firstHourGuideDismissed === true;
     character.lastWorld = character.lastWorld || profile.lastWorld || 'earth';
   }
   if (!profile.mmoCharacters.some((c) => c.id === profile.mmoCharacterId)) {
@@ -364,6 +365,7 @@ export function characterCamp(character, relics = []) {
     }),
     activeSet: character?.activeSet === 1 ? 1 : 0,
     characterStyle: {
+      classKey: MMO_CLASSES[character?.classKey] ? character.classKey : 'vanguard',
       raceKey: MMO_RACES[character?.raceKey] ? character.raceKey : 'human',
       appearance: APPEARANCES[character?.appearance] ? character.appearance : 'iron',
       customization: normalizeCustomization(character?.raceKey, character?.customization),

@@ -19,6 +19,7 @@ import {
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
+import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
@@ -33,6 +34,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
 import { loadMeta, awardRun, metaBonuses } from './meta.js';
 import { stateHash } from './lockstep-hash.js';
+import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
@@ -215,6 +217,12 @@ class App {
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
+      onRetry: () => this._retryMission(),
+      canRetry: (game) => {
+        const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+        return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
+          && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
+      },
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
@@ -743,7 +751,7 @@ class App {
     const character = selectedMmoCharacter(this.profile);
     const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
       raceKey: character.raceKey, appearance: character.appearance,
-      customization: character.customization, equipment: character.equipment,
+      customization: character.customization, equipment: character.equipment, classKey: character.classKey,
     } : null });
     const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
       : character.appearance === 'cobalt' ? '4679b8'
@@ -1497,6 +1505,21 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    if (status.signedIn && !status.needsUsername) {
+      const character = selectedMmoCharacter(this.profile);
+      const retry = consumeRetry(sessionStorage, {
+        allowedHeroes: character?.proxyHero ? [character.proxyHero] : [],
+        maxLevel: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
+      });
+      if (retry) {
+        this._authenticatedEntryHandled = true;
+        this.ui._accountAccepted = true;
+        this.ui.selectedLevel = retry.level;
+        this.ui.selectedMode = 'campaign';
+        setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
+        return;
+      }
+    } else clearRetry(sessionStorage);
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: back onto the planet you launched
@@ -1528,6 +1551,29 @@ class App {
       this.ui.shell.finishMission();
     }
     location.reload();
+  }
+
+  _retryMission() {
+    if (!this.auth?.isSignedIn() || !this.game?.over || this.game.mode !== 'campaign' || this.netMode) {
+      clearRetry(sessionStorage);
+      return this._restartOrReturn();
+    }
+    const character = selectedMmoCharacter(this.profile);
+    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+    if (!character?.proxyHero || this.ui.selectedHero !== character.proxyHero
+      || !Number.isInteger(this.game.levelId) || this.game.levelId < 1 || this.game.levelId > unlocked) {
+      clearRetry(sessionStorage);
+      return this._restartOrReturn();
+    }
+    // Preserve the exact mission setup across the clean reload. Startup already
+    // owns authentication/profile hydration; the retry marker is consumed once
+    // that entry path is ready instead of trying to reuse stale scene state.
+    const stored = storeRetry(sessionStorage, {
+      difficulty: this.game.diffKey, hero: this.ui.selectedHero,
+      level: this.game.levelId, mode: this.game.mode,
+    });
+    if (stored) location.reload();
+    else this._restartOrReturn();
   }
 
   async _signIn() {
@@ -1867,6 +1913,7 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    persistRunTelemetry(this.game);
     const p = this.profile;
     p.games++;
     if (won && this.game.mode !== 'survival') p.wins++;
@@ -2498,6 +2545,7 @@ class App {
       return;
     }
     this._launchCountdownActive = true;
+    this.ui._startActivated = false;
     this.audio.init();
     try {
       for (let count = 5; count >= 1; count--) {
@@ -5334,14 +5382,14 @@ class App {
           this.audio.victory();
           this.pause();
           this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
         case 'defeat':
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
           this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras);
+          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
       }
     }

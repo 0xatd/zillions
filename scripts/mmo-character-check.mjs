@@ -30,6 +30,8 @@ assert.equal(selectedMmoCharacter(profile), vanguard);
 const camp = characterCamp(vanguard, profile.relics);
 assert.deepEqual(camp.relics, ['relic']);
 assert.equal(camp.level, 1);
+assert.equal(camp.characterStyle.classKey, 'vanguard',
+  'combat must receive the same class-role silhouette used by creator, paper doll and overworld');
 
 const levels = grantMmoExperience(vanguard, 1000000);
 assert.ok(levels.length > 1, 'large awards must cross multiple levels safely');

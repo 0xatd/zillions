@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { combatBuckets, nearbyBuckets } from '../src/game.js';
+import { combatBuckets, nearbyBuckets, sampleArmyPeak } from '../src/game.js';
 import { PLOT_KINDS, THREAT, hiveInterval, hiveSquad } from '../src/config.js';
 
 // A broad-phase lookup around one fight must stay local even when the world
@@ -13,6 +13,18 @@ const nearby = nearbyBuckets(buckets, actors, 60, 25, 10);
 assert.ok(nearby.length > 0, 'spatial combat lookup found nobody');
 assert.ok(nearby.length < actors.length / 4,
   `spatial combat lookup scanned too much of the army (${nearby.length}/${actors.length})`);
+
+// Army telemetry is sampled once per simulated second. It must not restore a
+// full-unit allocation/scan to every frame at high density.
+let visits = 0;
+const sampledActors = {
+  *[Symbol.iterator]() { for (const actor of actors) { visits++; yield { ...actor, key: actor.id % 2 ? 'guard' : 'archer' }; } },
+};
+const peak = {};
+let nextSampleAt = 0;
+for (let frame = 0; frame < 600; frame++) nextSampleAt = sampleArmyPeak(sampledActors, peak, frame / 60, nextSampleAt);
+assert.ok(visits <= actors.length * 11, `army telemetry scanned ${visits} actors across 600 frames`);
+assert.equal(peak.guard, 3000);
 
 // One living hive is intentionally stronger than one human producer. Humans
 // catch up by capturing ground and raising several camps; razing the hive is

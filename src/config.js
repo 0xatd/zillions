@@ -781,8 +781,8 @@ export const LEVELS = [
       desc: 'A mountain of meat and cleavers. Enrages at half health.' },
   },
   {
-    id: 2, name: 'Rotmire', seed: 20202, mult: 1.0, size: 200, nests: 3,
-    economy: { startGold: 64, income: 1.04, pressure: 0.96 },
+    id: 2, name: 'Rotmire', seed: 20202, mult: 0.92, size: 200, nests: 3,
+    economy: { startGold: 64, income: 1.04, pressure: 0.94 },
     quests: [
       { id: 'l2q1', name: 'Drain the Fen', desc: 'Raze 2 hive nests', reward: 'tithe_ledger', check: (g) => g.stats.nests >= 2 },
       { id: 'l2q2', name: 'Untouchable', desc: 'Win without your hero falling', reward: 'servo_legs', check: (g) => g.stats.heroDeaths === 0 },
@@ -791,8 +791,8 @@ export const LEVELS = [
     blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
     theme: { terrain: 'fen', city: 'fort', liquidName: 'Bog water',
       palette: { grass: 0x4e6a4a, forest: 0x314e38, water: 0x4e9a68, mountain: 0x9a9488, sand: 0x8a8562, path: 0x6e6a4e, sky: 0x8aa896 } },
-    boss: { name: 'Plague Mother', icon: '🪳', hp: 3400, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
-      color: 0x6e8f3a, score: 80, spawn: { every: 9, count: 5, type: 'walker' },
+    boss: { name: 'Plague Mother', icon: '🪳', hp: 3100, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
+      color: 0x6e8f3a, score: 80, spawn: { every: 10, count: 5, type: 'walker' },
       desc: 'Every few seconds she births another brood. Kill her fast.' },
   },
   {

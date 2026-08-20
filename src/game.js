@@ -59,6 +59,20 @@ export function combatBuckets(actors) {
   return buckets;
 }
 
+export const ARMY_PEAK_SAMPLE_SECONDS = 1;
+export function sampleArmyPeak(units, peak, time, nextSampleAt = 0) {
+  if (time + 1e-9 < nextSampleAt) return nextSampleAt;
+  const composition = {};
+  for (const unit of units) {
+    if (unit.hero || unit.dead) continue;
+    composition[unit.key] = (composition[unit.key] || 0) + 1;
+  }
+  for (const [key, count] of Object.entries(composition)) {
+    peak[key] = Math.max(peak[key] || 0, count);
+  }
+  return (Math.floor(time / ARMY_PEAK_SAMPLE_SECONDS) + 1) * ARMY_PEAK_SAMPLE_SECONDS;
+}
+
 export function nearbyBuckets(buckets, fallback, x, z, radius) {
   if (!buckets) return fallback;
   const found = [];
@@ -154,8 +168,10 @@ export class Game {
 
     this.stats = {
       kills: 0, built: 0, lost: 0, coins: 0, nests: 0, nodes: 0, bestHeld: 0,
-      heroDeaths: 0, bossKillT: null, repaired: 0,
+      heroDeaths: 0, bossKillT: null, repaired: 0, spent: 0,
+      damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {},
     };
+    this._armyPeakSampleAt = 0;
 
     // heroKeys entries: 'scott' (fresh) or { k, camp: { level, xp, items, relics } }
     // — the WC3-style persistent campaign hero each player brings along.
@@ -216,7 +232,7 @@ export class Game {
       flowT: snapNum(this.flowTimer),
       timers: {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
-        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
+        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), armyPeakSampleAt: snapNum(this._armyPeakSampleAt), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
       },
       brews: this.brews.map((b) => ({
         x: snapNum(b.x), z: snapNum(b.z), r: snapNum(b.r),
@@ -224,7 +240,13 @@ export class Game {
       })),
       nests: this.nests.map((n) => [snapNum(n.hp), n.alive ? 1 : 0, snapNum(n.musterT), snapNum(n.defendT || 0)]),
       nodes: this.nodes.map((n) => [n.owner, snapNum(n.cap), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
-      stats: { ...this.stats },
+      stats: {
+        ...this.stats,
+        damageTaken: { ...(this.stats.damageTaken || {}) },
+        builtByKind: { ...(this.stats.builtByKind || {}) },
+        lostByKind: { ...(this.stats.lostByKind || {}) },
+        armyPeak: { ...(this.stats.armyPeak || {}) },
+      },
       rng: this.rng.getState(), nextId: getNextId(),
       plots: this.plots.map((p) => ({
         id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch,
@@ -351,6 +373,7 @@ export class Game {
     this._nodeT = timers.nodeT ?? 0;
     this._campT = timers.campT ?? 0;
     this._supportT = timers.supportT ?? 0;
+    this._armyPeakSampleAt = timers.armyPeakSampleAt ?? 0;
     this.bossSpawnT = timers.bossSpawnT ?? null;
     (snap.nests || []).forEach(([hp, alive, musterT, defendT], i) => {
       if (this.nests[i]) {
@@ -370,7 +393,14 @@ export class Game {
       n.empty = !!empty;
       n.looted = !!looted;
     });
-    this.stats = { nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0, ...snap.stats };
+    this.stats = {
+      nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0,
+      spent: 0, damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {}, ...snap.stats,
+      damageTaken: { ...(snap.stats?.damageTaken || {}) },
+      builtByKind: { ...(snap.stats?.builtByKind || {}) },
+      lostByKind: { ...(snap.stats?.lostByKind || {}) },
+      armyPeak: { ...(snap.stats?.armyPeak || {}) },
+    };
     this.loot = (snap.loot || []).map(([key, x, z, hidden, cool]) => ({
       id: nextId++, key, x, z, hidden: !!hidden, cool: cool || 0,
     }));
@@ -1129,6 +1159,7 @@ export class Game {
       const pay = Math.min(rate * dt, this.gold, need);
       if (pay <= 0) continue;
       this.gold -= pay;
+      this.stats.spent += pay;
       const [px, pz] = target.payPoint || this.payPoint(plot, h);
       h._coinAcc = (h._coinAcc || 0) + pay;
       if (h._coinAcc >= 1) {
@@ -1167,6 +1198,7 @@ export class Game {
     if (amount <= 1e-6) return;
     plot.paid = 0;
     this.gold += amount;
+    this.stats.spent = Math.max(0, this.stats.spent - amount);
     const h = this.heroes[plot.refundHero || 0] || this.heroes[0];
     if (h) h._coinAcc = 0;
     const [px, pz] = this.payPoint(plot, h);
@@ -1214,7 +1246,12 @@ export class Game {
     const def = this.tierDef(plot, nextTier);
     if (!def) return false;
     plot.tier = nextTier;
-    if (!free) this.stats.built++;
+    if (!free) {
+      // This counts completed construction purchases. A tier upgrade is a
+      // purchase of that plot kind; free setup and discounted rebuilds are not.
+      this.stats.built++;
+      this.stats.builtByKind[plot.kind] = (this.stats.builtByKind[plot.kind] || 0) + 1;
+    }
 
     if (plot.kind === 'wall') {
       // One building per rampart tile; the gate ARCH (every wall tile the
@@ -1542,8 +1579,9 @@ export class Game {
     this.flowDirty = true;
     if (byZombie) {
       this.stats.lost++;
+      this.stats.lostByKind[b.kind] = (this.stats.lostByKind[b.kind] || 0) + 1;
       this.emit({ type: 'bdestroyed', x: b.cx, z: b.cz });
-      if (b.kind === 'hq') { this._gameOver(false); return; }
+      if (b.kind === 'hq') { this.defeatCause = 'keep_destroyed'; this._gameOver(false); return; }
       const plot = this.plots.find((p) => p.id === b.plotId);
       if (plot) plot.ruined = true;
       // Nothing rebuilds itself any more — a ruin is a bill.
@@ -3313,6 +3351,8 @@ export class Game {
   _damageBuilding(b, dmg, source = null) {
     if (!b.alive) return;
     b.hp -= dmg;
+    const sourceKey = source?.type || source?.key || 'horde';
+    this.stats.damageTaken[sourceKey] = (this.stats.damageTaken[sourceKey] || 0) + dmg;
     b.hitT = this.time;
     this.emit({ type: 'bhit', x: b.cx, z: b.cz, fromId: source?.id, fx: source?.x, fz: source?.z });
     if (this.time - (this._uaT || -99) > 20) {
@@ -3355,6 +3395,10 @@ export class Game {
     if (thorns > 0 && dmg > 0 && attacker && !attacker.dead) {
       this.damageZombie(attacker, dmg * thorns, u.x, u.z);
     }
+    if (dmg > 0) {
+      const sourceKey = attacker?.type || attacker?.key || 'hive_blight';
+      this.stats.damageTaken[sourceKey] = (this.stats.damageTaken[sourceKey] || 0) + dmg;
+    }
     u.hp -= dmg;
     if (u.hp <= 0) {
       u.dead = true;
@@ -3375,7 +3419,10 @@ export class Game {
           }
           // The run ends only when nobody is coming back — a dead hero with a
           // revive pending is still in the fight.
-          if (this.heroes.every((h) => h.dead && h.fallen)) this._gameOver(false);
+          if (this.heroes.every((h) => h.dead && h.fallen)) {
+            this.defeatCause = 'party_exhausted';
+            this._gameOver(false);
+          }
         } else {
           u.reviveT = 12 + 2.5 * u.level;
           this.msg(`☠️ ${u.def.name} has fallen! Reviving at the Keep in ${Math.round(u.reviveT)}s…`, 'bad');
@@ -3402,6 +3449,9 @@ export class Game {
   update(dt) {
     if (this.over) return;
     this.time += dt;
+    this._armyPeakSampleAt = sampleArmyPeak(
+      this.units, this.stats.armyPeak, this.time, this._armyPeakSampleAt,
+    );
     this._updateSiege(dt);
     if (this.over) return;
     this._updatePlots(dt);
