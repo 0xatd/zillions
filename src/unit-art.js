@@ -386,6 +386,11 @@ const APPEARANCE_COLORS = {
   bone: 0xb7aa8c, void: 0x6d568f, forest: 0x4f785d,
 };
 
+const FRAME_CLASSES = new Set(['berserker', 'xenoshaper', 'vanguard', 'warden']);
+const SIGNAL_CLASSES = new Set(['vox_officer', 'chaplain', 'psion', 'voidbound', 'arcanist']);
+const roleFamily = (classKey) => FRAME_CLASSES.has(classKey) ? 'frontline'
+  : SIGNAL_CLASSES.has(classKey) ? 'signal' : 'skirmisher';
+
 export function playerHeroVisualState(u) {
   const style = u.characterStyle || {};
   const race = style.raceKey === 'robot' ? 'robot' : 'human';
@@ -398,17 +403,22 @@ export function playerHeroVisualState(u) {
     return [slot, { family, recipe: COSMETIC_RENDERERS[race][slot][family] }];
   }));
   const equipment = style.equipment || u.equipment || {};
-  const gear = Object.fromEntries(['head', 'chest', 'hands', 'legs', 'boots'].map((slot) => {
+  const gearInfo = Object.fromEntries(['head', 'chest', 'hands', 'legs', 'boots'].map((slot) => {
     const value = equipment[slot] || (slot === 'chest' ? equipment.armor : null);
-    return [slot, itemInfo(value)?.base?.visual || itemInfo(value)?.base?.id || ''];
+    const item = itemInfo(value);
+    return [slot, {
+      family: item?.base?.visual || item?.base?.id || '',
+      rarity: Number(item?.rarity) || 1,
+    }];
   }));
-  return { race, appearance: style.appearance || 'iron', identity, gear };
+  const gear = Object.fromEntries(Object.entries(gearInfo).map(([slot, value]) => [slot, value.family]));
+  return { race, appearance: style.appearance || 'iron', role: roleFamily(style.classKey), identity, gear, gearInfo };
 }
 
 function playerHero(u) {
   const style = u.characterStyle || {};
   const state = playerHeroVisualState(u);
-  const { race, identity, gear } = state;
+  const { race, identity, gear, gearInfo } = state;
   const custom = Object.fromEntries(Object.entries(identity).map(([slot, value]) => [slot, value.family]));
   const color = APPEARANCE_COLORS[style.appearance] || u.def.color || 0x8493a6;
   const bodyScale = identity.body.recipe.scale;
@@ -416,17 +426,20 @@ function playerHero(u) {
   const rig = humanoid({
     armor: color, cloth: race === 'robot' ? shade(color, .48) : 0x33383e,
     shell: race === 'robot' ? 0xb8c4ca : 0xd8c6ad,
-    bulk, tall: race === 'robot' ? 1.08 : 1.03,
+    bulk, tall: bodyScale[1] * (race === 'robot' ? 1.08 : 1.03),
     visor: race === 'robot' ? 0x5ee8ff : 0x8fd0ff,
     visorWide: ['visor', 'faceless'].includes(custom.face),
     visorVisible: false,
   });
   rig.root.userData.visualState = state;
+  rig.root.scale.z = bodyScale[2];
   const weapons = [];
   // Identity parts stay visible beneath gear.
   if (race === 'human') {
     const skin = M(0xd8c6ad), mark = M(custom.face === 'nomad' ? 0x315b66 : 0x4a3229);
     for (const x of [-.035, .035]) sph(rig.head, M(0x18212a), .012, x, .048, .104, 1.15, .7, .45);
+    cone(rig.head, skin, .018, .045, 0, .018, .112, Math.PI / 2, 0, 0, 5); // readable nose plane
+    box(rig.head, M(0x6d493b), .055, .008, .01, 0, -.022, .108);           // mouth line
     if (custom.face === 'sentinel') { box(rig.head, M(0x3b2d25), .13, .016, .012, 0, .076, .103); box(rig.head, M(0x5c4435), .055, .018, .014, 0, -.032, .105); }
     if (custom.face === 'ranger') box(rig.head, mark, .09, .012, .014, 0, .075, .102, 0, 0, -.12);
     if (custom.face === 'veteran') box(rig.head, M(0xa77969), .012, .09, .012, .04, .02, .103, 0, 0, -.28);
@@ -442,11 +455,31 @@ function playerHero(u) {
   }
   if (custom.head === 'hooded') cone(rig.head, M(0x252c35), .145, .2, 0, .08, -.04, -.35, 0, 0, 7);
   if (race === 'robot') {
+    // Exposed joints, hard shoulder wedges and a reactor sternum keep the
+    // synthetic silhouette distinct even when both origins wear the same gear.
+    for (const arm of [rig.limbs.armL, rig.limbs.armR]) {
+      sph(arm, M(0x202a31), .055, 0, -.19, 0);
+      box(arm, M(shade(color, .72)), .15, .08, .17, 0, .045, 0, 0, 0, .12);
+    }
+    for (const leg of [rig.limbs.legL, rig.limbs.legR]) sph(leg, M(0x202a31), .05, 0, -.19, 0);
+    box(rig.torso, M(0x26323a), .12, .25, .11, 0, .17, .1);
+    sph(rig.torso, M(0x5ee8ff, .85), .035, 0, .2, .17, 1, 1, .45);
     if (custom.face === 'optic') sph(rig.head, M(0x5ee8ff, 1), .035, 0, .045, .108, 1, 1, .45);
     if (custom.face === 'visor') box(rig.head, M(0x5ee8ff, 1), .19, .035, .025, 0, .045, .105);
     if (custom.face === 'tri-eye') for (const x of [-.055, 0, .055]) sph(rig.head, M(0x5ee8ff, 1), .018, x, .045, .105);
     if (custom.face === 'faceless') box(rig.head, M(shade(color, .58)), .17, .13, .025, 0, .03, .101);
     if (custom.head === 'smooth') sph(rig.head, M(shade(color, .88)), .116, 0, .055, -.01, 1.05, .9, 1.02);
+  }
+
+  if (state.role === 'frontline') {
+    for (const arm of [rig.limbs.armL, rig.limbs.armR]) box(arm, M(shade(color, .62)), .18, .07, .2, 0, .09, 0);
+    box(rig.torso, M(0x2a3036), .08, .28, .08, 0, .18, -.2);
+  } else if (state.role === 'signal') {
+    sph(rig.torso, M(0x8eeaff, .8), .035, 0, .2, .18, 1, 1, .45);
+    for (const x of [-.11, .11]) box(rig.root, M(0x4a5963), .018, .22, .018, x, .88, -.19, 0, 0, x * 1.2);
+  } else {
+    box(rig.torso, M(0x303943), .07, .22, .06, -.14, .1, -.16, 0, 0, -.18);
+    box(rig.head, M(0x79dcff, .65), .04, .025, .02, .085, .075, .095);
   }
 
   // Base legs retain origin identity even when armor is worn.
@@ -461,8 +494,10 @@ function playerHero(u) {
   if (gear.chest) {
     const chestScale = /powered|siege|bulwark/.test(gear.chest) ? 1.18 : /weave|ghost|shroud/.test(gear.chest) ? .98 : 1.08;
     box(rig.torso, M(shade(color, .8)), .34 * chestScale, .31, .16, 0, .19, .01);
+    if (gear.chest === 'flak') for (const x of [-.09, .09]) box(rig.torso, M(shade(color, .68)), .13, .22, .035, x, .19, .105, 0, 0, x * -.8);
     if (/weave|ghost|shroud/.test(gear.chest)) cone(rig.torso, M(shade(color, .48)), .23, .42, 0, -.12, -.02, 0, 0, 0, 9);
     if (/powered|siege|bulwark/.test(gear.chest)) for (const x of [-.18, .18]) box(rig.torso, M(shade(color, .62)), .12, .12, .16, x, .28, 0);
+    if (gear.chest === 'powered') sph(rig.torso, M(0x70e6ff, .8), .04, 0, .2, .18, 1.4, 1, .45);
   }
   if (gear.head) {
     const helm = gear.head;
@@ -480,6 +515,18 @@ function playerHero(u) {
     box(leg, M(gear.boots === 'phase' ? 0x496e86 : 0x25282c), gear.boots === 'siege' ? .145 : .12, gear.boots === 'siege' ? .14 : .1, gear.boots === 'trail' ? .21 : .18, 0, -.4, .05);
     if (gear.boots === 'phase') sph(leg, M(0x5ee8ff, .8), .025, 0, -.4, .15);
   }
+  // Rarity is a controlled equipment accent, never a full-body recolor.
+  // Marked gear gets one cyan pip; Prime gear adds a paired amber pip.
+  const rarityAccent = (parent, rarity, x, y, z) => {
+    if (rarity < 2) return;
+    sph(parent, M(rarity >= 3 ? 0xe0b34b : 0x6fa8dc, .75), .018, x, y, z, 1, 1, .5);
+    if (rarity >= 3) sph(parent, M(0xe0b34b, .75), .018, -x, y, z, 1, 1, .5);
+  };
+  rarityAccent(rig.head, gearInfo.head.rarity, .055, .1, .12);
+  rarityAccent(rig.torso, gearInfo.chest.rarity, .1, .29, .19);
+  rarityAccent(rig.limbs.armR, gearInfo.hands.rarity, .035, -.31, .1);
+  rarityAccent(rig.limbs.legR, gearInfo.legs.rarity, .03, -.23, .09);
+  rarityAccent(rig.limbs.legL, gearInfo.boots.rarity, .03, -.39, .14);
   rifle(rig.root, weapons, { len: .72, y: .58 });
   return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
 }

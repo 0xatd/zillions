@@ -1211,7 +1211,7 @@ export class UI {
       appearance: this._creatorAppearance || 'iron',
       customization: { ...(this._creatorParts || {}) },
       equipment: {}, canvasId: 'creator-preview-canvas',
-      proxyHero: klass.proxy,
+      proxyHero: klass.proxy, classKey: this._creatorClass || 'vanguard',
     });
     const raceLabel = this.root.querySelector('#creator-preview-race');
     if (raceLabel) raceLabel.textContent = race.name.toUpperCase();
@@ -1496,7 +1496,7 @@ export class UI {
       <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
     this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
       customization: character.customization, equipment: character.equipment,
-      proxyHero: character.proxyHero, canvasId: 'paperdoll-preview-canvas' });
+      proxyHero: character.proxyHero, classKey: character.classKey, canvasId: 'paperdoll-preview-canvas' });
   }
 
   _renderAbilitiesOverview(character) {

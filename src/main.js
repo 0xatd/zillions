@@ -751,7 +751,7 @@ class App {
     const character = selectedMmoCharacter(this.profile);
     const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
       raceKey: character.raceKey, appearance: character.appearance,
-      customization: character.customization, equipment: character.equipment,
+      customization: character.customization, equipment: character.equipment, classKey: character.classKey,
     } : null });
     const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
       : character.appearance === 'cobalt' ? '4679b8'

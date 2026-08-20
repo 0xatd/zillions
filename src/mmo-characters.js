@@ -365,6 +365,7 @@ export function characterCamp(character, relics = []) {
     }),
     activeSet: character?.activeSet === 1 ? 1 : 0,
     characterStyle: {
+      classKey: MMO_CLASSES[character?.classKey] ? character.classKey : 'vanguard',
       raceKey: MMO_RACES[character?.raceKey] ? character.raceKey : 'human',
       appearance: APPEARANCES[character?.appearance] ? character.appearance : 'iron',
       customization: normalizeCustomization(character?.raceKey, character?.customization),

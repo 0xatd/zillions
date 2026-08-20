@@ -299,6 +299,35 @@ try {
       && bannerBox.left >= 12 && bannerBox.right <= window.innerWidth - 12
       && bannerBox.bottom <= window.innerHeight - 12;
   })()`), true, 'mission location title and description must remain separate, legible lines at 1440x1000');
+  const heroMetrics = async (race, classKey, parts, equipment = {}) => evaluate(`(() => {
+    window.__app.ui._showCharacterCreator();
+    window.__app._setCharacterPreview({ raceKey: ${JSON.stringify(race)}, classKey: ${JSON.stringify(classKey)},
+      appearance: 'cobalt', customization: ${JSON.stringify(parts)}, equipment: ${JSON.stringify(equipment)},
+      proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
+    const model = window.__app.characterPreviews.get('creator-preview-canvas').model;
+    let meshes = 0, triangles = 0;
+    model.traverse((node) => {
+      if (!node.isMesh) return;
+      meshes++;
+      triangles += (node.geometry.index ? node.geometry.index.count : node.geometry.attributes.position.count) / 3;
+    });
+    return { meshes, triangles, state: model.userData.visualState };
+  })()`);
+  const humanMetrics = await heroMetrics('human', 'vanguard',
+    { face: 'veteran', body: 'heavy', head: 'hooded', legs: 'armored' },
+    { head: 'sentinel_helm:1:35:3', chest: 'powered_shell:2:45:3', hands: 'siege_gauntlets:3:35:3', legs: 'bulwark_greaves:4:40:3', boots: 'phase_boots:5:35:3' });
+  const robotMetrics = await heroMetrics('robot', 'arcanist',
+    { face: 'tri-eye', body: 'bulwark', head: 'crest', legs: 'heavy' },
+    { head: 'sentinel_helm:1:35:3', chest: 'powered_shell:2:45:3', hands: 'siege_gauntlets:3:35:3', legs: 'bulwark_greaves:4:40:3', boots: 'phase_boots:5:35:3' });
+  assert.equal(humanMetrics.state.race, 'human');
+  assert.equal(humanMetrics.state.role, 'frontline');
+  assert.equal(robotMetrics.state.race, 'robot');
+  assert.equal(robotMetrics.state.role, 'signal');
+  assert.equal(robotMetrics.state.gearInfo.chest.rarity, 3, 'rolled Prime chest rarity must reach the renderer');
+  for (const metrics of [humanMetrics, robotMetrics]) {
+    assert.ok(metrics.triangles <= 8000, `procedural hero exceeded 8,000 triangle budget: ${metrics.triangles}`);
+    assert.ok(metrics.meshes <= 70, `procedural hero exceeded 70-mesh fallback budget: ${metrics.meshes}`);
+  }
   if (process.env.ZILLIONS_VISUAL_QA_DIR) {
     const capture = async (name, race, parts, equipment = {}) => {
       await evaluate(`(() => {
@@ -310,7 +339,7 @@ try {
         for (const [index, node] of document.querySelectorAll('#creator-races button').entries()) node.classList.toggle('sel', index === ${race === 'robot' ? 1 : 0});
         ui._buildCreatorParts();
         ui._renderCreatorSummary();
-        window.__app._setCharacterPreview({ raceKey: ${JSON.stringify(race)}, appearance: 'cobalt', customization: wanted,
+        window.__app._setCharacterPreview({ raceKey: ${JSON.stringify(race)}, classKey: 'vanguard', appearance: 'cobalt', customization: wanted,
           equipment: ${JSON.stringify(equipment)}, proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
         document.querySelector('#character-create-form').scrollIntoView({ block: 'start' });
         return true;

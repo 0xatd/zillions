@@ -7,7 +7,10 @@ assert.equal(unitArtState({ dead: false, moving: true }, { castT: 0.1, attackT: 
 assert.equal(unitArtState({ dead: false, moving: false }, { attackT: 0.1 }), 'attack');
 assert.equal(unitArtState({ dead: false, moving: true }), 'run');
 assert.equal(unitArtState({ dead: false, moving: false }), 'idle');
-assert.ok(unitPose('run', Math.PI / 2).stride > 0.6);
+assert.ok(unitPose('run', Math.PI / 2).stride >= 0.5 && unitPose('run', Math.PI / 2).stride <= 0.56,
+  'run stride must read without flailing at gameplay zoom');
+assert.ok(unitPose('idle', Math.PI / 2).y <= 0.015,
+  'idle motion must stay restrained');
 assert.ok(unitPose('attack', 0, { pulse: 1, melee: true }).z > 0.3);
 assert.ok(unitPose('hit', 0, { pulse: 1 }).z < 0);
 assert.ok(unitPose('down', 0).roll > 1.4);
