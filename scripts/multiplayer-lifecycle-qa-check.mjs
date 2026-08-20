@@ -31,5 +31,13 @@ assert.match(schema, /room_players_update_self_or_host[\s\S]*auth\.uid\(\) = use
 assert.doesNotMatch(liveSmoke, /@example\.com/, 'Supabase Admin rejects reserved example.com QA identities');
 assert.match(liveSmoke, /zillions-mp-[\s\S]*@taborlin\.co/, 'live QA identities must use the dedicated Taborlin namespace');
 assert.match(liveSmoke, /refusing unsafe cleanup target/, 'live QA cleanup must fail closed outside its namespace');
+assert.match(liveSmoke, /account\('MP Guest 4'\)/,
+  'live multiplayer smoke must create a real fourth authenticated account');
+assert.match(liveSmoke, /\[1, 2, 3, 4\]/,
+  'live multiplayer smoke must prove all four persisted seat assignments');
+assert.match(liveSmoke, /seat: 5/,
+  'live multiplayer smoke must prove the database rejects forbidden seat 5');
+assert.match(liveSmoke, /nextAvailableRoomSeat\(fullRoster\.body, room\.max_players\), null/,
+  'live multiplayer smoke must exercise the app allocator against a full room');
 
 console.log('multiplayer lifecycle QA checks passed');
