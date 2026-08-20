@@ -37,6 +37,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
+import { normalizeLivingWorld } from './living-world-ui.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -60,6 +61,7 @@ export class UI {
     this.shell = new ShellState();
     this.msgSeen = 0;
     this.pauseOpen = false;
+    this._livingWorld = normalizeLivingWorld();
     this._buildDOM();
   }
 
@@ -87,9 +89,22 @@ export class UI {
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
       <div id="ow-quick-actions" class="owquick hidden">
-        <button id="ow-custom-quick" class="tbtn" title="Browse live and arcade games">CUSTOM GAMES</button>
+        <button id="ow-party" class="tbtn ow-party-action" title="Create a party or invite friends">＋ PARTY</button>
+        <button id="ow-map" class="tbtn ow-map-action" title="Open world map and mission finder">🗺 WORLD MAP</button>
         <button id="ow-menu" class="tbtn" title="Game menu (Esc)">☰ MENU</button>
       </div>
+
+      <aside id="ow-party-frames" class="ow-party-frames hidden" aria-label="Party"></aside>
+
+      <section id="living-world-map" class="living-world-map hidden" role="dialog" aria-modal="true" aria-label="World map">
+        <div class="lw-shell">
+          <header class="lw-head"><div><span>LIVING WORLD</span><h1 id="lw-world-name">EARTH FRONTIER</h1><small id="lw-region"></small></div><div class="lw-head-actions"><button class="tbtn" id="lw-party">＋ PARTY</button><button class="tbtn" id="lw-close">CLOSE</button></div></header>
+          <div class="lw-body">
+            <div class="lw-map-stage" id="lw-map-stage"><div class="lw-map-grid"></div><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div><div class="lw-legend"><span><i class="free"></i> Free</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
+            <aside class="lw-finder"><span class="lw-kicker">MISSION FINDER</span><h2>Choose your next move</h2><p>Travel the roads for encounters and discoveries, or deploy directly to a known destination.</p><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support fast travel. Discovered fronts support direct deployment.</p></div></aside>
+          </div>
+        </div>
+      </section>
 
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
@@ -198,8 +213,9 @@ export class UI {
           <div class="world-menu-card">
             <span class="world-menu-eyebrow">ZILLIONS</span><h1>GAME MENU</h1>
             <button class="menubtn primary" id="ow-resume">RETURN TO WORLD</button>
+            <button class="menubtn" id="ow-world-map">WORLD MAP & MISSIONS</button>
+            <button class="menubtn" id="ow-party-menu">CREATE / VIEW PARTY</button>
             <button class="menubtn" id="ow-characters">CHARACTER SELECT</button>
-            <button class="menubtn" id="ow-custom">CUSTOM GAMES</button>
             <button class="menubtn" id="ow-settings">SYSTEM</button>
             <button class="menubtn danger" id="ow-logout">LOG OUT</button>
           </div>
@@ -544,8 +560,9 @@ export class UI {
       if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
     };
     q('#ow-resume').onclick = () => this.hideOverlay();
+    q('#ow-world-map').onclick = () => { this.hideOverlay(); this.openLivingWorldMap(); };
+    q('#ow-party-menu').onclick = () => { this.hideOverlay(); this._partyAction(); };
     q('#ow-characters').onclick = () => this._showScreen('main');
-    q('#ow-custom').onclick = () => { this._customFrom = 'world-menu'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#ow-settings').onclick = () => { this._settingsReturn = 'world-menu'; this._showScreen('settings'); };
     q('#ow-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
     q('#creator-cancel').onclick = () => {
@@ -748,10 +765,10 @@ export class UI {
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
     q('#ow-menu').onclick = () => this.toggleOverlay();
-    q('#ow-custom-quick').onclick = () => {
-      this._customFrom = 'overworld';
-      if (this.cb.onCustomOpen) this.cb.onCustomOpen();
-    };
+    q('#ow-party').onclick = () => this._partyAction();
+    q('#ow-map').onclick = () => this.openLivingWorldMap();
+    q('#lw-party').onclick = () => this._partyAction();
+    q('#lw-close').onclick = () => this.closeLivingWorldMap();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -2243,6 +2260,78 @@ export class UI {
     if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-quick-actions').classList.toggle('hidden', !on);
+    this.root.querySelector('#ow-party-frames').classList.toggle('hidden', !on);
+    if (!on) this.closeLivingWorldMap();
+    else this._renderPartyFrames();
+  }
+
+  setLivingWorldState(state) {
+    this._livingWorld = normalizeLivingWorld(state);
+    this._renderPartyFrames();
+    if (!this.root.querySelector('#living-world-map')?.classList.contains('hidden')) this._renderLivingWorldMap();
+  }
+
+  _partyAction() {
+    const party = this._livingWorld.party;
+    if (party.id) this.cb.onPartyOpen?.(party);
+    else this.cb.onPartyCreate?.();
+  }
+
+  _renderPartyFrames() {
+    const box = this.root.querySelector('#ow-party-frames');
+    if (!box) return;
+    const members = this._livingWorld.party.members || [];
+    box.innerHTML = `<div class="opf-head"><span>PARTY</span><button id="opf-invite">${this._livingWorld.party.id ? '+ INVITE' : '+ CREATE'}</button></div>${members.length ? members.map((member) => {
+      const health = Math.max(0, Math.min(100, Number(member.health) || 0));
+      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')}</small></span><strong>${health}%</strong></button>`;
+    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}`;
+    box.querySelector('#opf-invite').onclick = () => this._partyAction();
+    for (const button of box.querySelectorAll('[data-member]')) button.onclick = () => this.cb.onPartyMemberLocate?.(button.dataset.member);
+  }
+
+  openLivingWorldMap() {
+    this._renderLivingWorldMap();
+    this.root.querySelector('#living-world-map').classList.remove('hidden');
+    this.cb.onLivingWorldOpen?.(this._livingWorld.world.id);
+  }
+
+  closeLivingWorldMap() {
+    this.root.querySelector('#living-world-map')?.classList.add('hidden');
+  }
+
+  _renderLivingWorldMap() {
+    const state = this._livingWorld;
+    this.root.querySelector('#lw-world-name').textContent = state.world.name;
+    this.root.querySelector('#lw-region').textContent = `${state.world.region} · WORLD TIME ${state.world.time}`;
+    const routes = this.root.querySelector('#lw-routes');
+    routes.innerHTML = state.routes.map((route) => `<line x1="${route.from[0]}" y1="${route.from[1]}" x2="${route.to[0]}" y2="${route.to[1]}" class="${route.state}"/>`).join('');
+    const nodes = this.root.querySelector('#lw-map-nodes');
+    nodes.innerHTML = [
+      ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)}</small></button>`),
+      ...state.parties.map((item) => `<button class="lw-node army ${item.owner}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>⚑</i><b>${escapeHtml(item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.intent)}</small></button>`),
+      ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
+    ].join('');
+    const missions = this.root.querySelector('#lw-missions');
+    missions.innerHTML = state.missions.length ? state.missions.map((mission) => `<button class="lw-mission" data-kind="mission" data-id="${escapeHtml(mission.id)}" ${!mission.known ? 'disabled' : ''}><span>${mission.unlocked ? 'AVAILABLE' : mission.known ? 'DISCOVERED' : 'UNKNOWN'}</span><b>${escapeHtml(mission.known ? mission.name : 'Undiscovered front')}</b><small>${escapeHtml(mission.difficulty)}</small></button>`).join('') : '<p class="lw-empty">No mission intelligence is available yet.</p>';
+    for (const button of this.root.querySelectorAll('#living-world-map [data-kind]')) button.onclick = () => this._selectLivingWorldTarget(button.dataset.kind, button.dataset.id);
+  }
+
+  _selectLivingWorldTarget(kind, id) {
+    const state = this._livingWorld;
+    const item = kind === 'settlement' ? state.settlements.find((entry) => entry.id === id)
+      : kind === 'army' ? state.parties.find((entry) => entry.id === id)
+      : state.missions.find((entry) => entry.id === id);
+    if (!item) return;
+    const selection = this.root.querySelector('#lw-selection');
+    const canTravel = kind === 'settlement' && item.known && item.fastTravel;
+    const canDeploy = kind === 'mission' && item.known && item.unlocked;
+    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : 'DESTINATION'}</small><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.blurb || item.intent || `${item.kind} · ${item.owner}`)}</p>${canTravel ? '<button class="menubtn primary" id="lw-act">FAST TRAVEL</button>' : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NOT AVAILABLE</button>'}`;
+    const action = selection.querySelector('#lw-act');
+    if (action) action.onclick = () => {
+      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id);
+      else if (canDeploy) this.cb.onLivingWorldMission?.(item.levelId, { mission: item, party: state.party });
+      else this.cb.onLivingWorldTrackParty?.(item.id);
+    };
   }
 
   showGalaxy(destinations, currentWorld = 'earth', macro = null) {

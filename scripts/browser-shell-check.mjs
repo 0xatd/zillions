@@ -195,12 +195,15 @@ try {
   })()`), true, 'first-deployment guide must route offline players to a mission, signed-in players to Market, and persist its per-character skip');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
-    let customOpened = 0;
-    app.ui.cb.onCustomOpen = () => { customOpened++; };
-    const custom = document.querySelector('#ow-custom-quick');
-    custom.click();
-    return !!custom && !custom.classList.contains('hidden') && customOpened === 1;
-  })()`), true, 'the overworld HUD must keep Custom Games directly visible and actionable');
+    const noCustom = !document.querySelector('#ow-custom-quick') && !document.querySelector('#ow-custom');
+    const characterCustom = !!document.querySelector('#m-custom');
+    const party = document.querySelector('#ow-party');
+    const map = document.querySelector('#ow-map');
+    map.click();
+    const mapOpened = !document.querySelector('#living-world-map').classList.contains('hidden');
+    document.querySelector('#lw-close').click();
+    return noCustom && characterCustom && !!party && !!map && mapOpened;
+  })()`), true, 'the overworld HUD must expose Party and World Map while Custom Games remains character-menu only');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     const gate = app.owMap.overworldLayout.gates.find((entry) => !entry.portal && entry.levelId === 1);

@@ -38,6 +38,9 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
+  getLivingWorldProjection, livingWorldProjectionToUi, sendLivingWorldCommand, setLivingWorldSession,
+} from './living-world-client.js';
+import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
 } from './mmo-characters.js';
@@ -228,6 +231,13 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._enterOverworld(),
+      onPartyCreate: () => this._livingWorldUnavailable('Party creation'),
+      onPartyOpen: () => this._openLivingWorldParty(),
+      onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
+      onLivingWorldOpen: () => this._refreshLivingWorld(),
+      onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
+      onLivingWorldMission: () => this._livingWorldUnavailable('Living-world encounters'),
+      onLivingWorldTrackParty: (partyId) => this._trackLivingWorldParty(partyId),
       onGalaxyOpen: () => this._openGalaxyMap(),
       onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
       onSignIn: () => this._signIn(),
@@ -649,6 +659,7 @@ class App {
     this._saveProfile();
     this.ui.hideOverlay();
     this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
+    this._refreshLivingWorld().catch(() => {});
   }
 
   async _openGalaxyMap() {
@@ -658,6 +669,81 @@ class App {
     let macro = null;
     try { macro = await getGalaxyState(); } catch { /* local galaxy still works */ }
     this.ui.showGalaxy(destinations, currentWorld, macro);
+  }
+
+  _livingWorldSelf() {
+    const character = selectedMmoCharacter(this.profile);
+    return {
+      id: character?.id || this.auth?.user?.id || 'self',
+      name: character?.name || this.profile?.name || 'Commander',
+      className: character?.classKey ? (MMO_CLASSES[character.classKey]?.name || character.classKey) : 'Commander',
+      health: 100,
+    };
+  }
+
+  async _refreshLivingWorld() {
+    if (!this.auth?.isSignedIn()) {
+      this.ui.setLivingWorldState({});
+      this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
+      return null;
+    }
+    try {
+      const projection = await getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth');
+      if (!projection?.shard) throw new Error('world_not_initialized');
+      const state = livingWorldProjectionToUi(projection, this._livingWorldSelf());
+      this.livingWorldState = state;
+      this.ui.setLivingWorldState(state);
+      return state;
+    } catch (error) {
+      this.livingWorldState = null;
+      this.ui.setLivingWorldState({});
+      const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
+      this.ui.showBanner(unavailable ? 'The persistent world is not initialized on this build.' : 'World intelligence could not be refreshed.', 'bad', 3000);
+      return null;
+    }
+  }
+
+  _livingWorldUnavailable(feature) {
+    this.ui.showBanner(`${feature} is not available until the authoritative shard is initialized.`, 'bad', 3000);
+  }
+
+  _openLivingWorldParty() {
+    const members = this.livingWorldState?.party?.members || [];
+    if (!members.length) return this._livingWorldUnavailable('Party management');
+    this.ui.showBanner(`Party · ${members.map((member) => member.name).join(', ')}`, '', 2600);
+  }
+
+  _locateLivingWorldPartyMember(memberId) {
+    const member = this.livingWorldState?.party?.members?.find((entry) => entry.id === memberId);
+    if (!member) return this._livingWorldUnavailable('Party location');
+    this.ui.openLivingWorldMap();
+    this.ui.showBanner(`${member.name} · ${member.location}`, '', 2400);
+  }
+
+  _trackLivingWorldParty(partyId) {
+    const party = this.livingWorldState?.parties?.find((entry) => entry.id === partyId);
+    if (!party) return this._livingWorldUnavailable('Army tracking');
+    this.ui.showBanner(`Tracking ${party.name} · ${party.intent}`, '', 2400);
+  }
+
+  async _requestLivingWorldTravel(locationId) {
+    const state = this.livingWorldState;
+    const party = state?.party;
+    const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
+    if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
+    try {
+      await sendLivingWorldCommand({
+        type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
+          || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
+        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id },
+      });
+      // Command acceptance is not arrival. Refresh to show only state the
+      // authority has actually committed.
+      await this._refreshLivingWorld();
+      this.ui.showBanner('Movement order submitted to the world simulation.', '', 2600);
+    } catch (error) {
+      this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
+    }
   }
 
   _travelToWorld(worldId) {
@@ -1453,8 +1539,10 @@ class App {
   async _initAuth() {
     try {
       const status = await this.auth.init();
+      setLivingWorldSession(this.auth.session);
       await this._applyAuth(status);
       this.auth.onAuthChange((next) => {
+        setLivingWorldSession(this.auth.session);
         this._applyAuth(next).catch((err) => {
           console.warn('auth sync failed', err);
           this.ui.setAccount({ ...this.auth.status(), error: 'Profile sync failed. Try again.' });
@@ -1474,6 +1562,7 @@ class App {
   }
 
   async _applyAuth(status) {
+    setLivingWorldSession(this.auth.session);
     this.authStatus = status;
     if (status.signedIn) {
       await this.auth.ensureProfile(this.profile);
