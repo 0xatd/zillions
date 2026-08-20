@@ -71,6 +71,7 @@ export function livingWorldProjectionToUi(projection = {}, self = {}) {
     }),
     missions: [],
     markets: projection.markets || [],
+    logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,
   };
 }
