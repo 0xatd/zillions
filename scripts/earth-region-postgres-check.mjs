@@ -152,6 +152,25 @@ try {
   assert.equal(completeReplay.duplicate, true);
   assert.equal(Number((await admin.query('select count(*) count from public.world_region_handoffs where party_id=$1 and status=\'accepted\'', [firstEntry.partyId])).rows[0].count), 1);
 
+  // Logistics ticks are lease-fenced and replay-safe. A retry cannot consume
+  // supplies or reprice markets twice.
+  await admin.query('update public.world_region_states set simulation_tick=1 where region_id=$1', [ironwood.id]);
+  const foodBefore = Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity);
+  const treasuryBeforeLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
+  const logistics = (await admin.query("select public.process_world_region_logistics($1,1,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(logistics.duplicate, false);
+  assert.ok(logistics.caravansProcessed >= 1);
+  const foodAfter = Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity);
+  const treasuryAfterLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
+  assert.ok(treasuryAfterLogistics < treasuryBeforeLogistics, 'company wages must settle during the logistics tick');
+  assert.ok(Number((await admin.query("select coalesce(sum(quantity),0) quantity from public.world_cargo where party_id='13000000-0000-4000-8000-000000000002' and commodity_key='iron'")).rows[0].quantity) > 0, 'caravan must move market stock into physical cargo');
+  const logisticsReplay = (await admin.query("select public.process_world_region_logistics($1,1,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(logisticsReplay.duplicate, true);
+  assert.equal(Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity), foodAfter);
+  assert.ok(foodAfter <= foodBefore);
+  await expectError(admin.query("select public.process_world_region_logistics($1,2,'worker-e',$2)", [ironwood.id, destinationTakeover.leaseEpoch]), 'future_logistics_tick');
+  await expectError(admin.query("select public.process_world_region_logistics($1,1,'worker-d',$2)", [ironwood.id, destinationLease.leaseEpoch]), 'region_lease_required');
+
   // RLS: an authenticated user can see their handoff, but not another user's.
   await admin.query('grant usage on schema public to authenticated; grant select on public.world_region_handoffs,public.world_parties to authenticated');
   const client = postgres.getPgClient();

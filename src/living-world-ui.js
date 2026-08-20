@@ -1,6 +1,7 @@
 const EMPTY_WORLD = {
   world: { id: 'unknown', name: 'World map', region: 'Awaiting world intelligence', time: '—' },
   party: { id: null, members: [] }, settlements: [], routes: [], parties: [], missions: [],
+  logistics: { supplies: [], cargo: [], caravans: [], raids: [] },
 };
 const coord = (value) => Math.max(0, Math.min(100, Number(value) || 0));
 const point = (value) => [coord(value?.[0]), coord(value?.[1])];
@@ -16,5 +17,6 @@ export const normalizeLivingWorld = (value = {}) => {
     routes: (value.routes || fallback.routes).map((entry) => ({ ...entry, state: routeState(entry.state), from: point(entry.from), to: point(entry.to) })),
     parties: (value.parties || fallback.parties).map((entry) => ({ ...entry, id: String(entry.id || ''), owner: owner(entry.owner), x: coord(entry.x), y: coord(entry.y) })),
     missions: (value.missions || fallback.missions).map((entry) => ({ ...entry, id: String(entry.id || ''), x: coord(entry.x), y: coord(entry.y) })),
+    logistics: { ...fallback.logistics, ...(value.logistics || {}) },
   };
 };

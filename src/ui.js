@@ -101,7 +101,7 @@ export class UI {
           <header class="lw-head"><div><span>LIVING WORLD</span><h1 id="lw-world-name">EARTH FRONTIER</h1><small id="lw-region"></small></div><div class="lw-head-actions"><button class="tbtn" id="lw-party">＋ PARTY</button><button class="tbtn" id="lw-close">CLOSE</button></div></header>
           <div class="lw-body">
             <div class="lw-map-stage" id="lw-map-stage"><div class="lw-map-grid"></div><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div><div class="lw-legend"><span><i class="free"></i> Free</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
-            <aside class="lw-finder"><span class="lw-kicker">MISSION FINDER</span><h2>Choose your next move</h2><p>Travel the roads for encounters and discoveries, or deploy directly to a known destination.</p><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support fast travel. Discovered fronts support direct deployment.</p></div></aside>
+            <aside class="lw-finder"><span class="lw-kicker">MISSION FINDER</span><h2>Choose your next move</h2><p>Travel the roads for encounters and discoveries, or deploy directly to a known destination.</p><div id="lw-logistics" class="lw-selection"></div><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support fast travel. Discovered fronts support direct deployment.</p></div></aside>
           </div>
         </div>
       </section>
@@ -2312,6 +2312,9 @@ export class UI {
       ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
     ].join('');
     const missions = this.root.querySelector('#lw-missions');
+    const logistics = this.root.querySelector('#lw-logistics');
+    const supplies = state.logistics?.supplies || [], cargo = state.logistics?.cargo || [], raids = state.logistics?.raids || [];
+    logistics.innerHTML = `<small>COMPANY LOGISTICS</small><b>${supplies.length ? supplies.map((item) => `${escapeHtml(item.supply_key)} ${Math.floor(Number(item.quantity) || 0)}`).join(' · ') : 'No supply report'}</b><p>${cargo.length ? `${cargo.length} cargo type${cargo.length === 1 ? '' : 's'} aboard` : 'No cargo'}${raids.some((raid) => raid.state === 'pending') ? ' · RAID IN PROGRESS' : ''}</p>`;
     missions.innerHTML = state.missions.length ? state.missions.map((mission) => `<button class="lw-mission" data-kind="mission" data-id="${escapeHtml(mission.id)}" ${!mission.known ? 'disabled' : ''}><span>${mission.unlocked ? 'AVAILABLE' : mission.known ? 'DISCOVERED' : 'UNKNOWN'}</span><b>${escapeHtml(mission.known ? mission.name : 'Undiscovered front')}</b><small>${escapeHtml(mission.difficulty)}</small></button>`).join('') : '<p class="lw-empty">No mission intelligence is available yet.</p>';
     for (const button of this.root.querySelectorAll('#living-world-map [data-kind]')) button.onclick = () => this._selectLivingWorldTarget(button.dataset.kind, button.dataset.id);
   }
