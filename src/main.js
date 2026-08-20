@@ -19,6 +19,7 @@ import {
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
+import { storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
@@ -1550,13 +1551,12 @@ class App {
     // Preserve the exact mission setup across the clean reload. Startup already
     // owns authentication/profile hydration; the retry marker is consumed once
     // that entry path is ready instead of trying to reuse stale scene state.
-    try {
-      sessionStorage.setItem('zillions-retry-mission', JSON.stringify({
-        difficulty: this.game.diffKey, hero: this.ui.selectedHero,
-        level: this.game.levelId, mode: this.game.mode,
-      }));
-    } catch { /* blocked storage */ }
-    location.reload();
+    const stored = storeRetry(sessionStorage, {
+      difficulty: this.game.diffKey, hero: this.ui.selectedHero,
+      level: this.game.levelId, mode: this.game.mode,
+    });
+    if (stored) location.reload();
+    else this._restartOrReturn();
   }
 
   async _signIn() {

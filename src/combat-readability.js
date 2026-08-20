@@ -26,11 +26,25 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
         : { icon: '⚔️', title: 'You survived the final pressure', detail: `${safe.kills} enemies slain through Threat ${n(threat)}.` };
     return { cause, action: mode === 'campaign' ? 'Review the new rewards, then prepare for the next front.' : 'Continue while this loadout is working.' };
   }
+  if (game?.defeatCause === 'party_exhausted') return {
+    cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero ${safe.heroDeaths === 1 ? 'fall exhausted' : 'falls exhausted'} the shared life pool.` },
+    action: 'Slow down before sealed encounters and save abilities for the largest wave.',
+  };
   if (mode === 'labyrinth' && safe.heroDeaths > 0) return { cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero falls exhausted the shared life pool.` }, action: 'Slow down before sealed encounters and save abilities for the largest wave.' };
-  if (keep && n(keep.hp) <= 0) return {
+  if (game?.defeatCause === 'keep_destroyed' || (keep && n(keep.hp) <= 0)) return {
     cause: { icon: '🏰', title: 'The Keep was destroyed', detail: safe.lost > 0 ? `${safe.lost} structures fell before the city collapsed.` : 'The enemy reached the heart of the city.' },
     action: safe.bestHeld === 0 ? 'Take and hold a lane node early, then return before the final counterattack.' : safe.lost >= Math.max(3, safe.built / 2) ? 'Build a tighter inner defense and switch the army to Defend when the champion walks.' : 'Return when the Keep warning appears and focus siegers or the marked champion.',
   };
   if (remainingNests != null && remainingNests > 0) return { cause: { icon: '🔥', title: `${remainingNests} ${remainingNests === 1 ? 'hive remained' : 'hives remained'}`, detail: 'Uncleared hives kept adding pressure to the battlefield.' }, action: safe.bestHeld === 0 ? 'Capture a lane node before pushing the nearest hive.' : 'Push one lane at a time and destroy its hive before the next Threat surge.' };
   return { cause: { icon: '☠️', title: 'The army was overwhelmed', detail: `${safe.kills} enemies slain; ${safe.lost} structures lost by Threat ${n(threat)}.` }, action: safe.heroDeaths > 1 ? 'Disengage earlier when hero health turns red; a dead hero leaves the army without its aura.' : 'Concentrate structures around one defensible lane and use the mission warnings to regroup.' };
+}
+
+export function storeRetry(storage, retry) {
+  if (!storage || !retry?.level || !retry?.hero) return false;
+  try {
+    storage.setItem('zillions-retry-mission', JSON.stringify(retry));
+    return storage.getItem('zillions-retry-mission') != null;
+  } catch {
+    return false;
+  }
 }
