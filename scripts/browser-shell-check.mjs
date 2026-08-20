@@ -265,6 +265,23 @@ try {
   })()`), true, 'Staging lobby must expose four seats, chat, guest-ready state, and host-only room controls');
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
+    const original = ui.cb.onStart;
+    let launches = 0;
+    try {
+      ui.cb.onStart = () => { launches++; };
+      ui._startActivated = false;
+      ui.showRoomCountdown(0);
+      const disabled = document.querySelector('#s-start').disabled;
+      ui.activateStart();
+      ui.activateStart();
+      return disabled && launches === 1;
+    } finally {
+      ui.cb.onStart = original;
+      ui._startActivated = false;
+    }
+  })()`), true, 'Countdown completion must launch once even though its presentation button remains disabled');
+  assert.equal(await evaluate(`(() => {
+    const ui = window.__app.ui;
     ui.showLocationBanner(
       'OLD CROSSROADS',
       'Open ground on every side. Everything can reach you — and you can reach everything.',

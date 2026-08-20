@@ -433,7 +433,7 @@ create table if not exists public.rooms (
   visibility text not null default 'public' check (visibility in ('public', 'private')),
   status text not null default 'open' check (status in ('open', 'starting', 'in_game', 'finished')),
   rules text not null default 'survival-plots',
-  max_players integer not null default 3 check (max_players between 1 and 3),
+  max_players integer not null default 4 check (max_players between 1 and 4),
   difficulty text not null default 'normal',
   invite_code text,
   metadata jsonb not null default '{}'::jsonb,
@@ -454,7 +454,7 @@ execute function public.touch_updated_at();
 create table if not exists public.room_players (
   room_id uuid not null references public.rooms(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  seat integer not null check (seat between 1 and 3),
+  seat integer not null check (seat between 1 and 4),
   display_name text not null,
   hero text not null default 'scott',
   ready boolean not null default false,

@@ -113,6 +113,13 @@ export function canRejoinRoom(game, userId) {
     && (game._players || []).some((player) => player.user_id === userId);
 }
 
+export function nextAvailableRoomSeat(players = [], maxPlayers = 4) {
+  const cap = Math.max(1, Math.min(4, Number(maxPlayers) || 4));
+  const used = new Set((players || []).map((player) => Number(player.seat || 0)));
+  for (let seat = 2; seat <= cap; seat++) if (!used.has(seat)) return seat;
+  return null;
+}
+
 // Custom games are the same rooms wearing a kind tag — one system, one
 // browser per flavour. The lobby feed shows both; the custom browser and
 // the portal filter to these.
@@ -797,14 +804,13 @@ export class OnlineLobby {
 
   async joinGame(game, unlockedLevel = 1) {
     assertRoomCompatibility(game);
+    const seat = nextAvailableRoomSeat(game._players || [], game.max_players || 4);
+    if (seat == null) throw new Error('This room is full. Refresh the browser and choose another room.');
     this.game = game;
-    const used = new Set((game._players || []).map((p) => Number(p.seat || 0)));
-    let seat = 2;
-    while (used.has(seat) && seat <= 3) seat++;
     const localPlayer = {
       room_id: game.id,
       user_id: this.me.id,
-      seat: Math.min(seat, 3),
+      seat,
       display_name: this.me.name,
       hero: this.me.hero,
       ready: false,

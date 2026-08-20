@@ -867,7 +867,12 @@ export class UI {
   }
 
   activateStart() {
-    this.root.querySelector('#s-start')?.click();
+    // Countdown presentation deliberately disables the button. HTMLElement
+    // click() is a no-op on a disabled button, so launch through the same
+    // callback directly and guard duplicate countdown completions.
+    if (this._startActivated) return;
+    this._startActivated = true;
+    this.cb.onStart(this.selectedDiff, this.selectedHero);
   }
 
   showLobby() {

@@ -2545,6 +2545,7 @@ class App {
       return;
     }
     this._launchCountdownActive = true;
+    this.ui._startActivated = false;
     this.audio.init();
     try {
       for (let count = 5; count >= 1; count--) {
