@@ -10,9 +10,9 @@ mkdir -p /tmp/zillions-hero-review
 ZILLIONS_VISUAL_QA_DIR=/tmp/zillions-hero-review npm run check:browser
 ```
 
-The capture writes every Human and Robot face, light and heavy Human bodies,
-the Robot reverse-joint silhouette, and a fully equipped Robot to the review
-directory.
+The capture writes every Human and Robot face from the front, plus three-quarter
+views of light and heavy Human bodies, the Robot reverse-joint silhouette, and
+a fully equipped Robot to the review directory.
 
 Review each image at its original 1440 × 1000 size and at 50 percent scale.
 Check these points:

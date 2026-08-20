@@ -18,7 +18,8 @@ assert.ok(ui.includes('creator-preview-canvas') && ui.includes('paperdoll-previe
 assert.ok(main.includes('buildUnitModel') && main.includes('_renderCharacterPreview'), 'previews must share the live unit renderer');
 assert.ok(art.includes("roleFamily(style.classKey)"), 'class role family must reach the shared visual state');
 assert.ok(art.includes('gearInfo') && art.includes('rarityAccent'), 'visible gear must preserve restrained rarity treatment');
-assert.ok(art.includes("race === 'robot'") && art.includes('Exposed joints'), 'Robot origin needs mechanical silhouette language');
+assert.ok(art.includes("race === 'robot'") && art.includes('segmented limbs') && art.includes('rig.head.children[0].visible = false'),
+  'Human and Robot origins need different dominant head and limb silhouettes');
 assert.ok(ui.includes("classKey: this._creatorClass") && ui.includes('classKey: character.classKey'),
   'creator and paper doll must pass the same class role identity as live models');
 assert.ok(main.includes('classKey: character.classKey') && characters.includes("classKey: MMO_CLASSES[character?.classKey]"),

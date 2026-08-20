@@ -307,7 +307,7 @@ try {
     const model = window.__app.characterPreviews.get('creator-preview-canvas').model;
     let meshes = 0, triangles = 0;
     model.traverse((node) => {
-      if (!node.isMesh) return;
+      if (!node.isMesh || !node.visible) return;
       meshes++;
       triangles += (node.geometry.index ? node.geometry.index.count : node.geometry.attributes.position.count) / 3;
     });
@@ -329,7 +329,7 @@ try {
     assert.ok(metrics.meshes <= 70, `procedural hero exceeded 70-mesh fallback budget: ${metrics.meshes}`);
   }
   if (process.env.ZILLIONS_VISUAL_QA_DIR) {
-    const capture = async (name, race, parts, equipment = {}) => {
+    const capture = async (name, race, parts, equipment = {}, angle = 0) => {
       await evaluate(`(() => {
         const ui = window.__app.ui;
         ui._showCharacterCreator();
@@ -341,6 +341,7 @@ try {
         ui._renderCreatorSummary();
         window.__app._setCharacterPreview({ raceKey: ${JSON.stringify(race)}, classKey: 'vanguard', appearance: 'cobalt', customization: wanted,
           equipment: ${JSON.stringify(equipment)}, proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
+        window.__app.characterPreviews.get('creator-preview-canvas').model.rotation.y = ${angle};
         document.querySelector('#character-create-form').scrollIntoView({ block: 'start' });
         return true;
       })()`);
@@ -350,12 +351,12 @@ try {
     };
     for (const face of ['sentinel', 'ranger', 'veteran', 'nomad']) await capture(`human-face-${face}`, 'human', { face, body: 'standard', head: 'cropped', legs: 'field' });
     for (const face of ['optic', 'visor', 'tri-eye', 'faceless']) await capture(`robot-face-${face}`, 'robot', { face, body: 'warden', head: 'smooth', legs: 'biped' });
-    await capture('human-light-scout-no-gear', 'human', { face: 'ranger', body: 'light', head: 'swept', legs: 'scout' });
-    await capture('human-heavy-armored-no-gear', 'human', { face: 'veteran', body: 'heavy', head: 'hooded', legs: 'armored' });
-    await capture('robot-strider-reverse-joint-no-gear', 'robot', { face: 'optic', body: 'strider', head: 'antenna', legs: 'reverse-joint' });
+    await capture('human-light-scout-no-gear', 'human', { face: 'ranger', body: 'light', head: 'swept', legs: 'scout' }, {}, -.3);
+    await capture('human-heavy-armored-no-gear', 'human', { face: 'veteran', body: 'heavy', head: 'hooded', legs: 'armored' }, {}, -.3);
+    await capture('robot-strider-reverse-joint-no-gear', 'robot', { face: 'optic', body: 'strider', head: 'antenna', legs: 'reverse-joint' }, {}, -.3);
     await capture('robot-bulwark-heavy-full-gear', 'robot', { face: 'tri-eye', body: 'bulwark', head: 'crest', legs: 'heavy' }, {
       head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
-    });
+    }, -.3);
   }
   console.log('browser shell check passed');
 } finally {
