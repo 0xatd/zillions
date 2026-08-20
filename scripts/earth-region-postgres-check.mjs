@@ -56,6 +56,24 @@ try {
   assert.equal(secondEntry.duplicate, true);
   assert.equal(Number((await admin.query('select count(*) count from public.world_parties where owner_user_id=$1', [userId])).rows[0].count), 1);
 
+  // Company creation, recruitment, supplies, and services are atomic and revision-fenced.
+  const company = (await admin.query('select treasury,revision from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0];
+  assert.equal(Number(company.treasury), 250);
+  const recruited = (await admin.query("select public.living_world_company_command($1,'recruit-1',$2,$3,'recruit','{\"recruitKey\":\"greenfall_militia\",\"quantity\":2}') result", [userId, firstEntry.partyId, company.revision])).rows[0].result;
+  assert.equal(recruited.cost, 120);
+  assert.equal(Number((await admin.query('select count(*) count from public.world_company_members where party_id=$1', [firstEntry.partyId])).rows[0].count), 2);
+  const replayRecruit = (await admin.query("select public.living_world_company_command($1,'recruit-1',$2,$3,'recruit','{\"recruitKey\":\"greenfall_militia\",\"quantity\":2}') result", [userId, firstEntry.partyId, company.revision])).rows[0].result;
+  assert.equal(replayRecruit.duplicate, true);
+  assert.equal(Number((await admin.query('select count(*) count from public.world_company_members where party_id=$1', [firstEntry.partyId])).rows[0].count), 2);
+  await expectError(admin.query("select public.living_world_company_command($1,'stale-1',$2,$3,'buy_supplies','{\"supplyKey\":\"food\",\"quantity\":5}')", [userId, firstEntry.partyId, company.revision]), 'stale_company');
+  const supplied = (await admin.query("select public.living_world_company_command($1,'supply-1',$2,$3,'buy_supplies','{\"supplyKey\":\"food\",\"quantity\":5}') result", [userId, firstEntry.partyId, recruited.companyRevision])).rows[0].result;
+  assert.equal(supplied.cost, 10);
+  assert.equal(Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity), 25);
+  await admin.query('update public.world_parties set fatigue=50 where id=$1', [firstEntry.partyId]);
+  const rested = (await admin.query("select public.living_world_company_command($1,'rest-1',$2,$3,'use_town_service','{\"serviceKey\":\"rest\"}') result", [userId, firstEntry.partyId, supplied.companyRevision])).rows[0].result;
+  assert.equal(rested.cost, 15);
+  assert.equal(Number((await admin.query('select fatigue from public.world_parties where id=$1', [firstEntry.partyId])).rows[0].fatigue), 0);
+
   const regions = (await admin.query("select id,key,revision from public.world_provinces where key in ('greenfall','ironwood') order by key")).rows;
   const greenfall = regions.find((region) => region.key === 'greenfall');
   const ironwood = regions.find((region) => region.key === 'ironwood');
