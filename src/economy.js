@@ -112,3 +112,12 @@ export function applyEconomySnapshot(character, snapshot) {
   character.authoritativeBalance = snapshot.wallet?.balance ?? 0;
   return true;
 }
+
+// Auth profile refreshes replace the profile and its character objects. Economy
+// requests can finish after that replacement, so callers must resolve the
+// profile-owned character again before applying the server response.
+export function applyEconomySnapshotToProfile(profile, character, snapshot) {
+  const current = (profile?.mmoCharacters || []).find((entry) => entry.id === character?.id);
+  if (!current) return false;
+  return applyEconomySnapshot(current, snapshot);
+}

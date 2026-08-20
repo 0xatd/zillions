@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import handler, { serverRotation } from '../api/economy.js';
-import { quarantineForAuthoritativeLoad, runEconomyMutation } from '../src/economy.js';
+import { applyEconomySnapshotToProfile, quarantineForAuthoritativeLoad, runEconomyMutation } from '../src/economy.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const schema = read('supabase/schema.sql');
 const vendor = read('src/vendor.js');
 const ui = read('src/ui.js');
+const main = read('src/main.js');
 
 for (const marker of ['game_characters', 'player_wallets', 'item_instances', 'economy_requests', 'economy_audit_events', 'economy_mutate']) {
   assert.match(schema, new RegExp(marker), `${marker} is missing from the authority schema`);
@@ -29,6 +30,14 @@ assert.match(ui, /onMarketBuy/, 'signed-in market buys must cross the server cal
 assert.match(ui, /onMarketSell/, 'signed-in market sales must cross the server callback');
 assert.match(ui, /onAuthorityEquip/, 'signed-in equip must cross the server callback');
 assert.match(ui, /onAuthorityUnequip/, 'signed-in unequip must cross the server callback');
+assert.match(main, /_craftMutation\(character, \(current\) => buyCraftMaterial\(current, materialId\)\)/,
+  'craft material mutations must use the current profile character');
+assert.match(main, /_craftMutation\(character, \(current\) => buyCraftComponent\(current, componentId\)\)/,
+  'component mutations must use the current profile character');
+assert.match(main, /_craftMutation\(character, \(current\) => craftAuthoritative\(current, action, itemId, revision, details\)\)/,
+  'craft item mutations must use the current profile character');
+assert.match(main, /const result = await mutation\(character\)/,
+  'craft mutations must receive the character re-resolved after auth synchronization');
 assert.doesNotMatch(read('api/economy.js'), /body\.characterLevel/, 'vendor level must not come from the browser');
 
 let offlineCalls = 0;
@@ -49,6 +58,17 @@ assert.deepEqual(legacyCharacter.items, [], 'signed-in load must not leave brows
 assert.deepEqual(legacyCharacter.equipment, {}, 'signed-in load must not leave browser equipment active');
 assert.deepEqual(legacyCharacter.legacyOfflineEconomy.items, ['legacy-item'], 'legacy items must remain in the offline archive');
 assert.equal('authoritativeBalance' in legacyCharacter, false, 'browser balance must be discarded before authority load');
+
+const staleCharacter = { id: 'character-1', items: ['rifle'], equipment: {} };
+const refreshedCharacter = { id: 'character-1', items: ['rifle'], equipment: {} };
+const refreshedProfile = { mmoCharacters: [refreshedCharacter] };
+assert.equal(applyEconomySnapshotToProfile(refreshedProfile, staleCharacter, {
+  character: { revision: 4 }, wallet: { balance: 75 }, materials: {}, components: [],
+  items: [{ id: 'item-1', legacyKey: 'rifle', location: 'equipped', equipSlot: 'weapon', revision: 2 }],
+}), true, 'snapshot must resolve the current profile-owned character');
+assert.deepEqual(refreshedCharacter.items, [], 'equipped item must leave the current character stash');
+assert.equal(refreshedCharacter.equipment.weapon, 'rifle', 'current character must show the equipped item');
+assert.deepEqual(staleCharacter.items, ['rifle'], 'detached character reference must not receive the snapshot');
 
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
 const request = (body, authorization = '') => ({ method: 'POST', headers: { authorization }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); } });

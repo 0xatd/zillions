@@ -14,7 +14,7 @@ import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
 import {
-  applyEconomySnapshot, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
+  applyEconomySnapshotToProfile, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
   loadAuthoritativeEconomy, quarantineForAuthoritativeLoad, registerAuthoritativeCharacter,
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
@@ -202,9 +202,9 @@ class App {
       onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
       onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
       onAuthoritySync: (character) => this._ensureAuthoritativeEconomy(character),
-      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, () => buyCraftMaterial(character, materialId)),
-      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, () => buyCraftComponent(character, componentId)),
-      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, () => craftAuthoritative(character, action, itemId, revision, details)),
+      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, (current) => buyCraftMaterial(current, materialId)),
+      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, (current) => buyCraftComponent(current, componentId)),
+      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, (current) => craftAuthoritative(current, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
@@ -1255,8 +1255,12 @@ class App {
       // The survey is the authoritative claim about this ground, so drop the
       // generic "open on every side" flavour when the wall line says otherwise.
       const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
-      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
-        `A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`, 5600);
+      const siteName = s.name || `Site ${i + 1}`;
+      this.ui.showLocationBanner(
+        `🏳️ ${siteName}`,
+        `${hint}${wall} A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`,
+        5600,
+      );
     });
   }
 
@@ -1646,6 +1650,7 @@ class App {
 
   async _ensureAuthoritativeEconomy(character) {
     if (!this.auth?.isSignedIn()) return null;
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     let result;
     try {
       result = await loadAuthoritativeEconomy(character);
@@ -1655,8 +1660,9 @@ class App {
       result = await registerAuthoritativeCharacter(character);
     }
     if (result?.ok) {
-      applyEconomySnapshot(character, result);
-      this.profile.metaCurrency = character.authoritativeBalance;
+      applyEconomySnapshotToProfile(this.profile, character, result);
+      const current = this.profile.mmoCharacters?.find((entry) => entry.id === character.id);
+      this.profile.metaCurrency = current?.authoritativeBalance ?? this.profile.metaCurrency;
       this._saveProfile();
     }
     return result;
@@ -1665,45 +1671,50 @@ class App {
   async _marketBuy(character, vendorId, offerIndex) {
     if (!this.auth?.isSignedIn()) return null;
     await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     const result = await buyAuthoritativeItem(character, vendorId, offerIndex);
-    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
 
   async _marketSell(character, itemIndex) {
     if (!this.auth?.isSignedIn()) return null;
     await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     const itemId = character.itemInstances?.[Number(itemIndex)]?.id;
     if (!itemId) throw new Error('item_not_found');
     const result = await sellAuthoritativeItem(character, itemId);
-    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
 
   async _authorityEquip(character, itemIndex, slot) {
     if (!this.auth?.isSignedIn()) return null;
     await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     const instance = character.itemInstances?.[Number(itemIndex)];
     if (!instance) throw new Error('item_not_found');
     const result = await equipAuthoritativeItem(character, instance.id, slot, instance.revision);
-    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
 
   async _authorityUnequip(character, slot) {
     if (!this.auth?.isSignedIn()) return null;
     await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     const revision = character.equipmentInstanceRevisions?.[slot] ?? null;
     const result = await unequipAuthoritativeItem(character, slot, revision);
-    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
 
   async _craftMutation(character, mutation) {
     if (!this.auth?.isSignedIn()) throw new Error('sign_in_required');
     await this._ensureAuthoritativeEconomy(character);
-    const result = await mutation();
-    if (result?.ok) { applyEconomySnapshot(character, result); this._saveProfile(); }
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
+    const result = await mutation(character);
+    if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
 

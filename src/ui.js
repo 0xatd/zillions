@@ -2996,6 +2996,23 @@ export class UI {
     this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
   }
 
+  showLocationBanner(title, detail, dur = 5600) {
+    this.banner.textContent = '';
+    const eyebrow = document.createElement('span');
+    eyebrow.className = 'banner-eyebrow';
+    eyebrow.textContent = 'FRONTIER SITE';
+    const heading = document.createElement('strong');
+    heading.className = 'banner-title';
+    heading.textContent = title;
+    const description = document.createElement('span');
+    description.className = 'banner-detail';
+    description.textContent = detail;
+    this.banner.append(eyebrow, heading, description);
+    this.banner.className = 'show location';
+    clearTimeout(this._bt);
+    this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
+  }
+
   setSpeedUI(speed, paused) {
     this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
