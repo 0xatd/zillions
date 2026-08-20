@@ -45,4 +45,3 @@ through Rotmire.
 3. First-session onboarding and progression clarity.
 4. Hero presentation.
 5. Authenticated multiplayer validation.
-
