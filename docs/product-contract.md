@@ -83,6 +83,9 @@ Use continuous siege on a lane graph as the gameplay base:
   the hero aura, one of two passive paths, or ult damage. The HUD must show
   derived hero stats and whether the aura is affecting allies or enemies.
 - Persistent WC3-style heroes, items, relics, quests, and campaign progress.
+- Signed-in inventory, equipment, item creation, and Salvage Alloy are
+  server-owned. Economic requests are atomic, idempotent, revision-checked,
+  and audited. Static local play cannot change the online economy.
 
 Do not turn Survival back into a generic RTS or a debug launcher.
 
@@ -172,9 +175,21 @@ that must stay separate.
 
 Gear is rolled. An item is a key that resolves to a base, an item level, a
 rarity and its affixes; item level comes from the world, so loot quality is
-tied to how far out the player has travelled. Five slots are worn: weapon,
-off-hand, armour and two implants. Weapon and off-hand exist twice, and X draws
-the other set in the field on a four-second cooldown.
+tied to how far out the player has travelled. Eleven slots are available:
+head, chest, hands, legs, boots, weapon, off-hand, a second weapon set, and two
+implants. Visible armour changes the procedural character silhouette. Weapon
+and off-hand exist twice, and X draws the other set in the field on a
+four-second cooldown.
+
+Characters choose one of two free origins: Human or Robot. Origins are balanced
+sidegrades. They never decide account access or payment status. Character
+creation also stores face, body, head, leg, and armour-color choices.
+
+The Orbital Exchange rotates deterministic level-scaled gear. Salvage Alloy
+buys gear and is paid for sold gear. Vendor sell prices stay below buy prices.
+Mission gold remains mission-only. Launch content and progression are free.
+Entitlement metadata exists for future owned cosmetics and subscriptions, but
+the launch UI does not gate content.
 
 The Lattice is one shared 646-node passive tree with thirteen origins. A class
 picks where it starts, not what it can become. A character spends one point per
@@ -198,6 +213,8 @@ The rules these must keep:
 - Nothing is unrecoverable. A reshaped tree, a lost level or a rewire refunds
   and prunes; it never breaks a character.
 - No trade until a server owns item creation.
+- Do not activate player trade or paid inventory until the server owns item
+  creation, inventory, currency, and every buy/sell transaction.
 
 ## Longer-Range Direction
 

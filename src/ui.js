@@ -16,7 +16,7 @@ import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
 import {
-  MMO_CLASSES, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
+  MMO_CLASSES, MMO_RACES, CREATOR_PARTS, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
@@ -32,6 +32,11 @@ import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
 import { ShellState, SHELL_BASES } from './shell-state.js';
+import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
+import { runEconomyMutation } from './economy.js';
+import { COMPONENTS, CRAFTING_MATERIALS, RECIPES } from './crafting.js';
+
+const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
@@ -197,6 +202,8 @@ export class UI {
             <div class="sheet-tabs">
               <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
               <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
+              <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">MARKET</button>
+              <button class="sheet-tab" id="sheet-tab-crafting" data-tab="crafting">FORGE</button>
               <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
             </div>
@@ -209,6 +216,19 @@ export class UI {
             <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div></div>
             <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
             <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
+          </div>
+
+          <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
+            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
+            <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
+            <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
+            <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
+          </div>
+
+          <div id="sheet-panel-crafting" class="sheet-panel crafting-panel hidden">
+            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>All actions use the online ledger. Failed or repeated requests never consume resources.</p><div id="craft-resources"></div><div id="craft-vendor"></div></section>
+            <section><h3>SELECT ITEM</h3><div id="craft-items" class="market-grid"></div></section>
+            <section><h3>WORKBENCH</h3><div id="craft-workbench"><p>Select an item.</p></div><div id="craft-status" role="status"></div></section>
           </div>
 
           <div id="sheet-panel-abilities" class="sheet-panel abilities-overview hidden"></div>
@@ -227,11 +247,16 @@ export class UI {
         </div>
 
         <div id="screen-character-create" class="character-create-screen hidden">
-          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>CHOOSE YOUR PATH</h1><p>All thirteen class identities are available. Vanguard is the first class with its complete combat progression; the others currently use prototype combat rigs while their full kits come online.</p></div>
-          <form id="character-create-form" class="creator-form">
-            <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
-            <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
-            <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
+          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
+          <form id="character-create-form" class="creator-form creator-xl">
+            <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>The same procedural model appears in the world and in combat.</span></section>
+            <div class="creator-controls">
+              <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
+              <fieldset><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
+              <div class="creator-parts" id="creator-parts"></div>
+              <fieldset><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
+              <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
+            </div>
             <div id="creator-summary" class="creator-summary"></div>
             <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
           </form>
@@ -523,6 +548,8 @@ export class UI {
         name: q('#creator-name').value,
         classKey: this._creatorClass || 'vanguard',
         appearance: this._creatorAppearance || 'iron',
+        raceKey: this._creatorRace || 'human',
+        customization: { ...(this._creatorParts || {}) },
       });
     };
     // Back out of the browser to where you walked in from — the title
@@ -1072,9 +1099,26 @@ export class UI {
   _buildCharacterCreator() {
     const classes = this.root.querySelector('#creator-classes');
     const appearances = this.root.querySelector('#creator-appearance');
-    if (!classes || !appearances) return;
+    const races = this.root.querySelector('#creator-races');
+    if (!classes || !appearances || !races) return;
     this._creatorClass = 'vanguard';
     this._creatorAppearance = 'iron';
+    this._creatorRace = 'human';
+    this._creatorParts = {};
+    for (const [key, race] of Object.entries(MMO_RACES)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `creator-race${key === this._creatorRace ? ' sel' : ''}`;
+      button.innerHTML = `<i>${race.icon}</i><span><b>${race.name}</b><small>${race.passive} · ${race.desc}</small></span>`;
+      button.onclick = () => {
+        this._creatorRace = key;
+        this._creatorParts = {};
+        for (const entry of races.children) entry.classList.toggle('sel', entry === button);
+        this._buildCreatorParts();
+        this._renderCreatorSummary();
+      };
+      races.appendChild(button);
+    }
     for (const [key, klass] of Object.entries(MMO_CLASSES)) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -1102,14 +1146,59 @@ export class UI {
       };
       appearances.appendChild(button);
     }
+    this._buildCreatorParts();
     this._renderCreatorSummary();
+  }
+
+  _buildCreatorParts() {
+    const root = this.root.querySelector('#creator-parts');
+    if (!root) return;
+    root.innerHTML = '';
+    const defs = CREATOR_PARTS[this._creatorRace || 'human'];
+    for (const [part, values] of Object.entries(defs)) {
+      const field = document.createElement('fieldset');
+      field.innerHTML = `<legend>${part.toUpperCase()}</legend><div class="creator-part-options"></div>`;
+      const row = field.querySelector('div');
+      this._creatorParts[part] = values.includes(this._creatorParts[part]) ? this._creatorParts[part] : values[0];
+      for (const value of values) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `creator-part${value === this._creatorParts[part] ? ' sel' : ''}`;
+        button.textContent = value.replace(/-/g, ' ');
+        button.onclick = () => {
+          this._creatorParts[part] = value;
+          for (const entry of row.children) entry.classList.toggle('sel', entry === button);
+          this._renderCreatorSummary();
+        };
+        row.appendChild(button);
+      }
+      root.appendChild(field);
+    }
   }
 
   _renderCreatorSummary() {
     const klass = MMO_CLASSES[this._creatorClass || 'vanguard'];
     const appearance = APPEARANCES[this._creatorAppearance || 'iron'];
+    const race = MMO_RACES[this._creatorRace || 'human'];
     const summary = this.root.querySelector('#creator-summary');
-    if (summary) summary.innerHTML = `<b>${klass.icon} ${klass.name}</b><span>${klass.role}</span><small>${klass.resource} resource · ${appearance.name} armor · universal ${this._keyLabel('build')} construction</small>`;
+    if (summary) summary.innerHTML = `<b>${race.icon} ${race.name} ${klass.name}</b><span>${klass.role}</span><small>${race.passive} · ${klass.resource} resource · ${appearance.name} armor · all launch options free</small>`;
+    const preview = this.root.querySelector('#creator-preview');
+    if (preview) {
+      preview.dataset.race = this._creatorRace || 'human';
+      preview.dataset.body = this._creatorParts?.body || '';
+      preview.dataset.head = this._creatorParts?.head || '';
+      preview.dataset.legs = this._creatorParts?.legs || '';
+      preview.style.setProperty('--creator-color', appearance.color);
+    }
+    this.cb.onCharacterPreview?.({
+      raceKey: this._creatorRace || 'human',
+      appearance: this._creatorAppearance || 'iron',
+      customization: { ...(this._creatorParts || {}) },
+      equipment: {}, canvasId: 'creator-preview-canvas',
+      proxyHero: klass.proxy,
+    });
+    const raceLabel = this.root.querySelector('#creator-preview-race');
+    if (raceLabel) raceLabel.textContent = race.name.toUpperCase();
   }
 
   _showCharacterCreator() {
@@ -1345,12 +1434,14 @@ export class UI {
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
-    for (const tab of ['character', 'gear', 'abilities', 'lattice']) {
+    for (const tab of ['character', 'gear', 'shop', 'crafting', 'abilities', 'lattice']) {
       this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', this._sheetTab !== tab);
     }
 
     if (this._sheetTab === 'character') this._renderCharacterOverview(character);
     else if (this._sheetTab === 'gear') this._renderGearPanel(character);
+    else if (this._sheetTab === 'shop') this._renderMarketPanel(character);
+    else if (this._sheetTab === 'crafting') this._renderCraftingPanel(character);
     else if (this._sheetTab === 'abilities') this._renderAbilitiesOverview(character);
     else this._renderLatticePanel(character);
   }
@@ -1361,9 +1452,12 @@ export class UI {
     const attrs = characterAttributes(character);
     const stats = character.stats || {};
     this.root.querySelector('#sheet-panel-character').innerHTML = `
-      <section class="character-paperdoll" style="--character-color:${appearance.color}"><div class="paperdoll-aura"></div><div class="paperdoll-hero">${klass.icon}</div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
+      <section class="character-paperdoll" style="--character-color:${appearance.color}"><canvas id="paperdoll-preview-canvas"></canvas><div class="paperdoll-aura"></div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
       <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
       <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
+    this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+      proxyHero: character.proxyHero, canvasId: 'paperdoll-preview-canvas' });
   }
 
   _renderAbilitiesOverview(character) {
@@ -1373,6 +1467,149 @@ export class UI {
       ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
     ];
     this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
+  }
+
+  _renderMarketPanel(character) {
+    const balance = this.root.querySelector('#market-balance');
+    const authoritative = !!this.cb.useAuthoritativeEconomy?.();
+    if (authoritative && !Number.isFinite(character.authoritativeBalance)) {
+      if (balance) balance.textContent = `${META_CURRENCY.icon} Syncing online ledger…`;
+      this.root.querySelector('#market-stock').innerHTML = '<span class="empty-gear">Online inventory is loading.</span>';
+      this.root.querySelector('#market-sell').innerHTML = '';
+      if (!this._marketSyncing) {
+        this._marketSyncing = true;
+        Promise.resolve(this.cb.onAuthoritySync?.(character))
+          .then((result) => {
+            if (!result) throw new Error('authority_unavailable');
+            this._marketSyncing = false;
+            this._renderCharacterSheet();
+          })
+          .catch(() => {
+            this._marketSyncing = false;
+            if (balance) balance.textContent = `${META_CURRENCY.icon} Online ledger unavailable`;
+            this.showBanner('Online inventory is unavailable. No changes were made.', 'bad', 2800);
+          });
+      }
+      return;
+    }
+    const meta = loadMeta();
+    const marketCurrency = Number.isFinite(character.authoritativeBalance) ? character.authoritativeBalance : meta.currency;
+    if (balance) balance.textContent = `${META_CURRENCY.icon} ${marketCurrency.toLocaleString()} ${META_CURRENCY.name}`;
+    this._marketVendor = VENDORS[this._marketVendor] ? this._marketVendor : 'quartermaster';
+    const vendorNav = this.root.querySelector('#market-vendors');
+    vendorNav.innerHTML = Object.values(VENDORS).map((vendor) => {
+      const eligibility = vendorEligibility(vendor.id, character);
+      return `<button data-vendor="${vendor.id}" class="${vendor.id === this._marketVendor ? 'sel' : ''}" ${eligibility.ok ? '' : 'disabled'}>${vendor.icon} ${vendor.name}${eligibility.ok ? '' : ` · LV ${eligibility.requiredLevel}`}</button>`;
+    }).join('');
+    for (const button of vendorNav.querySelectorAll('[data-vendor]')) button.onclick = () => {
+      this._marketVendor = button.dataset.vendor;
+      this._renderMarketPanel(character);
+    };
+    const vendor = VENDORS[this._marketVendor];
+    this.root.querySelector('#market-vendor-name').textContent = vendor.name.toUpperCase();
+    this.root.querySelector('#market-vendor-description').textContent = vendor.description;
+    const rotation = vendorRotation(vendor.id);
+    const stock = vendorStock(vendor.id, rotation, character.level || 1);
+    const stockRoot = this.root.querySelector('#market-stock');
+    stockRoot.innerHTML = stock.map((offer, index) => `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl}</small></div><button data-buy="${index}">${META_CURRENCY.icon} ${offer.price}</button></article>`).join('');
+    for (const button of stockRoot.querySelectorAll('[data-buy]')) {
+      button.onclick = async () => {
+        button.disabled = true;
+        let result;
+        try {
+          result = await runEconomyMutation({
+            authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+            remote: () => this.cb.onMarketBuy?.(character, vendor.id, Number(button.dataset.buy)),
+            offline: () => buyVendorItem(character, stock[Number(button.dataset.buy)]),
+          });
+        }
+        catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
+        button.disabled = false;
+        if (!result.ok) {
+          const message = result.reason === 'authority_unavailable' ? 'Online inventory is unavailable. No changes were made.'
+            : ['full', 'inventory_full'].includes(result.reason) ? 'Your stash is full.'
+              : result.reason === 'insufficient_funds' ? `You do not have enough ${META_CURRENCY.name}.`
+                : 'The purchase could not be completed.';
+          this.showBanner(message, 'bad', 2400);
+          return;
+        }
+        this._sheetChanged();
+        this.showBanner('Item purchased and moved to your stash.', '', 1800);
+      };
+    }
+    const sellRoot = this.root.querySelector('#market-sell');
+    sellRoot.innerHTML = (character.items || []).map((key, index) => {
+      const item = itemInfo(key);
+      return item ? `<article class="market-item compact" style="--rarity:${item.rarityColor}"><span>${item.icon}</span><div><b>${item.name}</b><small>${item.rarityName}</small></div><button data-sell="${index}">SELL · ${META_CURRENCY.icon} ${vendorSellPrice(key)}</button></article>` : '';
+    }).join('') || '<span class="empty-gear">Your stash has nothing the quartermaster can buy.</span>';
+    for (const button of sellRoot.querySelectorAll('[data-sell]')) {
+      button.onclick = async () => {
+        button.disabled = true;
+        const expectedValue = vendorSellPrice((character.items || [])[Number(button.dataset.sell)]);
+        let result;
+        try {
+          result = await runEconomyMutation({
+            authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+            remote: () => this.cb.onMarketSell?.(character, Number(button.dataset.sell)),
+            offline: () => sellVendorItem(character, Number(button.dataset.sell)),
+          });
+        }
+        catch (error) { result = { ok: false, reason: error?.result?.error || error?.message || 'failed' }; }
+        button.disabled = false;
+        if (!result.ok) {
+          this.showBanner(result.reason === 'authority_unavailable'
+            ? 'Online inventory is unavailable. No changes were made.' : 'The sale could not be completed.', 'bad', 2400);
+          return;
+        }
+        this._sheetChanged();
+        this.showBanner(`Sold for ${result.mutation?.value || result.value || expectedValue} ${META_CURRENCY.name}.`, '', 1800);
+      };
+    }
+  }
+
+  _renderCraftingPanel(character) {
+    const resources = this.root.querySelector('#craft-resources');
+    const vendor = this.root.querySelector('#craft-vendor');
+    const itemRoot = this.root.querySelector('#craft-items');
+    const bench = this.root.querySelector('#craft-workbench');
+    const status = this.root.querySelector('#craft-status');
+    const materials = character.craftingMaterials || {};
+    resources.innerHTML = `<b>${META_CURRENCY.icon} ${character.authoritativeBalance ?? '—'} ${META_CURRENCY.name}</b>${Object.values(CRAFTING_MATERIALS).map((m) => `<span>${m.icon} ${m.name}: <b>${materials[m.id] || 0}</b></span>`).join('')}`;
+    vendor.innerHTML = `<h3>FORGE SUPPLIES</h3>${Object.values(CRAFTING_MATERIALS).map((m) => `<button data-material="${m.id}">${m.icon} BUY ${m.name} · ${CRAFT_VENDOR_PRICES[m.id]}</button>`).join('')}<h3>RANK I COMPONENTS</h3>${Object.values(COMPONENTS).map((c) => `<button data-component="${c.id}">◇ ${c.name} · 45</button>`).join('')}`;
+    const transact = async (button, task) => {
+      button.disabled = true; status.textContent = 'Processing securely…'; status.className = 'loading';
+      try {
+        const result = await task();
+        if (!result?.ok) throw Object.assign(new Error(result?.error?.message || result?.error || 'Crafting failed.'), { result });
+        status.textContent = result.mutation?.action ? 'Crafting complete.' : 'Supply purchased.'; status.className = 'ok';
+        this._renderCraftingPanel(character);
+      } catch (error) {
+        const detail = error?.result?.error; status.textContent = detail?.message || (typeof detail === 'string' ? detail.replaceAll('_', ' ') : error.message); status.className = 'bad';
+      } finally { button.disabled = false; }
+    };
+    for (const button of vendor.querySelectorAll('[data-material]')) button.onclick = () => transact(button, () => this.cb.onCraftBuyMaterial?.(character, button.dataset.material));
+    for (const button of vendor.querySelectorAll('[data-component]')) button.onclick = () => transact(button, () => this.cb.onCraftBuyComponent?.(character, button.dataset.component));
+    const instances = [
+      ...(character.itemInstances || []).map((item) => ({ ...item, location: 'stash' })),
+      ...Object.entries(character.equipmentItemInstances || {}).map(([slot, item]) => ({ ...item, id: item.id, key: item.legacyKey, location: slot })),
+    ];
+    if (!instances.some((item) => item.id === this._craftItemId)) this._craftItemId = instances[0]?.id || null;
+    itemRoot.innerHTML = instances.map((instance) => {
+      const item = itemInfo(instance.key || instance.legacyKey); const sockets = instance.sockets || [];
+      return `<button data-craft-item="${instance.id}" class="market-item ${instance.id === this._craftItemId ? 'sel' : ''}"><span>${item?.icon || '◈'}</span><div><b>${item?.name || 'Unknown item'}</b><small>${instance.location} · revision ${instance.revision} · ${sockets.length} socket${sockets.length === 1 ? '' : 's'}</small></div></button>`;
+    }).join('') || '<span class="empty-gear">Buy an item before using the forge.</span>';
+    for (const button of itemRoot.querySelectorAll('[data-craft-item]')) button.onclick = () => { this._craftItemId = button.dataset.craftItem; this._craftSocket = 0; this._renderCraftingPanel(character); };
+    const selected = instances.find((item) => item.id === this._craftItemId);
+    if (!selected) { bench.innerHTML = '<p>Select an item.</p>'; return; }
+    const sockets = selected.sockets || []; const components = (character.craftingComponents || []).filter((c) => c.location === 'inventory');
+    bench.innerHTML = `<div class="craft-sockets">${sockets.map((socket, index) => `<button data-socket="${index}" class="${index === (this._craftSocket || 0) ? 'sel' : ''}">${socket.color} ${socket.type}<small>${socket.component ? `${COMPONENTS[socket.component.id]?.name || socket.component.id} · rank ${socket.component.rank}` : 'empty'}</small></button>`).join('') || '<p>No sockets. Add one below.</p>'}</div>
+      <div class="craft-recipes">${Object.values(RECIPES).map((recipe) => `<button data-recipe="${recipe.id}">${recipe.name}<small>${recipe.cost.alloy} Alloy</small></button>`).join('')}</div>
+      <div class="craft-components">${components.map((component) => `<button data-insert="${component.id}">INSTALL ${COMPONENTS[component.componentId]?.name || component.componentId}</button>`).join('') || '<p>No loose components. Buy one from Forge Supplies.</p>'}${sockets[this._craftSocket || 0]?.component ? '<button data-remove>REMOVE COMPONENT</button>' : ''}</div>`;
+    for (const button of bench.querySelectorAll('[data-socket]')) button.onclick = () => { this._craftSocket = Number(button.dataset.socket); this._renderCraftingPanel(character); };
+    const run = (button, action, details) => transact(button, () => this.cb.onCraftAction?.(character, action, selected.id, selected.revision, { socketIndex: this._craftSocket || 0, ...details }));
+    for (const button of bench.querySelectorAll('[data-recipe]')) button.onclick = () => run(button, 'craft_recipe', { recipeId: button.dataset.recipe });
+    for (const button of bench.querySelectorAll('[data-insert]')) button.onclick = () => run(button, 'socket_insert', { componentId: button.dataset.insert });
+    bench.querySelector('[data-remove]')?.addEventListener('click', (event) => run(event.currentTarget, 'socket_remove', {}));
   }
 
   // What a character is wearing, what is in the stash, and what the two add up
@@ -1387,7 +1624,8 @@ export class UI {
     const label = {
       weapon: 'SET I · WEAPON', offhand: 'SET I · OFF-HAND',
       weapon2: 'SET II · WEAPON', offhand2: 'SET II · OFF-HAND',
-      armor: 'ARMOUR', implant1: 'IMPLANT I', implant2: 'IMPLANT II',
+      head: 'HEAD', armor: 'CHEST', hands: 'HANDS', legs: 'LEGS', boots: 'BOOTS',
+      implant1: 'IMPLANT I', implant2: 'IMPLANT II',
     };
     slots.innerHTML = EQUIP_SLOTS.map((slot) => {
       const key = (character.equipment || {})[slot];
@@ -1572,7 +1810,7 @@ export class UI {
     this.root.querySelector('#gear-stat-list').innerHTML = rows.join('');
   }
 
-  _equipFromStash(character, index, preferredSlot = null) {
+  async _equipFromStash(character, index, preferredSlot = null) {
     const key = (character.items || [])[index];
     const item = key ? itemInfo(key) : null;
     if (!item || !item.slot) return;
@@ -1592,6 +1830,21 @@ export class UI {
       this.showBanner(`✋ ${item.name} needs ${requirementText(item)}.`, '', 2600);
       return;
     }
+    try {
+      const result = await runEconomyMutation({
+        authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+        remote: () => this.cb.onAuthorityEquip?.(character, index, slot),
+        offline: () => null,
+      });
+      if (result) {
+        this._sheetSelection = { kind: 'slot', slot, key };
+        this._sheetChanged();
+        return;
+      }
+    } catch (error) {
+      this.showBanner(`✋ ${error?.result?.error || error?.message || 'Equipment update failed.'}`, 'bad', 2600);
+      return;
+    }
     const previous = (character.equipment || {})[slot];
     character.equipment = { ...(character.equipment || {}), [slot]: key };
     character.items = (character.items || []).filter((_, i) => i !== index);
@@ -1601,11 +1854,26 @@ export class UI {
     this._sheetChanged();
   }
 
-  _unequip(character, slot) {
+  async _unequip(character, slot) {
     const key = (character.equipment || {})[slot];
     if (!key) return;
     if ((character.items || []).length >= STASH_SLOTS) {
       this.showBanner('✋ The stash is full.', '', 2400);
+      return;
+    }
+    try {
+      const result = await runEconomyMutation({
+        authoritative: !!this.cb.useAuthoritativeEconomy?.(),
+        remote: () => this.cb.onAuthorityUnequip?.(character, slot),
+        offline: () => null,
+      });
+      if (result) {
+        this._sheetSelection = { kind: 'stash', index: character.items.length - 1, key };
+        this._sheetChanged();
+        return;
+      }
+    } catch (error) {
+      this.showBanner(`✋ ${error?.result?.error || error?.message || 'Equipment update failed.'}`, 'bad', 2600);
       return;
     }
     const next = { ...(character.equipment || {}) };
@@ -1715,6 +1983,10 @@ export class UI {
     this.root.querySelector('#lattice-rewire').onclick = () => {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
+      if (this.cb.useAuthoritativeEconomy?.()) {
+        this.showBanner('✋ Lattice rewiring is unavailable until its server transaction is enabled.', 'bad', 3200);
+        return;
+      }
       const cost = rewireCost((character.lattice || []).length);
       const held = loadMeta().currency;
       if (held < cost) {
@@ -1984,7 +2256,7 @@ export class UI {
         <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
         <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
         ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
-      `;
+    `;
       grid.appendChild(card);
     }
   }

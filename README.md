@@ -46,6 +46,8 @@ The profile remembers the last world.
 Character Info separates the character overview, equipment, abilities, and the
 Lattice. Equipment supports item inspection, comparisons, click actions, and
 drag-and-drop between compatible body slots and the persistent stash.
+Signed-in shop transactions use the server-owned inventory and Salvage Alloy
+ledger. Static local play keeps a separate offline-only ledger.
 
 Custom Games separates Live Games from Arcade. Live Games shows real player
 rooms that can be joined or watched. Arcade lists prebuilt campaign, Survival,
@@ -157,8 +159,15 @@ A galaxy character carries its own build between adventures.
 Gear is rolled. An item is a key such as `scatter_mk2:7f3a91:62:2` — base, roll
 seed, item level and rarity — and it resolves to the same item on every machine
 without storing anything but the key. Item level comes from the world, so loot
-gets better the further out you travel. Five slots are worn, and the weapon and
-off-hand exist twice: press X to draw the other set mid-fight.
+gets better the further out you travel. Characters choose a Human or Robot
+origin and assemble face, body, head, and leg variants. Head, chest, hands,
+legs, boots, weapons, and off-hands change the procedural model. Two implants
+remain internal stat gear. The weapon and off-hand exist twice: press X to draw
+the other set mid-fight.
+
+The Character Info market tab opens the Orbital Exchange. Its stock rotates
+deterministically and scales with character level. Players buy and sell with
+Salvage Alloy. Mission gold remains inside each mission.
 
 The Lattice is one shared 646-node passive tree. All thirteen classes allocate
 into the same tree from thirteen different starting positions, so a class
