@@ -845,3 +845,10 @@ create trigger on_auth_user_created_zillions
 after insert on auth.users
 for each row
 execute function public.handle_new_user();
+
+-- The persistent living-world schema is additive and remains dormant until
+-- its migrations are activated. Apply migrations 20260820173000 through
+-- 20260820203000 in timestamp order. The final migration defines the canonical
+-- universe -> star system -> planet -> region topology, faction control,
+-- region worker leases, and atomic cross-region party handoffs while retaining
+-- the earth-1 compatibility shard and Greenfall bootstrap data.
