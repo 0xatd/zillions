@@ -23,6 +23,14 @@ assert.match(sql, /world_planets[\s\S]*system_id text not null references public
 assert.match(sql, /world_provinces[\s\S]*add column planet_id text references public\.world_planets\(id\)/, 'regions must belong to a planet');
 assert.match(sql, /world_provinces alter column planet_id set not null/, 'region planet identity must fail closed');
 
+// World entry must remain valid after region_id becomes mandatory. Resolve the
+// canonical starter region and location together, and retain the original
+// owner and replay behavior.
+assert.match(sql, /create or replace function public\.enter_living_world\(p_actor uuid,p_character uuid\)[\s\S]*select p\.id,l\.id into v_region,v_location[\s\S]*p\.key='greenfall' and l\.key='greenfall-crossing'/, 'world entry must resolve the canonical Greenfall region and location');
+assert.match(sql, /insert into public\.world_parties\(shard_id,region_id,owner_user_id,leader_character_id[\s\S]*values\('earth-1',v_region,p_actor,p_character/, 'world entry must create an owned party with authoritative region identity');
+assert.match(sql, /v_progress\.world_party_id is not null[\s\S]*'duplicate',true[\s\S]*v_progress\.world_party_id/, 'world entry replay must return the existing party');
+assert.match(sql, /revoke all on function public\.enter_living_world\(uuid,uuid\) from public,anon,authenticated[\s\S]*grant execute on function public\.enter_living_world\(uuid,uuid\) to service_role/, 'world entry must remain service-only');
+
 // Faction control is authoritative state, not only a map color.
 assert.match(sql, /create table public\.world_factions[\s\S]*planet_id text not null references public\.world_planets\(id\)/, 'factions must belong to a planet');
 for (const table of ['world_provinces', 'world_locations']) {

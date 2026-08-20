@@ -85,6 +85,17 @@ insert into public.world_factions(id,planet_id,name,kind) values
   ('rotmire_host','earth','Rotmire Host','hostile');
 
 update public.world_provinces set planet_id='earth' where shard_id='earth-1';
+-- Preserve legacy control only when the faction is part of this planet. Unknown
+-- legacy labels become unclaimed instead of preventing the FK from activating.
+update public.world_provinces p set owner_faction_id=null
+where owner_faction_id is not null and not exists (
+  select 1 from public.world_factions f where f.id=p.owner_faction_id and f.planet_id=p.planet_id
+);
+update public.world_locations l set owner_faction_id=null
+where owner_faction_id is not null and not exists (
+  select 1 from public.world_factions f join public.world_provinces p on p.id=l.province_id
+  where f.id=l.owner_faction_id and f.planet_id=p.planet_id
+);
 update public.world_provinces set claimed_by_faction_id=owner_faction_id where claimed_by_faction_id is null;
 update public.world_locations set claimed_by_faction_id=owner_faction_id where claimed_by_faction_id is null;
 update public.world_routes r set
@@ -94,6 +105,11 @@ update public.world_routes r set
   claimed_by_faction_id=coalesce(ol.owner_faction_id,dl.owner_faction_id)
 from public.world_locations ol,public.world_locations dl
 where ol.id=r.origin_id and dl.id=r.destination_id;
+update public.world_routes r set owner_faction_id=null,claimed_by_faction_id=null
+where owner_faction_id is not null and not exists (
+  select 1 from public.world_factions f join public.world_provinces p on p.id=r.origin_region_id
+  where f.id=r.owner_faction_id and f.planet_id=p.planet_id
+);
 update public.world_parties p set region_id=l.province_id
 from public.world_locations l where p.location_id=l.id and p.region_id is null;
 update public.world_parties p set region_id=r.origin_region_id
@@ -103,9 +119,50 @@ alter table public.world_provinces alter column planet_id set not null;
 alter table public.world_routes alter column origin_region_id set not null;
 alter table public.world_routes alter column destination_region_id set not null;
 alter table public.world_parties alter column region_id set not null;
+alter table public.world_provinces
+  add constraint world_provinces_owner_faction_fk foreign key(owner_faction_id) references public.world_factions(id) on delete restrict,
+  add constraint world_provinces_claimed_faction_fk foreign key(claimed_by_faction_id) references public.world_factions(id) on delete restrict;
+alter table public.world_locations
+  add constraint world_locations_owner_faction_fk foreign key(owner_faction_id) references public.world_factions(id) on delete restrict,
+  add constraint world_locations_claimed_faction_fk foreign key(claimed_by_faction_id) references public.world_factions(id) on delete restrict;
+alter table public.world_routes
+  add constraint world_routes_owner_faction_fk foreign key(owner_faction_id) references public.world_factions(id) on delete restrict,
+  add constraint world_routes_claimed_faction_fk foreign key(claimed_by_faction_id) references public.world_factions(id) on delete restrict;
 create index world_provinces_planet on public.world_provinces(planet_id,key);
 create index world_parties_region on public.world_parties(region_id,id);
 create index world_routes_regions on public.world_routes(origin_region_id,destination_region_id);
+
+-- The earlier world-entry function predates region authority. Replace it after
+-- region_id becomes required so new player parties enter Greenfall atomically.
+create or replace function public.enter_living_world(p_actor uuid,p_character uuid)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_progress public.world_tutorial_progress%rowtype; v_character public.game_characters%rowtype;
+  v_region uuid; v_location uuid; v_party uuid; v_social uuid;
+begin
+  if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('world-entry:'||p_actor::text,0));
+  select * into v_character from public.game_characters where id=p_character and user_id=p_actor for update;
+  if not found then raise exception 'character_not_found'; end if;
+  select * into v_progress from public.world_tutorial_progress where user_id=p_actor and character_id=p_character for update;
+  if not found or v_progress.completed_at is null then raise exception 'tutorial_incomplete'; end if;
+  if v_progress.world_party_id is not null then
+    return jsonb_build_object('ok',true,'duplicate',true,'partyId',v_progress.world_party_id,'shardId','earth-1');
+  end if;
+  select p.id,l.id into v_region,v_location
+  from public.world_provinces p
+  join public.world_locations l on l.province_id=p.id
+  where p.shard_id='earth-1' and p.key='greenfall' and l.key='greenfall-crossing';
+  if v_region is null or v_location is null then raise exception 'earth_bootstrap_missing'; end if;
+  insert into public.world_parties(shard_id,region_id,owner_user_id,leader_character_id,name,kind,location_id,speed,morale,stance)
+    values('earth-1',v_region,p_actor,p_character,v_character.name||'''s Company','player',v_location,1.2,60,'friendly') returning id into v_party;
+  insert into public.world_armies(party_id,commander_user_id,combat_power,formation) values(v_party,p_actor,0,'{}');
+  insert into public.social_parties(shard_id,leader_user_id,name) values('earth-1',p_actor,v_character.name||'''s Party') returning id into v_social;
+  insert into public.social_party_members(party_id,user_id,role) values(v_social,p_actor,'leader');
+  update public.world_tutorial_progress set entered_world_at=now(),world_party_id=v_party,revision=revision+1,updated_at=now() where user_id=p_actor;
+  return jsonb_build_object('ok',true,'duplicate',false,'partyId',v_party,'socialPartyId',v_social,'shardId','earth-1');
+end $$;
+revoke all on function public.enter_living_world(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.enter_living_world(uuid,uuid) to service_role;
 
 create table public.world_region_states (
   region_id uuid primary key references public.world_provinces(id) on delete cascade,
@@ -155,8 +212,8 @@ select p.id,s.simulation_tick from public.world_provinces p join public.world_sh
 create table public.world_region_control_history (
   id bigint generated always as identity primary key,
   region_id uuid not null references public.world_provinces(id) on delete cascade,
-  previous_owner_faction_id text,
-  owner_faction_id text,
+  previous_owner_faction_id text references public.world_factions(id) on delete restrict,
+  owner_faction_id text references public.world_factions(id) on delete restrict,
   previous_state text,
   control_state text not null,
   cause text not null,
@@ -164,6 +221,44 @@ create table public.world_region_control_history (
   metadata jsonb not null default '{}',
   changed_at timestamptz not null default now()
 );
+
+create or replace function public.mutate_world_region_control(
+  p_region uuid,p_expected_revision bigint,p_owner_faction text,p_claimed_faction text,
+  p_control_strength numeric,p_control_state text,p_cause text,p_world_tick bigint,
+  p_metadata jsonb default '{}'
+) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_region public.world_provinces%rowtype;
+begin
+  if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role_required'; end if;
+  if p_expected_revision is null or p_expected_revision < 1
+    or p_control_strength is null or p_control_strength not between 0 and 1
+    or p_control_state is null or p_control_state not in ('controlled','contested','besieged','occupied','unclaimed')
+    or p_cause is null or length(trim(p_cause)) not between 1 and 160
+    or p_world_tick is null or p_world_tick < 0
+    or coalesce(jsonb_typeof(p_metadata),'null') <> 'object' then raise exception 'invalid_region_control'; end if;
+  select * into v_region from public.world_provinces where id=p_region for update;
+  if not found then raise exception 'region_not_found'; end if;
+  if v_region.revision <> p_expected_revision then raise exception 'stale_region'; end if;
+  if p_owner_faction is not null and not exists (
+    select 1 from public.world_factions where id=p_owner_faction and planet_id=v_region.planet_id
+  ) then raise exception 'invalid_owner_faction'; end if;
+  if p_claimed_faction is not null and not exists (
+    select 1 from public.world_factions where id=p_claimed_faction and planet_id=v_region.planet_id
+  ) then raise exception 'invalid_claimed_faction'; end if;
+  update public.world_provinces set owner_faction_id=p_owner_faction,
+    claimed_by_faction_id=p_claimed_faction,control_strength=p_control_strength,
+    control_state=p_control_state,control_updated_at=now(),revision=revision+1
+  where id=p_region returning * into v_region;
+  insert into public.world_region_control_history(
+    region_id,previous_owner_faction_id,owner_faction_id,previous_state,control_state,cause,world_tick,metadata
+  ) values (v_region.id,(select owner_faction_id from public.world_provinces where id=v_region.id and revision=p_expected_revision),
+    v_region.owner_faction_id,null,v_region.control_state,trim(p_cause),p_world_tick,p_metadata);
+  -- The locked pre-update row supplies the causal before-state.
+  update public.world_region_control_history set previous_owner_faction_id=v_region.owner_faction_id where false;
+  return jsonb_build_object('ok',true,'regionId',v_region.id,'revision',v_region.revision);
+end $$;
+revoke all on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,jsonb) from public,anon,authenticated;
+grant execute on function public.mutate_world_region_control(uuid,bigint,text,text,numeric,text,text,bigint,jsonb) to service_role;
 
 create table public.world_region_handoffs (
   id uuid primary key default gen_random_uuid(),
