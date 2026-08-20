@@ -59,6 +59,20 @@ export function combatBuckets(actors) {
   return buckets;
 }
 
+export const ARMY_PEAK_SAMPLE_SECONDS = 1;
+export function sampleArmyPeak(units, peak, time, nextSampleAt = 0) {
+  if (time + 1e-9 < nextSampleAt) return nextSampleAt;
+  const composition = {};
+  for (const unit of units) {
+    if (unit.hero || unit.dead) continue;
+    composition[unit.key] = (composition[unit.key] || 0) + 1;
+  }
+  for (const [key, count] of Object.entries(composition)) {
+    peak[key] = Math.max(peak[key] || 0, count);
+  }
+  return (Math.floor(time / ARMY_PEAK_SAMPLE_SECONDS) + 1) * ARMY_PEAK_SAMPLE_SECONDS;
+}
+
 export function nearbyBuckets(buckets, fallback, x, z, radius) {
   if (!buckets) return fallback;
   const found = [];
@@ -157,6 +171,7 @@ export class Game {
       heroDeaths: 0, bossKillT: null, repaired: 0, spent: 0,
       damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {},
     };
+    this._armyPeakSampleAt = 0;
 
     // heroKeys entries: 'scott' (fresh) or { k, camp: { level, xp, items, relics } }
     // — the WC3-style persistent campaign hero each player brings along.
@@ -217,7 +232,7 @@ export class Game {
       flowT: snapNum(this.flowTimer),
       timers: {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
-        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
+        nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), armyPeakSampleAt: snapNum(this._armyPeakSampleAt), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
       },
       brews: this.brews.map((b) => ({
         x: snapNum(b.x), z: snapNum(b.z), r: snapNum(b.r),
@@ -358,6 +373,7 @@ export class Game {
     this._nodeT = timers.nodeT ?? 0;
     this._campT = timers.campT ?? 0;
     this._supportT = timers.supportT ?? 0;
+    this._armyPeakSampleAt = timers.armyPeakSampleAt ?? 0;
     this.bossSpawnT = timers.bossSpawnT ?? null;
     (snap.nests || []).forEach(([hp, alive, musterT, defendT], i) => {
       if (this.nests[i]) {
@@ -3433,14 +3449,9 @@ export class Game {
   update(dt) {
     if (this.over) return;
     this.time += dt;
-    const composition = {};
-    for (const unit of this.units) {
-      if (unit.hero || unit.dead) continue;
-      composition[unit.key] = (composition[unit.key] || 0) + 1;
-    }
-    for (const [key, count] of Object.entries(composition)) {
-      this.stats.armyPeak[key] = Math.max(this.stats.armyPeak[key] || 0, count);
-    }
+    this._armyPeakSampleAt = sampleArmyPeak(
+      this.units, this.stats.armyPeak, this.time, this._armyPeakSampleAt,
+    );
     this._updateSiege(dt);
     if (this.over) return;
     this._updatePlots(dt);

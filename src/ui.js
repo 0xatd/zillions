@@ -1259,7 +1259,7 @@ export class UI {
     const root = this.root.querySelector('#first-hour-guide');
     if (!root) return;
     const character = this._sheetCharacter();
-    const guide = firstHourGuidance(character);
+    const guide = firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() });
     if (guide.step === 'complete') { root.classList.add('hidden'); root.innerHTML = ''; return; }
     root.classList.remove('hidden');
     root.innerHTML = `<span>FIRST DEPLOYMENT · ${guide.step.toUpperCase()}</span><b>${guide.title}</b><p>${guide.body}</p><div><button class="menubtn primary" data-guide-action>${guide.action}</button>${character ? '<button class="utilitybtn" data-guide-skip>SKIP GUIDE</button>' : ''}</div>`;
@@ -2404,7 +2404,7 @@ export class UI {
     const cave = !!gate.cave;
     const character = this._sheetCharacter();
     const level = cave ? null : levelById(gate.levelId || 1);
-    const guide = character ? firstHourGuidance(character) : null;
+    const guide = character ? firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() }) : null;
     const loadout = character && Object.keys(legalEquipment(character)).length
       ? 'Loadout ready. Your equipped attributes and socket effects will be applied when the mission starts.'
       : 'No persistent gear equipped. You can still deploy, or return to Character Info for a field upgrade.';
@@ -3509,7 +3509,7 @@ export class UI {
           ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
         ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
         <div class="endactions">
-          ${!won && mode === 'campaign' ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
           <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
         </div>
       </div>`;

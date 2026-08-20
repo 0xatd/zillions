@@ -114,10 +114,33 @@ try {
     document.querySelector('#m-enter-world').click();
     return selected && app.ui.shell.base === 'overworld' && app.ui.overlayHidden() && app.ow?.world?.id === 'earth';
   })()`), true, 'new account must create a character, return to Character Select, and enter Earth');
+  await evaluate(`(() => {
+    const app = window.__app;
+    const character = app.profile.mmoCharacters[0];
+    character.firstHourGuideDismissed = false;
+    character.items = [];
+    character.equipment = {};
+    app.ui.setProfile(app.profile);
+    app.ui._showScreen('main');
+  })()`);
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 900, height: 800 }, { width: 700, height: 900 }]) {
+    await command('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: viewport.width < 800 });
+    await delay(80);
+    const geometry = JSON.parse(await evaluate(`(() => {
+      const a = document.querySelector('#first-hour-guide').getBoundingClientRect();
+      const b = document.querySelector('.character-roster').getBoundingClientRect();
+      return JSON.stringify({ overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
+        guide: { left:a.left,right:a.right,top:a.top,bottom:a.bottom }, roster: { left:b.left,right:b.right,top:b.top,bottom:b.bottom } });
+    })()`));
+    assert.equal(geometry.overlap, false, `first-hour guide overlaps roster at ${viewport.width}x${viewport.height}: ${JSON.stringify(geometry)}`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
     const originalDirty = app.ui.cb.onProfileDirty;
+    const originalAuthority = app.ui.cb.useAuthoritativeEconomy;
+    const originalCampaign = app.ui.cb.onCampaignMap;
     const original = {
       items: structuredClone(character.items),
       equipment: structuredClone(character.equipment),
@@ -134,8 +157,18 @@ try {
       const guide = document.querySelector('#first-hour-guide');
       const action = guide.querySelector('[data-guide-action]');
       const skip = guide.querySelector('[data-guide-skip]');
-      const wired = !guide.classList.contains('hidden') && action?.textContent === 'OPEN MARKET' && !!skip;
+      let campaignOpened = 0;
+      app.ui.cb.onCampaignMap = () => { campaignOpened++; };
+      const offlineWired = !guide.classList.contains('hidden') && action?.textContent === 'ENTER WORLD'
+        && /sign in/i.test(guide.textContent) && !!skip;
       action.click();
+      const offlineRouted = campaignOpened === 1;
+      app.ui.cb.useAuthoritativeEconomy = () => true;
+      app.ui._showScreen('main');
+      app.ui.setProfile(app.profile);
+      const onlineAction = document.querySelector('#first-hour-guide [data-guide-action]');
+      const onlineWired = onlineAction?.textContent === 'OPEN MARKET';
+      onlineAction.click();
       const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
         && document.querySelector('#sheet-tab-shop').classList.contains('sel');
       let dirtied = 0;
@@ -145,9 +178,11 @@ try {
       document.querySelector('#first-hour-guide [data-guide-skip]').click();
       const skipped = character.firstHourGuideDismissed === true
         && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
-      result = wired && routed && skipped;
+      result = offlineWired && offlineRouted && onlineWired && routed && skipped;
     } finally {
       app.ui.cb.onProfileDirty = originalDirty;
+      app.ui.cb.useAuthoritativeEconomy = originalAuthority;
+      app.ui.cb.onCampaignMap = originalCampaign;
       character.items = original.items;
       character.equipment = original.equipment;
       if (original.hadDismissal) character.firstHourGuideDismissed = original.dismissal;
@@ -157,7 +192,7 @@ try {
       app.ui.hideOverlay();
     }
     return result;
-  })()`), true, 'first-deployment guide CTA must route to Market and its per-character skip must persist through profile dirty wiring');
+  })()`), true, 'first-deployment guide must route offline players to a mission, signed-in players to Market, and persist its per-character skip');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     let customOpened = 0;

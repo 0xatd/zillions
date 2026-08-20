@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { combatAlert, runReview, storeRetry } from '../src/combat-readability.js';
+import { combatAlert, consumeRetry, RETRY_SCHEMA, runReview, storeRetry } from '../src/combat-readability.js';
 
 const game = (overrides = {}) => ({
   over: false, phase: 'live', finalStand: false,
@@ -27,9 +27,19 @@ const empty = runReview({ won: false, stats: null, game: null });
 assert.ok(empty.cause.title && empty.action, 'missing stats still yield useful copy');
 assert.match(runReview({ won: true, stats: { built: 4, lost: 0 } }).cause.title, /held/);
 const memory = new Map();
-const storage = { setItem: (k, v) => memory.set(k, v), getItem: (k) => memory.get(k) ?? null };
-assert.equal(storeRetry(storage, { level: 2, hero: 'scott', difficulty: 'casual' }), true);
-assert.equal(storeRetry({ setItem: () => { throw new Error('blocked'); }, getItem: () => null }, { level: 2, hero: 'scott' }), false);
-assert.equal(storeRetry({ setItem: () => {}, getItem: () => '{"level":1,"hero":"stale"}' }, { level: 2, hero: 'scott' }), false, 'stale marker is not accepted after a no-op write');
-assert.equal(storeRetry(storage, { level: 2 }), false, 'invalid retry is never persisted');
+const storage = { setItem: (k, v) => memory.set(k, v), getItem: (k) => memory.get(k) ?? null, removeItem: (k) => memory.delete(k) };
+assert.equal(storeRetry(storage, { mode: 'campaign', level: 2, hero: 'scott', difficulty: 'casual' }), true);
+assert.equal(JSON.parse(memory.get('zillions-retry-mission')).schema, RETRY_SCHEMA);
+assert.deepEqual(consumeRetry(storage, { allowedHeroes: ['scott'], maxLevel: 2 }), {
+  schema: RETRY_SCHEMA, mode: 'campaign', level: 2, difficulty: 'casual', hero: 'scott',
+});
+assert.equal(memory.has('zillions-retry-mission'), false, 'valid retry is one-shot');
+assert.equal(storeRetry({ setItem: () => { throw new Error('blocked'); }, getItem: () => null }, { mode: 'campaign', level: 2, hero: 'scott' }), false);
+assert.equal(storeRetry({ setItem: () => {}, getItem: () => '{"level":1,"hero":"stale"}' }, { mode: 'campaign', level: 2, hero: 'scott' }), false, 'stale marker is not accepted after a no-op write');
+assert.equal(storeRetry(storage, { mode: 'campaign', level: 2 }), false, 'invalid retry is never persisted');
+memory.set('zillions-retry-mission', JSON.stringify({ schema: RETRY_SCHEMA, mode: 'campaign', level: 3, hero: 'scott', difficulty: 'normal' }));
+assert.equal(consumeRetry(storage, { allowedHeroes: ['scott'], maxLevel: 2 }), null, 'locked levels are rejected');
+assert.equal(memory.has('zillions-retry-mission'), false, 'invalid retry is cleared');
+memory.set('zillions-retry-mission', JSON.stringify({ schema: RETRY_SCHEMA, mode: 'campaign', level: 1, hero: 'other', difficulty: 'normal' }));
+assert.equal(consumeRetry(storage, { allowedHeroes: ['scott'], maxLevel: 2 }), null, 'wrong hero is rejected');
 console.log('combat readability checks passed');

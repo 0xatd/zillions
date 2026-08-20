@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { firstHourStep, equipmentPreview, missionRewardSummary } from '../src/first-hour.js';
+import { firstHourStep, firstHourGuidance, equipmentPreview, missionRewardSummary } from '../src/first-hour.js';
 import { LEVELS } from '../src/config.js';
 import { rollItemKey } from '../src/items.js';
 
@@ -7,6 +7,9 @@ const base = { classKey: 'vanguard', level: 1, items: [], equipment: {}, stats: 
 const weapon = rollItemKey('scatter_mk1', 7, 1, 1);
 assert.equal(firstHourStep(null), 'create');
 assert.equal(firstHourStep(base), 'market');
+assert.equal(firstHourGuidance(base, { online: false }).step, 'offline');
+assert.equal(firstHourGuidance(base, { online: false }).action, 'ENTER WORLD');
+assert.equal(firstHourGuidance(base, { online: true }).action, 'OPEN MARKET');
 assert.equal(firstHourStep({ ...base, items: [weapon] }), 'equip');
 assert.equal(firstHourStep({ ...base, equipment: { weapon } }), 'forge');
 const equipped = { ...base, equipment: { weapon } };

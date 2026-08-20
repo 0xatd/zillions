@@ -39,13 +39,46 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
   return { cause: { icon: '☠️', title: 'The army was overwhelmed', detail: `${safe.kills} enemies slain; ${safe.lost} structures lost by Threat ${n(threat)}.` }, action: safe.heroDeaths > 1 ? 'Disengage earlier when hero health turns red; a dead hero leaves the army without its aura.' : 'Concentrate structures around one defensible lane and use the mission warnings to regroup.' };
 }
 
+export const RETRY_SCHEMA = 'zillions.retry.v1';
+const RETRY_KEY = 'zillions-retry-mission';
+const RETRY_DIFFICULTIES = new Set(['casual', 'normal', 'brutal']);
+
+function retryMarker(retry) {
+  const level = Number(retry?.level);
+  const hero = typeof retry?.hero === 'string' ? retry.hero.trim() : '';
+  const difficulty = retry?.difficulty || 'normal';
+  if (retry?.mode !== 'campaign' || !Number.isInteger(level) || level < 1
+    || !hero || hero.length > 64 || !RETRY_DIFFICULTIES.has(difficulty)) return null;
+  return { schema: RETRY_SCHEMA, mode: 'campaign', level, difficulty, hero };
+}
+
+export function clearRetry(storage) {
+  try { storage?.removeItem(RETRY_KEY); } catch { /* blocked storage */ }
+}
+
 export function storeRetry(storage, retry) {
-  if (!storage || !retry?.level || !retry?.hero) return false;
-  const serialized = JSON.stringify(retry);
+  const marker = retryMarker(retry);
+  if (!storage || !marker) return false;
+  const serialized = JSON.stringify(marker);
   try {
-    storage.setItem('zillions-retry-mission', serialized);
-    return storage.getItem('zillions-retry-mission') === serialized;
+    storage.setItem(RETRY_KEY, serialized);
+    return storage.getItem(RETRY_KEY) === serialized;
   } catch {
     return false;
   }
+}
+
+// Retry is a one-shot request, not a save file. Consume it even when invalid so
+// malformed or stale state cannot survive across later sign-ins.
+export function consumeRetry(storage, { allowedHeroes = [], maxLevel = 0 } = {}) {
+  let raw = null;
+  try { raw = storage?.getItem(RETRY_KEY); } catch { return null; }
+  clearRetry(storage);
+  if (!raw) return null;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  const marker = retryMarker(parsed);
+  if (!marker || parsed.schema !== RETRY_SCHEMA) return null;
+  if (!allowedHeroes.includes(marker.hero) || marker.level > Number(maxLevel || 0)) return null;
+  return marker;
 }

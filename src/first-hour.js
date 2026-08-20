@@ -17,14 +17,19 @@ export function firstHourStep(character) {
   return forged ? 'mission' : 'forge';
 }
 
-export function firstHourGuidance(character) {
-  const step = firstHourStep(character);
+export function firstHourGuidance(character, { online = true } = {}) {
+  let step = firstHourStep(character);
+  // Persistent inventory, vendors, and crafting are authority-owned. An
+  // offline player can still deploy, but must never be sent into a screen
+  // whose mutations are intentionally unavailable.
+  if (character && step !== 'complete' && !online) step = 'offline';
   const content = {
     create: ['Create your survivor', 'Origin changes a small racial passive. Class determines your battlefield role and primary attribute.', 'CREATE CHARACTER'],
     market: ['Claim your first field upgrade', 'Open the Market. Compare an item against your current loadout before spending Salvage Alloy.', 'OPEN MARKET'],
     equip: ['Equip what you bought', 'Open Equipment, inspect the green and red attribute changes, then equip your chosen item.', 'OPEN EQUIPMENT'],
     forge: ['Tune one item at the Forge', 'Add or calibrate a socket, or install a component. The workbench shows its exact stat effect.', 'OPEN FORGE'],
     mission: ['Deploy to Greenfall Marches', 'Enter Earth, walk to the Greenfall gate, and choose Casual for your first deployment.', 'ENTER WORLD'],
+    offline: ['Deploy now or sign in for persistent gear', 'Market and Forge require a signed-in account. You can enter Earth and play a field mission now.', 'ENTER WORLD'],
     complete: ['First deployment complete', 'Your character, equipment, crafting, and campaign progress persist.', 'CONTINUE'],
   }[step];
   return { step, title: content[0], body: content[1], action: content[2] };
