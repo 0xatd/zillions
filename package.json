@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "precheck": "node scripts/run-telemetry-check.mjs && node scripts/shell-state-check.mjs && node scripts/state-auth-check.mjs && node scripts/campaign-cloud-check.mjs && node scripts/economy-authority-check.mjs && node scripts/crafting-authority-check.mjs && node scripts/custom-games-shell-check.mjs",
+    "precheck": "node scripts/run-telemetry-check.mjs && node scripts/first-hour-check.mjs && node scripts/shell-state-check.mjs && node scripts/state-auth-check.mjs && node scripts/campaign-cloud-check.mjs && node scripts/economy-authority-check.mjs && node scripts/crafting-authority-check.mjs && node scripts/custom-games-shell-check.mjs",
     "check:browser": "node scripts/browser-shell-check.mjs",
     "check:live-economy": "node scripts/live-economy-smoke.mjs",
     "check:cosmetics": "node scripts/cosmetic-check.mjs && node scripts/character-visual-check.mjs",

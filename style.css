@@ -1385,6 +1385,20 @@ body::after {
 .creator-summary b { color: #fff1b8; font-size: 15px; }
 .creator-summary span { color: #d8e5f0; }
 .creator-summary small { color: #91a8bc; }
+.first-hour-guide { position:absolute; z-index:4; right:34px; top:28px; width:min(390px,42vw); padding:14px 16px; border:1px solid rgba(228,191,85,.45); border-left:3px solid #e4bf55; background:rgba(5,14,25,.94); box-shadow:0 12px 30px rgba(0,0,0,.35); }
+.first-hour-guide>span { color:#e4bf55; font-size:10px; font-weight:900; letter-spacing:.16em; }
+.first-hour-guide>b { display:block; margin-top:5px; color:#fff1b8; font-size:16px; }
+.first-hour-guide p { margin:5px 0 10px; color:#b9d2e4; font-size:12px; line-height:1.4; }
+.first-hour-guide>div { display:flex; gap:7px; }
+.first-hour-guide button { min-width:0; padding:8px 11px; }
+.sheet-guide { margin-top:9px; max-width:680px; padding:8px 10px; border-left:2px solid #80cfff; color:#b9d8e9; background:rgba(74,167,224,.08); font-size:12px; line-height:1.4; }
+.sheet-guide button { margin-left:8px; padding:4px 7px; color:#fff1b8; border:1px solid rgba(228,191,85,.35); background:rgba(228,191,85,.09); cursor:pointer; }
+.market-item small { white-space:normal; }
+#craft-vendor button small { display:block; margin-top:4px; color:#83efb4; }
+.gate-loadout { display:grid; gap:4px; margin:10px 0; padding:9px 10px; border:1px solid rgba(128,207,255,.2); background:rgba(40,91,125,.14); }
+.gate-loadout b { color:#dcefff; font-size:12px; }
+.gate-loadout small { color:#91a8bc; line-height:1.35; }
+.gate-loadout em { color:#83efb4; font-size:10px; font-style:normal; font-weight:900; letter-spacing:.13em; }
 .market-panel { grid-template-columns: 1fr 1fr; gap: 22px; overflow: auto; }
 .crafting-panel { display:grid; grid-template-columns:minmax(250px,.8fr) 1fr 1.15fr; gap:18px; overflow:auto; }
 .crafting-panel>section { background:rgba(7,18,31,.82); border:1px solid rgba(97,190,255,.18); padding:18px; min-width:0; }
@@ -1415,6 +1429,7 @@ body::after {
 .creator-actions button { min-width: 190px; }
 
 @media (max-width: 820px) { .creator-form.creator-xl,.market-panel,.crafting-panel { grid-template-columns: 1fr; } .creator-preview { position: relative; top: 0; min-height: 380px; } .creator-avatar { transform: scale(.78); } .creator-classes { grid-template-columns: repeat(2, minmax(0, 1fr)); } .creator-parts { grid-template-columns: 1fr; } }
+@media (max-width: 820px) { .first-hour-guide { left:16px; right:16px; top:92px; width:auto; } }
 
 /* ---------- galaxy navigation ---------- */
 .galaxy-screen { position: absolute; inset: 0; overflow: hidden; color: #dcecff; background: radial-gradient(circle at 38% 48%, rgba(18,55,92,.36), transparent 34%), linear-gradient(135deg, rgba(2,6,14,.96), rgba(4,11,25,.9)); }
