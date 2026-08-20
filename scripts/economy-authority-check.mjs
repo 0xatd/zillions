@@ -7,6 +7,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const schema = read('supabase/schema.sql');
 const vendor = read('src/vendor.js');
 const ui = read('src/ui.js');
+const main = read('src/main.js');
 
 for (const marker of ['game_characters', 'player_wallets', 'item_instances', 'economy_requests', 'economy_audit_events', 'economy_mutate']) {
   assert.match(schema, new RegExp(marker), `${marker} is missing from the authority schema`);
@@ -29,6 +30,14 @@ assert.match(ui, /onMarketBuy/, 'signed-in market buys must cross the server cal
 assert.match(ui, /onMarketSell/, 'signed-in market sales must cross the server callback');
 assert.match(ui, /onAuthorityEquip/, 'signed-in equip must cross the server callback');
 assert.match(ui, /onAuthorityUnequip/, 'signed-in unequip must cross the server callback');
+assert.match(main, /_craftMutation\(character, \(current\) => buyCraftMaterial\(current, materialId\)\)/,
+  'craft material mutations must use the current profile character');
+assert.match(main, /_craftMutation\(character, \(current\) => buyCraftComponent\(current, componentId\)\)/,
+  'component mutations must use the current profile character');
+assert.match(main, /_craftMutation\(character, \(current\) => craftAuthoritative\(current, action, itemId, revision, details\)\)/,
+  'craft item mutations must use the current profile character');
+assert.match(main, /const result = await mutation\(character\)/,
+  'craft mutations must receive the character re-resolved after auth synchronization');
 assert.doesNotMatch(read('api/economy.js'), /body\.characterLevel/, 'vendor level must not come from the browser');
 
 let offlineCalls = 0;

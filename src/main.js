@@ -202,9 +202,9 @@ class App {
       onAuthorityEquip: (character, itemIndex, slot) => this._authorityEquip(character, itemIndex, slot),
       onAuthorityUnequip: (character, slot) => this._authorityUnequip(character, slot),
       onAuthoritySync: (character) => this._ensureAuthoritativeEconomy(character),
-      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, () => buyCraftMaterial(character, materialId)),
-      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, () => buyCraftComponent(character, componentId)),
-      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, () => craftAuthoritative(character, action, itemId, revision, details)),
+      onCraftBuyMaterial: (character, materialId) => this._craftMutation(character, (current) => buyCraftMaterial(current, materialId)),
+      onCraftBuyComponent: (character, componentId) => this._craftMutation(character, (current) => buyCraftComponent(current, componentId)),
+      onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, (current) => craftAuthoritative(current, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
@@ -1709,7 +1709,7 @@ class App {
     if (!this.auth?.isSignedIn()) throw new Error('sign_in_required');
     await this._ensureAuthoritativeEconomy(character);
     character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
-    const result = await mutation();
+    const result = await mutation(character);
     if (result?.ok) { applyEconomySnapshotToProfile(this.profile, character, result); this._saveProfile(); }
     return result;
   }
