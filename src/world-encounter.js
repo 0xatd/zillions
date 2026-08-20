@@ -78,6 +78,43 @@ export function getPursuerOptions(context = {}) {
   return Object.freeze(options.filter((entry) => entry.available));
 }
 
+// Resolves only the strategic contact. `battle` means PR 7 must create and
+// resolve the tactical engagement; this function never invents casualties.
+export function resolveEncounterDecision(context = {}, caughtChoice, pursuerChoice) {
+  const caughtOptions = new Set(getCaughtForceOptions(context).map(({ id }) => id));
+  if (!caughtOptions.has(caughtChoice)) throw new Error('unavailable_caught_choice');
+  const responseContext = {
+    ...context,
+    parleyOffered: caughtChoice === 'parley',
+    surrenderOffered: caughtChoice === 'surrender',
+    rearguardCommitted: caughtChoice === 'rearguard',
+  };
+  const pursuerOptions = new Set(getPursuerOptions(responseContext).map(({ id }) => id));
+  if (!pursuerOptions.has(pursuerChoice)) throw new Error('unavailable_pursuer_choice');
+
+  const pursuit = evaluatePursuit(context);
+  const roll = seededUnit(`${context.seed || 'encounter'}:${caughtChoice}:${pursuerChoice}`) * 100;
+  let outcome = 'battle';
+  const effects = {};
+  if (pursuerChoice === 'disengage' || pursuerChoice === 'grant-safe-passage') outcome = 'escaped';
+  else if (caughtChoice === 'surrender' && ['demand-surrender', 'take-prisoners-and-release'].includes(pursuerChoice)) outcome = 'surrendered';
+  else if (caughtChoice === 'parley' && pursuerChoice === 'accept-payment') outcome = 'negotiated';
+  else if (caughtChoice === 'escape') outcome = roll < pursuit.escapeChance ? 'escaped' : 'battle';
+  else if (caughtChoice === 'diversion') {
+    const chance = clamp(pursuit.escapeChance + terrainRules(context.terrain).concealment + 12, 5, 95);
+    outcome = roll < chance ? 'escaped' : 'battle'; effects.cargoSacrificed = true;
+  } else if (caughtChoice === 'rearguard') {
+    const estimate = rearguardEstimate(context.caught, context.pursuer, context.terrain, context.rearguardFraction);
+    Object.assign(effects, estimate);
+    outcome = pursuerChoice === 'pursue-main-force' ? 'battle' : 'rearguard-engaged';
+  } else if (caughtChoice === 'scatter') {
+    const chance = clamp(pursuit.escapeChance + terrainRules(context.terrain).concealment - 10, 5, 90);
+    outcome = roll < chance ? 'scattered' : 'battle'; effects.cohesionLoss = 25;
+  } else if (caughtChoice === 'call-allies') outcome = 'awaiting-allies';
+  else if (caughtChoice === 'fortify') { outcome = 'battle'; effects.defenseBonus = terrainRules(context.terrain).defense; }
+  return Object.freeze({ outcome, caughtChoice, pursuerChoice, roll: round(roll), pursuit, effects: Object.freeze(effects), tacticalPending: outcome === 'battle' || outcome === 'rearguard-engaged' });
+}
+
 export function rearguardEstimate(caught = {}, pursuer = {}, terrain = 'plains', fraction = 0.25) {
   const committed = clamp(Math.ceil(armyMass(caught) * clamp(fraction, 0.1, 0.6)), 1, armyMass(caught) - 1);
   const delay = Math.max(1, Math.round(committed / Math.max(1, armyMass(pursuer)) * 30 + terrainRules(terrain).defense / 4));
