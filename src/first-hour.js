@@ -9,9 +9,11 @@ export function firstHourStep(character) {
   if (!(character.items || []).length && !equipped) return 'market';
   if (!equipped) return 'equip';
   const instances = [...(character.itemInstances || []), ...Object.values(character.equipmentItemInstances || {})];
-  const forged = instances.some((item) => (item?.sockets || []).length > 0)
-    || (character.craftingComponents || []).length > 0
-    || Object.values(character.craftingMaterials || {}).some((count) => Number(count) > 0);
+  // Supplies are only inputs. Completion requires an authority-owned item
+  // snapshot that records actual work on the item. A loose material or
+  // component must never let the guide claim the item was tuned.
+  const forged = instances.some((item) => (item?.sockets || []).some((socket) =>
+    socket && (socket.color || socket.type || socket.component)));
   return forged ? 'mission' : 'forge';
 }
 

@@ -116,6 +116,35 @@ try {
   })()`), true, 'new account must create a character, return to Character Select, and enter Earth');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
+    const character = app.profile.mmoCharacters[0];
+    character.firstHourGuideDismissed = false;
+    character.items = [];
+    character.equipment = {};
+    app.ui.setProfile(app.profile);
+    app.ui._showScreen('main');
+    const guide = document.querySelector('#first-hour-guide');
+    const action = guide.querySelector('[data-guide-action]');
+    const skip = guide.querySelector('[data-guide-skip]');
+    const wired = !guide.classList.contains('hidden') && action?.textContent === 'OPEN MARKET' && !!skip;
+    action.click();
+    const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
+      && document.querySelector('#sheet-tab-shop').classList.contains('sel');
+    let dirtied = 0;
+    const originalDirty = app.ui.cb.onProfileDirty;
+    app.ui.cb.onProfileDirty = () => { dirtied++; };
+    app.ui._showScreen('main');
+    app.ui.setProfile(app.profile);
+    document.querySelector('#first-hour-guide [data-guide-skip]').click();
+    const skipped = character.firstHourGuideDismissed === true
+      && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
+    character.firstHourGuideDismissed = false;
+    app.ui.setProfile(app.profile);
+    app.ui.cb.onProfileDirty = originalDirty;
+    app.ui.hideOverlay();
+    return wired && routed && skipped;
+  })()`), true, 'first-deployment guide CTA must route to Market and its per-character skip must persist through profile dirty wiring');
+  assert.equal(await evaluate(`(() => {
+    const app = window.__app;
     let customOpened = 0;
     app.ui.cb.onCustomOpen = () => { customOpened++; };
     const custom = document.querySelector('#ow-custom-quick');
