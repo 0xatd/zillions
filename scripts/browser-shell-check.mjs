@@ -34,7 +34,7 @@ const profile = await mkdtemp(join(tmpdir(), 'zillions-browser-'));
 const browser = spawn(chrome, [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
-  '--window-size=1440,900',
+  '--window-size=1440,1000',
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, `http://127.0.0.1:${serverPort}/`,
 ], { stdio: 'ignore' });
 
@@ -79,6 +79,9 @@ try {
     socket.send(JSON.stringify({ id: requestId, method, params }));
   });
   socket.send(JSON.stringify({ id: ++id, method: 'Runtime.enable' }));
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false,
+  });
   let appReady = false;
   for (let i = 0; i < 40 && !appReady; i++) {
     appReady = !!(await evaluate('!!window.__app'));
@@ -181,6 +184,25 @@ try {
       && document.querySelector('#screen-setup').classList.contains('room-host');
     return guestLocked && guestState && hostEditable;
   })()`), true, 'Staging lobby must expose four seats, chat, guest-ready state, and host-only room controls');
+  assert.equal(await evaluate(`(() => {
+    const ui = window.__app.ui;
+    ui.showLocationBanner(
+      'OLD CROSSROADS',
+      'Open ground on every side. Everything can reach you — and you can reach everything.',
+      10000,
+    );
+    const banner = document.querySelector('#banner');
+    const title = banner.querySelector('.banner-title');
+    const detail = banner.querySelector('.banner-detail');
+    const titleBox = title?.getBoundingClientRect();
+    const detailBox = detail?.getBoundingClientRect();
+    const bannerBox = banner.getBoundingClientRect();
+    return window.innerWidth === 1440 && window.innerHeight === 1000
+      && !!titleBox && !!detailBox
+      && titleBox.bottom + 6 <= detailBox.top
+      && bannerBox.left >= 12 && bannerBox.right <= window.innerWidth - 12
+      && bannerBox.bottom <= window.innerHeight - 12;
+  })()`), true, 'mission location title and description must remain separate, legible lines at 1440x1000');
   if (process.env.ZILLIONS_VISUAL_QA_DIR) {
     const capture = async (name, race, parts, equipment = {}) => {
       await evaluate(`(() => {

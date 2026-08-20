@@ -1255,8 +1255,12 @@ class App {
       // The survey is the authoritative claim about this ground, so drop the
       // generic "open on every side" flavour when the wall line says otherwise.
       const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
-      this.ui.showBanner(`🏳️ ${s.name || `Site ${i + 1}`} — ${hint}${wall}`,
-        `A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`, 5600);
+      const siteName = s.name || `Site ${i + 1}`;
+      this.ui.showLocationBanner(
+        `🏳️ ${siteName}`,
+        `${hint}${wall} A ${survey.plan.label} would stand here · ${keyLabel(this.binds().build)} to found the city`,
+        5600,
+      );
     });
   }
 
