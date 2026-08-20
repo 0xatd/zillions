@@ -117,31 +117,46 @@ try {
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
-    character.firstHourGuideDismissed = false;
-    character.items = [];
-    character.equipment = {};
-    app.ui.setProfile(app.profile);
-    app.ui._showScreen('main');
-    const guide = document.querySelector('#first-hour-guide');
-    const action = guide.querySelector('[data-guide-action]');
-    const skip = guide.querySelector('[data-guide-skip]');
-    const wired = !guide.classList.contains('hidden') && action?.textContent === 'OPEN MARKET' && !!skip;
-    action.click();
-    const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
-      && document.querySelector('#sheet-tab-shop').classList.contains('sel');
-    let dirtied = 0;
     const originalDirty = app.ui.cb.onProfileDirty;
-    app.ui.cb.onProfileDirty = () => { dirtied++; };
-    app.ui._showScreen('main');
-    app.ui.setProfile(app.profile);
-    document.querySelector('#first-hour-guide [data-guide-skip]').click();
-    const skipped = character.firstHourGuideDismissed === true
-      && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
-    character.firstHourGuideDismissed = false;
-    app.ui.setProfile(app.profile);
-    app.ui.cb.onProfileDirty = originalDirty;
-    app.ui.hideOverlay();
-    return wired && routed && skipped;
+    const original = {
+      items: structuredClone(character.items),
+      equipment: structuredClone(character.equipment),
+      hadDismissal: Object.prototype.hasOwnProperty.call(character, 'firstHourGuideDismissed'),
+      dismissal: character.firstHourGuideDismissed,
+    };
+    let result = false;
+    try {
+      character.firstHourGuideDismissed = false;
+      character.items = [];
+      character.equipment = {};
+      app.ui.setProfile(app.profile);
+      app.ui._showScreen('main');
+      const guide = document.querySelector('#first-hour-guide');
+      const action = guide.querySelector('[data-guide-action]');
+      const skip = guide.querySelector('[data-guide-skip]');
+      const wired = !guide.classList.contains('hidden') && action?.textContent === 'OPEN MARKET' && !!skip;
+      action.click();
+      const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
+        && document.querySelector('#sheet-tab-shop').classList.contains('sel');
+      let dirtied = 0;
+      app.ui.cb.onProfileDirty = () => { dirtied++; };
+      app.ui._showScreen('main');
+      app.ui.setProfile(app.profile);
+      document.querySelector('#first-hour-guide [data-guide-skip]').click();
+      const skipped = character.firstHourGuideDismissed === true
+        && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
+      result = wired && routed && skipped;
+    } finally {
+      app.ui.cb.onProfileDirty = originalDirty;
+      character.items = original.items;
+      character.equipment = original.equipment;
+      if (original.hadDismissal) character.firstHourGuideDismissed = original.dismissal;
+      else delete character.firstHourGuideDismissed;
+      app.ui.setProfile(app.profile);
+      if (!original.hadDismissal) delete character.firstHourGuideDismissed;
+      app.ui.hideOverlay();
+    }
+    return result;
   })()`), true, 'first-deployment guide CTA must route to Market and its per-character skip must persist through profile dirty wiring');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
