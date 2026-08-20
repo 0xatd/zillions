@@ -29,6 +29,28 @@ create table public.world_faction_region_states (
   primary key (region_id,faction_id)
 );
 
+-- Single-column foreign keys prove that each row exists, but they do not prove
+-- that the faction and target belong to this region's planet. Keep that
+-- ownership boundary enforced for every writer, including service jobs.
+create function public.enforce_world_faction_region_state_scope()
+returns trigger language plpgsql set search_path=public,pg_temp as $$
+begin
+  if not exists (
+    select 1 from public.world_provinces p
+    join public.world_factions f on f.id=new.faction_id and f.planet_id=p.planet_id
+    where p.id=new.region_id
+  ) then raise exception 'faction_region_scope_mismatch'; end if;
+  if new.target_location_id is not null and not exists (
+    select 1 from public.world_locations l
+    where l.id=new.target_location_id and l.province_id=new.region_id
+  ) then raise exception 'target_region_scope_mismatch'; end if;
+  return new;
+end $$;
+create trigger world_faction_region_states_scope
+before insert or update of region_id,faction_id,target_location_id
+on public.world_faction_region_states for each row
+execute function public.enforce_world_faction_region_state_scope();
+
 alter table public.world_faction_region_states enable row level security;
 
 create or replace function public.living_world_process_region(
@@ -86,13 +108,24 @@ begin
   for v_party in
     select p.* from public.world_parties p
     where p.region_id=p_region and p.owner_user_id is null
+      and p.owner_faction_id is not null
+      and exists (
+        select 1 from public.world_factions f
+        join public.world_provinces owned_region on owned_region.id=p.region_id
+        where f.id=p.owner_faction_id and f.planet_id=owned_region.planet_id
+      )
       and p.kind in ('ai','caravan','patrol','garrison')
       and p.stance<>'engaged'
-    order by p.id limit p_max_actions for update
+    -- Rotate the bounded work set by authoritative tick. A fixed ID prefix
+    -- would starve every army after p_max_actions in a large region.
+    order by mod(mod(hashtextextended(p.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),p.id
+    limit p_max_actions for update
   loop
     -- Stable UUID hashing plus the authoritative tick produces the same goal
     -- for the same state and command log. Wall time and entropy calls are forbidden.
-    v_slot:=mod(abs(hashtextextended(v_party.id::text,0)+v_state.simulation_tick),7)::integer;
+    -- Hash the complete input instead of adding two bigints. Addition and
+    -- abs(min_bigint) can overflow even though the choice only needs 7 slots.
+    v_slot:=mod(mod(hashtextextended(v_party.id::text||':'||v_state.simulation_tick::text,0),7)+7,7)::integer;
     v_goal:=(array['patrol','trade','raid','reinforce','pursue','defend','siege_prepare'])[v_slot+1];
     if v_party.kind='caravan' then v_goal:='trade';
     elsif v_party.kind='patrol' and v_slot in (1,3,5) then v_goal:='patrol';
@@ -106,7 +139,7 @@ begin
       select r.* into v_route from public.world_routes r
       where r.origin_region_id=p_region and r.destination_region_id=p_region
         and r.origin_id=v_party.location_id
-      order by mod(abs(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0)),2147483647),r.id
+      order by mod(mod(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),r.id
       limit 1;
       if found then v_target:=v_route.destination_id; end if;
     end if;
