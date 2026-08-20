@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { resolveAutosimRound } from './world-encounter.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OUTCOMES = new Set(['attacker_victory', 'defender_victory', 'retreat', 'surrender', 'draw']);
@@ -60,4 +61,54 @@ export function validateBattleResult(value) {
   for (const row of value.retreatRoutes) if (!row || !UUID.test(row.partyId) || !UUID.test(row.routeId)) throw new Error('invalid_retreat_routes');
   if (!/^[a-f0-9]{32,128}$/i.test(String(value.stateHash || '')) || !Number.isInteger(value.completedTick) || value.completedTick < 0) throw new Error('invalid_battle_result');
   return value;
+}
+
+const numeric = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
+  const snapshot = assignment?.force_snapshot;
+  if (!snapshot || !UUID.test(snapshot.attackerPartyId) || !UUID.test(snapshot.defenderPartyId)) throw new Error('invalid_force_snapshot');
+  if (snapshot.engagementMode !== 'autosim') throw new Error('autosim_not_available');
+  const armies = new Map((snapshot.armies || []).map((army) => [army.id, army]));
+  const stacksByParty = new Map([[snapshot.attackerPartyId, []], [snapshot.defenderPartyId, []]]);
+  for (const stack of snapshot.stacks || []) {
+    const partyId = armies.get(stack.army_id)?.party_id;
+    if (stacksByParty.has(partyId)) stacksByParty.get(partyId).push(stack);
+  }
+  const makeForce = (partyId) => {
+    const stacks = stacksByParty.get(partyId) || [];
+    const troops = stacks.reduce((sum, stack) => sum + Math.max(0, numeric(stack.healthy)), 0);
+    const weightedTier = stacks.reduce((sum, stack) => sum + numeric(stack.healthy) * numeric(stack.tier, 1), 0);
+    const party = (snapshot.parties || []).find((row) => row.id === partyId) || {};
+    return { troops, initialTroops: troops, morale: numeric(party.morale, 50), quality: troops ? weightedTier / troops : 1, supplies: 50, fatigue: numeric(party.fatigue) };
+  };
+  const attacker = makeForce(snapshot.attackerPartyId), defender = makeForce(snapshot.defenderPartyId);
+  if (attacker.troops < 1 || defender.troops < 1) throw new Error('empty_battle_force');
+  const rounds = [];
+  for (let round = 1; round <= maxRounds && attacker.troops > 0 && defender.troops > 0 && attacker.morale > 5 && defender.morale > 5; round++) {
+    const resolved = resolveAutosimRound({ engagementId: snapshot.engagementId, round, seed: snapshot.seed, attacker, defender, terrain: snapshot.terrain?.kind || snapshot.terrain?.type || 'plains' });
+    attacker.troops = Math.max(0, attacker.troops - resolved.attackerLosses);
+    defender.troops = Math.max(0, defender.troops - resolved.defenderLosses);
+    attacker.morale = Math.max(0, attacker.morale + resolved.attackerMoraleDelta);
+    defender.morale = Math.max(0, defender.morale + resolved.defenderMoraleDelta);
+    rounds.push(resolved);
+  }
+  const attackerWon = defender.troops === 0 || defender.morale <= 5 || (attacker.troops > defender.troops && rounds.length === maxRounds);
+  const defenderWon = attacker.troops === 0 || attacker.morale <= 5 || (defender.troops > attacker.troops && rounds.length === maxRounds);
+  const winnerPartyId = attackerWon === defenderWon ? null : attackerWon ? snapshot.attackerPartyId : snapshot.defenderPartyId;
+  const outcome = winnerPartyId === snapshot.attackerPartyId ? 'attacker_victory' : winnerPartyId === snapshot.defenderPartyId ? 'defender_victory' : 'draw';
+  const casualties = [];
+  for (const [partyId, finalForce] of [[snapshot.attackerPartyId, attacker], [snapshot.defenderPartyId, defender]]) {
+    let remainingLoss = finalForce.initialTroops - finalForce.troops;
+    const stacks = [...(stacksByParty.get(partyId) || [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    for (let index = 0; index < stacks.length; index++) {
+      const healthy = Math.max(0, numeric(stacks[index].healthy));
+      const loss = index === stacks.length - 1 ? remainingLoss : Math.min(remainingLoss, Math.round((finalForce.initialTroops - finalForce.troops) * healthy / finalForce.initialTroops));
+      if (loss > 0) casualties.push({ stackId: stacks[index].id, killed: Math.max(0, Math.floor(loss * 0.8)), wounded: Math.max(0, loss - Math.floor(loss * 0.8)) });
+      remainingLoss -= loss;
+    }
+  }
+  const completedTick = Math.max(0, numeric(snapshot.startedTick)) + rounds.length;
+  const canonical = { engagementId: snapshot.engagementId, outcome, winnerPartyId, casualties, rounds, completedTick };
+  return validateBattleResult({ outcome, winnerPartyId, casualties, morale: { attacker: attacker.morale, defender: defender.morale }, cargoTransfers: [], prisoners: [], retreatRoutes: [], stateHash: createHash('sha256').update(JSON.stringify(canonical)).digest('hex'), completedTick });
 }

@@ -62,6 +62,47 @@ try {
   const rotmire = (await admin.query("select id from public.world_provinces where key='rotmire'")).rows[0];
   assert.ok(greenfall && ironwood);
 
+  // A resolved strategic encounter must create one tactical engagement. The
+  // assignment snapshot is immutable, and its result commits exactly once.
+  const locationId = (await admin.query('select id from public.world_locations where province_id=$1 order by id limit 1', [greenfall.id])).rows[0].id;
+  const defenderPartyId = '30000000-0000-4000-8000-000000000002';
+  const attackerArmyId = (await admin.query('select id from public.world_armies where party_id=$1', [firstEntry.partyId])).rows[0].id;
+  const defenderArmyId = '40000000-0000-4000-8000-000000000002';
+  const attackerStackId = '50000000-0000-4000-8000-000000000001';
+  const defenderStackId = '50000000-0000-4000-8000-000000000002';
+  await admin.query(`insert into public.world_parties(id,shard_id,region_id,owner_user_id,name,kind,location_id,morale)
+    values($1,'earth-1',$2,$3,'Rival Company','player',$4,60)`, [defenderPartyId, greenfall.id, otherUserId, locationId]);
+  await admin.query(`insert into public.world_armies(id,party_id,commander_user_id,combat_power)
+    values($1,$2,$3,45)`, [defenderArmyId, defenderPartyId, otherUserId]);
+  await admin.query(`insert into public.world_unit_stacks(id,army_id,unit_key,tier,healthy)
+    values($1,$2,'greenfall_guard',2,40),($3,$4,'rival_raider',1,35)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
+  const encounterId = '60000000-0000-4000-8000-000000000001';
+  await admin.query(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
+    values($1,'earth-1',$2,$3,0,'choosing','auto-command','auto-command','{"kind":"plains"}','{}')`, [encounterId, firstEntry.partyId, defenderPartyId]);
+  await admin.query("update public.world_encounters set state='battle',revision=revision+1 where id=$1", [encounterId]);
+  const engagement = (await admin.query('select id,mode,state from public.world_engagements where encounter_id=$1', [encounterId])).rows[0];
+  assert.equal(engagement.mode, 'autosim');
+  assert.equal(engagement.state, 'active');
+  const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
+  const assignment = (await admin.query("select public.living_world_issue_battle($1,$2,$3,'postgres-autosim') result", [userId, engagement.id, encounterRevision])).rows[0].result;
+  assert.equal(assignment.force_snapshot.attackerPartyId, firstEntry.partyId);
+  assert.equal(assignment.force_snapshot.defenderPartyId, defenderPartyId);
+  assert.equal(assignment.force_snapshot.engagementMode, 'autosim');
+  assert.equal(assignment.force_snapshot.startedTick, 0);
+  assert.equal(assignment.force_snapshot.stacks.length, 2);
+  const battleResult = { outcome: 'attacker_victory', winnerPartyId: firstEntry.partyId, casualties: [
+    { stackId: attackerStackId, killed: 1, wounded: 2 },
+    { stackId: defenderStackId, killed: 4, wounded: 3 },
+  ], morale: { attacker: 72, defender: 25 }, cargoTransfers: [], prisoners: [], retreatRoutes: [], stateHash: 'a'.repeat(64), completedTick: 4 };
+  const committed = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
+  assert.equal(committed.ok, true);
+  assert.equal(committed.duplicate, false);
+  const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
+  assert.equal(battleReplay.duplicate, true);
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy), 37);
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy), 28);
+  assert.equal((await admin.query('select state from public.world_encounters where id=$1', [encounterId])).rows[0].state, 'resolved');
+
   // Two independent connections racing for an unleased region serialize to one winner.
   const racerA = postgres.getPgClient();
   const racerB = postgres.getPgClient();
