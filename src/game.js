@@ -155,7 +155,7 @@ export class Game {
     this.stats = {
       kills: 0, built: 0, lost: 0, coins: 0, nests: 0, nodes: 0, bestHeld: 0,
       heroDeaths: 0, bossKillT: null, repaired: 0, spent: 0,
-      damageTaken: {}, lostByKind: {}, armyPeak: {},
+      damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {},
     };
 
     // heroKeys entries: 'scott' (fresh) or { k, camp: { level, xp, items, relics } }
@@ -228,6 +228,7 @@ export class Game {
       stats: {
         ...this.stats,
         damageTaken: { ...(this.stats.damageTaken || {}) },
+        builtByKind: { ...(this.stats.builtByKind || {}) },
         lostByKind: { ...(this.stats.lostByKind || {}) },
         armyPeak: { ...(this.stats.armyPeak || {}) },
       },
@@ -378,8 +379,9 @@ export class Game {
     });
     this.stats = {
       nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0,
-      spent: 0, damageTaken: {}, lostByKind: {}, armyPeak: {}, ...snap.stats,
+      spent: 0, damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {}, ...snap.stats,
       damageTaken: { ...(snap.stats?.damageTaken || {}) },
+      builtByKind: { ...(snap.stats?.builtByKind || {}) },
       lostByKind: { ...(snap.stats?.lostByKind || {}) },
       armyPeak: { ...(snap.stats?.armyPeak || {}) },
     };
@@ -1228,7 +1230,12 @@ export class Game {
     const def = this.tierDef(plot, nextTier);
     if (!def) return false;
     plot.tier = nextTier;
-    if (!free) this.stats.built++;
+    if (!free) {
+      // This counts completed construction purchases. A tier upgrade is a
+      // purchase of that plot kind; free setup and discounted rebuilds are not.
+      this.stats.built++;
+      this.stats.builtByKind[plot.kind] = (this.stats.builtByKind[plot.kind] || 0) + 1;
+    }
 
     if (plot.kind === 'wall') {
       // One building per rampart tile; the gate ARCH (every wall tile the

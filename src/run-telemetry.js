@@ -39,6 +39,7 @@ export function runTelemetry(game) {
     },
     structures: {
       built: finite(stats.built),
+      builtByKind: sortedEntries(stats.builtByKind),
       lost: finite(stats.lost),
       lostByKind: sortedEntries(stats.lostByKind),
     },
@@ -59,8 +60,8 @@ export function runTelemetry(game) {
 
 // Telemetry is diagnostic only. Blocked storage, quota errors, or malformed
 // old data must never stop a match from ending or a profile from saving.
-export function persistRunTelemetry(game, storage = globalThis.localStorage) {
-  const record = runTelemetry(game);
+export function persistRunTelemetry(game, storage = globalThis.localStorage, now = Date.now()) {
+  const record = { ...runTelemetry(game), capturedAt: new Date(now).toISOString() };
   if (!storage) return { saved: false, record };
   try {
     const existing = JSON.parse(storage.getItem(STORAGE_KEY) || '[]');
