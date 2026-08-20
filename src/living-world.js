@@ -6,8 +6,10 @@ export const WORLD_COMMANDS = Object.freeze([
 ]);
 
 export const ENCOUNTER_CHOICES = Object.freeze([
-  'fight', 'auto_command', 'surrender', 'attempt_escape',
-  'rearguard', 'diversion', 'negotiate',
+  'fight', 'auto-command', 'surrender', 'parley', 'escape',
+  'diversion', 'rearguard', 'fortify', 'call-allies', 'scatter',
+  // Accepted while queued commands from the foundation migration drain.
+  'auto_command', 'attempt_escape', 'negotiate',
 ]);
 
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;

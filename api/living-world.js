@@ -8,7 +8,7 @@ const FORBIDDEN_IDENTITY_KEYS = new Set(['actor', 'actorId', 'actor_id', 'userId
 const COMMAND_KEYS = new Set(['type', 'requestId', 'shardId', 'partyId', 'expectedRevision', 'payload']);
 const PAYLOAD_KEYS = Object.freeze({
   issue_movement: ['routeId'], cancel_movement: ['movementOrderId'],
-  set_encounter_choice: ['encounterId', 'choice', 'rearguardStackIds', 'diversion'],
+  set_encounter_choice: ['encounterId', 'choice', 'decisionRevision', 'rearguardStackIds', 'diversion'],
   submit_battle_order: ['engagementId', 'round', 'order'], accept_surrender: ['encounterId', 'terms'],
   trade_market: ['locationId', 'commodityKey', 'side', 'quantity'],
 });
