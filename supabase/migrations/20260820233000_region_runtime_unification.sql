@@ -384,7 +384,7 @@ begin
   -- Contact is created before AI movement. Engaged parties are then excluded
   -- from faction travel until their encounter resolves.
   v_population:=public.reconcile_world_region_population(p_region,v_state.simulation_tick+1);
-  select coalesce(t.max_actions_per_region_tick,8) into v_action_budget
+  select least(t.max_actions_per_region_tick,greatest(4,(v_population->>'present')::integer)) into v_action_budget
     from public.world_population_targets t join public.world_provinces p on p.planet_id=t.planet_id where p.id=p_region;
   v_encounters:=public.create_world_region_encounters(p_region,v_state.simulation_tick+1,p_worker,p_lease_epoch);
   -- Resolve the prior authoritative intent before choosing a new route. This

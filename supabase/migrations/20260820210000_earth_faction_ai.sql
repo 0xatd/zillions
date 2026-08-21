@@ -63,7 +63,7 @@ declare
   v_route public.world_routes%rowtype;
   v_order public.world_movement_orders%rowtype;
   v_location public.world_locations%rowtype;
-  v_goal text; v_reason text; v_target uuid; v_slot integer; v_duration bigint;
+  v_goal text; v_reason text; v_target uuid; v_pursuit_target uuid; v_slot integer; v_duration bigint;
   v_processed integer:=0; v_sequence bigint; v_shard text;
 begin
   if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
@@ -137,18 +137,45 @@ begin
     elsif v_party.kind='garrison' then v_goal:=case when v_slot=6 then 'reinforce' else 'defend' end;
     end if;
 
+    v_pursuit_target:=null;
+    if v_goal='pursue' then
+      select coalesce(t.location_id,tr.destination_id) into v_pursuit_target
+      from public.world_pursuits po join public.world_parties t on t.id=po.target_party_id
+      left join public.world_routes tr on tr.id=t.route_id
+      where po.pursuer_party_id=v_party.id and po.state='active' order by po.started_tick desc limit 1;
+    end if;
+
     -- Pick an outgoing route deterministically. Direction stays authoritative;
     -- a reverse trip requires a reverse route record.
     v_route:=null; v_target:=null;
     if v_party.location_id is not null then
-      select r.* into v_route from public.world_routes r
-      where r.origin_region_id=p_region and r.origin_id=v_party.location_id
-        and r.control_state<>'blocked' and not coalesce((r.blockade_state->>'closed')::boolean,false)
-      order by mod(mod(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),r.id
-      limit 1;
+      if v_goal='pursue' and v_pursuit_target is not null then
+        with recursive chase(location_id,first_route,total_distance,visited,depth) as(
+          select r.destination_id,r.id,r.distance::numeric(20,3),array[r.origin_id,r.destination_id],1
+          from public.world_routes r where r.origin_id=v_party.location_id and r.control_state<>'blocked'
+            and not coalesce((r.blockade_state->>'closed')::boolean,false)
+          union all
+          select r.destination_id,c.first_route,(c.total_distance+r.distance)::numeric(20,3),c.visited||r.destination_id,c.depth+1
+          from chase c join public.world_routes r on r.origin_id=c.location_id
+          where c.depth<24 and not r.destination_id=any(c.visited) and r.control_state<>'blocked'
+            and not coalesce((r.blockade_state->>'closed')::boolean,false)
+        )
+        select r.* into v_route from chase c join public.world_routes r on r.id=c.first_route
+        where c.location_id=v_pursuit_target order by c.total_distance,c.first_route limit 1;
+      else
+        select r.* into v_route from public.world_routes r
+        where r.origin_region_id=p_region and r.origin_id=v_party.location_id
+          and r.control_state<>'blocked' and not coalesce((r.blockade_state->>'closed')::boolean,false)
+        order by mod(mod(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),r.id
+        limit 1;
+      end if;
       if found then v_target:=v_route.destination_id; end if;
     end if;
     select * into v_location from public.world_locations where id=coalesce(v_target,v_party.location_id);
+    if v_goal='pursue' and v_route.id is not null then
+      update public.world_pursuits set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('chaseRouteId',v_route.id,'targetLocationId',v_pursuit_target,'chaseTick',v_state.simulation_tick)
+        where pursuer_party_id=v_party.id and state='active';
+    end if;
 
     v_reason:=case v_goal
       when 'patrol' then 'Securing a known road and scouting nearby movement.'

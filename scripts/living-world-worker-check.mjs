@@ -26,5 +26,6 @@ assert.match(endpoint,/LIVING_WORLD_RUNTIME_ENABLED==='1'/,'production runtime m
 assert.match(endpoint,/status:'inactive'/,'a merged but inactive runtime must not touch the database');
 assert.match(endpoint,/Math\.min\(16[\s\S]*LIVING_WORLD_REGION_BATCH_SIZE/,'each invocation must process a bounded region batch');
 assert.match(endpoint,/p_lease_seconds:120/,'the minute worker must renew an overlapping lease so battle issuance has no dead interval');
+assert.match(endpoint,/record_world_region_runtime_health/,'workers must persist latency, errors, lag and backlog health after each region tick');
 assert.match(retirement,/living_world_region_runtime_batch[\s\S]*greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'bounded batches must prioritize regions that have waited longest, including failed attempts');
 console.log('living world worker check passed');

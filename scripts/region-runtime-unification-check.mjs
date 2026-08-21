@@ -26,7 +26,9 @@ const response=()=>({status:0,writeHead(status){this.status=status;},end(value){
 let touched=false;
 const inactive=createLivingWorldWorkerHandler({secret:'cron',regions:async()=>{touched=true;return[];}});
 let res=response();await inactive({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.status,'inactive');assert.equal(touched,false);
-const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'https://example.invalid',serviceKey:'test'},workerId:'qa-worker',regions:async(limit)=>{assert.equal(limit,8);return[{region_id:'region-a'}];},claim:async()=>({ok:true,leaseEpoch:4}),process:async(region,worker,epoch)=>({region,worker,epoch,tick:9})});
+let healthRecorded=false;
+const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'https://example.invalid',serviceKey:'test'},workerId:'qa-worker',regions:async(limit)=>{assert.equal(limit,8);return[{region_id:'region-a'}];},claim:async()=>({ok:true,leaseEpoch:4}),process:async(region,worker,epoch)=>({region,worker,epoch,tick:9,actionBudget:6,factions:{processed:5}}),record:async(region,tick,worker,epoch,duration,success)=>{assert.equal(region,'region-a');assert.equal(tick,9);assert.equal(worker,'qa-worker');assert.equal(epoch,4);assert.ok(duration>=0);assert.equal(success,true);healthRecorded=true;return{ok:true,thresholdBreached:false};}});
 res=response();await handler({method:'GET',headers:{authorization:'Bearer wrong'}},res);assert.equal(res.status,401);
 res=response();await handler({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.regions[0].result.tick,9);
+assert.equal(healthRecorded,true,'worker must persist runtime health after each region tick');
 console.log('region runtime unification checks passed');
