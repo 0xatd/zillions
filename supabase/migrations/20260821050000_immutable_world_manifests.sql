@@ -1,10 +1,12 @@
 -- Persist generated planet topology once. Campaign state changes elsewhere.
 begin;
+-- This fence protects the application service role. A database owner can alter
+-- or drop database objects and remains an explicit operational trust boundary.
 create table public.world_manifests (
   planet_id text primary key references public.world_planets(id) on delete restrict,
   schema_version text not null check (length(schema_version) between 1 and 64),
   generator_version integer not null check (generator_version > 0), seed bigint not null check (seed >= 0),
-  content_hash text not null unique check (content_hash ~ '^fnv64-[0-9a-f]{16}$'),
+  content_hash text not null unique check (content_hash ~ '^zillions-fingerprint-v1-[0-9a-f]{16}$'),
   manifest jsonb not null check (jsonb_typeof(manifest) = 'object'),
   materialization_state text not null default 'pending' check (materialization_state in ('pending','materializing','ready','failed')),
   materialized_at timestamptz, created_at timestamptz not null default now(),
@@ -33,8 +35,15 @@ begin
   return new;
 end $$;
 create trigger world_manifests_immutable before update on public.world_manifests for each row execute function public.prevent_world_manifest_mutation();
+create or replace function public.prevent_world_manifest_delete() returns trigger language plpgsql set search_path=public,pg_temp as $$
+begin
+  raise exception 'immutable_world_manifest_delete_forbidden';
+end $$;
+create trigger world_manifests_no_delete before delete on public.world_manifests for each row execute function public.prevent_world_manifest_delete();
 alter table public.world_manifests enable row level security;
 revoke all on public.world_manifests from public,anon,authenticated;
+revoke all on public.world_manifests from service_role;
+revoke create on schema public from anon,authenticated,service_role;
 revoke all on function public.create_world_manifest_once(text,text,integer,bigint,text,jsonb) from public,anon,authenticated;
 grant execute on function public.create_world_manifest_once(text,text,integer,bigint,text,jsonb) to service_role;
 commit;

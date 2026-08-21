@@ -259,6 +259,10 @@ Static local play cannot change authoritative state.
 The planet seed creates topology one time. `world_manifests` stores the seed,
 generator version, content hash, and full canonical manifest. The database
 rejects a second manifest for the same planet unless every field is identical.
+Application roles cannot update, delete, truncate, or replace the stored row.
+The database owner remains an explicit operations trust boundary because an
+owner can alter or drop database objects. The manifest fingerprint detects
+accidental drift. It is not a cryptographic security boundary.
 
 Do not regenerate a live planet after a deployment. Store faction control,
 damage, construction, settlement growth, and other campaign history in the
