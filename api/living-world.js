@@ -83,7 +83,10 @@ export function filterProjection(snapshot, actorId, viewport = DEFAULT_VIEWPORT)
   const reportedPartyIds = new Set(reports.map((report) => report.subject_party_id).filter(Boolean));
   const reportedLocationIds = new Set(reports.map((report) => report.location_id).filter(Boolean));
   own.forEach((party) => { if (party.location_id) reportedLocationIds.add(party.location_id); });
-  const knownLocations = (snapshot.locations || []).filter((location) => factions.has(location.owner_faction_id) || reportedLocationIds.has(location.id));
+  const knownLocations = mergeById(
+    (snapshot.locations || []).filter((location) => factions.has(location.owner_faction_id) || reportedLocationIds.has(location.id)),
+    snapshot.positioningLocations || [],
+  );
   const locationsInViewport = knownLocations.filter((location) => pointInViewport(location.position, viewport));
   const initialLocationIds = new Set(locationsInViewport.map((location) => location.id));
   const armyByParty = new Map((snapshot.armies || []).map((army) => [army.party_id, army]));
@@ -185,7 +188,7 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
     restRows(config, 'world_parties', `select=${PARTY_SELECT}&shard_id=eq.${encoded}&owner_user_id=eq.${encodeURIComponent(actorId)}`, fetchImpl),
   ]);
   const planet = planets[0] || null;
-  if (!planet) return { shard: shards[0], planet: null, factions: [], manifest: null, regions: [], parties: ownParties, ownParties, locations: [], routes: [], markets: [], scoutingReports: [], armies: [], sieges: [], pursuits: [], supplies: [], cargo: [], caravans: [], raids: [], encounters: [], engagements: [], socialParty: null };
+  if (!planet) return { shard: shards[0], planet: null, factions: [], manifest: null, regions: [], parties: ownParties, ownParties, locations: [], positioningLocations: [], routes: [], markets: [], scoutingReports: [], armies: [], sieges: [], pursuits: [], supplies: [], cargo: [], caravans: [], raids: [], encounters: [], engagements: [], socialParty: null };
   const [factions, manifest] = await Promise.all([
     restRows(config, 'world_factions', `select=id,planet_id,name,kind,status,revision&planet_id=eq.${encodeURIComponent(planet.id)}`, fetchImpl),
     rpcJson(config, 'living_world_projection_manifest', { p_planet: planet.id }, fetchImpl),
@@ -232,7 +235,7 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
   const endpointLocations = missingEndpointIds.length ? await restRows(config, 'world_locations', `select=id,province_id,position,owner_faction_id&id=in.(${missingEndpointIds.join(',')})`, fetchImpl) : [];
   const locations = mergeById(initialLocations, endpointLocations);
   const engagements = encounters.length ? await restRows(config, 'world_engagements', `select=id,encounter_id,mode,state,current_round,started_tick,revision&encounter_id=in.${inIds(encounters)}&state=in.(active,retreat)`, fetchImpl) : [];
-  return { shard: shards[0], planet, factions, manifest, regions: provinces, parties, armies, sieges, pursuits, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations, routes, markets };
+  return { shard: shards[0], planet, factions, manifest, regions: provinces, parties, armies, sieges, pursuits, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations, positioningLocations: endpointLocations, routes, markets };
 }
 
 export function createLivingWorldHandler(deps = {}) {
