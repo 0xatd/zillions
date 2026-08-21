@@ -198,6 +198,7 @@ try {
   const engagement = (await admin.query('select id,mode,state from public.world_engagements where encounter_id=$1', [encounterId])).rows[0];
   assert.equal(engagement.mode, 'live_command');
   assert.equal(engagement.state, 'active');
+  await admin.query('update public.world_engagements set seed=$1 where id=$2', [991, engagement.id]);
   const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
   const expiredAssignment=(await admin.query("select public.living_world_issue_battle($1,$2,$3,'expired-proof') result",[userId,engagement.id,encounterRevision])).rows[0].result;
   await admin.query("update public.world_battle_assignments set expires_at=now()-interval '1 second' where id=$1",[expiredAssignment.id]);
