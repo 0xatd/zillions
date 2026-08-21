@@ -36,6 +36,9 @@ begin
   select * into v_enc from public.world_encounters where id=v_eng.encounter_id for update;
   if v_enc.revision<>p_encounter_revision or v_enc.state not in('battle','rearguard') then raise exception 'stale_encounter_revision'; end if;
   if not exists(select 1 from public.world_parties p where p.id in(v_enc.attacker_party_id,v_enc.defender_party_id) and p.owner_user_id=p_actor) then raise exception 'not_encounter_commander'; end if;
+  if v_eng.mode='live_command' and (select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id))>2000 then
+    raise exception 'battle_requires_autosim';
+  end if;
   select jsonb_build_object(
     'engagementId',v_eng.id,'engagementMode',v_eng.mode,'encounterId',v_enc.id,'encounterRevision',v_enc.revision,'seed',v_eng.seed,'startedTick',v_eng.started_tick,'terrain',v_enc.terrain,
     'attackerPartyId',v_enc.attacker_party_id,'defenderPartyId',v_enc.defender_party_id,

@@ -629,6 +629,7 @@ export class Game {
     const playerStacks=stacks.filter((stack)=>armyParty.get(stack.army_id)===playerParty.id);
     const enemyStacks=stacks.filter((stack)=>armyParty.get(stack.army_id)===opponentPartyId);
     if(!playerStacks.length||!enemyStacks.length)throw new Error('empty_living_world_battle_force');
+    if([...playerStacks,...enemyStacks].reduce((sum,stack)=>sum+(Number(stack.healthy)||0),0)>2000)throw new Error('living_world_battle_requires_autosim');
     this.mode='living_world_battle';this.phase='live';this.finalStand=false;this.firstSiege=null;
     this.nests=[];this.nodes=[];this.plots=[];this.buildings=[];this.coins=[];this.loot=[];this.zombies=[];
     this.units=this.heroes.filter((hero)=>!hero.dead);

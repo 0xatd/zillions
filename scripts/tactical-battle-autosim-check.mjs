@@ -21,9 +21,11 @@ const sql = readFileSync(new URL('../supabase/migrations/20260820223000_tactical
 const main=readFileSync(new URL('../src/main.js',import.meta.url),'utf8'),ui=readFileSync(new URL('../src/ui.js',import.meta.url),'utf8'),api=readFileSync(new URL('../api/living-world-battle.js',import.meta.url),'utf8');
 for (const marker of ['world_encounter_open_engagement','world_engagements','autosim','hybrid','attackerPartyId','defenderPartyId','on conflict(encounter_id) do nothing']) assert.ok(sql.includes(marker), `${marker} missing`);
 assert.match(sql, /after update of state on public\.world_encounters/);
+assert.match(sql,/v_eng\.mode='live_command'[\s\S]*sum\(s\.healthy\)[\s\S]*battle_requires_autosim/,'oversized live battles must be rejected before assignment issuance');
 assert.match(ui,/data-encounter="live"/,'active engagements must offer player command');
 assert.match(main,/action:'launch'[\s\S]*configureLivingWorldBattle|action:'launch'[\s\S]*startGame/,'the client must launch the signed persistent assignment');
 assert.match(main,/assignmentToken:battle\.token[\s\S]*replay/,'the client must return its deterministic command replay');
+assert.match(main,/this\._livingWorldBattle \? 'alexander'/,'browser and server replay must use the same clean tactical commander');
 assert.match(api,/verifyLivingWorldBattleReplay[\s\S]*living_world_commit_battle/,'the server must derive and commit the played result');
 
 const actor=randomUUID(),tactical={id:randomUUID(),requested_by:actor,force_snapshot:{...assignment.force_snapshot,engagementMode:'tactical',parties:[{id:attacker,owner_user_id:actor,morale:70,fatigue:4},{id:defender,owner_user_id:null,morale:65,fatigue:8}],stacks:[{id:randomUUID(),army_id:aa,unit_key:'freehold_spearman',healthy:8,tier:1},{id:randomUUID(),army_id:da,unit_key:'rotmire_raider',healthy:6,tier:1}]}};
@@ -32,4 +34,5 @@ game.configureLivingWorldBattle(tactical);let completedTick=0;while(!game.over&&
 assert.equal(game.over,true,'the exact assigned forces must resolve in the tactical simulation');
 const verified=verifyLivingWorldBattleReplay(tactical,{version:1,completedTick,commands:[]});
 assert.equal(verified.winnerPartyId,game.won?attacker:defender);assert.ok(verified.casualties.length>0);assert.match(verified.stateHash,/^[a-f0-9]{64}$/);
+assert.throws(()=>game.configureLivingWorldBattle({...tactical,force_snapshot:{...tactical.force_snapshot,stacks:tactical.force_snapshot.stacks.map((stack)=>({...stack,healthy:1200}))}}),/requires_autosim/);
 console.log('tactical battle launch and autosim checks passed');

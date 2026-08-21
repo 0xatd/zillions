@@ -24,6 +24,7 @@ create table public.world_api_rate_buckets (
   primary key(actor_user_id,scope,window_started_at)
 );
 alter table public.world_api_rate_buckets enable row level security;
+create index world_api_rate_buckets_window_idx on public.world_api_rate_buckets(window_started_at);
 
 create function public.consume_world_api_rate_limit(p_actor uuid,p_scope text,p_limit integer,p_window_seconds integer)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$

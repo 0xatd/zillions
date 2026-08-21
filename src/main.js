@@ -1242,7 +1242,7 @@ class App {
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : this._livingWorldBattle ? 'alexander' : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
     if(this._livingWorldBattle&&!snap)this.game.configureLivingWorldBattle(this._livingWorldBattle.assignment);
     this.slowFrameT = 0;
