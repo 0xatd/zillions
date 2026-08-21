@@ -37,7 +37,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
-import { clusterLivingWorldParties, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
+import { clusterLivingWorldParties, livingWorldReadyStatus, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -2281,9 +2281,10 @@ export class UI {
   }
 
   setLivingWorldMapStatus(mode, message = '') {
-    this._livingWorldStatus = { mode, message };
+    const resolved = mode === 'ready' && !message ? livingWorldReadyStatus(this._livingWorld) : message;
+    this._livingWorldStatus = { mode, message: resolved };
     const status = this.root.querySelector('#lw-map-status');
-    if (status) { status.dataset.state = mode; status.textContent = message; }
+    if (status) { status.dataset.state = mode; status.textContent = resolved; }
   }
 
   _partyAction() {
@@ -2371,8 +2372,7 @@ export class UI {
       ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
     ].join('');
     const status = this.root.querySelector('#lw-map-status');
-    const truncatedCount = Object.values(state.viewport?.truncated || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
-    const normalStatus = truncatedCount ? `Dense front: ${truncatedCount} more objects; zoom in for detail.` : `${state.parties.length} visible parties · ${state.settlements.length} known settlements`;
+    const normalStatus = livingWorldReadyStatus(state);
     status.dataset.state = this._livingWorldStatus.mode;
     status.textContent = this._livingWorldStatus.message || normalStatus;
     this._applyLivingWorldView();

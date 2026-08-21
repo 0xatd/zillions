@@ -35,6 +35,10 @@ export function clusterLivingWorldParties(parties = [], zoom = 1) {
 }
 
 export const livingWorldRouteLine = (route) => `<line x1="${Number(route.from?.[0]) || 0}" y1="${Number(route.from?.[1]) || 0}" x2="${Number(route.to?.[0]) || 0}" y2="${Number(route.to?.[1]) || 0}" class="${route.state === 'contested' ? 'contested' : 'safe'}" marker-end="url(#lw-route-arrow)"/>`;
+export function livingWorldReadyStatus(state = {}) {
+  const truncated = Object.values(state.viewport?.truncated || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  return truncated ? `Dense front: ${truncated} more objects; zoom in for detail.` : `${state.parties?.length || 0} visible parties · ${state.settlements?.length || 0} known settlements`;
+}
 
 export const normalizeLivingWorld = (value = {}) => {
   const fallback = EMPTY_WORLD;

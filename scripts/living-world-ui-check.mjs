@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { clusterLivingWorldParties, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from '../src/living-world-ui.js';
+import { clusterLivingWorldParties, livingWorldReadyStatus, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from '../src/living-world-ui.js';
 
 const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
@@ -41,4 +41,6 @@ assert.match(livingWorldRouteLine({ from: [1, 2], to: [3, 4], state: 'contested'
 assert.ok(state.hotspots.length === 0, 'hotspots default to authoritative emptiness');
 const hotspotState = normalizeLivingWorld({ hotspots: [{ id: 'pursuit:x', type: 'pursuit', x: 14, y: 18 }] });
 assert.equal(hotspotState.hotspots[0].type, 'pursuit', 'pursuit/raid/battle hotspots survive normalization');
+assert.equal(livingWorldReadyStatus(state), 'Dense front: 12 more objects; zoom in for detail.', 'successful refresh preserves the dense-front status');
+assert.equal(livingWorldReadyStatus({ parties: [{}, {}], settlements: [{}], viewport: { truncated: {} } }), '2 visible parties · 1 known settlements', 'successful normal refresh preserves object counts');
 console.log('living-world-ui-check: party, map, travel, missions and authority hooks ✓');
