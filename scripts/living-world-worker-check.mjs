@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const sql = readFileSync(new URL('../supabase/migrations/20260820190000_living_world_worker.sql', import.meta.url), 'utf8');
+const retirement = readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql', import.meta.url), 'utf8');
 for (const marker of ['world_worker_leases','world_battle_orders','living_world_process_shard','command.queued','command.applied','issue_movement','cancel_movement','set_encounter_choice','submit_battle_order','accept_surrender','trade_market'])
   assert.match(sql, new RegExp(marker), `${marker} missing from worker migration`);
 assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\('world-shard:'\|\|p_shard/, 'worker must take the shared shard lock');
@@ -18,4 +19,6 @@ assert.match(sql, /unsupported_surrender_terms/, 'unimplemented surrender transf
 assert.doesNotMatch(sql, /'sqlstate',sqlstate/, 'actor-readable responses must not expose database details');
 assert.doesNotMatch(sql, /random\s*\(/i, 'worker state changes must not depend on database RNG');
 assert.doesNotMatch(sql, /extract\s*\(epoch/i, 'world progress must not depend on wall-clock deltas');
+assert.match(retirement,/shard_worker_retired/,'the compatibility worker must be retired after region migration');
+assert.match(retirement,/revoke all on function public\.living_world_process_shard[\s\S]*service_role/,'service role must not invoke legacy shard ticks');
 console.log('living world worker check passed');

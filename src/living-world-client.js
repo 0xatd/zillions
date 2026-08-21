@@ -1,5 +1,9 @@
 const API = '/api/living-world';
 const PARTY_API = '/api/living-world-party';
+const ENTRY_API = '/api/living-world-entry';
+const COMPANY_API = '/api/living-world-company';
+const BATTLE_API = '/api/living-world-battle';
+const GOVERNANCE_API = '/api/living-world-governance';
 let session = null;
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
@@ -31,6 +35,48 @@ export async function sendLivingWorldPartyCommand(command) {
   if (!response.ok) throw Object.assign(new Error(result?.error || 'party_command_failed'), { status: response.status, result });
   return result;
 }
+export async function enterLivingWorld(characterId) {
+  if (!session?.access_token) return null;
+  const response = await fetch(ENTRY_API, { method: 'POST', headers: headers({ accept: 'application/json', 'content-type': 'application/json' }), body: JSON.stringify({ characterId }) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'world_entry_failed'), { status: response.status, result });
+  return result;
+}
+export async function getLivingWorldCompany() {
+  if (!session?.access_token) return null;
+  const response = await fetch(COMPANY_API, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'company_projection_failed'), { status: response.status, result });
+  return result.company;
+}
+export async function sendLivingWorldCompanyCommand(command) {
+  if (!session?.access_token) return null;
+  const response = await fetch(COMPANY_API, { method: 'POST', headers: headers({ accept: 'application/json', 'content-type': 'application/json' }), body: JSON.stringify(command) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'company_command_failed'), { status: response.status, result });
+  return result;
+}
+export async function sendLivingWorldBattleAction(action) {
+  if (!session?.access_token) return null;
+  const response = await fetch(BATTLE_API, { method: 'POST', headers: headers({ accept: 'application/json', 'content-type': 'application/json' }), body: JSON.stringify(action) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'battle_action_failed'), { status: response.status, result });
+  return result;
+}
+export async function getLivingWorldGovernance() {
+  if (!session?.access_token) return null;
+  const response = await fetch(GOVERNANCE_API, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'governance_projection_failed'), { status: response.status, result });
+  return result;
+}
+export async function sendLivingWorldGovernanceCommand(command) {
+  if (!session?.access_token) return null;
+  const response = await fetch(GOVERNANCE_API, { method: 'POST', headers: headers({ accept: 'application/json', 'content-type': 'application/json' }), body: JSON.stringify(command) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'governance_command_failed'), { status: response.status, result });
+  return result;
+}
 
 const point = (position = {}) => [Number(position.x) || 0, Number(position.y ?? position.z) || 0];
 const factionOwner = (party, ownIds, ownFactions) => ownIds.has(party.id) ? 'free'
@@ -39,7 +85,7 @@ const factionOwner = (party, ownIds, ownFactions) => ownIds.has(party.id) ? 'fre
 
 // Convert the filtered server projection into the UI contract. This function
 // never invents world state. Missing authority data remains missing.
-export function livingWorldProjectionToUi(projection = {}, self = {}, socialParty = null) {
+export function livingWorldProjectionToUi(projection = {}, self = {}, socialParty = null, company = null, governance = null) {
   const locations = projection.locations || [];
   const byLocation = new Map(locations.map((location) => [location.id, location]));
   const own = projection.ownParties || [];
@@ -134,7 +180,18 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       const [x, y] = partyPosition(party);
       return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.intelligence?.estimate || 0), x, y, intent: party.stance || 'Unknown' };
     }),
-    missions: [],
+    missions: locations.filter((location) => Number(location.services?.missionLevel) > 0).map((location) => {
+      const [x, y] = point(location.position); return { id: `mission:${location.id}`, locationId: location.id,
+        name: location.services.missionName || location.name, levelId: Number(location.services.missionLevel),
+        difficulty: 'Choose at deployment', known: true, unlocked: true, x, y,
+        blurb: 'Deploy from the living-world map without walking to the battlefield gate.' };
+    }),
+    company,
+    encounters: (projection.encounters || []).map((encounter) => ({
+      ...encounter, engagement: (projection.engagements || []).find((entry) => entry.encounter_id === encounter.id) || null,
+      ownSide: ownIds.has(encounter.attacker_party_id) ? 'attacker' : 'defender',
+    })),
+    governance,
     markets: projection.markets || [],
     logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,

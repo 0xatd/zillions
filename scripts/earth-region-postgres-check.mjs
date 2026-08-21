@@ -128,6 +128,7 @@ try {
   assert.equal(engagement.mode, 'autosim');
   assert.equal(engagement.state, 'active');
   const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
+  await admin.query("select public.claim_world_region_lease($1,'worker-a',300)", [greenfall.id]);
   const assignment = (await admin.query("select public.living_world_issue_battle($1,$2,$3,'postgres-autosim') result", [userId, engagement.id, encounterRevision])).rows[0].result;
   assert.equal(assignment.force_snapshot.attackerPartyId, firstEntry.partyId);
   assert.equal(assignment.force_snapshot.defenderPartyId, defenderPartyId);
@@ -251,6 +252,7 @@ try {
   const permission = (await admin.query("select public.living_world_governance_command($1,'holding-permission-1',$2,$3,'set_holding_permission',jsonb_build_object('holdingId',$4::text,'userId',$5::text,'permission','garrison','enabled',true)) result", [userId, firstEntry.partyId, partyAfterSiege.revision, holdingId, otherUserId])).rows[0].result;
   assert.equal(permission.ok, true);
   assert.equal(Number((await admin.query("select count(*) count from public.world_holding_permissions where holding_id=$1 and user_id=$2 and permission='garrison'", [holdingId, otherUserId])).rows[0].count), 1);
+
   // Logistics ticks are lease-fenced and replay-safe. A retry cannot consume
   // supplies or reprice markets twice.
   await admin.query('update public.world_region_states set simulation_tick=1 where region_id=$1', [ironwood.id]);
@@ -269,6 +271,15 @@ try {
   assert.ok(foodAfter <= foodBefore);
   await expectError(admin.query("select public.process_world_region_logistics($1,2,'worker-e',$2)", [ironwood.id, destinationTakeover.leaseEpoch]), 'future_logistics_tick');
   await expectError(admin.query("select public.process_world_region_logistics($1,1,'worker-d',$2)", [ironwood.id, destinationLease.leaseEpoch]), 'region_lease_required');
+
+  // The combined release has one authority path. The region runtime advances
+  // faction and logistics state under the same lease; shard mutation is gone.
+  const runtime = (await admin.query("select public.process_world_region_runtime($1,'worker-e',$2,100) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(runtime.ok, true);
+  assert.equal(runtime.regionId, ironwood.id);
+  assert.ok(Number(runtime.tick) >= 2);
+  assert.equal(Number((await admin.query('select count(*) count from public.world_region_runtime_ticks where region_id=$1 and world_tick=$2', [ironwood.id, runtime.tick])).rows[0].count), 1);
+  await expectError(admin.query("select public.living_world_process_shard('earth-1','legacy-worker',30,100)"), 'shard_worker_retired');
 
   // RLS: an authenticated user can see their handoff, but not another user's.
   await admin.query('grant usage on schema public to authenticated; grant select on public.world_region_handoffs,public.world_parties to authenticated');
