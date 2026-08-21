@@ -12,7 +12,10 @@ export function createLivingWorldWorkerHandler(deps={}){const fetchImpl=deps.fet
   if(!enabled)return send(res,200,{ok:true,status:'inactive',regions:[]});
   const config=deps.config||{url:process.env.NEXT_PUBLIC_SUPABASE_URL||process.env.SUPABASE_URL,serviceKey:process.env.SUPABASE_SERVICE_ROLE_KEY};
   if(!config.url||!config.serviceKey)return send(res,503,{ok:false,error:'living_world_backend_not_configured'});
-  const workerId=deps.workerId||`vercel-region-runtime:${process.env.VERCEL_REGION||'unknown'}`;
+  // Every invocation needs a distinct lease identity. Reused regional IDs let
+  // overlapping cron deliveries share one epoch and double-advance regions.
+  const invocationId=deps.invocationId||globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const workerId=deps.workerId||`vercel-region-runtime:${process.env.VERCEL_REGION||'unknown'}:${invocationId}`;
   // A production invocation must cover the full pinned Earth (72 regions).
   // The database still orders oldest regions first, and the cap protects later
   // procedural planets from unbounded work in one serverless invocation.

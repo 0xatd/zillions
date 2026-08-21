@@ -22,23 +22,26 @@ grant execute on function public.world_materialized_topology_fingerprint(text) t
 create function public.fence_materialized_world_province()
 returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ begin
   if tg_op='INSERT' then if exists(select 1 from public.world_manifests where planet_id=new.planet_id and materialization_state='ready') then raise exception 'materialized_world_topology_immutable'; end if; return new; end if;
-  if not exists(select 1 from public.world_manifests where planet_id=old.planet_id and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+  if not exists(select 1 from public.world_manifests where materialization_state='ready' and planet_id=old.planet_id)
+     and (tg_op='DELETE' or not exists(select 1 from public.world_manifests where materialization_state='ready' and planet_id=new.planet_id)) then if tg_op='DELETE' then return old; else return new; end if; end if;
   if tg_op='DELETE' or (old.id,old.shard_id,old.key,old.name,old.bounds,old.planet_id) is distinct from (new.id,new.shard_id,new.key,new.name,new.bounds,new.planet_id) then raise exception 'materialized_world_topology_immutable'; end if;
   return new;
 end $$;
 create function public.fence_materialized_world_location()
-returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_planet text; begin
-  select planet_id into v_planet from public.world_provinces where id=case when tg_op='INSERT' then new.province_id else old.province_id end;
-  if tg_op='INSERT' then if exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then raise exception 'materialized_world_topology_immutable'; end if; return new; end if;
-  if not exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_old_planet text;v_new_planet text; begin
+  if tg_op<>'INSERT' then select planet_id into v_old_planet from public.world_provinces where id=old.province_id; end if;
+  if tg_op<>'DELETE' then select planet_id into v_new_planet from public.world_provinces where id=new.province_id; end if;
+  if tg_op='INSERT' then if exists(select 1 from public.world_manifests where planet_id=v_new_planet and materialization_state='ready') then raise exception 'materialized_world_topology_immutable'; end if; return new; end if;
+  if not exists(select 1 from public.world_manifests where materialization_state='ready' and planet_id in(v_old_planet,v_new_planet)) then if tg_op='DELETE' then return old; else return new; end if; end if;
   if tg_op='DELETE' or (old.id,old.province_id,old.key,old.name,old.kind,old.position,old.services,old.is_region_seat) is distinct from (new.id,new.province_id,new.key,new.name,new.kind,new.position,new.services,new.is_region_seat) then raise exception 'materialized_world_topology_immutable'; end if;
   return new;
 end $$;
 create function public.fence_materialized_world_route()
-returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_planet text; begin
-  select planet_id into v_planet from public.world_provinces where id=case when tg_op='INSERT' then new.origin_region_id else old.origin_region_id end;
-  if tg_op='INSERT' then if exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then raise exception 'materialized_world_topology_immutable'; end if; return new; end if;
-  if not exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_old_planet text;v_new_planet text; begin
+  if tg_op<>'INSERT' then select planet_id into v_old_planet from public.world_provinces where id=old.origin_region_id; end if;
+  if tg_op<>'DELETE' then select planet_id into v_new_planet from public.world_provinces where id=new.origin_region_id; end if;
+  if tg_op='INSERT' then if exists(select 1 from public.world_manifests where planet_id=v_new_planet and materialization_state='ready') then raise exception 'materialized_world_topology_immutable'; end if; return new; end if;
+  if not exists(select 1 from public.world_manifests where materialization_state='ready' and planet_id in(v_old_planet,v_new_planet)) then if tg_op='DELETE' then return old; else return new; end if; end if;
   if tg_op='DELETE' or (old.id,old.province_id,old.origin_id,old.destination_id,old.distance,old.terrain,old.origin_region_id,old.destination_region_id) is distinct from (new.id,new.province_id,new.origin_id,new.destination_id,new.distance,new.terrain,new.origin_region_id,new.destination_region_id) then raise exception 'materialized_world_topology_immutable'; end if;
   return new;
 end $$;

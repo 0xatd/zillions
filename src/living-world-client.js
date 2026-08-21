@@ -104,16 +104,17 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
   const ownFactions = new Set(own.map((party) => party.owner_faction_id).filter(Boolean));
   const routeById = new Map((projection.routes || []).map((route) => [route.id, route]));
   const partyPosition = (party) => {
+    if (!party) return null;
     if (party.location_id && byLocation.has(party.location_id)) return point(byLocation.get(party.location_id).position);
     const route = routeById.get(party.route_id);
-    if (!route) return [0, 0];
+    if (!route) return null;
     const from = point(byLocation.get(route.origin_id)?.position);
     const to = point(byLocation.get(route.destination_id)?.position);
     const progress = Math.max(0, Math.min(1, Number(party.route_progress) || 0));
     return [from[0] + (to[0] - from[0]) * progress, from[1] + (to[1] - from[1]) * progress];
   };
   const partyById = new Map((projection.parties || []).map((party) => [party.id, party]));
-  const hotspot = (type, id, partyId, state, label) => { const [x, y] = partyPosition(partyById.get(partyId)); return { id: `${type}:${id}`, type, x, y, state, label }; };
+  const hotspot = (type, id, partyId, state, label) => { const position = partyPosition(partyById.get(partyId)); if (!position) return null; const [x, y] = position; return { id: `${type}:${id}`, type, x, y, state, label }; };
   const primary = own[0] || null;
   const factionById = new Map((projection.factions || []).map((faction) => [faction.id, faction]));
   const regionById = new Map((projection.regions || []).map((region) => [region.id, region]));
@@ -197,8 +198,8 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       from: point(byLocation.get(route.origin_id)?.position), to: point(byLocation.get(route.destination_id)?.position),
       state: route.control_state === 'blocked' || route.control_state === 'contested' || Number(route.danger) >= 0.5 ? 'contested' : 'safe',
       crossRegion: route.origin_region_id !== route.destination_region_id })),
-    parties: (projection.parties || []).filter((party) => !ownIds.has(party.id)).map((party) => {
-      const [x, y] = partyPosition(party);
+    parties: (projection.parties || []).map((party) => {
+      const [x, y] = partyPosition(party) || [0, 0];
       return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.strength ?? party.army_strength ?? party.intelligence?.estimate ?? 0), x, y, intent: party.strategic_intent || party.stance || 'Unknown', routeId: party.route_id || null, moving: Boolean(party.route_id) };
     }),
     missions: locations.filter((location) => Number(location.services?.missionLevel) > 0).map((location) => {
@@ -219,7 +220,7 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       ...(projection.pursuits || []).map((row) => hotspot('pursuit', row.id, row.target_party_id, row.state, 'PURSUIT')),
       ...(projection.logistics?.raids || []).map((row) => hotspot('raid', row.id, row.target_party_id || row.attacker_party_id, row.state, 'RAID')),
       ...(projection.encounters || []).map((row) => hotspot('battle', row.id, row.defender_party_id || row.attacker_party_id, row.state, 'BATTLE')),
-    ].filter((row) => row.x || row.y),
+    ].filter((row) => row && (row.x || row.y)),
     markets: projection.markets || [],
     logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,

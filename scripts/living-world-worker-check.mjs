@@ -35,4 +35,5 @@ const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,concurr
 const req={method:'GET',headers:{authorization:'Bearer cron'}},res={status:0,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}};
 await handler(req,res);
 assert.equal(res.status,200);assert.equal(handled.length,72);assert.equal(res.body.batchLimit,72);assert.equal(res.body.concurrency,8);assert.ok(maxActive>1&&maxActive<=8);
+const ids=[];for(const invocationId of ['one','two']){const isolated=createLivingWorldWorkerHandler({secret:'cron',enabled:true,invocationId,config:{url:'x',serviceKey:'x'},regions:async()=>[{region_id:'region'}],claim:async(_region,worker)=>{ids.push(worker);return{leaseEpoch:1};},process:async()=>({tick:1,actionBudget:1,population:{present:1},factions:{processed:1}}),record:async()=>({})});await isolated(req,{writeHead(){},end(){},setHeader(){}});}assert.notEqual(ids[0],ids[1],'overlapping invocations must never share a lease identity');
 console.log('living world worker check passed');

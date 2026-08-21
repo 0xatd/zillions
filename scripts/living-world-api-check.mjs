@@ -27,6 +27,10 @@ const boundary = filterProjection({ shard: { simulation_tick: 1 }, locations: [
 assert.deepEqual(boundary.routes.map((row)=>row.id), ['edge-route']);
 assert.deepEqual(boundary.parties.map((row)=>row.id), ['boundary-owner','edge'], 'a moving boundary party must remain visible with its positioning route');
 assert.deepEqual(boundary.locations.map((row)=>row.id), ['inside','outside'], 'the off-viewport route endpoint must accompany the boundary party');
+const midpoint = filterProjection({ shard: { simulation_tick: 1 }, locations: [
+  { id: 'left', owner_faction_id: 'blue', position: { x: 20, y: 50 } }, { id: 'right', owner_faction_id: 'blue', position: { x: 80, y: 50 } },
+], parties: [{ id: 'mine-mid', owner_user_id: 'actor-1', owner_faction_id: 'blue', route_id: 'crossing', route_progress: .5 }], routes: [{ id: 'crossing', origin_id: 'left', destination_id: 'right' }] }, 'actor-1', { minX: 40, minY: 40, maxX: 60, maxY: 60, zoom: 3 });
+assert.deepEqual(midpoint.parties.map((row)=>row.id), ['mine-mid']);assert.deepEqual(midpoint.routes.map((row)=>row.id), ['crossing']);assert.equal(midpoint.locations.length,2,'a mid-route party must carry minimal endpoint geometry even when both endpoints are offscreen');
 
 assert.deepEqual(parseViewport(new URLSearchParams()), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 0 });
 assert.deepEqual(parseViewport(new URLSearchParams('zoom=3')), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 3 });

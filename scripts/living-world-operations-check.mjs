@@ -8,7 +8,9 @@ const degraded = summarizeWorldOperations({ leases: [{ region_id: 'r', worker_id
 assert.equal(degraded.status, 'degraded'); assert.equal(degraded.staleLeases.length, 1); assert.equal(degraded.stuckCommands.length, 1);
 const failedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 9, worker_id: 'w', success: false, error_code: 'region_runtime_failed', threshold_breached: false, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
 assert.equal(failedRuntime.status, 'degraded'); assert.equal(failedRuntime.runtimeFailures[0].error, 'region_runtime_failed');
-const breachedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 10, worker_id: 'w', success: true, threshold_breached: true, worker_lag: 3, command_backlog: 4, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
+const breachedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 10, worker_id: 'w', success: true, threshold_breached: true, tick_lag: 3, handoff_backlog: 4, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
+assert.equal(breachedRuntime.runtimeFailures[0].lag, 3);
+assert.equal(breachedRuntime.runtimeFailures[0].backlog, 4);
 assert.equal(breachedRuntime.status, 'degraded'); assert.equal(breachedRuntime.runtimeFailures[0].thresholdBreached, true);
 const deadRuntime = summarizeWorldOperations({ expectedActiveRegions: 72, leases: [], runtimeHealth: [] }, now);
 assert.equal(deadRuntime.status, 'degraded'); assert.equal(deadRuntime.runtimeCoverage.missingRegions, 72);

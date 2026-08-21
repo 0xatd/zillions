@@ -93,7 +93,18 @@ export function filterProjection(snapshot, actorId, viewport = DEFAULT_VIEWPORT)
     return { id: party.id, name: party.name, kind: party.kind, owner_faction_id: party.owner_faction_id, location_id: party.location_id, route_id: party.route_id, route_progress: party.route_progress, stance: party.stance, intelligence: report?.intelligence || {}, observed_tick: report?.observed_tick, accuracy: report?.accuracy };
   });
   const movingRouteIds = new Set(visibleParties.map((party) => party.route_id).filter(Boolean));
-  const boundaryRoutes = (snapshot.routes || []).filter((route) => movingRouteIds.has(route.id) && (initialLocationIds.has(route.origin_id) || initialLocationIds.has(route.destination_id)));
+  const knownLocationById = new Map(knownLocations.map((location) => [location.id, location]));
+  const boundaryRoutes = (snapshot.routes || []).filter((route) => {
+    if (!movingRouteIds.has(route.id)) return false;
+    if (initialLocationIds.has(route.origin_id) || initialLocationIds.has(route.destination_id)) return true;
+    const origin = knownLocationById.get(route.origin_id)?.position, destination = knownLocationById.get(route.destination_id)?.position;
+    if (!origin || !destination) return false;
+    return visibleParties.some((party) => {
+      if (party.route_id !== route.id) return false;
+      const progress = Math.max(0, Math.min(1, Number(party.route_progress) || 0));
+      return pointInViewport({ x: Number(origin.x) + (Number(destination.x) - Number(origin.x)) * progress, y: Number(origin.y ?? origin.z) + (Number(destination.y ?? destination.z) - Number(origin.y ?? origin.z)) * progress }, viewport);
+    });
+  });
   const boundaryEndpointIds = new Set(boundaryRoutes.flatMap((route) => [route.origin_id, route.destination_id]));
   const projectionLocations = mergeById(locationsInViewport, knownLocations.filter((location) => boundaryEndpointIds.has(location.id)));
   const truncated = {};

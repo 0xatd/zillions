@@ -16,7 +16,7 @@ export function createLivingWorldHealthMonitorHandler(deps = {}) {
       const operations = await operationsResponse.json().catch(() => null);
       if (!operationsResponse.ok || !operations) throw new Error('monitor_operations_failed');
       if (operations.status === 'healthy') return send(res, 200, { ok: true, status: 'healthy', generatedAt: operations.generatedAt });
-      const incident = { event: 'living_world_runtime_degraded', generatedAt: operations.generatedAt, staleLeases: operations.staleLeases || [], stuckCommands: operations.stuckCommands || [], runtimeFailures: operations.runtimeFailures || [] };
+      const incident = { event: 'living_world_runtime_degraded', generatedAt: operations.generatedAt, staleLeases: operations.staleLeases || [], stuckCommands: operations.stuckCommands || [], runtimeFailures: operations.runtimeFailures || [], runtimeCoverage: operations.runtimeCoverage || null };
       console.error(JSON.stringify(incident));
       const webhook = deps.webhook ?? process.env.LIVING_WORLD_ALERT_WEBHOOK_URL;
       if (!webhook) return send(res, 503, { ok: false, status: 'degraded', error: 'living_world_alert_delivery_not_configured', incident });
