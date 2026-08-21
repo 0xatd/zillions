@@ -27,6 +27,18 @@ try{
   assert.equal((await admin.query("select count(*) count from public.world_provinces where key in('greenfall','ironwood','rotmire')")).rows[0].count,'0');
   assert.equal((await admin.query("select count(*) count from public.world_routes r join public.world_locations o on o.id=r.origin_id join public.world_locations d on d.id=r.destination_id where o.province_id<>r.origin_region_id or d.province_id<>r.destination_region_id")).rows[0].count,'0');
   assert.equal((await admin.query("select count(*) count from public.world_parties p left join public.world_armies a on a.party_id=p.id where p.kind='garrison' and a.id is null")).rows[0].count,'0');
+  await expectError(admin.query("update public.world_provinces set bounds=jsonb_build_object('corrupt',true) where planet_id='earth' and id=(select id from public.world_provinces where planet_id='earth' order by id limit 1)"),'materialized_world_topology_immutable');
+  await expectError(admin.query("update public.world_locations set position=jsonb_build_object('x',0,'y',0) where id=(select l.id from public.world_locations l join public.world_provinces p on p.id=l.province_id where p.planet_id='earth' order by l.id limit 1)"),'materialized_world_topology_immutable');
+  await expectError(admin.query("delete from public.world_routes where id=(select r.id from public.world_routes r join public.world_provinces p on p.id=r.origin_region_id where p.planet_id='earth' order by r.id limit 1)"),'materialized_world_topology_immutable');
+  await admin.query("update public.world_provinces set control_strength=.75 where planet_id='earth' and id=(select id from public.world_provinces where planet_id='earth' order by id limit 1)");
+  await admin.query('begin');
+  try {
+    await admin.query('alter table public.world_provinces disable trigger fence_world_province_topology');
+    await admin.query("update public.world_provinces set bounds=jsonb_build_object('corrupt',true) where planet_id='earth' and id=(select id from public.world_provinces where planet_id='earth' order by id limit 1)");
+    await expectError(admin.query('select public.materialize_world_manifest($1,$2,$3)',[manifest.planetId,manifest.contentHash,bundle]),'world_materialization_topology_drift');
+  } finally { await admin.query('rollback'); }
+  const intactReplay=(await admin.query('select public.materialize_world_manifest($1,$2,$3) result',[manifest.planetId,manifest.contentHash,bundle])).rows[0].result;
+  assert.equal(intactReplay.duplicate,true);
   const start=bundle.startingLocationId;
   assert.ok(Number((await admin.query('select count(*) count from public.world_recruitment_offers where location_id=$1',[start])).rows[0].count)>0,'pinned starting town must offer recruits');
   assert.ok(Number((await admin.query('select count(*) count from public.world_supply_offers where location_id=$1',[start])).rows[0].count)>=4,'pinned starting town must offer supplies');

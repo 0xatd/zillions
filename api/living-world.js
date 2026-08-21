@@ -98,8 +98,9 @@ export function filterProjection(snapshot, actorId, viewport = DEFAULT_VIEWPORT)
     return { id: party.id, name: party.name, kind: party.kind, owner_faction_id: party.owner_faction_id, location_id: party.location_id, route_id: party.route_id, route_progress: party.route_progress, stance: party.stance, intelligence: report?.intelligence || {}, observed_tick: report?.observed_tick, accuracy: report?.accuracy };
   });
   const viewportLocationIds = new Set(locations.map((location) => location.id));
-  const parties = limited(visibleParties.filter((party) => viewportLocationIds.has(party.location_id) || (party.route_id && (snapshot.routes || []).some((route) => route.id === party.route_id && (viewportLocationIds.has(route.origin_id) || viewportLocationIds.has(route.destination_id))))), 'parties', PROJECTION_LIMITS, truncated);
   const routes = limited((snapshot.routes || []).filter((route) => locationIds.has(route.origin_id) && locationIds.has(route.destination_id)), 'routes', PROJECTION_LIMITS, truncated);
+  const routeIds = new Set(routes.map((route) => route.id));
+  const parties = limited(visibleParties.filter((party) => viewportLocationIds.has(party.location_id) || (party.route_id && routeIds.has(party.route_id))), 'parties', PROJECTION_LIMITS, truncated);
   const regionIds = new Set([
     ...locations.map((location) => location.province_id),
   ].filter(Boolean));
@@ -222,6 +223,7 @@ export function createLivingWorldHandler(deps = {}) {
       const user = deps.authenticate ? await deps.authenticate(authorization) : await authenticate(authorization, config, fetchImpl);
       if (!user?.id) return send(res, 401, { ok: false, error: 'sign_in_required' });
       if (req.method === 'GET') {
+        await enforceLivingWorldRateLimit({ config, actor: user.id, scope: 'world:projection', limit: 240, fetchImpl, override: deps.rateLimit });
         const url = new URL(req.url, `https://${req.headers.host || 'localhost'}`), shardId = text(url.searchParams.get('shardId'));
         if (!IDENTIFIER.test(shardId)) return send(res, 400, { ok: false, error: 'invalid_shard_id' });
         const viewport = parseViewport(url.searchParams);

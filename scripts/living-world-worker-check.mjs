@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createLivingWorldWorkerHandler } from '../api/living-world-worker.js';
 
 const sql = readFileSync(new URL('../supabase/migrations/20260820190100_living_world_worker.sql', import.meta.url), 'utf8');
 const retirement = readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql', import.meta.url), 'utf8');
@@ -24,8 +25,14 @@ assert.match(retirement,/shard_worker_retired/,'the compatibility worker must be
 assert.match(retirement,/revoke all on function public\.living_world_process_shard[\s\S]*service_role/,'service role must not invoke legacy shard ticks');
 assert.match(endpoint,/LIVING_WORLD_RUNTIME_ENABLED==='1'/,'production runtime must be explicitly activated');
 assert.match(endpoint,/status:'inactive'/,'a merged but inactive runtime must not touch the database');
-assert.match(endpoint,/Math\.min\(16[\s\S]*LIVING_WORLD_REGION_BATCH_SIZE/,'each invocation must process a bounded region batch');
+assert.match(endpoint,/Math\.min\(96[\s\S]*LIVING_WORLD_REGION_BATCH_SIZE\?\?72/,'each production invocation must cover all 72 Earth regions with a bounded ceiling');
 assert.match(endpoint,/p_lease_seconds:120/,'the minute worker must renew an overlapping lease so battle issuance has no dead interval');
 assert.match(endpoint,/record_world_region_runtime_health/,'workers must persist latency, errors, lag and backlog health after each region tick');
 assert.match(retirement,/living_world_region_runtime_batch[\s\S]*greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'bounded batches must prioritize regions that have waited longest, including failed attempts');
+assert.match(retirement,/p_limit integer default 72[\s\S]*least\(96,coalesce\(p_limit,72\)\)/,'database batch must cover Earth once per scheduled minute');
+const handled=[];
+const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'x',serviceKey:'x'},regions:async limit=>{assert.equal(limit,72);return Array.from({length:72},(_,i)=>({region_id:`region-${i}`}));},claim:async()=>({leaseEpoch:1}),process:async region=>{handled.push(region);return{tick:1,actionBudget:8,population:{present:1},factions:{processed:1}};},record:async()=>({thresholdBreached:false})});
+const req={method:'GET',headers:{authorization:'Bearer cron'}},res={status:0,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}};
+await handler(req,res);
+assert.equal(res.status,200);assert.equal(handled.length,72);assert.equal(res.body.batchLimit,72);
 console.log('living world worker check passed');

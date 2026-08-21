@@ -6,6 +6,7 @@ import {performance} from 'node:perf_hooks';
 import pg from 'pg';
 import {earthManifest} from '../src/world-manifest.js';
 import {buildWorldMaterialization} from '../src/world-materialization.js';
+import {autosimBattleAssignment} from '../src/living-world-battle.js';
 
 const {Client}=pg;
 const root=path.resolve(import.meta.dirname,'..');
@@ -147,11 +148,12 @@ try{
     await q("select public.living_world_command($1,'earth-1',$2,'issue_movement',$3,$4,jsonb_build_object('routeId',$5::text,'mode',$6::text))",
       [player.userId,`hosted-${runId}-${index}-move`,player.partyId,revision,route.id,index===0?'travel':'fast']);
   }
-  const regions=(await q("select id from public.world_provinces where planet_id='earth' order by (id=$1) desc,id limit 8",[route.origin_region_id])).rows.map(row=>row.id);
+  const regions=(await q("select id from public.world_provinces where planet_id='earth' order by (id=$1) desc,id limit 72",[route.origin_region_id])).rows.map(row=>row.id);
+  assert.equal(regions.length,72,'hosted scheduler proof must cover every Earth region');
   await q("update public.world_region_states set status='active' where region_id=any($1::uuid[])",[regions]);
   const leases=new Map();
   for(const region of regions){const lease=(await q("select public.claim_world_region_lease($1,$2,300) result",[region,`hosted-${shortRun}-a`])).rows[0].result;leases.set(region,Number(lease.leaseEpoch));}
-  for(let round=0;round<24;round++)for(const region of regions){const result=await timed(`bounded-region-runtime:${region}:round:${round}`,async()=>{
+  for(let round=0;round<4;round++)for(const region of regions){const result=await timed(`bounded-region-runtime:${region}:round:${round}`,async()=>{
     const tick=(await q('select public.process_world_region_runtime($1,$2,$3,16) result',[region,`hosted-${shortRun}-a`,leases.get(region)])).rows[0].result;
     assert.ok(Number(tick.actionBudget)<=16);return tick;
   });latencies.push(result.ms);await q('select public.record_world_region_runtime_health($1,$2,$3,$4,$5,true,null,$6,$7)',
@@ -163,6 +165,32 @@ try{
   const takeoverTick=await timed('lease-takeover',async()=>(await q('select public.process_world_region_runtime($1,$2,$3,16) result',[takeoverRegion,`hosted-${shortRun}-b`,Number(takeover.leaseEpoch)])).rows[0].result);latencies.push(takeoverTick.ms);
   await q('select public.record_world_region_runtime_health($1,$2,$3,$4,$5,true,null,$6,$7)',[takeoverRegion,takeoverTick.value.tick,`hosted-${shortRun}-b`,Number(takeover.leaseEpoch),takeoverTick.ms,takeoverTick.value.actionBudget,takeoverTick.value.population?.congestion==='overloaded']);
   assert.ok(Number((await q("select count(*) count from public.world_movement_orders where party_id=any($1::uuid[]) and status in('moving','arrived')",[players.map(player=>player.partyId)])).rows[0].count)>=2,'both QA accounts must enter authoritative travel');
+
+  // Prove the hosted encounter -> assignment -> deterministic autosim ->
+  // persistent consequence transaction instead of stopping at movement.
+  const battlePlayer=players[0];
+  await q('delete from public.world_region_handoffs where party_id=$1',[battlePlayer.partyId]);
+  await q('delete from public.world_movement_orders where party_id=$1',[battlePlayer.partyId]);
+  const defender=(await q(`select p.id,p.region_id,p.location_id from public.world_parties p
+    where p.owner_user_id is null and p.location_id is not null and exists(
+      select 1 from public.world_armies a join public.world_unit_stacks s on s.army_id=a.id where a.party_id=p.id and s.healthy>0)
+    order by p.id limit 1`)).rows[0];
+  assert.ok(defender,'hosted battle proof needs a materialized AI force');
+  await q('update public.world_parties set region_id=$2,location_id=$3,route_id=null,route_progress=0,revision=revision+1 where id=$1',[battlePlayer.partyId,defender.region_id,defender.location_id]);
+  await q("insert into public.world_cargo(party_id,commodity_key,quantity) values($1,'grain',8) on conflict(party_id,commodity_key) do update set quantity=8,reserved_quantity=0",[defender.id]);
+  const encounterId=randomUUID();
+  await q(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
+    values($1,'earth-1',$2,$3,(select simulation_tick from public.world_shards where id='earth-1'),'choosing','auto-command','auto-command','{"kind":"plains"}','{}')`,[encounterId,battlePlayer.partyId,defender.id]);
+  await q("update public.world_encounters set state='battle',revision=revision+1 where id=$1",[encounterId]);
+  const battleEncounter=(await q('select revision from public.world_encounters where id=$1',[encounterId])).rows[0];
+  const engagement=(await q('select id from public.world_engagements where encounter_id=$1',[encounterId])).rows[0];
+  assert.ok(engagement,'battle engagement must be created');
+  const assignment=(await q("select public.living_world_issue_battle($1,$2,$3,$4) result",[battlePlayer.userId,engagement.id,battleEncounter.revision,`hosted-${runId}-autosim`])).rows[0].result;
+  const battleResult=autosimBattleAssignment(assignment);
+  assert.ok(battleResult.casualties.some(row=>row.killed>0||row.wounded>0),'hosted autosim must produce casualties');
+  const battleCommit=(await q('select public.living_world_commit_battle($1,$2,$3,$4) result',[assignment.id,assignment.nonce,battleEncounter.revision,battleResult])).rows[0].result;
+  assert.equal(battleCommit.duplicate,false);
+  assert.equal((await q('select state from public.world_encounters where id=$1',[encounterId])).rows[0].state,'resolved');
 
   const telemetry=(await q(`select
     coalesce(max(simulation_tick)-min(simulation_tick),0)::integer lag,
@@ -181,7 +209,7 @@ try{
     migrations:{count:migrations.length,first:migrationNames[0],last:migrationNames.at(-1),digest:createHash('sha256').update(migrations.map(x=>`${x.name}\n${x.sql}`).join('\n')).digest('hex')},
     rollback:{transactionalProof:true,preState,rolledBackState:rollbackState,postActivationRollbackPlan:'delete the isolated Supabase branch; do not down-migrate the successful rehearsal'},
     earth:{contentHash:manifest.contentHash,materializationHash:materialized.materializationHash,regions:Number(materialized.summary.regions),parties:Number((await q("select count(*) count from public.world_parties where shard_id='earth-1'")).rows[0].count)},
-    qa:{accounts:players.length,entry:true,recruit:true,supply:true,trade:true},workers:{regions:regions.length,ticks:latencies.length,takeover:true,batchLimit:16,p95Ms:Number(p95.toFixed(1)),maxMs:Number(max.toFixed(1)),lag:Number(telemetry.lag),errors:0,saturation:0},postState};
+    qa:{accounts:players.length,entry:true,recruit:true,supply:true,trade:true,encounter:true,battleAutosim:true,battleWriteback:true},workers:{regions:regions.length,ticks:latencies.length,takeover:true,batchLimit:72,p95Ms:Number(p95.toFixed(1)),maxMs:Number(max.toFixed(1)),lag:Number(telemetry.lag),errors:0,saturation:0},postState};
   console.log(JSON.stringify(summary));
 }catch(error){
   console.error(JSON.stringify({ok:false,runId,branchRef:expectedRef,error:safeError(error),preState,rollbackState,postState}));

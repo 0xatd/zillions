@@ -6,10 +6,15 @@ const summary = summarizeWorldOperations({ leases: [{ region_id: 'greenfall', wo
 assert.equal(summary.status, 'healthy'); assert.deepEqual(summary.tutorial, { started: 1, completed: 1, entered: 1, completionRate: 100, entryRate: 100 }); assert.equal(tutorialStatus({ movement_complete: true }).completed, 1);
 const degraded = summarizeWorldOperations({ leases: [{ region_id: 'r', worker_id: 'old', heartbeat_at: '2026-08-21T00:58:00Z', lease_until: '2026-08-21T00:59:00Z' }], commands: [{ shard_id: 'earth-1', request_id: 'stuck', command_type: 'move', created_at: '2026-08-21T00:58:00Z' }] }, now);
 assert.equal(degraded.status, 'degraded'); assert.equal(degraded.staleLeases.length, 1); assert.equal(degraded.stuckCommands.length, 1);
+const failedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 9, worker_id: 'w', success: false, error_code: 'region_runtime_failed', threshold_breached: false, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
+assert.equal(failedRuntime.status, 'degraded'); assert.equal(failedRuntime.runtimeFailures[0].error, 'region_runtime_failed');
+const breachedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 10, worker_id: 'w', success: true, threshold_breached: true, worker_lag: 3, command_backlog: 4, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
+assert.equal(breachedRuntime.status, 'degraded'); assert.equal(breachedRuntime.runtimeFailures[0].thresholdBreached, true);
 const request = (secret, method = 'GET') => ({ method, headers: { 'x-admin-secret': secret } });
 const response = () => ({ status: 0, setHeader() {}, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } });
 const handler = createLivingWorldOperationsHandler({ secret: 'valid', config: { url: 'x', serviceKey: 'x' }, snapshot: async () => ({ leases: [], commands: [], tutorials: [] }) });
 let res = response(); await handler(request('wrong'), res); assert.equal(res.status, 401); res = response(); await handler(request('valid', 'POST'), res); assert.equal(res.status, 405); res = response(); await handler(request('valid'), res); assert.equal(res.status, 200); assert.equal(res.body.status, 'healthy');
 const requested=[];const realQueryHandler=createLivingWorldOperationsHandler({secret:'valid',config:{url:'https://db.example',serviceKey:'service'},fetch:async(url,options={})=>{requested.push(url);return options.method==='HEAD'?{ok:true,headers:{get:()=> '0-0/0'},json:async()=>[]}:{ok:true,json:async()=>[]};}});
 res=response();await realQueryHandler(request('valid'),res);assert.equal(res.status,200);assert.ok(requested.some(url=>url.includes('world_encounters?select=id&state=in.(choosing,negotiating,battle,awaiting_allies,rearguard)')),'operations must query the real encounter state column and values');
+assert.ok(requested.some(url=>url.includes('world_region_runtime_health?select=')),'operations must consume persisted runtime health');
 console.log('living world operations checks passed');

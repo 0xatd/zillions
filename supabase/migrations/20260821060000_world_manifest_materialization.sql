@@ -5,11 +5,47 @@ create extension if not exists pgcrypto with schema extensions;
 
 alter table public.world_manifests
   add column materialization_hash text,
+  add column topology_fingerprint text,
   add column materialization_summary jsonb not null default '{}';
+
+create function public.world_materialized_topology_fingerprint(p_planet text)
+returns text language sql stable security definer set search_path=public,extensions,pg_temp as $$
+  select 'sha256-'||encode(extensions.digest(convert_to(jsonb_build_object(
+    'regions',coalesce((select jsonb_agg(jsonb_build_object('id',id,'shardId',shard_id,'key',key,'name',name,'bounds',bounds,'planetId',planet_id) order by id) from public.world_provinces where planet_id=p_planet),'[]'::jsonb),
+    'locations',coalesce((select jsonb_agg(jsonb_build_object('id',l.id,'provinceId',l.province_id,'key',l.key,'name',l.name,'kind',l.kind,'position',l.position,'services',l.services,'seat',l.is_region_seat) order by l.id) from public.world_locations l join public.world_provinces p on p.id=l.province_id where p.planet_id=p_planet),'[]'::jsonb),
+    'routes',coalesce((select jsonb_agg(jsonb_build_object('id',r.id,'provinceId',r.province_id,'originId',r.origin_id,'destinationId',r.destination_id,'distance',r.distance,'terrain',r.terrain,'originRegionId',r.origin_region_id,'destinationRegionId',r.destination_region_id) order by r.id) from public.world_routes r join public.world_provinces p on p.id=r.origin_region_id where p.planet_id=p_planet),'[]'::jsonb)
+  )::text,'utf8'),'sha256'),'hex');
+$$;
+revoke all on function public.world_materialized_topology_fingerprint(text) from public,anon,authenticated;
+grant execute on function public.world_materialized_topology_fingerprint(text) to service_role;
+
+create function public.fence_materialized_world_province()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ begin
+  if not exists(select 1 from public.world_manifests where planet_id=old.planet_id and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+  if tg_op='DELETE' or (old.id,old.shard_id,old.key,old.name,old.bounds,old.planet_id) is distinct from (new.id,new.shard_id,new.key,new.name,new.bounds,new.planet_id) then raise exception 'materialized_world_topology_immutable'; end if;
+  return new;
+end $$;
+create function public.fence_materialized_world_location()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_planet text; begin
+  select planet_id into v_planet from public.world_provinces where id=old.province_id;
+  if not exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+  if tg_op='DELETE' or (old.id,old.province_id,old.key,old.name,old.kind,old.position,old.services,old.is_region_seat) is distinct from (new.id,new.province_id,new.key,new.name,new.kind,new.position,new.services,new.is_region_seat) then raise exception 'materialized_world_topology_immutable'; end if;
+  return new;
+end $$;
+create function public.fence_materialized_world_route()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$ declare v_planet text; begin
+  select planet_id into v_planet from public.world_provinces where id=old.origin_region_id;
+  if not exists(select 1 from public.world_manifests where planet_id=v_planet and materialization_state='ready') then if tg_op='DELETE' then return old; else return new; end if; end if;
+  if tg_op='DELETE' or (old.id,old.province_id,old.origin_id,old.destination_id,old.distance,old.terrain,old.origin_region_id,old.destination_region_id) is distinct from (new.id,new.province_id,new.origin_id,new.destination_id,new.distance,new.terrain,new.origin_region_id,new.destination_region_id) then raise exception 'materialized_world_topology_immutable'; end if;
+  return new;
+end $$;
+create trigger fence_world_province_topology before update or delete on public.world_provinces for each row execute function public.fence_materialized_world_province();
+create trigger fence_world_location_topology before update or delete on public.world_locations for each row execute function public.fence_materialized_world_location();
+create trigger fence_world_route_topology before update or delete on public.world_routes for each row execute function public.fence_materialized_world_route();
 
 create or replace function public.materialize_world_manifest(p_planet text,p_manifest_hash text,p_bundle jsonb)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare m public.world_manifests%rowtype;x record;v_start uuid;v_counts jsonb;v_bundle_hash text;
+declare m public.world_manifests%rowtype;x record;v_start uuid;v_counts jsonb;v_bundle_hash text;v_topology_fingerprint text;
 begin
   if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
   if p_bundle is null or jsonb_typeof(p_bundle)<>'object' or p_bundle->>'schema'<>'zillions.world-materialization.v1' then raise exception 'invalid_materialization_bundle'; end if;
@@ -21,6 +57,8 @@ begin
   v_bundle_hash:='sha256-'||encode(extensions.digest(convert_to((p_bundle-'materializationHash')::text,'utf8'),'sha256'),'hex');
   if m.materialization_state='ready' then
     if m.materialization_hash is distinct from v_bundle_hash then raise exception 'world_materialization_conflict'; end if;
+    v_topology_fingerprint:=public.world_materialized_topology_fingerprint(p_planet);
+    if m.topology_fingerprint is null or m.topology_fingerprint is distinct from v_topology_fingerprint then raise exception 'world_materialization_topology_drift'; end if;
     return jsonb_build_object('ok',true,'duplicate',true,'planetId',p_planet,'manifestHash',p_manifest_hash,'materializationHash',m.materialization_hash,'summary',m.materialization_summary);
   end if;
   if p_bundle->>'shardId' is null or not exists(select 1 from public.world_planets where id=p_planet and shard_id=p_bundle->>'shardId') then raise exception 'materialization_planet_scope_mismatch'; end if;
@@ -76,7 +114,8 @@ begin
   select (p_bundle->>'startingLocationId')::uuid into v_start;
   update public.world_planets set world_state=world_state||jsonb_build_object('manifestHash',p_manifest_hash,'startingLocationId',v_start,'materializationHash',v_bundle_hash),revision=revision+1 where id=p_planet;
   v_counts:=jsonb_build_object('regions',jsonb_array_length(p_bundle->'regions'),'locations',jsonb_array_length(p_bundle->'locations'),'routes',jsonb_array_length(p_bundle->'routes'),'garrisons',jsonb_array_length(p_bundle->'parties'),'markets',jsonb_array_length(p_bundle->'markets'));
-  update public.world_manifests set materialization_state='ready',materialized_at=now(),materialization_summary=v_counts where planet_id=p_planet;
+  v_topology_fingerprint:=public.world_materialized_topology_fingerprint(p_planet);
+  update public.world_manifests set materialization_state='ready',materialized_at=now(),materialization_summary=v_counts,topology_fingerprint=v_topology_fingerprint where planet_id=p_planet;
   return jsonb_build_object('ok',true,'duplicate',false,'planetId',p_planet,'manifestHash',p_manifest_hash,'materializationHash',v_bundle_hash,'summary',v_counts);
 exception when others then
   raise;

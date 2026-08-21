@@ -421,7 +421,7 @@ end $$;
 revoke all on function public.process_world_region_runtime(uuid,text,bigint,integer) from public,anon,authenticated;
 grant execute on function public.process_world_region_runtime(uuid,text,bigint,integer) to service_role;
 
-create function public.living_world_region_runtime_batch(p_limit integer default 8)
+create function public.living_world_region_runtime_batch(p_limit integer default 72)
 returns table(region_id uuid) language sql stable security definer set search_path=public,pg_temp as $$
   select s.region_id
   from public.world_region_states s
@@ -433,7 +433,7 @@ returns table(region_id uuid) language sql stable security definer set search_pa
   left join public.world_region_worker_leases lease on lease.region_id=s.region_id
   where s.status='active'
   order by greatest(tick.last_processed_at,lease.heartbeat_at) nulls first,s.region_id
-  limit greatest(1,least(16,coalesce(p_limit,8)));
+  limit greatest(1,least(96,coalesce(p_limit,72)));
 $$;
 revoke all on function public.living_world_region_runtime_batch(integer) from public,anon,authenticated;
 grant execute on function public.living_world_region_runtime_batch(integer) to service_role;

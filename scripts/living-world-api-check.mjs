@@ -18,6 +18,15 @@ const projection = filterProjection(snapshot, 'actor-1');
 assert.deepEqual(projection.parties.map((p) => p.id), ['mine', 'ally', 'seen']); assert.equal(projection.parties[2].speed, undefined);
 assert.deepEqual(projection.locations.map((p) => p.id), ['home', 'ally-town', 'wild']); assert.deepEqual(projection.routes.map((p) => p.id), ['known']); assert.deepEqual(projection.markets.map((p) => p.location_id), ['home']);
 
+const boundary = filterProjection({ shard: { simulation_tick: 1 }, locations: [
+  { id: 'inside', owner_faction_id: 'blue', position: { x: 10, y: 10 } },
+  { id: 'outside', owner_faction_id: 'blue', position: { x: 90, y: 90 } },
+], parties: [{ id: 'edge', owner_faction_id: 'blue', route_id: 'edge-route', route_progress: .5 }], routes: [
+  { id: 'edge-route', origin_id: 'inside', destination_id: 'outside' },
+] }, 'actor-1', { minX: 0, minY: 0, maxX: 25, maxY: 25, zoom: 3 });
+assert.deepEqual(boundary.routes, []);
+assert.deepEqual(boundary.parties, [], 'a moving party must never be emitted without the route needed to position it');
+
 assert.deepEqual(parseViewport(new URLSearchParams()), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 0 });
 assert.deepEqual(parseViewport(new URLSearchParams('zoom=3')), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 3 });
 assert.throws(() => parseViewport(new URLSearchParams('minX=90&maxX=10&minY=0&maxY=100&zoom=1')), /invalid_viewport/);
