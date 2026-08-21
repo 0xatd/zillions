@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { signBattleAssignment, validateBattleResult, verifyBattleAssignment } from '../src/living-world-battle.js';
+import { deriveStrategicConsequences, signBattleAssignment, validateBattleResult, verifyBattleAssignment } from '../src/living-world-battle.js';
 import { createLivingWorldBattleHandler } from '../api/living-world-battle.js';
 import { readFileSync } from 'node:fs';
 
@@ -15,6 +15,9 @@ assert.throws(() => verifyBattleAssignment(signBattleAssignment({ ...assignment,
 const result = validateBattleResult({ outcome: 'attacker_victory', winnerPartyId: ids.party, casualties: [{ stackId: ids.stack, killed: 2, wounded: 3 }], morale: { attacker: 75, defender: 20 }, cargoTransfers: [], prisoners: [], retreatRoutes: [], stateHash: 'a'.repeat(64), completedTick: 44 });
 assert.equal(result.casualties[0].wounded, 3);
 assert.throws(() => validateBattleResult({ ...result, casualties: [{ stackId: ids.stack, killed: -1, wounded: 0 }] }), /invalid_casualties/);
+const defender = randomUUID(), army = randomUUID();
+const consequences = deriveStrategicConsequences({ attackerPartyId: ids.party, defenderPartyId: defender, armies: [{ id: army, party_id: defender }], stacks: [{ id: ids.stack, army_id: army, unit_key: 'guard', tier: 2, healthy: 20 }], cargo: [{ party_id: defender, commodity_key: 'iron', quantity: 12, reserved_quantity: 0 }] }, ids.party, [{ stackId: ids.stack, killed: 2, wounded: 1 }]);
+assert.equal(consequences.cargoTransfers[0].quantity, 3); assert.equal(consequences.prisoners[0].unitKey, 'guard');
 
 function response() { return { status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } }; }
 async function request(handler, body, headers = {}) { const req = { method: 'POST', headers, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); } }; const res = response(); await handler(req, res); return res; }

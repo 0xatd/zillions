@@ -66,6 +66,20 @@ export function validateBattleResult(value) {
 
 const numeric = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
+export function deriveStrategicConsequences(snapshot, winnerPartyId, casualties = []) {
+  if (!winnerPartyId) return { cargoTransfers: [], prisoners: [], retreatRoutes: [] };
+  const loserPartyId = winnerPartyId === snapshot.attackerPartyId ? snapshot.defenderPartyId : snapshot.attackerPartyId;
+  const lossByStack = new Map(casualties.map((row) => [row.stackId, Number(row.killed) + Number(row.wounded)]));
+  const armies = new Map((snapshot.armies || []).map((army) => [army.id, army.party_id]));
+  const cargo = (snapshot.cargo || []).find((row) => row.party_id === loserPartyId && numeric(row.quantity) - numeric(row.reserved_quantity) >= 1);
+  const capturable = (snapshot.stacks || []).find((stack) => armies.get(stack.army_id) === loserPartyId && numeric(stack.healthy) - (lossByStack.get(stack.id) || 0) >= 1);
+  return {
+    cargoTransfers: cargo ? [{ fromPartyId: loserPartyId, toPartyId: winnerPartyId, commodityKey: cargo.commodity_key, quantity: Math.max(1, Math.min(10, Math.floor((numeric(cargo.quantity) - numeric(cargo.reserved_quantity)) * .25))) }] : [],
+    prisoners: capturable ? [{ captorPartyId: winnerPartyId, sourcePartyId: loserPartyId, unitKey: capturable.unit_key, tier: Number(capturable.tier) || 1, quantity: Math.min(2, Math.max(1, Math.floor((numeric(capturable.healthy) - (lossByStack.get(capturable.id) || 0)) * .05))) }] : [],
+    retreatRoutes: [],
+  };
+}
+
 export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
   const snapshot = assignment?.force_snapshot;
   if (!snapshot || !UUID.test(snapshot.attackerPartyId) || !UUID.test(snapshot.defenderPartyId)) throw new Error('invalid_force_snapshot');
@@ -112,5 +126,6 @@ export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
   }
   const completedTick = Math.max(0, numeric(snapshot.startedTick)) + rounds.length;
   const canonical = { engagementId: snapshot.engagementId, outcome, winnerPartyId, casualties, rounds, completedTick };
-  return validateBattleResult({ outcome, winnerPartyId, casualties, morale: { attacker: attacker.morale, defender: defender.morale }, cargoTransfers: [], prisoners: [], retreatRoutes: [], stateHash: createHash('sha256').update(JSON.stringify(canonical)).digest('hex'), completedTick });
+  const consequences = deriveStrategicConsequences(snapshot, winnerPartyId, casualties);
+  return validateBattleResult({ outcome, winnerPartyId, casualties, morale: { attacker: attacker.morale, defender: defender.morale }, ...consequences, stateHash: createHash('sha256').update(JSON.stringify({ ...canonical, ...consequences })).digest('hex'), completedTick });
 }

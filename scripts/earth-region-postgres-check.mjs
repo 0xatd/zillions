@@ -93,6 +93,16 @@ try {
   const rested = (await admin.query("select public.living_world_company_command($1,'rest-1',$2,$3,'use_town_service','{\"serviceKey\":\"rest\"}') result", [userId, firstEntry.partyId, supplied.companyRevision])).rows[0].result;
   assert.equal(rested.cost, 15);
   assert.equal(Number((await admin.query('select fatigue from public.world_parties where id=$1', [firstEntry.partyId])).rows[0].fatigue), 0);
+  // Player trade uses the active direct domain authority, not the retired shard worker.
+  await admin.query('insert into public.player_wallets(user_id,salvage_alloy) values($1,1000) on conflict(user_id) do update set salvage_alloy=1000',[userId]);
+  const tradeOffer=(await admin.query('select location_id,commodity_key from public.world_markets where location_id=(select location_id from public.world_parties where id=$1) order by commodity_key limit 1',[firstEntry.partyId])).rows[0];
+  const tradeRevision=Number((await admin.query('select revision from public.world_parties where id=$1',[firstEntry.partyId])).rows[0].revision);
+  const tradePayload={locationId:tradeOffer.location_id,commodityKey:tradeOffer.commodity_key,side:'buy',quantity:1};
+  const traded=(await admin.query("select public.living_world_trade_market($1,'trade-live-1',$2,$3,$4) result",[userId,firstEntry.partyId,tradeRevision,tradePayload])).rows[0].result;
+  assert.equal(traded.side,'buy');
+  const tradeReplay=(await admin.query("select public.living_world_trade_market($1,'trade-live-1',$2,$3,$4) result",[userId,firstEntry.partyId,tradeRevision,tradePayload])).rows[0].result;
+  assert.equal(tradeReplay.duplicate,true);
+  assert.equal(Number((await admin.query('select quantity from public.world_cargo where party_id=$1 and commodity_key=$2',[firstEntry.partyId,tradeOffer.commodity_key])).rows[0].quantity),1);
   // Two independent accounts keep their own companies while one durable social
   // party coordinates an atomic grouped move. Accepting an invite safely
   // replaces the invitee's automatically-created solo party.
@@ -119,7 +129,16 @@ try {
   assert.equal(grouped.memberCount, 2);
   const groupedReplay = (await admin.query("select public.social_party_command($1,'group-two','group_travel',$2,null,null,jsonb_build_object('routeId',$3::text,'expectedRevisions',$4::jsonb)) result", [userId, firstEntry.socialPartyId, groupRoute, JSON.stringify(revisions)])).rows[0].result;
   assert.equal(groupedReplay.duplicate, true);
-  assert.equal(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId])).rows[0].count), 2);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='moving'", [firstEntry.partyId, otherEntry.partyId])).rows[0].count), 2);
+  const groupRegionId=(await admin.query('select region_id from public.world_parties where id=$1',[firstEntry.partyId])).rows[0].region_id;
+  const groupLease=(await admin.query("select public.claim_world_region_lease($1,'group-worker',300) result",[groupRegionId])).rows[0].result;
+  for(let tick=0;tick<20;tick++){
+    if(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='moving'",[firstEntry.partyId,otherEntry.partyId])).rows[0].count)===0)break;
+    await admin.query("select public.process_world_region_runtime($1,'group-worker',$2,100)",[groupRegionId,groupLease.leaseEpoch]);
+  }
+  assert.equal(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='arrived'",[firstEntry.partyId,otherEntry.partyId])).rows[0].count),2,'grouped parties must actually arrive');
+  assert.equal(Number((await admin.query('select count(distinct location_id) count from public.world_parties where id in($1,$2)',[firstEntry.partyId,otherEntry.partyId])).rows[0].count),1,'grouped parties must arrive together');
+  await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[groupRegionId]);
   await admin.query("select public.social_party_command($1,'split-two','travel_mode',$2,null,null,'{\"mode\":\"split\"}')", [otherUserId, firstEntry.socialPartyId]);
   await new Promise((resolve)=>server.close(resolve));
   assert.equal((await admin.query('select travel_mode from public.social_party_members where party_id=$1 and user_id=$2', [firstEntry.socialPartyId, otherUserId])).rows[0].travel_mode, 'split');
@@ -142,10 +161,10 @@ try {
   const defenderStackId = '50000000-0000-4000-8000-000000000002';
   await admin.query("update public.world_movement_orders set status='cancelled' where party_id=$1 and status in('queued','moving')",[firstEntry.partyId]);
   await admin.query("update public.world_parties set location_id=$1,route_id=null,route_progress=0,stance='neutral' where id=$2",[locationId,firstEntry.partyId]);
-  await admin.query(`insert into public.world_parties(id,shard_id,region_id,owner_user_id,name,kind,location_id,morale,stance)
-    values($1,'earth-1',$2,$3,'Rival Company','player',$4,60,'hostile')`, [defenderPartyId, greenfall.id, otherUserId, locationId]);
-  await admin.query(`insert into public.world_armies(id,party_id,commander_user_id,combat_power)
-    values($1,$2,$3,45)`, [defenderArmyId, defenderPartyId, otherUserId]);
+  await admin.query(`insert into public.world_parties(id,shard_id,region_id,name,kind,location_id,morale,stance)
+    values($1,'earth-1',$2,'Rival Company','ai',$3,60,'hostile')`, [defenderPartyId, greenfall.id, locationId]);
+  await admin.query(`insert into public.world_armies(id,party_id,combat_power)
+    values($1,$2,45)`, [defenderArmyId, defenderPartyId]);
   await admin.query(`insert into public.world_unit_stacks(id,army_id,unit_key,tier,healthy)
     values($1,$2,'greenfall_guard',2,40),($3,$4,'rival_raider',1,35)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
   const contactLease=(await admin.query("select public.claim_world_region_lease($1,'worker-a',300) result",[greenfall.id])).rows[0].result;
@@ -154,9 +173,9 @@ try {
   const encounterRow=(await admin.query("select * from public.world_encounters where attacker_party_id in($1,$2) and defender_party_id in($1,$2) order by created_tick desc limit 1",[firstEntry.partyId,defenderPartyId])).rows[0];
   assert.ok(encounterRow?.id,'runtime-created encounter missing');
   const encounterId=encounterRow.id;
+  assert.equal((await admin.query('select choice from public.world_encounter_decisions where encounter_id=$1 and party_id=$2',[encounterId,defenderPartyId])).rows[0].choice,'fight','AI contact must seed its deterministic decision');
   const firstDecision=(await admin.query("select public.submit_world_encounter_decision($1,$2,$3,'runtime-fight-owner',$4,'fight',null,'worker-a',$5) result",[userId,encounterId,firstEntry.partyId,Number(encounterRow.revision),contactLease.leaseEpoch])).rows[0].result;
-  const secondDecision=(await admin.query("select public.submit_world_encounter_decision($1,$2,$3,'runtime-fight-other',$4,'fight',null,'worker-a',$5) result",[otherUserId,encounterId,defenderPartyId,Number(firstDecision.encounterRevision),contactLease.leaseEpoch])).rows[0].result;
-  assert.equal(secondDecision.outcome,'battle');
+  assert.equal(firstDecision.outcome,'battle');
   const engagement = (await admin.query('select id,mode,state from public.world_engagements where encounter_id=$1', [encounterId])).rows[0];
   assert.equal(engagement.mode, 'live_command');
   assert.equal(engagement.state, 'active');
@@ -183,7 +202,8 @@ try {
   assert.equal(assignment.force_snapshot.defenderPartyId, encounterRow.defender_party_id);
   assert.equal(assignment.force_snapshot.engagementMode, 'live_command');
   assert.ok(Number(assignment.force_snapshot.startedTick)>=1);
-  assert.equal(assignment.force_snapshot.stacks.length, 2);
+  assert.ok(assignment.force_snapshot.stacks.length >= 3, 'recruited company members must join the authoritative battle force');
+  assert.ok(assignment.force_snapshot.stacks.some((stack) => stack.unit_key === 'greenfall_militia' && Number(stack.healthy) >= 2));
   assert.ok(assignment.force_snapshot.supplies.length>=1,'supply state must be part of the immutable assignment');
   await expectError(admin.query('update public.world_parties set morale=morale-1 where id=$1',[firstEntry.partyId]),'battle_force_locked');
   await expectError(admin.query('update public.world_unit_stacks set healthy=healthy-1 where id=$1',[attackerStackId]),'battle_force_locked');

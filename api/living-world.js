@@ -230,7 +230,11 @@ export function createLivingWorldHandler(deps = {}) {
       }
       const command = validateCommandBody(await parseBody(req));
       await enforceLivingWorldRateLimit({ config, actor: user.id, scope: 'world:command', limit: 120, fetchImpl, override: deps.rateLimit });
-      const rpc = deps.command ? await deps.command(user.id, command) : await fetchImpl(`${config.url}/rest/v1/rpc/living_world_command`, { method: 'POST', headers: { authorization: `Bearer ${config.serviceKey}`, apikey: config.serviceKey, 'content-type': 'application/json' }, body: JSON.stringify({ p_actor: user.id, p_shard: command.shardId, p_request_id: command.requestId, p_type: command.type, p_party: command.partyId, p_expected_revision: command.expectedRevision, p_payload: command.payload }) });
+      const rpcName = command.type === 'trade_market' ? 'living_world_trade_market' : 'living_world_command';
+      const rpcBody = command.type === 'trade_market'
+        ? { p_actor: user.id, p_request_id: command.requestId, p_party: command.partyId, p_expected_revision: command.expectedRevision, p_payload: command.payload }
+        : { p_actor: user.id, p_shard: command.shardId, p_request_id: command.requestId, p_type: command.type, p_party: command.partyId, p_expected_revision: command.expectedRevision, p_payload: command.payload };
+      const rpc = deps.command ? await deps.command(user.id, command) : await fetchImpl(`${config.url}/rest/v1/rpc/${rpcName}`, { method: 'POST', headers: { authorization: `Bearer ${config.serviceKey}`, apikey: config.serviceKey, 'content-type': 'application/json' }, body: JSON.stringify(rpcBody) });
       const result = deps.command ? rpc : await rpc.json().catch(() => null);
       if (!deps.command && !rpc.ok) return send(res, rpc.status === 409 ? 409 : 400, { ok: false, error: result?.message || 'living_world_command_failed' });
       return send(res, 200, result);

@@ -239,7 +239,8 @@ class App {
       onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
       onLivingWorldOpen: () => this._refreshLivingWorld(),
       onLivingWorldViewport: (viewport) => this._refreshLivingWorldViewport(viewport),
-      onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
+      onLivingWorldFastTravel: (locationId, mode) => this._requestLivingWorldTravel(locationId, mode),
+      onLivingWorldTrade: (payload) => this._livingWorldTrade(payload),
       onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
       onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
       onLivingWorldEncounter: (encounter, action) => this._livingWorldEncounterAction(encounter, action),
@@ -782,7 +783,7 @@ class App {
     this.ui.showBanner(`Tracking ${party.name} · ${party.intent}`, '', 2400);
   }
 
-  async _requestLivingWorldTravel(locationId) {
+  async _requestLivingWorldTravel(locationId, mode = 'travel') {
     const state = this.livingWorldState;
     const party = state?.party;
     const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
@@ -790,13 +791,16 @@ class App {
     if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
     try {
       const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
+      if (mode === 'fast' && party.socialPartyId && grouped.length > 1) {
+        this.ui.showBanner('Fast travel requires party members to use split travel. Group travel uses the road simulation.', 'bad', 3200); return;
+      }
       if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
         action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
         partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
       }); else await sendLivingWorldCommand({
         type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
           || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
-        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: destination?.fastTravel ? 'fast' : 'travel' },
+        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: mode === 'fast' && destination?.fastTravel ? 'fast' : 'travel' },
       });
       // Command acceptance is not arrival. Refresh to show only state the
       // authority has actually committed.
@@ -805,6 +809,15 @@ class App {
     } catch (error) {
       this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
     }
+  }
+
+  async _livingWorldTrade(payload) {
+    const state = this.livingWorldState, party = state?.party;
+    if (!party?.id || !party?.revision || party.locationId !== payload.locationId) return this._livingWorldUnavailable('Market trade');
+    try {
+      await sendLivingWorldCommand({ type: 'trade_market', requestId: globalThis.crypto?.randomUUID?.() || `trade-${Date.now().toString(36)}`, shardId: state.world.id, partyId: party.id, expectedRevision: party.revision, payload });
+      await this._refreshLivingWorld(); this.ui.showBanner(`${payload.side === 'buy' ? 'Purchase' : 'Sale'} submitted to the market.`, '', 2200);
+    } catch (error) { this.ui.showBanner(error?.message || 'Market trade was rejected.', 'bad', 2600); }
   }
 
   async _livingWorldCompanyAction(action, payload) {
@@ -1700,6 +1713,7 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    if (status.signedIn) await this._retryLivingWorldBattleOutbox();
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -2118,10 +2132,26 @@ class App {
     const battle=this._livingWorldBattle;
     if(!battle||!this.game)return;
     const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
+    try { sessionStorage.setItem('zillions-living-world-battle-outbox', JSON.stringify({ assignmentToken: battle.token, replay })); } catch { /* blocked storage */ }
     try{
       await sendLivingWorldBattleAction({action:'result',assignmentToken:battle.token,replay});
+      try { sessionStorage.removeItem('zillions-living-world-battle-outbox'); } catch { /* blocked storage */ }
       battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
     }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
+  }
+
+  async _retryLivingWorldBattleOutbox() {
+    let pending;
+    try { pending = JSON.parse(sessionStorage.getItem('zillions-living-world-battle-outbox') || 'null'); } catch { return; }
+    if (!pending?.assignmentToken || !pending?.replay || this._livingWorldOutboxRetrying) return;
+    this._livingWorldOutboxRetrying = true;
+    try {
+      await sendLivingWorldBattleAction({ action: 'result', assignmentToken: pending.assignmentToken, replay: pending.replay });
+      sessionStorage.removeItem('zillions-living-world-battle-outbox');
+      this.ui.showBanner('Recovered and committed the previous battle result.', '', 3200);
+    } catch (error) {
+      this.ui.showBanner(error?.message === 'battle_assignment_expired' ? 'The previous battle result expired before recovery.' : 'Previous battle result is still waiting for authority recovery.', 'bad', 4200);
+    } finally { this._livingWorldOutboxRetrying = false; }
   }
 
   _recordGameEnd(won) {

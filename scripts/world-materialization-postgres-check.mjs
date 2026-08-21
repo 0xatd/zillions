@@ -27,6 +27,10 @@ try{
   assert.equal((await admin.query("select count(*) count from public.world_provinces where key in('greenfall','ironwood','rotmire')")).rows[0].count,'0');
   assert.equal((await admin.query("select count(*) count from public.world_routes r join public.world_locations o on o.id=r.origin_id join public.world_locations d on d.id=r.destination_id where o.province_id<>r.origin_region_id or d.province_id<>r.destination_region_id")).rows[0].count,'0');
   assert.equal((await admin.query("select count(*) count from public.world_parties p left join public.world_armies a on a.party_id=p.id where p.kind='garrison' and a.id is null")).rows[0].count,'0');
+  const start=bundle.startingLocationId;
+  assert.ok(Number((await admin.query('select count(*) count from public.world_recruitment_offers where location_id=$1',[start])).rows[0].count)>0,'pinned starting town must offer recruits');
+  assert.ok(Number((await admin.query('select count(*) count from public.world_supply_offers where location_id=$1',[start])).rows[0].count)>=4,'pinned starting town must offer supplies');
+  assert.ok(Number((await admin.query('select count(*) count from public.world_town_services where location_id=$1',[start])).rows[0].count)>=3,'pinned starting town must offer town services');
   const replay=(await admin.query('select public.materialize_world_manifest($1,$2,$3) result',[manifest.planetId,manifest.contentHash,bundle])).rows[0].result;assert.equal(replay.duplicate,true);assert.equal(replay.materializationHash,first.materializationHash);
   for(const role of ['anon','authenticated']){await admin.query(`set role ${role}`);await admin.query("select set_config('request.jwt.claim.role',$1,false)",[role]);await expectError(admin.query('select public.materialize_world_manifest($1,$2,$3)',[manifest.planetId,manifest.contentHash,bundle]),'permission denied');await admin.query('reset role');}
   console.log(`world materialization PostgreSQL checks passed (${first.summary.regions} regions)`);

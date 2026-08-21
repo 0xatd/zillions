@@ -2315,10 +2315,13 @@ export class UI {
     this._renderLivingWorldMap();
     this.root.querySelector('#living-world-map').classList.remove('hidden');
     this.cb.onLivingWorldOpen?.(this._livingWorld.world.id);
+    clearInterval(this._livingWorldPoll);
+    this._livingWorldPoll = setInterval(() => this.cb.onLivingWorldViewport?.(this._livingWorldViewport()), 3000);
   }
 
   closeLivingWorldMap() {
     this.root.querySelector('#living-world-map')?.classList.add('hidden');
+    clearInterval(this._livingWorldPoll); this._livingWorldPoll = null;
   }
 
   _changeLivingWorldZoom(action) {
@@ -2407,11 +2410,15 @@ export class UI {
     const canFastTravel = kind === 'settlement' && item.known && item.fastTravel;
     const canTravel = kind === 'settlement' && item.known && item.reachable;
     const canDeploy = kind === 'mission' && item.known && item.unlocked;
-    const travelLabel = canFastTravel ? 'FAST TRAVEL' : item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
-    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : kind === 'hotspot' ? 'WORLD HOTSPOT' : 'DESTINATION'}</small><b>${escapeHtml(item.name || item.label || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : kind === 'hotspot' ? `${item.type} · ${item.state || 'active'}` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<button class="menubtn primary" id="lw-act">${travelLabel}</button>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}`;
+    const travelLabel = item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
+    const marketRows = kind === 'settlement' && state.party.locationId === item.id ? (state.markets || []).filter((row) => row.location_id === item.id) : [];
+    const market = marketRows.length ? `<div class="lw-market"><small>MARKET</small>${marketRows.map((row) => `<div><b>${escapeHtml(row.commodity_key)}</b><span>stock ${Number(row.stock) || 0}</span><button class="tbtn" data-trade="buy" data-key="${escapeHtml(row.commodity_key)}">BUY ${Number(row.buy_price) || 0}</button><button class="tbtn" data-trade="sell" data-key="${escapeHtml(row.commodity_key)}">SELL ${Number(row.sell_price) || 0}</button></div>`).join('')}</div>` : '';
+    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : kind === 'hotspot' ? 'WORLD HOTSPOT' : 'DESTINATION'}</small><b>${escapeHtml(item.name || item.label || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : kind === 'hotspot' ? `${item.type} · ${item.state || 'active'}` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<div class="lw-travel-actions"><button class="menubtn primary" data-travel="travel">${travelLabel}</button>${canFastTravel ? '<button class="menubtn" data-travel="fast">FAST TRAVEL</button>' : ''}</div>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : kind === 'settlement' && state.party.locationId === item.id ? '' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}${market}`;
+    for (const action of selection.querySelectorAll('[data-travel]')) action.onclick = () => this.cb.onLivingWorldFastTravel?.(item.id, action.dataset.travel);
+    for (const action of selection.querySelectorAll('[data-trade]')) action.onclick = () => this.cb.onLivingWorldTrade?.({ locationId: item.id, commodityKey: action.dataset.key, side: action.dataset.trade, quantity: 1 });
     const action = selection.querySelector('#lw-act');
     if (action) action.onclick = () => {
-      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id);
+      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id, 'travel');
       else if (canDeploy) this.cb.onLivingWorldMission?.(item.levelId, { mission: item, party: state.party });
       else this.cb.onLivingWorldTrackParty?.(item.id);
     };
