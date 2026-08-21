@@ -28,6 +28,10 @@ jobs:
       - run: npm run check:living-world
       - run: npm run check:earth-region-postgres
       - run: npm run check
+      - name: Configure local Vercel build
+        run: |
+          mkdir -p .vercel
+          printf '%s' '{"projectId":"prj_1l1tzmumNW4LAWQmvDDC9oMDeC4v","orgId":"team_8608EfcapFF0iJf9AomkK2GV","projectName":"zillions","settings":{"framework":null,"nodeVersion":"24.x"}}' > .vercel/project.json
       - run: npx vercel build --prod
         env:
           VERCEL_ORG_ID: team_8608EfcapFF0iJf9AomkK2GV
