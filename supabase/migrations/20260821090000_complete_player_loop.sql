@@ -116,6 +116,29 @@ create trigger sync_recruit_to_world_force after insert on public.world_company_
 for each row execute function public.sync_recruit_to_world_force();
 revoke all on function public.sync_recruit_to_world_force() from public,anon,authenticated;
 
+-- Every ownerless strategic army must also have a tactical force. Without this
+-- bridge, freshly materialized patrols, caravans, raiders, scouts, siege
+-- forces, and garrisons can move on the campaign map but cannot enter battle.
+create function public.seed_ownerless_world_force()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$
+declare p public.world_parties%rowtype;
+begin
+  select * into p from public.world_parties where id=new.party_id;
+  if not found or p.owner_user_id is not null then return new; end if;
+  insert into public.world_unit_stacks(army_id,unit_key,tier,healthy)
+    values(new.id,coalesce(nullif(p.strategic_role,''),nullif(p.kind,''),'militia'),1,greatest(1,ceil(new.combat_power)::integer))
+  on conflict(army_id,unit_key,tier) do nothing;
+  return new;
+end $$;
+create trigger seed_ownerless_world_force after insert on public.world_armies
+for each row execute function public.seed_ownerless_world_force();
+revoke all on function public.seed_ownerless_world_force() from public,anon,authenticated;
+insert into public.world_unit_stacks(army_id,unit_key,tier,healthy)
+select a.id,coalesce(nullif(p.strategic_role,''),nullif(p.kind,''),'militia'),1,greatest(1,ceil(a.combat_power)::integer)
+from public.world_armies a join public.world_parties p on p.id=a.party_id
+where p.owner_user_id is null and not exists(select 1 from public.world_unit_stacks s where s.army_id=a.id)
+on conflict(army_id,unit_key,tier) do nothing;
+
 create table public.world_trade_requests(
   actor_user_id uuid not null references auth.users(id) on delete cascade,request_id text not null,
   party_id uuid not null references public.world_parties(id),expected_revision bigint not null,payload jsonb not null,response jsonb not null,

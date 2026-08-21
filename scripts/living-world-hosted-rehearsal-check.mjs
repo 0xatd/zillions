@@ -6,6 +6,7 @@ import path from 'node:path';
 const root=path.resolve(import.meta.dirname,'..');
 const script=path.join(root,'scripts/living-world-hosted-rehearsal.mjs');
 const source=await readFile(script,'utf8');
+assert.match(source,/hosted battle proof needs a materialized AI force/,'hosted rehearsal must require a tactical AI opponent');
 const run=env=>spawnSync(process.execPath,[script],{cwd:root,env:{PATH:process.env.PATH,...env},encoding:'utf8'});
 
 let result=run({});
