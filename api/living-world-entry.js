@@ -30,11 +30,15 @@ export function createLivingWorldEntryHandler(deps={}) {
       const authorization=String(req.headers.authorization || '');
       const user=deps.authenticate ? await deps.authenticate(authorization) : await authenticate(authorization,config,fetchImpl);
       if(!user?.id) return send(res,401,{ok:false,error:'sign_in_required'});
+      await enforceLivingWorldRateLimit({config,actor:user.id,scope:'world:entry',limit:6,windowSeconds:300,fetchImpl,override:deps.rateLimit});
       const input=await body(req);
       if(!input || Object.keys(input).length!==1 || !UUID.test(String(input.characterId || ''))) return send(res,400,{ok:false,error:'invalid_character'});
+      if(deps.complete) await deps.complete(user.id,input.characterId);
+      else await rpc(config,'complete_world_tutorial_from_campaign',{p_actor:user.id,p_character:input.characterId},fetchImpl);
       const result=deps.enter ? await deps.enter(user.id,input.characterId) : await rpc(config,'enter_living_world',{p_actor:user.id,p_character:input.characterId},fetchImpl);
       return send(res,200,result);
     } catch(error) { return send(res,error?.status || 500,{ok:false,error:error?.message || 'world_entry_failed'}); }
   };
 }
 export default createLivingWorldEntryHandler();
+import { enforceLivingWorldRateLimit } from './living-world-rate-limit.js';

@@ -1,6 +1,6 @@
 # Living-world worker
 
-The database owns each shard tick. A worker calls `living_world_process_shard` with the service role. The function acquires the shard lock and a renewable lease. It applies queued commands in a stable order and advances one simulation tick in one transaction.
+The database owns each region tick. The scheduled endpoint selects a bounded set of regions. It then claims a renewable region lease and calls `process_world_region_runtime` with the service role. The function applies queued commands in a stable order and advances one simulation tick in one transaction. `living_world_process_shard` is retired and always fails closed.
 
 ## Command lifecycle
 
@@ -18,10 +18,20 @@ This slice accepts only unconditional surrender terms. It rejects non-empty term
 
 The worker uses `simulation_tick`, route distance, and party speed. It does not use wall-clock time for movement or supply consumption. A successful call advances exactly one tick. Movement arrival, fatigue, and supplies change in that transaction.
 
-Only one worker can hold a shard lease. The PostgreSQL advisory lock also serializes command acceptance, event sequence allocation, and tick advancement. An expired lease can be recovered by another worker.
+Only one worker can hold a region lease. The lease epoch fences stale worker processes. The PostgreSQL advisory lock serializes tick advancement for the region. An expired lease can be recovered by another worker.
+
+Each region tick performs these actions under the same lease:
+
+1. Complete inbound region handoffs.
+2. Apply queued player commands.
+3. Create encounters when hostile parties meet.
+4. Advance movement and faction AI.
+5. Process logistics and markets.
+6. Advance active sieges and resolve terminal siege states.
+7. Store one durable runtime-tick result.
 
 ## Operations
 
-Run the caller on an always-on process. Do not use a browser or an untrusted client. Give the caller only the service-role environment at runtime. Use a unique worker ID. Call the RPC at the ruleset tick interval. Treat `lease_held` as a healthy no-op.
+Keep `LIVING_WORLD_RUNTIME_ENABLED` unset until the migrations and activation checks pass. The scheduled endpoint returns `inactive` without database access while this flag is off. Do not use a browser or an untrusted client as a worker. Give the endpoint only the service-role environment at runtime. Use a unique worker ID. Treat a held lease as a healthy no-op.
 
 Do not apply this migration to production until it passes isolated PostgreSQL tests for concurrent command retries, lease takeover, movement arrival, trade conservation, command rejection, and transaction rollback. The repository check verifies the contract statically. It does not replace database integration tests.

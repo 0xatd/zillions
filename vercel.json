@@ -1,4 +1,5 @@
 {
+  "crons": [{ "path": "/api/living-world-worker", "schedule": "* * * * *" }],
   "headers": [
     {
       "source": "/(assets|vendor)/(.*)",

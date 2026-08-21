@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createLivingWorldWorkerHandler } from '../api/living-world-worker.js';
+import { enforceLivingWorldRateLimit } from '../api/living-world-rate-limit.js';
+
+const sql=readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql',import.meta.url),'utf8');
+assert.match(sql,/living_world_process_shard[\s\S]*shard_worker_retired/,'legacy shard authority must fail closed');
+assert.match(sql,/revoke all on function public\.living_world_process_shard[\s\S]*service_role/,'service workers must not retain shard mutation authority');
+assert.match(sql,/process_world_region_runtime[\s\S]*world_region_worker_leases[\s\S]*lease_epoch<>p_lease_epoch/,'runtime must fence every region incarnation');
+assert.match(sql,/world_commands c join public\.world_parties p[\s\S]*p\.region_id=p_region[\s\S]*for update of c skip locked/,'runtime may drain only commands owned by its region');
+assert.match(sql,/living_world_process_region\(p_region,p_worker,p_lease_epoch/,'faction simulation must run inside the region runtime');
+assert.match(sql,/process_world_region_logistics\(p_region,v_tick,p_worker,p_lease_epoch/,'logistics must run inside the same leased runtime');
+assert.match(sql,/create_world_region_encounters\(p_region,v_state\.simulation_tick\+1,p_worker,p_lease_epoch/,'hostile contact must be created by the region runtime');
+assert.match(sql,/advance_world_siege\(v_siege\.id,'runtime:'\|\|v_tick::text/,'active sieges must advance inside the region runtime');
+assert.match(sql,/guard_issued_battle_force/,'issued tactical assignments must freeze their strategic force');
+assert.match(sql,/request_world_region_handoff/,'cross-region departure must create a durable handoff');
+assert.match(sql,/complete_world_region_handoff/,'the destination region must complete the durable handoff');
+assert.doesNotMatch(sql,/random\s*\(/i,'runtime state changes must remain deterministic');
+assert.match(sql,/world_api_rate_buckets/,'mutation quotas must use durable database buckets');
+assert.match(sql,/pg_advisory_xact_lock\(hashtextextended\('world-rate:/,'fresh request ids must serialize under the same actor and scope quota');
+assert.match(sql,/greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'failed claims must move behind untouched regions instead of starving the batch');
+const limited=()=>enforceLivingWorldRateLimit({config:{url:'x',serviceKey:'x'},actor:'actor',scope:'battle:autosim',limit:4,override:async()=>({allowed:false,retryAfterSeconds:42})});
+await assert.rejects(limited,error=>error.status===429&&error.retryAfter===42);
+
+const response=()=>({status:0,writeHead(status){this.status=status;},end(value){this.body=JSON.parse(value);},setHeader(){}});
+let touched=false;
+const inactive=createLivingWorldWorkerHandler({secret:'cron',regions:async()=>{touched=true;return[];}});
+let res=response();await inactive({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.status,'inactive');assert.equal(touched,false);
+const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'https://example.invalid',serviceKey:'test'},workerId:'qa-worker',regions:async(limit)=>{assert.equal(limit,8);return[{region_id:'region-a'}];},claim:async()=>({ok:true,leaseEpoch:4}),process:async(region,worker,epoch)=>({region,worker,epoch,tick:9})});
+res=response();await handler({method:'GET',headers:{authorization:'Bearer wrong'}},res);assert.equal(res.status,401);
+res=response();await handler({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.regions[0].result.tick,9);
+console.log('region runtime unification checks passed');

@@ -4,9 +4,9 @@ import { signBattleAssignment, validateBattleResult, verifyBattleAssignment } fr
 import { createLivingWorldBattleHandler } from '../api/living-world-battle.js';
 import { readFileSync } from 'node:fs';
 
-const ids = { assignment: randomUUID(), engagement: randomUUID(), encounter: randomUUID(), party: randomUUID(), stack: randomUUID() };
+const ids = { assignment: randomUUID(), engagement: randomUUID(), encounter: randomUUID(), party: randomUUID(), stack: randomUUID(), actor: randomUUID() };
 const secret = 's'.repeat(48), authoritySecret = 'a'.repeat(48);
-const assignment = { id: ids.assignment, engagement_id: ids.engagement, encounter_id: ids.encounter, encounter_revision: 7, nonce: randomUUID(), expires_at: new Date(Date.now() + 60_000).toISOString() };
+const assignment = { id: ids.assignment, engagement_id: ids.engagement, encounter_id: ids.encounter, encounter_revision: 7, requested_by: ids.actor, nonce: randomUUID(), state:'issued', expires_at: new Date(Date.now() + 60_000).toISOString() };
 const token = signBattleAssignment(assignment, secret);
 assert.equal(verifyBattleAssignment(token, secret).encounterRevision, 7);
 assert.throws(() => verifyBattleAssignment(`${token}x`, secret), /invalid_battle_assignment/);
@@ -19,13 +19,17 @@ assert.throws(() => validateBattleResult({ ...result, casualties: [{ stackId: id
 function response() { return { status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } }; }
 async function request(handler, body, headers = {}) { const req = { method: 'POST', headers, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); } }; const res = response(); await handler(req, res); return res; }
 let commits = 0;
-const handler = createLivingWorldBattleHandler({ config: { url: 'x', anonKey: 'x', serviceKey: 'x', signingSecret: secret, authoritySecret }, authenticate: async () => ({ id: randomUUID() }), issue: async () => assignment, commit: async (claim, submitted) => { commits += 1; assert.equal(claim.assignmentId, ids.assignment); assert.equal(submitted.stateHash, result.stateHash); return { ok: true }; } });
+const handler = createLivingWorldBattleHandler({ config: { url: 'x', anonKey: 'x', serviceKey: 'x', signingSecret: secret, authoritySecret }, authenticate: async (authorization) => authorization==='Bearer user'?{ id: ids.actor }:null, rateLimit: async()=>({allowed:true}), issue: async () => assignment, assignment: async()=>assignment, verifyReplay:()=>result, autosim: () => result, commit: async (claim, submitted) => { commits += 1; assert.equal(claim.assignmentId, ids.assignment); assert.equal(submitted.stateHash, result.stateHash); return { ok: true }; } });
 const launched = await request(handler, { action: 'launch', engagementId: ids.engagement, encounterRevision: 7, requestId: 'launch-1' }, { authorization: 'Bearer user' });
 assert.equal(launched.status, 200); assert.ok(launched.body.token);
-const rejected = await request(handler, { action: 'result', assignmentToken: token, result }, {});
+const rejected = await request(handler, { action: 'result', assignmentToken: token, replay: {} }, {});
 assert.equal(rejected.status, 401); assert.equal(commits, 0);
-const accepted = await request(handler, { action: 'result', assignmentToken: token, result }, { 'x-zillions-battle-authority': authoritySecret });
+const accepted = await request(handler, { action: 'result', assignmentToken: token, replay: {} }, { authorization: 'Bearer user' });
 assert.equal(accepted.status, 200); assert.equal(commits, 1);
+const authorityAccepted = await request(handler, { action: 'authority_result', assignmentToken: token, result }, { 'x-zillions-battle-authority': authoritySecret });
+assert.equal(authorityAccepted.status, 200); assert.equal(commits, 2);
+const autosimmed = await request(handler, { action: 'autosim', engagementId: ids.engagement, encounterRevision: 7, requestId: 'autosim-1' }, { authorization: 'Bearer user' });
+assert.equal(autosimmed.status, 200); assert.equal(autosimmed.body.result.stateHash, result.stateHash); assert.equal(commits, 3);
 const migration = readFileSync(new URL('../supabase/migrations/20260820190000_living_world_battle_authority.sql', import.meta.url), 'utf8');
 const commitBody = migration.slice(migration.indexOf('create or replace function public.living_world_commit_battle'));
 assert.ok(commitBody.indexOf("pg_advisory_xact_lock(hashtextextended('world-shard:'") < commitBody.indexOf('where id=p_assignment for update'), 'battle commit must acquire the shard lock before aggregate locks');

@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {validateGovernanceCommand,createLivingWorldGovernanceHandler} from '../api/living-world-governance.js';
+const sql=fs.readFileSync(new URL('../supabase/migrations/20260820230000_siege_governance.sql',import.meta.url),'utf8');
+for(const marker of ['world_sieges','world_faction_reputation','world_holdings','world_governance_commands','world_siege_advances','world_siege_resolutions','living_world_governance_command','resolve_world_siege'])assert.match(sql,new RegExp(marker),`${marker} missing`);
+assert.match(sql,/world_sieges_one_open_location[\s\S]*where status in \('preparing','active','breached'\)/,'one active siege per target must be enforced');
+assert.match(sql,/world_region_worker_leases[\s\S]*lease_epoch<>p_lease_epoch[\s\S]*lease_until<=now\(\)/,'resolution must be fenced by the live region lease');
+assert.match(sql,/pg_advisory_xact_lock\(hashtextextended\('world-siege:'\|\|p_siege::text/,'siege resolution must serialize');
+assert.match(sql,/world_siege_resolutions[\s\S]*primary key\(siege_id,request_id\)/,'resolution replay key must be durable');
+assert.match(sql,/world_siege_advances[\s\S]*primary key\(siege_id,request_id\)/,'advance replay key must be durable');
+assert.match(sql,/if v_old.expected_revision<>p_expected_revision or v_old.outcome<>p_outcome or v_old.worker_id<>p_worker or v_old.lease_epoch<>p_lease_epoch then raise exception 'idempotency_conflict'/,'conflicting resolution replays must fail');
+assert.match(sql,/update public\.world_locations set owner_faction_id=v_siege\.attacker_faction_id[\s\S]*control_state='occupied'/,'victory must occupy the target atomically');
+assert.match(sql,/if v_location\.is_region_seat then[\s\S]*update public\.world_provinces set owner_faction_id=v_siege\.attacker_faction_id/,'only a region-seat siege may transfer regional ownership');
+assert.match(sql,/insert into public\.world_holdings[\s\S]*'governorship'/,'occupation must grant a durable holding');
+assert.match(sql,/world_faction_reputation\.score\+25[\s\S]*world_faction_reputation\.score-20/,'siege outcome must update bounded faction reputation');
+assert.match(sql,/world-events:[\s\S]*insert into public\.world_events[\s\S]*'siege\.resolved'/,'resolution must serialize and enter the world audit stream');
+assert.match(sql,/enable row level security/);assert.match(sql,/world_reputation_owner_read/);assert.match(sql,/world_holdings_owner_read/);
+assert.match(sql,/world_sieges_region_participant_read[\s\S]*owner_user_id=auth\.uid\(\)/,'siege reads must be region-scoped');
+const id='10000000-0000-4000-8000-000000000001';
+assert.equal(validateGovernanceCommand({requestId:'siege:1',partyId:id,expectedRevision:2,action:'declare_siege',payload:{locationId:id}}).action,'declare_siege');
+assert.throws(()=>validateGovernanceCommand({requestId:'siege:1',partyId:id,expectedRevision:2,action:'declare_siege',payload:{locationId:id,worker:'evil'}}),/invalid_governance_payload/);
+assert.throws(()=>validateGovernanceCommand({requestId:'siege:1',partyId:id,expectedRevision:2,action:'set_siege_stance',payload:{siegeId:id,stance:'instant_win'}}),/invalid_siege_stance/);
+function response(){return{status:0,value:null,headers:{},writeHead(status,headers){this.status=status;this.headers=headers;},setHeader(){},end(value){this.value=JSON.parse(value);}};}
+let called=null;const handler=createLivingWorldGovernanceHandler({config:{url:'x',anonKey:'a',serviceKey:'s'},authenticate:async()=>({id:'actor'}),rateLimit:async()=>({allowed:true}),command:async(actor,command)=>{called={actor,command};return{ok:true};},snapshot:async()=>({sieges:[],reputation:[{score:25}],holdings:[]})});
+let res=response();await handler({method:'GET',headers:{authorization:'Bearer ok'}},res);assert.equal(res.status,200);assert.equal(res.value.reputation[0].score,25);
+res=response();const payload=JSON.stringify({requestId:'siege:1',partyId:id,expectedRevision:2,action:'declare_siege',payload:{locationId:id}});await handler({method:'POST',headers:{authorization:'Bearer ok'},async *[Symbol.asyncIterator](){yield Buffer.from(payload);}},res);assert.equal(res.status,200);assert.equal(called.actor,'actor');assert.equal(called.command.action,'declare_siege');
+console.log('siege governance check passed');

@@ -309,6 +309,14 @@ Supabase owns:
 - Global lobby chat (`lobby_chat`).
 - Friend requests, accepted friends, and friend online state (`friendships`).
 - Room setup chat and in-game team chat (`room_chat.channel = 'room' | 'game'`).
+- Canonical universe, star system, planet, region, faction, and ownership state.
+- Region worker leases and replay-safe cross-region party handoffs.
+
+Earth is the first canonical planet. Greenfall is its first active region.
+Every region, settlement, route, and strategic site has faction control state.
+The state includes its owner, claimant, control strength, garrison, unrest,
+siege or blockade state, and causal control history. A planet can use one or
+many region workers. Players must still experience one shared planet.
 
 Vercel owns:
 

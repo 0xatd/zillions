@@ -38,7 +38,7 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
-  getLivingWorldProjection, livingWorldProjectionToUi, sendLivingWorldCommand, setLivingWorldSession,
+  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, livingWorldProjectionToUi, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
 } from './living-world-client.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
@@ -231,12 +231,18 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._enterOverworld(),
-      onPartyCreate: () => this._livingWorldUnavailable('Party creation'),
+      onPartyCreate: () => this._createLivingWorldParty(),
       onPartyOpen: () => this._openLivingWorldParty(),
+      onPartyLeave: () => this._leaveLivingWorldParty(),
+      onPartyTravelMode: (mode) => this._setLivingWorldPartyTravelMode(mode),
+      onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
       onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
       onLivingWorldOpen: () => this._refreshLivingWorld(),
       onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
-      onLivingWorldMission: () => this._livingWorldUnavailable('Living-world encounters'),
+      onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
+      onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
+      onLivingWorldEncounter: (encounter, action) => this._livingWorldEncounterAction(encounter, action),
+      onLivingWorldGovernance: (action, payload) => this._livingWorldGovernanceAction(action, payload),
       onLivingWorldTrackParty: (partyId) => this._trackLivingWorldParty(partyId),
       onGalaxyOpen: () => this._openGalaxyMap(),
       onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
@@ -688,9 +694,15 @@ class App {
       return null;
     }
     try {
-      const projection = await getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth');
+      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth'), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       if (!projection?.shard) throw new Error('world_not_initialized');
-      const state = livingWorldProjectionToUi(projection, this._livingWorldSelf());
+      if (!(projection.ownParties || []).length) {
+        const character = selectedMmoCharacter(this.profile);
+        if (!character?.id) throw new Error('living_world_character_required');
+        await enterLivingWorld(character.id);
+        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
+      }
+      const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
       this.livingWorldState = state;
       this.ui.setLivingWorldState(state);
       return state;
@@ -698,7 +710,8 @@ class App {
       this.livingWorldState = null;
       this.ui.setLivingWorldState({});
       const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
-      this.ui.showBanner(unavailable ? 'The persistent world is not initialized on this build.' : 'World intelligence could not be refreshed.', 'bad', 3000);
+      const tutorial = error?.message === 'tutorial_campaign_required';
+      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'The persistent world is not initialized on this build.' : 'World intelligence could not be refreshed.', 'bad', 3000);
       return null;
     }
   }
@@ -708,9 +721,39 @@ class App {
   }
 
   _openLivingWorldParty() {
-    const members = this.livingWorldState?.party?.members || [];
-    if (!members.length) return this._livingWorldUnavailable('Party management');
-    this.ui.showBanner(`Party · ${members.map((member) => member.name).join(', ')}`, '', 2600);
+    const party = this.livingWorldState?.party;
+    if (!party?.socialPartyId) return this._createLivingWorldParty();
+    const targetHandle = globalThis.prompt?.('Invite a player by Zillions username:')?.trim().toLowerCase();
+    if (!targetHandle) return;
+    this._sendLivingWorldPartyAction('invite', { partyId: party.socialPartyId, targetHandle }).then(() => {
+      this.ui.showBanner('Party invitation sent.', '', 2400); this._refreshLivingWorld();
+    }).catch(() => this.ui.showBanner('The party invitation was rejected.', 'bad', 2600));
+  }
+
+  async _sendLivingWorldPartyAction(action, fields = {}) {
+    return sendLivingWorldPartyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `party-${Date.now().toString(36)}`, action, payload: {}, ...fields });
+  }
+
+  async _createLivingWorldParty() {
+    try { await this._sendLivingWorldPartyAction('create', { payload: { name: `${this._livingWorldSelf().name}'s Party`, shardId: this.livingWorldState?.world?.id || 'earth-1' } }); await this._refreshLivingWorld(); this.ui.showBanner('Party created.', '', 2200); }
+    catch (error) { this.ui.showBanner(error?.message === 'already_in_party' ? 'You already have a party.' : 'Party creation was rejected.', 'bad', 2500); }
+  }
+
+  async _leaveLivingWorldParty() {
+    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId || !globalThis.confirm?.('Leave this party? Your company remains in the world.')) return;
+    try { await this._sendLivingWorldPartyAction('leave', { partyId }); await this._refreshLivingWorld(); this.ui.showBanner('You left the party.', '', 2200); }
+    catch { this.ui.showBanner('Could not leave the party.', 'bad', 2400); }
+  }
+
+  async _setLivingWorldPartyTravelMode(mode) {
+    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId) return;
+    try { await this._sendLivingWorldPartyAction('travel_mode', { partyId, payload: { mode } }); await this._refreshLivingWorld(); this.ui.showBanner(mode === 'grouped' ? 'Your company will travel with the party.' : 'Your company may travel separately.', '', 2400); }
+    catch { this.ui.showBanner('Travel mode was rejected.', 'bad', 2400); }
+  }
+
+  async _acceptLivingWorldPartyInvite(invite) {
+    try { await this._sendLivingWorldPartyAction('accept', { partyId: invite.partyId, inviteId: invite.id }); await this._refreshLivingWorld(); this.ui.showBanner(`Joined ${invite.partyName || 'party'}.`, '', 2400); }
+    catch { this.ui.showBanner('The party invitation could not be accepted.', 'bad', 2600); }
   }
 
   _locateLivingWorldPartyMember(memberId) {
@@ -730,12 +773,17 @@ class App {
     const state = this.livingWorldState;
     const party = state?.party;
     const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
+    const destination = state?.settlements?.find((entry) => entry.id === locationId);
     if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
     try {
-      await sendLivingWorldCommand({
+      const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
+      if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
+        action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
+        partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
+      }); else await sendLivingWorldCommand({
         type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
           || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
-        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id },
+        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: destination?.fastTravel ? 'fast' : 'travel' },
       });
       // Command acceptance is not arrival. Refresh to show only state the
       // authority has actually committed.
@@ -744,6 +792,47 @@ class App {
     } catch (error) {
       this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
     }
+  }
+
+  async _livingWorldCompanyAction(action, payload) {
+    const company = this.livingWorldState?.company;
+    if (!company?.partyId || !company?.revision) return this._livingWorldUnavailable('Company management');
+    try {
+      await sendLivingWorldCompanyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `company-${Date.now().toString(36)}`, partyId: company.partyId, expectedRevision: Number(company.revision), action, payload });
+      await this._refreshLivingWorld(); this.ui.showBanner('Company order completed.', '', 2200);
+    } catch (error) { this.ui.showBanner(error?.message || 'Company order was rejected.', 'bad', 2600); }
+  }
+
+  async _livingWorldEncounterAction(encounter, action) {
+    const party = this.livingWorldState?.party;
+    try {
+      if (action === 'autosim' && encounter.engagement?.id) {
+        await sendLivingWorldBattleAction({ action: 'autosim', engagementId: encounter.engagement.id, encounterRevision: Number(encounter.revision), requestId: globalThis.crypto?.randomUUID?.() || `battle-${Date.now().toString(36)}` });
+      } else if (action === 'live' && encounter.engagement?.id) {
+        const launched=await sendLivingWorldBattleAction({action:'launch',engagementId:encounter.engagement.id,encounterRevision:Number(encounter.revision),requestId:globalThis.crypto?.randomUUID?.()||`battle-${Date.now().toString(36)}`});
+        this._livingWorldBattle={assignment:launched.assignment,token:launched.token,commands:[]};
+        this.closePauseMenu?.();this.ui.closeLivingWorldMap();this.ui.selectedMode='living_world_battle';this.ui.selectedLevel=1;
+        await this.startGame('normal','alexander');
+        return;
+      } else {
+        await sendLivingWorldCommand({ type: 'set_encounter_choice', requestId: globalThis.crypto?.randomUUID?.() || `encounter-${Date.now().toString(36)}`, shardId: this.livingWorldState.world.id, partyId: party.id, expectedRevision: party.revision, payload: { encounterId: encounter.id, choice: action, decisionRevision: Number(encounter.revision), rearguardStackIds: [], diversion: {} } });
+      }
+      await this._refreshLivingWorld(); this.ui.showBanner(action === 'autosim' ? 'Battle resolved and written back.' : 'Encounter decision submitted.', '', 2400);
+    } catch (error) { this.ui.showBanner(error?.message || 'Encounter action was rejected.', 'bad', 2800); }
+  }
+
+  async _livingWorldGovernanceAction(action, payload) {
+    const party = this.livingWorldState?.party;
+    if (!party?.id || !party.revision) return this._livingWorldUnavailable('Governance');
+    try { await sendLivingWorldGovernanceCommand({ requestId: globalThis.crypto?.randomUUID?.() || `governance-${Date.now().toString(36)}`, partyId: party.id, expectedRevision: party.revision, action, payload }); await this._refreshLivingWorld(); this.ui.showBanner('Governance order completed.', '', 2300); }
+    catch (error) { this.ui.showBanner(error?.message || 'Governance order was rejected.', 'bad', 2800); }
+  }
+
+  _launchLivingWorldMission(levelId) {
+    if (!Number.isInteger(Number(levelId)) || Number(levelId) < 1) return this._livingWorldUnavailable('Mission deployment');
+    this.closePauseMenu?.();
+    this.ui.closeLivingWorldMap();
+    this._launchGateMission({ levelId: Number(levelId), cave: false }, this.ui.selectedDiff || 'normal');
   }
 
   _travelToWorld(worldId) {
@@ -1153,8 +1242,9 @@ class App {
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : this._livingWorldBattle ? 'alexander' : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    if(this._livingWorldBattle&&!snap)this.game.configureLivingWorldBattle(this._livingWorldBattle.assignment);
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1632,6 +1722,9 @@ class App {
   }
 
   _restartOrReturn() {
+    if(this.game?.mode==='living_world_battle'&&this._livingWorldBattle&&!this._livingWorldBattle.committed){
+      this.ui.showBanner(this._livingWorldBattle.error?'The persistent result was rejected. Retry the result before leaving.':'Verifying the persistent battle result…','bad',3200);return;
+    }
     // Any campaign run that came off the planet — or belongs to a character —
     // returns to the world, not the title screen.
     if (this.game?.over && this.game.mode === 'campaign'
@@ -1725,6 +1818,7 @@ class App {
   issue(cmd) {
     if (!this.game) return;
     if (this.mpRole === 'spectator') return;
+    if(this._livingWorldBattle&&this.game.mode==='living_world_battle')this._livingWorldBattle.commands.push({tick:Math.max(0,Math.round(this.game.time/SIM_DT)),command:structuredClone(cmd)});
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
     else this.net.send({ t: 'cmd', c: cmd });
@@ -2000,8 +2094,22 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
+  async _commitLivingWorldBattle() {
+    const battle=this._livingWorldBattle;
+    if(!battle||!this.game)return;
+    const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
+    try{
+      await sendLivingWorldBattleAction({action:'result',assignmentToken:battle.token,replay});
+      battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
+    }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
+  }
+
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if(this.game?.mode==='living_world_battle'){
+      persistRunTelemetry(this.game);this.profile.games++;this.profile.kills+=this.game.stats.kills;this._saveProfile();
+      this._livingWorldBattleCommit=this._commitLivingWorldBattle();return;
+    }
     persistRunTelemetry(this.game);
     const p = this.profile;
     p.games++;

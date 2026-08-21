@@ -617,6 +617,41 @@ export class Game {
     this.msg('🏳️ The frontier is yours to claim. Ride to a marked site and use Build to found your city.', 'info');
   }
 
+  configureLivingWorldBattle(assignment) {
+    const snapshot=assignment?.force_snapshot;
+    const parties=Array.isArray(snapshot?.parties)?snapshot.parties:[];
+    const armies=Array.isArray(snapshot?.armies)?snapshot.armies:[];
+    const stacks=Array.isArray(snapshot?.stacks)?snapshot.stacks:[];
+    const playerParty=parties.find((party)=>party.owner_user_id===assignment.requested_by);
+    if(!playerParty||!snapshot?.attackerPartyId||!snapshot?.defenderPartyId)throw new Error('invalid_living_world_battle_assignment');
+    const opponentPartyId=playerParty.id===snapshot.attackerPartyId?snapshot.defenderPartyId:snapshot.attackerPartyId;
+    const armyParty=new Map(armies.map((army)=>[army.id,army.party_id]));
+    const playerStacks=stacks.filter((stack)=>armyParty.get(stack.army_id)===playerParty.id);
+    const enemyStacks=stacks.filter((stack)=>armyParty.get(stack.army_id)===opponentPartyId);
+    if(!playerStacks.length||!enemyStacks.length)throw new Error('empty_living_world_battle_force');
+    if([...playerStacks,...enemyStacks].reduce((sum,stack)=>sum+(Number(stack.healthy)||0),0)>2000)throw new Error('living_world_battle_requires_autosim');
+    this.mode='living_world_battle';this.phase='live';this.finalStand=false;this.firstSiege=null;
+    this.nests=[];this.nodes=[];this.plots=[];this.buildings=[];this.coins=[];this.loot=[];this.zombies=[];
+    this.units=this.heroes.filter((hero)=>!hero.dead);
+    const anchor=this.heroes[0]||{x:this.map.size*.25,z:this.map.size*.5};
+    const enemyAnchor=this._reseat(Math.min(this.map.size-3,anchor.x+10),anchor.z)||[Math.min(this.map.size-3,anchor.x+10),anchor.z];
+    this.livingWorldBattle={assignmentId:assignment.id,playerPartyId:playerParty.id,opponentPartyId,
+      attackerPartyId:snapshot.attackerPartyId,defenderPartyId:snapshot.defenderPartyId,initial:{},losses:{}};
+    const friendlyKey=(key)=>/snip/i.test(key)?'sniper':/ranger|spear|scout/i.test(key)?'ranger':'soldier';
+    const enemyKey=(key)=>/brute|heavy/i.test(key)?'brute':/ranger|raider|scout/i.test(key)?'runner':'walker';
+    for(const [side,rows] of [['player',playerStacks],['enemy',enemyStacks]])for(const stack of rows){
+      const count=Math.max(0,Number(stack.healthy)||0);this.livingWorldBattle.initial[stack.id]=count;this.livingWorldBattle.losses[stack.id]=0;
+      for(let index=0;index<count;index++){
+        const angle=(index/Math.max(1,count))*Math.PI*2,radius=2+Math.floor(index/12)*.7;
+        const actor=side==='player'?this._spawnUnit(friendlyKey(stack.unit_key),anchor.x+Math.cos(angle)*radius,anchor.z+Math.sin(angle)*radius)
+          :this._spawnZombie(enemyKey(stack.unit_key),enemyAnchor[0]+Math.cos(angle)*radius,enemyAnchor[1]+Math.sin(angle)*radius,true,true);
+        if(actor){actor.strategicStackId=stack.id;const scale=1+Math.max(0,(Number(stack.tier)||1)-1)*.12;actor.maxHp*=scale;actor.hp=actor.maxHp;actor.def={...actor.def,dmg:actor.def.dmg*scale};}
+      }
+    }
+    this.stance='attack';
+    return this.livingWorldBattle;
+  }
+
   // ---------- labyrinth setup ----------
 
   // The Labyrinth: no founding, no colony, no army — the run opens live, with
@@ -3301,6 +3336,7 @@ export class Game {
     if (zb.state !== AGGRO) zb.state = AGGRO;
     if (zb.hp <= 0) {
       zb.dead = true;
+      if(this.livingWorldBattle&&zb.strategicStackId)this.livingWorldBattle.losses[zb.strategicStackId]=(this.livingWorldBattle.losses[zb.strategicStackId]||0)+1;
       this.stats.kills++;
       if (zb.boss) {
         this.boss = null;
@@ -3402,11 +3438,14 @@ export class Game {
     u.hp -= dmg;
     if (u.hp <= 0) {
       u.dead = true;
+      if(this.livingWorldBattle&&u.strategicStackId)this.livingWorldBattle.losses[u.strategicStackId]=(this.livingWorldBattle.losses[u.strategicStackId]||0)+1;
       this.emit({ type: 'udeath', x: u.x, z: u.z });
       if (u.hero) {
         this.stats.heroDeaths++;
         this.emit({ type: 'herodown' });
-        if (this.mode === 'labyrinth') {
+        if (this.mode === 'living_world_battle') {
+          u.fallen=true;
+        } else if (this.mode === 'labyrinth') {
           // A fall spends a shared life. Out of lives, the fall is final —
           // and when the last hero is down, the labyrinth keeps them.
           if (this.lives > 0) {
@@ -3470,6 +3509,10 @@ export class Game {
     this._updateTowers(dt);
     this._updateHero(dt);
     this._cleanup();
+    if(this.mode==='living_world_battle'&&!this.over){
+      if(!this.zombies.some((actor)=>!actor.dead))this._gameOver(true);
+      else if(this.heroes.every((hero)=>hero.dead)&&!this.units.some((actor)=>!actor.hero&&!actor.dead))this._gameOver(false);
+    }
   }
 
   // Hero auras — the passive third of the kit (auto-attack, aura, special).

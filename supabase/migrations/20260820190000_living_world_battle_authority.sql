@@ -93,6 +93,10 @@ begin
     or (p_result->>'outcome'='defender_victory' and v_winner is distinct from v_enc.defender_party_id)
     or (p_result->>'outcome' in('draw','retreat') and v_winner is not null) then raise exception 'winner_outcome_mismatch'; end if;
 
+  -- The assignment freezes its strategic force. Only this verified authority
+  -- transaction may mutate those rows until the assignment is committed.
+  perform set_config('zillions.battle_commit','1',true);
+
   for v_row in select value from jsonb_array_elements(coalesce(p_result->'casualties','[]'::jsonb)) loop
     select * into v_stack from public.world_unit_stacks where id=(v_row->>'stackId')::uuid for update;
     if not found or not exists(select 1 from public.world_armies a where a.id=v_stack.army_id and a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id)) then raise exception 'invalid_casualty_stack'; end if;
