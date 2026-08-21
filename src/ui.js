@@ -100,7 +100,7 @@ export class UI {
         <div class="lw-shell">
           <header class="lw-head"><div><span>LIVING WORLD</span><h1 id="lw-world-name">EARTH FRONTIER</h1><small id="lw-region"></small></div><div class="lw-head-actions"><button class="tbtn" id="lw-party">＋ PARTY</button><button class="tbtn" id="lw-close">CLOSE</button></div></header>
           <div class="lw-body">
-            <div class="lw-map-stage" id="lw-map-stage"><div class="lw-map-grid"></div><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div><div class="lw-legend"><span><i class="free"></i> Free</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
+            <div class="lw-map-stage" id="lw-map-stage"><div id="lw-regions" class="lw-regions"></div><div class="lw-map-grid"></div><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div><div class="lw-legend"><span><i class="free"></i> Allied</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
             <aside class="lw-finder"><span class="lw-kicker">MISSION FINDER</span><h2>Choose your next move</h2><p>Travel the roads for encounters and discoveries, or deploy directly to a known destination.</p><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support fast travel. Discovered fronts support direct deployment.</p></div></aside>
           </div>
         </div>
@@ -2280,13 +2280,19 @@ export class UI {
   _renderPartyFrames() {
     const box = this.root.querySelector('#ow-party-frames');
     if (!box) return;
-    const members = this._livingWorld.party.members || [];
+    const party = this._livingWorld.party;
+    const members = party.members || [];
+    const self = members.find((member) => member.self);
+    const pending = party.pendingInvites || [];
     box.innerHTML = `<div class="opf-head"><span>PARTY</span><button id="opf-invite">${this._livingWorld.party.id ? '+ INVITE' : '+ CREATE'}</button></div>${members.length ? members.map((member) => {
       const health = Math.max(0, Math.min(100, Number(member.health) || 0));
-      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')}</small></span><strong>${health}%</strong></button>`;
-    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}`;
+      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.role || member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')} · ⚔ ${Number(member.companyStrength) || 0}</small></span><strong>${health}%</strong></button>`;
+    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}${pending.map((invite) => `<button class="opf-invite-card" data-invite="${escapeHtml(invite.id)}">JOIN ${escapeHtml(invite.partyName || 'PARTY')}</button>`).join('')}${party.socialPartyId ? `<div class="opf-actions"><button data-mode="grouped" class="${self?.travelMode === 'grouped' ? 'active' : ''}">TRAVEL TOGETHER</button><button data-mode="split" class="${self?.travelMode === 'split' ? 'active' : ''}">SPLIT</button><button id="opf-leave">LEAVE</button></div>` : ''}`;
     box.querySelector('#opf-invite').onclick = () => this._partyAction();
     for (const button of box.querySelectorAll('[data-member]')) button.onclick = () => this.cb.onPartyMemberLocate?.(button.dataset.member);
+    for (const button of box.querySelectorAll('[data-mode]')) button.onclick = () => this.cb.onPartyTravelMode?.(button.dataset.mode);
+    for (const button of box.querySelectorAll('[data-invite]')) button.onclick = () => this.cb.onPartyInviteAccept?.(pending.find((invite) => invite.id === button.dataset.invite));
+    const leave = box.querySelector('#opf-leave'); if (leave) leave.onclick = () => this.cb.onPartyLeave?.();
   }
 
   openLivingWorldMap() {
@@ -2303,11 +2309,13 @@ export class UI {
     const state = this._livingWorld;
     this.root.querySelector('#lw-world-name').textContent = state.world.name;
     this.root.querySelector('#lw-region').textContent = `${state.world.region} · WORLD TIME ${state.world.time}`;
+    const regions = this.root.querySelector('#lw-regions');
+    regions.innerHTML = state.regions.map((region) => `<button class="lw-region ${region.owner}${region.current ? ' current' : ''}" data-region="${escapeHtml(region.id)}"><span>${escapeHtml(region.current ? 'YOU ARE HERE' : region.controlState.toUpperCase())}</span><b>${escapeHtml(region.name)}</b><small>${escapeHtml(region.ownerName)} · ${Math.round(region.controlStrength * 100)}% control</small></button>`).join('');
     const routes = this.root.querySelector('#lw-routes');
     routes.innerHTML = state.routes.map((route) => `<line x1="${route.from[0]}" y1="${route.from[1]}" x2="${route.to[0]}" y2="${route.to[1]}" class="${route.state}"/>`).join('');
     const nodes = this.root.querySelector('#lw-map-nodes');
     nodes.innerHTML = [
-      ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)}</small></button>`),
+      ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)} · ${escapeHtml(item.ownerName)}${item.controlState !== 'controlled' ? ` · ${escapeHtml(item.controlState)}` : ''}</small></button>`),
       ...state.parties.map((item) => `<button class="lw-node army ${item.owner}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>⚑</i><b>${escapeHtml(item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.intent)}</small></button>`),
       ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
     ].join('');
@@ -2323,9 +2331,11 @@ export class UI {
       : state.missions.find((entry) => entry.id === id);
     if (!item) return;
     const selection = this.root.querySelector('#lw-selection');
-    const canTravel = kind === 'settlement' && item.known && item.fastTravel;
+    const canFastTravel = kind === 'settlement' && item.known && item.fastTravel;
+    const canTravel = kind === 'settlement' && item.known && item.reachable;
     const canDeploy = kind === 'mission' && item.known && item.unlocked;
-    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : 'DESTINATION'}</small><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.blurb || item.intent || `${item.kind} · ${item.owner}`)}</p>${canTravel ? '<button class="menubtn primary" id="lw-act">FAST TRAVEL</button>' : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NOT AVAILABLE</button>'}`;
+    const travelLabel = canFastTravel ? 'FAST TRAVEL' : item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
+    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : 'DESTINATION'}</small><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.blurb || item.intent || `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`)}</p>${canTravel ? `<button class="menubtn primary" id="lw-act">${travelLabel}</button>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}`;
     const action = selection.querySelector('#lw-act');
     if (action) action.onclick = () => {
       if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id);

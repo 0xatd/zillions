@@ -1,4 +1,4 @@
-import { signBattleAssignment, validateBattleResult, verifyBattleAssignment } from '../src/living-world-battle.js';
+import { autosimBattleAssignment, signBattleAssignment, validateBattleResult, verifyBattleAssignment } from '../src/living-world-battle.js';
 
 const HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const send = (res, status, body) => { res.writeHead(status, HEADERS); res.end(JSON.stringify(body)); };
@@ -30,6 +30,16 @@ export function createLivingWorldBattleHandler(deps = {}) {
         if (!user?.id) return send(res, 401, { ok: false, error: 'sign_in_required' });
         const assignment = deps.issue ? await deps.issue(user.id, body) : await rpc(config, 'living_world_issue_battle', { p_actor: user.id, p_engagement: body.engagementId, p_encounter_revision: body.encounterRevision, p_request_id: body.requestId }, fetchImpl);
         return send(res, 200, { ok: true, assignment, token: signBattleAssignment(assignment, config.signingSecret) });
+      }
+      if (body.action === 'autosim') {
+        const authorization = String(req.headers.authorization || '');
+        const user = deps.authenticate ? await deps.authenticate(authorization) : await supabaseUser(authorization, config, fetchImpl);
+        if (!user?.id) return send(res, 401, { ok: false, error: 'sign_in_required' });
+        const assignment = deps.issue ? await deps.issue(user.id, body) : await rpc(config, 'living_world_issue_battle', { p_actor: user.id, p_engagement: body.engagementId, p_encounter_revision: body.encounterRevision, p_request_id: body.requestId }, fetchImpl);
+        const result = (deps.autosim || autosimBattleAssignment)(assignment);
+        const claim = verifyBattleAssignment(signBattleAssignment(assignment, config.signingSecret), config.signingSecret);
+        const committed = deps.commit ? await deps.commit(claim, result) : await rpc(config, 'living_world_commit_battle', { p_assignment: claim.assignmentId, p_nonce: claim.nonce, p_encounter_revision: claim.encounterRevision, p_result: result }, fetchImpl);
+        return send(res, 200, { ...committed, result });
       }
       if (body.action === 'result') {
         const supplied = String(req.headers['x-zillions-battle-authority'] || '');

@@ -66,6 +66,9 @@ Default branch: main
 - api/ contains Vercel server routes. api/economy.js is the authenticated,
   server-authoritative inventory and currency boundary.
 - supabase/schema.sql is the database schema source.
+- supabase/migrations/20260820203000_earth_region_topology.sql defines the
+  dormant canonical universe, Earth region, faction-control, lease, and
+  cross-region handoff authority.
 
 ## Critical rules
 

@@ -1,0 +1,4 @@
+const requestId=(action)=>`${action}:${Date.now().toString(36)}:${crypto.randomUUID()}`;
+async function responseJson(response){const value=await response.json().catch(()=>null);if(!response.ok)throw new Error(value?.error||'governance_request_failed');return value;}
+export async function loadLivingWorldGovernance(accessToken,fetchImpl=fetch){return responseJson(await fetchImpl('/api/living-world-governance',{headers:{authorization:`Bearer ${accessToken}`}}));}
+export async function sendGovernanceCommand(accessToken,{partyId,expectedRevision,action,payload},fetchImpl=fetch){return responseJson(await fetchImpl('/api/living-world-governance',{method:'POST',headers:{authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({requestId:requestId(action),partyId,expectedRevision,action,payload})}));}

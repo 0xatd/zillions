@@ -176,6 +176,8 @@ seat that the same account owned before disconnect.
 | Local development fallback | Browser local storage |
 | Legacy state mirror | Vercel Blob compatibility routes |
 | Last planetary location | Profile `lastWorld` with local mirror |
+| Galaxy topology, region ownership, parties, and world events | Supabase living-world authority |
+| Region simulation lease and cross-region handoff | Supabase service worker |
 
 ## Galaxy Travel
 
@@ -190,6 +192,32 @@ galaxy and world descriptors must not assume that future destinations use the
 same art, siege objectives, or encounter format.
 
 Do not move production social state back to Vercel Blob.
+
+## Living World Authority
+
+The durable topology is `universe -> star system -> planet -> region ->
+location`. Earth is the first planet. Greenfall is the first active region.
+The `earth-1` shard identifier remains a compatibility key while authority
+moves to region workers.
+
+Each party has one authoritative region. Each route records its origin and
+destination region. A region has one simulation state row and at most one
+active worker lease. Lease epochs fence an old worker after another worker
+takes ownership.
+
+Cross-region travel uses a durable two-step handoff. The source records one
+idempotent pending request. The destination worker must hold the destination
+lease. Completion locks the handoff and party, verifies the expected party
+revision, then updates the movement order, location, region, and handoff in one
+transaction. A replay returns the committed result. A stale transfer fails.
+
+Faction control is durable world state. Regions, locations, and routes store
+ownership, claims, control strength, and conflict state. Region control history
+records why control changed and the world tick at which it changed.
+
+This authority does not yet run tactical combat. Tactical matches still use
+browser lockstep. A later battle-result boundary will write signed outcomes
+back to the living world.
 
 ## Galaxy Generation and Meta-Progression
 

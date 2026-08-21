@@ -48,6 +48,13 @@ Supabase owns the real account backend:
 - Private match history.
 - Public/private room records, room players, ready state, hero picks, global
   lobby chat, room chat, in-game team chat, friendships, and invites.
+- Canonical galaxy topology, planets, Earth regions, faction control, world
+  parties, worker leases, and cross-region handoffs.
+
+The living-world migrations remain inactive until isolated migration, RLS,
+lease, replay, and concurrency checks pass. The first topology keeps `earth-1`
+for compatibility. It adds Sol, Earth, Greenfall region authority, three Earth
+factions, region simulation state, and lease-fenced party handoffs.
 
 The active gameplay rules identifier is `survival-plots`. Do not introduce
 branch, agent, or prototype names into persisted room or match records.

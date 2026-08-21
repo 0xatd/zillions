@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   applyTacticalContribution, evaluateSealedEngagement, getCaughtForceOptions,
-  rearguardEstimate, resolveAutosimRound,
+  getPursuerOptions, rearguardEstimate, resolveAutosimRound, resolveEncounterDecision,
 } from '../src/world-encounter.js';
 
 const ids = (options) => options.map((x) => x.id);
@@ -40,5 +40,20 @@ const once = applyTacticalContribution(base, contribution);
 const twice = applyTacticalContribution(once, contribution);
 assert.deepEqual(twice, once, 'replayed tactical result must be a no-op');
 assert.equal(once.defenderTroops, 60);
+
+const strategic = {
+  seed: 'contact-42', terrain: 'forest', minimumEscapeChance: 5,
+  caught: { troops: 80, speed: 8, scouting: 35, fatigue: 20, baggage: 10, supplies: 40 },
+  pursuer: { troops: 120, speed: 9, scouting: 30, fatigue: 10 },
+  alliesInRange: 1, timeToFortify: 2,
+};
+const escape = resolveEncounterDecision(strategic, 'escape', 'press-attack');
+assert.deepEqual(escape, resolveEncounterDecision(strategic, 'escape', 'press-attack'), 'strategic decision must replay exactly');
+assert.equal(typeof escape.tacticalPending, 'boolean');
+assert.throws(() => resolveEncounterDecision({ ...strategic, alliesInRange: 0 }, 'call-allies', 'press-attack'), /unavailable_caught_choice/);
+const rearDecision = resolveEncounterDecision(strategic, 'rearguard', 'engage-rearguard');
+assert.equal(rearDecision.outcome, 'rearguard-engaged');
+assert.equal(rearDecision.tacticalPending, true);
+assert(ids(getPursuerOptions({ rearguardCommitted: true })).includes('pursue-main-force'));
 
 console.log('world encounter checks passed');
