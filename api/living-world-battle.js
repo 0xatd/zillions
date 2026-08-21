@@ -66,6 +66,7 @@ export function createLivingWorldBattleHandler(deps = {}) {
         const { timingSafeEqual } = await import('node:crypto');
         if (a.length !== b.length || !timingSafeEqual(a, b)) return send(res, 401, { ok: false, error: 'battle_authority_required' });
         const claim = verifyBattleAssignment(body.assignmentToken, config.signingSecret);
+        await enforceLivingWorldRateLimit({ config, actor: claim.requestedBy, scope: 'battle:authority-result', limit: 4, windowSeconds: 300, fetchImpl, override: deps.rateLimit });
         const result = validateBattleResult(body.result);
         const committed = deps.commit ? await deps.commit(claim, result) : await rpc(config, 'living_world_commit_battle', { p_assignment: claim.assignmentId, p_nonce: claim.nonce, p_encounter_revision: claim.encounterRevision, p_result: result }, fetchImpl);
         return send(res, 200, committed);

@@ -54,6 +54,7 @@ begin
     'parties',(select jsonb_agg(to_jsonb(p) order by p.id) from public.world_parties p where p.id in(v_enc.attacker_party_id,v_enc.defender_party_id)),
     'armies',(select jsonb_agg(to_jsonb(a) order by a.id) from public.world_armies a where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id)),
     'stacks',(select jsonb_agg(to_jsonb(s) order by s.id) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id)),
+    'supplies',(select coalesce(jsonb_agg(to_jsonb(s) order by s.party_id,s.supply_key),'[]'::jsonb) from public.world_supplies s where s.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id)),
     'cargo',(select coalesce(jsonb_agg(to_jsonb(c) order by c.party_id,c.commodity_key),'[]'::jsonb) from public.world_cargo c where c.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id))
   ) into v_snapshot;
   insert into public.world_battle_assignments(engagement_id,encounter_id,encounter_revision,requested_by,request_id,force_snapshot,expires_at)

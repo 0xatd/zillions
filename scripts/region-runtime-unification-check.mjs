@@ -18,6 +18,7 @@ assert.match(sql,/complete_world_region_handoff/,'the destination region must co
 assert.doesNotMatch(sql,/random\s*\(/i,'runtime state changes must remain deterministic');
 assert.match(sql,/world_api_rate_buckets/,'mutation quotas must use durable database buckets');
 assert.match(sql,/pg_advisory_xact_lock\(hashtextextended\('world-rate:/,'fresh request ids must serialize under the same actor and scope quota');
+assert.match(sql,/greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'failed claims must move behind untouched regions instead of starving the batch');
 const limited=()=>enforceLivingWorldRateLimit({config:{url:'x',serviceKey:'x'},actor:'actor',scope:'battle:autosim',limit:4,override:async()=>({allowed:false,retryAfterSeconds:42})});
 await assert.rejects(limited,error=>error.status===429&&error.retryAfter===42);
 

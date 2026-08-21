@@ -161,6 +161,9 @@ try {
   assert.equal(engagement.mode, 'live_command');
   assert.equal(engagement.state, 'active');
   const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
+  const expiredAssignment=(await admin.query("select public.living_world_issue_battle($1,$2,$3,'expired-proof') result",[userId,engagement.id,encounterRevision])).rows[0].result;
+  await admin.query("update public.world_battle_assignments set expires_at=now()-interval '1 second' where id=$1",[expiredAssignment.id]);
+  await admin.query('update public.world_parties set morale=morale where id=$1',[firstEntry.partyId]);
   const battleHandler=createLivingWorldBattleHandler({
     config:{url:'http://local',anonKey:'anon',serviceKey:'service',signingSecret:'embedded-postgres-battle-signing-secret-0001'},
     authenticate:authenticateHttp,
@@ -174,11 +177,14 @@ try {
   const postBattle=async(token,payload)=>{const response=await fetch(battleBase,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(payload)});const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
   const launched=await postBattle('owner',{action:'launch',engagementId:engagement.id,encounterRevision,requestId:'postgres-live-command'});
   const assignment=launched.assignment;
+  assert.notEqual(assignment.id,expiredAssignment.id,'an expired assignment must be replaced');
+  assert.equal((await admin.query('select state from public.world_battle_assignments where id=$1',[expiredAssignment.id])).rows[0].state,'expired');
   assert.equal(assignment.force_snapshot.attackerPartyId, encounterRow.attacker_party_id);
   assert.equal(assignment.force_snapshot.defenderPartyId, encounterRow.defender_party_id);
   assert.equal(assignment.force_snapshot.engagementMode, 'live_command');
   assert.ok(Number(assignment.force_snapshot.startedTick)>=1);
   assert.equal(assignment.force_snapshot.stacks.length, 2);
+  assert.ok(assignment.force_snapshot.supplies.length>=1,'supply state must be part of the immutable assignment');
   await expectError(admin.query('update public.world_parties set morale=morale-1 where id=$1',[firstEntry.partyId]),'battle_force_locked');
   await expectError(admin.query('update public.world_unit_stacks set healthy=healthy-1 where id=$1',[attackerStackId]),'battle_force_locked');
   await expectError(admin.query("update public.world_supplies set quantity=quantity-1 where party_id=$1 and supply_key='food'",[firstEntry.partyId]),'battle_force_locked');
@@ -281,18 +287,17 @@ try {
   assert.equal(declared.duplicate, false);
   const declareReplay = (await admin.query("select public.living_world_governance_command($1,'siege-declare-1',$2,$3,'declare_siege',jsonb_build_object('locationId',$4::text,'attackerFactionId','greenfall_freeholds')) result", [userId, firstEntry.partyId, siegeParty.revision, siegeParty.location_id])).rows[0].result;
   assert.equal(declareReplay.duplicate, true);
+  await admin.query('update public.world_sieges set progress=.99,defender_supply=.1 where id=$1',[declared.siegeId]);
   await admin.query('update public.world_region_states set simulation_tick=48 where region_id=$1',[ironwood.id]);
   const siegeRuntime=(await admin.query("select public.process_world_region_runtime($1,'worker-e',$2,100) result",[ironwood.id,destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(Number(siegeRuntime.siegesAdvanced),1,'scheduled region runtime must advance active sieges');
-  const advanced=(await admin.query('select status,progress,defender_supply "defenderSupply",revision "siegeRevision" from public.world_sieges where id=$1',[declared.siegeId])).rows[0];
-  assert.equal(advanced.status, 'active');
+  const advanced=(await admin.query('select status,outcome,progress,defender_supply "defenderSupply",revision "siegeRevision" from public.world_sieges where id=$1',[declared.siegeId])).rows[0];
+  assert.equal(advanced.status,'resolved');
+  assert.equal(advanced.outcome,'attacker_victory','scheduled runtime must resolve a terminal siege');
   assert.ok(Number(advanced.progress) > 0);
   assert.ok(Number(advanced.defenderSupply) <= 100);
-  await expectError(admin.query("select public.advance_world_siege($1,'siege-tick-stale',$2,'worker-d',$3,50,.9,.1)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
-  await expectError(admin.query("select public.resolve_world_siege($1,'resolve-stale',$2,'attacker_victory','worker-d',$3,50)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
-  const resolution = (await admin.query("select public.resolve_world_siege($1,'resolve-1',$2,'attacker_victory','worker-e',$3,50) result", [declared.siegeId, advanced.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
-  assert.equal(resolution.outcome, 'attacker_victory');
-  const resolutionReplay = (await admin.query("select public.resolve_world_siege($1,'resolve-1',$2,'attacker_victory','worker-e',$3,50) result", [declared.siegeId, advanced.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  const runtimeResolution=(await admin.query('select * from public.world_siege_resolutions where siege_id=$1',[declared.siegeId])).rows[0];
+  const resolutionReplay = (await admin.query("select public.resolve_world_siege($1,$2,$3,'attacker_victory','worker-e',$4,49) result", [declared.siegeId,runtimeResolution.request_id,runtimeResolution.expected_revision,destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(resolutionReplay.duplicate, true);
   assert.equal((await admin.query('select owner_faction_id from public.world_locations where id=$1', [siegeParty.location_id])).rows[0].owner_faction_id, 'greenfall_freeholds');
   assert.equal((await admin.query('select owner_faction_id from public.world_provinces where id=$1', [ironwood.id])).rows[0].owner_faction_id, 'greenfall_freeholds');

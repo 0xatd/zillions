@@ -20,6 +20,7 @@ assert.throws(() => autosimBattleAssignment({ force_snapshot: { ...assignment.fo
 const sql = readFileSync(new URL('../supabase/migrations/20260820223000_tactical_battle_autosim.sql', import.meta.url), 'utf8');
 const main=readFileSync(new URL('../src/main.js',import.meta.url),'utf8'),ui=readFileSync(new URL('../src/ui.js',import.meta.url),'utf8'),api=readFileSync(new URL('../api/living-world-battle.js',import.meta.url),'utf8');
 for (const marker of ['world_encounter_open_engagement','world_engagements','autosim','hybrid','attackerPartyId','defenderPartyId','on conflict(encounter_id) do nothing']) assert.ok(sql.includes(marker), `${marker} missing`);
+assert.match(sql,/'supplies',[\s\S]*world_supplies/,'battle assignments must snapshot strategic supplies');
 assert.match(sql, /after update of state on public\.world_encounters/);
 assert.match(sql,/v_eng\.mode='live_command'[\s\S]*sum\(s\.healthy\)[\s\S]*battle_requires_autosim/,'oversized live battles must be rejected before assignment issuance');
 assert.match(ui,/data-encounter="live"/,'active engagements must offer player command');

@@ -414,8 +414,9 @@ returns table(region_id uuid) language sql stable security definer set search_pa
     from public.world_region_runtime_ticks t
     where t.region_id=s.region_id
   ) tick on true
+  left join public.world_region_worker_leases lease on lease.region_id=s.region_id
   where s.status='active'
-  order by tick.last_processed_at nulls first,s.region_id
+  order by greatest(tick.last_processed_at,lease.heartbeat_at) nulls first,s.region_id
   limit greatest(1,least(16,coalesce(p_limit,8)));
 $$;
 revoke all on function public.living_world_region_runtime_batch(integer) from public,anon,authenticated;

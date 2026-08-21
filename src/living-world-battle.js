@@ -71,6 +71,7 @@ export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
   if (!snapshot || !UUID.test(snapshot.attackerPartyId) || !UUID.test(snapshot.defenderPartyId)) throw new Error('invalid_force_snapshot');
   if (snapshot.engagementMode !== 'autosim') throw new Error('autosim_not_available');
   const armies = new Map((snapshot.armies || []).map((army) => [army.id, army]));
+  const suppliesByParty=new Map();for(const row of snapshot.supplies||[])suppliesByParty.set(row.party_id,(suppliesByParty.get(row.party_id)||0)+Math.max(0,numeric(row.quantity)));
   const stacksByParty = new Map([[snapshot.attackerPartyId, []], [snapshot.defenderPartyId, []]]);
   for (const stack of snapshot.stacks || []) {
     const partyId = armies.get(stack.army_id)?.party_id;
@@ -81,7 +82,7 @@ export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
     const troops = stacks.reduce((sum, stack) => sum + Math.max(0, numeric(stack.healthy)), 0);
     const weightedTier = stacks.reduce((sum, stack) => sum + numeric(stack.healthy) * numeric(stack.tier, 1), 0);
     const party = (snapshot.parties || []).find((row) => row.id === partyId) || {};
-    return { troops, initialTroops: troops, morale: numeric(party.morale, 50), quality: troops ? weightedTier / troops : 1, supplies: 50, fatigue: numeric(party.fatigue) };
+    return { troops, initialTroops: troops, morale: numeric(party.morale, 50), quality: troops ? weightedTier / troops : 1, supplies: snapshot.supplies ? (suppliesByParty.get(partyId)||0) : 50, fatigue: numeric(party.fatigue) };
   };
   const attacker = makeForce(snapshot.attackerPartyId), defender = makeForce(snapshot.defenderPartyId);
   if (attacker.troops < 1 || defender.troops < 1) throw new Error('empty_battle_force');
