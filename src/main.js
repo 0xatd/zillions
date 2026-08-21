@@ -238,6 +238,7 @@ class App {
       onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
       onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
       onLivingWorldOpen: () => this._refreshLivingWorld(),
+      onLivingWorldViewport: (viewport) => this._refreshLivingWorldViewport(viewport),
       onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
       onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
       onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
@@ -687,20 +688,20 @@ class App {
     };
   }
 
-  async _refreshLivingWorld() {
+  async _refreshLivingWorld(viewport = null) {
     if (!this.auth?.isSignedIn()) {
       this.ui.setLivingWorldState({});
       this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
       return null;
     }
     try {
-      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth'), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
+      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth', viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       if (!projection?.shard) throw new Error('world_not_initialized');
       if (!(projection.ownParties || []).length) {
         const character = selectedMmoCharacter(this.profile);
         if (!character?.id) throw new Error('living_world_character_required');
         await enterLivingWorld(character.id);
-        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
+        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id, viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       }
       const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
       this.livingWorldState = state;
@@ -714,6 +715,11 @@ class App {
       this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);
       return null;
     }
+  }
+
+  _refreshLivingWorldViewport(viewport) {
+    clearTimeout(this._livingWorldViewportTimer);
+    this._livingWorldViewportTimer = setTimeout(() => this._refreshLivingWorld(viewport), 140);
   }
 
   _livingWorldUnavailable(feature) {

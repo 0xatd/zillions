@@ -14,6 +14,39 @@ const PAYLOAD_KEYS = Object.freeze({
 });
 const send = (res, status, body) => { res.writeHead(status, JSON_HEADERS); res.end(JSON.stringify(body)); };
 const text = (value) => typeof value === 'string' ? value : '';
+const PROJECTION_LIMITS = Object.freeze({ regions: 160, locations: 600, routes: 1200, parties: 500, sieges: 200, pursuits: 200 });
+const DEFAULT_VIEWPORT = Object.freeze({ minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 0 });
+
+export function parseViewport(searchParams) {
+  const supplied = ['minX', 'minY', 'maxX', 'maxY', 'zoom'].some((key) => searchParams.has(key));
+  if (!supplied) return { ...DEFAULT_VIEWPORT };
+  const values = Object.fromEntries(['minX', 'minY', 'maxX', 'maxY', 'zoom'].map((key) => [key, searchParams.has(key) ? Number(searchParams.get(key)) : DEFAULT_VIEWPORT[key]]));
+  if (Object.values(values).some((value) => !Number.isFinite(value)) || values.minX < 0 || values.minY < 0 || values.maxX > 100 || values.maxY > 100 || values.minX >= values.maxX || values.minY >= values.maxY || values.zoom < 0 || values.zoom > 8) {
+    throw Object.assign(new Error('invalid_viewport'), { status: 400 });
+  }
+  return values;
+}
+
+const pointInViewport = (point, viewport) => !point || (Number(point.x) >= viewport.minX && Number(point.x) <= viewport.maxX && Number(point.y) >= viewport.minY && Number(point.y) <= viewport.maxY);
+const polygonInViewport = (polygon, viewport) => {
+  if (!Array.isArray(polygon) || !polygon.length) return false;
+  const xs = polygon.map(([x]) => x), ys = polygon.map(([, y]) => y);
+  return Math.max(...xs) >= viewport.minX && Math.min(...xs) <= viewport.maxX && Math.max(...ys) >= viewport.minY && Math.min(...ys) <= viewport.maxY;
+};
+const limited = (rows, key, limits, truncated) => {
+  if (rows.length > limits[key]) truncated[key] = rows.length - limits[key];
+  return rows.slice(0, limits[key]);
+};
+
+export function sanitizeWorldTopology(row, viewport = DEFAULT_VIEWPORT) {
+  const manifest = row?.manifest;
+  if (!manifest || manifest.planetId == null || !Array.isArray(manifest.landmasses) || !Array.isArray(manifest.regions)) return null;
+  const sanitizePolygon = (polygon) => Array.isArray(polygon) ? polygon.filter((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)).slice(0, 2048).map(([x, y]) => [x, y]) : [];
+  const landmasses = manifest.landmasses.map((landmass) => ({ key: text(landmass.key), name: text(landmass.name), polygon: sanitizePolygon(landmass.polygon) })).filter((landmass) => landmass.key && polygonInViewport(landmass.polygon, viewport)).slice(0, 32);
+  const provinces = manifest.regions.map((region) => ({ id: text(region.id), key: text(region.key), name: text(region.name), landmass: text(region.landmass), biome: text(region.biome), center: region.center && { x: Number(region.center.x), y: Number(region.center.y) }, polygon: sanitizePolygon(region.polygon) }))
+    .filter((region) => region.id && region.center && Number.isFinite(region.center.x) && Number.isFinite(region.center.y) && (pointInViewport(region.center, viewport) || polygonInViewport(region.polygon, viewport))).slice(0, PROJECTION_LIMITS.regions);
+  return { planetId: text(manifest.planetId), projection: text(manifest.projection), size: { width: Number(manifest.size?.width) || 100, height: Number(manifest.size?.height) || 100 }, contentHash: text(row.content_hash || manifest.contentHash), landmasses, provinces };
+}
 
 async function parseBody(req) {
   const chunks = []; let size = 0;
@@ -42,7 +75,7 @@ export function validateCommandBody(body) {
   return { ...command, payload };
 }
 
-export function filterProjection(snapshot, actorId) {
+export function filterProjection(snapshot, actorId, viewport = DEFAULT_VIEWPORT) {
   const tick = Number(snapshot.shard?.simulation_tick || 0), allParties = snapshot.parties || [];
   const own = allParties.filter((party) => party.owner_user_id === actorId), ownIds = new Set(own.map((party) => party.id));
   const factions = new Set(own.map((party) => party.owner_faction_id).filter(Boolean));
@@ -50,22 +83,27 @@ export function filterProjection(snapshot, actorId) {
   const reportedPartyIds = new Set(reports.map((report) => report.subject_party_id).filter(Boolean));
   const reportedLocationIds = new Set(reports.map((report) => report.location_id).filter(Boolean));
   own.forEach((party) => { if (party.location_id) reportedLocationIds.add(party.location_id); });
-  const locations = (snapshot.locations || []).filter((location) => factions.has(location.owner_faction_id) || reportedLocationIds.has(location.id));
+  const knownLocations = (snapshot.locations || []).filter((location) => factions.has(location.owner_faction_id) || reportedLocationIds.has(location.id));
+  const locationsInViewport = knownLocations.filter((location) => pointInViewport(location.position, viewport));
+  const truncated = {};
+  const locations = limited(locationsInViewport, 'locations', PROJECTION_LIMITS, truncated);
   const locationIds = new Set(locations.map((location) => location.id));
   const marketLocationIds = new Set(own.map((party) => party.location_id).filter(Boolean));
   locations.forEach((location) => { if (factions.has(location.owner_faction_id)) marketLocationIds.add(location.id); });
   reports.forEach((report) => { if (report.location_id && report.intelligence?.marketAccess === true) marketLocationIds.add(report.location_id); });
-  const parties = allParties.filter((party) => ownIds.has(party.id) || factions.has(party.owner_faction_id) || reportedPartyIds.has(party.id)).map((party) => {
-    if (ownIds.has(party.id) || factions.has(party.owner_faction_id)) return party;
+  const armyByParty = new Map((snapshot.armies || []).map((army) => [army.party_id, army]));
+  const visibleParties = allParties.filter((party) => ownIds.has(party.id) || factions.has(party.owner_faction_id) || reportedPartyIds.has(party.id)).map((party) => {
+    if (ownIds.has(party.id) || factions.has(party.owner_faction_id)) return { ...party, strength: Number(armyByParty.get(party.id)?.combat_power || 0) };
     const report = reports.find((entry) => entry.subject_party_id === party.id);
     return { id: party.id, name: party.name, kind: party.kind, owner_faction_id: party.owner_faction_id, location_id: party.location_id, route_id: party.route_id, route_progress: party.route_progress, stance: party.stance, intelligence: report?.intelligence || {}, observed_tick: report?.observed_tick, accuracy: report?.accuracy };
   });
-  const routes = (snapshot.routes || []).filter((route) => locationIds.has(route.origin_id) && locationIds.has(route.destination_id));
+  const viewportLocationIds = new Set(locations.map((location) => location.id));
+  const parties = limited(visibleParties.filter((party) => viewportLocationIds.has(party.location_id) || (party.route_id && (snapshot.routes || []).some((route) => route.id === party.route_id && (viewportLocationIds.has(route.origin_id) || viewportLocationIds.has(route.destination_id))))), 'parties', PROJECTION_LIMITS, truncated);
+  const routes = limited((snapshot.routes || []).filter((route) => locationIds.has(route.origin_id) && locationIds.has(route.destination_id)), 'routes', PROJECTION_LIMITS, truncated);
   const regionIds = new Set([
     ...locations.map((location) => location.province_id),
-    ...own.map((party) => party.region_id),
   ].filter(Boolean));
-  const regions = (snapshot.regions || []).filter((region) => regionIds.has(region.id));
+  const regions = limited((snapshot.regions || []).filter((region) => regionIds.has(region.id)), 'regions', PROJECTION_LIMITS, truncated);
   const factionIds = new Set([
     ...regions.flatMap((region) => [region.owner_faction_id, region.claimed_by_faction_id]),
     ...locations.flatMap((location) => [location.owner_faction_id, location.claimed_by_faction_id]),
@@ -86,16 +124,20 @@ export function filterProjection(snapshot, actorId) {
   const visiblePartyIds = new Set(parties.map((party) => party.id));
   const encounters = (snapshot.encounters || []).filter((encounter) => ownIds.has(encounter.attacker_party_id) || ownIds.has(encounter.defender_party_id));
   const encounterIds = new Set(encounters.map((encounter) => encounter.id));
+  const visibleRegionIds = new Set(regions.map((region) => region.id));
+  const sieges = limited((snapshot.sieges || []).filter((siege) => visibleRegionIds.has(siege.region_id) && locationIds.has(siege.location_id) && visiblePartyIds.has(siege.attacker_party_id)).map((siege) => ({ id: siege.id, region_id: siege.region_id, location_id: siege.location_id, attacker_party_id: siege.attacker_party_id, attacker_faction_id: siege.attacker_faction_id, defender_faction_id: siege.defender_faction_id, status: siege.status, progress: siege.progress, started_tick: siege.started_tick, revision: siege.revision })), 'sieges', PROJECTION_LIMITS, truncated);
+  const pursuits = limited((snapshot.pursuits || []).filter((pursuit) => visiblePartyIds.has(pursuit.pursuer_party_id) && visiblePartyIds.has(pursuit.target_party_id)).map((pursuit) => ({ id: pursuit.id, pursuer_party_id: pursuit.pursuer_party_id, target_party_id: pursuit.target_party_id, started_tick: pursuit.started_tick, state: pursuit.state, revision: pursuit.revision })), 'pursuits', PROJECTION_LIMITS, truncated);
   return { ok: true, shard: snapshot.shard || null, planet: snapshot.planet || null,
+    viewport: { ...viewport, truncated }, topology: sanitizeWorldTopology(snapshot.manifest, viewport),
     factions: (snapshot.factions || []).filter((faction) => factionIds.has(faction.id)), regions,
     ownParties: own, socialParty, locations, routes,
-    markets: (snapshot.markets || []).filter((market) => marketLocationIds.has(market.location_id)), parties,
+    markets: (snapshot.markets || []).filter((market) => marketLocationIds.has(market.location_id) && locationIds.has(market.location_id)), parties,
     logistics: {
       supplies: (snapshot.supplies || []).filter((row) => ownIds.has(row.party_id)),
       cargo: (snapshot.cargo || []).filter((row) => ownIds.has(row.party_id)),
       caravans: (snapshot.caravans || []).filter((row) => visiblePartyIds.has(row.party_id)),
       raids: (snapshot.raids || []).filter((row) => ownIds.has(row.attacker_party_id) || ownIds.has(row.target_party_id)),
-    }, encounters, engagements: (snapshot.engagements || []).filter((engagement) => encounterIds.has(engagement.encounter_id)) };
+    }, sieges, pursuits, encounters, engagements: (snapshot.engagements || []).filter((engagement) => encounterIds.has(engagement.encounter_id)) };
 }
 
 async function authenticate(authorization, config, fetchImpl) {
@@ -108,9 +150,14 @@ async function restRows(config, table, query, fetchImpl) {
   if (!response.ok) throw new Error('living_world_projection_failed');
   return response.json();
 }
+async function rpcJson(config, name, body, fetchImpl) {
+  const response = await fetchImpl(`${config.url}/rest/v1/rpc/${name}`, { method: 'POST', headers: { authorization: `Bearer ${config.serviceKey}`, apikey: config.serviceKey, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!response.ok) throw new Error('living_world_projection_failed');
+  return response.json();
+}
 async function loadSnapshot(config, shardId, actorId, fetchImpl) {
   const encoded = encodeURIComponent(shardId);
-  const [shards, planets, provinces, parties, reports, ownMemberships, supplies, cargo, caravans, raids, encounters, engagements] = await Promise.all([
+  const [shards, planets, provinces, parties, reports, ownMemberships, supplies, cargo, caravans, raids, encounters, engagements, pursuits] = await Promise.all([
     restRows(config, 'world_shards', `select=id,name,status,simulation_tick,ruleset_version,revision&id=eq.${encoded}&limit=1`, fetchImpl),
     restRows(config, 'world_planets', `select=id,system_id,shard_id,key,name,status,revision&shard_id=eq.${encoded}&limit=1`, fetchImpl),
     restRows(config, 'world_provinces', `select=id,planet_id,key,name,bounds,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,revision&shard_id=eq.${encoded}`, fetchImpl),
@@ -123,10 +170,16 @@ async function loadSnapshot(config, shardId, actorId, fetchImpl) {
     restRows(config, 'world_raid_orders', 'select=id,attacker_party_id,target_party_id,resolve_tick,state,result', fetchImpl),
     restRows(config, 'world_encounters', `select=id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot,revision&shard_id=eq.${encoded}&state=in.(choosing,negotiating,battle,rearguard,awaiting_allies)`, fetchImpl),
     restRows(config, 'world_engagements', 'select=id,encounter_id,mode,state,current_round,started_tick,revision&state=in.(active,retreat)', fetchImpl),
+    restRows(config, 'world_pursuits', `select=id,pursuer_party_id,target_party_id,started_tick,state,result,revision&shard_id=eq.${encoded}&state=eq.active`, fetchImpl),
   ]);
   const provinceIds = provinces.map((row) => row.id);
   const planet = planets[0] || null;
-  const factions = planet ? await restRows(config, 'world_factions', `select=id,planet_id,name,kind,status,revision&planet_id=eq.${encodeURIComponent(planet.id)}`, fetchImpl) : [];
+  const [factions, manifests, armies, sieges] = planet ? await Promise.all([
+    restRows(config, 'world_factions', `select=id,planet_id,name,kind,status,revision&planet_id=eq.${encodeURIComponent(planet.id)}`, fetchImpl),
+    rpcJson(config, 'living_world_projection_manifest', { p_planet: planet.id }, fetchImpl),
+    parties.length ? restRows(config, 'world_armies', `select=party_id,combat_power&party_id=in.(${parties.map((row) => row.id).join(',')})`, fetchImpl) : Promise.resolve([]),
+    provinceIds.length ? restRows(config, 'world_sieges', `select=id,region_id,location_id,attacker_party_id,attacker_faction_id,defender_faction_id,status,progress,started_tick,revision&region_id=in.(${provinceIds.join(',')})&status=in.(preparing,active,breached)`, fetchImpl) : Promise.resolve([]),
+  ]) : [[], [], [], []];
   let socialParty = null;
   if (ownMemberships[0]) {
     const partyId = ownMemberships[0].party_id;
@@ -138,14 +191,14 @@ async function loadSnapshot(config, shardId, actorId, fetchImpl) {
     const memberParties = parties.filter((party) => memberIds.includes(party.owner_user_id));
     socialParty = { ...socialParties[0], members: members.map((member) => ({ ...member, worldParty: memberParties.find((party) => party.owner_user_id === member.user_id) || null })) };
   }
-  if (!provinceIds.length) return { shard: shards[0], planet, factions, regions: [], parties, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations: [], routes: [], markets: [] };
+  if (!provinceIds.length) return { shard: shards[0], planet, factions, manifest: manifests, regions: [], parties, armies, sieges, pursuits, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations: [], routes: [], markets: [] };
   const inList = `(${provinceIds.join(',')})`;
   const locations = await restRows(config, 'world_locations', `select=id,province_id,key,name,kind,position,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,services,revision&province_id=in.${inList}`, fetchImpl);
   const [routes, markets] = await Promise.all([
     restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,origin_region_id,destination_region_id,distance,terrain,danger,owner_faction_id,claimed_by_faction_id,control_strength,control_state,blockade_state,revision&origin_region_id=in.${inList}`, fetchImpl),
     locations.length ? restRows(config, 'world_markets', `select=location_id,commodity_key,stock,buy_price,sell_price,revision&location_id=in.(${locations.map((row) => row.id).join(',')})`, fetchImpl) : [],
   ]);
-  return { shard: shards[0], planet, factions, regions: provinces, parties, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations, routes, markets };
+  return { shard: shards[0], planet, factions, manifest: manifests, regions: provinces, parties, armies, sieges, pursuits, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations, routes, markets };
 }
 
 export function createLivingWorldHandler(deps = {}) {
@@ -161,8 +214,9 @@ export function createLivingWorldHandler(deps = {}) {
       if (req.method === 'GET') {
         const url = new URL(req.url, `https://${req.headers.host || 'localhost'}`), shardId = text(url.searchParams.get('shardId'));
         if (!IDENTIFIER.test(shardId)) return send(res, 400, { ok: false, error: 'invalid_shard_id' });
+        const viewport = parseViewport(url.searchParams);
         const snapshot = deps.loadSnapshot ? await deps.loadSnapshot(shardId, user.id) : await loadSnapshot(config, shardId, user.id, fetchImpl);
-        return send(res, 200, filterProjection(snapshot, user.id));
+        return send(res, 200, filterProjection(snapshot, user.id, viewport));
       }
       const command = validateCommandBody(await parseBody(req));
       await enforceLivingWorldRateLimit({ config, actor: user.id, scope: 'world:command', limit: 120, fetchImpl, override: deps.rateLimit });

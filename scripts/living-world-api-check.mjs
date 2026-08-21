@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { createLivingWorldHandler, filterProjection } from '../api/living-world.js';
+import { createLivingWorldHandler, filterProjection, parseViewport, sanitizeWorldTopology } from '../api/living-world.js';
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
-const request = (method, body, authorization = 'Bearer valid') => ({ method, url: '/api/living-world?shardId=earth', headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
+const request = (method, body, authorization = 'Bearer valid', url = '/api/living-world?shardId=earth') => ({ method, url, headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
 const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, rateLimit: async()=>({allowed:true}), command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
 let res = response(); await handler(request('GET', null, ''), res); assert.equal(res.status, 401);
 const base = { type: 'issue_movement', requestId: 'req-1', shardId: 'earth', partyId: '8e604971-848f-4dc1-bfc6-8b29912d677e', expectedRevision: 1, payload: { routeId: '148da2b1-cc8a-41f5-a714-99d78d79fd9e' } };
@@ -13,4 +13,33 @@ const snapshot = { shard: { simulation_tick: 10 }, parties: [{ id: 'mine', owner
 const projection = filterProjection(snapshot, 'actor-1');
 assert.deepEqual(projection.parties.map((p) => p.id), ['mine', 'ally', 'seen']); assert.equal(projection.parties[2].speed, undefined);
 assert.deepEqual(projection.locations.map((p) => p.id), ['home', 'ally-town', 'wild']); assert.deepEqual(projection.routes.map((p) => p.id), ['known']); assert.deepEqual(projection.markets.map((p) => p.location_id), ['home']);
+
+assert.deepEqual(parseViewport(new URLSearchParams()), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 0 });
+assert.deepEqual(parseViewport(new URLSearchParams('zoom=3')), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 3 });
+assert.throws(() => parseViewport(new URLSearchParams('minX=90&maxX=10&minY=0&maxY=100&zoom=1')), /invalid_viewport/);
+res = response();
+await handler(request('GET', null, 'Bearer valid', '/api/living-world?shardId=earth&minX=-1&minY=0&maxX=20&maxY=20&zoom=2'), res);
+assert.equal(res.status, 400); assert.equal(res.body.error, 'invalid_viewport');
+
+const manifestRow = { content_hash: 'safe-hash', manifest: { planetId: 'earth', projection: 'earth-equirectangular-v1', size: { width: 100, height: 100 }, seed: 5150, materialization: { secret: true }, landmasses: [{ key: 'earth', name: 'Earth', polygon: [[0, 0], [100, 0], [100, 100], [0, 100]] }], regions: [{ id: 'near', key: 'near', name: 'Near', landmass: 'earth', biome: 'forest', center: { x: 10, y: 10 }, polygon: [[5, 5], [15, 5], [15, 15], [5, 15]] }, { id: 'far', key: 'far', name: 'Far', landmass: 'earth', biome: 'desert', center: { x: 90, y: 90 }, polygon: [[85, 85], [95, 85], [95, 95], [85, 95]] }] } };
+const topology = sanitizeWorldTopology(manifestRow, { minX: 0, minY: 0, maxX: 25, maxY: 25, zoom: 2 });
+assert.deepEqual(topology.provinces.map((row) => row.id), ['near']);
+assert.equal(topology.seed, undefined); assert.equal(topology.materialization, undefined); assert.equal(topology.contentHash, 'safe-hash');
+
+const secureSnapshot = {
+  shard: { simulation_tick: 10 }, manifest: manifestRow,
+  factions: [{ id: 'blue' }, { id: 'red' }], regions: [{ id: 'near', owner_faction_id: 'blue' }],
+  locations: [{ id: 'home', province_id: 'near', owner_faction_id: 'blue', position: { x: 10, y: 10 } }, { id: 'enemy-camp', province_id: 'near', owner_faction_id: 'red', position: { x: 12, y: 12 } }],
+  parties: [{ id: 'mine', owner_user_id: 'actor-1', owner_faction_id: 'blue', location_id: 'home' }, { id: 'ally', owner_faction_id: 'blue', location_id: 'home' }, { id: 'enemy', owner_faction_id: 'red', location_id: 'enemy-camp' }, { id: 'hidden-enemy', owner_faction_id: 'red', location_id: 'enemy-camp' }],
+  armies: [{ party_id: 'mine', combat_power: 77 }, { party_id: 'ally', combat_power: 66 }, { party_id: 'enemy', combat_power: 9999 }],
+  scoutingReports: [{ observer_party_id: 'mine', subject_party_id: 'enemy', location_id: 'enemy-camp', expires_tick: 20, intelligence: { estimate: 40 } }],
+  sieges: [{ id: 'known-siege', region_id: 'near', location_id: 'enemy-camp', attacker_party_id: 'enemy', status: 'active', progress: .4, private: true }, { id: 'hidden-siege', region_id: 'near', location_id: 'enemy-camp', attacker_party_id: 'hidden-enemy', status: 'active' }],
+  pursuits: [{ id: 'known-pursuit', pursuer_party_id: 'ally', target_party_id: 'enemy', state: 'active', result: { chaseRouteId: 'secret-route' } }, { id: 'hidden-pursuit', pursuer_party_id: 'ally', target_party_id: 'hidden-enemy', state: 'active' }],
+};
+const secure = filterProjection(secureSnapshot, 'actor-1', { minX: 0, minY: 0, maxX: 25, maxY: 25, zoom: 2 });
+assert.equal(secure.parties.find((row) => row.id === 'ally').strength, 66);
+assert.equal(secure.parties.find((row) => row.id === 'enemy').strength, undefined, 'exact hostile strength does not leak');
+assert.equal(secure.parties.find((row) => row.id === 'enemy').intelligence.estimate, 40);
+assert.deepEqual(secure.sieges.map((row) => row.id), ['known-siege']); assert.equal(secure.sieges[0].private, undefined);
+assert.deepEqual(secure.pursuits.map((row) => row.id), ['known-pursuit']); assert.equal(secure.pursuits[0].result, undefined);
 console.log('living world API check passed');

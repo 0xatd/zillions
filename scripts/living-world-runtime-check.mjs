@@ -4,11 +4,12 @@ import { livingWorldProjectionToUi } from '../src/living-world-client.js';
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const hook of ['onPartyCreate', 'onPartyOpen', 'onPartyMemberLocate', 'onLivingWorldOpen',
-  'onLivingWorldFastTravel', 'onLivingWorldMission', 'onLivingWorldTrackParty']) {
+  'onLivingWorldViewport', 'onLivingWorldFastTravel', 'onLivingWorldMission', 'onLivingWorldTrackParty']) {
   assert.match(main, new RegExp(`${hook}:`), `${hook} is not wired`);
 }
 assert.match(main, /setLivingWorldSession\(this\.auth\.session\)/, 'auth session must reach living-world client');
 assert.match(main, /this\._refreshLivingWorld\(\)\.catch/, 'overworld entry must hydrate authority projection');
+assert.match(main, /getLivingWorldProjection\([^\n]+viewport\)/, 'viewport changes must fetch a bounded authority projection');
 assert.doesNotMatch(main, /onLivingWorldMission:[^\n]*startGame/, 'living-world mission must not launch arbitrary campaign content');
 
 const projection = livingWorldProjectionToUi({

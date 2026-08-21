@@ -7,9 +7,11 @@ const GOVERNANCE_API = '/api/living-world-governance';
 let session = null;
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
-export async function getLivingWorldProjection(shardId) {
+export async function getLivingWorldProjection(shardId, viewport = null) {
   if (!session?.access_token) return null;
-  const response = await fetch(`${API}?${new URLSearchParams({ shardId })}`, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
+  const params = { shardId };
+  if (viewport) for (const key of ['minX','minY','maxX','maxY','zoom']) if (Number.isFinite(Number(viewport[key]))) params[key] = String(viewport[key]);
+  const response = await fetch(`${API}?${new URLSearchParams(params)}`, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'living_world_projection_failed'), { status: response.status, result });
   return result;
@@ -152,6 +154,14 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       pendingInvites: socialParty?.pendingInvites || [],
     },
     factions: (projection.factions || []).map((faction) => ({ id: faction.id, name: faction.name, kind: faction.kind, relation: relation(faction.id) })),
+    topology: {
+      projection: projection.topology?.projection || 'earth-equirectangular-v1',
+      size: projection.topology?.size || { width: 100, height: 100 },
+      contentHash: projection.topology?.contentHash || null,
+      landmasses: (projection.topology?.landmasses || []).map((entry) => ({ key: entry.key, name: entry.name, polygon: entry.polygon })),
+      provinces: (projection.topology?.provinces || projection.topology?.regions || []).map((entry) => ({ id: entry.id, key: entry.key, name: entry.name, landmass: entry.landmass, biome: entry.biome, center: entry.center, polygon: entry.polygon })),
+    },
+    viewport: projection.viewport || { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 1, truncated: false },
     regions: (projection.regions || []).map((region) => ({
       id: region.id, name: region.name, ownerFactionId: region.owner_faction_id || null,
       ownerName: factionById.get(region.owner_faction_id)?.name || 'Unclaimed', owner: relation(region.owner_faction_id),
@@ -178,7 +188,7 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       crossRegion: route.origin_region_id !== route.destination_region_id })),
     parties: (projection.parties || []).filter((party) => !ownIds.has(party.id)).map((party) => {
       const [x, y] = partyPosition(party);
-      return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.intelligence?.estimate || 0), x, y, intent: party.stance || 'Unknown' };
+      return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.strength ?? party.army_strength ?? party.intelligence?.estimate ?? 0), x, y, intent: party.strategic_intent || party.stance || 'Unknown', routeId: party.route_id || null, moving: Boolean(party.route_id) };
     }),
     missions: locations.filter((location) => Number(location.services?.missionLevel) > 0).map((location) => {
       const [x, y] = point(location.position); return { id: `mission:${location.id}`, locationId: location.id,
@@ -192,6 +202,8 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       ownSide: ownIds.has(encounter.attacker_party_id) ? 'attacker' : 'defender',
     })),
     governance,
+    sieges: (projection.sieges || []).map((siege) => { const [x, y] = point(siege.position || byLocation.get(siege.location_id)?.position); return { ...siege, x, y }; }),
+    pursuits: projection.pursuits || [],
     markets: projection.markets || [],
     logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,
