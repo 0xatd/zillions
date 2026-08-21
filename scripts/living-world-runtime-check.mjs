@@ -16,9 +16,9 @@ const projection = livingWorldProjectionToUi({
   ownParties: [{ id: 'p1', name: 'First Company', owner_faction_id: 'free', location_id: 'a', revision: 4, stance: 'friendly' }],
   locations: [
     { id: 'a', name: 'Greenfall', kind: 'town', position: { x: 10, y: 20 }, owner_faction_id: 'free', services: { fastTravel: true } },
-    { id: 'b', name: 'Rotmire', kind: 'fort', position: { x: 50, y: 60 }, owner_faction_id: 'hive', services: {} },
+    { id: 'b', name: 'Rotmire', kind: 'fort', position: { x: 50, y: 60 }, owner_faction_id: 'hive', services: { fastTravel: true } },
   ],
-  routes: [{ id: 'r1', origin_id: 'a', destination_id: 'b', danger: 0.8 }],
+  routes: [{ id: 'r1', origin_id: 'a', destination_id: 'b', danger: 0.2, control_state: 'controlled', blockade_state: {} }],
   parties: [
     { id: 'p1', owner_faction_id: 'free', location_id: 'a' },
     { id: 'enemy', name: 'Warband', owner_faction_id: 'hive', route_id: 'r1', route_progress: 0.5, stance: 'hostile', intelligence: { estimate: 90 } },
@@ -26,7 +26,8 @@ const projection = livingWorldProjectionToUi({
 }, { id: 'c1', name: 'Ted Prime', className: 'Engineer' });
 assert.equal(projection.party.id, 'p1');
 assert.equal(projection.party.members[0].name, 'Ted Prime');
-assert.equal(projection.settlements[0].fastTravel, true);
+assert.equal(projection.settlements[0].fastTravel, false, 'current location is not a travel destination');
+assert.equal(projection.settlements[1].fastTravel, true, 'authority-known safe connected destination enables fast travel');
 assert.deepEqual(projection.routes[0].from, [10, 20]);
 assert.deepEqual([projection.parties[0].x, projection.parties[0].y], [30, 40]);
 assert.equal(projection.parties[0].strength, 90);
