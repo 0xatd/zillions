@@ -19,6 +19,32 @@ create trigger activate_group_movement_order before insert on public.world_movem
 for each row execute function public.activate_group_movement_order();
 revoke all on function public.activate_group_movement_order() from public,anon,authenticated;
 
+-- Source logistics can legitimately advance a moving company's revision after
+-- handoff creation. Fence acceptance on monotonic revision plus the unchanged
+-- source, route, and active movement order instead of requiring exact equality.
+create or replace function public.complete_world_region_handoff(p_handoff uuid,p_destination_worker text,p_destination_lease_epoch bigint)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare h public.world_region_handoffs%rowtype;p public.world_parties%rowtype;l public.world_region_worker_leases%rowtype;
+begin
+  if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required';end if;
+  if p_destination_worker is null or length(p_destination_worker) not between 1 and 96 or p_destination_lease_epoch is null or p_destination_lease_epoch<=0 then raise exception 'destination_lease_required';end if;
+  select * into h from public.world_region_handoffs where id=p_handoff for update;if not found then raise exception 'handoff_not_found';end if;
+  select * into l from public.world_region_worker_leases where region_id=h.destination_region_id for update;
+  if not found or l.worker_id<>p_destination_worker or l.lease_epoch<>p_destination_lease_epoch or l.lease_until<=now() then raise exception 'destination_lease_required';end if;
+  if h.status='accepted' then return jsonb_build_object('ok',true,'duplicate',true,'partyId',h.party_id,'regionId',h.destination_region_id);end if;
+  if h.status<>'pending' then raise exception 'handoff_not_pending';end if;
+  select * into p from public.world_parties where id=h.party_id for update;
+  if p.region_id<>h.source_region_id or p.revision<h.expected_party_revision or p.route_id is distinct from h.route_id or p.location_id is not null
+    or not exists(select 1 from public.world_movement_orders where party_id=p.id and route_id=h.route_id and status='moving') then raise exception 'stale_handoff';end if;
+  if not exists(select 1 from public.world_locations where id=h.destination_location_id and province_id=h.destination_region_id) then raise exception 'invalid_destination';end if;
+  update public.world_movement_orders set status='arrived',revision=revision+1 where party_id=p.id and route_id=h.route_id and status='moving';
+  update public.world_parties set region_id=h.destination_region_id,location_id=h.destination_location_id,route_id=null,route_progress=0,revision=revision+1,updated_at=now() where id=p.id returning * into p;
+  update public.world_region_handoffs set status='accepted',completed_at=now() where id=h.id;
+  return jsonb_build_object('ok',true,'duplicate',false,'partyId',p.id,'regionId',p.region_id,'partyRevision',p.revision);
+end $$;
+revoke all on function public.complete_world_region_handoff(uuid,text,bigint) from public,anon,authenticated;
+grant execute on function public.complete_world_region_handoff(uuid,text,bigint) to service_role;
+
 -- Give an ownerless opponent a deterministic decision at contact creation. The
 -- human decision then resolves immediately and the existing engagement trigger
 -- opens exactly one tactical assignment.
@@ -29,6 +55,7 @@ begin
   select * into ai from public.world_parties where id=new.attacker_party_id and owner_user_id is null;
   if not found then select * into ai from public.world_parties where id=new.defender_party_id and owner_user_id is null; end if;
   if not found then return new; end if;
+  if (ai.id=new.attacker_party_id and new.attacker_choice is not null) or (ai.id=new.defender_party_id and new.defender_choice is not null) then return new;end if;
   ai_choice:='fight';
   insert into public.world_encounter_decisions(encounter_id,party_id,request_id,encounter_revision,choice,snapshot)
     values(new.id,ai.id,'ai:'||new.id::text,new.revision,ai_choice,

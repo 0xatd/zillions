@@ -80,6 +80,20 @@ export function deriveStrategicConsequences(snapshot, winnerPartyId, casualties 
   };
 }
 
+export function reserveCapturableSurvivor(snapshot, winnerPartyId, casualties = []) {
+  const adjusted = casualties.map((row) => ({ ...row }));
+  if (!winnerPartyId) return adjusted;
+  const loser = winnerPartyId === snapshot.attackerPartyId ? snapshot.defenderPartyId : snapshot.attackerPartyId;
+  const armies = new Map((snapshot.armies || []).map((army) => [army.id, army.party_id]));
+  for (const row of adjusted) {
+    const stack = (snapshot.stacks || []).find((candidate) => candidate.id === row.stackId && armies.get(candidate.army_id) === loser);
+    if (!stack || Number(stack.healthy) - row.killed - row.wounded > 0) continue;
+    if (row.wounded > 0) row.wounded -= 1; else if (row.killed > 0) row.killed -= 1; else continue;
+    break;
+  }
+  return adjusted;
+}
+
 export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
   const snapshot = assignment?.force_snapshot;
   if (!snapshot || !UUID.test(snapshot.attackerPartyId) || !UUID.test(snapshot.defenderPartyId)) throw new Error('invalid_force_snapshot');
@@ -126,6 +140,7 @@ export function autosimBattleAssignment(assignment, { maxRounds = 60 } = {}) {
   }
   const completedTick = Math.max(0, numeric(snapshot.startedTick)) + rounds.length;
   const canonical = { engagementId: snapshot.engagementId, outcome, winnerPartyId, casualties, rounds, completedTick };
-  const consequences = deriveStrategicConsequences(snapshot, winnerPartyId, casualties);
-  return validateBattleResult({ outcome, winnerPartyId, casualties, morale: { attacker: attacker.morale, defender: defender.morale }, ...consequences, stateHash: createHash('sha256').update(JSON.stringify({ ...canonical, ...consequences })).digest('hex'), completedTick });
+  const strategicCasualties = reserveCapturableSurvivor(snapshot, winnerPartyId, casualties);
+  const consequences = deriveStrategicConsequences(snapshot, winnerPartyId, strategicCasualties);
+  return validateBattleResult({ outcome, winnerPartyId, casualties: strategicCasualties, morale: { attacker: attacker.morale, defender: defender.morale }, ...consequences, stateHash: createHash('sha256').update(JSON.stringify({ ...canonical, casualties: strategicCasualties, ...consequences })).digest('hex'), completedTick });
 }

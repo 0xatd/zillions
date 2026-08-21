@@ -40,6 +40,7 @@ import { getGalaxyState } from './backend.js';
 import {
   enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
 } from './living-world-client.js';
+import { deliverBattleOutbox, loadBattleOutbox } from './living-world-battle-outbox.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
@@ -2132,22 +2133,20 @@ class App {
     const battle=this._livingWorldBattle;
     if(!battle||!this.game)return;
     const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
-    try { sessionStorage.setItem('zillions-living-world-battle-outbox', JSON.stringify({ assignmentToken: battle.token, replay })); } catch { /* blocked storage */ }
     try{
-      await sendLivingWorldBattleAction({action:'result',assignmentToken:battle.token,replay});
-      try { sessionStorage.removeItem('zillions-living-world-battle-outbox'); } catch { /* blocked storage */ }
+      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction,entry:{assignmentToken:battle.token,replay}});
+      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
       battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
     }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
   }
 
   async _retryLivingWorldBattleOutbox() {
-    let pending;
-    try { pending = JSON.parse(sessionStorage.getItem('zillions-living-world-battle-outbox') || 'null'); } catch { return; }
+    let pending;try{pending=loadBattleOutbox(sessionStorage);}catch{return;}
     if (!pending?.assignmentToken || !pending?.replay || this._livingWorldOutboxRetrying) return;
     this._livingWorldOutboxRetrying = true;
     try {
-      await sendLivingWorldBattleAction({ action: 'result', assignmentToken: pending.assignmentToken, replay: pending.replay });
-      sessionStorage.removeItem('zillions-living-world-battle-outbox');
+      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction});
+      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
       this.ui.showBanner('Recovered and committed the previous battle result.', '', 3200);
     } catch (error) {
       this.ui.showBanner(error?.message === 'battle_assignment_expired' ? 'The previous battle result expired before recovery.' : 'Previous battle result is still waiting for authority recovery.', 'bad', 4200);

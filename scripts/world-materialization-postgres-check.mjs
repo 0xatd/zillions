@@ -31,6 +31,33 @@ try{
   assert.ok(Number((await admin.query('select count(*) count from public.world_recruitment_offers where location_id=$1',[start])).rows[0].count)>0,'pinned starting town must offer recruits');
   assert.ok(Number((await admin.query('select count(*) count from public.world_supply_offers where location_id=$1',[start])).rows[0].count)>=4,'pinned starting town must offer supplies');
   assert.ok(Number((await admin.query('select count(*) count from public.world_town_services where location_id=$1',[start])).rows[0].count)>=3,'pinned starting town must offer town services');
+  // Prove the complete economic entry loop against the exact pinned Earth
+  // start, rather than relying on the smaller synthetic authority fixture.
+  const character='90000000-0000-4000-8000-000000000099';
+  await admin.query(`insert into public.game_characters(id,user_id,client_character_id,name,class_key,race_key)
+    values($1,$2,'pinned-earth-character','Pinned Earth Player','vanguard','human')`,[character,user]);
+  await admin.query("insert into public.match_history(user_id,mode,result,summary) values($1,'campaign','win','{\"level\":1}')",[user]);
+  await admin.query('select public.complete_world_tutorial_from_campaign($1,$2)',[user,character]);
+  const entry=(await admin.query('select public.enter_living_world($1,$2) result',[user,character])).rows[0].result;
+  assert.equal(entry.duplicate,false);assert.equal((await admin.query('select location_id from public.world_parties where id=$1',[entry.partyId])).rows[0].location_id,start);
+  let company=(await admin.query('select revision from public.world_companies where party_id=$1',[entry.partyId])).rows[0];
+  const recruit=(await admin.query('select recruit_key from public.world_recruitment_offers where location_id=$1 and available>0 order by cost,recruit_key limit 1',[start])).rows[0];
+  const recruited=(await admin.query("select public.living_world_company_command($1,'pinned-recruit',$2,$3,'recruit',jsonb_build_object('recruitKey',$4,'quantity',1)) result",[user,entry.partyId,company.revision,recruit.recruit_key])).rows[0].result;
+  assert.ok(Number((await admin.query('select coalesce(sum(healthy),0) count from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id=$1',[entry.partyId])).rows[0].count)>0,'pinned recruit must materialize into the tactical stack');
+  assert.ok(Number((await admin.query('select combat_power from public.world_armies where party_id=$1',[entry.partyId])).rows[0].combat_power)>0,'pinned recruit must increase strategic combat power');
+  const supply=(await admin.query('select supply_key from public.world_supply_offers where location_id=$1 and available>0 order by unit_price,supply_key limit 1',[start])).rows[0];
+  const supplied=(await admin.query("select public.living_world_company_command($1,'pinned-supply',$2,$3,'buy_supplies',jsonb_build_object('supplyKey',$4,'quantity',1)) result",[user,entry.partyId,recruited.companyRevision,supply.supply_key])).rows[0].result;
+  assert.ok(Number((await admin.query('select quantity from public.world_supplies where party_id=$1 and supply_key=$2',[entry.partyId,supply.supply_key])).rows[0].quantity)>0);
+  await admin.query('update public.world_parties set fatigue=50 where id=$1',[entry.partyId]);
+  const service=(await admin.query("select service_key from public.world_town_services where location_id=$1 and service_key='rest' limit 1",[start])).rows[0];
+  const serviced=(await admin.query("select public.living_world_company_command($1,'pinned-service',$2,$3,'use_town_service',jsonb_build_object('serviceKey',$4)) result",[user,entry.partyId,supplied.companyRevision,service.service_key])).rows[0].result;
+  assert.equal(Number((await admin.query('select fatigue from public.world_parties where id=$1',[entry.partyId])).rows[0].fatigue),0);assert.ok(serviced.companyRevision);
+  await admin.query('insert into public.player_wallets(user_id,salvage_alloy) values($1,1000) on conflict(user_id) do update set salvage_alloy=1000',[user]);
+  const market=(await admin.query('select commodity_key from public.world_markets where location_id=$1 and stock>0 order by commodity_key limit 1',[start])).rows[0];
+  const tradeRevision=Number((await admin.query('select revision from public.world_parties where id=$1',[entry.partyId])).rows[0].revision),buy={locationId:start,commodityKey:market.commodity_key,side:'buy',quantity:1};
+  const bought=(await admin.query("select public.living_world_trade_market($1,'pinned-buy',$2,$3,$4) result",[user,entry.partyId,tradeRevision,buy])).rows[0].result;
+  const sold=(await admin.query("select public.living_world_trade_market($1,'pinned-sell',$2,$3,$4) result",[user,entry.partyId,bought.partyRevision,{...buy,side:'sell'}])).rows[0].result;
+  assert.equal(bought.side,'buy');assert.equal(sold.side,'sell');assert.equal(Number((await admin.query('select quantity from public.world_cargo where party_id=$1 and commodity_key=$2',[entry.partyId,market.commodity_key])).rows[0].quantity),0);
   const replay=(await admin.query('select public.materialize_world_manifest($1,$2,$3) result',[manifest.planetId,manifest.contentHash,bundle])).rows[0].result;assert.equal(replay.duplicate,true);assert.equal(replay.materializationHash,first.materializationHash);
   for(const role of ['anon','authenticated']){await admin.query(`set role ${role}`);await admin.query("select set_config('request.jwt.claim.role',$1,false)",[role]);await expectError(admin.query('select public.materialize_world_manifest($1,$2,$3)',[manifest.planetId,manifest.contentHash,bundle]),'permission denied');await admin.query('reset role');}
   console.log(`world materialization PostgreSQL checks passed (${first.summary.regions} regions)`);

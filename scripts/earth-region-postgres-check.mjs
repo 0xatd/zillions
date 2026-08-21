@@ -8,6 +8,7 @@ import { createLivingWorldPartyHandler } from '../api/living-world-party.js';
 import { createLivingWorldBattleHandler } from '../api/living-world-battle.js';
 import { createLivingWorldEntryHandler } from '../api/living-world-entry.js';
 import { verifyLivingWorldBattleReplay } from '../src/living-world-battle-replay.js';
+import { autosimBattleAssignment } from '../src/living-world-battle.js';
 import { Game } from '../src/game.js';
 import { TerrainField } from '../src/terrain.js';
 import { levelById } from '../src/config.js';
@@ -140,9 +141,26 @@ try {
   assert.equal(Number((await admin.query('select count(distinct location_id) count from public.world_parties where id in($1,$2)',[firstEntry.partyId,otherEntry.partyId])).rows[0].count),1,'grouped parties must arrive together');
   await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[groupRegionId]);
   await admin.query("select public.social_party_command($1,'split-two','travel_mode',$2,null,null,'{\"mode\":\"split\"}')", [otherUserId, firstEntry.socialPartyId]);
-  await new Promise((resolve)=>server.close(resolve));
   assert.equal((await admin.query('select travel_mode from public.social_party_members where party_id=$1 and user_id=$2', [firstEntry.socialPartyId, otherUserId])).rows[0].travel_mode, 'split');
-  await admin.query("update public.world_movement_orders set status='cancelled' where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId]);
+  const crossRoute='12000000-0000-4000-8000-000000000098';
+  await admin.query(`insert into public.world_routes(id,province_id,origin_id,destination_id,distance,terrain,danger,origin_region_id,destination_region_id)
+    select $1,o.province_id,o.id,d.id,10,'{"type":"road"}',0.05,o.province_id,d.province_id from public.world_locations o join public.world_locations d on d.key='ironwood' where o.key='reedwater'`,[crossRoute]);
+  const splitRevisions=Object.fromEntries((await admin.query('select id,revision from public.world_parties where owner_user_id in($1,$2)',[userId,otherUserId])).rows.map(row=>[row.id,Number(row.revision)]));
+  const splitMove=await postParty('owner',{requestId:'split-cross-region',action:'group_travel',partyId:firstEntry.socialPartyId,payload:{routeId:crossRoute,expectedRevisions:splitRevisions}});
+  assert.equal(splitMove.memberCount,1,'split member must be excluded from group travel');
+  assert.equal((await admin.query('select location_id from public.world_parties where id=$1',[otherEntry.partyId])).rows[0].location_id,(await admin.query("select id from public.world_locations where key='reedwater'")).rows[0].id);
+  const crossSourceLease=(await admin.query("select public.claim_world_region_lease($1,'cross-source',300) result",[groupRegionId])).rows[0].result;
+  for(let tick=0;tick<20;tick++){
+    await admin.query("select public.process_world_region_runtime($1,'cross-source',$2,100)",[groupRegionId,crossSourceLease.leaseEpoch]);
+    if(Number((await admin.query("select count(*) count from public.world_region_handoffs where party_id=$1 and status='pending'",[firstEntry.partyId])).rows[0].count)>0)break;
+  }
+  const destinationRegion=(await admin.query("select province_id from public.world_locations where key='ironwood'")).rows[0].province_id;
+  const crossDestinationLease=(await admin.query("select public.claim_world_region_lease($1,'cross-destination',300) result",[destinationRegion])).rows[0].result;
+  await admin.query("select public.process_world_region_runtime($1,'cross-destination',$2,100)",[destinationRegion,crossDestinationLease.leaseEpoch]);
+  assert.equal((await admin.query('select location_id from public.world_parties where id=$1',[firstEntry.partyId])).rows[0].location_id,(await admin.query("select id from public.world_locations where key='ironwood'")).rows[0].id,'grouped cross-region traveler must complete destination handoff');
+  assert.equal((await admin.query('select location_id from public.world_parties where id=$1',[otherEntry.partyId])).rows[0].location_id,(await admin.query("select id from public.world_locations where key='reedwater'")).rows[0].id,'split member must remain behind');
+  await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id in($1,$2)",[groupRegionId,destinationRegion]);
+  await new Promise((resolve)=>server.close(resolve));
 
   const regions = (await admin.query("select id,key,revision from public.world_provinces where key in ('greenfall','ironwood') order by key")).rows;
   const greenfall = regions.find((region) => region.key === 'greenfall');
@@ -160,13 +178,14 @@ try {
   const attackerStackId = '50000000-0000-4000-8000-000000000001';
   const defenderStackId = '50000000-0000-4000-8000-000000000002';
   await admin.query("update public.world_movement_orders set status='cancelled' where party_id=$1 and status in('queued','moving')",[firstEntry.partyId]);
-  await admin.query("update public.world_parties set location_id=$1,route_id=null,route_progress=0,stance='neutral' where id=$2",[locationId,firstEntry.partyId]);
+  await admin.query("update public.world_parties set region_id=(select province_id from public.world_locations where id=$1),location_id=$1,route_id=null,route_progress=0,stance='neutral' where id=$2",[locationId,firstEntry.partyId]);
   await admin.query(`insert into public.world_parties(id,shard_id,region_id,name,kind,location_id,morale,stance)
     values($1,'earth-1',$2,'Rival Company','ai',$3,60,'hostile')`, [defenderPartyId, greenfall.id, locationId]);
   await admin.query(`insert into public.world_armies(id,party_id,combat_power)
     values($1,$2,45)`, [defenderArmyId, defenderPartyId]);
   await admin.query(`insert into public.world_unit_stacks(id,army_id,unit_key,tier,healthy)
-    values($1,$2,'greenfall_guard',2,40),($3,$4,'rival_raider',1,35)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
+    values($1,$2,'greenfall_guard',2,8),($3,$4,'rival_raider',1,6)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
+  await admin.query("insert into public.world_cargo(party_id,commodity_key,quantity) values($1,'grain',20) on conflict(party_id,commodity_key) do update set quantity=20",[defenderPartyId]);
   const contactLease=(await admin.query("select public.claim_world_region_lease($1,'worker-a',300) result",[greenfall.id])).rows[0].result;
   const contactRuntime=(await admin.query("select public.process_world_region_runtime($1,'worker-a',$2,100) result",[greenfall.id,contactLease.leaseEpoch])).rows[0].result;
   assert.ok(Number(contactRuntime.encountersCreated)>=1,'the scheduled region runtime must create hostile contact');
@@ -215,6 +234,10 @@ try {
   assert.equal(tacticalGame.over,true);
   const battleReplayPayload={version:1,completedTick:tacticalTick,commands:[]};
   const expectedBattleResult=verifyLivingWorldBattleReplay(assignment,battleReplayPayload);
+  assert.ok(expectedBattleResult.cargoTransfers.length>=1,'verified battle must produce reachable cargo consequences when the loser has cargo');
+  assert.ok(expectedBattleResult.prisoners.length>=1,'verified battle must produce reachable prisoner consequences when the loser has survivors');
+  const controlBefore=(await admin.query('select p.owner_faction_id province_owner,l.owner_faction_id location_owner from public.world_provinces p join public.world_locations l on l.province_id=p.id where l.id=$1',[locationId])).rows[0];
+  const cargoBefore=Number((await admin.query("select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'",[defenderPartyId])).rows[0].quantity);
   const battleCompleted=await postBattle('owner',{action:'result',assignmentToken:launched.token,replay:battleReplayPayload});
   const battleResult=battleCompleted.result;
   assert.deepEqual(battleResult,expectedBattleResult,'HTTP result must be derived by the server replay verifier');
@@ -223,11 +246,55 @@ try {
   assert.equal(committed.duplicate, false);
   assert.equal(Number((await admin.query('select region_lease_epoch from public.world_battle_assignments where id=$1',[assignment.id])).rows[0].region_lease_epoch),Number(battleTakeover.leaseEpoch),'verified result must rebind to the current live region lease after takeover');
   await new Promise((resolve)=>battleServer.close(resolve));
-  const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
+  const consequenceSnapshot=await admin.query(`select
+    (select jsonb_agg(to_jsonb(s) order by s.id) from public.world_unit_stacks s where s.army_id in($1,$2)) stacks,
+    (select jsonb_agg(to_jsonb(p) order by p.id) from public.world_parties p where p.id in($3,$4)) parties,
+    (select jsonb_agg(to_jsonb(c) order by c.party_id,c.commodity_key) from public.world_cargo c where c.party_id in($3,$4)) cargo,
+    (select jsonb_agg(to_jsonb(w) order by w.captor_party_id,w.source_party_id,w.unit_key,w.tier) from public.world_prisoners w where w.captor_party_id in($3,$4)) prisoners`,[attackerArmyId,defenderArmyId,firstEntry.partyId,defenderPartyId]);
+  const reorderedBattleResult=Object.fromEntries(Object.entries(battleResult).reverse());
+  const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, reorderedBattleResult])).rows[0].result;
   assert.equal(battleReplay.duplicate, true);
+  const consequenceAfterReplay=await admin.query(`select
+    (select jsonb_agg(to_jsonb(s) order by s.id) from public.world_unit_stacks s where s.army_id in($1,$2)) stacks,
+    (select jsonb_agg(to_jsonb(p) order by p.id) from public.world_parties p where p.id in($3,$4)) parties,
+    (select jsonb_agg(to_jsonb(c) order by c.party_id,c.commodity_key) from public.world_cargo c where c.party_id in($3,$4)) cargo,
+    (select jsonb_agg(to_jsonb(w) order by w.captor_party_id,w.source_party_id,w.unit_key,w.tier) from public.world_prisoners w where w.captor_party_id in($3,$4)) prisoners`,[attackerArmyId,defenderArmyId,firstEntry.partyId,defenderPartyId]);
+  assert.deepEqual(consequenceAfterReplay.rows[0],consequenceSnapshot.rows[0],'duplicate/reordered commit must not apply consequences twice');
   const attackerLoss=battleResult.casualties.find(row=>row.stackId===attackerStackId);const defenderLoss=battleResult.casualties.find(row=>row.stackId===defenderStackId);
-  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy),40-(attackerLoss?.killed||0)-(attackerLoss?.wounded||0));
-  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy),35-(defenderLoss?.killed||0)-(defenderLoss?.wounded||0));
+  const capturedFrom=(partyId,unitKey)=>battleResult.prisoners.filter(row=>row.sourcePartyId===partyId&&row.unitKey===unitKey).reduce((sum,row)=>sum+row.quantity,0);
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy),8-(attackerLoss?.killed||0)-(attackerLoss?.wounded||0)-capturedFrom(firstEntry.partyId,'greenfall_guard'));
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy),6-(defenderLoss?.killed||0)-(defenderLoss?.wounded||0)-capturedFrom(defenderPartyId,'rival_raider'));
+  assert.ok(Number((await admin.query('select count(*) count from public.world_prisoners where captor_party_id=$1',[battleResult.winnerPartyId])).rows[0].count)>=1);
+  assert.equal(Number((await admin.query("select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'",[defenderPartyId])).rows[0].quantity),cargoBefore-battleResult.cargoTransfers.filter(row=>row.fromPartyId===defenderPartyId&&row.commodityKey==='grain').reduce((sum,row)=>sum+row.quantity,0),'verified cargo transfer must debit the loser');
+  assert.equal(Number((await admin.query('select morale from public.world_parties where id=$1',[firstEntry.partyId])).rows[0].morale),Number(assignment.force_snapshot.attackerPartyId===firstEntry.partyId?battleResult.morale.attacker:battleResult.morale.defender));
+  assert.equal(Number((await admin.query('select morale from public.world_parties where id=$1',[defenderPartyId])).rows[0].morale),Number(assignment.force_snapshot.attackerPartyId===defenderPartyId?battleResult.morale.attacker:battleResult.morale.defender));
+  for(const armyId of [attackerArmyId,defenderArmyId])assert.equal(Number((await admin.query('select combat_power from public.world_armies where id=$1',[armyId])).rows[0].combat_power),Number((await admin.query('select coalesce(sum(healthy*tier),0) power from public.world_unit_stacks where army_id=$1',[armyId])).rows[0].power),'combat power must be recomputed from surviving stacks');
+  const companyConsequences=(await admin.query("select status,count(*)::integer count from public.world_company_members where party_id=$1 and status in('dead','wounded','captured') group by status",[firstEntry.partyId])).rows;
+  const expectedCompanyLosses=battleResult.casualties.filter(row=>assignment.force_snapshot.armies.find(army=>army.party_id===firstEntry.partyId)?.id===assignment.force_snapshot.stacks.find(stack=>stack.id===row.stackId)?.army_id).reduce((sum,row)=>sum+row.killed+row.wounded,0)+battleResult.prisoners.filter(row=>row.sourcePartyId===firstEntry.partyId).reduce((sum,row)=>sum+row.quantity,0);
+  if(expectedCompanyLosses>0)assert.ok(companyConsequences.reduce((sum,row)=>sum+row.count,0)>0,'verified company casualties must produce dead, wounded, or captured roster members where applicable');
+  const controlAfter=(await admin.query('select p.owner_faction_id province_owner,l.owner_faction_id location_owner from public.world_provinces p join public.world_locations l on l.province_id=p.id where l.id=$1',[locationId])).rows[0];
+  assert.deepEqual(controlAfter,controlBefore,'a field battle must not transfer province or location ownership; siege authority owns conquest');
+  // Autosim uses the same immutable assignment and PostgreSQL consequence
+  // transaction as live command. Prove that path independently after the live
+  // battle instead of treating deterministic JS output as sufficient evidence.
+  await admin.query('update public.world_unit_stacks set healthy=greatest(healthy,20),revision=revision+1 where army_id in($1,$2)',[attackerArmyId,defenderArmyId]);
+  await admin.query('update public.world_parties set morale=case when id=$1 then 70 else 65 end,revision=revision+1 where id in($1,$2)',[firstEntry.partyId,defenderPartyId]);
+  await admin.query("insert into public.world_cargo(party_id,commodity_key,quantity) values($1,'grain',16) on conflict(party_id,commodity_key) do update set quantity=16,reserved_quantity=0,revision=world_cargo.revision+1",[defenderPartyId]);
+  const autosimEncounterId='70000000-0000-4000-8000-000000000099';
+  await admin.query(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
+    values($1,'earth-1',$2,$3,(select simulation_tick from public.world_shards where id='earth-1'),'choosing','auto-command','auto-command','{"kind":"plains"}','{}')`,[autosimEncounterId,firstEntry.partyId,defenderPartyId]);
+  await admin.query("update public.world_encounters set state='battle',revision=revision+1 where id=$1",[autosimEncounterId]);
+  const autosimEncounter=(await admin.query('select revision from public.world_encounters where id=$1',[autosimEncounterId])).rows[0];
+  const autosimEngagement=(await admin.query('select id,mode from public.world_engagements where encounter_id=$1',[autosimEncounterId])).rows[0];
+  assert.equal(autosimEngagement.mode,'autosim');
+  const autosimAssignment=(await admin.query("select public.living_world_issue_battle($1,$2,$3,'postgres-autosim-proof') result",[userId,autosimEngagement.id,autosimEncounter.revision])).rows[0].result;
+  const autosimResult=autosimBattleAssignment(autosimAssignment);
+  assert.ok(autosimResult.casualties.some(row=>row.killed>0||row.wounded>0),'autosim must generate nonempty strategic casualties');
+  assert.ok(autosimResult.prisoners.length>0&&autosimResult.cargoTransfers.length>0,'autosim must produce prisoner and cargo consequences when the loser has survivors and cargo');
+  const autosimCommit=(await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result',[autosimAssignment.id,autosimAssignment.nonce,autosimEncounter.revision,autosimResult])).rows[0].result;
+  assert.equal(autosimCommit.duplicate,false);
+  assert.equal((await admin.query('select state from public.world_encounters where id=$1',[autosimEncounterId])).rows[0].state,'resolved');
+  for(const armyId of [attackerArmyId,defenderArmyId])assert.equal(Number((await admin.query('select combat_power from public.world_armies where id=$1',[armyId])).rows[0].combat_power),Number((await admin.query('select coalesce(sum(healthy*tier),0) power from public.world_unit_stacks where army_id=$1',[armyId])).rows[0].power),'autosim must recompute combat power');
   assert.equal((await admin.query('select state from public.world_encounters where id=$1', [encounterId])).rows[0].state, 'resolved');
   await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[greenfall.id]);
 
@@ -286,6 +353,7 @@ try {
   // Build a cross-region route and prove source/destination epoch fencing and replay safety.
   const routeId = (await admin.query('select id from public.world_routes where origin_region_id=$1 and destination_region_id=$2 limit 1', [greenfall.id, ironwood.id])).rows[0].id;
   await admin.query('update public.world_parties set location_id=null,route_id=$1,region_id=$2 where id=$3', [routeId, greenfall.id, firstEntry.partyId]);
+  await admin.query("insert into public.world_movement_orders(party_id,route_id,issued_tick,start_tick,expected_arrival_tick,status) values($1,$2,0,0,1,'moving')",[firstEntry.partyId,routeId]);
   const partyRevision = Number((await admin.query('select revision from public.world_parties where id=$1', [firstEntry.partyId])).rows[0].revision);
   const destinationLease = (await admin.query("select public.claim_world_region_lease($1,'worker-d',300) result", [ironwood.id])).rows[0].result;
   const handoff = (await admin.query("select public.request_world_region_handoff($1,$2,'handoff-1',$3,'worker-a',$4,'{}') result", [firstEntry.partyId, routeId, partyRevision, renewedLease.leaseEpoch])).rows[0].result;
@@ -301,7 +369,7 @@ try {
   assert.equal(completed.regionId, ironwood.id);
   const completeReplay = (await admin.query("select public.complete_world_region_handoff($1,'worker-e',$2) result", [handoff.handoffId, destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(completeReplay.duplicate, true);
-  assert.equal(Number((await admin.query('select count(*) count from public.world_region_handoffs where party_id=$1 and status=\'accepted\'', [firstEntry.partyId])).rows[0].count), 1);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_region_handoffs where party_id=$1 and request_id='handoff-1' and status='accepted'", [firstEntry.partyId])).rows[0].count), 1);
 
   // Siege declaration is player-owned and idempotent. Only the current region
   // lease may resolve it, and occupation writes control, reputation, holding,
@@ -337,21 +405,20 @@ try {
 
   // Logistics ticks are lease-fenced and replay-safe. A retry cannot consume
   // supplies or reprice markets twice.
-  await admin.query('update public.world_region_states set simulation_tick=1 where region_id=$1', [ironwood.id]);
+  await admin.query('update public.world_region_states set simulation_tick=50 where region_id=$1', [ironwood.id]);
   const foodBefore = Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity);
   const treasuryBeforeLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
-  const logistics = (await admin.query("select public.process_world_region_logistics($1,1,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
+  const logistics = (await admin.query("select public.process_world_region_logistics($1,50,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(logistics.duplicate, false);
-  assert.ok(Number(logistics.caravansProcessed)+Number(siegeRuntime.logistics.caravansProcessed)>=1);
   const foodAfter = Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity);
   const treasuryAfterLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
   assert.ok(treasuryAfterLogistics < treasuryBeforeLogistics, 'company wages must settle during the logistics tick');
   assert.ok(Number((await admin.query("select coalesce(sum(quantity),0) quantity from public.world_cargo where party_id='13000000-0000-4000-8000-000000000002' and commodity_key='iron'")).rows[0].quantity) > 0, 'caravan must move market stock into physical cargo');
-  const logisticsReplay = (await admin.query("select public.process_world_region_logistics($1,1,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
+  const logisticsReplay = (await admin.query("select public.process_world_region_logistics($1,50,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(logisticsReplay.duplicate, true);
   assert.equal(Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity), foodAfter);
   assert.ok(foodAfter <= foodBefore);
-  await expectError(admin.query("select public.process_world_region_logistics($1,2,'worker-e',$2)", [ironwood.id, destinationTakeover.leaseEpoch]), 'future_logistics_tick');
+  await expectError(admin.query("select public.process_world_region_logistics($1,51,'worker-e',$2)", [ironwood.id, destinationTakeover.leaseEpoch]), 'future_logistics_tick');
   await expectError(admin.query("select public.process_world_region_logistics($1,1,'worker-d',$2)", [ironwood.id, destinationLease.leaseEpoch]), 'region_lease_required');
 
   // The combined release has one authority path. The region runtime advances
@@ -372,7 +439,7 @@ try {
   await client.query("select set_config('request.jwt.claim.sub',$1,false)", [otherUserId]);
   assert.equal((await client.query('select count(*) count from public.world_region_handoffs')).rows[0].count, '0');
   await client.query("select set_config('request.jwt.claim.sub',$1,false)", [userId]);
-  assert.equal((await client.query('select count(*) count from public.world_region_handoffs')).rows[0].count, '1');
+  assert.equal((await client.query('select count(*) count from public.world_region_handoffs')).rows[0].count, '2');
   await client.end();
 
   console.log(`Earth region PostgreSQL authority checks passed (${migrations.length} migrations, PostgreSQL ${postgres.version || 'embedded'}).`);

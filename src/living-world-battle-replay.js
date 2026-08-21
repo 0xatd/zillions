@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Game } from './game.js';
 import { TerrainField } from './terrain.js';
 import { levelById } from './config.js';
-import { deriveStrategicConsequences, validateBattleResult } from './living-world-battle.js';
+import { deriveStrategicConsequences, reserveCapturableSurvivor, validateBattleResult } from './living-world-battle.js';
 
 const ALLOWED_COMMANDS=new Set(['hdir','cast','pay','heroUpgrade','stance','choose','towerpri','found','drop','swapset','dodge','blessing']);
 const SIM_DT=1/30,MAX_TICKS=108000,MAX_COMMANDS=50000;
@@ -43,7 +43,8 @@ export function verifyLivingWorldBattleReplay(assignment,input){
   };
   const attackerMorale=Math.max(0,Math.min(100,(Number(snapshotParties.get(battle.attackerPartyId)?.morale)||50)*survival(battle.attackerPartyId)));
   const defenderMorale=Math.max(0,Math.min(100,(Number(snapshotParties.get(battle.defenderPartyId)?.morale)||50)*survival(battle.defenderPartyId)));
-  const consequences=deriveStrategicConsequences(snapshot,winnerPartyId,casualties);
-  const canonical={assignmentId:assignment.id,completedTick:tick,outcome,winnerPartyId,casualties,morale:{attacker:attackerMorale,defender:defenderMorale},...consequences};
-  return validateBattleResult({completedTick:tick,outcome,winnerPartyId,casualties,morale:canonical.morale,...consequences,stateHash:createHash('sha256').update(JSON.stringify(canonical)).digest('hex')});
+  const strategicCasualties=reserveCapturableSurvivor(snapshot,winnerPartyId,casualties);
+  const consequences=deriveStrategicConsequences(snapshot,winnerPartyId,strategicCasualties);
+  const canonical={assignmentId:assignment.id,completedTick:tick,outcome,winnerPartyId,casualties:strategicCasualties,morale:{attacker:attackerMorale,defender:defenderMorale},...consequences};
+  return validateBattleResult({completedTick:tick,outcome,winnerPartyId,casualties:strategicCasualties,morale:canonical.morale,...consequences,stateHash:createHash('sha256').update(JSON.stringify(canonical)).digest('hex')});
 }
