@@ -59,8 +59,32 @@ export function filterProjection(snapshot, actorId) {
     const report = reports.find((entry) => entry.subject_party_id === party.id);
     return { id: party.id, name: party.name, kind: party.kind, owner_faction_id: party.owner_faction_id, location_id: party.location_id, route_id: party.route_id, route_progress: party.route_progress, stance: party.stance, intelligence: report?.intelligence || {}, observed_tick: report?.observed_tick, accuracy: report?.accuracy };
   });
-  return { ok: true, shard: snapshot.shard || null, ownParties: own, locations,
-    routes: (snapshot.routes || []).filter((route) => locationIds.has(route.origin_id) && locationIds.has(route.destination_id)),
+  const routes = (snapshot.routes || []).filter((route) => locationIds.has(route.origin_id) && locationIds.has(route.destination_id));
+  const regionIds = new Set([
+    ...locations.map((location) => location.province_id),
+    ...own.map((party) => party.region_id),
+  ].filter(Boolean));
+  const regions = (snapshot.regions || []).filter((region) => regionIds.has(region.id));
+  const factionIds = new Set([
+    ...regions.flatMap((region) => [region.owner_faction_id, region.claimed_by_faction_id]),
+    ...locations.flatMap((location) => [location.owner_faction_id, location.claimed_by_faction_id]),
+    ...routes.flatMap((route) => [route.owner_faction_id, route.claimed_by_faction_id]),
+    ...parties.map((party) => party.owner_faction_id),
+  ].filter(Boolean));
+  const social = snapshot.socialParty;
+  const actorIsMember = social?.members?.some((member) => member.user_id === actorId);
+  const socialParty = actorIsMember ? {
+    id: social.id, name: social.name, leader_user_id: social.leader_user_id, revision: social.revision,
+    members: social.members.map((member) => ({ user_id: member.user_id, role: member.role,
+      worldParty: member.worldParty ? {
+        id: member.worldParty.id, region_id: member.worldParty.region_id, owner_user_id: member.worldParty.owner_user_id,
+        name: member.worldParty.name, kind: member.worldParty.kind, location_id: member.worldParty.location_id,
+        route_id: member.worldParty.route_id, route_progress: member.worldParty.route_progress, stance: member.worldParty.stance,
+      } : null })),
+  } : null;
+  return { ok: true, shard: snapshot.shard || null, planet: snapshot.planet || null,
+    factions: (snapshot.factions || []).filter((faction) => factionIds.has(faction.id)), regions,
+    ownParties: own, socialParty, locations, routes,
     markets: (snapshot.markets || []).filter((market) => marketLocationIds.has(market.location_id)), parties };
 }
 
@@ -74,23 +98,38 @@ async function restRows(config, table, query, fetchImpl) {
   if (!response.ok) throw new Error('living_world_projection_failed');
   return response.json();
 }
-async function loadSnapshot(config, shardId, fetchImpl) {
+async function loadSnapshot(config, shardId, actorId, fetchImpl) {
   const encoded = encodeURIComponent(shardId);
-  const [shards, provinces, parties, reports] = await Promise.all([
+  const [shards, planets, provinces, parties, reports, ownMemberships] = await Promise.all([
     restRows(config, 'world_shards', `select=id,name,status,simulation_tick,ruleset_version,revision&id=eq.${encoded}&limit=1`, fetchImpl),
-    restRows(config, 'world_provinces', `select=id&shard_id=eq.${encoded}`, fetchImpl),
-    restRows(config, 'world_parties', `select=id,owner_user_id,owner_faction_id,name,kind,location_id,route_id,route_progress,speed,morale,fatigue,stance,revision&shard_id=eq.${encoded}`, fetchImpl),
+    restRows(config, 'world_planets', `select=id,system_id,shard_id,key,name,status,revision&shard_id=eq.${encoded}&limit=1`, fetchImpl),
+    restRows(config, 'world_provinces', `select=id,planet_id,key,name,bounds,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,revision&shard_id=eq.${encoded}`, fetchImpl),
+    restRows(config, 'world_parties', `select=id,region_id,owner_user_id,owner_faction_id,name,kind,location_id,route_id,route_progress,speed,morale,fatigue,stance,revision&shard_id=eq.${encoded}`, fetchImpl),
     restRows(config, 'world_scouting_reports', `select=observer_party_id,subject_party_id,location_id,observed_tick,expires_tick,accuracy,intelligence&shard_id=eq.${encoded}`, fetchImpl),
+    restRows(config, 'social_party_members', `select=party_id,user_id,role&user_id=eq.${encodeURIComponent(actorId)}`, fetchImpl),
   ]);
   const provinceIds = provinces.map((row) => row.id);
-  if (!provinceIds.length) return { shard: shards[0], parties, scoutingReports: reports, locations: [], routes: [], markets: [] };
+  const planet = planets[0] || null;
+  const factions = planet ? await restRows(config, 'world_factions', `select=id,planet_id,name,kind,status,revision&planet_id=eq.${encodeURIComponent(planet.id)}`, fetchImpl) : [];
+  let socialParty = null;
+  if (ownMemberships[0]) {
+    const partyId = ownMemberships[0].party_id;
+    const [socialParties, members] = await Promise.all([
+      restRows(config, 'social_parties', `select=id,leader_user_id,name,status,revision&id=eq.${partyId}&limit=1`, fetchImpl),
+      restRows(config, 'social_party_members', `select=party_id,user_id,role&party_id=eq.${partyId}`, fetchImpl),
+    ]);
+    const memberIds = members.map((member) => member.user_id);
+    const memberParties = parties.filter((party) => memberIds.includes(party.owner_user_id));
+    socialParty = { ...socialParties[0], members: members.map((member) => ({ ...member, worldParty: memberParties.find((party) => party.owner_user_id === member.user_id) || null })) };
+  }
+  if (!provinceIds.length) return { shard: shards[0], planet, factions, regions: [], parties, socialParty, scoutingReports: reports, locations: [], routes: [], markets: [] };
   const inList = `(${provinceIds.join(',')})`;
-  const locations = await restRows(config, 'world_locations', `select=id,province_id,key,name,kind,position,owner_faction_id,services,revision&province_id=in.${inList}`, fetchImpl);
+  const locations = await restRows(config, 'world_locations', `select=id,province_id,key,name,kind,position,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,services,revision&province_id=in.${inList}`, fetchImpl);
   const [routes, markets] = await Promise.all([
-    restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,distance,terrain,danger,revision&province_id=in.${inList}`, fetchImpl),
+    restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,origin_region_id,destination_region_id,distance,terrain,danger,owner_faction_id,claimed_by_faction_id,control_strength,control_state,blockade_state,revision&origin_region_id=in.${inList}`, fetchImpl),
     locations.length ? restRows(config, 'world_markets', `select=location_id,commodity_key,stock,buy_price,sell_price,revision&location_id=in.(${locations.map((row) => row.id).join(',')})`, fetchImpl) : [],
   ]);
-  return { shard: shards[0], parties, scoutingReports: reports, locations, routes, markets };
+  return { shard: shards[0], planet, factions, regions: provinces, parties, socialParty, scoutingReports: reports, locations, routes, markets };
 }
 
 export function createLivingWorldHandler(deps = {}) {
@@ -106,7 +145,7 @@ export function createLivingWorldHandler(deps = {}) {
       if (req.method === 'GET') {
         const url = new URL(req.url, `https://${req.headers.host || 'localhost'}`), shardId = text(url.searchParams.get('shardId'));
         if (!IDENTIFIER.test(shardId)) return send(res, 400, { ok: false, error: 'invalid_shard_id' });
-        const snapshot = deps.loadSnapshot ? await deps.loadSnapshot(shardId, user.id) : await loadSnapshot(config, shardId, fetchImpl);
+        const snapshot = deps.loadSnapshot ? await deps.loadSnapshot(shardId, user.id) : await loadSnapshot(config, shardId, user.id, fetchImpl);
         return send(res, 200, filterProjection(snapshot, user.id));
       }
       const command = validateCommandBody(await parseBody(req));
