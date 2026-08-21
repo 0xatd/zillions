@@ -38,7 +38,7 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
-  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, livingWorldProjectionToUi, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
+  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
 } from './living-world-client.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
@@ -694,6 +694,9 @@ class App {
       this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
       return null;
     }
+    this._livingWorldRequestGate ||= new LatestLivingWorldRequest();
+    const requestSequence = this._livingWorldRequestGate.next();
+    this.ui.setLivingWorldMapStatus('loading', viewport ? 'Loading this front…' : 'Loading world intelligence…');
     try {
       let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth', viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       if (!projection?.shard) throw new Error('world_not_initialized');
@@ -703,13 +706,17 @@ class App {
         await enterLivingWorld(character.id);
         [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id, viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       }
+      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
       const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
       this.livingWorldState = state;
       this.ui.setLivingWorldState(state);
+      this.ui.setLivingWorldMapStatus('ready', '');
       return state;
     } catch (error) {
-      this.livingWorldState = null;
-      this.ui.setLivingWorldState({});
+      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
+      const failure = livingWorldRefreshFailure(this.livingWorldState, viewport);
+      if (!failure.retained) { this.livingWorldState = null; this.ui.setLivingWorldState({}); }
+      this.ui.setLivingWorldMapStatus(failure.mode, failure.message);
       const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
       const tutorial = error?.message === 'tutorial_campaign_required';
       this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);

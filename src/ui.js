@@ -37,7 +37,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
-import { normalizeLivingWorld } from './living-world-ui.js';
+import { clusterLivingWorldParties, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -63,6 +63,7 @@ export class UI {
     this.pauseOpen = false;
     this._livingWorld = normalizeLivingWorld();
     this._livingWorldView = { zoom: 1, x: 0, y: 0 };
+    this._livingWorldStatus = { mode: 'idle', message: '' };
     this._buildDOM();
   }
 
@@ -2279,6 +2280,12 @@ export class UI {
     if (!this.root.querySelector('#living-world-map')?.classList.contains('hidden')) this._renderLivingWorldMap();
   }
 
+  setLivingWorldMapStatus(mode, message = '') {
+    this._livingWorldStatus = { mode, message };
+    const status = this.root.querySelector('#lw-map-status');
+    if (status) { status.dataset.state = mode; status.textContent = message; }
+  }
+
   _partyAction() {
     const party = this._livingWorld.party;
     if (party.id) this.cb.onPartyOpen?.(party);
@@ -2323,13 +2330,7 @@ export class UI {
 
   _livingWorldViewport() {
     const stage = this.root.querySelector('#lw-map-stage');
-    const width = 100 / this._livingWorldView.zoom;
-    const height = width * Math.max(.35, Math.min(1, (stage?.clientHeight || 600) / Math.max(1, stage?.clientWidth || 1000)));
-    const centerX = 50 - (this._livingWorldView.x / Math.max(1, stage?.clientWidth || 1000)) * width;
-    const centerY = 50 - (this._livingWorldView.y / Math.max(1, stage?.clientHeight || 600)) * height;
-    const minX = Math.max(0, Math.min(100 - width, centerX - width / 2));
-    const minY = Math.max(0, Math.min(100 - height, centerY - height / 2));
-    return { minX, minY, maxX: minX + width, maxY: minY + height, zoom: this._livingWorldView.zoom };
+    return livingWorldViewport(this._livingWorldView, { width: stage?.clientWidth, height: stage?.clientHeight });
   }
 
   _applyLivingWorldView() {
@@ -2342,16 +2343,7 @@ export class UI {
   }
 
   _clusterLivingWorldParties(parties) {
-    if (this._livingWorldView.zoom >= 2.2) return parties.map((party) => ({ ...party, count: 1 }));
-    const cell = this._livingWorldView.zoom < 1.4 ? 7 : 4;
-    const clusters = new Map();
-    for (const party of parties) {
-      const key = `${Math.floor(party.x / cell)}:${Math.floor(party.y / cell)}:${party.owner}`;
-      const current = clusters.get(key);
-      if (!current) clusters.set(key, { ...party, count: 1, members: [party.id] });
-      else { current.count += 1; current.strength += Number(party.strength) || 0; current.x = (current.x * (current.count - 1) + party.x) / current.count; current.y = (current.y * (current.count - 1) + party.y) / current.count; current.members.push(party.id); }
-    }
-    return [...clusters.values()];
+    return clusterLivingWorldParties(parties, this._livingWorldView.zoom);
   }
 
   _renderLivingWorldMap() {
@@ -2368,18 +2360,21 @@ export class UI {
       ...(state.topology?.provinces || []).map((province) => { const control = regionState.get(province.id); return `<path class="lw-province ${escapeHtml(control?.owner || 'neutral')} biome-${escapeHtml(province.biome || 'temperate')}${control?.current ? ' current' : ''}" d="${polygonPath(province.polygon)}"><title>${escapeHtml(province.name)}${control ? ` · ${escapeHtml(control.ownerName)}` : ''}</title></path>`; }),
     ].join('');
     const routes = this.root.querySelector('#lw-routes');
-    routes.innerHTML = `<defs><marker id="lw-route-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z"/></marker></defs>` + state.routes.map((route) => `<line x1="${route.from[0]}" y1="${route.from[1]}" x2="${route.to[0]}" y2="${route.to[1]}" class="${route.state}"/>`).join('');
+    routes.innerHTML = `<defs><marker id="lw-route-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z"/></marker></defs>` + state.routes.map(livingWorldRouteLine).join('');
     const nodes = this.root.querySelector('#lw-map-nodes');
     const displayedParties = this._clusterLivingWorldParties(state.parties);
     nodes.innerHTML = [
       ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)} · ${escapeHtml(item.ownerName)}${item.controlState !== 'controlled' ? ` · ${escapeHtml(item.controlState)}` : ''}</small></button>`),
       ...displayedParties.map((item) => `<button class="lw-node army ${item.owner}${item.moving ? ' moving' : ''}${item.count > 1 ? ' cluster' : ''}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>${item.count > 1 ? item.count : '⚑'}</i><b>${escapeHtml(item.count > 1 ? `${item.count} parties` : item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.count > 1 ? 'regional force' : item.intent)}</small></button>`),
       ...(state.sieges || []).map((item) => `<button class="lw-node siege" style="left:${item.x}%;top:${item.y}%" data-kind="siege" data-id="${escapeHtml(item.id)}"><i>⚔</i><b>SIEGE</b><small>${Math.round(Number(item.progress || 0) * 100)}%</small></button>`),
+      ...(state.hotspots || []).map((item) => `<button class="lw-node hotspot ${escapeHtml(item.type)}" style="left:${item.x}%;top:${item.y}%" data-kind="hotspot" data-id="${escapeHtml(item.id)}"><i>${item.type === 'pursuit' ? '➤' : item.type === 'raid' ? '♦' : '⚔'}</i><b>${escapeHtml(item.label)}</b><small>${escapeHtml(item.state || 'active')}</small></button>`),
       ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
     ].join('');
     const status = this.root.querySelector('#lw-map-status');
     const truncatedCount = Object.values(state.viewport?.truncated || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
-    status.textContent = truncatedCount ? `Dense front: ${truncatedCount} more objects; zoom in for detail.` : `${state.parties.length} visible parties · ${state.settlements.length} known settlements`;
+    const normalStatus = truncatedCount ? `Dense front: ${truncatedCount} more objects; zoom in for detail.` : `${state.parties.length} visible parties · ${state.settlements.length} known settlements`;
+    status.dataset.state = this._livingWorldStatus.mode;
+    status.textContent = this._livingWorldStatus.message || normalStatus;
     this._applyLivingWorldView();
     const missions = this.root.querySelector('#lw-missions');
     const companyBox = this.root.querySelector('#lw-company');
@@ -2405,6 +2400,7 @@ export class UI {
     const item = kind === 'settlement' ? state.settlements.find((entry) => entry.id === id)
       : kind === 'army' ? state.parties.find((entry) => entry.id === id)
       : kind === 'siege' ? state.sieges.find((entry) => entry.id === id)
+      : kind === 'hotspot' ? state.hotspots.find((entry) => entry.id === id)
       : state.missions.find((entry) => entry.id === id);
     if (!item) return;
     const selection = this.root.querySelector('#lw-selection');
@@ -2412,7 +2408,7 @@ export class UI {
     const canTravel = kind === 'settlement' && item.known && item.reachable;
     const canDeploy = kind === 'mission' && item.known && item.unlocked;
     const travelLabel = canFastTravel ? 'FAST TRAVEL' : item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
-    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : 'DESTINATION'}</small><b>${escapeHtml(item.name || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<button class="menubtn primary" id="lw-act">${travelLabel}</button>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}`;
+    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : kind === 'hotspot' ? 'WORLD HOTSPOT' : 'DESTINATION'}</small><b>${escapeHtml(item.name || item.label || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : kind === 'hotspot' ? `${item.type} · ${item.state || 'active'}` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<button class="menubtn primary" id="lw-act">${travelLabel}</button>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}`;
     const action = selection.querySelector('#lw-act');
     if (action) action.onclick = () => {
       if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id);

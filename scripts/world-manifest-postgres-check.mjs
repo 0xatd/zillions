@@ -21,6 +21,7 @@ try {
     insert into public.world_planets(id) values('earth');
   `);
   await admin.query(await readFile(path.join(root, 'supabase/migrations/20260821050000_immutable_world_manifests.sql'), 'utf8'));
+  await admin.query(await readFile(path.join(root, 'supabase/migrations/20260821080000_world_projection_manifest.sql'), 'utf8'));
   const manifest = earthManifest();
   const args = [manifest.planetId, manifest.schema, manifest.generatorVersion, manifest.seed, manifest.contentHash, manifest];
   await admin.query("select set_config('request.jwt.claim.role','service_role',false)");
@@ -52,11 +53,19 @@ try {
   await admin.query("select set_config('request.jwt.claim.role','service_role',false)");
   const serviceReplay = (await admin.query('select public.create_world_manifest_once($1,$2,$3,$4,$5,$6) result', args)).rows[0].result;
   assert.equal(serviceReplay.duplicate, true, 'service role must use the fenced function');
+  const projection = (await admin.query("select public.living_world_projection_manifest('earth') result")).rows[0].result;
+  assert.equal(projection.manifest.planetId, 'earth');
+  assert.equal(projection.content_hash, manifest.contentHash);
+  assert.ok(projection.manifest.landmasses.length && projection.manifest.regions.length);
+  assert.equal(projection.manifest.seed, undefined, 'projection must not expose the generation seed');
+  assert.equal(projection.manifest.materialization, undefined, 'projection must not expose materialization internals');
+  assert.equal((await admin.query("select has_function_privilege('public','public.living_world_projection_manifest(text)','execute') allowed")).rows[0].allowed, false);
   await admin.query('reset role');
   for (const role of ['anon', 'authenticated']) {
     await admin.query(`set role ${role}`);
     await admin.query("select set_config('request.jwt.claim.role',$1,false)", [role]);
     await expectError(admin.query('select public.create_world_manifest_once($1,$2,$3,$4,$5,$6)', args), 'permission denied');
+    await expectError(admin.query("select public.living_world_projection_manifest('earth')"), 'permission denied');
     await admin.query('reset role');
   }
   console.log(`world manifest PostgreSQL integrity checks passed (${manifest.contentHash})`);

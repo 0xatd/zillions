@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { livingWorldProjectionToUi } from '../src/living-world-client.js';
+import { LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure } from '../src/living-world-client.js';
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const hook of ['onPartyCreate', 'onPartyOpen', 'onPartyMemberLocate', 'onLivingWorldOpen',
@@ -32,4 +32,10 @@ assert.equal(projection.settlements[1].fastTravel, true, 'authority-known safe c
 assert.deepEqual(projection.routes[0].from, [10, 20]);
 assert.deepEqual([projection.parties[0].x, projection.parties[0].y], [30, 40]);
 assert.equal(projection.parties[0].strength, 90);
+const requests = new LatestLivingWorldRequest(), older = requests.next(), newer = requests.next();
+assert.equal(requests.isCurrent(older), false, 'an older pan response cannot overwrite a newer viewport');
+assert.equal(requests.isCurrent(newer), true, 'the newest viewport response is accepted');
+const retained = livingWorldRefreshFailure({ world: { id: 'earth' } }, { minX: 10 });
+assert.equal(retained.mode, 'stale'); assert.equal(retained.state.world.id, 'earth', 'transient viewport failure retains the last good map');
+assert.equal(livingWorldRefreshFailure(null, null).mode, 'error', 'initial projection failure exposes an explicit error state');
 console.log('living-world-runtime-check: auth, hydration, callbacks and honest projection wiring passed');

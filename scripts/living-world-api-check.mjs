@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createLivingWorldHandler, filterProjection, parseViewport, sanitizeWorldTopology } from '../api/living-world.js';
+import { createLivingWorldHandler, filterProjection, loadSnapshot, parseViewport, sanitizeWorldTopology } from '../api/living-world.js';
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
 const request = (method, body, authorization = 'Bearer valid', url = '/api/living-world?shardId=earth') => ({ method, url, headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
 const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, rateLimit: async()=>({allowed:true}), command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
@@ -42,4 +42,29 @@ assert.equal(secure.parties.find((row) => row.id === 'enemy').strength, undefine
 assert.equal(secure.parties.find((row) => row.id === 'enemy').intelligence.estimate, 40);
 assert.deepEqual(secure.sieges.map((row) => row.id), ['known-siege']); assert.equal(secure.sieges[0].private, undefined);
 assert.deepEqual(secure.pursuits.map((row) => row.id), ['known-pursuit']); assert.equal(secure.pursuits[0].result, undefined);
+
+const requestedUrls = [];
+const nearViewport = { minX: 0, minY: 0, maxX: 25, maxY: 25, zoom: 3 };
+const mockRows = {
+  world_shards: [{ id: 'earth-1', simulation_tick: 10 }],
+  world_planets: [{ id: 'earth', shard_id: 'earth-1' }],
+  world_factions: [{ id: 'blue', planet_id: 'earth' }],
+  world_provinces: [{ id: 'near', planet_id: 'earth' }],
+  world_locations: [{ id: 'home', province_id: 'near', owner_faction_id: 'blue', position: { x: 10, y: 10 } }],
+  world_parties: [{ id: 'mine', region_id: 'near', owner_user_id: 'actor-1', owner_faction_id: 'blue', location_id: 'home' }],
+  social_party_members: [], world_scouting_reports: [], world_routes: [], world_markets: [], world_armies: [], world_sieges: [], world_supplies: [], world_cargo: [], world_caravan_plans: [], world_raid_orders: [], world_encounters: [], world_pursuits: [], world_engagements: [],
+};
+const mockFetch = async (url) => {
+  requestedUrls.push(String(url));
+  if (String(url).includes('/rpc/living_world_projection_manifest')) return { ok: true, async json() { return manifestRow; } };
+  const table = String(url).match(/\/rest\/v1\/([^?]+)/)?.[1];
+  return { ok: true, async json() { return mockRows[table] || []; } };
+};
+const staged = await loadSnapshot({ url: 'https://mock.invalid', serviceKey: 'service' }, 'earth-1', 'actor-1', mockFetch, nearViewport);
+assert.deepEqual(staged.regions.map((row) => row.id), ['near']);
+assert.ok(requestedUrls.some((url) => url.includes('/world_provinces?') && url.includes('id=in.(near)')));
+assert.ok(requestedUrls.some((url) => url.includes('/world_locations?') && url.includes('province_id=in.(near)')));
+assert.ok(requestedUrls.some((url) => url.includes('/world_routes?') && url.includes('origin_region_id.in.(near)')));
+assert.ok(requestedUrls.filter((url) => url.includes('/world_parties?')).every((url) => url.includes('owner_user_id=eq.actor-1') || url.includes('region_id=in.(near)')), 'party fetches are actor- or viewport-bounded');
+assert.ok(requestedUrls.filter((url) => /world_(provinces|locations|routes)\?/.test(url)).every((url) => !url.includes('far')), 'far region is absent from staged queries');
 console.log('living world API check passed');

@@ -5,6 +5,15 @@ const COMPANY_API = '/api/living-world-company';
 const BATTLE_API = '/api/living-world-battle';
 const GOVERNANCE_API = '/api/living-world-governance';
 let session = null;
+export class LatestLivingWorldRequest {
+  constructor() { this.sequence = 0; }
+  next() { this.sequence += 1; return this.sequence; }
+  isCurrent(sequence) { return sequence === this.sequence; }
+}
+export function livingWorldRefreshFailure(currentState, viewport) {
+  const retained = Boolean(viewport && currentState);
+  return { retained, state: retained ? currentState : null, mode: retained ? 'stale' : 'error', message: retained ? 'Map update failed · showing stale intelligence' : 'World intelligence unavailable' };
+}
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
 export async function getLivingWorldProjection(shardId, viewport = null) {
@@ -103,6 +112,8 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
     const progress = Math.max(0, Math.min(1, Number(party.route_progress) || 0));
     return [from[0] + (to[0] - from[0]) * progress, from[1] + (to[1] - from[1]) * progress];
   };
+  const partyById = new Map((projection.parties || []).map((party) => [party.id, party]));
+  const hotspot = (type, id, partyId, state, label) => { const [x, y] = partyPosition(partyById.get(partyId)); return { id: `${type}:${id}`, type, x, y, state, label }; };
   const primary = own[0] || null;
   const factionById = new Map((projection.factions || []).map((faction) => [faction.id, faction]));
   const regionById = new Map((projection.regions || []).map((region) => [region.id, region]));
@@ -204,6 +215,11 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
     governance,
     sieges: (projection.sieges || []).map((siege) => { const [x, y] = point(siege.position || byLocation.get(siege.location_id)?.position); return { ...siege, x, y }; }),
     pursuits: projection.pursuits || [],
+    hotspots: [
+      ...(projection.pursuits || []).map((row) => hotspot('pursuit', row.id, row.target_party_id, row.state, 'PURSUIT')),
+      ...(projection.logistics?.raids || []).map((row) => hotspot('raid', row.id, row.target_party_id || row.attacker_party_id, row.state, 'RAID')),
+      ...(projection.encounters || []).map((row) => hotspot('battle', row.id, row.defender_party_id || row.attacker_party_id, row.state, 'BATTLE')),
+    ].filter((row) => row.x || row.y),
     markets: projection.markets || [],
     logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { normalizeLivingWorld } from '../src/living-world-ui.js';
+import { clusterLivingWorldParties, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from '../src/living-world-ui.js';
 
 const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
@@ -32,4 +32,13 @@ assert.doesNotMatch(ui, /id="ow-custom(?:-quick)?"/, 'Custom Games is absent fro
 assert.match(ui, /id="m-custom"/, 'Custom Games remains on character select');
 assert.match(css, /\.living-world-map/, 'living map has a dedicated visual shell');
 assert.match(css, /\.lw-province/, 'province control and biome layers have map styling');
+const clustered = clusterLivingWorldParties([{ id: 'a', owner: 'hive', x: 10, y: 10, strength: 20 }, { id: 'b', owner: 'hive', x: 12, y: 11, strength: 30 }], 1);
+assert.equal(clustered.length, 1); assert.equal(clustered[0].count, 2); assert.equal(clustered[0].strength, 50);
+assert.equal(clusterLivingWorldParties([{ id: 'a', owner: 'hive', x: 10, y: 10 }, { id: 'b', owner: 'hive', x: 12, y: 11 }], 3).length, 2, 'zoomed LOD exposes individual parties');
+const viewport = livingWorldViewport({ zoom: 2, x: 100, y: -50 }, { width: 1000, height: 500 });
+assert.ok(viewport.minX >= 0 && viewport.maxX <= 100 && viewport.maxX - viewport.minX === 50, 'pan and zoom produce a bounded viewport');
+assert.match(livingWorldRouteLine({ from: [1, 2], to: [3, 4], state: 'contested' }), /marker-end="url\(#lw-route-arrow\)"/, 'rendered routes carry directional arrows');
+assert.ok(state.hotspots.length === 0, 'hotspots default to authoritative emptiness');
+const hotspotState = normalizeLivingWorld({ hotspots: [{ id: 'pursuit:x', type: 'pursuit', x: 14, y: 18 }] });
+assert.equal(hotspotState.hotspots[0].type, 'pursuit', 'pursuit/raid/battle hotspots survive normalization');
 console.log('living-world-ui-check: party, map, travel, missions and authority hooks ✓');
