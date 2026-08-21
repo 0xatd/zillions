@@ -73,6 +73,32 @@ try {
   const rested = (await admin.query("select public.living_world_company_command($1,'rest-1',$2,$3,'use_town_service','{\"serviceKey\":\"rest\"}') result", [userId, firstEntry.partyId, supplied.companyRevision])).rows[0].result;
   assert.equal(rested.cost, 15);
   assert.equal(Number((await admin.query('select fatigue from public.world_parties where id=$1', [firstEntry.partyId])).rows[0].fatigue), 0);
+  // Two independent accounts keep their own companies while one durable social
+  // party coordinates an atomic grouped move. Accepting an invite safely
+  // replaces the invitee's automatically-created solo party.
+  await admin.query(`insert into public.game_characters(id,user_id,client_character_id,name,class_key,race_key)
+    values('20000000-0000-4000-8000-000000000002',$1,'other-char','Other','vanguard','human')`, [otherUserId]);
+  await admin.query(`insert into public.world_tutorial_progress(user_id,character_id,movement_complete,town_complete,recruitment_complete,trade_complete,battle_complete,completed_at)
+    values($1,'20000000-0000-4000-8000-000000000002',true,true,true,true,true,now())`, [otherUserId]);
+  const otherEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000002') result", [otherUserId])).rows[0].result;
+  const invite = (await admin.query("select public.social_party_command($1,'invite-two','invite',$2,$3,null,'{}') result", [userId, firstEntry.socialPartyId, otherUserId])).rows[0].result;
+  const accepted = (await admin.query("select public.social_party_command($1,'accept-two','accept',$2,null,$3,'{}') result", [otherUserId, firstEntry.socialPartyId, invite.inviteId])).rows[0].result;
+  assert.equal(accepted.status, 'accepted');
+  assert.equal(Number((await admin.query('select count(*) count from public.social_party_members where party_id=$1', [firstEntry.socialPartyId])).rows[0].count), 2);
+  const groupRoute = '12000000-0000-4000-8000-000000000099';
+  await admin.query(`insert into public.world_routes(id,province_id,origin_id,destination_id,distance,terrain,danger,origin_region_id,destination_region_id)
+    select $1,l.province_id,l.id,d.id,12,'{"type":"road"}',0.05,l.province_id,d.province_id
+    from public.world_locations l join public.world_locations d on d.key='reedwater'
+    where l.key='greenfall-crossing'`, [groupRoute]);
+  const revisions = Object.fromEntries((await admin.query('select id,revision from public.world_parties where owner_user_id in($1,$2) order by id', [userId, otherUserId])).rows.map((party) => [party.id, Number(party.revision)]));
+  const grouped = (await admin.query("select public.social_party_command($1,'group-two','group_travel',$2,null,null,jsonb_build_object('routeId',$3::text,'expectedRevisions',$4::jsonb)) result", [userId, firstEntry.socialPartyId, groupRoute, JSON.stringify(revisions)])).rows[0].result;
+  assert.equal(grouped.memberCount, 2);
+  const groupedReplay = (await admin.query("select public.social_party_command($1,'group-two','group_travel',$2,null,null,jsonb_build_object('routeId',$3::text,'expectedRevisions',$4::jsonb)) result", [userId, firstEntry.socialPartyId, groupRoute, JSON.stringify(revisions)])).rows[0].result;
+  assert.equal(groupedReplay.duplicate, true);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId])).rows[0].count), 2);
+  await admin.query("select public.social_party_command($1,'split-two','travel_mode',$2,null,null,'{\"mode\":\"split\"}')", [otherUserId, firstEntry.socialPartyId]);
+  assert.equal((await admin.query('select travel_mode from public.social_party_members where party_id=$1 and user_id=$2', [firstEntry.socialPartyId, otherUserId])).rows[0].travel_mode, 'split');
+  await admin.query("update public.world_movement_orders set status='cancelled' where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId]);
 
   const regions = (await admin.query("select id,key,revision from public.world_provinces where key in ('greenfall','ironwood') order by key")).rows;
   const greenfall = regions.find((region) => region.key === 'greenfall');
