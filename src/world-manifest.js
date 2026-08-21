@@ -7,6 +7,9 @@ export const EARTH_GENERATOR_VERSION = 1;
 const BIOMES = ['temperate', 'forest', 'wetland', 'highland', 'desert', 'tundra'];
 const SETTLEMENT_KINDS = ['town', 'fort', 'village'];
 const HASH_PREFIX = 'zillions-fingerprint-v1';
+const EARTH_FACTIONS = [['greenfall_freeholds','Greenfall Freeholds','state'],['ironwood_compact','Ironwood Compact','state'],['rotmire_host','Rotmire Host','hostile'],['sunward_concord','Sunward Concord','state'],['earth_wayfarers','Earth Wayfarers','neutral']];
+const EARTH_LANDMASS_FACTION = {'north-america':'greenfall_freeholds','south-america':'earth_wayfarers',europe:'ironwood_compact',africa:'rotmire_host',asia:'sunward_concord',oceania:'earth_wayfarers'};
+const MARKET_COMMODITIES = [['food',120,4],['iron',80,8],['medicine',55,12],['parts',70,10]];
 const EARTH_LANDMASSES = [
   { key: 'north-america', name: 'North America', count: 14, polygon: [[7,13],[20,8],[32,14],[36,25],[31,38],[27,49],[20,51],[16,41],[10,31]] },
   { key: 'south-america', name: 'South America', count: 8, polygon: [[27,51],[42,53],[44,64],[40,79],[34,93],[29,82],[27,68]] },
@@ -35,7 +38,7 @@ function hash32(input) {
   return value >>> 0;
 }
 
-function stableId(namespace, key) {
+export function stableManifestId(namespace, key) {
   const words = [0, 1, 2, 3].map((slot) => hash32(`${namespace}:${key}:${slot}`).toString(16).padStart(8, '0'));
   return `${words[0]}-${words[1].slice(0, 4)}-4${words[1].slice(5, 8)}-a${words[2].slice(1, 4)}-${words[2].slice(4)}${words[3]}`;
 }
@@ -155,7 +158,7 @@ function connectGroup(regions, planetId, kind = 'land') {
     const a = regions[best.from], b = regions[best.to];
     const path = [[a.center.x, a.center.y], ...(best.crossing ? [best.crossing] : []), [b.center.x, b.center.y]];
     const key = `${a.key}-${b.key}`;
-    routes.push({ id: stableId(planetId, `route:${key}`), key, originRegionId: a.id, destinationRegionId: b.id, kind, distance: Number(best.distance.toFixed(3)), path });
+    routes.push({ id: stableManifestId(planetId, `route:${key}`), key, originRegionId: a.id, destinationRegionId: b.id, kind, distance: Number(best.distance.toFixed(3)), path });
     connected.add(best.to); remaining.delete(best.to);
   }
   return routes;
@@ -175,7 +178,7 @@ function connectRegions(regions, planetId) {
       if (!best || distance < best.distance) best = { a, b, distance };
     }
     const key = `${best.a.key}-${best.b.key}`;
-    routes.push({ id: stableId(planetId, `route:${key}`), key, originRegionId: best.a.id, destinationRegionId: best.b.id, kind: 'sea', distance: Number(best.distance.toFixed(3)), path: [[best.a.center.x, best.a.center.y], [best.b.center.x, best.b.center.y]] });
+    routes.push({ id: stableManifestId(planetId, `route:${key}`), key, originRegionId: best.a.id, destinationRegionId: best.b.id, kind: 'sea', distance: Number(best.distance.toFixed(3)), path: [[best.a.center.x, best.a.center.y], [best.b.center.x, best.b.center.y]] });
   }
   return routes;
 }
@@ -212,7 +215,7 @@ function generateEarthRegions(planetId, rng) {
       if (attempts >= 1000) throw new Error('earth_landmass_sampling_failed');
       const key = `${landmass.key}-${String(slot + 1).padStart(2, '0')}`;
       const climate = y < 20 ? 'tundra' : y > 72 ? 'temperate' : y > 56 ? 'wetland' : BIOMES[Math.floor(rng() * (BIOMES.length - 1))];
-      regions.push({ id: stableId(planetId, key), key, name: `${landmass.name} Province ${slot + 1}`, landmass: landmass.key, center: { x: Number(x.toFixed(3)), y: Number(y.toFixed(3)) }, biome: climate, resourceBias: Number(rng().toFixed(4)) });
+      regions.push({ id: stableManifestId(planetId, key), key, name: `${landmass.name} Province ${slot + 1}`, landmass: landmass.key, center: { x: Number(x.toFixed(3)), y: Number(y.toFixed(3)) }, biome: climate, resourceBias: Number(rng().toFixed(4)) });
     }
   }
   for (const landmass of EARTH_LANDMASSES) {
@@ -233,6 +236,20 @@ function sampleInsidePolygon(polygon, center, rng) {
   return { ...center };
 }
 
+function buildMaterializationTemplate(planetId,name,regions,settlements,routes){
+  const earthLike=planetId==='earth';
+  const factions=(earthLike?EARTH_FACTIONS:[[`${planetId}_settlers`,`${name} Settlers`,'state'],[`${planetId}_wayfarers`,`${name} Wayfarers`,'neutral']]).map(([id,factionName,kind])=>({id,name:factionName,kind}));
+  const factionFor=(region)=>earthLike?(EARTH_LANDMASS_FACTION[region.landmass]||'earth_wayfarers'):`${planetId}_settlers`;
+  const regionRows=regions.map(region=>({...region,ownerFactionId:factionFor(region)}));
+  const byRegion=new Map();for(const location of settlements){if(!byRegion.has(location.regionId))byRegion.set(location.regionId,[]);byRegion.get(location.regionId).push(location);}for(const rows of byRegion.values())rows.sort((a,b)=>a.key.localeCompare(b.key));
+  const locationRows=settlements.map(location=>({...location,ownerFactionId:factionFor(regions.find(region=>region.id===location.regionId)),isRegionSeat:byRegion.get(location.regionId)[0].id===location.id,services:{recruit:location.kind!=='village',trade:['town','port'].includes(location.kind),rest:true,fastTravel:['town','port'].includes(location.kind)}}));
+  const routeRows=routes.flatMap(route=>{const originId=route.kind==='sea'?route.originPortId:byRegion.get(route.originRegionId)[0].id,destinationId=route.kind==='sea'?route.destinationPortId:byRegion.get(route.destinationRegionId)[0].id,ownerFactionId=factionFor(regions.find(region=>region.id===route.originRegionId));return[{...route,sourceRouteId:route.id,direction:'forward',originId,destinationId,ownerFactionId},{...route,id:stableManifestId(planetId,`route:${route.key}:reverse`),sourceRouteId:route.id,direction:'reverse',originRegionId:route.destinationRegionId,destinationRegionId:route.originRegionId,originId:destinationId,destinationId:originId,path:route.path.toReversed(),ownerFactionId}];});
+  const parties=regionRows.map(region=>{const location=byRegion.get(region.id)[0];return{id:stableManifestId(planetId,`garrison:${region.key}`),regionId:region.id,locationId:location.id,ownerFactionId:region.ownerFactionId,name:`${region.name} Garrison`,kind:'garrison',combatPower:120+Math.round(region.resourceBias*180)};});
+  const armies=parties.map(party=>({id:stableManifestId(planetId,`army:${party.id}`),partyId:party.id,combatPower:party.combatPower,formation:{doctrine:'garrison'}}));
+  const markets=locationRows.filter(location=>location.services.trade).flatMap(location=>MARKET_COMMODITIES.map(([commodityKey,stock,basePrice])=>({locationId:location.id,commodityKey,stock,targetStock:stock,basePrice,buyPrice:Math.ceil(basePrice*1.1),sellPrice:Math.floor(basePrice*.85)})));
+  return{schema:'zillions.world-materialization.v1',planetId,shardId:`${planetId}-1`,factions,regions:regionRows,locations:locationRows,routes:routeRows,parties,armies,markets,startingLocationId:locationRows[0].id};
+}
+
 export function generatePlanetManifest({ planetId = 'earth', name = 'Earth', seed = EARTH_MANIFEST_SEED, generatorVersion = EARTH_GENERATOR_VERSION, regionCount } = {}) {
   if (!Number.isInteger(seed) || seed < 0 || !Number.isInteger(generatorVersion) || generatorVersion < 1) throw new Error('invalid_manifest_identity');
   const earthLike = planetId === 'earth';
@@ -242,7 +259,7 @@ export function generatePlanetManifest({ planetId = 'earth', name = 'Earth', see
   const proceduralSurface = { key: 'surface', name: 'Surface', polygon: [[0,0],[100,0],[100,100],[0,100]] };
   const regions = earthLike && regionCount === 72 ? generateEarthRegions(planetId, rng) : Array.from({ length: regionCount }, (_, index) => {
     const key = `region-${String(index + 1).padStart(3, '0')}`;
-    return { id: stableId(planetId, key), key, name: `Province ${index + 1}`, landmass: proceduralSurface.key, center: { x: Number((5 + rng() * 90).toFixed(3)), y: Number((5 + rng() * 90).toFixed(3)) }, biome: BIOMES[Math.floor(rng() * BIOMES.length)], resourceBias: Number(rng().toFixed(4)) };
+    return { id: stableManifestId(planetId, key), key, name: `Province ${index + 1}`, landmass: proceduralSurface.key, center: { x: Number((5 + rng() * 90).toFixed(3)), y: Number((5 + rng() * 90).toFixed(3)) }, biome: BIOMES[Math.floor(rng() * BIOMES.length)], resourceBias: Number(rng().toFixed(4)) };
   });
   if (!earthLike) {
     const cells = provinceCells(regions, proceduralSurface.polygon);
@@ -250,7 +267,7 @@ export function generatePlanetManifest({ planetId = 'earth', name = 'Earth', see
   }
   const settlements = regions.flatMap((region, regionIndex) => Array.from({ length: earthLike ? 3 + (regionIndex % 3) : 2 + (regionIndex % 2) }, (_, slot) => {
     const key = `${region.key}-settlement-${slot + 1}`;
-    return { id: stableId(planetId, key), key, regionId: region.id, name: `${region.name} ${slot === 0 ? 'Crossing' : slot === 1 ? 'Hold' : 'Village'}`, kind: SETTLEMENT_KINDS[slot % SETTLEMENT_KINDS.length], position: region.polygon ? sampleInsidePolygon(region.polygon, region.center, rng) : { x: Number(Math.max(0, Math.min(100, region.center.x + (rng() - .5) * 4)).toFixed(3)), y: Number(Math.max(0, Math.min(100, region.center.y + (rng() - .5) * 4)).toFixed(3)) } };
+    return { id: stableManifestId(planetId, key), key, regionId: region.id, name: `${region.name} ${slot === 0 ? 'Crossing' : slot === 1 ? 'Hold' : 'Village'}`, kind: SETTLEMENT_KINDS[slot % SETTLEMENT_KINDS.length], position: region.polygon ? sampleInsidePolygon(region.polygon, region.center, rng) : { x: Number(Math.max(0, Math.min(100, region.center.x + (rng() - .5) * 4)).toFixed(3)), y: Number(Math.max(0, Math.min(100, region.center.y + (rng() - .5) * 4)).toFixed(3)) } };
   }));
   const routes = connectRegions(regions, planetId);
   for (const route of routes.filter((entry) => entry.kind === 'sea')) {
@@ -264,7 +281,7 @@ export function generatePlanetManifest({ planetId = 'earth', name = 'Earth', see
       const anchor = coastalAnchor(region, landmass, other.center);
       const position = { x: Number((anchor[0] + (region.center.x - anchor[0]) * 0.001).toFixed(4)), y: Number((anchor[1] + (region.center.y - anchor[1]) * 0.001).toFixed(4)) };
       const key = `${region.key}-port-${route.key}`;
-      const port = { id: stableId(planetId, key), key, regionId, name: `${region.name} Port`, kind: 'port', position, coastAnchor: anchor };
+      const port = { id: stableManifestId(planetId, key), key, regionId, name: `${region.name} Port`, kind: 'port', position, coastAnchor: anchor };
       settlements.push(port); route[`${side}PortId`] = port.id;
     }
     const origin = settlements.find((entry) => entry.id === route.originPortId);
@@ -272,7 +289,8 @@ export function generatePlanetManifest({ planetId = 'earth', name = 'Earth', see
     route.path = [[origin.position.x, origin.position.y], [destination.position.x, destination.position.y]];
   }
   const landmasses = earthLike ? EARTH_LANDMASSES.map(({ key, name: landmassName, polygon }) => ({ key, name: landmassName, polygon: convexHull(polygon) })) : [proceduralSurface];
-  const manifest = { schema: WORLD_MANIFEST_SCHEMA, planetId, name, seed, generatorVersion, projection: earthLike ? 'earth-equirectangular-v1' : 'procedural-plane-v1', size: { width: 100, height: 100 }, landmasses, regions, settlements, routes };
+  const materialization=buildMaterializationTemplate(planetId,name,regions,settlements,routes);
+  const manifest = { schema: WORLD_MANIFEST_SCHEMA, planetId, name, seed, generatorVersion, projection: earthLike ? 'earth-equirectangular-v1' : 'procedural-plane-v1', size: { width: 100, height: 100 }, landmasses, regions, settlements, routes, materialization };
   manifest.contentHash = manifestHash(manifest);
   return validatePlanetManifest(manifest);
 }
@@ -284,9 +302,9 @@ export function validatePlanetManifest(manifest) {
   const ids = [...manifest.regions, ...manifest.settlements, ...manifest.routes].map((entry) => entry.id);
   if (new Set(ids).size !== ids.length) throw new Error('duplicate_stable_id');
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/;
-  for (const entry of manifest.regions) if (!uuid.test(entry.id) || entry.id !== stableId(manifest.planetId, entry.key)) throw new Error('invalid_stable_id');
-  for (const entry of manifest.settlements) if (!uuid.test(entry.id) || entry.id !== stableId(manifest.planetId, entry.key)) throw new Error('invalid_stable_id');
-  for (const entry of manifest.routes) if (!uuid.test(entry.id) || entry.id !== stableId(manifest.planetId, `route:${entry.key}`)) throw new Error('invalid_stable_id');
+  for (const entry of manifest.regions) if (!uuid.test(entry.id) || entry.id !== stableManifestId(manifest.planetId, entry.key)) throw new Error('invalid_stable_id');
+  for (const entry of manifest.settlements) if (!uuid.test(entry.id) || entry.id !== stableManifestId(manifest.planetId, entry.key)) throw new Error('invalid_stable_id');
+  for (const entry of manifest.routes) if (!uuid.test(entry.id) || entry.id !== stableManifestId(manifest.planetId, `route:${entry.key}`)) throw new Error('invalid_stable_id');
   const regionIds = new Set(manifest.regions.map((region) => region.id));
   const settlementsById = new Map(manifest.settlements.map((settlement) => [settlement.id, settlement]));
   const keys = [...manifest.landmasses, ...manifest.regions, ...manifest.settlements, ...manifest.routes].map((entry) => entry.key);
@@ -331,6 +349,7 @@ export function validatePlanetManifest(manifest) {
   const reached = new Set([manifest.regions[0].id]); let changed = true;
   while (changed) { changed = false; for (const route of manifest.routes) if (reached.has(route.originRegionId) !== reached.has(route.destinationRegionId)) { reached.add(route.originRegionId); reached.add(route.destinationRegionId); changed = true; } }
   if (reached.size !== manifest.regions.length) throw new Error('disconnected_route_graph');
+  if (!manifest.materialization || canonical(manifest.materialization)!==canonical(buildMaterializationTemplate(manifest.planetId,manifest.name,manifest.regions,manifest.settlements,manifest.routes))) throw new Error('invalid_materialization_template');
   return manifest;
 }
 

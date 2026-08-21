@@ -56,4 +56,5 @@ const remapped = structuredClone(earth); const oldRegionId = remapped.regions[0]
 assert.throws(() => validatePlanetManifest(remapped), /invalid_stable_id/);
 const malformedId = structuredClone(earth); malformedId.settlements[0].id = 'not-a-uuid'; malformedId.contentHash = manifestHash(malformedId);
 assert.throws(() => validatePlanetManifest(malformedId), /invalid_stable_id/);
+for(const mutate of [value=>{value.materialization.regions[0].ownerFactionId='rotmire_host';},value=>{value.materialization.routes[0].originId=value.materialization.locations.at(-1).id;},value=>{value.materialization.markets[0].basePrice=999;},value=>{value.materialization.startingLocationId=value.materialization.locations.at(-1).id;}]){const invalid=structuredClone(earth);mutate(invalid);invalid.contentHash=manifestHash(invalid);assert.throws(()=>validatePlanetManifest(invalid),/invalid_materialization_template/);}
 console.log(`World manifest checks passed (${earth.contentHash})`);
