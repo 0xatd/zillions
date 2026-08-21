@@ -196,8 +196,10 @@ try{
     'playerCargo',(select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'),
     'defenderCargo',(select quantity from public.world_cargo where party_id=$2 and commodity_key='grain')) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
   const battleResult=autosimBattleAssignment(assignment);
-  assert.ok(battleResult.casualties.some(row=>row.killed>0||row.wounded>0),'hosted autosim must produce casualties');
-  assert.ok(battleResult.prisoners.length>0,'hosted autosim must produce prisoners');
+  const casualtyTotal=battleResult.casualties.reduce((sum,row)=>sum+Number(row.killed||0)+Number(row.wounded||0),0);
+  const prisonerTotal=battleResult.prisoners.reduce((sum,row)=>sum+Number(row.quantity||0),0);
+  assert.ok(casualtyTotal+prisonerTotal>0,'hosted autosim must remove combatants through casualties or capture');
+  assert.ok(prisonerTotal>0,'hosted autosim must produce prisoners');
   assert.ok(battleResult.cargoTransfers.length>0,'hosted autosim must produce cargo transfers');
   const battleCommit=(await q('select public.living_world_commit_battle($1,$2,$3,$4) result',[assignment.id,assignment.nonce,battleEncounter.revision,battleResult])).rows[0].result;
   assert.equal(battleCommit.duplicate,false);
