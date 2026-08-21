@@ -30,6 +30,7 @@ export function createLivingWorldEntryHandler(deps={}) {
       const authorization=String(req.headers.authorization || '');
       const user=deps.authenticate ? await deps.authenticate(authorization) : await authenticate(authorization,config,fetchImpl);
       if(!user?.id) return send(res,401,{ok:false,error:'sign_in_required'});
+      await enforceLivingWorldRateLimit({config,actor:user.id,scope:'world:entry',limit:6,windowSeconds:300,fetchImpl,override:deps.rateLimit});
       const input=await body(req);
       if(!input || Object.keys(input).length!==1 || !UUID.test(String(input.characterId || ''))) return send(res,400,{ok:false,error:'invalid_character'});
       if(deps.complete) await deps.complete(user.id,input.characterId);
@@ -40,3 +41,4 @@ export function createLivingWorldEntryHandler(deps={}) {
   };
 }
 export default createLivingWorldEntryHandler();
+import { enforceLivingWorldRateLimit } from './living-world-rate-limit.js';

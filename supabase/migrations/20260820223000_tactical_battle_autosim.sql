@@ -36,6 +36,14 @@ begin
   select * into v_enc from public.world_encounters where id=v_eng.encounter_id for update;
   if v_enc.revision<>p_encounter_revision or v_enc.state not in('battle','rearguard') then raise exception 'stale_encounter_revision'; end if;
   if not exists(select 1 from public.world_parties p where p.id in(v_enc.attacker_party_id,v_enc.defender_party_id) and p.owner_user_id=p_actor) then raise exception 'not_encounter_commander'; end if;
+  -- Serialize the immutable force snapshot against region movement, logistics,
+  -- recruitment, and other authority mutations. The final migration installs
+  -- guards that keep these rows frozen until this assignment resolves/expires.
+  perform 1 from public.world_parties p where p.id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by p.id for update;
+  perform 1 from public.world_armies a where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by a.id for update;
+  perform 1 from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by s.id for update of s;
+  perform 1 from public.world_supplies s where s.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by s.party_id,s.supply_key for update;
+  perform 1 from public.world_cargo c where c.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by c.party_id,c.commodity_key for update;
   if v_eng.mode='live_command' and (select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id))>2000 then
     raise exception 'battle_requires_autosim';
   end if;

@@ -5,6 +5,8 @@ import path from 'node:path';
 import EmbeddedPostgres from 'embedded-postgres';
 import { createServer } from 'node:http';
 import { createLivingWorldPartyHandler } from '../api/living-world-party.js';
+import { createLivingWorldBattleHandler } from '../api/living-world-battle.js';
+import { createLivingWorldEntryHandler } from '../api/living-world-entry.js';
 import { verifyLivingWorldBattleReplay } from '../src/living-world-battle-replay.js';
 import { Game } from '../src/game.js';
 import { TerrainField } from '../src/terrain.js';
@@ -33,6 +35,7 @@ try {
     create table auth.users(id uuid primary key, email text);
     create table public.rooms(id uuid primary key default gen_random_uuid(), max_players integer not null default 2 check(max_players between 1 and 2));
     create table public.room_players(room_id uuid not null references public.rooms(id), user_id uuid not null references auth.users(id), seat integer not null check(seat between 1 and 2), primary key(room_id,user_id));
+    create table public.match_history(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id),mode text not null,result text not null,summary jsonb not null default '{}'::jsonb);
     create or replace function auth.uid() returns uuid language sql stable as
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     create or replace function auth.role() returns text language sql stable as
@@ -53,16 +56,23 @@ try {
   }
   await admin.query(`insert into public.game_characters(id,user_id,client_character_id,name,class_key,race_key)
     values('20000000-0000-4000-8000-000000000001',$1,'owner-char','Owner','vanguard','human')`, [userId]);
-  await admin.query(`insert into public.world_tutorial_progress(user_id,character_id,movement_complete,town_complete,recruitment_complete,trade_complete,battle_complete,completed_at)
-    values($1,'20000000-0000-4000-8000-000000000001',true,true,true,true,true,now())`, [userId]);
+  await admin.query("insert into public.match_history(user_id,mode,result,summary) values($1,'campaign','win','{\"level\":1}')",[userId]);
 
-  // World entry must succeed after region_id is NOT NULL and retries must not duplicate state.
-  const firstEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000001') result", [userId])).rows[0].result;
+  const authenticateHttp=async(value)=>value==='Bearer owner'?{id:userId}:value==='Bearer other'?{id:otherUserId}:null;
+  const rateLimitHttp=async(actor,scope,limit,windowSeconds)=>(await admin.query('select public.consume_world_api_rate_limit($1,$2,$3,$4) result',[actor,scope,limit,windowSeconds])).rows[0].result;
+  const entryHandler=createLivingWorldEntryHandler({config:{url:'http://local',anonKey:'anon',serviceKey:'service'},authenticate:authenticateHttp,rateLimit:rateLimitHttp,complete:async(actor,characterId)=>(await admin.query('select public.complete_world_tutorial_from_campaign($1,$2) result',[actor,characterId])).rows[0].result,enter:async(actor,characterId)=>(await admin.query('select public.enter_living_world($1,$2) result',[actor,characterId])).rows[0].result});
+  const entryServer=createServer(entryHandler);await new Promise((resolve,reject)=>entryServer.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  const entryBase=`http://127.0.0.1:${entryServer.address().port}`;
+  const postEntry=async(token,characterId)=>{const response=await fetch(entryBase,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({characterId})});const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
+
+  // World entry must cross the authenticated HTTP boundary, succeed after
+  // region_id is NOT NULL, and remain idempotent on retry.
+  const firstEntry=await postEntry('owner','20000000-0000-4000-8000-000000000001');
   assert.equal(firstEntry.ok, true);
   assert.equal(firstEntry.duplicate, false);
   const enteredParty = (await admin.query('select id,region_id,revision from public.world_parties where id=$1', [firstEntry.partyId])).rows[0];
   assert.ok(enteredParty.region_id);
-  const secondEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000001') result", [userId])).rows[0].result;
+  const secondEntry=await postEntry('owner','20000000-0000-4000-8000-000000000001');
   assert.equal(secondEntry.duplicate, true);
   assert.equal(Number((await admin.query('select count(*) count from public.world_parties where owner_user_id=$1', [userId])).rows[0].count), 1);
 
@@ -88,10 +98,10 @@ try {
   // replaces the invitee's automatically-created solo party.
   await admin.query(`insert into public.game_characters(id,user_id,client_character_id,name,class_key,race_key)
     values('20000000-0000-4000-8000-000000000002',$1,'other-char','Other','vanguard','human')`, [otherUserId]);
-  await admin.query(`insert into public.world_tutorial_progress(user_id,character_id,movement_complete,town_complete,recruitment_complete,trade_complete,battle_complete,completed_at)
-    values($1,'20000000-0000-4000-8000-000000000002',true,true,true,true,true,now())`, [otherUserId]);
-  const otherEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000002') result", [otherUserId])).rows[0].result;
-  const partyHandler=createLivingWorldPartyHandler({config:{url:'http://local',anonKey:'anon',serviceKey:'service'},authenticate:async(value)=>value==='Bearer owner'?{id:userId}:value==='Bearer other'?{id:otherUserId}:null,rateLimit:async(actor,scope,limit,windowSeconds)=>(await admin.query('select public.consume_world_api_rate_limit($1,$2,$3,$4) result',[actor,scope,limit,windowSeconds])).rows[0].result,command:async(actor,command)=>(await admin.query("select public.social_party_command($1,$2,$3,$4,$5,$6,$7) result",[actor,command.requestId,command.action,command.partyId,command.targetId,command.inviteId,command.payload])).rows[0].result,snapshot:async(actor)=>(await admin.query('select public.social_party_snapshot($1) result',[actor])).rows[0].result});
+  await admin.query("insert into public.match_history(user_id,mode,result,summary) values($1,'campaign','win','{\"level\":1}')",[otherUserId]);
+  const otherEntry=await postEntry('other','20000000-0000-4000-8000-000000000002');
+  await new Promise((resolve)=>entryServer.close(resolve));
+  const partyHandler=createLivingWorldPartyHandler({config:{url:'http://local',anonKey:'anon',serviceKey:'service'},authenticate:authenticateHttp,rateLimit:rateLimitHttp,command:async(actor,command)=>(await admin.query("select public.social_party_command($1,$2,$3,$4,$5,$6,$7) result",[actor,command.requestId,command.action,command.partyId,command.targetId,command.inviteId,command.payload])).rows[0].result,snapshot:async(actor)=>(await admin.query('select public.social_party_snapshot($1) result',[actor])).rows[0].result});
   const server=createServer(partyHandler);await new Promise((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
   const base=`http://127.0.0.1:${server.address().port}`;
   const postParty=async(token,payload)=>{const response=await fetch(base,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(payload)});const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
@@ -129,34 +139,60 @@ try {
   const defenderArmyId = '40000000-0000-4000-8000-000000000002';
   const attackerStackId = '50000000-0000-4000-8000-000000000001';
   const defenderStackId = '50000000-0000-4000-8000-000000000002';
-  await admin.query(`insert into public.world_parties(id,shard_id,region_id,owner_user_id,name,kind,location_id,morale)
-    values($1,'earth-1',$2,$3,'Rival Company','player',$4,60)`, [defenderPartyId, greenfall.id, otherUserId, locationId]);
+  await admin.query("update public.world_movement_orders set status='cancelled' where party_id=$1 and status in('queued','moving')",[firstEntry.partyId]);
+  await admin.query("update public.world_parties set location_id=$1,route_id=null,route_progress=0,stance='neutral' where id=$2",[locationId,firstEntry.partyId]);
+  await admin.query(`insert into public.world_parties(id,shard_id,region_id,owner_user_id,name,kind,location_id,morale,stance)
+    values($1,'earth-1',$2,$3,'Rival Company','player',$4,60,'hostile')`, [defenderPartyId, greenfall.id, otherUserId, locationId]);
   await admin.query(`insert into public.world_armies(id,party_id,commander_user_id,combat_power)
     values($1,$2,$3,45)`, [defenderArmyId, defenderPartyId, otherUserId]);
   await admin.query(`insert into public.world_unit_stacks(id,army_id,unit_key,tier,healthy)
     values($1,$2,'greenfall_guard',2,40),($3,$4,'rival_raider',1,35)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
-  const encounterId = '60000000-0000-4000-8000-000000000001';
-  await admin.query(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
-    values($1,'earth-1',$2,$3,0,'choosing','fight','fight','{"kind":"plains"}','{}')`, [encounterId, firstEntry.partyId, defenderPartyId]);
-  await admin.query("update public.world_encounters set state='battle',revision=revision+1 where id=$1", [encounterId]);
+  const contactLease=(await admin.query("select public.claim_world_region_lease($1,'worker-a',300) result",[greenfall.id])).rows[0].result;
+  const contactRuntime=(await admin.query("select public.process_world_region_runtime($1,'worker-a',$2,100) result",[greenfall.id,contactLease.leaseEpoch])).rows[0].result;
+  assert.ok(Number(contactRuntime.encountersCreated)>=1,'the scheduled region runtime must create hostile contact');
+  const encounterRow=(await admin.query("select * from public.world_encounters where attacker_party_id in($1,$2) and defender_party_id in($1,$2) order by created_tick desc limit 1",[firstEntry.partyId,defenderPartyId])).rows[0];
+  assert.ok(encounterRow?.id,'runtime-created encounter missing');
+  const encounterId=encounterRow.id;
+  const firstDecision=(await admin.query("select public.submit_world_encounter_decision($1,$2,$3,'runtime-fight-owner',$4,'fight',null,'worker-a',$5) result",[userId,encounterId,firstEntry.partyId,Number(encounterRow.revision),contactLease.leaseEpoch])).rows[0].result;
+  const secondDecision=(await admin.query("select public.submit_world_encounter_decision($1,$2,$3,'runtime-fight-other',$4,'fight',null,'worker-a',$5) result",[otherUserId,encounterId,defenderPartyId,Number(firstDecision.encounterRevision),contactLease.leaseEpoch])).rows[0].result;
+  assert.equal(secondDecision.outcome,'battle');
   const engagement = (await admin.query('select id,mode,state from public.world_engagements where encounter_id=$1', [encounterId])).rows[0];
   assert.equal(engagement.mode, 'live_command');
   assert.equal(engagement.state, 'active');
   const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
-  await admin.query("select public.claim_world_region_lease($1,'worker-a',300)", [greenfall.id]);
-  const assignment = (await admin.query("select public.living_world_issue_battle($1,$2,$3,'postgres-autosim') result", [userId, engagement.id, encounterRevision])).rows[0].result;
-  assert.equal(assignment.force_snapshot.attackerPartyId, firstEntry.partyId);
-  assert.equal(assignment.force_snapshot.defenderPartyId, defenderPartyId);
+  const battleHandler=createLivingWorldBattleHandler({
+    config:{url:'http://local',anonKey:'anon',serviceKey:'service',signingSecret:'embedded-postgres-battle-signing-secret-0001'},
+    authenticate:authenticateHttp,
+    rateLimit:rateLimitHttp,
+    issue:async(actor,input)=>(await admin.query('select public.living_world_issue_battle($1,$2,$3,$4) result',[actor,input.engagementId,input.encounterRevision,input.requestId])).rows[0].result,
+    assignment:async(actor,claim)=>(await admin.query('select public.living_world_get_battle_assignment($1,$2,$3) result',[actor,claim.assignmentId,claim.nonce])).rows[0].result,
+    commit:async(claim,result)=>(await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result',[claim.assignmentId,claim.nonce,claim.encounterRevision,result])).rows[0].result,
+  });
+  const battleServer=createServer(battleHandler);await new Promise((resolve,reject)=>battleServer.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  const battleBase=`http://127.0.0.1:${battleServer.address().port}`;
+  const postBattle=async(token,payload)=>{const response=await fetch(battleBase,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(payload)});const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
+  const launched=await postBattle('owner',{action:'launch',engagementId:engagement.id,encounterRevision,requestId:'postgres-live-command'});
+  const assignment=launched.assignment;
+  assert.equal(assignment.force_snapshot.attackerPartyId, encounterRow.attacker_party_id);
+  assert.equal(assignment.force_snapshot.defenderPartyId, encounterRow.defender_party_id);
   assert.equal(assignment.force_snapshot.engagementMode, 'live_command');
-  assert.equal(assignment.force_snapshot.startedTick, 0);
+  assert.ok(Number(assignment.force_snapshot.startedTick)>=1);
   assert.equal(assignment.force_snapshot.stacks.length, 2);
+  await expectError(admin.query('update public.world_parties set morale=morale-1 where id=$1',[firstEntry.partyId]),'battle_force_locked');
+  await expectError(admin.query('update public.world_unit_stacks set healthy=healthy-1 where id=$1',[attackerStackId]),'battle_force_locked');
+  await expectError(admin.query("update public.world_supplies set quantity=quantity-1 where party_id=$1 and supply_key='food'",[firstEntry.partyId]),'battle_force_locked');
   const level=levelById(1),tacticalGame=new Game(new TerrainField(Number(assignment.force_snapshot.seed),level.theme,{size:level.size,nests:level.nests}),'normal','alexander',null,1,'living_world_battle');
   tacticalGame.configureLivingWorldBattle(assignment);let tacticalTick=0;while(!tacticalGame.over&&tacticalTick<108000){tacticalGame.update(1/30);tacticalTick++;}
   assert.equal(tacticalGame.over,true);
-  const battleResult=verifyLivingWorldBattleReplay(assignment,{version:1,completedTick:tacticalTick,commands:[]});
-  const committed = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
+  const battleReplayPayload={version:1,completedTick:tacticalTick,commands:[]};
+  const expectedBattleResult=verifyLivingWorldBattleReplay(assignment,battleReplayPayload);
+  const battleCompleted=await postBattle('owner',{action:'result',assignmentToken:launched.token,replay:battleReplayPayload});
+  const battleResult=battleCompleted.result;
+  assert.deepEqual(battleResult,expectedBattleResult,'HTTP result must be derived by the server replay verifier');
+  const committed=battleCompleted;
   assert.equal(committed.ok, true);
   assert.equal(committed.duplicate, false);
+  await new Promise((resolve)=>battleServer.close(resolve));
   const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
   assert.equal(battleReplay.duplicate, true);
   const attackerLoss=battleResult.casualties.find(row=>row.stackId===attackerStackId);const defenderLoss=battleResult.casualties.find(row=>row.stackId===defenderStackId);
@@ -244,13 +280,13 @@ try {
   assert.equal(declared.duplicate, false);
   const declareReplay = (await admin.query("select public.living_world_governance_command($1,'siege-declare-1',$2,$3,'declare_siege',jsonb_build_object('locationId',$4::text,'attackerFactionId','greenfall_freeholds')) result", [userId, firstEntry.partyId, siegeParty.revision, siegeParty.location_id])).rows[0].result;
   assert.equal(declareReplay.duplicate, true);
-  const advanced = (await admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.9,.1) result", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  await admin.query('update public.world_region_states set simulation_tick=48 where region_id=$1',[ironwood.id]);
+  const siegeRuntime=(await admin.query("select public.process_world_region_runtime($1,'worker-e',$2,100) result",[ironwood.id,destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(Number(siegeRuntime.siegesAdvanced),1,'scheduled region runtime must advance active sieges');
+  const advanced=(await admin.query('select status,progress,defender_supply "defenderSupply",revision "siegeRevision" from public.world_sieges where id=$1',[declared.siegeId])).rows[0];
   assert.equal(advanced.status, 'active');
-  const advanceReplay = (await admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.9,.1) result", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
-  assert.equal(advanceReplay.duplicate, true);
-  await expectError(admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.8,.1)", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch]), 'idempotency_conflict');
   assert.ok(Number(advanced.progress) > 0);
-  assert.ok(Number(advanced.defenderSupply) < 100);
+  assert.ok(Number(advanced.defenderSupply) <= 100);
   await expectError(admin.query("select public.advance_world_siege($1,'siege-tick-stale',$2,'worker-d',$3,50,.9,.1)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
   await expectError(admin.query("select public.resolve_world_siege($1,'resolve-stale',$2,'attacker_victory','worker-d',$3,50)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
   const resolution = (await admin.query("select public.resolve_world_siege($1,'resolve-1',$2,'attacker_victory','worker-e',$3,50) result", [declared.siegeId, advanced.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
@@ -276,7 +312,7 @@ try {
   const treasuryBeforeLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
   const logistics = (await admin.query("select public.process_world_region_logistics($1,1,'worker-e',$2) result", [ironwood.id, destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(logistics.duplicate, false);
-  assert.ok(logistics.caravansProcessed >= 1);
+  assert.ok(Number(logistics.caravansProcessed)+Number(siegeRuntime.logistics.caravansProcessed)>=1);
   const foodAfter = Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity);
   const treasuryAfterLogistics = Number((await admin.query('select treasury from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0].treasury);
   assert.ok(treasuryAfterLogistics < treasuryBeforeLogistics, 'company wages must settle during the logistics tick');

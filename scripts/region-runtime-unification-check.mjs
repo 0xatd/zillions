@@ -10,6 +10,9 @@ assert.match(sql,/process_world_region_runtime[\s\S]*world_region_worker_leases[
 assert.match(sql,/world_commands c join public\.world_parties p[\s\S]*p\.region_id=p_region[\s\S]*for update of c skip locked/,'runtime may drain only commands owned by its region');
 assert.match(sql,/living_world_process_region\(p_region,p_worker,p_lease_epoch/,'faction simulation must run inside the region runtime');
 assert.match(sql,/process_world_region_logistics\(p_region,v_tick,p_worker,p_lease_epoch/,'logistics must run inside the same leased runtime');
+assert.match(sql,/create_world_region_encounters\(p_region,v_state\.simulation_tick\+1,p_worker,p_lease_epoch/,'hostile contact must be created by the region runtime');
+assert.match(sql,/advance_world_siege\(v_siege\.id,'runtime:'\|\|v_tick::text/,'active sieges must advance inside the region runtime');
+assert.match(sql,/guard_issued_battle_force/,'issued tactical assignments must freeze their strategic force');
 assert.match(sql,/request_world_region_handoff/,'cross-region departure must create a durable handoff');
 assert.match(sql,/complete_world_region_handoff/,'the destination region must complete the durable handoff');
 assert.doesNotMatch(sql,/random\s*\(/i,'runtime state changes must remain deterministic');

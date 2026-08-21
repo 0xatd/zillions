@@ -26,6 +26,35 @@ create table public.world_api_rate_buckets (
 alter table public.world_api_rate_buckets enable row level security;
 create index world_api_rate_buckets_window_idx on public.world_api_rate_buckets(window_started_at);
 
+create function public.guard_issued_battle_force()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_old_party uuid; v_new_party uuid;
+begin
+  if current_setting('zillions.battle_commit',true)='1' then if tg_op='DELETE' then return old;else return new;end if; end if;
+  if tg_table_name='world_parties' then
+    if tg_op<>'INSERT' then v_old_party:=old.id; end if;if tg_op<>'DELETE' then v_new_party:=new.id; end if;
+  elsif tg_table_name in('world_cargo','world_supplies') then
+    if tg_op<>'INSERT' then v_old_party:=old.party_id; end if;if tg_op<>'DELETE' then v_new_party:=new.party_id; end if;
+  elsif tg_table_name='world_armies' then
+    if tg_op<>'INSERT' then v_old_party:=old.party_id; end if;if tg_op<>'DELETE' then v_new_party:=new.party_id; end if;
+  elsif tg_table_name='world_unit_stacks' then
+    if tg_op<>'INSERT' and old.army_id is not null then select party_id into v_old_party from public.world_armies where id=old.army_id; end if;
+    if tg_op<>'DELETE' and new.army_id is not null then select party_id into v_new_party from public.world_armies where id=new.army_id; end if;
+  end if;
+  if exists(
+    select 1 from public.world_battle_assignments a join public.world_encounters e on e.id=a.encounter_id
+    where a.state='issued' and a.expires_at>now()
+      and (e.attacker_party_id in(v_old_party,v_new_party) or e.defender_party_id in(v_old_party,v_new_party))
+  ) then raise exception 'battle_force_locked'; end if;
+  if tg_op='DELETE' then return old;else return new;end if;
+end $$;
+revoke all on function public.guard_issued_battle_force() from public,anon,authenticated;
+create trigger guard_world_party_battle_force before insert or update or delete on public.world_parties for each row execute function public.guard_issued_battle_force();
+create trigger guard_world_army_battle_force before insert or update or delete on public.world_armies for each row execute function public.guard_issued_battle_force();
+create trigger guard_world_stack_battle_force before insert or update or delete on public.world_unit_stacks for each row execute function public.guard_issued_battle_force();
+create trigger guard_world_supply_battle_force before insert or update or delete on public.world_supplies for each row execute function public.guard_issued_battle_force();
+create trigger guard_world_cargo_battle_force before insert or update or delete on public.world_cargo for each row execute function public.guard_issued_battle_force();
+
 create function public.consume_world_api_rate_limit(p_actor uuid,p_scope text,p_limit integer,p_window_seconds integer)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_window timestamptz; v_count integer;
@@ -183,6 +212,36 @@ end $$;
 revoke all on function public.living_world_get_battle_assignment(uuid,uuid,uuid) from public,anon,authenticated;
 grant execute on function public.living_world_get_battle_assignment(uuid,uuid,uuid) to service_role;
 
+create function public.create_world_region_encounters(p_region uuid,p_world_tick bigint,p_worker text,p_lease_epoch bigint)
+returns integer language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_pair record;v_attacker public.world_parties%rowtype;v_defender public.world_parties%rowtype;v_count integer:=0;v_snapshot jsonb;
+begin
+  if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
+  if not exists(select 1 from public.world_region_worker_leases where region_id=p_region and worker_id=p_worker and lease_epoch=p_lease_epoch and lease_until>now()) then raise exception 'region_lease_required'; end if;
+  for v_pair in
+    select a.id a_id,b.id b_id from public.world_parties a join public.world_parties b on a.id<b.id and b.region_id=a.region_id and b.location_id=a.location_id
+    left join public.world_factions af on af.id=a.owner_faction_id left join public.world_factions bf on bf.id=b.owner_faction_id
+    where a.region_id=p_region and a.location_id is not null and a.stance<>'engaged' and b.stance<>'engaged'
+      and (a.stance='hostile' or b.stance='hostile' or af.kind='hostile' or bf.kind='hostile')
+      and not exists(select 1 from public.world_encounters e where e.state in('choosing','negotiating','battle','awaiting_allies','rearguard') and (a.id in(e.attacker_party_id,e.defender_party_id) or b.id in(e.attacker_party_id,e.defender_party_id)))
+    order by a.id,b.id for update of a,b
+  loop
+    select * into v_attacker from public.world_parties where id=case when exists(select 1 from public.world_factions f where f.id=(select owner_faction_id from public.world_parties where id=v_pair.a_id) and f.kind='hostile') or (select stance from public.world_parties where id=v_pair.a_id)='hostile' then v_pair.a_id else v_pair.b_id end;
+    select * into v_defender from public.world_parties where id=case when v_attacker.id=v_pair.a_id then v_pair.b_id else v_pair.a_id end;
+    v_snapshot:=jsonb_build_object(
+      v_attacker.id::text,jsonb_build_object('troops',coalesce((select sum(s.healthy) from public.world_unit_stacks s join public.world_armies ar on ar.id=s.army_id where ar.party_id=v_attacker.id),0),'scouting',0,'supplies',coalesce((select sum(quantity) from public.world_supplies where party_id=v_attacker.id),0)),
+      v_defender.id::text,jsonb_build_object('troops',coalesce((select sum(s.healthy) from public.world_unit_stacks s join public.world_armies ar on ar.id=s.army_id where ar.party_id=v_defender.id),0),'scouting',0,'supplies',coalesce((select sum(quantity) from public.world_supplies where party_id=v_defender.id),0))
+    );
+    insert into public.world_encounters(shard_id,attacker_party_id,defender_party_id,created_tick,terrain,scouting_snapshot)
+      values(v_attacker.shard_id,v_attacker.id,v_defender.id,p_world_tick,jsonb_build_object('kind','plains','defense',0),v_snapshot);
+    update public.world_parties set stance='engaged',revision=revision+1,updated_at=now() where id in(v_attacker.id,v_defender.id);
+    v_count:=v_count+1;
+  end loop;
+  return v_count;
+end $$;
+revoke all on function public.create_world_region_encounters(uuid,bigint,text,bigint) from public,anon,authenticated;
+grant execute on function public.create_world_region_encounters(uuid,bigint,text,bigint) to service_role;
+
 create or replace function public.living_world_process_shard(
   p_shard text,p_worker text,p_lease_seconds integer default 30,p_command_limit integer default 100
 ) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
@@ -208,6 +267,12 @@ declare
   v_result jsonb;
   v_factions jsonb;
   v_logistics jsonb;
+  v_siege public.world_sieges%rowtype;
+  v_siege_step jsonb;
+  v_blockade numeric;
+  v_relief numeric;
+  v_encounters integer:=0;
+  v_sieges integer:=0;
   v_shard text;
 begin
   if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
@@ -308,13 +373,28 @@ begin
       v_party.revision,p_worker,p_lease_epoch,jsonb_build_object('arrivalTick',v_state.simulation_tick+1));
   end loop;
 
+  -- Contact is created before AI movement. Engaged parties are then excluded
+  -- from faction travel until their encounter resolves.
+  v_encounters:=public.create_world_region_encounters(p_region,v_state.simulation_tick+1,p_worker,p_lease_epoch);
   v_factions:=public.living_world_process_region(p_region,p_worker,p_lease_epoch,64);
   v_tick:=(v_factions->>'tick')::bigint;
   v_logistics:=public.process_world_region_logistics(p_region,v_tick,p_worker,p_lease_epoch);
+  for v_siege in select * from public.world_sieges where region_id=p_region and status in('preparing','active','breached') and started_tick<v_tick order by id for update
+  loop
+    select least(1,coalesce(a.combat_power,0)/100.0) into v_blockade from public.world_armies a where a.party_id=v_siege.attacker_party_id;
+    select least(1,coalesce(sum(a.combat_power),0)/100.0) into v_relief from public.world_parties p join public.world_armies a on a.party_id=p.id where p.region_id=p_region and p.location_id=v_siege.location_id and p.owner_faction_id is not distinct from v_siege.defender_faction_id and p.id<>v_siege.attacker_party_id;
+    v_siege_step:=public.advance_world_siege(v_siege.id,'runtime:'||v_tick::text,v_siege.revision,p_worker,p_lease_epoch,v_tick,coalesce(v_blockade,0),coalesce(v_relief,0));
+    if coalesce((v_siege_step->>'reliefSucceeded')::boolean,false) then
+      perform public.resolve_world_siege(v_siege.id,'runtime-resolve:'||v_tick::text,(v_siege_step->>'siegeRevision')::bigint,'lifted',p_worker,p_lease_epoch,v_tick);
+    elsif coalesce((v_siege_step->>'progress')::numeric,0)>=1 or coalesce((v_siege_step->>'defenderSupply')::numeric,0)<=0 then
+      perform public.resolve_world_siege(v_siege.id,'runtime-resolve:'||v_tick::text,(v_siege_step->>'siegeRevision')::bigint,'attacker_victory',p_worker,p_lease_epoch,v_tick);
+    end if;
+    v_sieges:=v_sieges+1;
+  end loop;
   update public.world_shards s set simulation_tick=greatest(s.simulation_tick,v_tick),revision=s.revision+1,updated_at=now()
     where s.id=v_shard;
   v_result:=jsonb_build_object('ok',true,'regionId',p_region,'tick',v_tick,'commandsApplied',v_applied,
-    'commandsRejected',v_rejected,'factions',v_factions,'logistics',v_logistics);
+    'commandsRejected',v_rejected,'encountersCreated',v_encounters,'siegesAdvanced',v_sieges,'factions',v_factions,'logistics',v_logistics);
   insert into public.world_region_runtime_ticks(region_id,world_tick,worker_id,lease_epoch,commands_applied,commands_rejected,result)
     values(p_region,v_tick,p_worker,p_lease_epoch,v_applied,v_rejected,v_result)
     on conflict(region_id,world_tick) do nothing;
