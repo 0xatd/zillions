@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const sql = readFileSync(new URL('../supabase/migrations/20260820190000_living_world_worker.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('../supabase/migrations/20260820190100_living_world_worker.sql', import.meta.url), 'utf8');
 const retirement = readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql', import.meta.url), 'utf8');
 const endpoint = readFileSync(new URL('../api/living-world-worker.js', import.meta.url), 'utf8');
 for (const marker of ['world_worker_leases','world_battle_orders','living_world_process_shard','command.queued','command.applied','issue_movement','cancel_movement','set_encounter_choice','submit_battle_order','accept_surrender','trade_market'])

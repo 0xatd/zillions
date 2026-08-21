@@ -374,6 +374,7 @@ begin
   for v_order in select o.* from public.world_movement_orders o join public.world_parties p on p.id=o.party_id
     join public.world_routes r on r.id=o.route_id where p.region_id=p_region and o.status='moving'
     and r.origin_region_id=p_region and r.destination_region_id<>p_region
+    and not exists(select 1 from public.world_region_handoffs h where h.party_id=p.id and h.route_id=o.route_id and h.status='pending')
     and o.expected_arrival_tick<=v_state.simulation_tick+1 order by o.id for update of o
   loop
     select * into strict v_party from public.world_parties where id=v_order.party_id for update;

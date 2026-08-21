@@ -1,6 +1,7 @@
 -- Materialize one immutable manifest into the authority tables in one transaction.
 begin;
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 alter table public.world_manifests
   add column materialization_hash text,
@@ -17,7 +18,7 @@ begin
   if not found then raise exception 'world_manifest_not_found'; end if;
   if m.content_hash<>p_manifest_hash or p_bundle->>'manifestHash'<>p_manifest_hash or p_bundle->>'planetId'<>p_planet then raise exception 'world_manifest_hash_conflict'; end if;
   if (p_bundle-'manifestHash'-'materializationHash')<>m.manifest->'materialization' then raise exception 'materialization_template_mismatch';end if;
-  v_bundle_hash:='sha256-'||encode(digest(convert_to((p_bundle-'materializationHash')::text,'utf8'),'sha256'),'hex');
+  v_bundle_hash:='sha256-'||encode(extensions.digest(convert_to((p_bundle-'materializationHash')::text,'utf8'),'sha256'),'hex');
   if m.materialization_state='ready' then
     if m.materialization_hash is distinct from v_bundle_hash then raise exception 'world_materialization_conflict'; end if;
     return jsonb_build_object('ok',true,'duplicate',true,'planetId',p_planet,'manifestHash',p_manifest_hash,'materializationHash',m.materialization_hash,'summary',m.materialization_summary);
