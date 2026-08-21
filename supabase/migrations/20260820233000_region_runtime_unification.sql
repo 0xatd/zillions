@@ -193,7 +193,10 @@ begin
     new.region_id:=v_region; new.region_lease_epoch:=v_lease.lease_epoch;
   elsif new.state='committed' and old.state is distinct from new.state then
     select * into v_lease from public.world_region_worker_leases where region_id=old.region_id for update;
-    if not found or v_lease.lease_epoch<>old.region_lease_epoch or v_lease.lease_until<=now() then raise exception 'stale_battle_region_lease'; end if;
+    if not found or v_lease.lease_until<=now() then raise exception 'stale_battle_region_lease'; end if;
+    -- The immutable assignment survives normal worker recovery. Commit is
+    -- rebound to the current live region authority instead of the dead epoch.
+    new.region_lease_epoch:=v_lease.lease_epoch;
   end if;
   return new;
 end $$;

@@ -19,7 +19,7 @@ export function validateLivingWorldBattleReplay(value){
 
 export function verifyLivingWorldBattleReplay(assignment,input){
   const replay=validateLivingWorldBattleReplay(input),snapshot=assignment?.force_snapshot;
-  if(!snapshot||!['tactical','live_command'].includes(snapshot.engagementMode))throw new Error('tactical_replay_not_available');
+  if(!snapshot||!['tactical','live_command','hybrid'].includes(snapshot.engagementMode))throw new Error('tactical_replay_not_available');
   const level=levelById(1),seed=Number(snapshot.seed)||level.seed;
   const map=new TerrainField(seed,level.theme,{size:level.size,nests:level.nests});
   const game=new Game(map,'normal','alexander',null,1,'living_world_battle');

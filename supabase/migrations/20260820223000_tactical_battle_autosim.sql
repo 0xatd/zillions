@@ -45,7 +45,7 @@ begin
   perform 1 from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by s.id for update of s;
   perform 1 from public.world_supplies s where s.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by s.party_id,s.supply_key for update;
   perform 1 from public.world_cargo c where c.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id) order by c.party_id,c.commodity_key for update;
-  if v_eng.mode='live_command' and (select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id))>2000 then
+  if v_eng.mode in('live_command','hybrid') and (select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in(v_enc.attacker_party_id,v_enc.defender_party_id))>2000 then
     raise exception 'battle_requires_autosim';
   end if;
   select jsonb_build_object(

@@ -22,7 +22,7 @@ const main=readFileSync(new URL('../src/main.js',import.meta.url),'utf8'),ui=rea
 for (const marker of ['world_encounter_open_engagement','world_engagements','autosim','hybrid','attackerPartyId','defenderPartyId','on conflict(encounter_id) do nothing']) assert.ok(sql.includes(marker), `${marker} missing`);
 assert.match(sql,/'supplies',[\s\S]*world_supplies/,'battle assignments must snapshot strategic supplies');
 assert.match(sql, /after update of state on public\.world_encounters/);
-assert.match(sql,/v_eng\.mode='live_command'[\s\S]*sum\(s\.healthy\)[\s\S]*battle_requires_autosim/,'oversized live battles must be rejected before assignment issuance');
+assert.match(sql,/v_eng\.mode in\('live_command','hybrid'\)[\s\S]*sum\(s\.healthy\)[\s\S]*battle_requires_autosim/,'oversized live and hybrid battles must be rejected before assignment issuance');
 assert.match(ui,/data-encounter="live"/,'active engagements must offer player command');
 assert.match(main,/action:'launch'[\s\S]*configureLivingWorldBattle|action:'launch'[\s\S]*startGame/,'the client must launch the signed persistent assignment');
 assert.match(main,/assignmentToken:battle\.token[\s\S]*replay/,'the client must return its deterministic command replay');
@@ -35,5 +35,6 @@ game.configureLivingWorldBattle(tactical);let completedTick=0;while(!game.over&&
 assert.equal(game.over,true,'the exact assigned forces must resolve in the tactical simulation');
 const verified=verifyLivingWorldBattleReplay(tactical,{version:1,completedTick,commands:[]});
 assert.equal(verified.winnerPartyId,game.won?attacker:defender);assert.ok(verified.casualties.length>0);assert.match(verified.stateHash,/^[a-f0-9]{64}$/);
+assert.deepEqual(verifyLivingWorldBattleReplay({...tactical,force_snapshot:{...tactical.force_snapshot,engagementMode:'hybrid'}},{version:1,completedTick,commands:[]}),verified,'hybrid battles must use the same server-verified live replay path');
 assert.throws(()=>game.configureLivingWorldBattle({...tactical,force_snapshot:{...tactical.force_snapshot,stacks:tactical.force_snapshot.stacks.map((stack)=>({...stack,healthy:1200}))}}),/requires_autosim/);
 console.log('tactical battle launch and autosim checks passed');

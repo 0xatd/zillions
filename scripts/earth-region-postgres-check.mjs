@@ -188,6 +188,8 @@ try {
   await expectError(admin.query('update public.world_parties set morale=morale-1 where id=$1',[firstEntry.partyId]),'battle_force_locked');
   await expectError(admin.query('update public.world_unit_stacks set healthy=healthy-1 where id=$1',[attackerStackId]),'battle_force_locked');
   await expectError(admin.query("update public.world_supplies set quantity=quantity-1 where party_id=$1 and supply_key='food'",[firstEntry.partyId]),'battle_force_locked');
+  await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[greenfall.id]);
+  const battleTakeover=(await admin.query("select public.claim_world_region_lease($1,'worker-b',300) result",[greenfall.id])).rows[0].result;
   const level=levelById(1),tacticalGame=new Game(new TerrainField(Number(assignment.force_snapshot.seed),level.theme,{size:level.size,nests:level.nests}),'normal','alexander',null,1,'living_world_battle');
   tacticalGame.configureLivingWorldBattle(assignment);let tacticalTick=0;while(!tacticalGame.over&&tacticalTick<108000){tacticalGame.update(1/30);tacticalTick++;}
   assert.equal(tacticalGame.over,true);
@@ -199,6 +201,7 @@ try {
   const committed=battleCompleted;
   assert.equal(committed.ok, true);
   assert.equal(committed.duplicate, false);
+  assert.equal(Number((await admin.query('select region_lease_epoch from public.world_battle_assignments where id=$1',[assignment.id])).rows[0].region_lease_epoch),Number(battleTakeover.leaseEpoch),'verified result must rebind to the current live region lease after takeover');
   await new Promise((resolve)=>battleServer.close(resolve));
   const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
   assert.equal(battleReplay.duplicate, true);
@@ -206,6 +209,7 @@ try {
   assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy),40-(attackerLoss?.killed||0)-(attackerLoss?.wounded||0));
   assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy),35-(defenderLoss?.killed||0)-(defenderLoss?.wounded||0));
   assert.equal((await admin.query('select state from public.world_encounters where id=$1', [encounterId])).rows[0].state, 'resolved');
+  await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[greenfall.id]);
 
   // Two independent connections racing for an unleased region serialize to one winner.
   const racerA = postgres.getPgClient();
