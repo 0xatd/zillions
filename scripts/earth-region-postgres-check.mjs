@@ -56,6 +56,24 @@ try {
   assert.equal(secondEntry.duplicate, true);
   assert.equal(Number((await admin.query('select count(*) count from public.world_parties where owner_user_id=$1', [userId])).rows[0].count), 1);
 
+  // Company creation, recruitment, supplies, and services are atomic and revision-fenced.
+  const company = (await admin.query('select treasury,revision from public.world_companies where party_id=$1', [firstEntry.partyId])).rows[0];
+  assert.equal(Number(company.treasury), 250);
+  const recruited = (await admin.query("select public.living_world_company_command($1,'recruit-1',$2,$3,'recruit','{\"recruitKey\":\"greenfall_militia\",\"quantity\":2}') result", [userId, firstEntry.partyId, company.revision])).rows[0].result;
+  assert.equal(recruited.cost, 120);
+  assert.equal(Number((await admin.query('select count(*) count from public.world_company_members where party_id=$1', [firstEntry.partyId])).rows[0].count), 2);
+  const replayRecruit = (await admin.query("select public.living_world_company_command($1,'recruit-1',$2,$3,'recruit','{\"recruitKey\":\"greenfall_militia\",\"quantity\":2}') result", [userId, firstEntry.partyId, company.revision])).rows[0].result;
+  assert.equal(replayRecruit.duplicate, true);
+  assert.equal(Number((await admin.query('select count(*) count from public.world_company_members where party_id=$1', [firstEntry.partyId])).rows[0].count), 2);
+  await expectError(admin.query("select public.living_world_company_command($1,'stale-1',$2,$3,'buy_supplies','{\"supplyKey\":\"food\",\"quantity\":5}')", [userId, firstEntry.partyId, company.revision]), 'stale_company');
+  const supplied = (await admin.query("select public.living_world_company_command($1,'supply-1',$2,$3,'buy_supplies','{\"supplyKey\":\"food\",\"quantity\":5}') result", [userId, firstEntry.partyId, recruited.companyRevision])).rows[0].result;
+  assert.equal(supplied.cost, 10);
+  assert.equal(Number((await admin.query("select quantity from public.world_supplies where party_id=$1 and supply_key='food'", [firstEntry.partyId])).rows[0].quantity), 25);
+  await admin.query('update public.world_parties set fatigue=50 where id=$1', [firstEntry.partyId]);
+  const rested = (await admin.query("select public.living_world_company_command($1,'rest-1',$2,$3,'use_town_service','{\"serviceKey\":\"rest\"}') result", [userId, firstEntry.partyId, supplied.companyRevision])).rows[0].result;
+  assert.equal(rested.cost, 15);
+  assert.equal(Number((await admin.query('select fatigue from public.world_parties where id=$1', [firstEntry.partyId])).rows[0].fatigue), 0);
+
   const regions = (await admin.query("select id,key,revision from public.world_provinces where key in ('greenfall','ironwood') order by key")).rows;
   const greenfall = regions.find((region) => region.key === 'greenfall');
   const ironwood = regions.find((region) => region.key === 'ironwood');
@@ -174,6 +192,39 @@ try {
   const completeReplay = (await admin.query("select public.complete_world_region_handoff($1,'worker-e',$2) result", [handoff.handoffId, destinationTakeover.leaseEpoch])).rows[0].result;
   assert.equal(completeReplay.duplicate, true);
   assert.equal(Number((await admin.query('select count(*) count from public.world_region_handoffs where party_id=$1 and status=\'accepted\'', [firstEntry.partyId])).rows[0].count), 1);
+
+  // Siege declaration is player-owned and idempotent. Only the current region
+  // lease may resolve it, and occupation writes control, reputation, holding,
+  // history, and the public world event in one transaction.
+  const siegeParty = (await admin.query('select location_id,revision from public.world_parties where id=$1', [firstEntry.partyId])).rows[0];
+  const declared = (await admin.query("select public.living_world_governance_command($1,'siege-declare-1',$2,$3,'declare_siege',jsonb_build_object('locationId',$4::text,'attackerFactionId','greenfall_freeholds')) result", [userId, firstEntry.partyId, siegeParty.revision, siegeParty.location_id])).rows[0].result;
+  assert.equal(declared.duplicate, false);
+  const declareReplay = (await admin.query("select public.living_world_governance_command($1,'siege-declare-1',$2,$3,'declare_siege',jsonb_build_object('locationId',$4::text,'attackerFactionId','greenfall_freeholds')) result", [userId, firstEntry.partyId, siegeParty.revision, siegeParty.location_id])).rows[0].result;
+  assert.equal(declareReplay.duplicate, true);
+  const advanced = (await admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.9,.1) result", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(advanced.status, 'active');
+  const advanceReplay = (await admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.9,.1) result", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(advanceReplay.duplicate, true);
+  await expectError(admin.query("select public.advance_world_siege($1,'siege-tick-1',$2,'worker-e',$3,49,.8,.1)", [declared.siegeId, declared.siegeRevision, destinationTakeover.leaseEpoch]), 'idempotency_conflict');
+  assert.ok(Number(advanced.progress) > 0);
+  assert.ok(Number(advanced.defenderSupply) < 100);
+  await expectError(admin.query("select public.advance_world_siege($1,'siege-tick-stale',$2,'worker-d',$3,50,.9,.1)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
+  await expectError(admin.query("select public.resolve_world_siege($1,'resolve-stale',$2,'attacker_victory','worker-d',$3,50)", [declared.siegeId, advanced.siegeRevision, destinationLease.leaseEpoch]), 'region_lease_required');
+  const resolution = (await admin.query("select public.resolve_world_siege($1,'resolve-1',$2,'attacker_victory','worker-e',$3,50) result", [declared.siegeId, advanced.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(resolution.outcome, 'attacker_victory');
+  const resolutionReplay = (await admin.query("select public.resolve_world_siege($1,'resolve-1',$2,'attacker_victory','worker-e',$3,50) result", [declared.siegeId, advanced.siegeRevision, destinationTakeover.leaseEpoch])).rows[0].result;
+  assert.equal(resolutionReplay.duplicate, true);
+  assert.equal((await admin.query('select owner_faction_id from public.world_locations where id=$1', [siegeParty.location_id])).rows[0].owner_faction_id, 'greenfall_freeholds');
+  assert.equal((await admin.query('select owner_faction_id from public.world_provinces where id=$1', [ironwood.id])).rows[0].owner_faction_id, 'greenfall_freeholds');
+  assert.equal((await admin.query('select owner_user_id from public.world_holdings where granted_by_siege_id=$1', [declared.siegeId])).rows[0].owner_user_id, userId);
+  assert.equal(Number((await admin.query("select score from public.world_faction_reputation where user_id=$1 and faction_id='greenfall_freeholds'", [userId])).rows[0].score), 25);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_events where event_type='siege.resolved' and payload->>'siegeId'=$1", [declared.siegeId])).rows[0].count), 1);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_governance_audit where aggregate_id=$1", [declared.siegeId])).rows[0].count), 2);
+  const holdingId = (await admin.query('select id from public.world_holdings where granted_by_siege_id=$1', [declared.siegeId])).rows[0].id;
+  const partyAfterSiege = (await admin.query('select revision from public.world_parties where id=$1', [firstEntry.partyId])).rows[0];
+  const permission = (await admin.query("select public.living_world_governance_command($1,'holding-permission-1',$2,$3,'set_holding_permission',jsonb_build_object('holdingId',$4::text,'userId',$5::text,'permission','garrison','enabled',true)) result", [userId, firstEntry.partyId, partyAfterSiege.revision, holdingId, otherUserId])).rows[0].result;
+  assert.equal(permission.ok, true);
+  assert.equal(Number((await admin.query("select count(*) count from public.world_holding_permissions where holding_id=$1 and user_id=$2 and permission='garrison'", [holdingId, otherUserId])).rows[0].count), 1);
 
   // RLS: an authenticated user can see their handoff, but not another user's.
   await admin.query('grant usage on schema public to authenticated; grant select on public.world_region_handoffs,public.world_parties to authenticated');
