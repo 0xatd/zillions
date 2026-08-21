@@ -72,7 +72,12 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
     };
   };
   const socialMembers = memberRows.map((member) => memberForParty(member.worldParty || { owner_user_id: member.user_id, name: member.role }));
-  const primaryMembers = socialMembers.length ? socialMembers : primary ? [{
+  const suppliedMembers = socialParty?.members?.length ? socialParty.members.map((member) => ({
+    ...member,
+    className: member.className || member.role || 'Member',
+    self: member.id === self.userId,
+  })) : [];
+  const primaryMembers = suppliedMembers.length ? suppliedMembers : socialMembers.length ? socialMembers : primary ? [{
     id: self.id || 'self', name: self.name || primary.name || 'Commander',
     className: self.className || 'Commander', health: Number(self.health ?? 100),
     status: primary.stance || 'Ready', location: byLocation.get(primary.location_id)?.name || (primary.route_id ? 'Travelling' : 'Unknown'),
