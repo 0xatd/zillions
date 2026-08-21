@@ -197,6 +197,7 @@ try{
   assert.ok(prisonerTotal>0,'hosted autosim must produce prisoners');
   assert.ok(battleResult.cargoTransfers.length>0,'hosted autosim must produce cargo transfers');
   const cargoTransfer=battleResult.cargoTransfers[0];
+  assert.ok(Number.isFinite(Number(cargoTransfer.quantity))&&Number(cargoTransfer.quantity)>0,'hosted autosim cargo transfer must move a positive quantity');
   const cargoBefore=(await q(`select
     (select quantity from public.world_cargo where party_id=$1 and commodity_key=$3) source,
     (select quantity from public.world_cargo where party_id=$2 and commodity_key=$3) destination`,
