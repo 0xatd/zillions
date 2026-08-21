@@ -1,7 +1,8 @@
 -- Tactical clients receive immutable assignments. Only the battle authority can
 -- submit a result, and this transaction validates and applies the full outcome.
 begin;
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 create table public.world_battle_assignments (
   id uuid primary key default gen_random_uuid(),
@@ -78,7 +79,7 @@ begin
   perform 1 from public.world_shards where id=v_shard for update;
   select * into v_a from public.world_battle_assignments where id=p_assignment for update;
   if not found or v_a.nonce::text<>p_nonce or v_a.encounter_revision<>p_encounter_revision then raise exception 'invalid_assignment'; end if;
-  v_hash:=encode(digest(p_result::text,'sha256'),'hex');
+  v_hash:=encode(extensions.digest(p_result::text,'sha256'),'hex');
   if v_a.state='committed' then
     if v_a.result_hash<>v_hash then raise exception 'battle_result_replay_conflict'; end if;
     return jsonb_build_object('ok',true,'duplicate',true,'assignmentId',v_a.id,'resultHash',v_hash);

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+const population=readFileSync(new URL('../supabase/migrations/20260821070000_living_population.sql',import.meta.url),'utf8');
+const runtime=readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql',import.meta.url),'utf8');
+const logistics=readFileSync(new URL('../supabase/migrations/20260820223000_markets_logistics.sql',import.meta.url),'utf8');
+for(const role of ['garrison','patrol','caravan','raider','scout','siege_force'])assert.match(population,new RegExp(`'${role}'`));
+assert.match(population,/parties_per_region[\s\S]*minimum_parties[\s\S]*maximum_parties[\s\S]*max_actions_per_region_tick/);
+assert.match(population,/home_region_id[\s\S]*reconcile_world_region_population[\s\S]*inserted_parties[\s\S]*retired_parties/);
+assert.match(population,/role_mix<>[\s\S]*unsupported_population_role_mix/,'configured role mix must be enforced');
+assert.match(population,/present_parties[\s\S]*crowded_present_parties[\s\S]*maximum_present_parties[\s\S]*congestion_state/,'present-region congestion thresholds must be durable');
+for(const authority of ['world_raid_orders','world_pursuits','world_sieges'])assert.match(population,new RegExp(`process_world_phase2_actions[\\s\\S]*${authority}`));
+assert.match(population,/world_region_runtime_health[\s\S]*duration_ms[\s\S]*tick_lag[\s\S]*handoff_backlog[\s\S]*threshold_breached/,'production runtime health must persist operational signals');
+assert.match(runtime,/reconcile_world_region_population[\s\S]*max_actions_per_region_tick[\s\S]*process_world_phase2_actions[\s\S]*living_world_process_region/);
+assert.match(runtime,/world_region_handoffs where destination_region_id=p_region[\s\S]*complete_world_region_handoff/);
+assert.match(logistics,/world_movement_orders[\s\S]*state='outbound'[\s\S]*destination_location_id and destination_id=caravan\.origin_location_id[\s\S]*state='returning'/);
+assert.doesNotMatch(population,/\brandom\s*\(|clock_timestamp\s*\(/i);
+console.log('living world Phase 2 contract check passed');

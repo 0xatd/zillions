@@ -48,7 +48,7 @@ begin
   -- fatigue and a stronger morale penalty. These consequences make large
   -- armies powerful but expensive to keep in the field.
   with due as(select c.party_id,c.treasury,coalesce(sum(cm.wage),0)::bigint wages from public.world_companies c left join public.world_company_members cm on cm.party_id=c.party_id and cm.status<>'dismissed' join public.world_parties p on p.id=c.party_id where p.region_id=p_region group by c.party_id,c.treasury), paid as(update public.world_companies c set treasury=c.treasury-least(c.treasury,d.wages),revision=c.revision+1,updated_at=now() from due d where c.party_id=d.party_id and d.wages>0 returning c.party_id,(d.wages<=d.treasury) fully_paid) update public.world_parties p set morale=greatest(0,p.morale-case when paid.fully_paid then 0 else 8 end),revision=p.revision+1,updated_at=now() from paid where p.id=paid.party_id;
-  update public.world_parties p set morale=greatest(0,p.morale-12),fatigue=least(100,p.fatigue+10),revision=p.revision+1,updated_at=now() where p.region_id=p_region and exists(select 1 from public.world_supplies s where s.party_id=p.id and s.supply_key='food' and s.quantity<=0);
+  update public.world_parties p set morale=greatest(0,p.morale-12),fatigue=least(100,p.fatigue+10),revision=p.revision+1,updated_at=now() where p.region_id=p_region and not exists(select 1 from public.world_region_handoffs h where h.party_id=p.id and h.status='pending') and exists(select 1 from public.world_supplies s where s.party_id=p.id and s.supply_key='food' and s.quantity<=0);
 
   -- Blockaded settlements price against a smaller effective stock target,
   -- causing visible scarcity without manufacturing or deleting goods.
@@ -65,12 +65,28 @@ begin
         update public.world_markets set stock=stock-moved,revision=revision+1 where location_id=caravan.origin_location_id and commodity_key=caravan.commodity_key;
         insert into public.world_cargo(party_id,commodity_key,quantity) values(caravan.party_id,caravan.commodity_key,moved) on conflict(party_id,commodity_key) do update set quantity=world_cargo.quantity+excluded.quantity,revision=world_cargo.revision+1;
         select * into route from public.world_routes where origin_region_id=p_region and origin_id=caravan.origin_location_id and destination_id=caravan.destination_location_id order by id limit 1 for update;
-        if found and not coalesce((route.blockade_state->>'closed')::boolean,false) then update public.world_parties set location_id=null,route_id=route.id,route_progress=0,revision=revision+1,updated_at=now() where id=caravan.party_id; update public.world_caravan_plans set state='outbound',revision=revision+1 where id=caravan.id; caravans_processed:=caravans_processed+1; end if;
+        if found and not coalesce((route.blockade_state->>'closed')::boolean,false) then
+          insert into public.world_movement_orders(id,party_id,route_id,issued_tick,start_tick,expected_arrival_tick,status)
+            select md5(caravan.party_id::text||':'||route.id::text||':'||p_world_tick::text)::uuid,caravan.party_id,route.id,p_world_tick,p_world_tick,
+              p_world_tick+greatest(1,ceil(route.distance/greatest(p.speed,.001)))::bigint,'moving' from public.world_parties p where p.id=caravan.party_id;
+          update public.world_parties set location_id=null,route_id=route.id,route_progress=0,revision=revision+1,updated_at=now() where id=caravan.party_id;
+          update public.world_caravan_plans set state='outbound',revision=revision+1 where id=caravan.id; caravans_processed:=caravans_processed+1;
+        end if;
       end if;
     elsif caravan.state='outbound' and exists(select 1 from public.world_parties p where p.id=caravan.party_id and p.location_id=caravan.destination_location_id and p.route_id is null) then
       select greatest(0,quantity-reserved_quantity) into moved from public.world_cargo where party_id=caravan.party_id and commodity_key=caravan.commodity_key for update;
       if coalesce(moved,0)>0 then update public.world_cargo set quantity=quantity-moved,revision=revision+1 where party_id=caravan.party_id and commodity_key=caravan.commodity_key; update public.world_markets set stock=stock+moved,revision=revision+1 where location_id=caravan.destination_location_id and commodity_key=caravan.commodity_key; end if;
-      update public.world_caravan_plans set state='returning',revision=revision+1 where id=caravan.id; caravans_processed:=caravans_processed+1;
+      select * into route from public.world_routes where origin_id=caravan.destination_location_id and destination_id=caravan.origin_location_id
+        and control_state<>'blocked' and not coalesce((blockade_state->>'closed')::boolean,false) order by id limit 1 for update;
+      if found then
+        insert into public.world_movement_orders(id,party_id,route_id,issued_tick,start_tick,expected_arrival_tick,status)
+          select md5(caravan.party_id::text||':'||route.id::text||':'||p_world_tick::text)::uuid,caravan.party_id,route.id,p_world_tick,p_world_tick,
+            p_world_tick+greatest(1,ceil(route.distance/greatest(p.speed,.001)))::bigint,'moving' from public.world_parties p where p.id=caravan.party_id;
+        update public.world_parties set location_id=null,route_id=route.id,route_progress=0,revision=revision+1,updated_at=now() where id=caravan.party_id;
+        update public.world_caravan_plans set state='returning',revision=revision+1 where id=caravan.id;caravans_processed:=caravans_processed+1;
+      else
+        update public.world_caravan_plans set state='suspended',revision=revision+1 where id=caravan.id;
+      end if;
     elsif caravan.state='returning' and exists(select 1 from public.world_parties p where p.id=caravan.party_id and p.location_id=caravan.origin_location_id and p.route_id is null) then update public.world_caravan_plans set state='buying',revision=revision+1 where id=caravan.id; caravans_processed:=caravans_processed+1;
     end if;
   end loop;

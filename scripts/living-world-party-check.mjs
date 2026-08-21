@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createLivingWorldPartyHandler, validatePartyBody } from '../api/living-world-party.js';
 import { livingWorldProjectionToUi } from '../src/living-world-client.js';
 
-const sql = readFileSync(new URL('../supabase/migrations/20260820214500_social_party_world_travel.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('../supabase/migrations/20260820214600_social_party_world_travel.sql', import.meta.url), 'utf8');
 for (const marker of ['travel_mode','social_party_snapshot','create','leave','group_travel','party_not_assembled','expectedRevisions','for update loop']) assert.match(sql,new RegExp(marker),'missing party authority contract');
 assert.match(sql,/world_parties wp on wp\.owner_user_id=m\.user_id[\s\S]*world_armies a on a\.party_id=wp\.id/,'party frames must use authoritative companies');
 assert.match(sql,/order by wp\.id for update loop[\s\S]*insert into public\.world_movement_orders/,'group movement must lock every company before writes');
@@ -12,6 +12,7 @@ assert.match(sql,/travel_mode='grouped'/,'split members must be excluded from gr
 const uuid = '8e604971-848f-4dc1-bfc6-8b29912d677e';
 assert.throws(()=>validatePartyBody({requestId:'x',action:'group_travel',partyId:uuid,payload:{routeId:uuid,expectedRevisions:{victim:1}}}),/invalid_expected_revisions/);
 assert.throws(()=>validatePartyBody({requestId:'x',action:'leave',partyId:uuid,payload:{actorId:'victim'}}),/unsupported_payload_field/);
+assert.throws(()=>validatePartyBody({requestId:'x',action:'group_travel',partyId:uuid,payload:{routeId:uuid,mode:'fast'}}),/unsupported_payload_field/);
 
 const response=()=>({status:0,body:null,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}});
 const request=(method,body,auth='Bearer valid')=>({method,url:'/api/living-world-party',headers:{authorization:auth},async *[Symbol.asyncIterator](){if(body)yield Buffer.from(JSON.stringify(body));}});

@@ -225,6 +225,7 @@ begin
     select a.id a_id,b.id b_id from public.world_parties a join public.world_parties b on a.id<b.id and b.region_id=a.region_id and b.location_id=a.location_id
     left join public.world_factions af on af.id=a.owner_faction_id left join public.world_factions bf on bf.id=b.owner_faction_id
     where a.region_id=p_region and a.location_id is not null and a.stance<>'engaged' and b.stance<>'engaged'
+      and a.strategic_role is distinct from 'raider' and b.strategic_role is distinct from 'raider'
       and (a.stance='hostile' or b.stance='hostile' or af.kind='hostile' or bf.kind='hostile')
       and not exists(select 1 from public.world_encounters e where e.state in('choosing','negotiating','battle','awaiting_allies','rearguard') and (a.id in(e.attacker_party_id,e.defender_party_id) or b.id in(e.attacker_party_id,e.defender_party_id)))
     order by a.id,b.id for update of a,b
@@ -270,6 +271,9 @@ declare
   v_rejected integer:=0;
   v_result jsonb;
   v_factions jsonb;
+  v_population jsonb;
+  v_action_budget integer:=8;
+  v_strategic_actions jsonb;
   v_logistics jsonb;
   v_siege public.world_sieges%rowtype;
   v_siege_step jsonb;
@@ -361,7 +365,7 @@ begin
   -- Source ownership advances cross-region routes only to the boundary, then
   -- emits a durable handoff for the destination runtime to accept.
   update public.world_parties p set
-    route_progress=least(1,(v_state.simulation_tick+1-o.start_tick)::numeric/greatest(1,o.expected_arrival_tick-o.start_tick)),
+    route_progress=least(1,greatest(0,(v_state.simulation_tick+1-o.start_tick)::numeric/greatest(1,o.expected_arrival_tick-o.start_tick))),
     fatigue=least(100,p.fatigue+.05),revision=p.revision+1,updated_at=now()
   from public.world_movement_orders o join public.world_routes r on r.id=o.route_id
   where o.party_id=p.id and p.region_id=p_region and o.status='moving'
@@ -370,6 +374,7 @@ begin
   for v_order in select o.* from public.world_movement_orders o join public.world_parties p on p.id=o.party_id
     join public.world_routes r on r.id=o.route_id where p.region_id=p_region and o.status='moving'
     and r.origin_region_id=p_region and r.destination_region_id<>p_region
+    and not exists(select 1 from public.world_region_handoffs h where h.party_id=p.id and h.route_id=o.route_id and h.status='pending')
     and o.expected_arrival_tick<=v_state.simulation_tick+1 order by o.id for update of o
   loop
     select * into strict v_party from public.world_parties where id=v_order.party_id for update;
@@ -379,8 +384,15 @@ begin
 
   -- Contact is created before AI movement. Engaged parties are then excluded
   -- from faction travel until their encounter resolves.
+  v_population:=public.reconcile_world_region_population(p_region,v_state.simulation_tick+1);
+  select least(t.max_actions_per_region_tick,greatest(4,(v_population->>'present')::integer)) into v_action_budget
+    from public.world_population_targets t join public.world_provinces p on p.planet_id=t.planet_id where p.id=p_region;
   v_encounters:=public.create_world_region_encounters(p_region,v_state.simulation_tick+1,p_worker,p_lease_epoch);
-  v_factions:=public.living_world_process_region(p_region,p_worker,p_lease_epoch,64);
+  -- Resolve the prior authoritative intent before choosing a new route. This
+  -- lets an arriving siege force act at the hostile settlement instead of
+  -- immediately walking away on its next faction tick.
+  v_strategic_actions:=public.process_world_phase2_actions(p_region,v_state.simulation_tick+1,p_worker,p_lease_epoch,v_action_budget);
+  v_factions:=public.living_world_process_region(p_region,p_worker,p_lease_epoch,v_action_budget);
   v_tick:=(v_factions->>'tick')::bigint;
   v_logistics:=public.process_world_region_logistics(p_region,v_tick,p_worker,p_lease_epoch);
   for v_siege in select * from public.world_sieges where region_id=p_region and status in('preparing','active','breached') and started_tick<v_tick order by id for update
@@ -398,7 +410,8 @@ begin
   update public.world_shards s set simulation_tick=greatest(s.simulation_tick,v_tick),revision=s.revision+1,updated_at=now()
     where s.id=v_shard;
   v_result:=jsonb_build_object('ok',true,'regionId',p_region,'tick',v_tick,'commandsApplied',v_applied,
-    'commandsRejected',v_rejected,'encountersCreated',v_encounters,'siegesAdvanced',v_sieges,'factions',v_factions,'logistics',v_logistics);
+    'commandsRejected',v_rejected,'encountersCreated',v_encounters,'siegesAdvanced',v_sieges,'factions',v_factions,
+    'population',v_population,'actionBudget',v_action_budget,'strategicActions',v_strategic_actions,'logistics',v_logistics);
   insert into public.world_region_runtime_ticks(region_id,world_tick,worker_id,lease_epoch,commands_applied,commands_rejected,result)
     values(p_region,v_tick,p_worker,p_lease_epoch,v_applied,v_rejected,v_result)
     on conflict(region_id,world_tick) do nothing;
@@ -408,7 +421,7 @@ end $$;
 revoke all on function public.process_world_region_runtime(uuid,text,bigint,integer) from public,anon,authenticated;
 grant execute on function public.process_world_region_runtime(uuid,text,bigint,integer) to service_role;
 
-create function public.living_world_region_runtime_batch(p_limit integer default 8)
+create function public.living_world_region_runtime_batch(p_limit integer default 72)
 returns table(region_id uuid) language sql stable security definer set search_path=public,pg_temp as $$
   select s.region_id
   from public.world_region_states s
@@ -420,7 +433,7 @@ returns table(region_id uuid) language sql stable security definer set search_pa
   left join public.world_region_worker_leases lease on lease.region_id=s.region_id
   where s.status='active'
   order by greatest(tick.last_processed_at,lease.heartbeat_at) nulls first,s.region_id
-  limit greatest(1,least(16,coalesce(p_limit,8)));
+  limit greatest(1,least(96,coalesce(p_limit,72)));
 $$;
 revoke all on function public.living_world_region_runtime_batch(integer) from public,anon,authenticated;
 grant execute on function public.living_world_region_runtime_batch(integer) to service_role;

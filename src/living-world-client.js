@@ -5,11 +5,22 @@ const COMPANY_API = '/api/living-world-company';
 const BATTLE_API = '/api/living-world-battle';
 const GOVERNANCE_API = '/api/living-world-governance';
 let session = null;
+export class LatestLivingWorldRequest {
+  constructor() { this.sequence = 0; }
+  next() { this.sequence += 1; return this.sequence; }
+  isCurrent(sequence) { return sequence === this.sequence; }
+}
+export function livingWorldRefreshFailure(currentState, viewport) {
+  const retained = Boolean(viewport && currentState);
+  return { retained, state: retained ? currentState : null, mode: retained ? 'stale' : 'error', message: retained ? 'Map update failed · showing stale intelligence' : 'World intelligence unavailable' };
+}
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
-export async function getLivingWorldProjection(shardId) {
+export async function getLivingWorldProjection(shardId, viewport = null) {
   if (!session?.access_token) return null;
-  const response = await fetch(`${API}?${new URLSearchParams({ shardId })}`, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
+  const params = { shardId };
+  if (viewport) for (const key of ['minX','minY','maxX','maxY','zoom']) if (Number.isFinite(Number(viewport[key]))) params[key] = String(viewport[key]);
+  const response = await fetch(`${API}?${new URLSearchParams(params)}`, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'living_world_projection_failed'), { status: response.status, result });
   return result;
@@ -93,14 +104,17 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
   const ownFactions = new Set(own.map((party) => party.owner_faction_id).filter(Boolean));
   const routeById = new Map((projection.routes || []).map((route) => [route.id, route]));
   const partyPosition = (party) => {
+    if (!party) return null;
     if (party.location_id && byLocation.has(party.location_id)) return point(byLocation.get(party.location_id).position);
     const route = routeById.get(party.route_id);
-    if (!route) return [0, 0];
+    if (!route) return null;
     const from = point(byLocation.get(route.origin_id)?.position);
     const to = point(byLocation.get(route.destination_id)?.position);
     const progress = Math.max(0, Math.min(1, Number(party.route_progress) || 0));
     return [from[0] + (to[0] - from[0]) * progress, from[1] + (to[1] - from[1]) * progress];
   };
+  const partyById = new Map((projection.parties || []).map((party) => [party.id, party]));
+  const hotspot = (type, id, partyId, state, label) => { const position = partyPosition(partyById.get(partyId)); if (!position) return null; const [x, y] = position; return { id: `${type}:${id}`, type, x, y, state, label }; };
   const primary = own[0] || null;
   const factionById = new Map((projection.factions || []).map((faction) => [faction.id, faction]));
   const regionById = new Map((projection.regions || []).map((region) => [region.id, region]));
@@ -152,6 +166,14 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       pendingInvites: socialParty?.pendingInvites || [],
     },
     factions: (projection.factions || []).map((faction) => ({ id: faction.id, name: faction.name, kind: faction.kind, relation: relation(faction.id) })),
+    topology: {
+      projection: projection.topology?.projection || 'earth-equirectangular-v1',
+      size: projection.topology?.size || { width: 100, height: 100 },
+      contentHash: projection.topology?.contentHash || null,
+      landmasses: (projection.topology?.landmasses || []).map((entry) => ({ key: entry.key, name: entry.name, polygon: entry.polygon })),
+      provinces: (projection.topology?.provinces || projection.topology?.regions || []).map((entry) => ({ id: entry.id, key: entry.key, name: entry.name, landmass: entry.landmass, biome: entry.biome, center: entry.center, polygon: entry.polygon })),
+    },
+    viewport: projection.viewport || { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 1, truncated: false },
     regions: (projection.regions || []).map((region) => ({
       id: region.id, name: region.name, ownerFactionId: region.owner_faction_id || null,
       ownerName: factionById.get(region.owner_faction_id)?.name || 'Unclaimed', owner: relation(region.owner_faction_id),
@@ -176,9 +198,9 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       from: point(byLocation.get(route.origin_id)?.position), to: point(byLocation.get(route.destination_id)?.position),
       state: route.control_state === 'blocked' || route.control_state === 'contested' || Number(route.danger) >= 0.5 ? 'contested' : 'safe',
       crossRegion: route.origin_region_id !== route.destination_region_id })),
-    parties: (projection.parties || []).filter((party) => !ownIds.has(party.id)).map((party) => {
-      const [x, y] = partyPosition(party);
-      return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.intelligence?.estimate || 0), x, y, intent: party.stance || 'Unknown' };
+    parties: (projection.parties || []).map((party) => {
+      const [x, y] = partyPosition(party) || [0, 0];
+      return { id: party.id, name: party.name || 'Unknown force', owner: factionOwner(party, ownIds, ownFactions), strength: Number(party.strength ?? party.army_strength ?? party.intelligence?.estimate ?? 0), x, y, intent: party.strategic_intent || party.stance || 'Unknown', routeId: party.route_id || null, moving: Boolean(party.route_id) };
     }),
     missions: locations.filter((location) => Number(location.services?.missionLevel) > 0).map((location) => {
       const [x, y] = point(location.position); return { id: `mission:${location.id}`, locationId: location.id,
@@ -192,6 +214,13 @@ export function livingWorldProjectionToUi(projection = {}, self = {}, socialPart
       ownSide: ownIds.has(encounter.attacker_party_id) ? 'attacker' : 'defender',
     })),
     governance,
+    sieges: (projection.sieges || []).map((siege) => { const [x, y] = point(siege.position || byLocation.get(siege.location_id)?.position); return { ...siege, x, y }; }),
+    pursuits: projection.pursuits || [],
+    hotspots: [
+      ...(projection.pursuits || []).map((row) => hotspot('pursuit', row.id, row.target_party_id, row.state, 'PURSUIT')),
+      ...(projection.logistics?.raids || []).map((row) => hotspot('raid', row.id, row.target_party_id || row.attacker_party_id, row.state, 'RAID')),
+      ...(projection.encounters || []).map((row) => hotspot('battle', row.id, row.defender_party_id || row.attacker_party_id, row.state, 'BATTLE')),
+    ].filter((row) => row && (row.x || row.y)),
     markets: projection.markets || [],
     logistics: projection.logistics || { supplies: [], cargo: [], caravans: [], raids: [] },
     raw: projection,

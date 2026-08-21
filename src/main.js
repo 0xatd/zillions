@@ -38,8 +38,9 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import { getGalaxyState } from './backend.js';
 import {
-  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, livingWorldProjectionToUi, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
+  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
 } from './living-world-client.js';
+import { deliverBattleOutbox, loadBattleOutbox } from './living-world-battle-outbox.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
@@ -238,7 +239,9 @@ class App {
       onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
       onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
       onLivingWorldOpen: () => this._refreshLivingWorld(),
-      onLivingWorldFastTravel: (locationId) => this._requestLivingWorldTravel(locationId),
+      onLivingWorldViewport: (viewport) => this._refreshLivingWorldViewport(viewport),
+      onLivingWorldFastTravel: (locationId, mode) => this._requestLivingWorldTravel(locationId, mode),
+      onLivingWorldTrade: (payload) => this._livingWorldTrade(payload),
       onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
       onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
       onLivingWorldEncounter: (encounter, action) => this._livingWorldEncounterAction(encounter, action),
@@ -687,33 +690,45 @@ class App {
     };
   }
 
-  async _refreshLivingWorld() {
+  async _refreshLivingWorld(viewport = null) {
     if (!this.auth?.isSignedIn()) {
       this.ui.setLivingWorldState({});
       this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
       return null;
     }
+    this._livingWorldRequestGate ||= new LatestLivingWorldRequest();
+    const requestSequence = this._livingWorldRequestGate.next();
+    this.ui.setLivingWorldMapStatus('loading', viewport ? 'Loading this front…' : 'Loading world intelligence…');
     try {
-      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth'), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
+      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth', viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       if (!projection?.shard) throw new Error('world_not_initialized');
       if (!(projection.ownParties || []).length) {
         const character = selectedMmoCharacter(this.profile);
         if (!character?.id) throw new Error('living_world_character_required');
         await enterLivingWorld(character.id);
-        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
+        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id, viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
       }
+      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
       const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
       this.livingWorldState = state;
       this.ui.setLivingWorldState(state);
+      this.ui.setLivingWorldMapStatus('ready', '');
       return state;
     } catch (error) {
-      this.livingWorldState = null;
-      this.ui.setLivingWorldState({});
+      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
+      const failure = livingWorldRefreshFailure(this.livingWorldState, viewport);
+      if (!failure.retained) { this.livingWorldState = null; this.ui.setLivingWorldState({}); }
+      this.ui.setLivingWorldMapStatus(failure.mode, failure.message);
       const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
       const tutorial = error?.message === 'tutorial_campaign_required';
-      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'The persistent world is not initialized on this build.' : 'World intelligence could not be refreshed.', 'bad', 3000);
+      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);
       return null;
     }
+  }
+
+  _refreshLivingWorldViewport(viewport) {
+    clearTimeout(this._livingWorldViewportTimer);
+    this._livingWorldViewportTimer = setTimeout(() => this._refreshLivingWorld(viewport), 140);
   }
 
   _livingWorldUnavailable(feature) {
@@ -769,7 +784,7 @@ class App {
     this.ui.showBanner(`Tracking ${party.name} · ${party.intent}`, '', 2400);
   }
 
-  async _requestLivingWorldTravel(locationId) {
+  async _requestLivingWorldTravel(locationId, mode = 'travel') {
     const state = this.livingWorldState;
     const party = state?.party;
     const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
@@ -777,13 +792,16 @@ class App {
     if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
     try {
       const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
+      if (mode === 'fast' && party.socialPartyId && grouped.length > 1) {
+        this.ui.showBanner('Fast travel requires party members to use split travel. Group travel uses the road simulation.', 'bad', 3200); return;
+      }
       if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
         action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
         partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
       }); else await sendLivingWorldCommand({
         type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
           || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
-        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: destination?.fastTravel ? 'fast' : 'travel' },
+        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: mode === 'fast' && destination?.fastTravel ? 'fast' : 'travel' },
       });
       // Command acceptance is not arrival. Refresh to show only state the
       // authority has actually committed.
@@ -792,6 +810,15 @@ class App {
     } catch (error) {
       this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
     }
+  }
+
+  async _livingWorldTrade(payload) {
+    const state = this.livingWorldState, party = state?.party;
+    if (!party?.id || !party?.revision || party.locationId !== payload.locationId) return this._livingWorldUnavailable('Market trade');
+    try {
+      await sendLivingWorldCommand({ type: 'trade_market', requestId: globalThis.crypto?.randomUUID?.() || `trade-${Date.now().toString(36)}`, shardId: state.world.id, partyId: party.id, expectedRevision: party.revision, payload });
+      await this._refreshLivingWorld(); this.ui.showBanner(`${payload.side === 'buy' ? 'Purchase' : 'Sale'} submitted to the market.`, '', 2200);
+    } catch (error) { this.ui.showBanner(error?.message || 'Market trade was rejected.', 'bad', 2600); }
   }
 
   async _livingWorldCompanyAction(action, payload) {
@@ -1669,7 +1696,10 @@ class App {
         try { await this._ensureAuthoritativeEconomy(character); }
         catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
       }
-      this._saveProfile();
+      // Auth events are read/hydration boundaries. Persisting account metadata
+      // here calls auth.updateUser(), which emits another auth event and used
+      // to recurse until Supabase rate-limited /auth/v1/user.
+      this._storeProfileLocally();
       this.ui.setProfile(this.profile);
       this.ui.setCampaign(this.profile.campaign || 0);
       if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -1684,6 +1714,7 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    if (status.signedIn) await this._retryLivingWorldBattleOutbox();
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -2059,8 +2090,12 @@ class App {
     return players;
   }
 
-  _saveProfile() {
+  _storeProfileLocally() {
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+  }
+
+  _saveProfile() {
+    this._storeProfileLocally();
     if (this.auth?.isSignedIn()) {
       this.auth.syncLocalProfile(this.profile).catch((err) => console.warn('profile sync failed', err));
     }
@@ -2099,9 +2134,23 @@ class App {
     if(!battle||!this.game)return;
     const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
     try{
-      await sendLivingWorldBattleAction({action:'result',assignmentToken:battle.token,replay});
+      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction,entry:{assignmentToken:battle.token,replay}});
+      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
       battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
     }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
+  }
+
+  async _retryLivingWorldBattleOutbox() {
+    let pending;try{pending=loadBattleOutbox(sessionStorage);}catch{return;}
+    if (!pending?.assignmentToken || !pending?.replay || this._livingWorldOutboxRetrying) return;
+    this._livingWorldOutboxRetrying = true;
+    try {
+      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction});
+      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
+      this.ui.showBanner('Recovered and committed the previous battle result.', '', 3200);
+    } catch (error) {
+      this.ui.showBanner(error?.message === 'battle_assignment_expired' ? 'The previous battle result expired before recovery.' : 'Previous battle result is still waiting for authority recovery.', 'bad', 4200);
+    } finally { this._livingWorldOutboxRetrying = false; }
   }
 
   _recordGameEnd(won) {

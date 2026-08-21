@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { livingWorldProjectionToUi } from '../src/living-world-client.js';
+import { LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure } from '../src/living-world-client.js';
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const hook of ['onPartyCreate', 'onPartyOpen', 'onPartyMemberLocate', 'onLivingWorldOpen',
-  'onLivingWorldFastTravel', 'onLivingWorldMission', 'onLivingWorldTrackParty']) {
+  'onLivingWorldViewport', 'onLivingWorldFastTravel', 'onLivingWorldMission', 'onLivingWorldTrackParty']) {
   assert.match(main, new RegExp(`${hook}:`), `${hook} is not wired`);
 }
 assert.match(main, /setLivingWorldSession\(this\.auth\.session\)/, 'auth session must reach living-world client');
 assert.match(main, /this\._refreshLivingWorld\(\)\.catch/, 'overworld entry must hydrate authority projection');
+assert.match(main, /getLivingWorldProjection\([^\n]+viewport\)/, 'viewport changes must fetch a bounded authority projection');
 assert.doesNotMatch(main, /onLivingWorldMission:[^\n]*startGame/, 'living-world mission must not launch arbitrary campaign content');
 
 const projection = livingWorldProjectionToUi({
@@ -29,6 +30,15 @@ assert.equal(projection.party.members[0].name, 'Ted Prime');
 assert.equal(projection.settlements[0].fastTravel, false, 'current location is not a travel destination');
 assert.equal(projection.settlements[1].fastTravel, true, 'authority-known safe connected destination enables fast travel');
 assert.deepEqual(projection.routes[0].from, [10, 20]);
-assert.deepEqual([projection.parties[0].x, projection.parties[0].y], [30, 40]);
-assert.equal(projection.parties[0].strength, 90);
+assert.ok(projection.parties.some((party) => party.id === 'p1'), 'the player army remains visible on the strategic map');
+const enemy = projection.parties.find((party) => party.id === 'enemy');
+assert.deepEqual([enemy.x, enemy.y], [30, 40]);
+assert.equal(enemy.strength, 90);
+assert.doesNotThrow(() => livingWorldProjectionToUi({ ownParties: [{ id: 'mine' }], parties: [{ id: 'mine' }], encounters: [{ id: 'offscreen', attacker_party_id: 'mine', defender_party_id: 'omitted' }] }), 'an encounter with an off-viewport opponent must not crash projection');
+const requests = new LatestLivingWorldRequest(), older = requests.next(), newer = requests.next();
+assert.equal(requests.isCurrent(older), false, 'an older pan response cannot overwrite a newer viewport');
+assert.equal(requests.isCurrent(newer), true, 'the newest viewport response is accepted');
+const retained = livingWorldRefreshFailure({ world: { id: 'earth' } }, { minX: 10 });
+assert.equal(retained.mode, 'stale'); assert.equal(retained.state.world.id, 'earth', 'transient viewport failure retains the last good map');
+assert.equal(livingWorldRefreshFailure(null, null).mode, 'error', 'initial projection failure exposes an explicit error state');
 console.log('living-world-runtime-check: auth, hydration, callbacks and honest projection wiring passed');

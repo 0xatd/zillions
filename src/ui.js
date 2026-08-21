@@ -37,7 +37,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
-import { normalizeLivingWorld } from './living-world-ui.js';
+import { clusterLivingWorldParties, livingWorldReadyStatus, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -62,6 +62,8 @@ export class UI {
     this.msgSeen = 0;
     this.pauseOpen = false;
     this._livingWorld = normalizeLivingWorld();
+    this._livingWorldView = { zoom: 1, x: 0, y: 0 };
+    this._livingWorldStatus = { mode: 'idle', message: '' };
     this._buildDOM();
   }
 
@@ -100,7 +102,7 @@ export class UI {
         <div class="lw-shell">
           <header class="lw-head"><div><span>LIVING WORLD</span><h1 id="lw-world-name">EARTH FRONTIER</h1><small id="lw-region"></small></div><div class="lw-head-actions"><button class="tbtn" id="lw-party">＋ PARTY</button><button class="tbtn" id="lw-close">CLOSE</button></div></header>
           <div class="lw-body">
-            <div class="lw-map-stage" id="lw-map-stage"><div id="lw-regions" class="lw-regions"></div><div class="lw-map-grid"></div><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div><div class="lw-legend"><span><i class="free"></i> Allied</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
+            <div class="lw-map-stage" id="lw-map-stage"><div id="lw-regions" class="lw-regions"></div><div class="lw-map-grid"></div><div id="lw-world-layer" class="lw-world-layer"><svg id="lw-terrain" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Earth geography"></svg><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div></div><div class="lw-map-tools"><button class="tbtn" data-map-zoom="out" aria-label="Zoom out">−</button><b id="lw-zoom">1×</b><button class="tbtn" data-map-zoom="in" aria-label="Zoom in">+</button><button class="tbtn" data-map-zoom="reset">EARTH</button></div><div id="lw-map-status" class="lw-map-status" role="status"></div><div class="lw-legend"><span><i class="free"></i> Allied</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
             <aside class="lw-finder"><span class="lw-kicker">WAR COUNCIL</span><h2>Choose your next move</h2><p>Travel the roads for opportunities, manage your company, or resolve an active encounter.</p><div id="lw-company" class="lw-selection"></div><div id="lw-encounters"></div><div id="lw-governance"></div><div id="lw-logistics" class="lw-selection"></div><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support travel. Discovered fronts support direct deployment.</p></div></aside>
           </div>
         </div>
@@ -769,6 +771,13 @@ export class UI {
     q('#ow-map').onclick = () => this.openLivingWorldMap();
     q('#lw-party').onclick = () => this._partyAction();
     q('#lw-close').onclick = () => this.closeLivingWorldMap();
+    for (const button of this.root.querySelectorAll('[data-map-zoom]')) button.onclick = () => this._changeLivingWorldZoom(button.dataset.mapZoom);
+    const mapStage = q('#lw-map-stage');
+    mapStage.onwheel = (event) => { event.preventDefault(); this._changeLivingWorldZoom(event.deltaY < 0 ? 'in' : 'out'); };
+    let drag = null;
+    mapStage.onpointerdown = (event) => { if (event.target.closest('button')) return; drag = { x: event.clientX, y: event.clientY, ox: this._livingWorldView.x, oy: this._livingWorldView.y }; mapStage.setPointerCapture?.(event.pointerId); };
+    mapStage.onpointermove = (event) => { if (!drag) return; this._livingWorldView.x = drag.ox + event.clientX - drag.x; this._livingWorldView.y = drag.oy + event.clientY - drag.y; this._applyLivingWorldView(); };
+    mapStage.onpointerup = mapStage.onpointercancel = () => { if (drag) this.cb.onLivingWorldViewport?.(this._livingWorldViewport()); drag = null; };
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -2271,6 +2280,13 @@ export class UI {
     if (!this.root.querySelector('#living-world-map')?.classList.contains('hidden')) this._renderLivingWorldMap();
   }
 
+  setLivingWorldMapStatus(mode, message = '') {
+    const resolved = mode === 'ready' && !message ? livingWorldReadyStatus(this._livingWorld) : message;
+    this._livingWorldStatus = { mode, message: resolved };
+    const status = this.root.querySelector('#lw-map-status');
+    if (status) { status.dataset.state = mode; status.textContent = resolved; }
+  }
+
   _partyAction() {
     const party = this._livingWorld.party;
     if (party.id) this.cb.onPartyOpen?.(party);
@@ -2299,10 +2315,39 @@ export class UI {
     this._renderLivingWorldMap();
     this.root.querySelector('#living-world-map').classList.remove('hidden');
     this.cb.onLivingWorldOpen?.(this._livingWorld.world.id);
+    clearInterval(this._livingWorldPoll);
+    this._livingWorldPoll = setInterval(() => this.cb.onLivingWorldViewport?.(this._livingWorldViewport()), 3000);
   }
 
   closeLivingWorldMap() {
     this.root.querySelector('#living-world-map')?.classList.add('hidden');
+    clearInterval(this._livingWorldPoll); this._livingWorldPoll = null;
+  }
+
+  _changeLivingWorldZoom(action) {
+    if (action === 'reset') this._livingWorldView = { zoom: 1, x: 0, y: 0 };
+    else this._livingWorldView.zoom = Math.max(1, Math.min(4, this._livingWorldView.zoom * (action === 'in' ? 1.35 : 1 / 1.35)));
+    if (this._livingWorldView.zoom === 1) { this._livingWorldView.x = 0; this._livingWorldView.y = 0; }
+    this._renderLivingWorldMap();
+    this.cb.onLivingWorldViewport?.(this._livingWorldViewport());
+  }
+
+  _livingWorldViewport() {
+    const stage = this.root.querySelector('#lw-map-stage');
+    return livingWorldViewport(this._livingWorldView, { width: stage?.clientWidth, height: stage?.clientHeight });
+  }
+
+  _applyLivingWorldView() {
+    const layer = this.root.querySelector('#lw-world-layer');
+    if (!layer) return;
+    const view = this._livingWorldView;
+    layer.style.transform = `translate(${Math.round(view.x)}px,${Math.round(view.y)}px) scale(${view.zoom.toFixed(3)})`;
+    const zoom = this.root.querySelector('#lw-zoom');
+    if (zoom) zoom.textContent = `${view.zoom.toFixed(1)}×`;
+  }
+
+  _clusterLivingWorldParties(parties) {
+    return clusterLivingWorldParties(parties, this._livingWorldView.zoom);
   }
 
   _renderLivingWorldMap() {
@@ -2311,14 +2356,29 @@ export class UI {
     this.root.querySelector('#lw-region').textContent = `${state.world.region} · WORLD TIME ${state.world.time}`;
     const regions = this.root.querySelector('#lw-regions');
     regions.innerHTML = state.regions.map((region) => `<button class="lw-region ${region.owner}${region.current ? ' current' : ''}" data-region="${escapeHtml(region.id)}"><span>${escapeHtml(region.current ? 'YOU ARE HERE' : region.controlState.toUpperCase())}</span><b>${escapeHtml(region.name)}</b><small>${escapeHtml(region.ownerName)} · ${Math.round(region.controlStrength * 100)}% control</small></button>`).join('');
+    const polygonPath = (polygon) => (polygon || []).map((point, index) => `${index ? 'L' : 'M'}${Math.max(0, Math.min(100, Number(point?.[0]) || 0)).toFixed(3)} ${Math.max(0, Math.min(100, Number(point?.[1]) || 0)).toFixed(3)}`).join(' ') + ' Z';
+    const terrain = this.root.querySelector('#lw-terrain');
+    const regionState = new Map(state.regions.map((region) => [region.id, region]));
+    terrain.innerHTML = [
+      ...(state.topology?.landmasses || []).map((landmass) => `<path class="lw-landmass" d="${polygonPath(landmass.polygon)}"><title>${escapeHtml(landmass.name)}</title></path>`),
+      ...(state.topology?.provinces || []).map((province) => { const control = regionState.get(province.id); return `<path class="lw-province ${escapeHtml(control?.owner || 'neutral')} biome-${escapeHtml(province.biome || 'temperate')}${control?.current ? ' current' : ''}" d="${polygonPath(province.polygon)}"><title>${escapeHtml(province.name)}${control ? ` · ${escapeHtml(control.ownerName)}` : ''}</title></path>`; }),
+    ].join('');
     const routes = this.root.querySelector('#lw-routes');
-    routes.innerHTML = state.routes.map((route) => `<line x1="${route.from[0]}" y1="${route.from[1]}" x2="${route.to[0]}" y2="${route.to[1]}" class="${route.state}"/>`).join('');
+    routes.innerHTML = `<defs><marker id="lw-route-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z"/></marker></defs>` + state.routes.map(livingWorldRouteLine).join('');
     const nodes = this.root.querySelector('#lw-map-nodes');
+    const displayedParties = this._clusterLivingWorldParties(state.parties);
     nodes.innerHTML = [
       ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)} · ${escapeHtml(item.ownerName)}${item.controlState !== 'controlled' ? ` · ${escapeHtml(item.controlState)}` : ''}</small></button>`),
-      ...state.parties.map((item) => `<button class="lw-node army ${item.owner}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>⚑</i><b>${escapeHtml(item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.intent)}</small></button>`),
+      ...displayedParties.map((item) => `<button class="lw-node army ${item.owner}${item.moving ? ' moving' : ''}${item.count > 1 ? ' cluster' : ''}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>${item.count > 1 ? item.count : '⚑'}</i><b>${escapeHtml(item.count > 1 ? `${item.count} parties` : item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.count > 1 ? 'regional force' : item.intent)}</small></button>`),
+      ...(state.sieges || []).map((item) => `<button class="lw-node siege" style="left:${item.x}%;top:${item.y}%" data-kind="siege" data-id="${escapeHtml(item.id)}"><i>⚔</i><b>SIEGE</b><small>${Math.round(Number(item.progress || 0) * 100)}%</small></button>`),
+      ...(state.hotspots || []).map((item) => `<button class="lw-node hotspot ${escapeHtml(item.type)}" style="left:${item.x}%;top:${item.y}%" data-kind="hotspot" data-id="${escapeHtml(item.id)}"><i>${item.type === 'pursuit' ? '➤' : item.type === 'raid' ? '♦' : '⚔'}</i><b>${escapeHtml(item.label)}</b><small>${escapeHtml(item.state || 'active')}</small></button>`),
       ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
     ].join('');
+    const status = this.root.querySelector('#lw-map-status');
+    const normalStatus = livingWorldReadyStatus(state);
+    status.dataset.state = this._livingWorldStatus.mode;
+    status.textContent = this._livingWorldStatus.message || normalStatus;
+    this._applyLivingWorldView();
     const missions = this.root.querySelector('#lw-missions');
     const companyBox = this.root.querySelector('#lw-company');
     const encounterBox = this.root.querySelector('#lw-encounters');
@@ -2342,17 +2402,23 @@ export class UI {
     const state = this._livingWorld;
     const item = kind === 'settlement' ? state.settlements.find((entry) => entry.id === id)
       : kind === 'army' ? state.parties.find((entry) => entry.id === id)
+      : kind === 'siege' ? state.sieges.find((entry) => entry.id === id)
+      : kind === 'hotspot' ? state.hotspots.find((entry) => entry.id === id)
       : state.missions.find((entry) => entry.id === id);
     if (!item) return;
     const selection = this.root.querySelector('#lw-selection');
     const canFastTravel = kind === 'settlement' && item.known && item.fastTravel;
     const canTravel = kind === 'settlement' && item.known && item.reachable;
     const canDeploy = kind === 'mission' && item.known && item.unlocked;
-    const travelLabel = canFastTravel ? 'FAST TRAVEL' : item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
-    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : 'DESTINATION'}</small><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.blurb || item.intent || `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`)}</p>${canTravel ? `<button class="menubtn primary" id="lw-act">${travelLabel}</button>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}`;
+    const travelLabel = item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
+    const marketRows = kind === 'settlement' && state.party.locationId === item.id ? (state.markets || []).filter((row) => row.location_id === item.id) : [];
+    const market = marketRows.length ? `<div class="lw-market"><small>MARKET</small>${marketRows.map((row) => `<div><b>${escapeHtml(row.commodity_key)}</b><span>stock ${Number(row.stock) || 0}</span><button class="tbtn" data-trade="buy" data-key="${escapeHtml(row.commodity_key)}">BUY ${Number(row.buy_price) || 0}</button><button class="tbtn" data-trade="sell" data-key="${escapeHtml(row.commodity_key)}">SELL ${Number(row.sell_price) || 0}</button></div>`).join('')}</div>` : '';
+    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : kind === 'hotspot' ? 'WORLD HOTSPOT' : 'DESTINATION'}</small><b>${escapeHtml(item.name || item.label || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : kind === 'hotspot' ? `${item.type} · ${item.state || 'active'}` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<div class="lw-travel-actions"><button class="menubtn primary" data-travel="travel">${travelLabel}</button>${canFastTravel ? '<button class="menubtn" data-travel="fast">FAST TRAVEL</button>' : ''}</div>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : kind === 'settlement' && state.party.locationId === item.id ? '' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}${market}`;
+    for (const action of selection.querySelectorAll('[data-travel]')) action.onclick = () => this.cb.onLivingWorldFastTravel?.(item.id, action.dataset.travel);
+    for (const action of selection.querySelectorAll('[data-trade]')) action.onclick = () => this.cb.onLivingWorldTrade?.({ locationId: item.id, commodityKey: action.dataset.key, side: action.dataset.trade, quantity: 1 });
     const action = selection.querySelector('#lw-act');
     if (action) action.onclick = () => {
-      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id);
+      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id, 'travel');
       else if (canDeploy) this.cb.onLivingWorldMission?.(item.levelId, { mission: item, party: state.party });
       else this.cb.onLivingWorldTrackParty?.(item.id);
     };

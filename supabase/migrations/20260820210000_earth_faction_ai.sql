@@ -63,7 +63,7 @@ declare
   v_route public.world_routes%rowtype;
   v_order public.world_movement_orders%rowtype;
   v_location public.world_locations%rowtype;
-  v_goal text; v_reason text; v_target uuid; v_slot integer; v_duration bigint;
+  v_goal text; v_reason text; v_target uuid; v_pursuit_target uuid; v_slot integer; v_duration bigint;
   v_processed integer:=0; v_sequence bigint; v_shard text;
 begin
   if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
@@ -84,7 +84,7 @@ begin
   -- Advance only movement owned by this region. Cross-region arrival remains a
   -- durable handoff and is never completed by this function.
   update public.world_parties p set
-    route_progress=least(1,(v_state.simulation_tick+1-o.start_tick)::numeric/greatest(1,o.expected_arrival_tick-o.start_tick)),
+    route_progress=least(1,greatest(0,(v_state.simulation_tick+1-o.start_tick)::numeric/greatest(1,o.expected_arrival_tick-o.start_tick))),
     fatigue=least(100,p.fatigue+0.05),revision=p.revision+1,updated_at=now()
   from public.world_movement_orders o join public.world_routes r on r.id=o.route_id
   where o.party_id=p.id and p.region_id=p_region and o.status='moving'
@@ -116,6 +116,8 @@ begin
       )
       and p.kind in ('ai','caravan','patrol','garrison')
       and p.stance<>'engaged'
+      and not exists(select 1 from public.world_region_handoffs h where h.party_id=p.id and h.status='pending')
+      and not exists(select 1 from public.world_sieges s where s.attacker_party_id=p.id and s.status in('preparing','active','breached'))
     -- Rotate the bounded work set by authoritative tick. A fixed ID prefix
     -- would starve every army after p_max_actions in a large region.
     order by mod(mod(hashtextextended(p.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),p.id
@@ -127,23 +129,53 @@ begin
     -- abs(min_bigint) can overflow even though the choice only needs 7 slots.
     v_slot:=mod(mod(hashtextextended(v_party.id::text||':'||v_state.simulation_tick::text,0),7)+7,7)::integer;
     v_goal:=(array['patrol','trade','raid','reinforce','pursue','defend','siege_prepare'])[v_slot+1];
-    if v_party.kind='caravan' then v_goal:='trade';
-    elsif v_party.kind='patrol' and v_slot in (1,3,5) then v_goal:='patrol';
+    if v_party.strategic_role='caravan' or v_party.kind='caravan' then v_goal:='trade';
+    elsif v_party.strategic_role='patrol' then v_goal:='patrol';
+    elsif v_party.strategic_role='raider' then v_goal:='raid';
+    elsif v_party.strategic_role='scout' then v_goal:='pursue';
+    elsif v_party.strategic_role='siege_force' then v_goal:='siege_prepare';
     elsif v_party.kind='garrison' then v_goal:=case when v_slot=6 then 'reinforce' else 'defend' end;
+    end if;
+
+    v_pursuit_target:=null;
+    if v_goal='pursue' then
+      select coalesce(t.location_id,tr.destination_id) into v_pursuit_target
+      from public.world_pursuits po join public.world_parties t on t.id=po.target_party_id
+      left join public.world_routes tr on tr.id=t.route_id
+      where po.pursuer_party_id=v_party.id and po.state='active' order by po.started_tick desc limit 1;
     end if;
 
     -- Pick an outgoing route deterministically. Direction stays authoritative;
     -- a reverse trip requires a reverse route record.
     v_route:=null; v_target:=null;
     if v_party.location_id is not null then
-      select r.* into v_route from public.world_routes r
-      where r.origin_region_id=p_region and r.destination_region_id=p_region
-        and r.origin_id=v_party.location_id
-      order by mod(mod(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),r.id
-      limit 1;
+      if v_goal='pursue' and v_pursuit_target is not null then
+        with recursive chase(location_id,first_route,total_distance,visited,depth) as(
+          select r.destination_id,r.id,r.distance::numeric(20,3),array[r.origin_id,r.destination_id],1
+          from public.world_routes r where r.origin_id=v_party.location_id and r.control_state<>'blocked'
+            and not coalesce((r.blockade_state->>'closed')::boolean,false)
+          union all
+          select r.destination_id,c.first_route,(c.total_distance+r.distance)::numeric(20,3),c.visited||r.destination_id,c.depth+1
+          from chase c join public.world_routes r on r.origin_id=c.location_id
+          where c.depth<24 and not r.destination_id=any(c.visited) and r.control_state<>'blocked'
+            and not coalesce((r.blockade_state->>'closed')::boolean,false)
+        )
+        select r.* into v_route from chase c join public.world_routes r on r.id=c.first_route
+        where c.location_id=v_pursuit_target order by c.total_distance,c.first_route limit 1;
+      else
+        select r.* into v_route from public.world_routes r
+        where r.origin_region_id=p_region and r.origin_id=v_party.location_id
+          and r.control_state<>'blocked' and not coalesce((r.blockade_state->>'closed')::boolean,false)
+        order by mod(mod(hashtextextended(r.id::text||':'||v_state.simulation_tick::text,0),2147483647)+2147483647,2147483647),r.id
+        limit 1;
+      end if;
       if found then v_target:=v_route.destination_id; end if;
     end if;
     select * into v_location from public.world_locations where id=coalesce(v_target,v_party.location_id);
+    if v_goal='pursue' and v_route.id is not null then
+      update public.world_pursuits set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('chaseRouteId',v_route.id,'targetLocationId',v_pursuit_target,'chaseTick',v_state.simulation_tick)
+        where pursuer_party_id=v_party.id and state='active';
+    end if;
 
     v_reason:=case v_goal
       when 'patrol' then 'Securing a known road and scouting nearby movement.'
@@ -159,7 +191,8 @@ begin
       revision=revision+1,updated_at=now() where id=v_party.id;
 
     insert into public.world_faction_region_states(region_id,faction_id,current_goal,goal_reason,target_location_id,ownership_pressure,evaluated_tick)
-      values(p_region,v_party.owner_faction_id,v_goal,v_reason,coalesce(v_target,v_party.location_id),
+      values(p_region,v_party.owner_faction_id,v_goal,v_reason,
+        case when v_route.destination_region_id=p_region then v_target else v_party.location_id end,
         case when v_location.owner_faction_id is distinct from v_party.owner_faction_id and v_goal in ('raid','siege_prepare') then 1 else 0 end,
         v_state.simulation_tick)
     on conflict(region_id,faction_id) do update set current_goal=excluded.current_goal,
@@ -169,6 +202,7 @@ begin
 
     if v_route.id is not null and v_goal in ('patrol','trade','raid','reinforce','pursue','siege_prepare')
       and not exists(select 1 from public.world_movement_orders where party_id=v_party.id and status in ('queued','moving'))
+      and not exists(select 1 from public.world_caravan_plans where party_id=v_party.id and state<>'suspended')
     then
       v_duration:=greatest(1,ceil(v_route.distance/greatest(v_party.speed,0.001)))::bigint;
       insert into public.world_movement_orders(id,party_id,route_id,issued_tick,start_tick,expected_arrival_tick,status)
