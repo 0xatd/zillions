@@ -189,31 +189,38 @@ try{
   const engagement=(await q('select id from public.world_engagements where encounter_id=$1',[encounterId])).rows[0];
   assert.ok(engagement,'battle engagement must be created');
   const assignment=(await q("select public.living_world_issue_battle($1,$2,$3,$4) result",[battlePlayer.userId,engagement.id,battleEncounter.revision,`hosted-${runId}-autosim`])).rows[0].result;
-  const beforeBattle=(await q(`select jsonb_build_object(
-    'healthy',(select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in($1,$2)),
-    'prisoners',(select coalesce(sum(quantity),0) from public.world_prisoners where captor_party_id in($1,$2)),
-    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured')),
-    'playerCargo',(select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'),
-    'defenderCargo',(select quantity from public.world_cargo where party_id=$2 and commodity_key='grain')) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
+  activeStep='hosted-battle-writeback';
   const battleResult=autosimBattleAssignment(assignment);
   const casualtyTotal=battleResult.casualties.reduce((sum,row)=>sum+Number(row.killed||0)+Number(row.wounded||0),0);
   const prisonerTotal=battleResult.prisoners.reduce((sum,row)=>sum+Number(row.quantity||0),0);
   assert.ok(casualtyTotal+prisonerTotal>0,'hosted autosim must remove combatants through casualties or capture');
   assert.ok(prisonerTotal>0,'hosted autosim must produce prisoners');
   assert.ok(battleResult.cargoTransfers.length>0,'hosted autosim must produce cargo transfers');
+  const cargoTransfer=battleResult.cargoTransfers[0];
+  const cargoBefore=(await q(`select
+    (select quantity from public.world_cargo where party_id=$1 and commodity_key=$3) source,
+    (select quantity from public.world_cargo where party_id=$2 and commodity_key=$3) destination`,
+    [cargoTransfer.fromPartyId,cargoTransfer.toPartyId,cargoTransfer.commodityKey])).rows[0];
+  const beforeBattle=(await q(`select jsonb_build_object(
+    'healthy',(select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in($1,$2)),
+    'prisoners',(select coalesce(sum(quantity),0) from public.world_prisoners where captor_party_id in($1,$2)),
+    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured'))) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
   const battleCommit=(await q('select public.living_world_commit_battle($1,$2,$3,$4) result',[assignment.id,assignment.nonce,battleEncounter.revision,battleResult])).rows[0].result;
   assert.equal(battleCommit.duplicate,false);
   assert.equal((await q('select state from public.world_encounters where id=$1',[encounterId])).rows[0].state,'resolved');
   const afterBattle=(await q(`select jsonb_build_object(
     'healthy',(select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in($1,$2)),
     'prisoners',(select coalesce(sum(quantity),0) from public.world_prisoners where captor_party_id in($1,$2)),
-    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured')),
-    'playerCargo',(select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'),
-    'defenderCargo',(select quantity from public.world_cargo where party_id=$2 and commodity_key='grain')) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
+    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured'))) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
+  const cargoAfter=(await q(`select
+    (select quantity from public.world_cargo where party_id=$1 and commodity_key=$3) source,
+    (select quantity from public.world_cargo where party_id=$2 and commodity_key=$3) destination`,
+    [cargoTransfer.fromPartyId,cargoTransfer.toPartyId,cargoTransfer.commodityKey])).rows[0];
   assert.ok(Number(afterBattle.healthy)<Number(beforeBattle.healthy),'battle commit must persist stack casualties');
   assert.ok(Number(afterBattle.prisoners)>Number(beforeBattle.prisoners),'battle commit must persist prisoners');
   assert.ok(Number(afterBattle.companyConsequences)>Number(beforeBattle.companyConsequences),'battle commit must persist player company consequences');
-  assert.notDeepEqual([afterBattle.playerCargo,afterBattle.defenderCargo],[beforeBattle.playerCargo,beforeBattle.defenderCargo],'battle commit must persist cargo transfer');
+  assert.equal(Number(cargoAfter.source),Number(cargoBefore.source)-Number(cargoTransfer.quantity),'battle commit must debit the exact loser cargo row');
+  assert.equal(Number(cargoAfter.destination),Number(cargoBefore.destination||0)+Number(cargoTransfer.quantity),'battle commit must credit the exact winner cargo row');
 
   const telemetry=(await q(`select
     coalesce(max(simulation_tick)-min(simulation_tick),0)::integer lag,
