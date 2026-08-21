@@ -192,7 +192,7 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
   ]);
   const topology = sanitizeWorldTopology(manifest, viewport);
   const provinceIds = (topology?.provinces || []).map((row) => row.id);
-  const [provinces, viewportParties, locations, reports] = await Promise.all([
+  const [provinces, viewportParties, initialLocations, reports] = await Promise.all([
     provinceIds.length ? restRows(config, 'world_provinces', `select=id,planet_id,key,name,bounds,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,revision&id=in.${inIds(provinceIds)}`, fetchImpl) : Promise.resolve([]),
     provinceIds.length ? restRows(config, 'world_parties', `select=${PARTY_SELECT}&region_id=in.${inIds(provinceIds)}`, fetchImpl) : Promise.resolve([]),
     provinceIds.length ? restRows(config, 'world_locations', `select=id,province_id,key,name,kind,position,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,services,revision&province_id=in.${inIds(provinceIds)}`, fetchImpl) : Promise.resolve([]),
@@ -211,10 +211,10 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
     socialParty = { ...socialParties[0], members: members.map((member) => ({ ...member, worldParty: memberParties.find((party) => party.owner_user_id === member.user_id) || null })) };
   }
   const parties = mergeById(ownParties, memberParties, viewportParties);
-  const partyIds = parties.map((row) => row.id), ownPartyIds = ownParties.map((row) => row.id), locationIds = locations.map((row) => row.id);
+  const partyIds = parties.map((row) => row.id), ownPartyIds = ownParties.map((row) => row.id), locationIds = initialLocations.map((row) => row.id);
   const [routes, markets, armies, sieges, supplies, cargo, caravans, raids, encounters, pursuits] = await Promise.all([
     provinceIds.length ? restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,origin_region_id,destination_region_id,distance,terrain,danger,owner_faction_id,claimed_by_faction_id,control_strength,control_state,blockade_state,revision&or=(origin_region_id.in.${inIds(provinceIds)},destination_region_id.in.${inIds(provinceIds)})`, fetchImpl) : Promise.resolve([]),
-    locations.length ? restRows(config, 'world_markets', `select=location_id,commodity_key,stock,buy_price,sell_price,revision&location_id=in.(${locations.map((row) => row.id).join(',')})`, fetchImpl) : [],
+    initialLocations.length ? restRows(config, 'world_markets', `select=location_id,commodity_key,stock,buy_price,sell_price,revision&location_id=in.(${initialLocations.map((row) => row.id).join(',')})`, fetchImpl) : [],
     partyIds.length ? restRows(config, 'world_armies', `select=party_id,combat_power&party_id=in.${inIds(partyIds)}`, fetchImpl) : Promise.resolve([]),
     provinceIds.length ? restRows(config, 'world_sieges', `select=id,region_id,location_id,attacker_party_id,attacker_faction_id,defender_faction_id,status,progress,started_tick,revision&region_id=in.${inIds(provinceIds)}&status=in.(preparing,active,breached)`, fetchImpl) : Promise.resolve([]),
     ownPartyIds.length ? restRows(config, 'world_supplies', `select=party_id,supply_key,quantity,consumption_per_tick,revision&party_id=in.${inIds(ownPartyIds)}`, fetchImpl) : Promise.resolve([]),
@@ -224,6 +224,13 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
     ownPartyIds.length ? restRows(config, 'world_encounters', `select=id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot,revision&shard_id=eq.${encoded}&or=(attacker_party_id.in.${inIds(ownPartyIds)},defender_party_id.in.${inIds(ownPartyIds)})&state=in.(choosing,negotiating,battle,rearguard,awaiting_allies)`, fetchImpl) : Promise.resolve([]),
     partyIds.length ? restRows(config, 'world_pursuits', `select=id,pursuer_party_id,target_party_id,started_tick,state,result,revision&shard_id=eq.${encoded}&or=(pursuer_party_id.in.${inIds(partyIds)},target_party_id.in.${inIds(partyIds)})&state=eq.active`, fetchImpl) : Promise.resolve([]),
   ]);
+  // Routes that touch the viewport may terminate in an adjacent province. Load
+  // only the missing endpoint geometry so moving parties can be projected
+  // without exposing the adjacent settlement's services or market data.
+  const loadedLocationIds = new Set(initialLocations.map((row) => row.id));
+  const missingEndpointIds = [...new Set(routes.flatMap((route) => [route.origin_id, route.destination_id]).filter((id) => id && !loadedLocationIds.has(id)))];
+  const endpointLocations = missingEndpointIds.length ? await restRows(config, 'world_locations', `select=id,province_id,position,owner_faction_id&id=in.(${missingEndpointIds.join(',')})`, fetchImpl) : [];
+  const locations = mergeById(initialLocations, endpointLocations);
   const engagements = encounters.length ? await restRows(config, 'world_engagements', `select=id,encounter_id,mode,state,current_round,started_tick,revision&encounter_id=in.${inIds(encounters)}&state=in.(active,retreat)`, fetchImpl) : [];
   return { shard: shards[0], planet, factions, manifest, regions: provinces, parties, armies, sieges, pursuits, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, encounters, engagements, locations, routes, markets };
 }

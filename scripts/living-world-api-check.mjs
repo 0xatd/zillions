@@ -85,4 +85,13 @@ assert.ok(requestedUrls.some((url) => url.includes('/world_locations?') && url.i
 assert.ok(requestedUrls.some((url) => url.includes('/world_routes?') && url.includes('origin_region_id.in.(near)')));
 assert.ok(requestedUrls.filter((url) => url.includes('/world_parties?')).every((url) => url.includes('owner_user_id=eq.actor-1') || url.includes('region_id=in.(near)')), 'party fetches are actor- or viewport-bounded');
 assert.ok(requestedUrls.filter((url) => /world_(provinces|locations|routes)\?/.test(url)).every((url) => !url.includes('far')), 'far region is absent from staged queries');
+const crossingRows = { ...mockRows,
+  world_locations: [{ id: 'home', province_id: 'near', owner_faction_id: 'blue', position: { x: 10, y: 10 } }],
+  world_parties: [{ id: 'mine', region_id: 'near', owner_user_id: 'actor-1', owner_faction_id: 'blue', route_id: 'cross-region', route_progress: .25 }],
+  world_routes: [{ id: 'cross-region', origin_id: 'home', destination_id: 'adjacent', origin_region_id: 'near', destination_region_id: 'far' }],
+};
+const crossingFetch = async (url) => { if (String(url).includes('/rpc/living_world_projection_manifest')) return { ok: true, async json() { return manifestRow; } }; const table=String(url).match(/\/rest\/v1\/([^?]+)/)?.[1]; if(table==='world_locations'&&String(url).includes('id=in.(adjacent)'))return{ok:true,async json(){return[{id:'adjacent',province_id:'far',owner_faction_id:'blue',position:{x:90,y:10}}];}};return{ok:true,async json(){return crossingRows[table]||[];}}; };
+const crossingSnapshot=await loadSnapshot({url:'https://mock.invalid',serviceKey:'service'},'earth-1','actor-1',crossingFetch,nearViewport);
+const crossingProjection=filterProjection(crossingSnapshot,'actor-1',nearViewport);
+assert.deepEqual(crossingProjection.routes.map((row)=>row.id),['cross-region']);assert.deepEqual(crossingProjection.parties.map((row)=>row.id),['mine']);assert.ok(crossingProjection.locations.some((row)=>row.id==='adjacent'),'loader must hydrate minimal cross-region endpoint geometry');
 console.log('living world API check passed');
