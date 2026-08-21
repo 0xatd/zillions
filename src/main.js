@@ -711,7 +711,7 @@ class App {
       this.ui.setLivingWorldState({});
       const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
       const tutorial = error?.message === 'tutorial_campaign_required';
-      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'The persistent world is not initialized on this build.' : 'World intelligence could not be refreshed.', 'bad', 3000);
+      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);
       return null;
     }
   }
@@ -1669,7 +1669,10 @@ class App {
         try { await this._ensureAuthoritativeEconomy(character); }
         catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
       }
-      this._saveProfile();
+      // Auth events are read/hydration boundaries. Persisting account metadata
+      // here calls auth.updateUser(), which emits another auth event and used
+      // to recurse until Supabase rate-limited /auth/v1/user.
+      this._storeProfileLocally();
       this.ui.setProfile(this.profile);
       this.ui.setCampaign(this.profile.campaign || 0);
       if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -2059,8 +2062,12 @@ class App {
     return players;
   }
 
-  _saveProfile() {
+  _storeProfileLocally() {
     try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+  }
+
+  _saveProfile() {
+    this._storeProfileLocally();
     if (this.auth?.isSignedIn()) {
       this.auth.syncLocalProfile(this.profile).catch((err) => console.warn('profile sync failed', err));
     }

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { AuthClient } from '../src/auth.js';
 
 function query(table, writes) {
@@ -64,5 +65,13 @@ assert.equal(auth.user.user_metadata.campaign, 5,
 assert.equal(auth.profileFromBundle({
   profile: { handle: 'ted', display_name: 'ted', username_set: true }, stats: {},
 }).campaign, 5, 'persisted campaign progress must survive the next cloud hydration');
+
+const mainSource = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+const applyAuthSource = mainSource.match(/async _applyAuth\(status\) \{([\s\S]*?)\n  \}\n\n  _restartOrReturn/)?.[1] || '';
+assert.ok(applyAuthSource, 'auth hydration implementation must remain inspectable');
+assert.doesNotMatch(applyAuthSource, /this\._saveProfile\(\)/,
+  'auth hydration must not write account metadata and trigger a recursive auth event');
+assert.match(applyAuthSource, /this\._storeProfileLocally\(\)/,
+  'auth hydration must still preserve the hydrated profile in local storage');
 
 console.log('campaign cloud check passed');
