@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 const ids = { assignment: randomUUID(), engagement: randomUUID(), encounter: randomUUID(), party: randomUUID(), stack: randomUUID(), actor: randomUUID() };
 const secret = 's'.repeat(48), authoritySecret = 'a'.repeat(48);
-const assignment = { id: ids.assignment, engagement_id: ids.engagement, encounter_id: ids.encounter, encounter_revision: 7, requested_by: ids.actor, nonce: randomUUID(), expires_at: new Date(Date.now() + 60_000).toISOString() };
+const assignment = { id: ids.assignment, engagement_id: ids.engagement, encounter_id: ids.encounter, encounter_revision: 7, requested_by: ids.actor, nonce: randomUUID(), state:'issued', expires_at: new Date(Date.now() + 60_000).toISOString() };
 const token = signBattleAssignment(assignment, secret);
 assert.equal(verifyBattleAssignment(token, secret).encounterRevision, 7);
 assert.throws(() => verifyBattleAssignment(`${token}x`, secret), /invalid_battle_assignment/);

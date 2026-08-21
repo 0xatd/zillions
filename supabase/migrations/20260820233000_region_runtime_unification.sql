@@ -228,6 +228,7 @@ begin
   loop
     select * into v_attacker from public.world_parties where id=case when exists(select 1 from public.world_factions f where f.id=(select owner_faction_id from public.world_parties where id=v_pair.a_id) and f.kind='hostile') or (select stance from public.world_parties where id=v_pair.a_id)='hostile' then v_pair.a_id else v_pair.b_id end;
     select * into v_defender from public.world_parties where id=case when v_attacker.id=v_pair.a_id then v_pair.b_id else v_pair.a_id end;
+    if v_attacker.stance='engaged' or v_defender.stance='engaged' then continue; end if;
     v_snapshot:=jsonb_build_object(
       v_attacker.id::text,jsonb_build_object('troops',coalesce((select sum(s.healthy) from public.world_unit_stacks s join public.world_armies ar on ar.id=s.army_id where ar.party_id=v_attacker.id),0),'scouting',0,'supplies',coalesce((select sum(quantity) from public.world_supplies where party_id=v_attacker.id),0)),
       v_defender.id::text,jsonb_build_object('troops',coalesce((select sum(s.healthy) from public.world_unit_stacks s join public.world_armies ar on ar.id=s.army_id where ar.party_id=v_defender.id),0),'scouting',0,'supplies',coalesce((select sum(quantity) from public.world_supplies where party_id=v_defender.id),0))

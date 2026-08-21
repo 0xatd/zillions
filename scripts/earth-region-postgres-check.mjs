@@ -133,7 +133,8 @@ try {
 
   // A resolved strategic encounter must create one tactical engagement. The
   // assignment snapshot is immutable, and its result commits exactly once.
-  const locationId = (await admin.query('select id from public.world_locations where province_id=$1 order by id limit 1', [greenfall.id])).rows[0].id;
+  const locationId='61000000-0000-4000-8000-000000000099';
+  await admin.query("insert into public.world_locations(id,province_id,key,name,kind,position) values($1,$2,'qa-contact-ground','QA Contact Ground','ruin','{\"x\":77,\"z\":77}')",[locationId,greenfall.id]);
   const defenderPartyId = '30000000-0000-4000-8000-000000000002';
   const attackerArmyId = (await admin.query('select id from public.world_armies where party_id=$1', [firstEntry.partyId])).rows[0].id;
   const defenderArmyId = '40000000-0000-4000-8000-000000000002';

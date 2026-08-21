@@ -26,6 +26,7 @@ declare v_eng public.world_engagements%rowtype; v_enc public.world_encounters%ro
 begin
   if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
   if p_actor is null or p_request_id is null or length(p_request_id) not between 1 and 96 then raise exception 'invalid_request'; end if;
+  update public.world_battle_assignments set state='expired' where state='issued' and expires_at<=now();
   select * into v_assignment from public.world_battle_assignments where requested_by=p_actor and request_id=p_request_id;
   if found then
     if v_assignment.engagement_id<>p_engagement or v_assignment.encounter_revision<>p_encounter_revision then raise exception 'idempotency_conflict'; end if;
