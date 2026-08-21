@@ -82,10 +82,17 @@ export function filterProjection(snapshot, actorId) {
         route_id: member.worldParty.route_id, route_progress: member.worldParty.route_progress, stance: member.worldParty.stance,
       } : null })),
   } : null;
+  const visiblePartyIds = new Set(parties.map((party) => party.id));
   return { ok: true, shard: snapshot.shard || null, planet: snapshot.planet || null,
     factions: (snapshot.factions || []).filter((faction) => factionIds.has(faction.id)), regions,
     ownParties: own, socialParty, locations, routes,
-    markets: (snapshot.markets || []).filter((market) => marketLocationIds.has(market.location_id)), parties };
+    markets: (snapshot.markets || []).filter((market) => marketLocationIds.has(market.location_id)), parties,
+    logistics: {
+      supplies: (snapshot.supplies || []).filter((row) => ownIds.has(row.party_id)),
+      cargo: (snapshot.cargo || []).filter((row) => ownIds.has(row.party_id)),
+      caravans: (snapshot.caravans || []).filter((row) => visiblePartyIds.has(row.party_id)),
+      raids: (snapshot.raids || []).filter((row) => ownIds.has(row.attacker_party_id) || ownIds.has(row.target_party_id)),
+    } };
 }
 
 async function authenticate(authorization, config, fetchImpl) {
@@ -100,13 +107,17 @@ async function restRows(config, table, query, fetchImpl) {
 }
 async function loadSnapshot(config, shardId, actorId, fetchImpl) {
   const encoded = encodeURIComponent(shardId);
-  const [shards, planets, provinces, parties, reports, ownMemberships] = await Promise.all([
+  const [shards, planets, provinces, parties, reports, ownMemberships, supplies, cargo, caravans, raids] = await Promise.all([
     restRows(config, 'world_shards', `select=id,name,status,simulation_tick,ruleset_version,revision&id=eq.${encoded}&limit=1`, fetchImpl),
     restRows(config, 'world_planets', `select=id,system_id,shard_id,key,name,status,revision&shard_id=eq.${encoded}&limit=1`, fetchImpl),
     restRows(config, 'world_provinces', `select=id,planet_id,key,name,bounds,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,revision&shard_id=eq.${encoded}`, fetchImpl),
     restRows(config, 'world_parties', `select=id,region_id,owner_user_id,owner_faction_id,name,kind,location_id,route_id,route_progress,speed,morale,fatigue,stance,strategic_intent,strategic_reason,strategic_target_location_id,strategic_intent_tick,revision&shard_id=eq.${encoded}`, fetchImpl),
     restRows(config, 'world_scouting_reports', `select=observer_party_id,subject_party_id,location_id,observed_tick,expires_tick,accuracy,intelligence&shard_id=eq.${encoded}`, fetchImpl),
     restRows(config, 'social_party_members', `select=party_id,user_id,role&user_id=eq.${encodeURIComponent(actorId)}`, fetchImpl),
+    restRows(config, 'world_supplies', 'select=party_id,supply_key,quantity,consumption_per_tick,revision', fetchImpl),
+    restRows(config, 'world_cargo', 'select=party_id,commodity_key,quantity,reserved_quantity,revision', fetchImpl),
+    restRows(config, 'world_caravan_plans', 'select=id,party_id,origin_location_id,destination_location_id,commodity_key,target_quantity,state,revision', fetchImpl),
+    restRows(config, 'world_raid_orders', 'select=id,attacker_party_id,target_party_id,resolve_tick,state,result', fetchImpl),
   ]);
   const provinceIds = provinces.map((row) => row.id);
   const planet = planets[0] || null;
@@ -122,14 +133,14 @@ async function loadSnapshot(config, shardId, actorId, fetchImpl) {
     const memberParties = parties.filter((party) => memberIds.includes(party.owner_user_id));
     socialParty = { ...socialParties[0], members: members.map((member) => ({ ...member, worldParty: memberParties.find((party) => party.owner_user_id === member.user_id) || null })) };
   }
-  if (!provinceIds.length) return { shard: shards[0], planet, factions, regions: [], parties, socialParty, scoutingReports: reports, locations: [], routes: [], markets: [] };
+  if (!provinceIds.length) return { shard: shards[0], planet, factions, regions: [], parties, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, locations: [], routes: [], markets: [] };
   const inList = `(${provinceIds.join(',')})`;
   const locations = await restRows(config, 'world_locations', `select=id,province_id,key,name,kind,position,owner_faction_id,claimed_by_faction_id,control_strength,garrison_strength,unrest,control_state,siege_state,services,revision&province_id=in.${inList}`, fetchImpl);
   const [routes, markets] = await Promise.all([
     restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,origin_region_id,destination_region_id,distance,terrain,danger,owner_faction_id,claimed_by_faction_id,control_strength,control_state,blockade_state,revision&origin_region_id=in.${inList}`, fetchImpl),
     locations.length ? restRows(config, 'world_markets', `select=location_id,commodity_key,stock,buy_price,sell_price,revision&location_id=in.(${locations.map((row) => row.id).join(',')})`, fetchImpl) : [],
   ]);
-  return { shard: shards[0], planet, factions, regions: provinces, parties, socialParty, scoutingReports: reports, locations, routes, markets };
+  return { shard: shards[0], planet, factions, regions: provinces, parties, socialParty, scoutingReports: reports, supplies, cargo, caravans, raids, locations, routes, markets };
 }
 
 export function createLivingWorldHandler(deps = {}) {
