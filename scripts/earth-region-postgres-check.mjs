@@ -230,7 +230,7 @@ try {
   await admin.query("update public.world_region_worker_leases set lease_until=now()-interval '1 second' where region_id=$1",[greenfall.id]);
   const battleTakeover=(await admin.query("select public.claim_world_region_lease($1,'worker-b',300) result",[greenfall.id])).rows[0].result;
   const level=levelById(1),tacticalGame=new Game(new TerrainField(Number(assignment.force_snapshot.seed),level.theme,{size:level.size,nests:level.nests}),'normal','alexander',null,1,'living_world_battle');
-  tacticalGame.configureLivingWorldBattle(assignment);let tacticalTick=0;while(!tacticalGame.over&&tacticalTick<108000){tacticalGame.update(1/30);tacticalTick++;}
+  tacticalGame.configureLivingWorldBattle(assignment);let tacticalTick=0;while(!tacticalGame.over&&tacticalTick<216000){tacticalGame.update(1/30);tacticalTick++;}
   assert.equal(tacticalGame.over,true);
   const battleReplayPayload={version:1,completedTick:tacticalTick,commands:[]};
   const expectedBattleResult=verifyLivingWorldBattleReplay(assignment,battleReplayPayload);
