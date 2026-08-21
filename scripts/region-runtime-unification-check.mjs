@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createLivingWorldWorkerHandler } from '../api/living-world-worker.js';
+import { enforceLivingWorldRateLimit } from '../api/living-world-rate-limit.js';
 
 const sql=readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql',import.meta.url),'utf8');
 assert.match(sql,/living_world_process_shard[\s\S]*shard_worker_retired/,'legacy shard authority must fail closed');
@@ -12,9 +13,16 @@ assert.match(sql,/process_world_region_logistics\(p_region,v_tick,p_worker,p_lea
 assert.match(sql,/request_world_region_handoff/,'cross-region departure must create a durable handoff');
 assert.match(sql,/complete_world_region_handoff/,'the destination region must complete the durable handoff');
 assert.doesNotMatch(sql,/random\s*\(/i,'runtime state changes must remain deterministic');
+assert.match(sql,/world_api_rate_buckets/,'mutation quotas must use durable database buckets');
+assert.match(sql,/pg_advisory_xact_lock\(hashtextextended\('world-rate:/,'fresh request ids must serialize under the same actor and scope quota');
+const limited=()=>enforceLivingWorldRateLimit({config:{url:'x',serviceKey:'x'},actor:'actor',scope:'battle:autosim',limit:4,override:async()=>({allowed:false,retryAfterSeconds:42})});
+await assert.rejects(limited,error=>error.status===429&&error.retryAfter===42);
 
 const response=()=>({status:0,writeHead(status){this.status=status;},end(value){this.body=JSON.parse(value);},setHeader(){}});
-const handler=createLivingWorldWorkerHandler({secret:'cron',config:{url:'https://example.invalid',serviceKey:'test'},workerId:'qa-worker',regions:async()=>[{region_id:'region-a'}],claim:async()=>({ok:true,leaseEpoch:4}),process:async(region,worker,epoch)=>({region,worker,epoch,tick:9})});
-let res=response();await handler({method:'GET',headers:{authorization:'Bearer wrong'}},res);assert.equal(res.status,401);
+let touched=false;
+const inactive=createLivingWorldWorkerHandler({secret:'cron',regions:async()=>{touched=true;return[];}});
+let res=response();await inactive({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.status,'inactive');assert.equal(touched,false);
+const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'https://example.invalid',serviceKey:'test'},workerId:'qa-worker',regions:async(limit)=>{assert.equal(limit,8);return[{region_id:'region-a'}];},claim:async()=>({ok:true,leaseEpoch:4}),process:async(region,worker,epoch)=>({region,worker,epoch,tick:9})});
+res=response();await handler({method:'GET',headers:{authorization:'Bearer wrong'}},res);assert.equal(res.status,401);
 res=response();await handler({method:'GET',headers:{authorization:'Bearer cron'}},res);assert.equal(res.status,200);assert.equal(res.body.regions[0].result.tick,9);
 console.log('region runtime unification checks passed');

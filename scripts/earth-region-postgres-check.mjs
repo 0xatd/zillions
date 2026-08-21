@@ -3,6 +3,12 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import EmbeddedPostgres from 'embedded-postgres';
+import { createServer } from 'node:http';
+import { createLivingWorldPartyHandler } from '../api/living-world-party.js';
+import { verifyLivingWorldBattleReplay } from '../src/living-world-battle-replay.js';
+import { Game } from '../src/game.js';
+import { TerrainField } from '../src/terrain.js';
+import { levelById } from '../src/config.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const databaseDir = await mkdtemp(path.join(os.tmpdir(), 'zillions-region-pg-'));
@@ -40,13 +46,17 @@ try {
   const userId = '10000000-0000-4000-8000-000000000001';
   const otherUserId = '10000000-0000-4000-8000-000000000002';
   await admin.query('insert into auth.users(id,email) values($1,$2),($3,$4)', [userId, 'owner@example.test', otherUserId, 'other@example.test']);
+  await admin.query("select set_config('request.jwt.claim.role','service_role',false)");
+  for(let attempt=1;attempt<=4;attempt++){
+    const limited=(await admin.query("select public.consume_world_api_rate_limit($1,'qa:limit',3,60) result",[userId])).rows[0].result;
+    assert.equal(limited.allowed,attempt<=3,'fresh request IDs must still share the same durable quota');
+  }
   await admin.query(`insert into public.game_characters(id,user_id,client_character_id,name,class_key,race_key)
     values('20000000-0000-4000-8000-000000000001',$1,'owner-char','Owner','vanguard','human')`, [userId]);
   await admin.query(`insert into public.world_tutorial_progress(user_id,character_id,movement_complete,town_complete,recruitment_complete,trade_complete,battle_complete,completed_at)
     values($1,'20000000-0000-4000-8000-000000000001',true,true,true,true,true,now())`, [userId]);
 
   // World entry must succeed after region_id is NOT NULL and retries must not duplicate state.
-  await admin.query("select set_config('request.jwt.claim.role','service_role',false)");
   const firstEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000001') result", [userId])).rows[0].result;
   assert.equal(firstEntry.ok, true);
   assert.equal(firstEntry.duplicate, false);
@@ -81,8 +91,12 @@ try {
   await admin.query(`insert into public.world_tutorial_progress(user_id,character_id,movement_complete,town_complete,recruitment_complete,trade_complete,battle_complete,completed_at)
     values($1,'20000000-0000-4000-8000-000000000002',true,true,true,true,true,now())`, [otherUserId]);
   const otherEntry = (await admin.query("select public.enter_living_world($1,'20000000-0000-4000-8000-000000000002') result", [otherUserId])).rows[0].result;
-  const invite = (await admin.query("select public.social_party_command($1,'invite-two','invite',$2,$3,null,'{}') result", [userId, firstEntry.socialPartyId, otherUserId])).rows[0].result;
-  const accepted = (await admin.query("select public.social_party_command($1,'accept-two','accept',$2,null,$3,'{}') result", [otherUserId, firstEntry.socialPartyId, invite.inviteId])).rows[0].result;
+  const partyHandler=createLivingWorldPartyHandler({config:{url:'http://local',anonKey:'anon',serviceKey:'service'},authenticate:async(value)=>value==='Bearer owner'?{id:userId}:value==='Bearer other'?{id:otherUserId}:null,rateLimit:async(actor,scope,limit,windowSeconds)=>(await admin.query('select public.consume_world_api_rate_limit($1,$2,$3,$4) result',[actor,scope,limit,windowSeconds])).rows[0].result,command:async(actor,command)=>(await admin.query("select public.social_party_command($1,$2,$3,$4,$5,$6,$7) result",[actor,command.requestId,command.action,command.partyId,command.targetId,command.inviteId,command.payload])).rows[0].result,snapshot:async(actor)=>(await admin.query('select public.social_party_snapshot($1) result',[actor])).rows[0].result});
+  const server=createServer(partyHandler);await new Promise((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const postParty=async(token,payload)=>{const response=await fetch(base,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(payload)});const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
+  const invite=await postParty('owner',{requestId:'invite-two',action:'invite',partyId:firstEntry.socialPartyId,targetId:otherUserId,payload:{}});
+  const accepted=await postParty('other',{requestId:'accept-two',action:'accept',partyId:firstEntry.socialPartyId,inviteId:invite.inviteId,payload:{}});
   assert.equal(accepted.status, 'accepted');
   assert.equal(Number((await admin.query('select count(*) count from public.social_party_members where party_id=$1', [firstEntry.socialPartyId])).rows[0].count), 2);
   const groupRoute = '12000000-0000-4000-8000-000000000099';
@@ -91,12 +105,13 @@ try {
     from public.world_locations l join public.world_locations d on d.key='reedwater'
     where l.key='greenfall-crossing'`, [groupRoute]);
   const revisions = Object.fromEntries((await admin.query('select id,revision from public.world_parties where owner_user_id in($1,$2) order by id', [userId, otherUserId])).rows.map((party) => [party.id, Number(party.revision)]));
-  const grouped = (await admin.query("select public.social_party_command($1,'group-two','group_travel',$2,null,null,jsonb_build_object('routeId',$3::text,'expectedRevisions',$4::jsonb)) result", [userId, firstEntry.socialPartyId, groupRoute, JSON.stringify(revisions)])).rows[0].result;
+  const grouped=await postParty('owner',{requestId:'group-two',action:'group_travel',partyId:firstEntry.socialPartyId,payload:{routeId:groupRoute,expectedRevisions:revisions}});
   assert.equal(grouped.memberCount, 2);
   const groupedReplay = (await admin.query("select public.social_party_command($1,'group-two','group_travel',$2,null,null,jsonb_build_object('routeId',$3::text,'expectedRevisions',$4::jsonb)) result", [userId, firstEntry.socialPartyId, groupRoute, JSON.stringify(revisions)])).rows[0].result;
   assert.equal(groupedReplay.duplicate, true);
   assert.equal(Number((await admin.query("select count(*) count from public.world_movement_orders where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId])).rows[0].count), 2);
   await admin.query("select public.social_party_command($1,'split-two','travel_mode',$2,null,null,'{\"mode\":\"split\"}')", [otherUserId, firstEntry.socialPartyId]);
+  await new Promise((resolve)=>server.close(resolve));
   assert.equal((await admin.query('select travel_mode from public.social_party_members where party_id=$1 and user_id=$2', [firstEntry.socialPartyId, otherUserId])).rows[0].travel_mode, 'split');
   await admin.query("update public.world_movement_orders set status='cancelled' where party_id in($1,$2) and status='queued'", [firstEntry.partyId, otherEntry.partyId]);
 
@@ -122,30 +137,31 @@ try {
     values($1,$2,'greenfall_guard',2,40),($3,$4,'rival_raider',1,35)`, [attackerStackId, attackerArmyId, defenderStackId, defenderArmyId]);
   const encounterId = '60000000-0000-4000-8000-000000000001';
   await admin.query(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
-    values($1,'earth-1',$2,$3,0,'choosing','auto-command','auto-command','{"kind":"plains"}','{}')`, [encounterId, firstEntry.partyId, defenderPartyId]);
+    values($1,'earth-1',$2,$3,0,'choosing','fight','fight','{"kind":"plains"}','{}')`, [encounterId, firstEntry.partyId, defenderPartyId]);
   await admin.query("update public.world_encounters set state='battle',revision=revision+1 where id=$1", [encounterId]);
   const engagement = (await admin.query('select id,mode,state from public.world_engagements where encounter_id=$1', [encounterId])).rows[0];
-  assert.equal(engagement.mode, 'autosim');
+  assert.equal(engagement.mode, 'live_command');
   assert.equal(engagement.state, 'active');
   const encounterRevision = Number((await admin.query('select revision from public.world_encounters where id=$1', [encounterId])).rows[0].revision);
   await admin.query("select public.claim_world_region_lease($1,'worker-a',300)", [greenfall.id]);
   const assignment = (await admin.query("select public.living_world_issue_battle($1,$2,$3,'postgres-autosim') result", [userId, engagement.id, encounterRevision])).rows[0].result;
   assert.equal(assignment.force_snapshot.attackerPartyId, firstEntry.partyId);
   assert.equal(assignment.force_snapshot.defenderPartyId, defenderPartyId);
-  assert.equal(assignment.force_snapshot.engagementMode, 'autosim');
+  assert.equal(assignment.force_snapshot.engagementMode, 'live_command');
   assert.equal(assignment.force_snapshot.startedTick, 0);
   assert.equal(assignment.force_snapshot.stacks.length, 2);
-  const battleResult = { outcome: 'attacker_victory', winnerPartyId: firstEntry.partyId, casualties: [
-    { stackId: attackerStackId, killed: 1, wounded: 2 },
-    { stackId: defenderStackId, killed: 4, wounded: 3 },
-  ], morale: { attacker: 72, defender: 25 }, cargoTransfers: [], prisoners: [], retreatRoutes: [], stateHash: 'a'.repeat(64), completedTick: 4 };
+  const level=levelById(1),tacticalGame=new Game(new TerrainField(Number(assignment.force_snapshot.seed),level.theme,{size:level.size,nests:level.nests}),'normal','alexander',null,1,'living_world_battle');
+  tacticalGame.configureLivingWorldBattle(assignment);let tacticalTick=0;while(!tacticalGame.over&&tacticalTick<108000){tacticalGame.update(1/30);tacticalTick++;}
+  assert.equal(tacticalGame.over,true);
+  const battleResult=verifyLivingWorldBattleReplay(assignment,{version:1,completedTick:tacticalTick,commands:[]});
   const committed = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
   assert.equal(committed.ok, true);
   assert.equal(committed.duplicate, false);
   const battleReplay = (await admin.query('select public.living_world_commit_battle($1,$2,$3,$4) result', [assignment.id, assignment.nonce, encounterRevision, battleResult])).rows[0].result;
   assert.equal(battleReplay.duplicate, true);
-  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy), 37);
-  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy), 28);
+  const attackerLoss=battleResult.casualties.find(row=>row.stackId===attackerStackId);const defenderLoss=battleResult.casualties.find(row=>row.stackId===defenderStackId);
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [attackerStackId])).rows[0].healthy),40-(attackerLoss?.killed||0)-(attackerLoss?.wounded||0));
+  assert.equal(Number((await admin.query('select healthy from public.world_unit_stacks where id=$1', [defenderStackId])).rows[0].healthy),35-(defenderLoss?.killed||0)-(defenderLoss?.wounded||0));
   assert.equal((await admin.query('select state from public.world_encounters where id=$1', [encounterId])).rows[0].state, 'resolved');
 
   // Two independent connections racing for an unleased region serialize to one winner.

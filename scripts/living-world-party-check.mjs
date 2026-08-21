@@ -15,7 +15,7 @@ assert.throws(()=>validatePartyBody({requestId:'x',action:'leave',partyId:uuid,p
 
 const response=()=>({status:0,body:null,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}});
 const request=(method,body,auth='Bearer valid')=>({method,url:'/api/living-world-party',headers:{authorization:auth},async *[Symbol.asyncIterator](){if(body)yield Buffer.from(JSON.stringify(body));}});
-const calls=[]; const handler=createLivingWorldPartyHandler({config:{url:'https://test.invalid',anonKey:'anon',serviceKey:'service'},authenticate:async(auth)=>auth==='Bearer valid'?{id:'actor-1'}:null,snapshot:async(actor)=>({id:'social-1',actor,members:[]}),command:async(actor,command)=>{calls.push({actor,command});return {ok:true};}});
+const calls=[]; const handler=createLivingWorldPartyHandler({config:{url:'https://test.invalid',anonKey:'anon',serviceKey:'service'},authenticate:async(auth)=>auth==='Bearer valid'?{id:'actor-1'}:null,rateLimit:async()=>({allowed:true}),snapshot:async(actor)=>({id:'social-1',actor,members:[]}),command:async(actor,command)=>{calls.push({actor,command});return {ok:true};}});
 let res=response(); await handler(request('GET'),res); assert.equal(res.body.party.actor,'actor-1');
 res=response(); await handler(request('POST',{requestId:'leave-1',action:'leave',partyId:uuid,payload:{}}),res); assert.equal(calls[0].actor,'actor-1');
 res=response(); await handler(request('POST',{requestId:'leave-2',action:'leave',partyId:uuid,payload:{},actorId:'victim'}),res); assert.equal(res.status,400);

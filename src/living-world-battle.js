@@ -16,6 +16,7 @@ export function signBattleAssignment(assignment, secret) {
     engagementId: assignment.engagement_id,
     encounterId: assignment.encounter_id,
     encounterRevision: Number(assignment.encounter_revision),
+    requestedBy: assignment.requested_by,
     nonce: assignment.nonce,
     expiresAt: assignment.expires_at,
   }));
@@ -31,7 +32,7 @@ export function verifyBattleAssignment(token, secret, now = Date.now()) {
   if (left.length !== right.length || !timingSafeEqual(left, right)) throw new Error('invalid_battle_assignment');
   let claim;
   try { claim = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { throw new Error('invalid_battle_assignment'); }
-  if (!UUID.test(claim.assignmentId) || !UUID.test(claim.engagementId) || !UUID.test(claim.encounterId)
+  if (!UUID.test(claim.assignmentId) || !UUID.test(claim.engagementId) || !UUID.test(claim.encounterId) || !UUID.test(claim.requestedBy)
     || !claim.nonce || !Number.isInteger(claim.encounterRevision)) throw new Error('invalid_battle_assignment');
   if (!Number.isFinite(Date.parse(claim.expiresAt)) || Date.parse(claim.expiresAt) <= now) throw new Error('battle_assignment_expired');
   return claim;

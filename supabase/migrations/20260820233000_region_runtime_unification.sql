@@ -15,6 +15,35 @@ create table public.world_region_runtime_ticks (
 );
 alter table public.world_region_runtime_ticks enable row level security;
 
+create table public.world_api_rate_buckets (
+  actor_user_id uuid not null,
+  scope text not null check(scope~'^[a-z0-9:._-]{1,64}$'),
+  window_started_at timestamptz not null,
+  request_count integer not null check(request_count>0),
+  updated_at timestamptz not null default now(),
+  primary key(actor_user_id,scope,window_started_at)
+);
+alter table public.world_api_rate_buckets enable row level security;
+
+create function public.consume_world_api_rate_limit(p_actor uuid,p_scope text,p_limit integer,p_window_seconds integer)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_window timestamptz; v_count integer;
+begin
+  if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
+  if p_actor is null or p_scope!~'^[a-z0-9:._-]{1,64}$' or p_limit not between 1 and 10000 or p_window_seconds not between 1 and 86400 then raise exception 'invalid_rate_limit'; end if;
+  v_window:=to_timestamp(floor(extract(epoch from clock_timestamp())/p_window_seconds)*p_window_seconds);
+  perform pg_advisory_xact_lock(hashtextextended('world-rate:'||p_actor::text||':'||p_scope||':'||v_window::text,0));
+  insert into public.world_api_rate_buckets(actor_user_id,scope,window_started_at,request_count)
+    values(p_actor,p_scope,v_window,1)
+  on conflict(actor_user_id,scope,window_started_at) do update set request_count=public.world_api_rate_buckets.request_count+1,updated_at=now()
+  returning request_count into v_count;
+  delete from public.world_api_rate_buckets where window_started_at<now()-interval '2 days';
+  return jsonb_build_object('allowed',v_count<=p_limit,'limit',p_limit,'remaining',greatest(0,p_limit-v_count),
+    'retryAfterSeconds',greatest(1,ceil(extract(epoch from (v_window+make_interval(secs=>p_window_seconds)-clock_timestamp())))::integer));
+end $$;
+revoke all on function public.consume_world_api_rate_limit(uuid,text,integer,integer) from public,anon,authenticated;
+grant execute on function public.consume_world_api_rate_limit(uuid,text,integer,integer) to service_role;
+
 -- The authored Greenfall victory is the existing, server-recorded tutorial.
 -- Convert that proof once instead of trusting five browser-supplied flags.
 create or replace function public.complete_world_tutorial_from_campaign(p_actor uuid,p_character uuid)
@@ -140,6 +169,18 @@ begin
 end $$;
 create trigger world_battle_assignment_region_fence before insert or update of state on public.world_battle_assignments
 for each row execute function public.fence_world_battle_assignment();
+
+create function public.living_world_get_battle_assignment(p_actor uuid,p_assignment uuid,p_nonce uuid)
+returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+declare v_assignment public.world_battle_assignments%rowtype;
+begin
+  if coalesce(auth.role(),'')<>'service_role' then raise exception 'service_role_required'; end if;
+  select * into v_assignment from public.world_battle_assignments where id=p_assignment and requested_by=p_actor and nonce=p_nonce;
+  if not found or v_assignment.state<>'issued' or v_assignment.expires_at<=now() then raise exception 'battle_assignment_unavailable'; end if;
+  return to_jsonb(v_assignment);
+end $$;
+revoke all on function public.living_world_get_battle_assignment(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.living_world_get_battle_assignment(uuid,uuid,uuid) to service_role;
 
 create or replace function public.living_world_process_shard(
   p_shard text,p_worker text,p_lease_seconds integer default 30,p_command_limit integer default 100
@@ -281,4 +322,20 @@ end $$;
 
 revoke all on function public.process_world_region_runtime(uuid,text,bigint,integer) from public,anon,authenticated;
 grant execute on function public.process_world_region_runtime(uuid,text,bigint,integer) to service_role;
+
+create function public.living_world_region_runtime_batch(p_limit integer default 8)
+returns table(region_id uuid) language sql stable security definer set search_path=public,pg_temp as $$
+  select s.region_id
+  from public.world_region_states s
+  left join lateral(
+    select max(t.processed_at) last_processed_at
+    from public.world_region_runtime_ticks t
+    where t.region_id=s.region_id
+  ) tick on true
+  where s.status='active'
+  order by tick.last_processed_at nulls first,s.region_id
+  limit greatest(1,least(16,coalesce(p_limit,8)));
+$$;
+revoke all on function public.living_world_region_runtime_batch(integer) from public,anon,authenticated;
+grant execute on function public.living_world_region_runtime_batch(integer) to service_role;
 commit;

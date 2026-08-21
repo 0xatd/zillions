@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createLivingWorldHandler, filterProjection } from '../api/living-world.js';
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
 const request = (method, body, authorization = 'Bearer valid') => ({ method, url: '/api/living-world?shardId=earth', headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
-const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
+const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, rateLimit: async()=>({allowed:true}), command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
 let res = response(); await handler(request('GET', null, ''), res); assert.equal(res.status, 401);
 const base = { type: 'issue_movement', requestId: 'req-1', shardId: 'earth', partyId: '8e604971-848f-4dc1-bfc6-8b29912d677e', expectedRevision: 1, payload: { routeId: '148da2b1-cc8a-41f5-a714-99d78d79fd9e' } };
 res = response(); await handler(request('POST', { ...base, actorId: 'victim' }), res); assert.equal(res.body.error, 'actor_spoof_rejected');

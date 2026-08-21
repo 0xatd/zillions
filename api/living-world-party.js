@@ -30,9 +30,11 @@ export function createLivingWorldPartyHandler(deps={}){
     if(!user?.id)return send(res,401,{ok:false,error:'sign_in_required'});
     if(req.method==='GET'){const snapshot=deps.snapshot?await deps.snapshot(user.id):await rpc(config,'social_party_snapshot',{p_actor:user.id},fetchImpl);return send(res,200,{ok:true,party:snapshot});}
     const command=validatePartyBody(await parseBody(req));
+    await enforceLivingWorldRateLimit({config,actor:user.id,scope:'party:command',limit:30,fetchImpl,override:deps.rateLimit});
     if(command.action==='invite'&&command.targetHandle&&!command.targetId){const response=await fetchImpl(`${config.url}/rest/v1/profiles?select=id&handle=eq.${encodeURIComponent(command.targetHandle)}&username_set=eq.true&limit=1`,{headers:{authorization:`Bearer ${config.serviceKey}`,apikey:config.serviceKey}});const rows=await response.json().catch(()=>[]);if(!response.ok||!rows[0]?.id)throw Object.assign(new Error('player_not_found'),{status:404});command.targetId=rows[0].id;}
     const result=deps.command?await deps.command(user.id,command):command.action==='kick'||command.action==='promote'?await rpc(config,'social_party_manage_member',{p_actor:user.id,p_request_id:command.requestId,p_party:command.partyId,p_target:command.targetId,p_action:command.action,p_role:command.payload.role||null},fetchImpl):await rpc(config,'social_party_command',{p_actor:user.id,p_request_id:command.requestId,p_action:command.action,p_party:command.partyId,p_target:command.targetId,p_invite:command.inviteId,p_payload:command.payload},fetchImpl);
     return send(res,200,result);
   }catch(error){return send(res,error?.status||500,{ok:false,error:error?.message||'party_backend_error'});} };
 }
 export default createLivingWorldPartyHandler();
+import { enforceLivingWorldRateLimit } from './living-world-rate-limit.js';

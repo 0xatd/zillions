@@ -165,6 +165,7 @@ export function createLivingWorldHandler(deps = {}) {
         return send(res, 200, filterProjection(snapshot, user.id));
       }
       const command = validateCommandBody(await parseBody(req));
+      await enforceLivingWorldRateLimit({ config, actor: user.id, scope: 'world:command', limit: 120, fetchImpl, override: deps.rateLimit });
       const rpc = deps.command ? await deps.command(user.id, command) : await fetchImpl(`${config.url}/rest/v1/rpc/living_world_command`, { method: 'POST', headers: { authorization: `Bearer ${config.serviceKey}`, apikey: config.serviceKey, 'content-type': 'application/json' }, body: JSON.stringify({ p_actor: user.id, p_shard: command.shardId, p_request_id: command.requestId, p_type: command.type, p_party: command.partyId, p_expected_revision: command.expectedRevision, p_payload: command.payload }) });
       const result = deps.command ? rpc : await rpc.json().catch(() => null);
       if (!deps.command && !rpc.ok) return send(res, rpc.status === 409 ? 409 : 400, { ok: false, error: result?.message || 'living_world_command_failed' });
@@ -173,3 +174,4 @@ export function createLivingWorldHandler(deps = {}) {
   };
 }
 export default createLivingWorldHandler();
+import { enforceLivingWorldRateLimit } from './living-world-rate-limit.js';

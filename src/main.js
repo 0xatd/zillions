@@ -808,6 +808,12 @@ class App {
     try {
       if (action === 'autosim' && encounter.engagement?.id) {
         await sendLivingWorldBattleAction({ action: 'autosim', engagementId: encounter.engagement.id, encounterRevision: Number(encounter.revision), requestId: globalThis.crypto?.randomUUID?.() || `battle-${Date.now().toString(36)}` });
+      } else if (action === 'live' && encounter.engagement?.id) {
+        const launched=await sendLivingWorldBattleAction({action:'launch',engagementId:encounter.engagement.id,encounterRevision:Number(encounter.revision),requestId:globalThis.crypto?.randomUUID?.()||`battle-${Date.now().toString(36)}`});
+        this._livingWorldBattle={assignment:launched.assignment,token:launched.token,commands:[]};
+        this.closePauseMenu?.();this.ui.closeLivingWorldMap();this.ui.selectedMode='living_world_battle';this.ui.selectedLevel=1;
+        await this.startGame('normal','alexander');
+        return;
       } else {
         await sendLivingWorldCommand({ type: 'set_encounter_choice', requestId: globalThis.crypto?.randomUUID?.() || `encounter-${Date.now().toString(36)}`, shardId: this.livingWorldState.world.id, partyId: party.id, expectedRevision: party.revision, payload: { encounterId: encounter.id, choice: action, decisionRevision: Number(encounter.revision), rearguardStackIds: [], diversion: {} } });
       }
@@ -1238,6 +1244,7 @@ class App {
     this.pal = level.theme.palette; // drives sky/fog grading
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    if(this._livingWorldBattle&&!snap)this.game.configureLivingWorldBattle(this._livingWorldBattle.assignment);
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1715,6 +1722,9 @@ class App {
   }
 
   _restartOrReturn() {
+    if(this.game?.mode==='living_world_battle'&&this._livingWorldBattle&&!this._livingWorldBattle.committed){
+      this.ui.showBanner(this._livingWorldBattle.error?'The persistent result was rejected. Retry the result before leaving.':'Verifying the persistent battle result…','bad',3200);return;
+    }
     // Any campaign run that came off the planet — or belongs to a character —
     // returns to the world, not the title screen.
     if (this.game?.over && this.game.mode === 'campaign'
@@ -1808,6 +1818,7 @@ class App {
   issue(cmd) {
     if (!this.game) return;
     if (this.mpRole === 'spectator') return;
+    if(this._livingWorldBattle&&this.game.mode==='living_world_battle')this._livingWorldBattle.commands.push({tick:Math.max(0,Math.round(this.game.time/SIM_DT)),command:structuredClone(cmd)});
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
     else this.net.send({ t: 'cmd', c: cmd });
@@ -2083,8 +2094,22 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
+  async _commitLivingWorldBattle() {
+    const battle=this._livingWorldBattle;
+    if(!battle||!this.game)return;
+    const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
+    try{
+      await sendLivingWorldBattleAction({action:'result',assignmentToken:battle.token,replay});
+      battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
+    }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
+  }
+
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if(this.game?.mode==='living_world_battle'){
+      persistRunTelemetry(this.game);this.profile.games++;this.profile.kills+=this.game.stats.kills;this._saveProfile();
+      this._livingWorldBattleCommit=this._commitLivingWorldBattle();return;
+    }
     persistRunTelemetry(this.game);
     const p = this.profile;
     p.games++;
