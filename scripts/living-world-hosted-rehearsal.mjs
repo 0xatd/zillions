@@ -174,23 +174,44 @@ try{
   const defender=(await q(`select p.id,p.region_id,p.location_id from public.world_parties p
     where p.owner_user_id is null and p.location_id is not null and exists(
       select 1 from public.world_armies a join public.world_unit_stacks s on s.army_id=a.id where a.party_id=p.id and s.healthy>0)
-    order by p.id limit 1`)).rows[0];
+      and p.region_id<>$1 order by p.id limit 1`,[takeoverRegion])).rows[0];
   assert.ok(defender,'hosted battle proof needs a materialized AI force');
   await q('update public.world_parties set region_id=$2,location_id=$3,route_id=null,route_progress=0,revision=revision+1 where id=$1',[battlePlayer.partyId,defender.region_id,defender.location_id]);
-  await q("insert into public.world_cargo(party_id,commodity_key,quantity) values($1,'grain',8) on conflict(party_id,commodity_key) do update set quantity=8,reserved_quantity=0",[defender.id]);
-  const encounterId=randomUUID();
-  await q(`insert into public.world_encounters(id,shard_id,attacker_party_id,defender_party_id,created_tick,state,attacker_choice,defender_choice,terrain,scouting_snapshot)
-    values($1,'earth-1',$2,$3,(select simulation_tick from public.world_shards where id='earth-1'),'choosing','auto-command','auto-command','{"kind":"plains"}','{}')`,[encounterId,battlePlayer.partyId,defender.id]);
+  await q("update public.world_parties set stance=case when id=$1 then 'hostile' else 'friendly' end,revision=revision+1 where id in($1,$2)",[defender.id,battlePlayer.partyId]);
+  await q("insert into public.world_cargo(party_id,commodity_key,quantity) values($1,'grain',8),($2,'grain',8) on conflict(party_id,commodity_key) do update set quantity=8,reserved_quantity=0",[defender.id,battlePlayer.partyId]);
+  const organicTick=(await q('select public.process_world_region_runtime($1,$2,$3,16) result',[defender.region_id,`hosted-${shortRun}-a`,leases.get(defender.region_id)])).rows[0].result;
+  assert.ok(Number(organicTick.encountersCreated)>0,'hosted region runtime must create the encounter organically');
+  const encounterId=(await q(`select id from public.world_encounters where state='choosing' and attacker_party_id in($1,$2) and defender_party_id in($1,$2) order by created_tick desc,id limit 1`,[battlePlayer.partyId,defender.id])).rows[0]?.id;
+  assert.ok(encounterId,'organic hosted encounter must be persisted');
+  await q("update public.world_encounters set attacker_choice='auto-command',defender_choice='auto-command' where id=$1",[encounterId]);
   await q("update public.world_encounters set state='battle',revision=revision+1 where id=$1",[encounterId]);
   const battleEncounter=(await q('select revision from public.world_encounters where id=$1',[encounterId])).rows[0];
   const engagement=(await q('select id from public.world_engagements where encounter_id=$1',[encounterId])).rows[0];
   assert.ok(engagement,'battle engagement must be created');
   const assignment=(await q("select public.living_world_issue_battle($1,$2,$3,$4) result",[battlePlayer.userId,engagement.id,battleEncounter.revision,`hosted-${runId}-autosim`])).rows[0].result;
+  const beforeBattle=(await q(`select jsonb_build_object(
+    'healthy',(select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in($1,$2)),
+    'prisoners',(select coalesce(sum(quantity),0) from public.world_prisoners where captor_party_id in($1,$2)),
+    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured')),
+    'playerCargo',(select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'),
+    'defenderCargo',(select quantity from public.world_cargo where party_id=$2 and commodity_key='grain')) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
   const battleResult=autosimBattleAssignment(assignment);
   assert.ok(battleResult.casualties.some(row=>row.killed>0||row.wounded>0),'hosted autosim must produce casualties');
+  assert.ok(battleResult.prisoners.length>0,'hosted autosim must produce prisoners');
+  assert.ok(battleResult.cargoTransfers.length>0,'hosted autosim must produce cargo transfers');
   const battleCommit=(await q('select public.living_world_commit_battle($1,$2,$3,$4) result',[assignment.id,assignment.nonce,battleEncounter.revision,battleResult])).rows[0].result;
   assert.equal(battleCommit.duplicate,false);
   assert.equal((await q('select state from public.world_encounters where id=$1',[encounterId])).rows[0].state,'resolved');
+  const afterBattle=(await q(`select jsonb_build_object(
+    'healthy',(select coalesce(sum(s.healthy),0) from public.world_unit_stacks s join public.world_armies a on a.id=s.army_id where a.party_id in($1,$2)),
+    'prisoners',(select coalesce(sum(quantity),0) from public.world_prisoners where captor_party_id in($1,$2)),
+    'companyConsequences',(select count(*) from public.world_company_members where party_id=$1 and status in('dead','wounded','captured')),
+    'playerCargo',(select quantity from public.world_cargo where party_id=$1 and commodity_key='grain'),
+    'defenderCargo',(select quantity from public.world_cargo where party_id=$2 and commodity_key='grain')) value`,[battlePlayer.partyId,defender.id])).rows[0].value;
+  assert.ok(Number(afterBattle.healthy)<Number(beforeBattle.healthy),'battle commit must persist stack casualties');
+  assert.ok(Number(afterBattle.prisoners)>Number(beforeBattle.prisoners),'battle commit must persist prisoners');
+  assert.ok(Number(afterBattle.companyConsequences)>Number(beforeBattle.companyConsequences),'battle commit must persist player company consequences');
+  assert.notDeepEqual([afterBattle.playerCargo,afterBattle.defenderCargo],[beforeBattle.playerCargo,beforeBattle.defenderCargo],'battle commit must persist cargo transfer');
 
   const telemetry=(await q(`select
     coalesce(max(simulation_tick)-min(simulation_tick),0)::integer lag,

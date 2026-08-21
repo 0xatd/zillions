@@ -30,9 +30,9 @@ assert.match(endpoint,/p_lease_seconds:120/,'the minute worker must renew an ove
 assert.match(endpoint,/record_world_region_runtime_health/,'workers must persist latency, errors, lag and backlog health after each region tick');
 assert.match(retirement,/living_world_region_runtime_batch[\s\S]*greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'bounded batches must prioritize regions that have waited longest, including failed attempts');
 assert.match(retirement,/p_limit integer default 72[\s\S]*least\(96,coalesce\(p_limit,72\)\)/,'database batch must cover Earth once per scheduled minute');
-const handled=[];
-const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,config:{url:'x',serviceKey:'x'},regions:async limit=>{assert.equal(limit,72);return Array.from({length:72},(_,i)=>({region_id:`region-${i}`}));},claim:async()=>({leaseEpoch:1}),process:async region=>{handled.push(region);return{tick:1,actionBudget:8,population:{present:1},factions:{processed:1}};},record:async()=>({thresholdBreached:false})});
+const handled=[];let active=0,maxActive=0;
+const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,concurrency:8,config:{url:'x',serviceKey:'x'},regions:async limit=>{assert.equal(limit,72);return Array.from({length:72},(_,i)=>({region_id:`region-${i}`}));},claim:async()=>({leaseEpoch:1}),process:async region=>{active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setTimeout(resolve,1));handled.push(region);active--;return{tick:1,actionBudget:8,population:{present:1},factions:{processed:1}};},record:async()=>({thresholdBreached:false})});
 const req={method:'GET',headers:{authorization:'Bearer cron'}},res={status:0,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}};
 await handler(req,res);
-assert.equal(res.status,200);assert.equal(handled.length,72);assert.equal(res.body.batchLimit,72);
+assert.equal(res.status,200);assert.equal(handled.length,72);assert.equal(res.body.batchLimit,72);assert.equal(res.body.concurrency,8);assert.ok(maxActive>1&&maxActive<=8);
 console.log('living world worker check passed');

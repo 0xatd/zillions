@@ -4,6 +4,8 @@ on:
     paths:
       - 'api/living-world*'
       - 'src/living-world*'
+      - 'src/world-manifest.js'
+      - 'src/world-materialization.js'
       - 'supabase/migrations/**'
       - 'scripts/*living-world*'
       - 'scripts/*world-materialization*'
@@ -26,3 +28,7 @@ jobs:
       - run: npm run check:living-world
       - run: npm run check:earth-region-postgres
       - run: npm run check
+      - run: npx vercel build --prod
+        env:
+          VERCEL_ORG_ID: team_8608EfcapFF0iJf9AomkK2GV
+          VERCEL_PROJECT_ID: prj_1l1tzmumNW4LAWQmvDDC9oMDeC4v

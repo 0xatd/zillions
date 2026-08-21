@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "api/living-world-worker.js": { "maxDuration": 60 },
+    "api/living-world-health-monitor.js": { "maxDuration": 30 }
+  },
   "crons": [
     { "path": "/api/living-world-worker", "schedule": "* * * * *" },
     { "path": "/api/living-world-health-monitor", "schedule": "*/5 * * * *" }

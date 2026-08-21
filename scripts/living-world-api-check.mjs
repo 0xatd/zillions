@@ -21,11 +21,12 @@ assert.deepEqual(projection.locations.map((p) => p.id), ['home', 'ally-town', 'w
 const boundary = filterProjection({ shard: { simulation_tick: 1 }, locations: [
   { id: 'inside', owner_faction_id: 'blue', position: { x: 10, y: 10 } },
   { id: 'outside', owner_faction_id: 'blue', position: { x: 90, y: 90 } },
-], parties: [{ id: 'edge', owner_faction_id: 'blue', route_id: 'edge-route', route_progress: .5 }], routes: [
+], parties: [{ id: 'boundary-owner', owner_user_id: 'actor-1', owner_faction_id: 'blue', location_id: 'inside' }, { id: 'edge', owner_faction_id: 'blue', route_id: 'edge-route', route_progress: .5 }], routes: [
   { id: 'edge-route', origin_id: 'inside', destination_id: 'outside' },
 ] }, 'actor-1', { minX: 0, minY: 0, maxX: 25, maxY: 25, zoom: 3 });
-assert.deepEqual(boundary.routes, []);
-assert.deepEqual(boundary.parties, [], 'a moving party must never be emitted without the route needed to position it');
+assert.deepEqual(boundary.routes.map((row)=>row.id), ['edge-route']);
+assert.deepEqual(boundary.parties.map((row)=>row.id), ['boundary-owner','edge'], 'a moving boundary party must remain visible with its positioning route');
+assert.deepEqual(boundary.locations.map((row)=>row.id), ['inside','outside'], 'the off-viewport route endpoint must accompany the boundary party');
 
 assert.deepEqual(parseViewport(new URLSearchParams()), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 0 });
 assert.deepEqual(parseViewport(new URLSearchParams('zoom=3')), { minX: 0, minY: 0, maxX: 100, maxY: 100, zoom: 3 });
