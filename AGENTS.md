@@ -120,6 +120,7 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/config.js`: balance, heroes, levels, plots, items, and siege constants.
 - `src/game.js`: deterministic simulation and snapshots.
 - `src/terrain.js`: terrain field and terrain-derived sites.
+- `src/overworld-parties.js`: overworld faction traffic — roads, party archetypes, routing.
 - `src/galaxy.js`: procedural star systems, world kinds, and world descriptors.
 - `src/factions.js`: faction roster, presence archetypes, and ownership.
 - `src/items.js`: item bases, weapons, affixes, damage types, and item generation.

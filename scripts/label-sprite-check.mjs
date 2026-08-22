@@ -49,9 +49,11 @@ const defAt = main.indexOf("_makeLabelSprite(text, sub = '')");
 assert.ok(defAt > 0, '_makeLabelSprite definition must be findable');
 const sprite = main.slice(defAt);
 const body = sprite.slice(0, sprite.indexOf('\n  }'));
-assert.ok(body.includes('fitFontSize('), '_makeLabelSprite must fit the font to the texture');
-assert.match(body, /strokeText\(sub, \d+, \d+, room\)/, 'strokeText needs the maxWidth backstop');
-assert.match(body, /fillText\(sub, \d+, \d+, room\)/, 'fillText needs the maxWidth backstop');
+assert.equal((body.match(/fitFontSize\(/g) || []).length, 2,
+  'both label lines must be fitted — callers pass multi-character faction designations, not just one glyph');
+assert.match(body, /fillText\(sub, \d+, \w+, room\)/, 'fillText needs the maxWidth backstop');
+assert.match(body, /fillText\(text, \d+, \d+, room\)/, 'the icon line needs the maxWidth backstop too');
+assert.match(body, /strokeText\(sub, \d+, \w+, room\)/, 'strokeText needs the maxWidth backstop');
 assert.ok(!/cnv\.width = 256/.test(body), 'the clipped 256px label texture must not come back');
 void root;
 console.log('label sprite check passed');

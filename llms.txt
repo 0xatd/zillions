@@ -34,6 +34,7 @@ Default branch: main
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
 - src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
+- src/overworld-parties.js owns overworld faction traffic: roads between settlements, party archetypes, and deterministic routing. main.js draws it.
 - src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
 - src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and

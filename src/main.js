@@ -20,8 +20,12 @@ import {
 } from './economy.js';
 import {
   clamp, lerp, fitFontSize,
-  LABEL_TEXTURE_WIDTH, LABEL_PADDING, LABEL_FONT_SIZE, LABEL_FONT_MIN,
+  LABEL_TEXTURE_WIDTH, LABEL_PADDING, LABEL_FONT_SIZE, LABEL_FONT_MIN, LABEL_ICON_SIZE,
 } from './utils.js';
+import {
+  spawnOverworldParties, updateOverworldParties, partiesNear, describeParty,
+} from './overworld-parties.js';
+import { factionByKey } from './factions.js';
 import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -62,6 +66,10 @@ import {
 } from './fog-of-war.js';
 
 const ZMAX = 1700;
+// How close the player must come before a party on the road names itself.
+const OVERWORLD_PARTY_READ_RADIUS = 9;
+// Banners sit across the line of march so their colour stays legible.
+const OVERWORLD_BANNER_YAW = Math.PI * 0.42;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
@@ -668,6 +676,7 @@ class App {
       this.owGates.push(this._makeOverworldGate(gate));
     }
     this._makeOverworldHero();
+    this._buildOverworldParties();
     this.profile.lastWorld = map.overworldWorld.id;
     character.lastWorld = map.overworldWorld.id;
     this._saveProfile();
@@ -889,6 +898,9 @@ class App {
     if (this.owTerrain) { this.scene.remove(this.owTerrain); this._disposeObject3D(this.owTerrain); }
     for (const g of this.owGates || []) { this.scene.remove(g); this._disposeObject3D(g); }
     if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
+    for (const m of (this.owPartyMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
+    this.owPartyMeshes = new Map();
+    this.owParties = null;
     for (const m of (this.owGhostMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
     this.owTerrain = null;
     this.owGates = [];
@@ -947,6 +959,136 @@ class App {
     gr.userData.gate = gate;
     this.scene.add(gr);
     return gr;
+  }
+
+  // ---------------- overworld traffic ----------------
+  // Faction parties routing between settlements. The rules half is
+  // `overworld-parties.js` (pure, deterministic, checked headless); this half
+  // only draws what it reports and never decides anything itself.
+  _buildOverworldParties() {
+    this.owPartyMeshes = this.owPartyMeshes || new Map();
+    const walkable = (x, z) => this.owMap.isWalkable(x, z);
+    this.owParties = spawnOverworldParties(
+      this.owMap.seed, this.owMap.overworldLayout, walkable, this.owMap.size,
+    );
+    for (const party of this.owParties.parties) {
+      const mesh = this._makeOverworldParty(party);
+      this.owPartyMeshes.set(party.id, mesh);
+    }
+  }
+
+  // A party reads as a body of troops under a banner, not a single figure:
+  // three tinted troopers around a faction standard, sized so the column is
+  // legible from the overworld camera without dwarfing the player's hero.
+  _makeOverworldParty(party) {
+    const faction = factionByKey(party.factionKey);
+    const color = faction?.color ?? 0x9aa3af;
+    const trim = faction?.trim ?? 0x2a2f38;
+    const gr = new THREE.Group();
+
+    const ranks = Math.min(3, Math.max(1, Math.round(party.strength / 20)));
+    for (let i = 0; i < ranks; i++) {
+      const trooper = this._makeUnitMesh({
+        hero: false, key: 'soldier', def: { ...UNITS.soldier, color },
+      });
+      trooper.scale.setScalar(0.78);
+      const angle = (i / ranks) * Math.PI * 2;
+      trooper.position.set(Math.cos(angle) * 0.34, 0, Math.sin(angle) * 0.34 - 0.2);
+      gr.add(trooper);
+      (gr.userData.troopers ||= []).push(trooper);
+    }
+
+    // The standard is what actually carries at distance — colour says whose
+    // it is before the label is readable.
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 2.4, 6),
+      new THREE.MeshStandardMaterial({ color: trim, roughness: 0.9, metalness: 0.05 }),
+    );
+    pole.position.set(0, 1.2, 0.24);
+    pole.castShadow = true;
+    gr.add(pole);
+    // Yawed off the line of march so the colour faces the camera instead of
+    // presenting edge-on and reading as another stick.
+    const flag = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.15, 0.72),
+      new THREE.MeshStandardMaterial({
+        color, roughness: 0.8, metalness: 0.05, side: THREE.DoubleSide,
+      }),
+    );
+    flag.position.set(0.6, 1.94, 0.24);
+    flag.rotation.y = OVERWORLD_BANNER_YAW;
+    gr.add(flag);
+    gr.userData.flag = flag;
+
+    // Hostile parties stand in a faint red footprint so the player can read
+    // intent from the ground colour alone, before reading anything.
+    const ringGeo = new THREE.RingGeometry(0.7, 0.92, 28);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: party.hostile ? 0xc4553f : 0x6f9f7a,
+      transparent: true, opacity: 0.34, depthWrite: false,
+    }));
+    ring.position.y = 0.05;
+    gr.add(ring);
+    gr.userData.ring = ring;
+
+    // No glyph: the standard's colour already says whose column this is.
+    const label = this._makeLabelSprite('', `${party.name.toUpperCase()} · ${party.strength}`);
+    label.position.y = 3.3;
+    label.scale.set(4.6, 2.3, 1);
+    gr.add(label);
+    gr.userData.label = label;
+
+    gr.position.set(party.x, this.owMap.groundY(party.x, party.z), party.z);
+    gr.userData.party = party;
+    this.scene.add(gr);
+    return gr;
+  }
+
+  _updateOverworldParties(dt, t) {
+    if (!this.owParties || !this.owPartyMeshes) return;
+    for (const ev of updateOverworldParties(this.owParties.parties, dt, this.owParties)) {
+      void ev; // arrivals and departures are the seam interception will use
+    }
+    for (const party of this.owParties.parties) {
+      const mesh = this.owPartyMeshes.get(party.id);
+      if (!mesh) continue;
+      mesh.position.set(party.x, this.owMap.groundY(party.x, party.z), party.z);
+      mesh.rotation.y = party.facing;
+      // Marching columns bob; resting ones stand still under a swaying banner.
+      const pose = unitPose(party.moving ? 'run' : 'idle', t * (party.moving ? 9 : 1.6));
+      for (const trooper of mesh.userData.troopers || []) {
+        const body = trooper.userData.body;
+        if (body) { body.position.y = pose.y; body.rotation.z = pose.roll; }
+        const limbs = trooper.userData.limbs;
+        if (limbs) {
+          if (limbs.legL) limbs.legL.rotation.x = pose.stride;
+          if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
+        }
+      }
+      if (mesh.userData.flag) {
+        mesh.userData.flag.rotation.y = OVERWORLD_BANNER_YAW + Math.sin(t * 1.6 + party.x) * 0.2;
+      }
+    }
+    this._readOverworldRoad(dt);
+  }
+
+  // What is on the road ahead. One banner at a time, and only when the
+  // nearest party changes, so walking past a column does not spam the strip.
+  _readOverworldRoad(dt) {
+    this._owRoadT = (this._owRoadT || 0) - dt;
+    if (this._owRoadT > 0) return;
+    this._owRoadT = 0.35;
+    const hero = this.ow?.hero;
+    if (!hero) return;
+    const nearest = partiesNear(this.owParties.parties, hero.x, hero.z, OVERWORLD_PARTY_READ_RADIUS)[0];
+    if (!nearest) { this._owNearParty = null; return; }
+    if (this._owNearParty === nearest.id) return;
+    this._owNearParty = nearest.id;
+    this.ui.showBanner(
+      describeParty(nearest, this.owParties.settlements),
+      nearest.hostile ? 'bad' : '', 2600,
+    );
   }
 
   // The player's chosen hero walks the overworld in miniature — the real unit
@@ -1064,6 +1206,7 @@ class App {
       gr.userData.ring.scale.setScalar(1 + ph * 0.12);
       gr.userData.banner.rotation.y = Math.sin(t * 1.8 + gr.position.x) * 0.22;
     }
+    this._updateOverworldParties(dt, t);
     this._updateOverworldGhosts(dt, t);
   }
 
@@ -4001,12 +4144,23 @@ class App {
     cnv.width = LABEL_TEXTURE_WIDTH; cnv.height = LABEL_TEXTURE_WIDTH / 2;
     const ctx = cnv.getContext('2d');
     ctx.textAlign = 'center';
-    ctx.font = '128px serif';
-    ctx.fillText(text, 256, 124);
+    const room = cnv.width - LABEL_PADDING * 2;
+    // The top line is usually one glyph, but callers pass short faction
+    // designations too — fit it rather than assuming it is narrow.
+    if (text) {
+      const iconSize = fitFontSize((px) => {
+        ctx.font = `${px}px serif`;
+        return ctx.measureText(text).width;
+      }, room, LABEL_ICON_SIZE, LABEL_FONT_MIN);
+      ctx.font = `${iconSize}px serif`;
+      ctx.fillText(text, 256, 124, room);
+    }
     if (sub) {
+      // With no glyph above it the name owns the whole texture, so centre it
+      // rather than leaving it pinned to the bottom edge.
+      const subY = text ? 216 : 150;
       // Place names run long ("GREENFALL MARCHES"). Fit the font to the
       // texture so the name arrives whole; maxWidth is the final backstop.
-      const room = cnv.width - LABEL_PADDING * 2;
       const family = 'system-ui, sans-serif';
       const size = fitFontSize((px) => {
         ctx.font = `bold ${px}px ${family}`;
@@ -4016,8 +4170,8 @@ class App {
       ctx.fillStyle = '#ffd75e';
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.lineWidth = 12;
-      ctx.strokeText(sub, 256, 216, room);
-      ctx.fillText(sub, 256, 216, room);
+      ctx.strokeText(sub, 256, subY, room);
+      ctx.fillText(sub, 256, subY, room);
     }
     const tex = new THREE.CanvasTexture(cnv);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });

@@ -73,6 +73,7 @@ to snapshots when the state can affect later simulation.
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/overworld.js` | Headless persistent worlds: galaxy catalog, world descriptors, stitched biomes, instance gates, Orbital Lifts, hero controller, ghost presence |
+| `src/overworld-parties.js` | Faction traffic on the walkable overworld: A* roads between settlements, party archetypes, deterministic routing and dwell |
 | `src/world-manifest.js` | Pure planet topology generation, stable IDs, manifest validation, and pinned content hashes |
 | `src/galaxy.js` | Headless galaxy generation: spiral star systems, world kinds, threat tiers, and generated world descriptors |
 | `src/factions.js` | Faction roster, presence archetypes, and deterministic ownership assignment |

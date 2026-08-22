@@ -57,6 +57,7 @@ export const LABEL_TEXTURE_WIDTH = 512;
 export const LABEL_PADDING = 16;
 export const LABEL_FONT_SIZE = 68;
 export const LABEL_FONT_MIN = 34;
+export const LABEL_ICON_SIZE = 128;
 
 // Canvas text is not fitted: `fillText` centered on a fixed-width texture
 // clips a too-wide string at BOTH ends, so "GREENFALL MARCHES" reaches the
