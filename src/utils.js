@@ -50,3 +50,21 @@ export function formatTime(sec) {
   const m = Math.floor(sec / 60), s = sec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
+
+// World-label typography, shared with scripts/label-sprite-check.mjs so the
+// check asserts against the values the renderer actually draws with.
+export const LABEL_TEXTURE_WIDTH = 512;
+export const LABEL_PADDING = 16;
+export const LABEL_FONT_SIZE = 68;
+export const LABEL_FONT_MIN = 34;
+
+// Canvas text is not fitted: `fillText` centered on a fixed-width texture
+// clips a too-wide string at BOTH ends, so "GREENFALL MARCHES" reaches the
+// player as ".D CROSSROA". Step the font down until the measured width fits.
+// `measure(px)` reports the string's width at that font size, so this stays a
+// pure function and the label check can run headless.
+export function fitFontSize(measure, maxWidth, baseSize, minSize = 1) {
+  let size = Math.max(Math.round(baseSize), minSize);
+  while (size > minSize && measure(size) > maxWidth) size -= 1;
+  return size;
+}

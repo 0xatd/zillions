@@ -39,6 +39,12 @@ import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafti
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
 import { clusterLivingWorldParties, livingWorldReadyStatus, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
 
+// Overworld chrome that lives OUTSIDE #overlay. setOverworldMode() raises it
+// and hideStart() must tear all of it down, or a panel survives into a
+// mission and floats over the battlefield. One list keeps the two in step.
+// The minimap is deliberately absent: missions reuse the same wrapper.
+export const OVERWORLD_CHROME = ['#ow-quick-actions', '#ow-party-frames'];
+
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
   `+${value < 1 ? `${Math.round(value * 100)}%` : value} ${key}`).join(' · ') || 'No combat stat change';
@@ -2268,8 +2274,7 @@ export class UI {
     this._overworldMode = !!on;
     if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
-    this.root.querySelector('#ow-quick-actions').classList.toggle('hidden', !on);
-    this.root.querySelector('#ow-party-frames').classList.toggle('hidden', !on);
+    for (const sel of OVERWORLD_CHROME) this.root.querySelector(sel)?.classList.toggle('hidden', !on);
     this.root.querySelector('#minimap-wrap').classList.toggle('hidden', !on);
     if (!on) this.closeLivingWorldMap();
     else this._renderPartyFrames();
@@ -3643,9 +3648,12 @@ export class UI {
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
+  // Starting a mission tears down the overworld's chrome. These panels are
+  // positioned OUTSIDE #overlay, so hiding the overlay alone left the party
+  // frames floating over the battlefield — drive both paths off one list.
   hideStart() {
     this.root.querySelector('#overlay').classList.add('hidden');
-    this.root.querySelector('#ow-quick-actions')?.classList.add('hidden');
+    for (const sel of OVERWORLD_CHROME) this.root.querySelector(sel)?.classList.add('hidden');
     this.pauseOpen = false;
   }
 

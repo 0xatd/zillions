@@ -18,7 +18,10 @@ import {
   loadAuthoritativeEconomy, quarantineForAuthoritativeLoad, registerAuthoritativeCharacter,
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
-import { clamp, lerp } from './utils.js';
+import {
+  clamp, lerp, fitFontSize,
+  LABEL_TEXTURE_WIDTH, LABEL_PADDING, LABEL_FONT_SIZE, LABEL_FONT_MIN,
+} from './utils.js';
 import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -3991,20 +3994,30 @@ class App {
 
   // ---------------- plot foundations ----------------
 
+  // The texture is 2x the old 256x128 — same 2:1 aspect, so every caller's
+  // sprite scale still holds, but names stay sharp instead of pixel-mush.
   _makeLabelSprite(text, sub = '') {
     const cnv = document.createElement('canvas');
-    cnv.width = 256; cnv.height = 128;
+    cnv.width = LABEL_TEXTURE_WIDTH; cnv.height = LABEL_TEXTURE_WIDTH / 2;
     const ctx = cnv.getContext('2d');
     ctx.textAlign = 'center';
-    ctx.font = '64px serif';
-    ctx.fillText(text, 128, 62);
+    ctx.font = '128px serif';
+    ctx.fillText(text, 256, 124);
     if (sub) {
-      ctx.font = 'bold 34px system-ui, sans-serif';
+      // Place names run long ("GREENFALL MARCHES"). Fit the font to the
+      // texture so the name arrives whole; maxWidth is the final backstop.
+      const room = cnv.width - LABEL_PADDING * 2;
+      const family = 'system-ui, sans-serif';
+      const size = fitFontSize((px) => {
+        ctx.font = `bold ${px}px ${family}`;
+        return ctx.measureText(sub).width;
+      }, room, LABEL_FONT_SIZE, LABEL_FONT_MIN);
+      ctx.font = `bold ${size}px ${family}`;
       ctx.fillStyle = '#ffd75e';
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.lineWidth = 6;
-      ctx.strokeText(sub, 128, 108);
-      ctx.fillText(sub, 128, 108);
+      ctx.lineWidth = 12;
+      ctx.strokeText(sub, 256, 216, room);
+      ctx.fillText(sub, 256, 216, room);
     }
     const tex = new THREE.CanvasTexture(cnv);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
