@@ -11,11 +11,21 @@ export function tutorialStatus(progress = {}) {
 const ageSeconds = (value, now) => value ? Math.max(0, (now - new Date(value).getTime()) / 1000) : Infinity;
 export function summarizeWorldOperations(snapshot = {}, now = Date.now()) {
   const leases = snapshot.leases || [], commands = snapshot.commands || [], tutorials = snapshot.tutorials || [], runtimeHealth = snapshot.runtimeHealth || [];
-  const staleLeases = leases.filter((lease) => ageSeconds(lease.heartbeat_at, now) > 45 || new Date(lease.lease_until).getTime() <= now);
+  // The Vercel worker is a minute batch, not a long-running daemon. Its lease
+  // is intentionally quiet between invocations, so a 45-second heartbeat
+  // threshold reports every healthy batch as stale before the next cron tick.
+  const leaseGraceMs = 15_000;
+  const staleLeases = leases.filter((lease) => ageSeconds(lease.heartbeat_at, now) > 135 || new Date(lease.lease_until).getTime() <= now - leaseGraceMs);
   const stuckCommands = commands.filter((command) => !command.completed_at && ageSeconds(command.created_at, now) > 60);
-  const runtimeFailures = runtimeHealth.filter((row) => row.success === false || row.threshold_breached === true);
+  // PostgREST returns newest rows first. Judge each region by its latest batch
+  // so a recovered latency or worker failure does not poison health for the
+  // full 15-minute telemetry window.
+  const latestByRegion = new Map();
+  for (const row of runtimeHealth) if (!latestByRegion.has(row.region_id)) latestByRegion.set(row.region_id, row);
+  const latestRuntimeHealth = [...latestByRegion.values()];
+  const runtimeFailures = latestRuntimeHealth.filter((row) => row.success === false || row.threshold_breached === true);
   const expectedActiveRegions = Number(snapshot.expectedActiveRegions) || 0;
-  const recentlyHealthyRegions = new Set(runtimeHealth.filter((row) => row.success === true && row.threshold_breached !== true).map((row) => row.region_id));
+  const recentlyHealthyRegions = new Set(latestRuntimeHealth.filter((row) => row.success === true && row.threshold_breached !== true).map((row) => row.region_id));
   const missingRegionCoverage = Math.max(0, expectedActiveRegions - recentlyHealthyRegions.size);
   const completed = tutorials.filter((progress) => tutorialStatus(progress).complete).length;
   const entered = tutorials.filter((progress) => progress.entered_world_at).length;

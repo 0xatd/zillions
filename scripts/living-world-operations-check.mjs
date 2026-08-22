@@ -6,6 +6,8 @@ const summary = summarizeWorldOperations({ leases: [{ region_id: 'greenfall', wo
 assert.equal(summary.status, 'healthy'); assert.deepEqual(summary.tutorial, { started: 1, completed: 1, entered: 1, completionRate: 100, entryRate: 100 }); assert.equal(tutorialStatus({ movement_complete: true }).completed, 1);
 const degraded = summarizeWorldOperations({ leases: [{ region_id: 'r', worker_id: 'old', heartbeat_at: '2026-08-21T00:58:00Z', lease_until: '2026-08-21T00:59:00Z' }], commands: [{ shard_id: 'earth-1', request_id: 'stuck', command_type: 'move', created_at: '2026-08-21T00:58:00Z' }] }, now);
 assert.equal(degraded.status, 'degraded'); assert.equal(degraded.staleLeases.length, 1); assert.equal(degraded.stuckCommands.length, 1);
+const quietMinuteBatch = summarizeWorldOperations({ leases: [{ region_id: 'r', worker_id: 'batch', heartbeat_at: '2026-08-21T00:59:05Z', lease_until: '2026-08-21T01:01:05Z' }] }, now);
+assert.equal(quietMinuteBatch.status, 'healthy'); assert.equal(quietMinuteBatch.staleLeases.length, 0);
 const failedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 9, worker_id: 'w', success: false, error_code: 'region_runtime_failed', threshold_breached: false, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
 assert.equal(failedRuntime.status, 'degraded'); assert.equal(failedRuntime.runtimeFailures[0].error, 'region_runtime_failed');
 const breachedRuntime = summarizeWorldOperations({ runtimeHealth: [{ region_id: 'r', world_tick: 10, worker_id: 'w', success: true, threshold_breached: true, tick_lag: 3, handoff_backlog: 4, recorded_at: '2026-08-21T00:59:59Z' }] }, now);
@@ -16,6 +18,8 @@ const deadRuntime = summarizeWorldOperations({ expectedActiveRegions: 72, leases
 assert.equal(deadRuntime.status, 'degraded'); assert.equal(deadRuntime.runtimeCoverage.missingRegions, 72);
 const coveredRuntime = summarizeWorldOperations({ expectedActiveRegions: 2, runtimeHealth: [{ region_id: 'a', success: true }, { region_id: 'b', success: true }] }, now);
 assert.equal(coveredRuntime.status, 'healthy'); assert.equal(coveredRuntime.runtimeCoverage.missingRegions, 0);
+const recoveredRuntime = summarizeWorldOperations({ expectedActiveRegions: 1, runtimeHealth: [{ region_id: 'a', success: true, threshold_breached: false, recorded_at: '2026-08-21T00:59:59Z' }, { region_id: 'a', success: true, threshold_breached: true, recorded_at: '2026-08-21T00:59:00Z' }] }, now);
+assert.equal(recoveredRuntime.status, 'healthy'); assert.equal(recoveredRuntime.runtimeCoverage.missingRegions, 0); assert.equal(recoveredRuntime.runtimeFailures.length, 0);
 const request = (secret, method = 'GET') => ({ method, headers: { 'x-admin-secret': secret } });
 const response = () => ({ status: 0, setHeader() {}, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } });
 const handler = createLivingWorldOperationsHandler({ secret: 'valid', config: { url: 'x', serviceKey: 'x' }, snapshot: async () => ({ leases: [], commands: [], tutorials: [] }) });
