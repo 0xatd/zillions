@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createLivingWorldHandler, filterProjection, loadSnapshot, parseViewport, sanitizeWorldTopology } from '../api/living-world.js';
+import { createLivingWorldHandler, filterProjection, loadSnapshot, parseViewport, sanitizeWorldTopology, selectVisibleParties } from '../api/living-world.js';
 const response = () => ({ status: 0, body: null, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); }, setHeader() {} });
 const request = (method, body, authorization = 'Bearer valid', url = '/api/living-world?shardId=earth') => ({ method, url, headers: { host: 'test', authorization }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)); } });
 const handler = createLivingWorldHandler({ config: { url: 'https://test.invalid', anonKey: 'anon', serviceKey: 'service' }, authenticate: async (auth) => auth === 'Bearer valid' ? { id: 'actor-1' } : null, rateLimit: async()=>({allowed:true}), command: async (actor, command) => ({ ok: true, actor, type: command.type }) });
@@ -17,6 +17,15 @@ const snapshot = { shard: { simulation_tick: 10 }, parties: [{ id: 'mine', owner
 const projection = filterProjection(snapshot, 'actor-1');
 assert.deepEqual(projection.parties.map((p) => p.id), ['mine', 'ally', 'seen']); assert.equal(projection.parties[2].speed, undefined);
 assert.deepEqual(projection.locations.map((p) => p.id), ['home', 'ally-town', 'wild']); assert.deepEqual(projection.routes.map((p) => p.id), ['known']); assert.deepEqual(projection.markets.map((p) => p.location_id), ['home']);
+
+const earthScaleParties = Array.from({ length: 432 }, (_, index) => ({ id: `hostile-${index}`, owner_faction_id: 'red' }));
+earthScaleParties.push({ id: 'ally-at-scale', owner_faction_id: 'blue' });
+const selectedAtScale = selectVisibleParties(
+  [{ id: 'mine-at-scale', owner_faction_id: 'blue' }], [], earthScaleParties,
+  [{ subject_party_id: 'hostile-17' }],
+);
+assert.deepEqual(selectedAtScale.map((party) => party.id), ['mine-at-scale', 'hostile-17', 'ally-at-scale'],
+  'Earth-scale loading must narrow dependent party queries to own, allied, and scouted forces');
 
 const boundary = filterProjection({ shard: { simulation_tick: 1 }, locations: [
   { id: 'inside', owner_faction_id: 'blue', position: { x: 10, y: 10 } },

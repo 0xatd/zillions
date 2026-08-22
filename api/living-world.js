@@ -179,6 +179,13 @@ const inIds = (rows) => `(${rows.map((row) => typeof row === 'string' ? row : ro
 const mergeById = (...groups) => [...new Map(groups.flat().map((row) => [row.id, row])).values()];
 const PARTY_SELECT = 'id,region_id,owner_user_id,owner_faction_id,name,kind,location_id,route_id,route_progress,speed,morale,fatigue,stance,strategic_intent,strategic_reason,strategic_target_location_id,strategic_intent_tick,revision';
 
+export function selectVisibleParties(ownParties = [], memberParties = [], viewportParties = [], reports = []) {
+  const alliedFactionIds = new Set(ownParties.map((party) => party.owner_faction_id).filter(Boolean));
+  const reportedPartyIds = new Set(reports.map((report) => report.subject_party_id).filter(Boolean));
+  const visibleViewportParties = viewportParties.filter((party) => alliedFactionIds.has(party.owner_faction_id) || reportedPartyIds.has(party.id));
+  return mergeById(ownParties, memberParties, visibleViewportParties);
+}
+
 export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport = DEFAULT_VIEWPORT) {
   const encoded = encodeURIComponent(shardId);
   const [shards, planets, ownMemberships, ownParties] = await Promise.all([
@@ -213,7 +220,10 @@ export async function loadSnapshot(config, shardId, actorId, fetchImpl, viewport
     memberParties = memberIds.length ? await restRows(config, 'world_parties', `select=${PARTY_SELECT}&shard_id=eq.${encoded}&owner_user_id=in.(${memberIds.join(',')})`, fetchImpl) : [];
     socialParty = { ...socialParties[0], members: members.map((member) => ({ ...member, worldParty: memberParties.find((party) => party.owner_user_id === member.user_id) || null })) };
   }
-  const parties = mergeById(ownParties, memberParties, viewportParties);
+  // Apply the knowledge boundary before dependent queries. A full-Earth load
+  // otherwise creates oversized PostgREST IN filters for all 432 parties and
+  // can exceed Node's response-header limit when Supabase echoes the query.
+  const parties = selectVisibleParties(ownParties, memberParties, viewportParties, reports);
   const partyIds = parties.map((row) => row.id), ownPartyIds = ownParties.map((row) => row.id), locationIds = initialLocations.map((row) => row.id);
   const [routes, markets, armies, sieges, supplies, cargo, caravans, raids, encounters, pursuits] = await Promise.all([
     provinceIds.length ? restRows(config, 'world_routes', `select=id,province_id,origin_id,destination_id,origin_region_id,destination_region_id,distance,terrain,danger,owner_faction_id,claimed_by_faction_id,control_strength,control_state,blockade_state,revision&or=(origin_region_id.in.${inIds(provinceIds)},destination_region_id.in.${inIds(provinceIds)})`, fetchImpl) : Promise.resolve([]),
