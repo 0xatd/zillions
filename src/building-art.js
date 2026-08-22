@@ -301,7 +301,14 @@ export function buildBuildingMesh(b, ctx = {}) {
   const B = merger();          // hull, steel, concrete — Lambert, shadowed
   const G = merger();          // marker lights, lenses — always lit
   const W = merger();          // habitation glass — glows at night
-  const M = (color, e = 0) => new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08, color, emissive: e ? color : 0x000000, emissiveIntensity: e });
+  // Phase-2 material pass: roughness comes DOWN off the flat 0.8 so the IBL
+  // environment (PR #86) actually reads on hulls — plate is satin steel,
+  // accents run hotter metalness, and emissives sit above the bloom
+  // threshold so marker lights genuinely glow (phase-1 bloom pass at 0.92).
+  const M = (color, e = 0) => new THREE.MeshStandardMaterial({
+    roughness: e ? 0.35 : 0.55, metalness: e ? 0.6 : 0.28, color,
+    emissive: e ? color : 0x000000, emissiveIntensity: e ? Math.max(1.2, e) : 0,
+  });
   // Separate-mesh helpers for ANIMATED parts only.
   const liveBox = (w, h, dep, color, x = 0, y = 0, z = 0, e = 0) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), M(color, e));
