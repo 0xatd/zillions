@@ -4,6 +4,7 @@ import { createLivingWorldWorkerHandler } from '../api/living-world-worker.js';
 
 const sql = readFileSync(new URL('../supabase/migrations/20260820190100_living_world_worker.sql', import.meta.url), 'utf8');
 const retirement = readFileSync(new URL('../supabase/migrations/20260820233000_region_runtime_unification.sql', import.meta.url), 'utf8');
+const cadence = readFileSync(new URL('../supabase/migrations/20260822050000_runtime_batch_cadence.sql', import.meta.url), 'utf8');
 const endpoint = readFileSync(new URL('../api/living-world-worker.js', import.meta.url), 'utf8');
 for (const marker of ['world_worker_leases','world_battle_orders','living_world_process_shard','command.queued','command.applied','issue_movement','cancel_movement','set_encounter_choice','submit_battle_order','accept_surrender','trade_market'])
   assert.match(sql, new RegExp(marker), `${marker} missing from worker migration`);
@@ -26,10 +27,12 @@ assert.match(retirement,/revoke all on function public\.living_world_process_sha
 assert.match(endpoint,/LIVING_WORLD_RUNTIME_ENABLED==='1'/,'production runtime must be explicitly activated');
 assert.match(endpoint,/status:'inactive'/,'a merged but inactive runtime must not touch the database');
 assert.match(endpoint,/Math\.min\(96[\s\S]*LIVING_WORLD_REGION_BATCH_SIZE\?\?72/,'each production invocation must cover all 72 Earth regions with a bounded ceiling');
-assert.match(endpoint,/p_lease_seconds:120/,'the minute worker must renew an overlapping lease so battle issuance has no dead interval');
+assert.match(endpoint,/p_lease_seconds:45/,'a finished minute batch must release naturally before the next cron invocation');
 assert.match(endpoint,/record_world_region_runtime_health/,'workers must persist latency, errors, lag and backlog health after each region tick');
 assert.match(retirement,/living_world_region_runtime_batch[\s\S]*greatest\(tick\.last_processed_at,lease\.heartbeat_at\) nulls first/,'bounded batches must prioritize regions that have waited longest, including failed attempts');
 assert.match(retirement,/p_limit integer default 72[\s\S]*least\(96,coalesce\(p_limit,72\)\)/,'database batch must cover Earth once per scheduled minute');
+assert.match(cadence,/last_processed_at<=now\(\)-interval '45 seconds'/,'database selection must fence duplicate or overlapping cron delivery');
+assert.match(cadence,/order by tick\.last_processed_at nulls first,s\.region_id/,'due regions must run oldest first with deterministic ties');
 const handled=[];let active=0,maxActive=0;
 const handler=createLivingWorldWorkerHandler({secret:'cron',enabled:true,concurrency:8,config:{url:'x',serviceKey:'x'},regions:async limit=>{assert.equal(limit,72);return Array.from({length:72},(_,i)=>({region_id:`region-${i}`}));},claim:async()=>({leaseEpoch:1}),process:async region=>{active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setTimeout(resolve,1));handled.push(region);active--;return{tick:1,actionBudget:8,population:{present:1},factions:{processed:1}};},record:async()=>({thresholdBreached:false})});
 const req={method:'GET',headers:{authorization:'Bearer cron'}},res={status:0,writeHead(status){this.status=status;},end(body){this.body=JSON.parse(body);},setHeader(){}};
