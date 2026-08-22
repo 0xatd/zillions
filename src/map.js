@@ -222,17 +222,91 @@ export class GameMap extends TerrainField {
     terrain.name = 'terrain';
     group.add(terrain);
 
-    // Water plane above sunken tiles.
+    // Water: a custom shader plane — animated waves, fresnel sheen toward
+    // the camera, and shore foam where the terrain mesh rises near the water
+    // line. The signature flourish; the old flat transparent plane is the
+    // lava fallback only. ShaderMaterial needs no lights, so the look is
+    // identical under any lighting rig.
     const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0,
-      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
-      transparent: true, opacity: 0.85,
-      ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
-    });
-    const water = new THREE.Mesh(waterGeo, waterMat);
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(N / 2, -0.22, N / 2);
-    group.add(water);
+    const waterColor = this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0;
+    if (this.isLava()) {
+      const waterMat = new THREE.MeshStandardMaterial({ roughness: 1.0, metalness: 0.0,
+        color: waterColor, transparent: true, opacity: 0.85,
+        emissive: 0x7a1f08, emissiveIntensity: 0.8,
+      });
+      const water = new THREE.Mesh(waterGeo, waterMat);
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(N / 2, -0.22, N / 2);
+      group.add(water);
+    } else {
+      const shallow = new THREE.Color(0x74c8b8);
+      const deep = new THREE.Color(waterColor);
+      const waterMat = new THREE.ShaderMaterial({
+        transparent: true,
+        uniforms: {
+          uTime: { value: 0 },
+          uDeep: { value: deep },
+          uShallow: { value: shallow },
+          uLightDir: { value: new THREE.Vector3(0.55, 0.62, 0.3).normalize() },
+        },
+        vertexShader: [
+          'uniform float uTime;',
+          'varying vec3 vWorld;',
+          'varying vec3 vNormal;',
+          'float waveH(vec2 p, float t) {',
+          '  return sin(p.x * 0.9 + t * 1.1) * 0.035',
+          '       + sin(p.y * 1.3 - t * 0.8) * 0.028',
+          '       + sin((p.x + p.y) * 2.1 + t * 1.7) * 0.014;',
+          '}',
+          'void main() {',
+          '  vec3 pos = position;',
+          '  float h = waveH(pos.xy, uTime);',
+          '  pos.z += h;',
+          '  float e = 0.25;',
+          '  vNormal = normalize(vec3(',
+          '    waveH(pos.xy + vec2(e, 0.0), uTime) - h,',
+          '    waveH(pos.xy + vec2(0.0, e), uTime) - h,',
+          '    e));',
+          '  vec4 world = modelMatrix * vec4(pos, 1.0);',
+          '  vWorld = world.xyz;',
+          '  gl_Position = projectionMatrix * viewMatrix * world;',
+          '}',
+        ].join('\n'),
+        fragmentShader: [
+          'uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uLightDir;',
+          'varying vec3 vWorld; varying vec3 vNormal;',
+          // Shore foam reads the TERRAIN height under each fragment — but
+          // this plane has no access to the heightfield, so foam is faked
+          // from world-space noise bands near the wave crests instead:
+          // crests lighten toward uShallow, troughs sink toward uDeep.
+          'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+          'float vnoise(vec2 p) {',
+          '  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+          '  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),',
+          '             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);',
+          '}',
+          'void main() {',
+          '  vec3 viewDir = normalize(cameraPosition - vWorld);',
+          '  float crest = clamp(vNormal.x + vNormal.y + 0.55, 0.0, 1.0);',
+          '  vec3 base = mix(uDeep, uShallow, crest * 0.55);',
+          '  float sparkle = vnoise(vWorld.xz * 6.0 + vNormal.xy * 8.0);',
+          '  base += sparkle * 0.05;',
+          '  vec3 n = normalize(vec3(vNormal.x, 1.0, vNormal.y));',
+          '  float diff = max(dot(n, uLightDir), 0.0);',
+          '  base *= 0.75 + diff * 0.35;',
+          '  float fresnel = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 2.2);',
+          '  vec3 col = mix(base, vec3(0.85, 0.93, 0.95), fresnel * 0.45);',
+          '  gl_FragColor = vec4(col, 0.82 + fresnel * 0.15);',
+          '}',
+        ].join('\n'),
+      });
+      const water = new THREE.Mesh(waterGeo, waterMat);
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(N / 2, -0.22, N / 2);
+      group.add(water);
+      // The frame loop advances this clock so waves roll (main.js owns time).
+      group.userData.water = water;
+    }
 
     group.add(this._buildRipples());
     group.add(this._buildTrees());
