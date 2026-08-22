@@ -1700,7 +1700,7 @@ class App {
       if (character) {
         this.ui.selectedHero = character.proxyHero;
         this.profile.lastHero = character.proxyHero;
-        try { await this._ensureAuthoritativeEconomy(character); }
+        try { await this._ensureAuthoritativeEconomy(character, { persistProfile: false }); }
         catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
       }
       // Auth events are read/hydration boundaries. Persisting account metadata
@@ -1915,7 +1915,7 @@ class App {
     this.ui._showScreen('main');
   }
 
-  async _ensureAuthoritativeEconomy(character) {
+  async _ensureAuthoritativeEconomy(character, { persistProfile = true } = {}) {
     if (!this.auth?.isSignedIn()) return null;
     character = this.profile.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
     let result;
@@ -1930,7 +1930,7 @@ class App {
       applyEconomySnapshotToProfile(this.profile, character, result);
       const current = this.profile.mmoCharacters?.find((entry) => entry.id === character.id);
       this.profile.metaCurrency = current?.authoritativeBalance ?? this.profile.metaCurrency;
-      this._saveProfile();
+      if (persistProfile) this._saveProfile();
     }
     return result;
   }

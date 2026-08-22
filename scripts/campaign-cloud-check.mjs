@@ -73,5 +73,12 @@ assert.doesNotMatch(applyAuthSource, /this\._saveProfile\(\)/,
   'auth hydration must not write account metadata and trigger a recursive auth event');
 assert.match(applyAuthSource, /this\._storeProfileLocally\(\)/,
   'auth hydration must still preserve the hydrated profile in local storage');
+assert.match(applyAuthSource, /_ensureAuthoritativeEconomy\(character,\s*\{\s*persistProfile:\s*false\s*\}\)/,
+  'auth hydration must prevent authoritative economy hydration from writing metadata indirectly');
+
+const economyHydrationSource = mainSource.match(/async _ensureAuthoritativeEconomy\(character, \{ persistProfile = true \} = \{\}\) \{([\s\S]*?)\n  \}\n\n  async _marketBuy/)?.[1] || '';
+assert.ok(economyHydrationSource, 'authoritative economy hydration must expose an inspectable persistence boundary');
+assert.match(economyHydrationSource, /if \(persistProfile\) this\._saveProfile\(\)/,
+  'normal economy mutations must still persist while auth hydration can remain read-only');
 
 console.log('campaign cloud check passed');
