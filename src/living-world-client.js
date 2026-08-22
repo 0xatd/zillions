@@ -15,10 +15,15 @@ export function livingWorldRefreshFailure(currentState, viewport) {
   return { retained, state: retained ? currentState : null, mode: retained ? 'stale' : 'error', message: retained ? 'Map update failed · showing stale intelligence' : 'World intelligence unavailable' };
 }
 export function setLivingWorldSession(nextSession) { session = nextSession || null; }
+// The walkable-world key predates the authoritative shard key. Keep the UI
+// identity stable, but do not send it to the shard API as a database key.
+export function livingWorldShardId(worldId) {
+  return !worldId || worldId === 'earth' ? 'earth-1' : worldId;
+}
 const headers = (extra = {}) => ({ ...extra, ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}) });
 export async function getLivingWorldProjection(shardId, viewport = null) {
   if (!session?.access_token) return null;
-  const params = { shardId };
+  const params = { shardId: livingWorldShardId(shardId) };
   if (viewport) for (const key of ['minX','minY','maxX','maxY','zoom']) if (Number.isFinite(Number(viewport[key]))) params[key] = String(viewport[key]);
   const response = await fetch(`${API}?${new URLSearchParams(params)}`, { headers: headers({ accept: 'application/json' }), cache: 'no-store' });
   const result = await response.json().catch(() => null);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure } from '../src/living-world-client.js';
+import { LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, livingWorldShardId } from '../src/living-world-client.js';
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const hook of ['onPartyCreate', 'onPartyOpen', 'onPartyMemberLocate', 'onLivingWorldOpen',
@@ -10,6 +10,9 @@ for (const hook of ['onPartyCreate', 'onPartyOpen', 'onPartyMemberLocate', 'onLi
 assert.match(main, /setLivingWorldSession\(this\.auth\.session\)/, 'auth session must reach living-world client');
 assert.match(main, /this\._refreshLivingWorld\(\)\.catch/, 'overworld entry must hydrate authority projection');
 assert.match(main, /getLivingWorldProjection\([^\n]+viewport\)/, 'viewport changes must fetch a bounded authority projection');
+assert.equal(livingWorldShardId('earth'), 'earth-1', 'walkable Earth key must resolve to the materialized shard');
+assert.equal(livingWorldShardId('earth-1'), 'earth-1', 'authoritative shard key must remain unchanged');
+assert.match(main, /drawOverworldMinimap\(this\.ow, map\)/, 'walkable overworld must initialize its minimap');
 assert.doesNotMatch(main, /onLivingWorldMission:[^\n]*startGame/, 'living-world mission must not launch arbitrary campaign content');
 
 const projection = livingWorldProjectionToUi({

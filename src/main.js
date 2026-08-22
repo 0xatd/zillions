@@ -658,6 +658,8 @@ class App {
     } catch { /* unavailable or corrupt session storage: use world spawn */ }
     this.owTerrain = map.buildTerrain();
     this.scene.add(this.owTerrain);
+    map.drawMinimap(document.getElementById('minimap-base'));
+    this.ui.drawOverworldMinimap(this.ow, map);
     this.owGates = [];
     for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave].filter(Boolean)) {
       this.owGates.push(this._makeOverworldGate(gate));
@@ -1023,6 +1025,11 @@ class App {
     for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
 
     const h = ow.hero;
+    this._overworldMinimapT = (this._overworldMinimapT || 0) - dt;
+    if (this._overworldMinimapT <= 0) {
+      this._overworldMinimapT = 0.1;
+      this.ui.drawOverworldMinimap(ow, this.owMap);
+    }
     if (this.owHero) {
       this.owHero.position.set(h.x, this.owMap.groundY(h.x, h.z), h.z);
       this.owHero.rotation.y = h.facing;
