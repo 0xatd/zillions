@@ -139,6 +139,8 @@ class App {
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
     this.payCoins = [];         // arcing purse-coins in flight (Thronefall build FX)
+    this.dmgNums = [];          // floating damage numbers (QA SOLO-2), pooled sprites
+    this.dmgNumPool = [];       // recycled sprites so combat bursts never allocate
     this.projectiles = [];      // visible bullets/bolts/globs, slower than damage
     this.abilityFx = [];        // presentation-only hero ability telegraphs/shockwaves
     this.zombieAttacks = new Map();
@@ -3984,6 +3986,58 @@ class App {
 
   // ---------------- plot foundations ----------------
 
+  _spawnDmgNum(e) {
+    // Pooled canvas sprite: numbers pop up, drift, fade. Boss hits get the
+    // big red treatment so champion damage reads at a glance.
+    const MAX_ACTIVE = 40;
+    if (this.dmgNums.length >= MAX_ACTIVE) {
+      const old = this.dmgNums.shift();
+      this.scene.remove(old.sprite);
+      this.dmgNumPool.push(old.sprite);
+    }
+    let sprite = this.dmgNumPool.pop();
+    if (!sprite) {
+      const cnv = document.createElement('canvas');
+      cnv.width = 128; cnv.height = 64;
+      const tex = new THREE.CanvasTexture(cnv);
+      sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
+      sprite.scale.set(2.0, 1.0, 1);
+      sprite.userData.cnv = cnv;
+      sprite.userData.tex = tex;
+    }
+    const cnv = sprite.userData.cnv;
+    const ctx = cnv.getContext('2d');
+    ctx.clearRect(0, 0, 128, 64);
+    ctx.textAlign = 'center';
+    ctx.font = e.boss ? 'bold 44px system-ui, sans-serif' : 'bold 34px system-ui, sans-serif';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 7;
+    ctx.strokeText(String(e.n), 64, 44);
+    ctx.fillStyle = e.boss ? '#ff6b5e' : '#ffe9a8';
+    ctx.fillText(String(e.n), 64, 44);
+    sprite.userData.tex.needsUpdate = true;
+    const jitter = (Math.random() - 0.5) * 0.8; // presentation-only, never sim
+    sprite.position.set(e.x + jitter, this.map.groundY(e.x, e.z) + (e.boss ? 2.4 : 1.6), e.z);
+    sprite.material.opacity = 1;
+    this.scene.add(sprite);
+    this.dmgNums.push({ sprite, life: e.boss ? 1.0 : 0.7, maxLife: e.boss ? 1.0 : 0.7, vy: 1.6 });
+  }
+
+  _updateDmgNums(dt) {
+    for (let i = this.dmgNums.length - 1; i >= 0; i--) {
+      const n = this.dmgNums[i];
+      n.life -= dt;
+      const p = 1 - Math.max(0, n.life) / n.maxLife;
+      n.sprite.position.y += n.vy * dt * (1 - p * 0.6);
+      n.sprite.material.opacity = Math.max(0, 1 - p * p);
+      if (n.life <= 0) {
+        this.scene.remove(n.sprite);
+        this.dmgNumPool.push(n.sprite);
+        this.dmgNums.splice(i, 1);
+      }
+    }
+  }
+
   _makeLabelSprite(text, sub = '') {
     const cnv = document.createElement('canvas');
     cnv.width = 256; cnv.height = 128;
@@ -5276,6 +5330,12 @@ class App {
     if (g.events.length > 90) g.events.splice(0, g.events.length - 30);
     for (const e of g.events) {
       switch (e.type) {
+        case 'zdmg': {
+          // Floating damage number (QA SOLO-2): combat must read without
+          // waiting for something to die. Pooled canvas sprites.
+          this._spawnDmgNum(e);
+          break;
+        }
         case 'shot': {
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
@@ -5904,6 +5964,7 @@ class App {
     this._updatePayCoins(dt);
     this._updateProjectiles(dt);
     this._updateAbilityFx(dt);
+    this._updateDmgNums(dt);
     this.tacticalVisuals.update(dt);
     this.tacticalVisuals.render();
     this._renderCharacterPreview(t);
