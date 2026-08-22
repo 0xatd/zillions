@@ -2270,8 +2270,26 @@ export class UI {
     this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
     this.root.querySelector('#ow-quick-actions').classList.toggle('hidden', !on);
     this.root.querySelector('#ow-party-frames').classList.toggle('hidden', !on);
+    this.root.querySelector('#minimap-wrap').classList.toggle('hidden', !on);
     if (!on) this.closeLivingWorldMap();
     else this._renderPartyFrames();
+  }
+
+  drawOverworldMinimap(overworld, map) {
+    const top = this.root.querySelector('#minimap-top');
+    const size = map?.size || 1;
+    if (top.width !== size) { top.width = size; top.height = size; }
+    const ctx = top.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    for (const gate of [...(map?.overworldLayout?.gates || []), map?.overworldLayout?.cave].filter(Boolean)) {
+      ctx.fillStyle = gate.portal ? '#86d8ff' : gate.locked ? '#707782' : '#ffd75e';
+      ctx.beginPath(); ctx.arc(gate.x, gate.z, gate.portal ? 2.2 : 1.7, 0, Math.PI * 2); ctx.fill();
+    }
+    const hero = overworld?.hero;
+    if (hero) {
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#07131d'; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.arc(hero.x, hero.z, 2.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
   }
 
   setLivingWorldState(state) {
