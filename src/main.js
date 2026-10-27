@@ -822,38 +822,56 @@ class App {
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
     const squarePlaza = plan && plan.key === 'fort';
+    // On a terraced site the pad and walkways are draped over the ground so
+    // they follow the steps instead of floating flat over the lower terraces.
+    const terraced = !!this.map._tileCH;
+    const drape = (mesh, lift) => {
+      if (!terraced) return mesh;
+      mesh.updateMatrix();
+      const geo = mesh.geometry.clone();
+      geo.applyMatrix4(mesh.matrix);
+      const pa = geo.attributes.position;
+      for (let k = 0; k < pa.count; k++) pa.setY(k, this.map.groundY(pa.getX(k), pa.getZ(k)) + lift);
+      geo.computeVertexNormals();
+      mesh.geometry = geo;
+      mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0); mesh.scale.set(1, 1, 1);
+      return mesh;
+    };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
       toyMat({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
     disc.position.set(cx, plazaY + 0.015, cz);
+    drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = new THREE.RingGeometry(5.6, 5.85, 48);
+    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
       color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
+    drape(ring, 0.05);
     g.add(ring);
     const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
     for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), laneMat);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
       lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
       lane.receiveShadow = true;
-      g.add(lane);
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len), stripeMat);
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
       stripe.rotation.copy(lane.rotation);
       stripe.position.copy(lane.position);
       stripe.position.y = plazaY + 0.022;
+      drape(lane, 0.025); drape(stripe, 0.04);
+      g.add(lane);
       g.add(stripe);
     }
     return g;
@@ -4066,6 +4084,7 @@ class App {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
+        g.userData.bob = { node: kit.node, y: kit.node.position.y };
       } else if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
         // existing collision/readability scale; visual meshes never change
@@ -4199,6 +4218,14 @@ class App {
       rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
+      // Hoverbike idle: the hero floats on its wash, bobbing and rocking.
+      const bob = rec.mesh.userData.bob;
+      if (bob) {
+        const ph = t * 2.6 + (u.id % 7);
+        bob.node.position.y = bob.y + 0.05 + Math.sin(ph) * 0.045;
+        bob.node.rotation.z = Math.sin(ph * 0.63) * 0.035;
+        bob.node.rotation.x = Math.sin(ph * 0.81 + 1) * 0.02;
+      }
       // Render-only local lead makes a guest's own hero answer immediately
       // while lockstep catches up. Never apply this to the host or another
       // guest: their meshes must stay on confirmed simulation positions.
@@ -4943,7 +4970,11 @@ class App {
     // The sim can run many ticks per frame (catch-up after a hidden tab, the
     // co-op pump). Replaying hundreds of stale FX events in one frame is a
     // hitch and an air-raid of sounds — keep only the freshest burst.
-    if (g.events.length > 90) g.events.splice(0, g.events.length - 30);
+    if (g.events.length > 90) {
+      // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
+      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      g.events.splice(0, g.events.length - 30, ...keep);
+    }
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {

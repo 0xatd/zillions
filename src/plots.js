@@ -30,7 +30,7 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
-import { SITE_FORMS, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
+import { SITE_FORMS, LEDGE, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
 const TAU = Math.PI * 2;
 // Ward camps are handed out cheapest-first, so a two-gate city can still afford
@@ -726,6 +726,12 @@ export function generatePlots(map, anchor = null, opts = {}) {
     // --- Districts on the flats. Fields cluster on the open ground away from
     // the keep, a mill beside each field group, a couple of extra towers over
     // the most exposed wall, and the rest topped up house/field alternately.
+    // Terrace steps are spoken for before the districts move in, so the
+    // town settles onto the terraces and the steps stay unbroken cliffs.
+    if (!form.ring && map.ledgeW) {
+      const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
+      for (const k of terraceSteps(map, cx, cz, reach, tierAt)) if (map.tiles[k] === TILE.GRASS) taken.add(k);
+    }
     fillDistrict('house', 3);
     fillDistrict('farm', 8);
     fillDistrict('mill', 2);
@@ -843,6 +849,11 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
     const toward = Math.atan2(cz - camp.cz, cx - camp.cx);
     paintPathLine(camp.cx, camp.cz, camp.cx + Math.cos(toward) * 6, camp.cz + Math.sin(toward) * 6);
+  }
+
+  if (rim && !form.ring && map.ledgeW) {
+    computeInterior();
+    raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
   }
 
   return plots;
@@ -1073,4 +1084,233 @@ function oreClusters(map, cx, cz) {
     if (d > 12 && d < 48) clusters.push({ x, z, d, n: members.length });
   }
   return clusters.sort((a, b) => a.d - b.d);
+}
+
+// ---------------------------------------------------------------------------
+// Terraces
+// ---------------------------------------------------------------------------
+// The plateau is not one flat floor: the keep stands on a crown, the
+// districts on a terrace below it, the rampart on the outer terrace. Each step
+// is a one-tile cliff (crag: nothing walks it) wherever the step is clear of a
+// plot and its margin; streets, plot margins and a few cut gaps are the ramps,
+// and they are the ONLY walkable links between tiers. A flood from the keep
+// re-opens a gap anywhere a cliff would seal ground off, so every walkable
+// tile inside stays reachable. Heights live in map.ledgeH (renderer only).
+function terraceTierFn({ cx, cz, facing, radiusAt, seed }) {
+  const ph1 = (seed % 97) * 0.37, ph2 = (seed % 89) * 0.53;
+  return (x, z) => {
+    const px = x + 0.5 - cx, pz = z + 0.5 - cz;
+    const a = Math.atan2(pz, px);
+    const t = Math.atan2(Math.sin(a - facing), Math.cos(a - facing));
+    const f = Math.hypot(px, pz) / Math.max(4, radiusAt(t) - 1);
+    // Not rings: the hill climbs AWAY from the war. Toward the hives (t = 0)
+    // the town steps down fast to the outer terrace the gates open onto;
+    // behind the keep the middle terrace runs on to the cliff top.
+    const back = -Math.cos(t);
+    if (f < 0.3 + 0.06 * back + 0.05 * Math.sin(2 * a + ph1)) return 2;
+    if (f < 0.6 + 0.32 * back + 0.07 * Math.sin(3 * a + ph2)) return 1;
+    return 0;
+  };
+}
+
+// The step tiles of the terrace plan: the upper-side tile of every tier change.
+// Reserved before the districts are laid out, so houses and fields settle on
+// the terraces and the steps run as unbroken cliffs between them.
+function terraceSteps(map, cx, cz, reach, tierAt) {
+  const N = map.size;
+  const out = [];
+  const ext = Math.ceil(reach + 3);
+  const sx = Math.round(cx), sz = Math.round(cz);
+  for (let z = sz - ext; z <= sz + ext; z++) {
+    for (let x = sx - ext; x <= sx + ext; x++) {
+      if (x < 2 || z < 2 || x >= N - 2 || z >= N - 2) continue;
+      const t = tierAt(x, z);
+      if (t <= 0) continue;
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => tierAt(x + dx, z + dz) < t)) out.push(z * N + x);
+    }
+  }
+  return out;
+}
+
+function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed }) {
+  const N = map.size;
+  const H = [LEDGE.out, LEDGE.mid, LEDGE.top];
+  const tier = new Int8Array(N * N).fill(-1);
+  const locked = new Uint8Array(N * N);
+  const ext = Math.ceil(Math.max(...Array.from({ length: 32 }, (_, i) => radiusAt((i / 32) * TAU))) + 3);
+  const sx = Math.round(cx), sz = Math.round(cz);
+  const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed });
+  for (let z = sz - ext; z <= sz + ext; z++) {
+    for (let x = sx - ext; x <= sx + ext; x++) {
+      if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;
+      const k = z * N + x;
+      if (interior[k] || map.tiles[k] === TILE.FOREST) tier[k] = tierAt(x, z);
+    }
+  }
+  // A plot sits on ONE tier: the tier under its centre.
+  const foot = new Uint8Array(N * N);
+  for (const p of plots) {
+    if (p.kind === 'wall') continue;
+    const tc = tier[Math.floor(p.cz) * N + Math.floor(p.cx)];
+    if (tc < 0) continue;
+    for (let dz = 0; dz < p.size; dz++) {
+      for (let dx = 0; dx < p.size; dx++) {
+        foot[(p.z + dz) * N + (p.x + dx)] = 1;
+        const k = (p.z + dz) * N + (p.x + dx);
+        if (tier[k] < 0 || locked[k]) continue;
+        tier[k] = tc; locked[k] = 1;
+      }
+    }
+  }
+  // Cliffs: open grass on the upper side of a step, clear of plots and streets.
+  const cliff = new Uint8Array(N * N);
+  const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (let z = sz - ext; z <= sz + ext; z++) {
+    for (let x = sx - ext; x <= sx + ext; x++) {
+      const k = z * N + x;
+      if (tier[k] <= 0 || locked[k] || map.tiles[k] !== TILE.GRASS) continue;
+      if (N4.some(([dx, dz]) => { const t = tier[(z + dz) * N + x + dx]; return t >= 0 && t < tier[k]; })) cliff[k] = 1;
+    }
+  }
+  // Isolated cliff stubs (a single tile with no cliff neighbour) read as
+  // rubble, not a terrace edge: leave them as ramp.
+  for (let k = 0; k < N * N; k++) {
+    if (!cliff[k]) continue;
+    const x = k % N, z = (k / N) | 0;
+    let n = 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if ((dx || dz) && cliff[(z + dz) * N + x + dx]) n++;
+    if (n === 0) cliff[k] = 0;
+  }
+  const walls = new Set();
+  for (const p of plots) if (p.kind === 'wall') for (const [x, z] of p.tiles) walls.add(z * N + x);
+  // Reachability is judged with every plot BUILT (footprints solid), from the
+  // ground round the keep, so a full build-out can never seal a district.
+  const hqPlot = plots.find((p) => p.kind === 'hq');
+  const open = (k) => !cliff[k] && !foot[k] && !walls.has(k) && tier[k] >= 0 && map.isWalkable(k % N, (k / N) | 0);
+  const ringOf = (p) => {
+    const r = [];
+    for (let dz = -1; dz <= p.size; dz++) for (let dx = -1; dx <= p.size; dx++) {
+      if (dx >= 0 && dz >= 0 && dx < p.size && dz < p.size) continue;
+      r.push((p.z + dz) * N + (p.x + dx));
+    }
+    return r;
+  };
+  // The town is the LARGEST ground region touching the keep: a scrap of the
+  // keep's margin boxed in by steps is a pocket to open up, not the town.
+  const flood = () => {
+    const lab = new Int32Array(N * N);
+    const seeds = hqPlot ? ringOf(hqPlot).filter(open) : [sz * N + sx];
+    let best = 0, bestN = -1, id = 0;
+    for (const s0 of seeds) {
+      if (lab[s0]) continue;
+      id++;
+      let n = 1;
+      const st = [s0];
+      lab[s0] = id;
+      while (st.length) {
+        const k = st.pop();
+        const x = k % N, z = (k / N) | 0;
+        for (const [dx, dz] of N4) {
+          const nk = (z + dz) * N + x + dx;
+          if (lab[nk] || !open(nk)) continue;
+          lab[nk] = id; n++; st.push(nk);
+        }
+      }
+      if (n > bestN) { bestN = n; best = id; }
+    }
+    const seen = new Uint8Array(N * N);
+    for (let k = 0; k < N * N; k++) if (lab[k] === best && best) seen[k] = 1;
+    return seen;
+  };
+  for (let guard = 0; guard < 120; guard++) {
+    const seen = flood();
+    // A plot with no reached ground beside it gets the first step tile of its
+    // margin cut into a ramp.
+    let fixed = false;
+    for (const p of plots) {
+      if (p.kind === 'wall' || tier[Math.floor(p.cz) * N + Math.floor(p.cx)] < 0) continue;
+      const ring = ringOf(p);
+      if (ring.some((k) => seen[k])) continue;
+      const c = ring.find((k) => cliff[k]);
+      if (c != null) { cliff[c] = 0; fixed = true; break; }
+    }
+    if (fixed) continue;
+    if (hqPlot) {
+      const pocket = ringOf(hqPlot).find((k) => open(k) && !seen[k]);
+      if (pocket != null) {
+        // Cut the nearest step tile to that scrap of margin.
+        const px = pocket % N, pz = (pocket / N) | 0;
+        let bestK = -1, bd = Infinity;
+        for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+          const k = (pz + dz) * N + px + dx;
+          if (!cliff[k]) continue;
+          const d = Math.abs(dx) + Math.abs(dz);
+          if (d < bd) { bd = d; bestK = k; }
+        }
+        if (bestK >= 0) { cliff[bestK] = 0; continue; }
+      }
+    }
+    // First cliff tile (scan order) that separates reached from unreached
+    // ground becomes a two-tile ramp.
+    let cut = -1;
+    for (let k = 0; k < N * N && cut < 0; k++) {
+      if (!cliff[k]) continue;
+      const x = k % N, z = (k / N) | 0;
+      let a = false, b = false;
+      for (const [dx, dz] of N4) {
+        const nk = (z + dz) * N + x + dx;
+        if (!open(nk)) continue;
+        if (seen[nk]) a = true; else b = true;
+      }
+      if (a && b) cut = k;
+    }
+    if (cut < 0) break;
+    cliff[cut] = 0;
+    const x = cut % N, z = (cut / N) | 0;
+    for (const [dx, dz] of N4) { const nk = (z + dz) * N + x + dx; if (cliff[nk]) { cliff[nk] = 0; break; } }
+  }
+  // Commit: cliffs become crag, every tier tile gets its height; towers stand
+  // on a raised knoll over their gate; tier changes across walkable ground
+  // (the ramps) are eased over two passes so slopes are walkable-looking.
+  const hgt = new Float32Array(N * N);
+  for (let k = 0; k < N * N; k++) {
+    if (tier[k] < 0) continue;
+    hgt[k] = H[tier[k]];
+    if (cliff[k]) { map.tiles[k] = TILE.MOUNTAIN; hgt[k] += LEDGE.lip * 0.6; }
+  }
+  for (const p of plots) {
+    if (p.kind !== 'tower') continue;
+    for (let dz = -1; dz <= p.size; dz++) {
+      for (let dx = -1; dx <= p.size; dx++) {
+        const k = (p.z + dz) * N + (p.x + dx);
+        if (tier[k] < 0 || cliff[k]) continue;
+        const inner = dx >= 0 && dz >= 0 && dx < p.size && dz < p.size;
+        hgt[k] += inner ? 0.42 : 0.2;
+      }
+    }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const next = hgt.slice();
+    for (let k = 0; k < N * N; k++) {
+      if (tier[k] < 0 || cliff[k] || !map.isWalkable(k % N, (k / N) | 0)) continue;
+      const x = k % N, z = (k / N) | 0;
+      let sum = 0, n = 0, diff = false;
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nk = (z + dz) * N + x + dx;
+          if (tier[nk] < 0 || cliff[nk] || !map.isWalkable(x + dx, z + dz)) continue;
+          if (tier[nk] !== tier[k]) diff = true;
+          sum += hgt[nk]; n++;
+        }
+      }
+      if (diff && n) next[k] = sum / n;
+    }
+    hgt.set(next);
+  }
+  for (let k = 0; k < N * N; k++) {
+    if (tier[k] < 0) continue;
+    map.ledgeH[k] = hgt[k];
+    map.ledgeW[k] = 1;
+  }
+  map.terraceCliff = cliff;
 }

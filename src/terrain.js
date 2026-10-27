@@ -12,7 +12,7 @@
 // coverage quantiles decide how much of it there is, so a map is playable no
 // matter how the noise landed.
 import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R, CITY_WALL_R } from './config.js';
-import { SITE_FORMS, makeRim, rimRadius, rimOpen, rimMaxRadius, cityFacing, angDiff } from './site-plan.js';
+import { SITE_FORMS, LEDGE, makeRim, rimRadius, rimOpen, rimMaxRadius, cityFacing, angDiff } from './site-plan.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -559,6 +559,14 @@ export class TerrainField {
     const eCrag = L.mountT + 0.38 * (1 - L.mountT);
     const eBog = L.waterT - 0.06 * span;
     const noise = this._moistNoise;
+    // Real elevation for the renderer: the plateau stands a full terrace above
+    // the valleys (ledgeH, blended in by ledgeW). The outpost stays a flat pan.
+    const ledge = !form.ring;
+    if (ledge) {
+      this.ledgeH = new Float32Array(N * N);
+      this.ledgeW = new Float32Array(N * N);
+    }
+    const setLedge = (k, h, w = 1) => { if (ledge) { this.ledgeH[k] = h; this.ledgeW[k] = w; } };
     // Tiles the war roads run on stay clear of dressing.
     const road = new Uint8Array(N * N);
     for (const r of this.roadPaths || []) {
@@ -595,12 +603,17 @@ export class TerrainField {
           if (d < r) {
             if (tile !== TILE.GOLDORE && tile !== TILE.STONEORE) this.tiles[k] = TILE.GRASS;
             elev[k] = eHigh;
+            setLedge(k, LEDGE.out);
             continue;
           }
           if (d < r + rw) {
-            if (open) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; } else if (nat === 'water') {
+            if (open) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; setLedge(k, LEDGE.out); } else if (nat === 'water') {
               this.tiles[k] = TILE.WATER; elev[k] = eBog;
-            } else { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag + (n1 - 0.5) * 0.08; }
+            } else {
+              this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag + (n1 - 0.5) * 0.08;
+              // The cliff lip: a rocky crest just proud of the terrace.
+              setLedge(k, LEDGE.out + LEDGE.lip + Math.max(0, n1 - 0.45) * 0.5);
+            }
             continue;
           }
           const u = d - (r + rw);
@@ -609,6 +622,12 @@ export class TerrainField {
           let e = nearOpen ? eHigh + (eLow - eHigh) * clamp(u / 7, 0, 1) : eLow;
           const w = clamp((pad + 6 - d) / 6, 0, 1);
           elev[k] = elev[k] * (1 - w) + e * w;
+          // The glacis below an open rim climbs from the valley floor over
+          // nine tiles; everywhere else the foot of the cliff is lowland.
+          if (TILE_INFO[this.tiles[k]].walk || this.tiles[k] === TILE.FOREST) {
+            const hl = nearOpen ? LEDGE.out + (LEDGE.low - LEDGE.out) * clamp(u / 9, 0, 1) : LEDGE.low;
+            setLedge(k, hl, w);
+          }
           if (d > pad + 2) continue;
           if (u < 2.6 || road[k]) {
             if (!TILE_INFO[tile].walk) this.tiles[k] = TILE.GRASS;
@@ -623,7 +642,7 @@ export class TerrainField {
             if (u > 9 && n3 > 0.66) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; }
             continue;
           }
-          if (!corridor && u < 6 && n3 > 0.6) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; continue; }
+          if (!corridor && u < 6 && n3 > 0.6) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; setLedge(k, 0, 0); continue; }
           if (n2 > (corridor ? 0.64 : 0.54)) this.tiles[k] = TILE.FOREST;
         }
       }
@@ -1358,6 +1377,15 @@ export class TerrainField {
     if (!this.inBounds(x, z)) return -0.7;
     const i = this.idx(x, z);
     const t = this.tiles[i];
+    const lw = this.ledgeW ? this.ledgeW[i] : 0;
+    if (lw > 0 && t !== TILE.WATER) {
+      const h = lw >= 1 ? 0 : this._naturalHeight(i, t);
+      return h * (1 - lw) + this.ledgeH[i] * lw;
+    }
+    return this._naturalHeight(i, t);
+  }
+
+  _naturalHeight(i, t) {
     const L = this._levels || { waterT: 0.2, sandT: 0.23, mountT: 0.75 };
     const e = this.elev ? this.elev[i] : (L.waterT + L.mountT) / 2;
     const span = Math.max(0.001, L.mountT - L.waterT);

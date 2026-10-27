@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
+import { tileCorners, cliffSkirt, tileGroundY } from './terrace-mesh.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -20,6 +21,13 @@ function kitGeo(name, part) {
 import { makeRNG, makeNoise } from './utils.js';
 
 export class GameMap extends TerrainField {
+  // Ground under a point. On the terraced landform the per-tile corners keep
+  // a figure on its own terrace right up to the cliff edge.
+  groundY(x, z) {
+    if (this._tileCH) return tileGroundY(this, this._tileCH, x, z);
+    return super.groundY(x, z);
+  }
+
   isLava() {
     return this.theme?.liquid === 'lava';
   }
@@ -59,6 +67,7 @@ export class GameMap extends TerrainField {
     const N = this.size;
     const group = new THREE.Group();
     this._cornerH = null; // invalidate: recompute against the current tiles
+    this._tileCH = null;
 
     // Terrain: 2 triangles per tile. Cel look: large SMOOTH fields of color —
     // variation is low-frequency noise, never per-tile jitter (no checkering).
@@ -98,7 +107,7 @@ export class GameMap extends TerrainField {
             const d = Math.max(Math.abs(dx), Math.abs(dz));
             if (t === TILE.WATER) dw = Math.min(dw, d);
             if (t === TILE.FOREST && d <= 1) nearForest[i] = 1;
-            if (t === TILE.MOUNTAIN && d <= 1) nearCrag[i] = 1;
+            if (t === TILE.MOUNTAIN && d <= 1 && !(this.terraceCliff && this.terraceCliff[this.idx(x + dx, z + dz)])) nearCrag[i] = 1;
           }
         }
         nearWater[i] = dw <= 2 ? 1 - dw / 3 : 0;
@@ -126,7 +135,9 @@ export class GameMap extends TerrainField {
             if (!this.inBounds(tx, tz)) continue;
             const ti = this.idx(tx, tz);
             const t = this.tiles[ti];
-            col.setHex(this.colorOf(t));
+            // Terrace steps are grassy shelves: the rock shows on the face.
+            const tc = this.terraceCliff && this.terraceCliff[ti];
+            col.setHex(this.colorOf(tc ? TILE.GRASS : t));
             r += col.r; g += col.g; b += col.b; n++;
             wet += nearWater[ti];
             shadeF += nearForest[ti];
@@ -140,7 +151,10 @@ export class GameMap extends TerrainField {
         // Sunlit relief, baked in: high ground lifts toward light, hollows and
         // basins sink — so the landform reads even under flat Lambert shading.
         const h = cornerH[z * cw + x];
-        const lift = h >= 0 ? Math.min(0.035, h * 0.025) : Math.max(-0.04, h * 0.06);
+        let lift = h >= 0 ? Math.min(0.035, h * 0.025) : Math.max(-0.04, h * 0.06);
+        // Terraced landform: the valleys the horde climbs out of sink into a
+        // darker, cooler green; the terraces lift toward the light by tier.
+        if (this.ledgeW && h >= 0) lift = Math.max(-0.09, Math.min(0.05, (h - 3.0) * 0.045));
         const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.012;
         col.offsetHSL(0, 0, v + lift);
         // Toy art pass: open ground is ONE flat colour per map (Thronefall-
@@ -189,13 +203,16 @@ export class GameMap extends TerrainField {
     // frame, and the corner grid only changes when the terrain mesh does.
     this._cornerH = cornerH;
     this._cornerW = cw;
+    const tileCH = tileCorners(this, cornerH, cw);
+    this._tileCH = tileCH;
 
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        const h00 = cornerH[z * cw + x];
-        const h10 = cornerH[z * cw + (x + 1)];
-        const h01 = cornerH[(z + 1) * cw + x];
-        const h11 = cornerH[(z + 1) * cw + (x + 1)];
+        const ti4 = (z * N + x) * 4;
+        const h00 = tileCH ? tileCH[ti4] : cornerH[z * cw + x];
+        const h10 = tileCH ? tileCH[ti4 + 1] : cornerH[z * cw + (x + 1)];
+        const h01 = tileCH ? tileCH[ti4 + 2] : cornerH[(z + 1) * cw + x];
+        const h11 = tileCH ? tileCH[ti4 + 3] : cornerH[(z + 1) * cw + (x + 1)];
 
         const verts = [
           [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
@@ -224,6 +241,8 @@ export class GameMap extends TerrainField {
     terrain.receiveShadow = true;
     terrain.name = 'terrain';
     group.add(terrain);
+    const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS));
+    if (strata) group.add(strata);
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
@@ -477,6 +496,12 @@ export class GameMap extends TerrainField {
         }
         const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) =>
           this.isWalkable(x + dx, z + dz));
+        // Terrace steps inside the city are drawn by the strata face; only an
+        // odd boulder sits on their lip so the streets stay readable.
+        if (rim && this.terraceCliff && this.terraceCliff[this.idx(x, z)]) {
+          if (rng() < 0.22) boulders.push({ x: x + 0.3 + rng() * 0.4, z: z + 0.3 + rng() * 0.4, s: 0.45 + rng() * 0.3, r: rng() * Math.PI * 2 });
+          continue;
+        }
         if (rim) {
           const n = 1 + (rng() < 0.55 ? 1 : 0);
           for (let i = 0; i < n; i++) {

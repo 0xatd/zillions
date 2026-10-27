@@ -4123,7 +4123,7 @@ export class Game {
           // Never lock on across a cliff or water: the chase is a straight
           // line, and a zombie pressed into a rock face below a hero on the
           // plateau was the commonest stuck figure in the playthrough check.
-          if (d < bd && (range || this._walkLine(zb.x, zb.z, u.x, u.z))) { bd = d; best = u; }
+          if (d < bd && ((range && d <= range * range) || this._walkLine(zb.x, zb.z, u.x, u.z))) { bd = d; best = u; }
         }
         zb.targetU = best;
       }

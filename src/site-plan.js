@@ -20,6 +20,12 @@
 
 const TAU = Math.PI * 2;
 
+// World heights of the terraced landform (presentation only: the sim stays on
+// tiles, where cliffs are crag and ramps are the only walkable links between
+// tiers). Lowland valleys the horde climbs out of, the outer terrace the
+// rampart stands on, the district terrace, and the keep's crown.
+export const LEDGE = { low: 0.05, out: 2.1, mid: 3.25, top: 4.4, lip: 0.22 };
+
 const ellipse = (a, b) => (t) => 1 / Math.sqrt((Math.cos(t) / a) ** 2 + (Math.sin(t) / b) ** 2);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 export const angDiff = (a, b) => Math.abs(wrap(a - b));
