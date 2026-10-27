@@ -22,7 +22,9 @@ import {
 import { ITEM_BASES, hashString, parseItemKey, resolveItem, worldItemLevel } from './items.js';
 import { vendorSellPrice } from './vendor.js';
 
-export const MATCH_REPORT_VERSION = 1;
+import { MATCH_REPORT_VERSION } from './match-report.js';
+
+export { MATCH_REPORT_VERSION };
 export const MAX_CHARACTER_LEVEL = 100;
 export const MATCH_MODES = ['campaign', 'survival', 'labyrinth'];
 

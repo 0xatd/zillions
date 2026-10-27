@@ -87,8 +87,19 @@ export function nearbyBuckets(buckets, fallback, x, z, radius) {
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
-  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'campaign') {
+  // opts.rngSeed: the match seed (from the server-issued match ticket). Every
+  // peer of a co-op match uses the same one; replays on the server reuse it.
+  constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'campaign', opts = {}) {
     this.map = map;
+    // Entity ids are part of the simulated state. A fresh match always starts
+    // from the same id, so a second match in one tab (or a server replay in a
+    // warm function) runs exactly like the first. Restores set it below.
+    if (!snap) setNextId(1000);
+    // Sim steps taken so far — the clock the input log is keyed on.
+    this.steps = 0;
+    // When set to an array, every executed command is appended as
+    // [step, command] so the server can replay the match (src/match-replay.js).
+    this.inputLog = null;
     this.diffKey = difficulty;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal;
     this.levelId = snap ? snap.level : levelId;
@@ -96,7 +107,8 @@ export class Game {
     this.level = levelById(this.levelId || 1);
     this.economy = { startGold: START_GOLD, income: 1, pressure: 1, ...(this.level.economy || {}) };
     this.boss = null;
-    this.rng = makeRNG(999);
+    this.rngSeed = Number.isInteger(opts?.rngSeed) ? opts.rngSeed >>> 0 : 999;
+    this.rng = makeRNG(this.rngSeed);
 
     this.gold = this.economy.startGold;
     this.coins = [];             // physical coins on the ground
@@ -247,7 +259,7 @@ export class Game {
         lostByKind: { ...(this.stats.lostByKind || {}) },
         armyPeak: { ...(this.stats.armyPeak || {}) },
       },
-      rng: this.rng.getState(), nextId: getNextId(),
+      rng: this.rng.getState(), nextId: getNextId(), steps: this.steps, rngSeed: this.rngSeed,
       plots: this.plots.map((p) => ({
         id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch,
         ruined: p.ruined ? 1 : 0, musterT: p.musterT != null ? snapNum(p.musterT) : null,
@@ -580,6 +592,8 @@ export class Game {
 
     this.rng.setState(snap.rng);
     setNextId(snap.nextId);
+    this.steps = Number.isInteger(snap.steps) ? snap.steps : 0;
+    if (Number.isInteger(snap.rngSeed)) this.rngSeed = snap.rngSeed >>> 0;
     this.flowDirty = true;
     if (this.mode === 'labyrinth' && Array.isArray(snap.flowSeeds)) {
       // Rebuild the exact hunting field the save was using — recomputing from
@@ -2692,6 +2706,7 @@ export class Game {
   // Central command entry point — local input and remote co-op players both go
   // through here, so the sim stays deterministic under lockstep.
   exec(c) {
+    if (this.inputLog && !this.over && c && typeof c === 'object') this.inputLog.push([this.steps, JSON.parse(JSON.stringify(c))]);
     switch (c.t) {
       case 'hdir': { // hero movement input: direction + sprint flag
         const h = this.heroes[c.p || 0];
@@ -3448,6 +3463,7 @@ export class Game {
 
   update(dt) {
     if (this.over) return;
+    this.steps++;
     this.time += dt;
     this._armyPeakSampleAt = sampleArmyPeak(
       this.units, this.stats.armyPeak, this.time, this._armyPeakSampleAt,
