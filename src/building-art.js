@@ -14,7 +14,7 @@
 // keyed off plot ids and tile coords — deterministic, so peers agree.
 import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
-import { assetClone, assetPart, hasKit, kitClone, kitMaterials } from './assets.js';
+import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } from './assets.js';
 import { culture, kitBuildingKey } from './cultures.js';
 
 // The art-slice GLBs predate the detailed procedural kit and read flatter
@@ -98,7 +98,28 @@ function merger() {
     if (g !== geo) g.dispose();
     geo.dispose();
   };
+  // A toy-kit GLB part merged with its OWN vertex colours (linear, from the
+  // Blender kit). The shared kit geometry is cloned, never disposed.
+  const kit = (geo, x = 0, y = 0, z = 0, ry = 0, sx = 1, sy = 1, sz = 1, tint = 1) => {
+    const src = geo.index ? geo.toNonIndexed() : geo.clone();
+    _mat.makeRotationFromEuler(_euler.set(0, ry, 0, 'YXZ'));
+    _mat.scale(_vec.set(sx, sy, sz));
+    _mat.setPosition(x, y, z);
+    src.applyMatrix4(_mat);
+    const p = src.getAttribute('position');
+    const n = src.getAttribute('normal');
+    const c = src.getAttribute('color');
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+      if (c) col.push(c.getX(i) * tint, c.getY(i) * tint, c.getZ(i) * tint);
+      else col.push(tint, tint, tint);
+      uvs.push(0.125, 0.875);
+    }
+    src.dispose();
+  };
   const api = {
+    kit,
     box: (hex, w, h, d, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) =>
       add(new THREE.BoxGeometry(w, h, d), hex, x, y, z, rx, ry, rz),
     cyl: (hex, r1, r2, h, x = 0, y = 0, z = 0, seg = 10, rx = 0, ry = 0, rz = 0) =>
@@ -319,6 +340,84 @@ function kitBuildingMesh(b) {
   return g;
 }
 
+// ---------------- the toy-kit rampart ----------------
+// Walls are drawn from the Blender kit (tools/art/toy_kit/walls.py): curtain
+// runs scaled from each pier toward its neighbours (so the line follows the
+// tile chain the terrain-adapted plan laid down), joint posts only at ends,
+// junctions and every few tiles, and ONE gatehouse per gate, centred on the
+// plot's principal gate tile and aligned with the local wall run. The other
+// arch tiles draw nothing: they are the gatehouse's open passage.
+function kitWall(b, ctx, tier, K, KG) {
+  const t = Math.min(3, Math.max(1, tier | 0));
+  const seg = kitGeometry(`wall_t${t}_seg`, 'body');
+  const post = kitGeometry(`wall_t${t}_post`, 'body');
+  const gate = kitGeometry(`gate_t${t}`, 'body');
+  if (!seg || !post || !gate) return false;
+  const glowOf = (name) => kitGeometry(name, 'glow');
+  const N = ctx.mapSize || 0;
+  const wallTiles = ctx.wallTiles || new Set();
+  const has = (x, z) => wallTiles.has(z * N + x);
+  const arch = ctx.archTiles || new Set();
+  const isArch = (x, z) => arch.has(z * N + x);
+  const shock = b.branch === 'shock', bastion = b.branch === 'bastion';
+  const sy = bastion ? 1.18 : 1, sz = bastion ? 1.3 : 1;
+  const tint = 1 + (((b.x * 7 + b.z * 13) % 5) - 2) * 0.025;
+  const [cx, cz] = ctx.center || [N / 2, N / 2];
+  const ox = b.x + 0.5 - cx, oz = b.z + 0.5 - cz;
+  // local +z (the merlon/outside face) after a yaw of ry points at
+  // (sin ry, cos ry); flip by pi when it faces the keep.
+  const faceOut = (ry) => (Math.sin(ry) * ox + Math.cos(ry) * oz < 0 ? ry + Math.PI : ry);
+  if (b.gate) {
+    if (!(ctx.gateMain && ctx.gateMain.has(b.z * N + b.x))) return true;
+    // the local run: principal axis of the wall chain within 3 tiles
+    let sxx = 0, szz = 0, sxz = 0, n = 0;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      if (!has(b.x + dx, b.z + dz)) continue;
+      sxx += dx * dx; szz += dz * dz; sxz += dx * dz; n++;
+    }
+    const th = n > 1 ? 0.5 * Math.atan2(2 * sxz, sxx - szz) : 0;
+    const ry = faceOut(-th);
+    K.kit(gate.geometry, 0, 0, 0, ry, 1, sy, 1, tint);
+    const gg = glowOf(`gate_t${t}`);
+    if (gg) KG.kit(gg.geometry, 0, 0, 0, ry, 1, sy, 1);
+    return true;
+  }
+  const nbs = [];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (has(b.x + dx, b.z + dz)) nbs.push([dx, dz]);
+  let scx = 0, scz = 0;
+  for (const [dx, dz] of nbs) { scx += dx * 0.26; scz += dz * 0.26; }
+  const sg = glowOf(`wall_t${t}_seg`);
+  for (const [dx, dz] of nbs) {
+    const ex = dx * 0.5, ez = dz * 0.5;
+    const vx = ex - scx, vz = ez - scz;
+    const len = Math.hypot(vx, vz) + 0.05;
+    const yaw = Math.atan2(vz, vx);
+    let ry = -yaw, px = scx, pz = scz;
+    if (Math.sin(ry) * ox + Math.cos(ry) * oz < 0) { ry += Math.PI; px = ex + (vx / (len || 1)) * 0.05; pz = ez + (vz / (len || 1)) * 0.05; }
+    K.kit(seg.geometry, px, 0, pz, ry, len, sy, sz, tint);
+    if (sg) KG.kit(sg.geometry, px, 0, pz, ry, len, sy, sz);
+    if (shock) {
+      for (const side of [-1, 1]) {
+        const nx = Math.sin(yaw) * side * 0.3, nz = -Math.cos(yaw) * side * 0.3;
+        KG.box(0x6ff6ff, len * 0.92, 0.05, 0.03, (scx + ex) / 2 + nx, 0.78 * sy, (scz + ez) / 2 + nz, 0, -yaw, 0);
+      }
+    }
+  }
+  const nearArch = nbs.some(([dx, dz]) => isArch(b.x + dx, b.z + dz));
+  const straight = nbs.length === 2 && nbs[0][0] === -nbs[1][0] && nbs[0][1] === -nbs[1][1];
+  const joint = nbs.length !== 2 || (((b.x * 3 + b.z * 5) % 4 + 4) % 4 === 0 && !(straight && ((b.x + b.z) & 1)));
+  if (!nbs.length || (joint && !nearArch)) {
+    const run = nbs.length === 2 ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
+      : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
+    const ry = faceOut(-run);
+    K.kit(post.geometry, scx, 0, scz, ry, bastion ? 1.15 : 1, sy, bastion ? 1.15 : 1, tint);
+    const pg = glowOf(`wall_t${t}_post`);
+    if (pg) KG.kit(pg.geometry, scx, 0, scz, ry, 1, sy, 1);
+    if (shock) KG.box(0x6ff6ff, 0.16, 0.16, 0.16, scx, 1.9 * sy, scz);
+  }
+  return true;
+}
+
 export function buildBuildingMesh(b, ctx = {}) {
   const authored = authoredBuildingMesh(b) || kitBuildingMesh(b);
   if (authored) return authored;
@@ -327,6 +426,8 @@ export function buildBuildingMesh(b, ctx = {}) {
   const B = merger();          // hull, steel, concrete — Lambert, shadowed
   const G = merger();          // marker lights, lenses — always lit
   const W = merger();          // habitation glass — glows at night
+  const K = merger();          // toy-kit pieces with their own vertex colours
+  const KG = merger();         // toy-kit glow parts
   const M = (color, e = 0) => toyMat({ color, emissive: e ? color : 0x000000, emissiveIntensity: e });
   // Separate-mesh helpers for ANIMATED parts only.
   const liveBox = (w, h, dep, color, x = 0, y = 0, z = 0, e = 0) => {
@@ -661,6 +762,7 @@ export function buildBuildingMesh(b, ctx = {}) {
       break;
     }
     case 'wall': {
+      if (hasKit('wall_t1_seg') && kitWall(b, ctx, tier, K, KG)) break;
       // THE RAMPART — still a smoothed polyline (piers chamfer toward their
       // neighbors, curtains meet at shared midpoints; the sim's tile grid is
       // untouched) — but each curtain is now real fortification: a sloped
@@ -952,6 +1054,16 @@ export function buildBuildingMesh(b, ctx = {}) {
   }
 
   // Merged output: body (shadowed hull), glow (always-lit), windows (night).
+  if (!K.empty()) {
+    const m = K.build(kitMaterials().body.clone(), false);
+    g.add(m);
+  }
+  if (!KG.empty()) {
+    const m = KG.build(kitMaterials().glow.clone(), false);
+    m.castShadow = false;
+    m.userData.noOutline = true;
+    g.add(m);
+  }
   if (!B.empty()) {
     g.add(B.build(toyMat({ vertexColors: true, map: colonyAtlas() }), true));
   }

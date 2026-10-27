@@ -14,6 +14,7 @@ const KIT_ASSETS = [
   ...[1, 2, 3].flatMap((t) => [
     `farm_t${t}`, `mill_t${t}`, `mine_t${t}`, `workshop_t${t}`, `hero_forge_t${t}`,
     `camp_militia_t${t}`, `camp_ranger_t${t}`, `camp_sniper_t${t}`,
+    `wall_t${t}_seg`, `wall_t${t}_post`, `gate_t${t}`,
   ]),
   'unit_soldier', 'unit_ranger', 'unit_sniper',
   'hero_scott', 'hero_alexander', 'hero_danny',

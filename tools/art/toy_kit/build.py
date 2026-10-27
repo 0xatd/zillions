@@ -14,6 +14,7 @@ sys.path.insert(0, HERE)
 
 from kit import Kit, export_kit  # noqa: E402
 from cultures import CULTURES  # noqa: E402
+import walls  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 
@@ -33,6 +34,9 @@ def jobs(culture):
         out.append((f'house_t{t}', lambda k, t=t: B.house(k, t, pal)))
         out.append((f'outpost_t{t}', lambda k, t=t: B.outpost(k, t, pal)))
     for t in (1, 2, 3):
+        out.append((f'wall_t{t}_seg', lambda k, t=t: walls.wall_seg(k, t, pal)))
+        out.append((f'wall_t{t}_post', lambda k, t=t: walls.wall_post(k, t, pal)))
+        out.append((f'gate_t{t}', lambda k, t=t: walls.gatehouse(k, t, pal)))
         out.append((f'farm_t{t}', lambda k, t=t: B.farm(k, t, pal)))
         out.append((f'mill_t{t}', lambda k, t=t: B.mill(k, t, pal)))
         out.append((f'mine_t{t}', lambda k, t=t: B.mine(k, t, pal)))

@@ -3942,15 +3942,26 @@ class App {
 
   _makeBuildingMesh(b) {
     // Colony-kit construction lives in building-art.js; the renderer only
-    // supplies the wall-plot occupancy the smoothed rampart polyline needs.
-    if (!this._wallTiles) {
+    // supplies the wall-plot occupancy (the rampart line), the arch tiles,
+    // each gate's principal tile and the keep (walls face away from it).
+    const plots = this.game.plots;
+    if (!this._wallTiles || this._wallTilesFor !== plots.length) {
       const N = this.game.map.size;
+      this._wallTilesFor = plots.length;
       this._wallTiles = new Set();
-      for (const p of this.game.plots) {
-        if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
+      this._archTiles = new Set();
+      this._gateMain = new Set();
+      for (const p of plots) {
+        if (p.kind !== 'wall') continue;
+        for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
+        for (const [x, z] of p.arch || (p.gate ? [p.gate] : [])) this._archTiles.add(z * N + x);
+        if (p.gate) this._gateMain.add(p.gate[1] * N + p.gate[0]);
       }
     }
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles });
+    const hq = this.game.buildings.find((o) => o.kind === 'hq');
+    const center = hq ? [hq.cx, hq.cz] : null;
+    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+      archTiles: this._archTiles, gateMain: this._gateMain, center });
   }
 
   _syncBuildings() {
