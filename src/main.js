@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, PACK_SLOTS,
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
@@ -31,25 +31,17 @@ import { HordeArt, buildCorpseGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
-import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
-import { loadMeta, awardRun, metaBonuses } from './meta.js';
+import { loadMeta, awardRun } from './meta.js';
+import { MATCH_REPORT_VERSION } from './match-rewards.js';
+import { matchResultRequest } from './backend.js';
+import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
-import { getGalaxyState } from './backend.js';
-import {
-  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
-} from './living-world-client.js';
-import { deliverBattleOutbox, loadBattleOutbox } from './living-world-battle-outbox.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, recordMmoInstance,
 } from './mmo-characters.js';
-import {
-  stitchOverworld, Overworld, gateState,
-  earthWorldDescriptor, overworldChannel,
-  OVERWORLD_SIZE, OVERWORLD_GHOSTS,
-} from './overworld.js';
 import {
   FOG_DARKNESS,
   FOG_EDGE_SOFTNESS,
@@ -65,49 +57,6 @@ const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
-
-// The overworld's renderer half: the headless stitch from overworld.js poured
-// through GameMap's cel terrain pipeline. Each region wears its own level's
-// palette, so the planet reads as the campaign itself.
-class OverworldMap extends GameMap {
-  constructor(campaign = 0, worldId = 'earth') {
-    // The planet is a descriptor: Earth today, other servers' universes
-    // tomorrow — same stitch, same renderer, different data.
-    const world = descriptorForWorldId(knownGalaxy(), worldId, campaign);
-    super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
-    this._owWorld = world;
-    // super() stitched with a zero-campaign descriptor (the ladder is not
-    // known until super returns); re-stitch with the real campaign so locked
-    // fronts bake stained ground on first build. Idempotent — fresh rng.
-    this.generate();
-  }
-
-   generate() { stitchOverworld(this, this._owWorld || earthWorldDescriptor()); }
-
-   // buildTerrain asks colorOf(tile) without a position — but idx(x, z) is
-   // always called for the same tile first, so the last query tells us where
-   // the color is going. Region palette by position, one biome per band.
-   idx(x, z) { this._q = [x, z]; return super.idx(x, z); }
-
-   regionPalette(x, z) {
-     // Colour comes from whichever region's descriptor owns this tile.
-     const regions = (this.overworldWorld && this.overworldWorld.regions) || [];
-     const r = this.region ? this.region[this.idx(Math.floor(x), Math.floor(z))] : 0;
-     const lv = regions[r] || regions[0];
-     return lv && lv.palette;
-   }
-
-   colorOf(t, x, z) {
-     const q = x !== undefined ? [x, z] : this._q;
-     const p = q ? this.regionPalette(q[0], q[1]) : (this.overworldWorld.regions[0].palette);
-     const map = {
-       [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
-       [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
-       [TILE.GOLDORE]: p.sand, [TILE.STONEORE]: p.mountain,
-     };
-     return map[t] !== undefined ? map[t] : TILE_INFO[t].color;
-   }
-}
 
 class App {
   constructor() {
@@ -231,24 +180,7 @@ class App {
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
-      onCampaignMap: () => this._enterOverworld(),
-      onPartyCreate: () => this._createLivingWorldParty(),
-      onPartyOpen: () => this._openLivingWorldParty(),
-      onPartyLeave: () => this._leaveLivingWorldParty(),
-      onPartyTravelMode: (mode) => this._setLivingWorldPartyTravelMode(mode),
-      onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
-      onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
-      onLivingWorldOpen: () => this._refreshLivingWorld(),
-      onLivingWorldViewport: (viewport) => this._refreshLivingWorldViewport(viewport),
-      onLivingWorldFastTravel: (locationId, mode) => this._requestLivingWorldTravel(locationId, mode),
-      onLivingWorldTrade: (payload) => this._livingWorldTrade(payload),
-      onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
-      onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
-      onLivingWorldEncounter: (encounter, action) => this._livingWorldEncounterAction(encounter, action),
-      onLivingWorldGovernance: (action, payload) => this._livingWorldGovernanceAction(action, payload),
-      onLivingWorldTrackParty: (partyId) => this._trackLivingWorldParty(partyId),
-      onGalaxyOpen: () => this._openGalaxyMap(),
-      onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
+      onCampaignMap: () => this._openCampaignSelect(),
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -345,7 +277,6 @@ class App {
     if (initialCharacter) {
       this.ui.selectedHero = initialCharacter.proxyHero;
       this.profile.lastHero = initialCharacter.proxyHero;
-      this.profile.lastWorld = initialCharacter.lastWorld || this.profile.lastWorld || 'earth';
     }
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
@@ -404,7 +335,7 @@ class App {
   // A real last stand still runs on the surface. The extra geometry makes it
   // read as one small battlefield on a much larger planet under siege.
   showMenuBackdrop(levelId = 1) {
-    if (this.game || this.ow || this.menuTerrain) return;
+    if (this.game || this.menuTerrain) return;
     const level = levelById(levelId);
     const map = new GameMap(level.seed, level.theme);
     this.menuMap = map;
@@ -427,7 +358,7 @@ class App {
   }
 
   showLoginBackdrop() {
-    if (this.game || this.ow || this.titleSpace) return;
+    if (this.game || this.titleSpace) return;
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camera.position.set(MAP_SIZE / 2 + 22, 27, MAP_SIZE / 2 + 35);
     this.camera.lookAt(this.focus);
@@ -615,357 +546,16 @@ class App {
     this.menuMap = null;
   }
 
-  // ---------------- overworld ----------------
-  // The menu is a place: the five fronts stitched onto one small planet,
-  // walked by the player's selected hero. Entering a front's gate starts the
-  // run through the same onStart path the setup screen uses.
-
-  _enterOverworld(worldId = null) {
+  // ---------------- mission select ----------------
+  // "Enter World" opens the campaign mission select for the selected
+  // character. The game is a siege game: every run starts from here.
+  _openCampaignSelect() {
     if (this.game) return;
-    // Already on the planet — the hub's ENTER WORLD means "resume the walk",
-    // not a no-op. It used to early-return with the overlay still up, which
-    // read as a dead button inside the custom-games loop (QA 2026-08-18).
-    if (this.ow) {
-      this._makeOverworldHero();
-      this.ui.hideOverlay();
-      return;
-    }
-    const character = selectedMmoCharacter(this.profile);
-    if (!character) {
-      this.ui.setProfile(this.profile);
+    if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
       this.ui.showCharacterCreator();
       return;
     }
-    this.ui.selectedHero = character.proxyHero;
-    worldId = worldId || character.lastWorld || this.profile.lastWorld || 'earth';
-    this._clearMenuBackdrop();
-    this.ui.setOverworldMode(true);
-    const map = new OverworldMap(this.profile.campaign || 0, worldId);
-    const sky = map.overworldWorld.regions[0]?.palette?.sky || 0x7eaeb5;
-    this.scene.background = new THREE.Color(sky);
-    this.scene.fog.color.setHex(sky);
-    this.scene.fog.density = 0.0045;
-    this.owMap = map;
-    this.ow = new Overworld(map, { world: map.overworldWorld });
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('zillions-overworld-return') || 'null');
-      if (saved?.worldId === map.overworldWorld.id && Number.isFinite(saved.x) && Number.isFinite(saved.z)) {
-        this.ow.hero.x = saved.x;
-        this.ow.hero.z = saved.z;
-        this.ow.hero.facing = Number(saved.facing) || 0;
-        sessionStorage.removeItem('zillions-overworld-return');
-      }
-    } catch { /* unavailable or corrupt session storage: use world spawn */ }
-    this.owTerrain = map.buildTerrain();
-    this.scene.add(this.owTerrain);
-    map.drawMinimap(document.getElementById('minimap-base'));
-    this.ui.drawOverworldMinimap(this.ow, map);
-    this.owGates = [];
-    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave].filter(Boolean)) {
-      this.owGates.push(this._makeOverworldGate(gate));
-    }
-    this._makeOverworldHero();
-    this.profile.lastWorld = map.overworldWorld.id;
-    character.lastWorld = map.overworldWorld.id;
-    this._saveProfile();
-    this.ui.hideOverlay();
-    this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
-    this._refreshLivingWorld().catch(() => {});
-  }
-
-  async _openGalaxyMap() {
-    const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
-    const depth = 12 + metaBonuses().unlock.galaxyDepth;
-    const destinations = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth);
-    let macro = null;
-    try { macro = await getGalaxyState(); } catch { /* local galaxy still works */ }
-    this.ui.showGalaxy(destinations, currentWorld, macro);
-  }
-
-  _livingWorldSelf() {
-    const character = selectedMmoCharacter(this.profile);
-    return {
-      id: character?.id || this.auth?.user?.id || 'self',
-      name: character?.name || this.profile?.name || 'Commander',
-      className: character?.classKey ? (MMO_CLASSES[character.classKey]?.name || character.classKey) : 'Commander',
-      health: 100,
-    };
-  }
-
-  async _refreshLivingWorld(viewport = null) {
-    if (!this.auth?.isSignedIn()) {
-      this.ui.setLivingWorldState({});
-      this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
-      return null;
-    }
-    this._livingWorldRequestGate ||= new LatestLivingWorldRequest();
-    const requestSequence = this._livingWorldRequestGate.next();
-    this.ui.setLivingWorldMapStatus('loading', viewport ? 'Loading this front…' : 'Loading world intelligence…');
-    try {
-      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth', viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
-      if (!projection?.shard) throw new Error('world_not_initialized');
-      if (!(projection.ownParties || []).length) {
-        const character = selectedMmoCharacter(this.profile);
-        if (!character?.id) throw new Error('living_world_character_required');
-        await enterLivingWorld(character.id);
-        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id, viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
-      }
-      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
-      const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
-      this.livingWorldState = state;
-      this.ui.setLivingWorldState(state);
-      this.ui.setLivingWorldMapStatus('ready', '');
-      return state;
-    } catch (error) {
-      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
-      const failure = livingWorldRefreshFailure(this.livingWorldState, viewport);
-      if (!failure.retained) { this.livingWorldState = null; this.ui.setLivingWorldState({}); }
-      this.ui.setLivingWorldMapStatus(failure.mode, failure.message);
-      const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
-      const tutorial = error?.message === 'tutorial_campaign_required';
-      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);
-      return null;
-    }
-  }
-
-  _refreshLivingWorldViewport(viewport) {
-    clearTimeout(this._livingWorldViewportTimer);
-    this._livingWorldViewportTimer = setTimeout(() => this._refreshLivingWorld(viewport), 140);
-  }
-
-  _livingWorldUnavailable(feature) {
-    this.ui.showBanner(`${feature} is not available until the authoritative shard is initialized.`, 'bad', 3000);
-  }
-
-  _openLivingWorldParty() {
-    const party = this.livingWorldState?.party;
-    if (!party?.socialPartyId) return this._createLivingWorldParty();
-    const targetHandle = globalThis.prompt?.('Invite a player by Zillions username:')?.trim().toLowerCase();
-    if (!targetHandle) return;
-    this._sendLivingWorldPartyAction('invite', { partyId: party.socialPartyId, targetHandle }).then(() => {
-      this.ui.showBanner('Party invitation sent.', '', 2400); this._refreshLivingWorld();
-    }).catch(() => this.ui.showBanner('The party invitation was rejected.', 'bad', 2600));
-  }
-
-  async _sendLivingWorldPartyAction(action, fields = {}) {
-    return sendLivingWorldPartyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `party-${Date.now().toString(36)}`, action, payload: {}, ...fields });
-  }
-
-  async _createLivingWorldParty() {
-    try { await this._sendLivingWorldPartyAction('create', { payload: { name: `${this._livingWorldSelf().name}'s Party`, shardId: this.livingWorldState?.world?.id || 'earth-1' } }); await this._refreshLivingWorld(); this.ui.showBanner('Party created.', '', 2200); }
-    catch (error) { this.ui.showBanner(error?.message === 'already_in_party' ? 'You already have a party.' : 'Party creation was rejected.', 'bad', 2500); }
-  }
-
-  async _leaveLivingWorldParty() {
-    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId || !globalThis.confirm?.('Leave this party? Your company remains in the world.')) return;
-    try { await this._sendLivingWorldPartyAction('leave', { partyId }); await this._refreshLivingWorld(); this.ui.showBanner('You left the party.', '', 2200); }
-    catch { this.ui.showBanner('Could not leave the party.', 'bad', 2400); }
-  }
-
-  async _setLivingWorldPartyTravelMode(mode) {
-    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId) return;
-    try { await this._sendLivingWorldPartyAction('travel_mode', { partyId, payload: { mode } }); await this._refreshLivingWorld(); this.ui.showBanner(mode === 'grouped' ? 'Your company will travel with the party.' : 'Your company may travel separately.', '', 2400); }
-    catch { this.ui.showBanner('Travel mode was rejected.', 'bad', 2400); }
-  }
-
-  async _acceptLivingWorldPartyInvite(invite) {
-    try { await this._sendLivingWorldPartyAction('accept', { partyId: invite.partyId, inviteId: invite.id }); await this._refreshLivingWorld(); this.ui.showBanner(`Joined ${invite.partyName || 'party'}.`, '', 2400); }
-    catch { this.ui.showBanner('The party invitation could not be accepted.', 'bad', 2600); }
-  }
-
-  _locateLivingWorldPartyMember(memberId) {
-    const member = this.livingWorldState?.party?.members?.find((entry) => entry.id === memberId);
-    if (!member) return this._livingWorldUnavailable('Party location');
-    this.ui.openLivingWorldMap();
-    this.ui.showBanner(`${member.name} · ${member.location}`, '', 2400);
-  }
-
-  _trackLivingWorldParty(partyId) {
-    const party = this.livingWorldState?.parties?.find((entry) => entry.id === partyId);
-    if (!party) return this._livingWorldUnavailable('Army tracking');
-    this.ui.showBanner(`Tracking ${party.name} · ${party.intent}`, '', 2400);
-  }
-
-  async _requestLivingWorldTravel(locationId, mode = 'travel') {
-    const state = this.livingWorldState;
-    const party = state?.party;
-    const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
-    const destination = state?.settlements?.find((entry) => entry.id === locationId);
-    if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
-    try {
-      const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
-      if (mode === 'fast' && party.socialPartyId && grouped.length > 1) {
-        this.ui.showBanner('Fast travel requires party members to use split travel. Group travel uses the road simulation.', 'bad', 3200); return;
-      }
-      if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
-        action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
-        partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
-      }); else await sendLivingWorldCommand({
-        type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
-          || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
-        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: mode === 'fast' && destination?.fastTravel ? 'fast' : 'travel' },
-      });
-      // Command acceptance is not arrival. Refresh to show only state the
-      // authority has actually committed.
-      await this._refreshLivingWorld();
-      this.ui.showBanner('Movement order submitted to the world simulation.', '', 2600);
-    } catch (error) {
-      this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
-    }
-  }
-
-  async _livingWorldTrade(payload) {
-    const state = this.livingWorldState, party = state?.party;
-    if (!party?.id || !party?.revision || party.locationId !== payload.locationId) return this._livingWorldUnavailable('Market trade');
-    try {
-      await sendLivingWorldCommand({ type: 'trade_market', requestId: globalThis.crypto?.randomUUID?.() || `trade-${Date.now().toString(36)}`, shardId: state.world.id, partyId: party.id, expectedRevision: party.revision, payload });
-      await this._refreshLivingWorld(); this.ui.showBanner(`${payload.side === 'buy' ? 'Purchase' : 'Sale'} submitted to the market.`, '', 2200);
-    } catch (error) { this.ui.showBanner(error?.message || 'Market trade was rejected.', 'bad', 2600); }
-  }
-
-  async _livingWorldCompanyAction(action, payload) {
-    const company = this.livingWorldState?.company;
-    if (!company?.partyId || !company?.revision) return this._livingWorldUnavailable('Company management');
-    try {
-      await sendLivingWorldCompanyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `company-${Date.now().toString(36)}`, partyId: company.partyId, expectedRevision: Number(company.revision), action, payload });
-      await this._refreshLivingWorld(); this.ui.showBanner('Company order completed.', '', 2200);
-    } catch (error) { this.ui.showBanner(error?.message || 'Company order was rejected.', 'bad', 2600); }
-  }
-
-  async _livingWorldEncounterAction(encounter, action) {
-    const party = this.livingWorldState?.party;
-    try {
-      if (action === 'autosim' && encounter.engagement?.id) {
-        await sendLivingWorldBattleAction({ action: 'autosim', engagementId: encounter.engagement.id, encounterRevision: Number(encounter.revision), requestId: globalThis.crypto?.randomUUID?.() || `battle-${Date.now().toString(36)}` });
-      } else if (action === 'live' && encounter.engagement?.id) {
-        const launched=await sendLivingWorldBattleAction({action:'launch',engagementId:encounter.engagement.id,encounterRevision:Number(encounter.revision),requestId:globalThis.crypto?.randomUUID?.()||`battle-${Date.now().toString(36)}`});
-        this._livingWorldBattle={assignment:launched.assignment,token:launched.token,commands:[]};
-        this.closePauseMenu?.();this.ui.closeLivingWorldMap();this.ui.selectedMode='living_world_battle';this.ui.selectedLevel=1;
-        await this.startGame('normal','alexander');
-        return;
-      } else {
-        await sendLivingWorldCommand({ type: 'set_encounter_choice', requestId: globalThis.crypto?.randomUUID?.() || `encounter-${Date.now().toString(36)}`, shardId: this.livingWorldState.world.id, partyId: party.id, expectedRevision: party.revision, payload: { encounterId: encounter.id, choice: action, decisionRevision: Number(encounter.revision), rearguardStackIds: [], diversion: {} } });
-      }
-      await this._refreshLivingWorld(); this.ui.showBanner(action === 'autosim' ? 'Battle resolved and written back.' : 'Encounter decision submitted.', '', 2400);
-    } catch (error) { this.ui.showBanner(error?.message || 'Encounter action was rejected.', 'bad', 2800); }
-  }
-
-  async _livingWorldGovernanceAction(action, payload) {
-    const party = this.livingWorldState?.party;
-    if (!party?.id || !party.revision) return this._livingWorldUnavailable('Governance');
-    try { await sendLivingWorldGovernanceCommand({ requestId: globalThis.crypto?.randomUUID?.() || `governance-${Date.now().toString(36)}`, partyId: party.id, expectedRevision: party.revision, action, payload }); await this._refreshLivingWorld(); this.ui.showBanner('Governance order completed.', '', 2300); }
-    catch (error) { this.ui.showBanner(error?.message || 'Governance order was rejected.', 'bad', 2800); }
-  }
-
-  _launchLivingWorldMission(levelId) {
-    if (!Number.isInteger(Number(levelId)) || Number(levelId) < 1) return this._livingWorldUnavailable('Mission deployment');
-    this.closePauseMenu?.();
-    this.ui.closeLivingWorldMap();
-    this._launchGateMission({ levelId: Number(levelId), cave: false }, this.ui.selectedDiff || 'normal');
-  }
-
-  _travelToWorld(worldId) {
-    const depth = 12 + metaBonuses().unlock.galaxyDepth;
-    const destination = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth)
-      .find((world) => world.id === worldId);
-    if (!destination || !destination.unlocked) {
-      this.audio.deny();
-      this.ui.showBanner('🔒 That route is beyond the current frontier.', 'bad', 2600);
-      return;
-    }
-    if (this.ow?.world?.id === worldId) {
-      this.ui.hideOverlay();
-      return;
-    }
-    this._clearOverworld();
-    this.ui.setOverworldMode(false);
-    this._enterOverworld(worldId);
-  }
-
-  _clearOverworld() {
-    if (this.owTerrain) { this.scene.remove(this.owTerrain); this._disposeObject3D(this.owTerrain); }
-    for (const g of this.owGates || []) { this.scene.remove(g); this._disposeObject3D(g); }
-    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
-    for (const m of (this.owGhostMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
-    this.owTerrain = null;
-    this.owGates = [];
-    this.owHero = null;
-    this.owGhostMeshes = new Map();
-    this.owMap = null;
-    this.ow = null;
-    if (this._owGhostChan) { try { this.lobby?.sb?.removeChannel?.(this._owGhostChan); } catch { /* already gone */ } this._owGhostChan = null; }
-  }
-
-  // A front's gate: two posts, a lintel, a banner whose colour is the state
-  // of the war there, and the boss's name overhead. Locked gates stand on
-  // blighted ground with a slow corrupted pulse.
-  _makeOverworldGate(gate) {
-    const st = gateState(gate);
-    const gr = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 });
-    for (const dx of [-1.5, 1.5]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
-      post.position.set(dx, 1.7, 0);
-      post.castShadow = true;
-      gr.add(post);
-    }
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.4, 0.5), wood);
-    lintel.position.y = 3.4;
-    lintel.castShadow = true;
-    gr.add(lintel);
-    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.2, 1.1),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: bannerColor, side: THREE.DoubleSide }),
-    );
-    banner.position.y = 2.6;
-    gr.add(banner);
-    gr.userData.banner = banner;
-    const ringGeo = new THREE.RingGeometry(2.4, 3.0, 40);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: st.locked ? 0x8a4aff : st.cleared ? 0xc9a44a : 0xfff2d8,
-      transparent: true, opacity: 0.4, depthWrite: false,
-    }));
-    ring.position.y = 0.06;
-    gr.add(ring);
-    gr.userData.ring = ring;
-    const icon = gate.cave ? '🌀' : gate.portal ? '🚀' : gate.boss.icon;
-    const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
-    const sub = gate.cave ? 'the trials below'
-      : gate.portal ? 'starship navigation'
-      : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
-    const label = this._makeLabelSprite(icon, name);
-    label.position.y = 5.6;
-    label.scale.set(5.2, 2.6, 1);
-    gr.add(label);
-    gr.userData.sub = sub;
-    gr.position.set(gate.x, this.owMap.groundY(gate.x, gate.z), gate.z);
-    gr.userData.gate = gate;
-    this.scene.add(gr);
-    return gr;
-  }
-
-  // The player's chosen hero walks the overworld in miniature — the real unit
-  // mesh, real walk cycle, smaller aura. Rebuilt when the pick changes.
-  _makeOverworldHero() {
-    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
-    const key = this.ui.selectedHero || 'alexander';
-    const def = HEROES[key] || HEROES.alexander;
-    const character = selectedMmoCharacter(this.profile);
-    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
-      raceKey: character.raceKey, appearance: character.appearance,
-      customization: character.customization, equipment: character.equipment, classKey: character.classKey,
-    } : null });
-    const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
-      : character.appearance === 'cobalt' ? '4679b8'
-      : character.appearance === 'bone' ? 'b7aa8c'
-      : character.appearance === 'void' ? '6d568f'
-      : character.appearance === 'forest' ? '4f785d' : '8493a6'), 16) : null;
-    if (tint != null) mesh.userData.characterTint = tint;
-    mesh.scale.setScalar(1.0);
-    this.owHero = mesh;
-    this.scene.add(mesh);
+    this.ui.showSetup({ mode: 'campaign' });
   }
 
   _setCharacterPreview(style) {
@@ -1006,239 +596,6 @@ class App {
     }
   }
 
-  _updateOverworld(dt, t) {
-    const ow = this.ow;
-    if (!ow) return;
-    // Steering only while the hub overlay is closed; typing in lobby inputs
-    // already swallows keys, and a menu open over the world means "at ease".
-    if (!this.ui.overlayHidden()) ow.setDir(0, 0);
-    else {
-      // The hub walks on the same bindings the battlefield does.
-      const binds = this.binds();
-      let dx = 0, dz = 0;
-      if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
-      if (isHeld(binds, this.keys, 'move_down')) dz += 1;
-      if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
-      if (isHeld(binds, this.keys, 'move_right')) dx += 1;
-      ow.setDir(dx, dz);
-    }
-    for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
-
-    const h = ow.hero;
-    this._overworldMinimapT = (this._overworldMinimapT || 0) - dt;
-    if (this._overworldMinimapT <= 0) {
-      this._overworldMinimapT = 0.1;
-      this.ui.drawOverworldMinimap(ow, this.owMap);
-    }
-    if (this.owHero) {
-      this.owHero.position.set(h.x, this.owMap.groundY(h.x, h.z), h.z);
-      this.owHero.rotation.y = h.facing;
-      // The real walk cycle from _syncUnits, mirrored here so the overworld
-      // hero moves like he does in a fight.
-      const pose = unitPose(h.moving ? 'run' : 'idle', t * (h.moving ? 10 : 1.8));
-      const body = this.owHero.userData.body;
-      if (body) {
-        body.position.y = pose.y;
-        body.rotation.z = pose.roll;
-      }
-      const limbs = this.owHero.userData.limbs;
-      if (limbs) {
-        if (limbs.legL) limbs.legL.rotation.x = pose.stride;
-        if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
-        if (limbs.armL) limbs.armL.rotation.x = -pose.stride * 0.55;
-        if (limbs.armR) limbs.armR.rotation.x = pose.stride * 0.55;
-      }
-    }
-
-    // Gates breathe: locked ones pulse a corrupted violet, open ones ripple
-    // gently, and every banner sways on its pole.
-    for (const gr of this.owGates) {
-      const st = gateState(gr.userData.gate);
-      const ph = (t * 0.7) % 1;
-      gr.userData.ring.material.opacity = st.locked
-        ? 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))
-        : 0.3 * (1 - ph * 0.6);
-      gr.userData.ring.scale.setScalar(1 + ph * 0.12);
-      gr.userData.banner.rotation.y = Math.sin(t * 1.8 + gr.position.x) * 0.22;
-    }
-    this._updateOverworldGhosts(dt, t);
-  }
-
-  _onOverworldEvent(ev) {
-    if (ev.t === 'gateleave') {
-      this.ui.hideGatePrompt();
-      this._leaveGateRally().catch(() => {});
-      return;
-    }
-    if (ev.t !== 'gate') return;
-    if (ev.state.locked) {
-      this.shake = 0.35;
-      this.audio.deny();
-      this.ui.showBanner('🔒 The road ends here — take the front before it first.', 'bad', 2600);
-      return;
-    }
-    this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
-    if (ev.gate.portal) {
-      if (ev.gate.action === 'custom') {
-        this._openCustomGames();
-        return;
-      }
-      this._openGalaxyMap();
-      return;
-    }
-    this.ui.showGateConfirm({
-      gate: ev.gate,
-      diff: this.ui.selectedDiff,
-      onLeave: () => this._leaveGateRally().catch(() => {}),
-      onEnter: (diff) => {
-        if (ev.gate.cave) {
-          this.ui.selectedMode = 'labyrinth';
-          this.ui.showSetup({ mode: 'labyrinth' });
-          return;
-        }
-        // A campaign gate is the direct single-player door. Party formation
-        // belongs in Custom Games, where players can see and control the room
-        // they are joining. Do not turn this button into a hidden two-click
-        // public rally flow.
-        this._launchGateMission(ev.gate, diff);
-      },
-    });
-  }
-
-  _launchGateMission(gate, diff) {
-    this.ui.selectedMode = gate.cave ? 'labyrinth' : 'campaign';
-    this.ui.selectedLevel = gate.levelId || 1;
-    this.ui.selectedDiff = diff;
-    this.ui.cb.onStart(diff, this.ui.selectedHero);
-  }
-
-  async _joinGateRally(gate, diff) {
-    const lobby = await this._openLobby().catch(() => null);
-    if (!lobby?.connected) {
-      this._launchGateMission(gate, diff);
-      return;
-    }
-    const worldId = this.ow?.world?.id || 'earth';
-    const gateKey = gate.cave ? `labyrinth:${gate.levelId || 1}` : `level:${gate.levelId}`;
-    const matches = (await lobby.refreshGames().catch(() => []))
-      .filter((game) => game.rally && game.status === 'open'
-        && game.rallyWorldId === worldId && game.rallyGateKey === gateKey);
-
-    if (lobby.game?.rally && lobby.game.rallyWorldId === worldId && lobby.game.rallyGateKey === gateKey) {
-      const game = lobby.game;
-      if (this.mpRole === 'host') {
-        const readiness = roomLaunchReadiness(game, this.peers.length + 1);
-        if (readiness.ready) this._launchGateMission(gate, diff);
-      } else {
-        await this._setRoomReady(true);
-      }
-      return;
-    }
-
-    if (matches[0]) {
-      await this.joinOnlineGame(matches[0], { compact: true });
-      await this._setRoomReady(true);
-      this.ui.setGateRally({ players: this.lobby?.game?.players || matches[0].players, maxPlayers: matches[0].max_players, role: 'guest', ready: true });
-      return;
-    }
-
-    this.audio.init();
-    this.mpRole = 'host';
-    this.onlineMode = true;
-    this.onlinePending = new Map();
-    const game = await lobby.createGame({
-      visibility: 'public', level: gate.levelId || 1, mode: gate.cave ? 'labyrinth' : 'campaign',
-      difficulty: diff, unlockedLevel: highestUnlockedLevel(this.profile.campaign),
-      name: `${gate.name || 'Mission'} rally`, maxPlayers: 4, kind: 'rally',
-      mapName: gate.name || 'Mission', worldId, gateKey,
-    });
-    await lobby.updateRoomPlayer({ hero: this.ui.selectedHero, ready: true }).catch(() => {});
-    this._onRoomUpdate(lobby.game || game);
-  }
-
-  async _leaveGateRally() {
-    if (!this.lobby?.game?.rally || this.netMode) return;
-    await this.lobby.leaveRoom();
-    for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
-    try { this.net?.destroy(); } catch { /* closed */ }
-    this.peers = [];
-    this.net = null;
-    this.mpRole = null;
-    this.onlineMode = false;
-  }
-
-  // ----- multiplayer ghosts: presence garnish, never game netcode -----
-
-  _owGhostSend(payload) {
-    if (!OVERWORLD_GHOSTS || !this.lobby?.connected || !this.lobby.sb || !this.lobby.me) return;
-    try {
-      if (!this._owGhostChan) {
-        // Presence is scoped per planet: ghosts you see walk YOUR world.
-        this._owGhostChan = this.lobby.sb.channel(overworldChannel(this.ow.world.id))
-          .on('broadcast', { event: 'pos' }, ({ payload: p }) => {
-            if (!this.ow || !p || p.id === this.lobby.me.id) return;
-            if (p.worldId && p.worldId !== this.ow.world.id) return; // another planet's ghost
-            this.ow.ghostUpsert(p.id, p, this.ow.time);
-            if (p.enter) this._owGhostNote(p);
-          })
-          .subscribe();
-      }
-      const res = this._owGhostChan.send({ type: 'broadcast', event: 'pos', payload });
-      if (res && res.catch) res.catch(() => {});
-    } catch { /* the overworld is walkable alone */ }
-  }
-
-  _updateOverworldGhosts(dt, t) {
-    if (!OVERWORLD_GHOSTS) return;
-    this._owGhostAcc = (this._owGhostAcc || 0) + dt;
-    if (this._owGhostAcc >= 0.25) {
-      this._owGhostAcc = 0;
-      const h = this.ow.hero;
-      this._owGhostSend({
-        id: this.lobby?.me?.id || 'local',
-        name: this._publicName(),
-        hero: this.ui.selectedHero,
-        worldId: this.ow.world.id,
-        x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
-        enter: this.owEnterNote || undefined,
-      });
-      this.owEnterNote = null;
-      this.ow.ghostSweep(6, this.ow.time);
-    }
-    this.owGhostMeshes = this.owGhostMeshes || new Map();
-    for (const [id, g] of this.ow.ghosts) {
-      let mesh = this.owGhostMeshes.get(id);
-      if (!mesh) {
-        const def = HEROES[g.hero] || HEROES.alexander;
-        mesh = this._makeUnitMesh({ hero: true, key: g.hero, def, auraRadius: 1.3 });
-        mesh.scale.setScalar(0.92);
-        mesh.userData.label = this._makeLabelSprite('👤', g.name);
-        mesh.userData.label.position.y = 2.6;
-        mesh.userData.label.scale.set(3.4, 1.7, 1);
-        mesh.add(mesh.userData.label);
-        this.scene.add(mesh);
-        this.owGhostMeshes.set(id, mesh);
-      }
-      mesh.position.set(g.x, this.owMap.groundY(g.x, g.z), g.z);
-      mesh.userData.label.material.opacity = 0.85;
-    }
-    for (const [id, mesh] of this.owGhostMeshes) {
-      if (!this.ow.ghosts.has(id)) {
-        this.scene.remove(mesh);
-        this._disposeObject3D(mesh);
-        this.owGhostMeshes.delete(id);
-      }
-    }
-    void t;
-  }
-
-  // "X entered Greenfall Marches" — the hub chat strip doubles as the war
-  // report for whoever is walking the same planet.
-  _owGhostNote(p) {
-    this._hubChatLog = [...(this._hubChatLog || []), { name: p.name || 'A commander', text: `entered ${p.enter}` }];
-    this.ui.hubChat(this._hubChatLog);
-  }
-
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
@@ -1246,7 +603,6 @@ class App {
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
-    this.ui.hideGatePrompt();
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
@@ -1254,31 +610,14 @@ class App {
       await loadAssets();
       this.assetsLoaded = true;
     }
-    // Remember launches that came off the walkable planet: victory's
-    // "Return to world" keys off this, because the profile's character may
-    // not be hydrated by the time the button is clicked — and losing the
-    // relay dumped returning commanders on the title screen (QA 2026-08-18).
-    this._runFromOverworld = !!this.ow;
-    if (this.ow) {
-      const point = {
-        worldId: this.ow.world?.id || 'earth',
-        x: this.ow.hero.x,
-        z: this.ow.hero.z,
-        facing: this.ow.hero.facing || 0,
-      };
-      try { sessionStorage.setItem('zillions-overworld-return', JSON.stringify(point)); } catch { /* blocked storage */ }
-      this.ui.shell.enterMission(point);
-    }
-    this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : this._livingWorldBattle ? 'alexander' : { k: heroKey, camp: this.campFor(heroKey) };
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
-    if(this._livingWorldBattle&&!snap)this.game.configureLivingWorldBattle(this._livingWorldBattle.assignment);
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1663,10 +1002,8 @@ class App {
   async _initAuth() {
     try {
       const status = await this.auth.init();
-      setLivingWorldSession(this.auth.session);
       await this._applyAuth(status);
       this.auth.onAuthChange((next) => {
-        setLivingWorldSession(this.auth.session);
         this._applyAuth(next).catch((err) => {
           console.warn('auth sync failed', err);
           this.ui.setAccount({ ...this.auth.status(), error: 'Profile sync failed. Try again.' });
@@ -1686,7 +1023,6 @@ class App {
   }
 
   async _applyAuth(status) {
-    setLivingWorldSession(this.auth.session);
     this.authStatus = status;
     if (status.signedIn) {
       await this.auth.ensureProfile(this.profile);
@@ -1703,6 +1039,8 @@ class App {
         try { await this._ensureAuthoritativeEconomy(character, { persistProfile: false }); }
         catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
       }
+      // Claim any match the server never confirmed (closed tab, offline).
+      this._flushPendingMatches().catch((err) => console.warn('pending match flush failed', err));
       // Auth events are read/hydration boundaries. Persisting account metadata
       // here calls auth.updateUser(), which emits another auth event and used
       // to recurse until Supabase rate-limited /auth/v1/user.
@@ -1721,7 +1059,6 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
-    if (status.signedIn) await this._retryLivingWorldBattleOutbox();
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -1739,13 +1076,13 @@ class App {
     } else clearRetry(sessionStorage);
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
-      // Returning from a finished run: back onto the planet you launched
-      // from. No character yet (created mid-session edge)? Land on the
-      // roster, one click from making one — never a dead title screen.
+      // Returning from a finished run: straight back to mission select.
+      // No character yet (created mid-session edge)? Land on the roster,
+      // one click from making one — never a dead title screen.
       const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
-      if (returning) setTimeout(() => this._enterOverworld(
-        returning.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      this.ui._accountAccepted = true;
+      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
@@ -1760,13 +1097,9 @@ class App {
   }
 
   _restartOrReturn() {
-    if(this.game?.mode==='living_world_battle'&&this._livingWorldBattle&&!this._livingWorldBattle.committed){
-      this.ui.showBanner(this._livingWorldBattle.error?'The persistent result was rejected. Retry the result before leaving.':'Verifying the persistent battle result…','bad',3200);return;
-    }
-    // Any campaign run that came off the planet — or belongs to a character —
-    // returns to the world, not the title screen.
-    if (this.game?.over && this.game.mode === 'campaign'
-      && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
+    // Any campaign run that belongs to a character returns to mission
+    // select, not the title screen.
+    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
       this.ui.shell.finishMission();
     }
@@ -1820,8 +1153,6 @@ class App {
   async _signOut() {
     try {
       this._authenticatedEntryHandled = false;
-      this._clearOverworld();
-      this.ui.setOverworldMode(false);
       await this.auth.signOut();
       await this._applyAuth(this.auth.status());
     } catch (err) {
@@ -1856,7 +1187,6 @@ class App {
   issue(cmd) {
     if (!this.game) return;
     if (this.mpRole === 'spectator') return;
-    if(this._livingWorldBattle&&this.game.mode==='living_world_battle')this._livingWorldBattle.commands.push({tick:Math.max(0,Math.round(this.game.time/SIM_DT)),command:structuredClone(cmd)});
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
     else this.net.send({ t: 'cmd', c: cmd });
@@ -1878,7 +1208,6 @@ class App {
     if (!character) return;
     this.profile.mmoCharacterId = character.id;
     this.profile.lastHero = character.proxyHero;
-    this.profile.lastWorld = character.lastWorld || this.profile.lastWorld || 'earth';
     this.ui.selectedHero = character.proxyHero;
     if (this.auth?.isSignedIn() && !Number.isFinite(character.authoritativeBalance)) {
       try { await this._ensureAuthoritativeEconomy(character); }
@@ -1888,10 +1217,6 @@ class App {
     }
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    if (!this.game && this.ow) {
-      if (this.ow.world?.id !== character.lastWorld) this._travelToWorld(character.lastWorld || 'earth');
-      else this._makeOverworldHero();
-    }
   }
 
   _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
@@ -1906,12 +1231,11 @@ class App {
       return;
     }
     this.profile.lastHero = character.proxyHero;
-    this.profile.lastWorld = character.lastWorld;
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
     const klass = MMO_CLASSES[character.classKey];
-    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
+    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, is ready for the siege.`, '', 3000);
     this.ui._showScreen('main');
   }
 
@@ -1993,7 +1317,6 @@ class App {
     const next = this.profile.mmoCharacters[Math.min(index, this.profile.mmoCharacters.length - 1)] || null;
     this.profile.mmoCharacterId = next?.id || null;
     this.profile.lastHero = next?.proxyHero || null;
-    this.profile.lastWorld = next?.lastWorld || 'earth';
     this.ui.selectedHero = next?.proxyHero || 'alexander';
     this._saveProfile();
     this.ui.setProfile(this.profile);
@@ -2025,9 +1348,6 @@ class App {
 
   _pickHero(key) {
     const msg = this._heroPayload(key);
-    // On the overworld the pick is visible immediately: the walking hero is
-    // rebuilt from the new unit def.
-    if (!this.game && this.ow) this._makeOverworldHero();
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
     if (this.lobby?.game) {
@@ -2136,37 +1456,161 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
-  async _commitLivingWorldBattle() {
-    const battle=this._livingWorldBattle;
-    if(!battle||!this.game)return;
-    const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
-    try{
-      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction,entry:{assignmentToken:battle.token,replay}});
-      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
-      battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
-    }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
-  }
-
-  async _retryLivingWorldBattleOutbox() {
-    let pending;try{pending=loadBattleOutbox(sessionStorage);}catch{return;}
-    if (!pending?.assignmentToken || !pending?.replay || this._livingWorldOutboxRetrying) return;
-    this._livingWorldOutboxRetrying = true;
-    try {
-      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction});
-      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
-      this.ui.showBanner('Recovered and committed the previous battle result.', '', 3200);
-    } catch (error) {
-      this.ui.showBanner(error?.message === 'battle_assignment_expired' ? 'The previous battle result expired before recovery.' : 'Previous battle result is still waiting for authority recovery.', 'bad', 4200);
-    } finally { this._livingWorldOutboxRetrying = false; }
-  }
-
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
-    if(this.game?.mode==='living_world_battle'){
-      persistRunTelemetry(this.game);this.profile.games++;this.profile.kills+=this.game.stats.kills;this._saveProfile();
-      this._livingWorldBattleCommit=this._commitLivingWorldBattle();return;
-    }
     persistRunTelemetry(this.game);
+    this._endExtras = null;
+    const h = this.game.heroes[this.myPlayer];
+    try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+    if (this.auth?.isSignedIn()) {
+      // Signed in: the server is the only source of XP, loot, Alloy and
+      // stats. Nothing is granted locally; the end screen shows what the
+      // server confirms.
+      this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
+      const character = selectedMmoCharacter(this.profile);
+      this._endExtras = character ? {
+        heroKey: character.proxyHero, heroName: character.name, level: character.level,
+        grants: [], quests: [], pending: true,
+      } : { pending: true, grants: [], quests: [] };
+      this._submitMatchResult(won, h, character);
+    } else {
+      this._recordGuestGameEnd(won, h);
+      this._saveProfile();
+    }
+    this._netPumpStop();
+    if (this.lobby) this.lobby.setMatchActive(false);
+    if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
+  }
+
+  // What the client claims happened. The server bounds-checks every field and
+  // re-derives loot and quests itself (src/match-rewards.js).
+  _matchReport(won, h) {
+    const g = this.game;
+    const s = g.stats || {};
+    const hq = (g.plots || []).find((plot) => plot.kind === 'hq');
+    return {
+      version: MATCH_REPORT_VERSION,
+      mode: g.mode || 'campaign',
+      levelId: g.levelId,
+      difficulty: g.diffKey || 'normal',
+      won: !!won,
+      durationSeconds: Math.round(g.time || 0),
+      threatLevel: g.threatLevel | 0,
+      kills: s.kills | 0, coins: Math.floor(s.coins || 0), nests: s.nests | 0, nodes: s.nodes | 0,
+      built: s.built | 0, lost: s.lost | 0, bestHeld: s.bestHeld | 0, heroDeaths: s.heroDeaths | 0,
+      bossKillT: s.bossKillT == null ? null : Number(s.bossKillT),
+      hqTier: hq?.tier | 0,
+      standingBuildings: (g.buildings || []).filter((b) => b.alive && b.kind !== 'wall').length,
+      pack: [...new Set(h?.pack || [])].slice(0, PACK_SLOTS),
+      hero: h?.key || this.ui.selectedHero || null,
+    };
+  }
+
+  async _submitMatchResult(won, h, character) {
+    const quests = this.game?.questResults || [];
+    const pending = {
+      requestId: globalThis.crypto?.randomUUID?.() || `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      characterId: character?.id || null,
+      roomId: this.onlineMode && this.lobby?.game?.id ? this.lobby.game.id : null,
+      report: this._matchReport(won, h),
+    };
+    if (!pending.characterId) {
+      this._endExtras = { pending: false, error: 'Create a character to earn rewards.', grants: [], quests };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
+    queuePendingMatch(pending);
+    try {
+      const result = await this._sendMatchResult(pending);
+      this._applyMatchResult(character, result, quests);
+    } catch (error) {
+      console.warn('match result failed', error);
+      const retryable = retryableMatchError(error);
+      if (!retryable) dropPendingMatch(pending.requestId);
+      this._endExtras = {
+        ...(this._endExtras || {}), pending: false, grants: [], quests,
+        error: retryable
+          ? 'Command could not confirm your rewards yet. They will be claimed automatically next time you sign in.'
+          : `Command rejected this report (${error?.message || 'invalid'}). No rewards were granted.`,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+    }
+  }
+
+  async _sendMatchResult(pending) {
+    if (pending.characterId) {
+      const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
+      // A character the server has never seen is registered first; the
+      // economy snapshot also refreshes stash and wallet afterwards.
+      if (character && !Number.isFinite(character.authoritativeBalance)) await this._ensureAuthoritativeEconomy(character);
+    }
+    const result = await matchResultRequest(pending);
+    if (!result?.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: 503 });
+    dropPendingMatch(pending.requestId);
+    return result;
+  }
+
+  // Replays reports that never reached the server (closed tab, offline).
+  // Same requestId, so the server grants each match at most once.
+  async _flushPendingMatches() {
+    if (!this.auth?.isSignedIn()) return;
+    for (const pending of readPendingMatches()) {
+      try {
+        const result = await this._sendMatchResult(pending);
+        const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
+        if (character) this._applyMatchResult(character, result, [], { quiet: true });
+      } catch (error) {
+        if (!retryableMatchError(error)) dropPendingMatch(pending.requestId);
+      }
+    }
+  }
+
+  // Render exactly what the server granted.
+  _applyMatchResult(character, result, quests = [], { quiet = false } = {}) {
+    const p = this.profile;
+    const current = p.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
+    if (current && result.character) {
+      current.level = result.character.level;
+      current.xp = result.character.xp;
+      current.stats = { instances: 0, victories: 0, kills: 0, ...(result.character.stats || {}) };
+      current.progressRevision = result.character.progressRevision;
+    }
+    const st = result.stats || {};
+    p.games = st.gamesPlayed ?? p.games;
+    p.wins = st.wins ?? p.wins;
+    p.kills = st.kills ?? p.kills;
+    p.bestDay = st.bestDay ?? p.bestDay;
+    p.campaign = st.campaignCleared ?? p.campaign;
+    p.bestSurvival = st.bestSurvival ?? p.bestSurvival;
+    if (st.relics) p.relics = [...st.relics];
+    if (st.questsDone) p.questsDone = { ...st.questsDone };
+    if (st.labyrinthClears) p.labyrinthClears = { ...st.labyrinthClears };
+    if (result.wallet) p.metaCurrency = result.wallet.balance;
+    normalizeMmoCharacters(p);
+    if (!quiet) {
+      const serverQuests = new Set(result.questsCompleted || []);
+      this._endExtras = {
+        heroKey: current?.proxyHero, heroName: current?.name, level: current?.level,
+        grants: [...(result.grantedItems || []), ...(result.relicsGranted || [])],
+        quests: (result.quests || quests).map((q) => {
+          const authored = quests.find((entry) => entry.id === q.id) || {};
+          return { ...authored, ...q, desc: authored.desc || q.desc || '', done: !!q.done, claimed: serverQuests.has(q.id) };
+        }),
+        xp: result.xpGained, levels: result.levelsGained || [], alloy: result.alloyGained || 0,
+        skipped: result.skippedItems || [], pending: false,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+    }
+    this.ui.setProfile(p);
+    this.ui.setCampaign(p.campaign || 0);
+    // Pull the stash/wallet snapshot the server just changed.
+    if (current) this._ensureAuthoritativeEconomy(current).catch((err) => console.warn('economy refresh failed', err));
+    else this._storeProfileLocally();
+  }
+
+  // Guest / offline play: progress lives only in this browser (localStorage
+  // profile + meta ledger) and is never sent to, or trusted by, the server.
+  _recordGuestGameEnd(won, h) {
     const p = this.profile;
     p.games++;
     if (won && this.game.mode !== 'survival') p.wins++;
@@ -2190,8 +1634,6 @@ class App {
 
     // WC3-style persistence: the campaign hero keeps every level and item —
     // and quest/boss rewards granted here await them on the next map.
-    this._endExtras = null;
-    const h = this.game.heroes[this.myPlayer];
     // Named heroes belong to Custom Games. Their legacy career records remain
     // available there, but persistent campaign instances write to the selected
     // player-created character instead.
@@ -2262,7 +1704,6 @@ class App {
           won,
           kills: this.game.stats.kills,
           xp,
-          world: this.profile.lastWorld || 'earth',
           items: [...new Set([...(h.items || []), ...rewards])],
         });
         character.upgrades = { ...(character.upgrades || {}), ...(h.upgrades || {}) };
@@ -2278,24 +1719,6 @@ class App {
         this.ui.setProfile(p);
       }
     }
-    this._saveProfile();
-    try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
-    if (this.auth?.isSignedIn()) {
-      this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
-      this.auth.recordMatch({
-        mode: this.game.mode || 'campaign',
-        rules: 'continuous-siege',
-        hero: h?.key || this.ui.selectedHero,
-        won,
-        day: this.game.threatLevel,
-        kills: this.game.stats.kills,
-        built: this.game.stats.built || 0,
-        level: this.game.levelId,
-      }).catch((err) => console.warn('match history sync failed', err));
-    }
-    this._netPumpStop();
-    if (this.lobby) this.lobby.setMatchActive(false);
-    if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
   async continueGame() {
@@ -2765,15 +2188,6 @@ class App {
       title: 'Only the host can launch this room.',
     });
     const self = (game._players || []).find((player) => player.user_id === this.lobby?.me?.id);
-    if (game.rally) {
-      this.ui.setGateRally({
-        players: game.players || expectedPlayers,
-        maxPlayers: game.max_players || 4,
-        role: isHost ? 'host' : 'guest',
-        ready: !!self?.ready,
-        canLaunch: isHost && ready && compatible,
-      });
-    }
     this.ui.setRoomReady({
       visible: !isHost && !isSpectator && game.status === 'open',
       ready: !!self?.ready,
@@ -4790,14 +4204,13 @@ class App {
         this.ui.openGameChat();
         return;
       }
-      // Character info is not Character Select. The latter is reached from
-      // the Game Menu, matching traditional MMO navigation.
-      if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ow) {
+      // Character info shortcuts work from the menus between missions.
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ui._sheetCharacter?.()) {
         e.preventDefault();
         this.ui.showCharacterSheet('gear');
         return;
       }
-      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ow) {
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ui._sheetCharacter?.()) {
         e.preventDefault();
         this.ui.showCharacterSheet('lattice');
         return;
@@ -4810,16 +4223,7 @@ class App {
         else this.ui._showScreen('heroes');
         return;
       }
-      if (!this.game) {
-        // The overworld owns Escape: the hub slides in as a translucent
-        // overlay and slides back out — the walk never stops underneath.
-        if (k === 'escape') {
-          e.preventDefault();
-          this.ui.toggleOverlay();
-          return;
-        }
-        return;
-      }
+      if (!this.game) return;
       // Every in-battle key goes through the binding table. Nothing here
       // knows a letter, so the scheme, the Settings screen and the help page
       // cannot drift apart.
@@ -4877,20 +4281,6 @@ class App {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       this.audio.init();
-      // Overworld click-to-move: a course set on the ground itself.
-      if (!this.game && this.ow && e.button === 0 && this.ui.overlayHidden()) {
-        this._owMouse = this._owMouse || new THREE.Vector2();
-        this._owRay = this._owRay || new THREE.Raycaster();
-        this._owPlane = this._owPlane || new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        this._owHit = this._owHit || new THREE.Vector3();
-        this._owMouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-        this._owRay.setFromCamera(this._owMouse, this.camera);
-        if (this._owRay.ray.intersectPlane(this._owPlane, this._owHit)) {
-          this._owHit.x = clamp(this._owHit.x, 1, this.owMap.size - 1);
-          this._owHit.z = clamp(this._owHit.z, 1, this.owMap.size - 1);
-          this.ow.setTarget(this._owHit.x, this._owHit.z);
-        }
-      }
     });
   }
 
@@ -5096,28 +4486,6 @@ class App {
   }
 
   _updateCamera(dt) {
-    if (!this.game && this.ow) {
-      // Overworld: the game camera glued to the walking hero — same iso
-      // angle, same soft lag, so the menu feels like the game's first step.
-      const h = this.ow.hero;
-      const k = 1 - Math.exp(-6 * dt);
-      this.focus.x += (h.x - this.focus.x) * k;
-      this.focus.z += (h.z - this.focus.z) * k;
-      this.focus.x = clamp(this.focus.x, 2, this.owMap.size - 2);
-      this.focus.z = clamp(this.focus.z, 2, this.owMap.size - 2);
-      this.focus.y += (Math.max(0, this.owMap.groundY(this.focus.x, this.focus.z)) - this.focus.y) * (1 - Math.exp(-4 * dt));
-      const dist = 30;
-      const elev = 0.78;
-      this.camera.position.set(
-        this.focus.x + Math.sin(this.camYaw) * Math.cos(elev) * dist,
-        this.focus.y + Math.sin(elev) * dist,
-        this.focus.z + Math.cos(this.camYaw) * Math.cos(elev) * dist,
-      );
-      this.camera.lookAt(this.focus);
-      this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
-      this.sun.target.position.set(this.focus.x, 0, this.focus.z);
-      return;
-    }
     if (!this.game) return;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
@@ -5698,7 +5066,7 @@ class App {
     // Watch the game while it runs, and the menu while the attract show does —
     // the vignettes put real load on the backdrop, so the menu gets the same
     // safety net a live siege has.
-    const active = this.game ? !this.paused : !!this.ow;
+    const active = this.game ? !this.paused : false;
     if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
@@ -5720,7 +5088,7 @@ class App {
     this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);
 
-    if (!this.game && !this.ow && this.titleSpace) {
+    if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
 
@@ -5903,8 +5271,6 @@ class App {
         this.ui.drawMinimap(this.game, this.focus, viewSize);
       }
     }
-
-    if (!this.game && this.ow) this._updateOverworld(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);
