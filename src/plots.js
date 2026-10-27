@@ -6,14 +6,16 @@
 // to build on, and the number of ways in all change with the plan, so no two
 // campaign levels feel like the same base with a different colour.
 //
-// And since the pad system, the plan is the WHOLE design. The terrain levels a
-// flat, buildable disc under the city before the first stone, so the rampart
-// line is not negotiated with crag and water — it is an authored arc or a
-// straight wall, bought in segments, standing on purpose. What the land
-// contributes now is the APPROACH: the biome outside the pad, the shore the
-// city looks over, the canyon it sits at the mouth of. The one place the old
-// bargain survives is the Labyrinth, where the mountain IS the architecture
-// and the plan still leans on it.
+// The plan names a LANDFORM (src/site-plan.js) that the terrain raises under
+// every site: a hilltop plateau, a fen island, a ridge spur, a valley head.
+// The rampart is traced along that landform's rim, so the wall follows the
+// land: where the rim is cliff or bog the land is the wall (free and
+// indestructible), wall plots are raised only across the open rim, and the
+// gates sit where the ramps climb onto the plateau. Inside, the districts
+// cluster the way a real town does — houses huddled round the keep, fields
+// grouped on the open flats, towers at the gates and over the cliffs —
+// instead of concentric rows. The one ring left is the desert outpost, a
+// deliberate last-stand set piece on open badlands.
 //
 // What every plan guarantees, because the game depends on it:
 //   - a Keep at the centre, on levelled ground
@@ -28,6 +30,7 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
+import { SITE_FORMS, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
 const TAU = Math.PI * 2;
 // Ward camps are handed out cheapest-first, so a two-gate city can still afford
@@ -69,7 +72,6 @@ export const CITY_PLANS = {
     scale: 0.95,
     gates: [0, Math.PI / 2, -Math.PI / 2],
     radius: square,
-    inner: { radius: 7.8 },
     layout: layoutFort,
   },
   // Five spurs, each carrying a tower, gates sunk into the valleys between
@@ -111,12 +113,22 @@ export const CITY_PLANS = {
       const a = Math.atan2(Math.sin(t), Math.cos(t));
       return R * (0.74 + 0.68 * Math.exp(-((a / 0.22) ** 2)));
     },
-    inner: { radius: 7.4 },
     layout: layoutKeyhole,
+  },
+  // The desert last stand: an isolated octagonal fort on open badlands, a
+  // gate on every quarter, swarms from every side. The only ring left.
+  outpost: {
+    key: 'outpost',
+    label: 'badlands outpost',
+    blurb: 'An octagon of wall on open badlands. Four gates, no cliffs, nowhere to fall back. Hold until relieved.',
+    scale: 1.05,
+    gates: [Math.PI / 8, (5 * Math.PI) / 8, (-3 * Math.PI) / 8, (-7 * Math.PI) / 8],
+    radius: (t, R) => R * SITE_FORMS.outpost.base(t),
+    layout: layoutOutpost,
   },
 };
 
-const PLAN_ORDER = Object.keys(CITY_PLANS);
+const PLAN_ORDER = Object.keys(CITY_PLANS).filter((k) => k !== 'outpost');
 
 function pickPlan(map, opts) {
   const named = opts.plan || (map.theme && map.theme.city);
@@ -129,17 +141,7 @@ function pickPlan(map, opts) {
 
 // Which way is the war? The plan turns its face toward the hives, so the heavy
 // gate, the towers and the camps end up on the side that gets hit.
-function cityFacing(map, cx, cz) {
-  const nests = map.nestSpots || [];
-  if (!nests.length) return 0;
-  let sx = 0, sz = 0;
-  for (const [x, z] of nests) {
-    const d = Math.max(1, Math.hypot(x - cx, z - cz));
-    sx += (x - cx) / d; sz += (z - cz) / d;
-  }
-  if (Math.abs(sx) < 1e-6 && Math.abs(sz) < 1e-6) return 0;
-  return Math.atan2(sz, sx);
-}
+const cityFacing = siteFacing;
 
 const COMPASS = ['East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest', 'North', 'Northeast'];
 const compassName = (ang) => COMPASS[Math.round((((ang % TAU) + TAU) % TAU) / (Math.PI / 4)) % 8];
@@ -154,12 +156,18 @@ export function generatePlots(map, anchor = null, opts = {}) {
   const cz = anchor ? anchor.z : N / 2;
   const plan = pickPlan(map, opts);
   const rng = makeRNG(map.seed * 7 + 13 + (opts.siteIdx || 0) * 101);
-  const R = CITY_WALL_R * plan.scale;
-  const facing = cityFacing(map, cx, cz);
+  // The landform the terrain raised under this site, when it raised one for
+  // this plan. The rampart line runs one tile out on its rim.
+  const rim = anchor && anchor.rim && anchor.rim.key === plan.key ? anchor.rim : null;
+  const form = rim ? rimForm(rim) : null;
+  const rimOpenAt = (t) => !!rim && rimOpen(rim, t);
+  const R = rim ? rim.R : CITY_WALL_R * plan.scale;
+  const facing = rim ? rim.facing : cityFacing(map, cx, cz);
   let plots = [];
   const taken = new Set(); // tile keys reserved by already-placed plots
 
-  const radiusAt = (t) => plan.radius(t, R);
+  const radiusAt = rim ? (t) => rimRadius(rim, t) + 1.0 : (t) => plan.radius(t, R);
+  const planGates = form ? form.gates : plan.gates;
   let reach = 0;
   for (let i = 0; i < 64; i++) reach = Math.max(reach, radiusAt((i / 64) * TAU));
 
@@ -209,7 +217,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
     }
   };
-  plan.gates.slice(0, 2).forEach(cutApproach);
+  planGates.slice(0, 2).forEach(cutApproach);
 
   const reserve = (x, z, size, pad = 1) => {
     for (let dz = -pad; dz < size + pad; dz++) {
@@ -281,7 +289,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // not bargained for: every tile of every arc gets its stone. The one
   // exception is the Labyrinth, where the plan still leans on the mountain
   // the map is carved from — there the impassable ground closes the line.
-  const naturalWalls = map.terrainKind === 'labyrinth';
+  const naturalWalls = map.terrainKind === 'labyrinth' || (!!form && !form.ring);
   const traceRing = (radiusFn, gateAngles, { role, useTerrain, ox = cx, oz = cz, spin = facing }) => {
     const ringTiles = [];
     const seen = new Set();
@@ -372,7 +380,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     return { gates: made, natural, length: ringTiles.length };
   };
 
-  const gateAngles = [...plan.gates];
+  const gateAngles = [...planGates];
   let rampart = traceRing(radiusAt, gateAngles, { role: 'rampart', useTerrain: naturalWalls });
   // A plan whose gates the ground closed entirely (only possible in the
   // Labyrinth now) is a city with no way out. The founders cut one more way
@@ -470,7 +478,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // --- The inner ward, for the plans that keep one: a second wall around the
   // Keep with its own gates, so losing the outer line is not losing the city.
   let inner = null;
-  if (plan.inner) {
+  if (plan.inner && !rim) {
     const ir = plan.inner.radius;
     inner = traceRing(() => ir, [plan.gates[0], plan.gates[0] + Math.PI],
       { role: 'inner', useTerrain: false });
@@ -503,9 +511,112 @@ export function generatePlots(map, anchor = null, opts = {}) {
   }
   if (inner) for (const ig of inner.gates) markPathLine(ig.gate[0], ig.gate[1], cx, cz);
 
+  // --- The interior: everything the rampart and the land enclose, read by
+  // flood from the keep. Terrain-adapted districts are placed only on it,
+  // with a tile of walkable margin all round so no building ever closes a
+  // lane against a wall or a cliff foot.
+  let interior = null;
+  const wallList = [];
+  const computeInterior = () => {
+    interior = new Uint8Array(N * N);
+    const wallK = new Set();
+    for (const p of plots) if (p.kind === 'wall') for (const [x, z] of p.tiles) { wallK.add(z * N + x); wallList.push([x, z]); }
+    const sx = Math.round(cx), sz = Math.round(cz);
+    const stack = [[sx, sz]];
+    interior[sz * N + sx] = 1;
+    while (stack.length) {
+      const [x, z] = stack.pop();
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 1 || nz < 1 || nx >= N - 1 || nz >= N - 1) continue;
+        const k = nz * N + nx;
+        if (interior[k] || wallK.has(k) || !map.isWalkable(nx, nz)) continue;
+        if (Math.hypot(nx + 0.5 - cx, nz + 0.5 - cz) > reach + 4) continue;
+        interior[k] = 1;
+        stack.push([nx, nz]);
+      }
+    }
+  };
+  const insideSpot = (x, z, size) => {
+    for (let dz = -1; dz <= size; dz++) {
+      for (let dx = -1; dx <= size; dx++) if (!interior[(z + dz) * N + (x + dx)]) return false;
+    }
+    return free(x, z, size);
+  };
+  const addInside = (kind, x, z, size = 2, extra = {}, maxR = 12) => {
+    if (!rim) return add(kind, x, z, size, extra, Math.min(maxR, 10));
+    if (!interior) computeInterior();
+    x |= 0; z |= 0;
+    for (let r = 0; r <= maxR; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          if (insideSpot(x + dx, z + dz, size)) return add(kind, x + dx, z + dz, size, extra, 0);
+        }
+      }
+    }
+    return null;
+  };
+
+  // Pick the best interior spot for a district kind and build a plot there.
+  // Scores are deterministic (a positional hash stands in for "the founders'
+  // whim"), so every peer lays out the same town.
+  const jit = (x, z) => {
+    let h = Math.imul(x * 73856093 ^ z * 19349663 ^ (opts.siteIdx || 0) * 83492791, 0x27d4eb2d);
+    h ^= h >>> 15;
+    return ((h >>> 0) % 1000) / 1000;
+  };
+  const nearestOf = (kinds, x, z) => {
+    let best = 99;
+    for (const p of plots) if (kinds.includes(p.kind)) best = Math.min(best, Math.hypot(p.cx - x, p.cz - z));
+    return best;
+  };
+  const wallDist = (x, z) => {
+    let best = 99;
+    for (const [wx, wz] of wallList) best = Math.min(best, Math.hypot(wx + 0.5 - x, wz + 0.5 - z));
+    return best;
+  };
+  const SCORE = {
+    // Houses huddle on the keep's sheltered side (away from the hives), in a
+    // knot rather than a ring.
+    house: (x, z, d) => {
+      const back = -((x - cx) * cosF + (z - cz) * sinF) / Math.max(1, d);
+      return -d * 0.8 + back * 3 - Math.abs(nearestOf(['house', 'hq'], x, z) - 3.2) * 0.9 + jit(x, z) * 1.2;
+    },
+    farm: (x, z, d) => {
+      const nf = nearestOf(['farm'], x, z);
+      return d * 0.3 + (nf < 4.5 ? 4 : 0) - Math.min(nf, 12) * 0.2 - (nearestOf(['house'], x, z) < 3.5 ? 3 : 0)
+        + jit(x, z) * 1.5;
+    },
+    mill: (x, z) => -Math.abs(nearestOf(['farm'], x, z) - 3) * 2 - (nearestOf(['mill'], x, z) < 7 ? 20 : 0) + jit(x, z),
+    tower: (x, z) => -Math.abs(wallDist(x, z) - 3.2) * 1.5 + Math.min(nearestOf(['tower'], x, z), 9) * 0.8 + jit(x, z) * 0.5,
+  };
+  function fillDistrict(kind, n) {
+    if (!interior) computeInterior();
+    const score = SCORE[kind];
+    const ext = Math.ceil(reach + 3);
+    let made = 0;
+    for (let k = 0; k < n; k++) {
+      let best = null, bs = -Infinity;
+      for (let z = Math.round(cz) - ext; z <= Math.round(cz) + ext; z++) {
+        for (let x = Math.round(cx) - ext; x <= Math.round(cx) + ext; x++) {
+          if (x < 2 || z < 2 || x > N - 4 || z > N - 4 || !insideSpot(x, z, 2)) continue;
+          const px = x + 1, pz = z + 1;
+          const d = Math.hypot(px - cx, pz - cz);
+          if (d < 4.5) continue;
+          const sc = score(px, pz, d);
+          if (sc > bs) { bs = sc; best = [x, z]; }
+        }
+      }
+      if (!best || !add(kind, best[0], best[1], 2, {}, 0)) break;
+      made++;
+    }
+    return made;
+  }
+
   const campPlots = [];
   const addCamp = (kind, x, z, maxR = 6) => {
-    const camp = add(kind, x, z, 2, {}, maxR);
+    const camp = rim ? addInside(kind, x, z, 2, {}, maxR + 4) : add(kind, x, z, 2, {}, maxR);
     if (camp) campPlots.push(camp);
     return camp;
   };
@@ -515,29 +626,37 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // it start here, not on the other side of town. Mycenae's gate bastion, a
   // hillfort's guarded passage, a bailey's barracks — same idea, same reason.
   gates.forEach((g, i) => {
-    for (const side of [-1, 1]) add('tower', ...gateFlank(g, side), 2);
+    for (const side of [-1, 1]) (rim ? addInside : add)('tower', ...gateFlank(g, side), 2, {}, 6);
     const camp = addCamp(CAMP_KINDS[i % CAMP_KINDS.length], ...gateFlank(g, i % 2 ? 1 : -1, 6.5, 4.2));
     if (camp) { g.camp = camp; g.plot.ward = camp.kind; }
   });
 
   const C = {
     map, N, cx, cz, R, plan, facing, rng, gates, radiusAt,
-    add, at, spot, road, gateFlank, addCamp, inner,
+    add, at, spot, road, gateFlank, addCamp, inner, addInside,
   };
-  plan.layout(C);
+  if (rim) {
+    if (!interior) computeInterior();
+    layoutLandform(C);
+  } else plan.layout(C);
 
   // Major progression lives in-world. Place support after the plan districts
   // so each workshop lands beside structures it can actually maintain.
-  add('hero_forge', ...spot(5.0, -Math.PI / 2), 2, {}, 10);
+  addInside('hero_forge', ...spot(5.0, -Math.PI / 2), 2, {}, 10);
+  if (rim) {
+    // Houses first, huddled round the keep: they are what the walls are for.
+    fillDistrict('house', 6);
+  }
   const supportAnchors = plots.filter((p) => p.kind === 'house' || p.kind === 'farm');
   const placeWorkshop = (anchor, fallbackAngle) => {
     if (anchor) {
       for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) {
-        const workshop = add('workshop', anchor.x + dx, anchor.z + dz, 2, {}, 3);
+        const workshop = rim ? addInside('workshop', anchor.x + dx, anchor.z + dz, 2, {}, 2)
+          : add('workshop', anchor.x + dx, anchor.z + dz, 2, {}, 3);
         if (workshop) return workshop;
       }
     }
-    return add('workshop', ...spot(7.0, fallbackAngle), 2, {}, 10);
+    return addInside('workshop', ...spot(7.0, fallbackAngle), 2, {}, 10);
   };
   placeWorkshop(supportAnchors[0], Math.PI);
   placeWorkshop(supportAnchors.at(-1), 0);
@@ -546,6 +665,10 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // Keep, so the player always has all three doctrines available.
   CAMP_KINDS.forEach((kind, i) => {
     if (campPlots.some((c) => c.kind === kind)) return;
+    if (rim) {
+      const camp = addInside(kind, ...spot(8.5, Math.PI + (i - 1) * 0.8), 2, {}, 14);
+      if (camp) { campPlots.push(camp); return; }
+    }
     for (const [r, t] of [[9.4, Math.PI + (i - 1) * 0.55], [11.5, Math.PI + (i - 1) * 0.9],
       [8.0, Math.PI / 2 + i], [12.5, -Math.PI / 2 - i * 0.6]]) {
       if (addCamp(kind, ...spot(r, t))) return;
@@ -599,20 +722,81 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
   }
 
-  // --- The terrace rows. A plan may leave ring-miles unclaimed, and a
-  // half-empty city is not a city — but neither is a city of dice rolls. What
-  // is left goes to the LATTICE: concentric rows, houses and fields alternating
-  // row by row, each building born on a designed cell of its own terrace.
-  // Nothing scatters, nothing hugs terrain (there is no terrain left to hug
-  // inside a pad) — the city simply fills the way a drawn city fills.
-  for (let row = 0; plots.length < 48 && row < 12; row++) {
-    const r = 5.4 + row * 2.3;
-    const kind = row % 2 ? 'farm' : 'house';
-    const count = Math.max(6, Math.round((TAU * r) / 4.0));
-    for (let i = 0; i < count && plots.length < 48; i++) {
-      const t = ((i + (row % 2) / 2) / count) * TAU;
-      if (r > radiusAt(t) - 3.2) continue;
-      add(kind, ...spot(r, t), 2, {}, 0);
+  if (rim) {
+    // --- Districts on the flats. Fields cluster on the open ground away from
+    // the keep, a mill beside each field group, a couple of extra towers over
+    // the most exposed wall, and the rest topped up house/field alternately.
+    fillDistrict('house', 3);
+    fillDistrict('farm', 8);
+    fillDistrict('mill', 2);
+    for (let i = 0; plots.length < 46 && i < 30; i++) {
+      if (!fillDistrict(i % 3 === 1 ? 'house' : 'farm', 1)) break;
+    }
+    // --- Groves: knots of trees along the cliff tops inside the walls, the
+    // dressing that makes a plateau read as a place. Only in the land-closed
+    // sectors, never within two tiles of a plot or a street, and reverted
+    // wholesale if they would pocket a single building.
+    if (!form.ring) {
+      const near = new Uint8Array(N * N);
+      for (const p of plots) {
+        if (p.kind === 'wall') continue;
+        for (let dz = -2; dz < p.size + 2; dz++) for (let dx = -2; dx < p.size + 2; dx++) {
+          const x = p.x + dx, z = p.z + dz;
+          if (x >= 0 && z >= 0 && x < N && z < N) near[z * N + x] = 1;
+        }
+      }
+      const placed = [];
+      const ext = Math.ceil(reach + 2);
+      for (let z = Math.round(cz) - ext; z <= Math.round(cz) + ext; z++) {
+        for (let x = Math.round(cx) - ext; x <= Math.round(cx) + ext; x++) {
+          if (x < 2 || z < 2 || x > N - 3 || z > N - 3) continue;
+          const k = z * N + x;
+          if (!interior[k] || near[k] || map.tiles[k] !== TILE.GRASS) continue;
+          const px = x + 0.5 - cx, pz = z + 0.5 - cz;
+          const t = Math.atan2(Math.sin(Math.atan2(pz, px) - facing), Math.cos(Math.atan2(pz, px) - facing));
+          const d = Math.hypot(px, pz);
+          if (d < radiusAt(t) - 5.5 || rimOpenAt(t)) continue;
+          if (jit(x >> 2, z >> 2) < 0.45 || jit(x, z) < 0.25) continue;
+          map.tiles[k] = TILE.FOREST;
+          placed.push(k);
+        }
+      }
+      if (placed.length) {
+        const seen = new Uint8Array(N * N);
+        const wallK = new Set(wallList.map(([x, z]) => z * N + x));
+        const st = [Math.round(cz) * N + Math.round(cx)];
+        seen[st[0]] = 1;
+        while (st.length) {
+          const k = st.pop();
+          const x = k % N, z = (k / N) | 0;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nk = (z + dz) * N + (x + dx);
+            if (seen[nk] || wallK.has(nk) || !map.isWalkable(x + dx, z + dz)) continue;
+            if (Math.hypot(x + dx - cx, z + dz - cz) > reach + 4) continue;
+            seen[nk] = 1; st.push(nk);
+          }
+        }
+        const pocketed = plots.some((p) => {
+          if (p.kind === 'wall' || p.role === 'outer' || Math.hypot(p.cx - cx, p.cz - cz) > reach) return false;
+          for (let dz = -1; dz <= p.size; dz++) for (let dx = -1; dx <= p.size; dx++) {
+            if (seen[(p.z + dz) * N + (p.x + dx)]) return false;
+          }
+          return true;
+        });
+        if (pocketed) for (const k of placed) map.tiles[k] = TILE.GRASS;
+      }
+    }
+  } else {
+    // --- Fallback for maps with no landform (test harnesses): rows.
+    for (let row = 0; plots.length < 48 && row < 12; row++) {
+      const r = 5.4 + row * 2.3;
+      const kind = row % 2 ? 'farm' : 'house';
+      const count = Math.max(6, Math.round((TAU * r) / 4.0));
+      for (let i = 0; i < count && plots.length < 48; i++) {
+        const t = ((i + (row % 2) / 2) / count) * TAU;
+        if (r > radiusAt(t) - 3.2) continue;
+        add(kind, ...spot(r, t), 2, {}, 0);
+      }
     }
   }
 
@@ -624,6 +808,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       natural: rampart.natural,
       naturalShare: rampart.length ? rampart.natural / rampart.length : 0,
       inner: !!inner,
+      landform: form ? form.label : null,
       outerWorks: plots.filter((p) => p.role === 'outer').length,
     };
   }
@@ -669,15 +854,17 @@ export function generatePlots(map, anchor = null, opts = {}) {
 // already there" is the whole reason to prefer one site over another.
 export function surveySite(map, site, opts = {}) {
   const plan = pickPlan(map, opts);
-  const R = CITY_WALL_R * plan.scale;
-  const facing = cityFacing(map, site.x, site.z);
-  const cut = plan.gates.slice(0, 2); // the two gates the founders always cut open
+  const rim = site.rim && site.rim.key === plan.key ? site.rim : null;
+  const R = rim ? rim.R : CITY_WALL_R * plan.scale;
+  const facing = rim ? rim.facing : cityFacing(map, site.x, site.z);
+  const gs = rim ? rimForm(rim).gates : plan.gates;
+  const cut = gs.slice(0, 2); // the two gates the founders always cut open
   let total = 0, natural = 0;
   for (let i = 0; i < 240; i++) {
     const t = (i / 240) * TAU - Math.PI;
     if (cut.some((g) => angDiff(t, g) < 0.19)) continue;
     const world = t + facing;
-    const r = plan.radius(t, R);
+    const r = rim ? rimRadius(rim, t) + 1.0 : plan.radius(t, R);
     const x = Math.round(site.x + Math.cos(world) * r);
     const z = Math.round(site.z + Math.sin(world) * r);
     total++;
@@ -827,6 +1014,30 @@ function layoutKeyhole(C) {
   for (const v of [-8, -3, 3, 8]) add('farm', ...at(-10, v), 2);
   add('mill', ...at(-13.5, -3.5), 2);
   add('mill', ...at(-13.5, 3.5), 2);
+}
+
+// The terrain-adapted layout's signature: towers where THIS landform wants
+// them — over the cliffs that flank the approach, on the spur tips, down the
+// valley mouth, at the outpost's corners. The rest of the town is clustered
+// by fillDistrict, so the plan only states what makes it this place.
+function layoutLandform(C) {
+  const { addInside, spot, radiusAt, plan } = C;
+  const SIG = {
+    bastion: [1.0, -1.0, Math.PI],
+    fort: [0.62, -0.62],
+    star: [0, (TAU * 2) / 5, -(TAU * 2) / 5],
+    crescent: [0.95, -0.95, 1.9, -1.9],
+    keyhole: [0.5, -0.5],
+    outpost: [0, Math.PI / 2, Math.PI, -Math.PI / 2],
+  };
+  for (const t of SIG[plan.key] || []) addInside('tower', ...spot(radiusAt(t) - 4.2, t), 2, {}, 4);
+}
+
+function layoutOutpost(C) {
+  const { add, spot, R } = C;
+  for (let i = 0; i < 8; i++) add('tower', ...spot(R - 3.5, (i / 8) * TAU), 2);
+  for (let i = 0; i < 6; i++) add('house', ...spot(6.6, (i / 6) * TAU + 0.4), 2);
+  for (let i = 0; i < 4; i++) add('farm', ...spot(10, (i / 4) * TAU + 0.8), 2);
 }
 
 // Find clusters of gold-ore tiles, nearest-to-the-city first.

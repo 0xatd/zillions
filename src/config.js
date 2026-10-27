@@ -807,7 +807,7 @@ export const LEVELS = [
     // liquid: 'lava' switches the whole liquid treatment — glowing surface,
     // ember shoreline, bright crust rim — so molten channels can never be
     // mistaken for ground you can walk.
-    theme: { terrain: 'wastes', city: 'star', liquid: 'lava', liquidName: 'Molten rock',
+    theme: { terrain: 'wastes', city: 'outpost', liquid: 'lava', liquidName: 'Molten rock',
       palette: { grass: 0xe9a43e, forest: 0xc9783a, canopy: 0x8a3a2a, water: 0xd8461e, mountain: 0xf2d39a, sand: 0xf0bd62, path: 0xc0743c, sky: 0xffdca6, skyTop: 0xe58a52, shadow: 0x14304a } },
     boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
       color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },

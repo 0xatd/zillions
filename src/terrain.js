@@ -11,7 +11,8 @@
 // is a rift with two passes through it. The archetype decides the pattern; the
 // coverage quantiles decide how much of it there is, so a map is playable no
 // matter how the noise landed.
-import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R } from './config.js';
+import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R, CITY_WALL_R } from './config.js';
+import { SITE_FORMS, makeRim, rimRadius, rimOpen, rimMaxRadius, cityFacing, angDiff } from './site-plan.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,7 @@ export class TerrainField {
     this._stampCityPads(elev);
     this.nestSpots = this._pickNests();
     this._carveWarRoads();
+    this._shapePlateaus(elev);
     this._carveOutpostPads();
     // Lane nodes are read BEFORE the frontier connector runs, so the connector
     // can guarantee they are reachable — a node marooned behind water or crag
@@ -530,6 +532,99 @@ export class TerrainField {
             const w = clamp((R + 2 - d) / 4, 0, 1);
             elev[k] = elev[k] * (1 - w) + target * w;
           }
+        }
+      }
+    });
+  }
+
+  // ---- terrain-adapted bases ---------------------------------------------
+  // The founders' pad becomes a LANDFORM (src/site-plan.js): a plateau whose
+  // rim is cliff (or bog water) wherever the plan lets the land close the
+  // line, and open grass where it has to be walled — the ramps the approaches
+  // climb, which is where the gates go. Outside the rim a walkable shelf runs
+  // round the foot of the cliffs (so a horde can always work its way to a
+  // ramp), and past it the country comes back: tree clumps and rock
+  // outcrops framing the base instead of a mown disc. Runs after the war
+  // roads, so a road that hits a cliff is re-routed by the land itself.
+  // The desert outpost is the one exception: an open, flat badland pan.
+  _shapePlateaus(elev) {
+    const key = this.theme && this.theme.city;
+    if (!SITE_FORMS[key] || !elev || !this._levels) return;
+    const N = this.size;
+    const form = SITE_FORMS[key];
+    const L = this._levels;
+    const span = Math.max(0.001, L.mountT - L.waterT);
+    const eHigh = L.waterT + (form.ring ? 0.42 : 0.8) * span;
+    const eLow = L.waterT + (form.ring ? 0.4 : 0.3) * span;
+    const eCrag = L.mountT + 0.38 * (1 - L.mountT);
+    const eBog = L.waterT - 0.06 * span;
+    const noise = this._moistNoise;
+    // Tiles the war roads run on stay clear of dressing.
+    const road = new Uint8Array(N * N);
+    for (const r of this.roadPaths || []) {
+      for (const [x, z] of r.pts) {
+        for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+          if (this.inBounds(x + dx, z + dz)) road[this.idx(x + dx, z + dz)] = 1;
+        }
+      }
+    }
+    this.sites.forEach((s, i) => {
+      const facing = cityFacing(this, s.x, s.z);
+      const rim = makeRim(key, facing, CITY_WALL_R * (form.ring ? 1.08 : 1.0), this.seed, i);
+      const pad = s.padR || CITY_PAD_R;
+      const m = rimMaxRadius(rim);
+      if (m + 9 > pad + 4) rim.R *= (pad - 5) / m;
+      s.rim = rim;
+      const ext = Math.ceil(pad + 6);
+      const sx = Math.round(s.x), sz = Math.round(s.z);
+      for (let dz = -ext; dz <= ext; dz++) {
+        for (let dx = -ext; dx <= ext; dx++) {
+          const x = sx + dx, z = sz + dz;
+          if (!this.inBounds(x, z) || x < 2 || z < 2 || x > N - 3 || z > N - 3) continue;
+          const px = x + 0.5 - s.x, pz = z + 0.5 - s.z;
+          const d = Math.hypot(px, pz);
+          if (d > pad + 6) continue;
+          const t = Math.atan2(Math.sin(Math.atan2(pz, px) - facing), Math.cos(Math.atan2(pz, px) - facing));
+          const r = rimRadius(rim, t);
+          const open = rimOpen(rim, t);
+          const nat = form.natural(t);
+          const k = this.idx(x, z);
+          const n1 = noise(x * 0.23 + 40, z * 0.23 + 40, 2);
+          const rw = open ? 2.2 : nat === 'water' ? 3.2 + n1 * 3 : 2.4 + Math.max(0, n1 - 0.4) * 9;
+          const tile = this.tiles[k];
+          if (d < r) {
+            if (tile !== TILE.GOLDORE && tile !== TILE.STONEORE) this.tiles[k] = TILE.GRASS;
+            elev[k] = eHigh;
+            continue;
+          }
+          if (d < r + rw) {
+            if (open) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; } else if (nat === 'water') {
+              this.tiles[k] = TILE.WATER; elev[k] = eBog;
+            } else { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag + (n1 - 0.5) * 0.08; }
+            continue;
+          }
+          const u = d - (r + rw);
+          // Ramps run down from the open rim; cliffs drop straight to the shelf.
+          const nearOpen = form.ring || form.open.some(([c, hw]) => angDiff(t, c) <= hw + 0.12);
+          let e = nearOpen ? eHigh + (eLow - eHigh) * clamp(u / 7, 0, 1) : eLow;
+          const w = clamp((pad + 6 - d) / 6, 0, 1);
+          elev[k] = elev[k] * (1 - w) + e * w;
+          if (d > pad + 2) continue;
+          if (u < 2.6 || road[k]) {
+            if (!TILE_INFO[tile].walk) this.tiles[k] = TILE.GRASS;
+            continue;
+          }
+          if (tile !== TILE.GRASS) continue;
+          const corridor = form.ring || form.open.some(([c, hw]) => angDiff(t, c) <= hw + 0.22);
+          const n2 = noise(x * 0.16 + 200, z * 0.16 + 200, 2);
+          const n3 = noise(x * 0.31 + 500, z * 0.31 + 500, 2);
+          if (form.ring) {
+            // Badlands: a few lone mesas far out, nothing to hide behind near the walls.
+            if (u > 9 && n3 > 0.66) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; }
+            continue;
+          }
+          if (!corridor && u < 6 && n3 > 0.6) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; continue; }
+          if (n2 > (corridor ? 0.64 : 0.54)) this.tiles[k] = TILE.FOREST;
         }
       }
     });
