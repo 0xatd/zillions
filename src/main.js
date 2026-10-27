@@ -5,12 +5,12 @@ import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
 } from './config.js';
-import { GameMap } from './map.js';
+import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, assetClone, assetPart } from './assets.js';
+import { loadAssets, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -28,7 +28,7 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
-import { HordeArt, buildCorpseGeometry } from './horde-art.js';
+import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
@@ -217,6 +217,8 @@ class App {
     this._setupLights();
     this._setupParticles();
     this._setupZombieMeshes();
+    // Start pulling the toy kit now so the menu horde swaps to it early.
+    this._loadArt().catch(() => {});
     this._setupCoins();
     this._setupBars();
     this._setupCorpses();
@@ -698,8 +700,7 @@ class App {
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
-      await loadAssets();
-      this.assetsLoaded = true;
+      await this._loadArt();
     }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
@@ -3359,10 +3360,26 @@ class App {
 
   // ---------------- zombies (instanced) ----------------
 
+  // Load GLB art once; when the toy kit lands, hand it to the map props and
+  // rebuild the horde pools on kit geometry. Presentation only.
+  _loadArt() {
+    if (!this._artLoading) {
+      this._artLoading = loadAssets().then(() => {
+        this.assetsLoaded = true;
+        setMapKit(kitGeometry);
+        if (hasKit('enemy_walker') && this.horde) {
+          this.horde.dispose();
+          this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+        }
+      });
+    }
+    return this._artLoading;
+  }
+
   _setupZombieMeshes() {
     // Per-type authored silhouettes, instanced — see horde-art.js. The menu
     // vignette writes into the same pools, so the menu horde IS the game's.
-    this.horde = new HordeArt(this.scene, ZMAX);
+    this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
     this._zdummy = new THREE.Object3D();
     this._zcolor = new THREE.Color();
   }
@@ -3455,10 +3472,10 @@ class App {
   // damage source, tumble through the air, bounce, and sink into the mud.
 
   _setupCorpses() {
-    const MAXC = 300;
-    // A real felled body (limbs splayed, baked gore) instead of a tumbling
-    // crate — instance color still tints it per type.
-    const geo = buildCorpseGeometry();
+    const MAXC = 600;
+    // Toy-style kill pop: every dead drone shatters into a handful of crystal
+    // shards that bounce and shrink away. No bodies, no gore.
+    const geo = buildShardGeometry();
     this.corpseMesh = new THREE.InstancedMesh(geo, toyMat({ color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
@@ -3469,19 +3486,24 @@ class App {
   }
 
   spawnCorpse(e) {
-    if (this.corpses.length >= 300) this.corpses.shift();
     const f = e.force || 1;
-    const sp = 2.5 * f + Math.random() * 2;
-    this.corpses.push({
-      x: e.x, y: this.map.groundY(e.x, e.z) + 0.5, z: e.z,
-      gy: this.map.groundY(e.x, e.z),
-      vx: (e.dx || 0) * sp + (Math.random() - 0.5), vy: 2.2 + 3.2 * f * Math.random(), vz: (e.dz || 0) * sp + (Math.random() - 0.5),
-      rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
-      wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
-      life: 6 + Math.random() * 3, scale: e.big ? 1.7 : 1,
-      // Multiplies the corpse geometry's baked pale palette, so keep it bright.
-      color: e.big ? 0xa886c8 : 0xa4bc72,
-    });
+    const n = e.big ? 7 : 4;
+    const gy = this.map.groundY(e.x, e.z);
+    for (let k = 0; k < n; k++) {
+      if (this.corpses.length >= 600) this.corpses.shift();
+      const a = (k / n) * Math.PI * 2 + Math.random() * 0.8;
+      const sp = (1.6 + Math.random() * 1.8) * (0.7 + 0.3 * f);
+      this.corpses.push({
+        x: e.x, y: gy + 0.5 + Math.random() * 0.3, z: e.z, gy,
+        vx: Math.cos(a) * sp + (e.dx || 0) * 1.5 * f, vy: 3 + Math.random() * 2.5,
+        vz: Math.sin(a) * sp + (e.dz || 0) * 1.5 * f,
+        rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
+        wx: (Math.random() - 0.5) * 16, wy: (Math.random() - 0.5) * 12,
+        life: 0.8 + Math.random() * 0.5, max: 1.3,
+        scale: (e.big ? 1.6 : 1) * (0.7 + Math.random() * 0.6),
+        color: e.big ? 0xc8a6ff : k % 2 ? 0xb9a2f0 : 0x9fe8ff,
+      });
+    }
   }
 
   _updateCorpses(dt) {
@@ -3496,13 +3518,10 @@ class App {
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
         p.rx += p.wx * dt; p.ry += p.wy * dt;
         if (p.y < floor) { p.y = floor; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
-      } else {
-        p.rx = Math.PI / 2; // settled flat
-        if (p.life < 1.5) p.y = floor - (1.5 - p.life) * 0.2; // sink away
       }
       d.position.set(p.x, p.y, p.z);
       d.rotation.set(p.rx, p.ry, p.rz);
-      d.scale.setScalar(p.scale);
+      d.scale.setScalar(p.scale * Math.min(1, p.life / 0.4)); // shrink away
       d.updateMatrix();
       this.corpseMesh.setMatrixAt(i, d.matrix);
       c.setHex(p.color);
@@ -3671,25 +3690,46 @@ class App {
     pips.tex.needsUpdate = true;
   }
 
-  // The Thronefall "stump", sci-fi: one small survey beacon per plot — a
-  // gunmetal pylon with a spinning amber holo-gem. Everything else (ghost,
-  // pips, icon) only appears when you ride up close.
-  _makeBeacon(x, z) {
+  // The build pad: a glowing hex plate on the exact spot a piece will rise
+  // (fixed posts, Thronefall-style). An unlit cyan rim + faint fill reads at
+  // any zoom, and a small holo-gem floats above it. Cost + icon ride a tag
+  // sprite (see _syncPlots), so every free spot says what goes there and
+  // what it costs without opening a menu.
+  _makeBeacon(x, z, r = 1.15) {
     const grp = new THREE.Group();
-    const pylon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.11, 0.55, 6),
-      toyMat({ color: 0x565c60 }),
-    );
-    pylon.position.set(x, 0.28, z);
-    pylon.castShadow = true;
-    grp.add(pylon);
-    const gem = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.17, 0),
-      toyMat({ color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
-    );
-    gem.position.set(x, 0.95, z);
+    if (!this._padMats) {
+      this._padMats = {
+        rim: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.9, depthWrite: false }),
+        fill: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.16, depthWrite: false }),
+        plate: toyMat({ color: 0x5d6b80 }),
+        gem: new THREE.MeshBasicMaterial({ color: 0xbff8ff }),
+      };
+    }
+    const m = this._padMats;
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, 6), m.plate);
+    plate.position.set(x, 0.04, z);
+    plate.rotation.y = Math.PI / 6;
+    plate.receiveShadow = true;
+    grp.add(plate);
+    const fillGeo = new THREE.CircleGeometry(r * 0.86, 6);
+    fillGeo.rotateX(-Math.PI / 2);
+    const fill = new THREE.Mesh(fillGeo, m.fill);
+    fill.position.set(x, 0.09, z);
+    fill.rotation.y = Math.PI / 6;
+    fill.userData.noOutline = true;
+    grp.add(fill);
+    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
+    rimGeo.rotateX(-Math.PI / 2);
+    const rim = new THREE.Mesh(rimGeo, m.rim);
+    rim.position.set(x, 0.095, z);
+    rim.rotation.y = Math.PI / 6;
+    rim.userData.noOutline = true;
+    grp.add(rim);
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(Math.min(0.2, r * 0.22), 0), m.gem);
+    gem.position.set(x, 0.75, z);
     grp.add(gem);
     grp.userData.gem = gem;
+    grp.userData.rim = rim;
     return grp;
   }
 
@@ -3698,7 +3738,8 @@ class App {
     const kind = PLOT_KINDS[plot.kind];
     const anchor = plot.anchor || plot.gate;
     const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
-    const beacon = this._makeBeacon(mx, mz);
+    const padR = plot.kind === 'wall' ? 0.5 : plot.kind === 'hq' ? 2.3 : 1.2;
+    const beacon = this._makeBeacon(mx, mz, padR);
     g.add(beacon);
     g.userData.beacon = beacon;
     const label = this._makeLabelSprite(kind.icon, '');
@@ -3808,6 +3849,7 @@ class App {
 
       if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
+        if (ud.tag) ud.tag.visible = false;
         ud.ring.visible = false;
         ud.prog.visible = false;
         if (ud.pips) ud.pips.sprite.visible = false;
@@ -3831,8 +3873,22 @@ class App {
       if (ud.beacon.visible) {
         const gem = ud.beacon.userData.gem;
         gem.rotation.y = t * 2;
-        gem.position.y = 0.95 + Math.sin(t * 2.4 + plot.id) * 0.08;
+        gem.position.y = 0.75 + Math.sin(t * 2.4 + plot.id) * 0.08;
       }
+      // Pad tag: what goes here + what it costs, on every free spot.
+      if (!built && !nt.branch) {
+        const tagKey = PLOT_KINDS[plot.kind].icon + '|' + Math.ceil(nt.cost);
+        if (ud.tagKey !== tagKey) {
+          ud.tagKey = tagKey;
+          if (ud.tag) { rec.group.remove(ud.tag); ud.tag.material.map.dispose(); ud.tag.material.dispose(); }
+          ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].icon, `${Math.ceil(nt.cost)}`);
+          ud.tag.scale.set(1.5, 0.75, 1);
+          const [tx, tz] = ud.labelPos;
+          ud.tag.position.set(tx, 1.45, tz);
+          rec.group.add(ud.tag);
+        }
+      }
+      if (ud.tag) ud.tag.visible = !built && !nt.branch && plot.id !== pipPlotId;
       const wantSub = nt.branch ? 'choose!'
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
@@ -3919,7 +3975,7 @@ class App {
         this.scene.add(mesh);
         const materials = [];
         mesh.traverse((o) => {
-          if (!o.isMesh) return;
+          if (!o.isMesh || o.userData.skirt) return;
           for (const material of (Array.isArray(o.material) ? o.material : [o.material])) {
             if (!material || materials.includes(material)) continue;
             material.userData.artBaseColor = material.color?.clone() || null;
@@ -3951,13 +4007,31 @@ class App {
   _disposeObject3D(obj) {
     if (!obj) return;
     obj.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
+      // Toy-kit geometry is shared with its template — never free it here.
+      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
         if (mat.map) mat.map.dispose();
         mat.dispose();
       }
     });
+  }
+
+  // A toy-kit figurine (shared geometry, per-unit material copies so stealth
+  // fades and hit flashes stay per unit). Null when the kit piece is absent.
+  _kitFigure(name) {
+    if (!hasKit(name)) return null;
+    const node = kitClone(name);
+    const shared = kitMaterials();
+    const body = shared.body.clone(), glow = shared.glow.clone();
+    node.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
+    return {
+      node,
+      limbs: {
+        legL: assetPart(node, 'leg_l'), legR: assetPart(node, 'leg_r'),
+        armL: assetPart(node, 'arm_l'), armR: assetPart(node, 'arm_r'),
+      },
+    };
   }
 
   _makeUnitMesh(u) {
@@ -3975,8 +4049,13 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const authored = u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (authored) {
+      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (kit) {
+        // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
+        body.add(kit.node);
+        g.userData.limbs = kit.limbs;
+      } else if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
         // existing collision/readability scale; visual meshes never change
         // the deterministic unit radius.
@@ -4053,8 +4132,13 @@ class App {
       // snipers and hero summons get their own procedural rigs (unit-art.js)
       // so the army reads apart at a glance.
       const d = u.def;
-      const authored = u.key === 'soldier' ? assetClone('humanRifleman') : null;
-      if (authored) {
+      const kit = this._kitFigure(`unit_${u.key}`);
+      const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
+      if (kit) {
+        // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
+        body.add(kit.node);
+        g.userData.limbs = kit.limbs;
+      } else if (authored) {
         authored.scale.setScalar(0.48);
         authored.traverse((o) => {
           if (!o.isMesh) return;
@@ -4916,17 +5000,18 @@ class App {
         }
         case 'zdeath':
           this.spawnCorpse(e);
-          this.burst(e.x, 0.4, e.z, { count: e.big ? 26 : 12, color: 0x8c1a1a, speed: e.big ? 3 : 2, life: 0.6, size: e.big ? 0.7 : 0.5, up: 2 });
+          this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
+          this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
           this.deathSfxT -= 1;
           if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
           break;
         case 'bite':
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
-          this.burst(e.x, 0.7, e.z, { count: 4, color: 0xb32020, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
+          this.burst(e.x, 0.7, e.z, { count: 4, color: 0xffb070, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
           break;
         case 'udeath':
-          this.burst(e.x, 0.5, e.z, { count: 20, color: 0xd23c3c, speed: 2.5, life: 0.7, size: 0.55, up: 2 });
+          this.burst(e.x, 0.5, e.z, { count: 20, color: 0xbfe0ff, speed: 2.5, life: 0.6, size: 0.55, up: 2 });
           this.audio.zombieDeath();
           break;
         case 'build':
@@ -5158,7 +5243,7 @@ class App {
           this.audio.victory();
           this.shake = Math.max(this.shake, 1.4);
           this.burst(e.x, 0.6, e.z, { count: 60, color: 0xffd75e, speed: 4.5, life: 1.2, size: 0.8, up: 4 });
-          this.burst(e.x, 0.5, e.z, { count: 40, color: 0x8c1a1a, speed: 3.5, life: 0.9, size: 0.7, up: 3 });
+          this.burst(e.x, 0.5, e.z, { count: 40, color: 0xc8a6ff, speed: 3.5, life: 0.9, size: 0.7, up: 3 });
           break;
         case 'enrage':
           this.audio.bossHorn();

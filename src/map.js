@@ -6,6 +6,17 @@ import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
+
+// Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
+// renderer once assets load (setMapKit). Null in headless tooling, where the
+// procedural primitives below stay in use.
+let MAP_KIT = null;
+export function setMapKit(provider) { MAP_KIT = provider; }
+function kitGeo(name, part) {
+  const k = MAP_KIT && MAP_KIT(name, part);
+  if (!k) return null;
+  return k.geometry.clone().translate(k.pivot.x, k.pivot.y, k.pivot.z);
+}
 import { makeRNG, makeNoise } from './utils.js';
 
 export class GameMap extends TerrainField {
@@ -364,11 +375,16 @@ export class GameMap extends TerrainField {
     // A few trees carry bioluminescent spore pods that burn through the dark.
     const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
     const g = new THREE.Group();
-    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
-    const trunkMat = toyMat({ color: 0xcbbfa0 });
-    const canopyGeo = new THREE.ConeGeometry(0.52, 1.3, 7);
-    const canopyMat = toyMat({ color: 0xffffff });
-    const lobeGeo = new THREE.SphereGeometry(0.42, 7, 5);
+    // Toy kit: round crowns with a small pine beside each (the "lobe").
+    const kTrunk = kitGeo('prop_tree_round', 'trunk');
+    const kCanopy = kitGeo('prop_tree_round', 'canopy');
+    const kPine = kitGeo('prop_tree_pine', 'canopy');
+    const useKit = !!(kTrunk && kCanopy && kPine);
+    const trunkGeo = useKit ? kTrunk : new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
+    const trunkMat = useKit ? toyMat({ color: 0xffffff, vertexColors: true }) : toyMat({ color: 0xcbbfa0 });
+    const canopyGeo = useKit ? kCanopy : new THREE.ConeGeometry(0.52, 1.3, 7);
+    const canopyMat = toyMat({ color: 0xffffff, vertexColors: useKit });
+    const lobeGeo = useKit ? kPine : new THREE.SphereGeometry(0.42, 7, 5);
     const lobeMat = canopyMat; // same program: instance color does the varying
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
@@ -388,16 +404,20 @@ export class GameMap extends TerrainField {
       q.setFromEuler(eul);
       sc.set(s.s, s.s * (0.9 + rng() * 0.35), s.s);
       const gy = this.groundY(s.x, s.z);
-      pos.set(s.x, gy + 0.32 * s.s, s.z);
+      pos.set(s.x, gy + (useKit ? 0 : 0.32 * s.s), s.z);
       m.compose(pos, q, sc);
       trunks.setMatrixAt(i, m);
-      pos.set(s.x + leanX * 0.5, gy + (0.62 + 0.55) * s.s * (0.95 + rng() * 0.2), s.z + leanZ * 0.5);
+      const ch = (0.62 + 0.55) * s.s * (0.95 + rng() * 0.2);
+      pos.set(s.x + leanX * 0.5, useKit ? gy : gy + ch, s.z + leanZ * 0.5);
+      if (useKit) sc.set(s.s * 1.25, s.s * 1.3, s.s * 1.25);
       m.compose(pos, q, sc);
       canopies.setMatrixAt(i, m);
       // Understory lobe: offset to one side and lower, a second rounded mass.
-      const la = rng() * Math.PI * 2, lr = 0.28 + rng() * 0.2;
-      pos.set(s.x + Math.cos(la) * lr * s.s, gy + (0.55 + rng() * 0.25) * s.s, s.z + Math.sin(la) * lr * s.s);
+      const la = rng() * Math.PI * 2, lr = (useKit ? 0.5 : 0.28) + rng() * 0.2;
+      const ly = (0.55 + rng() * 0.25) * s.s;
+      pos.set(s.x + Math.cos(la) * lr * s.s, useKit ? gy : gy + ly, s.z + Math.sin(la) * lr * s.s);
       sc.set(s.s * (0.8 + rng() * 0.4), s.s * (0.65 + rng() * 0.3), s.s * (0.8 + rng() * 0.4));
+      if (useKit) sc.multiplyScalar(0.8);
       m.compose(pos, q, sc);
       lobes.setMatrixAt(i, m);
       // Canopies key off the map's forest color — one hue family per map
@@ -476,18 +496,21 @@ export class GameMap extends TerrainField {
     const eul = new THREE.Euler();
     const c = new THREE.Color();
     if (teeth.length) {
+      const kCliff = kitGeo('prop_cliff', 'rock');
       const mesh = new THREE.InstancedMesh(
-        new THREE.ConeGeometry(0.4, 1.5, 5),
-        toyMat({ color: 0xffffff }),
+        kCliff || new THREE.ConeGeometry(0.4, 1.5, 5),
+        toyMat({ color: 0xffffff, vertexColors: !!kCliff }),
         teeth.length,
       );
+      mesh.userData.kit = !!kCliff;
       mesh.castShadow = true;
       const toothBase = new THREE.Color(cragCol).multiplyScalar(0.82);
       teeth.forEach((s, i) => {
         eul.set(s.tilt, s.r, s.tilt * 0.7);
         q.setFromEuler(eul);
         sc.set(s.s, s.s * (0.9 + (i % 3) * 0.25), s.s);
-        pos.set(s.x, this.groundY(s.x, s.z) + 0.55 * s.s, s.z);
+        if (mesh.userData.kit) sc.multiplyScalar(0.85);
+        pos.set(s.x, this.groundY(s.x, s.z) + (mesh.userData.kit ? -0.05 : 0.55 * s.s), s.z);
         m.compose(pos, q, sc);
         mesh.setMatrixAt(i, m);
         // Strata: neighbouring teeth vary light-to-dark, so the rim reads as
@@ -498,9 +521,11 @@ export class GameMap extends TerrainField {
       g.add(mesh);
     }
     if (scree.length) {
+      const kScree = kitGeo('prop_rock_a', 'rock');
+      if (kScree) kScree.scale(0.32, 0.32, 0.32);
       const mesh = new THREE.InstancedMesh(
-        new THREE.DodecahedronGeometry(0.13, 0),
-        toyMat({ color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex() }),
+        kScree || new THREE.DodecahedronGeometry(0.13, 0),
+        toyMat({ color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex(), vertexColors: !!kScree }),
         scree.length,
       );
       scree.forEach((s, i) => {
@@ -514,17 +539,19 @@ export class GameMap extends TerrainField {
       g.add(mesh);
     }
     if (boulders.length) {
+      const kBoulder = kitGeo('prop_rock_b', 'rock') || null;
       const mesh = new THREE.InstancedMesh(
-        new THREE.DodecahedronGeometry(0.4, 0),
-        toyMat({ color: cragCol }),
+        kBoulder || new THREE.DodecahedronGeometry(0.4, 0),
+        toyMat({ color: cragCol, vertexColors: !!kBoulder }),
         boulders.length,
       );
+      if (kBoulder) mesh.userData.kit = true;
       mesh.castShadow = true;
       boulders.forEach((s, i) => {
         eul.set(0, s.r, 0);
         q.setFromEuler(eul);
         sc.set(s.s, s.s * 0.8, s.s);
-        pos.set(s.x, this.groundY(s.x, s.z) + 0.15, s.z);
+        pos.set(s.x, this.groundY(s.x, s.z) + (mesh.userData.kit ? -0.02 : 0.15), s.z);
         m.compose(pos, q, sc);
         mesh.setMatrixAt(i, m);
       });

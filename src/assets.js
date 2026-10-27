@@ -3,6 +3,7 @@
 // the procedural meshes, so the game always runs.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { culture } from './cultures.js';
 
 const TEMPLATES = {};
 
@@ -41,9 +42,80 @@ export const ART_SLICE_KEYS = Object.freeze([
   'humanMine', 'humanWall', 'humanGate',
 ]);
 
+// ---- toy kit (per culture, vertex-coloured, see tools/art/toy_kit) ----
+// Shared runtime materials: every kit mesh is flat matte Lambert carrying its
+// baked vertex colours; meshes named glow/eyes are unlit so lamps, pads and
+// eyes read at any light level.
+let _kitBody = null, _kitGlow = null;
+export function kitMaterials() {
+  if (!_kitBody) {
+    _kitBody = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    _kitGlow = new THREE.MeshBasicMaterial({ vertexColors: true });
+  }
+  return { body: _kitBody, glow: _kitGlow };
+}
+const KIT = {};
+
+async function loadKit(loader) {
+  const c = culture();
+  const mats = kitMaterials();
+  await Promise.all(c.assets.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(`${c.kitPath}/${name}.glb`);
+      const root = gltf.scene;
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        o.geometry.userData.kitShared = true;
+        const glow = o.name === 'glow' || o.name === 'eyes' || o.material?.name === 'glow'
+          || o.parent?.name === 'glow' || o.parent?.name === 'eyes';
+        o.material = glow ? mats.glow : mats.body;
+        o.castShadow = !glow;
+        o.receiveShadow = !glow;
+        if (glow) o.userData.noOutline = true;
+      });
+      KIT[name] = root;
+    } catch (e) {
+      // Missing kit piece — callers fall back to procedural art.
+    }
+  }));
+}
+
+export function hasKit(name) {
+  return !!KIT[name];
+}
+
+// Clone a kit asset. Geometry and the two shared materials are shared, so a
+// clone is cheap; callers must not dispose them (kitShared flags this).
+export function kitClone(name) {
+  const t = KIT[name];
+  if (!t) return null;
+  const g = t.clone(true);
+  g.userData.kitShared = true;
+  return g;
+}
+
+// A named part's geometry (pivot-relative, as authored) plus its pivot, for
+// instanced use (horde bodies, trees, rocks).
+export function kitGeometry(name, part) {
+  const t = KIT[name];
+  if (!t) return null;
+  let found = null;
+  t.traverse((o) => {
+    if (found) return;
+    if (o.name === part || (o.parent && o.parent.name === part && o.isMesh)) found = o;
+  });
+  if (!found) return null;
+  let mesh = found.isMesh ? found : null;
+  if (!mesh) found.traverse((o) => { if (!mesh && o.isMesh) mesh = o; });
+  if (!mesh) return null;
+  const pivot = found.position.clone();
+  return { geometry: mesh.geometry, pivot };
+}
+
 export function loadAssets() {
   const loader = new GLTFLoader();
-  return Promise.all(Object.entries(MANIFEST).map(async ([key, url]) => {
+  const kit = loadKit(loader);
+  return Promise.all([kit, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;
@@ -73,7 +145,7 @@ export function loadAssets() {
     } catch (e) {
       // Asset missing/unloadable — procedural fallback will be used.
     }
-  }));
+  })]);
 }
 
 // Clone an asset scaled so its horizontal footprint fits `fit` world units

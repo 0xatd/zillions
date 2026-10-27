@@ -14,7 +14,8 @@
 // keyed off plot ids and tile coords — deterministic, so peers agree.
 import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
-import { assetClone, assetPart } from './assets.js';
+import { assetClone, assetPart, hasKit, kitClone, kitMaterials } from './assets.js';
+import { culture, kitBuildingKey } from './cultures.js';
 
 // The art-slice GLBs predate the detailed procedural kit and read flatter
 // than it; the kit is now the primary look. Flip to true to restore the
@@ -269,6 +270,8 @@ export function groundSkirt(b) {
   }));
   skirt.position.y = 0.03;
   skirt.receiveShadow = true;
+  skirt.userData.skirt = true; // keeps its own opacity (see main _syncBuildings)
+  skirt.userData.noOutline = true;
   return skirt;
 }
 
@@ -293,8 +296,31 @@ function authoredBuildingMesh(b) {
   return g;
 }
 
+// The toy kit (tools/art/toy_kit): one Blender-authored, vertex-coloured
+// model per building kind and tier for the active culture. Each building gets
+// its OWN copy of the two kit materials (damage soot and construction fade are
+// per building); geometry is shared with the template.
+function kitBuildingMesh(b) {
+  if (b.kind === 'wall') return null;
+  const key = kitBuildingKey(b.kind, b.plotTier);
+  if (!key || !hasKit(key)) return null;
+  const model = kitClone(key);
+  if (!model) return null;
+  const shared = kitMaterials();
+  const body = shared.body.clone(), glow = shared.glow.clone();
+  model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
+  const g = new THREE.Group();
+  g.add(model);
+  g.add(groundSkirt(b));
+  g.userData.kit = key;
+  g.userData.head = assetPart(model, 'part_turret');
+  g.userData.rotor = assetPart(model, 'part_rotor');
+  g.userData.core = assetPart(model, 'part_core');
+  return g;
+}
+
 export function buildBuildingMesh(b, ctx = {}) {
-  const authored = authoredBuildingMesh(b);
+  const authored = authoredBuildingMesh(b) || kitBuildingMesh(b);
   if (authored) return authored;
 
   const g = new THREE.Group();
@@ -666,85 +692,99 @@ export function buildBuildingMesh(b, ctx = {}) {
       const passYaw = Math.atan2(pvz, pvx);
       const shock = b.branch === 'shock';
       const bastion = b.branch === 'bastion';
-      const capCol = 0x8a8069;
-      const wear = (((b.x * 7 + b.z * 13) % 5) - 2) * 0.016;
-      if (tier === 1 && !b.gate) {
-        // FRONTIER FENCE: jersey barrier + posts + triple razorwire, with a
-        // wire coil crowning each barrier — reads "field expedient".
-        B.frustum(shade(0xa8a190, 1 + wear), 0.34, 0.34, 0.5, 0.5, scx, 0.25, scz, -run);
-        B.box(0xe8a83c, 0.2, 0.05, 0.2, scx, 0.53, scz);
-        B.cyl(STEEL, 0.035, 0.05, 0.85, scx, 0.42, scz, 6);
+      // EUROPEAN RAMPART (toy kit): cream ashlar on a darker plinth, slate-blue
+      // caps, gold trim, cyan energy lamps. Every tier is visibly MORE wall —
+      // it thickens and rises; T2 grows merlons and pier turrets, T3 adds the
+      // energy band, banners and men on the walk.
+      const P = culture().palette;
+      const wear = (((b.x * 7 + b.z * 13) % 5) - 2) * 0.02;
+      const stone = shade(P.stone, 1 + wear), stone2 = P.stone2, base = P.stone3;
+      const H = bastion ? 1.75 : tier >= 3 ? 1.4 : tier === 2 ? 1.05 : 0.62;
+      const T = bastion ? 0.66 : tier >= 3 ? 0.56 : tier === 2 ? 0.44 : 0.3;
+      const pierR = tier >= 3 || bastion ? 0.36 : tier === 2 ? 0.3 : 0.2;
+      const guard = (x, z, yaw) => {
+        // a toy sentry: one of YOUR men, blue tabard + steel helm + spear
+        B.box(P.banner, 0.16, 0.2, 0.12, x, H + 0.24, z, 0, yaw, 0);
+        B.box(0xf0c8a0, 0.11, 0.1, 0.1, x, H + 0.4, z, 0, yaw, 0);
+        B.box(P.steel, 0.13, 0.06, 0.13, x, H + 0.48, z, 0, yaw, 0);
+        B.box(P.wood, 0.025, 0.5, 0.025, x + Math.cos(yaw) * 0.1, H + 0.36, z - Math.sin(yaw) * 0.1);
+        B.box(P.steel, 0.05, 0.08, 0.02, x + Math.cos(yaw) * 0.1, H + 0.64, z - Math.sin(yaw) * 0.1);
+      };
+      const banner = (x, z, h, yaw) => {
+        B.box(P.steel, 0.03, h, 0.03, x, h / 2, z);
+        B.box(P.banner, 0.26, 0.36, 0.02, x + Math.cos(yaw) * 0.14, h - 0.24, z - Math.sin(yaw) * 0.14, 0, yaw, 0);
+        B.box(P.trim, 0.26, 0.05, 0.025, x + Math.cos(yaw) * 0.14, h - 0.08, z - Math.sin(yaw) * 0.14, 0, yaw, 0);
+      };
+      if (b.gate) {
+        // THE GATE outranks the wall: twin round towers with slate cones,
+        // a gold-trimmed arch lintel and a glowing threshold for your men.
         for (const s of segs) {
-          for (const wy of [0.34, 0.58, 0.8]) seg3(s, s.len, 0.028, 0.028, 0x9aa0a2, wy);
-          // barbs
-          for (let k = 0; k < 3; k++) {
-            const t = (k + 0.5) / 3 - 0.5;
-            B.box(0x9aa0a2, 0.05, 0.09, 0.02, s.mx + Math.cos(s.yaw) * t * s.len, 0.8, s.mz - Math.sin(s.yaw) * t * s.len, 0, -s.yaw, 0.6);
+          seg3(s, s.len, H, T, stone, H / 2);
+          seg3(s, s.len + 0.04, 0.12, T + 0.1, base, 0.06);
+          seg3(s, s.len + 0.04, 0.1, T + 0.06, P.roof, H + 0.05);
+        }
+        const towH = H + 1.0 + tier * 0.25;
+        for (const side of [-1, 1]) {
+          const px = pvx * side * 0.55, pz = pvz * side * 0.55;
+          B.cyl(stone, 0.34 + tier * 0.03, 0.4 + tier * 0.03, towH, px, towH / 2, pz, 8);
+          B.cyl(base, 0.44 + tier * 0.03, 0.46 + tier * 0.03, 0.16, px, 0.08, pz, 8);
+          B.cyl(P.trim, 0.42 + tier * 0.03, 0.4 + tier * 0.03, 0.08, px, towH + 0.04, pz, 8);
+          B.cone(P.roof, 0.46 + tier * 0.03, 0.7 + tier * 0.12, px, towH + 0.4 + tier * 0.06, pz, 8);
+          G.box(P.glow, 0.1, 0.16, 0.1, px + pvz * 0.36, towH * 0.7, pz - pvx * 0.36);
+          if (tier >= 2) banner(px, pz, towH + 1.15 + tier * 0.12, -passYaw);
+        }
+        B.box(stone2, 1.0, 0.3, T + 0.08, 0, towH - 0.3, 0, 0, -passYaw, 0);      // lintel
+        B.box(P.trim, 1.02, 0.06, T + 0.1, 0, towH - 0.13, 0, 0, -passYaw, 0);
+        for (const side of [-1, 1]) {                                              // leaves, ajar
+          B.box(P.wood, 0.36, H * 1.1, 0.08, pvx * side * 0.24, H * 0.55, pvz * side * 0.24, 0, -passYaw + side * 0.5, 0);
+          B.box(P.steel, 0.04, H * 0.9, 0.09, pvx * side * 0.12, H * 0.55, pvz * side * 0.12, 0, -passYaw + side * 0.5, 0);
+        }
+        G.box(P.glow, 1.3, 0.03, 0.42, 0, 0.04, 0, 0, -passYaw, 0);                // threshold
+        if (tier >= 3) for (const side of [-1, 1]) guard(pvx * side * 0.55, pvz * side * 0.55 + 0.001, -passYaw);
+        break;
+      }
+      // Pier: a round stone drum; from T2 it caps with a slate cone turret.
+      const pierH = H + (tier >= 2 ? 0.28 : 0.12);
+      B.cyl(stone2, pierR, pierR + 0.05, pierH, scx, pierH / 2, scz, 8);
+      B.cyl(base, pierR + 0.1, pierR + 0.12, 0.14, scx, 0.07, scz, 8);
+      if (tier >= 2 || bastion) {
+        B.cyl(P.trim, pierR + 0.04, pierR + 0.02, 0.06, scx, pierH + 0.03, scz, 8);
+        B.cone(P.roof, pierR + 0.08, 0.5 + tier * 0.08, scx, pierH + 0.3 + tier * 0.04, scz, 8);
+      } else {
+        B.cyl(P.roof, pierR + 0.03, pierR + 0.03, 0.08, scx, pierH + 0.04, scz, 8);
+      }
+      for (const s of segs) {
+        seg3(s, s.len, 0.16, T + 0.14, base, 0.08);                          // plinth
+        seg3(s, s.len, H - 0.16, T, stone, (H - 0.16) / 2 + 0.16);           // curtain
+        seg3(s, s.len * 0.9, 0.06, T + 0.02, stone2, H * 0.55);              // course line
+        if (tier === 1 && !bastion) {
+          seg3(s, s.len, 0.06, T + 0.04, P.wood, H + 0.03);                  // timber cap
+          continue;
+        }
+        seg3(s, s.len + 0.04, 0.1, T + 0.1, stone2, H + 0.05);               // wall-walk
+        const n = tier >= 3 || bastion ? 3 : 2;                              // merlons
+        for (let k = 0; k < n; k++) {
+          const u = (k + 0.5) / n - 0.5;
+          const ox = Math.cos(s.yaw) * u * s.len, oz = -Math.sin(s.yaw) * u * s.len;
+          for (const side of [-1, 1]) {
+            const nx = Math.sin(s.yaw) * side * (T / 2), nz = Math.cos(s.yaw) * side * (T / 2);
+            B.box(stone, 0.16, 0.2, 0.1, s.mx + ox + nx, H + 0.2, s.mz + oz + nz, 0, -s.yaw, 0);
           }
         }
-        B.cyl(0x9aa0a2, 0.09, 0.09, 0.05, scx, 0.9, scz, 8, Math.PI / 2, run, 0); // coil hint
-        break;
+        if (tier >= 3 || shock) {
+          const nx = Math.sin(s.yaw) * (T / 2 + 0.01), nz = Math.cos(s.yaw) * (T / 2 + 0.01);
+          for (const side of [-1, 1]) {
+            G.box(shock ? 0x6ff6ff : P.glow, s.len * 0.92, 0.05, 0.02, s.mx + nx * side, H * 0.78, s.mz + nz * side, 0, -s.yaw, 0);
+          }
+        }
+        if (bastion) seg3(s, s.len, H * 0.5, T + 0.18, shade(stone, 0.94), H * 0.25); // battered footing
       }
-      const H = bastion ? 1.6 : tier >= 3 ? 1.15 : 1.0;
-      const hull = new THREE.Color(bastion ? 0xece6d6 : HULL).offsetHSL(0, 0, wear).getHex();
-      const glacisCol = shade(hull, 0.82);
-      if (b.gate) {
-        // THE GATE outranks the wall: drum bastions with plate rings and
-        // sensor masts, a chevron-striped lintel, half-open blast leaves,
-        // and an amber threshold burning on the ground through the passage.
-        for (const s of segs) {
-          seg3(s, s.len, H * 0.6, 0.4, hull, H * 0.3);
-          seg3(s, s.len + 0.05, 0.14, 0.46, capCol, H * 0.6 + 0.07);
-          seg3(s, s.len, 0.22, 0.5, glacisCol, 0.11);
-        }
-        const towH = H + 1.35;
-        for (const side of [-1, 1]) {
-          const px = pvx * side * 0.5, pz = pvz * side * 0.5;
-          B.cyl(hull, 0.34, 0.42, towH, px, towH / 2, pz, 10);
-          B.cyl(capCol, 0.38, 0.34, 0.14, px, towH * 0.4, pz, 10);   // plate ring
-          B.cyl(capCol, 0.4, 0.36, 0.16, px, towH + 0.08, pz, 10);
-          B.cyl(STEEL, 0.02, 0.035, 0.7, px, towH + 0.5, pz, 6);     // sensor mast
-          G.box(TRIM, 0.14, 0.14, 0.14, px, towH + 0.3, pz);
-          floodlight(B, G, px * 2.2, pz * 2.2, towH * 0.85, Math.atan2(-px, -pz));
-        }
-        // Chevron lintel spanning the drums.
-        B.box(DARK, 1.1, 0.26, 0.3, 0, towH - 0.18, 0, 0, -passYaw, 0);
-        hazard(B, 0, towH - 0.02, 0, 1.05, -passYaw, 0.26);
-        // Blast leaves, cracked open for your own squads.
-        for (const side of [-1, 1]) {
-          B.box(shade(hull, 0.9), 0.34, H * 0.92, 0.09, pvx * side * 0.26, H * 0.46, pvz * side * 0.26, 0, -passYaw + side * 0.5, 0);
-          B.box(TRIM, 0.05, H * 0.8, 0.02, pvx * side * 0.13, H * 0.46, pvz * side * 0.13, 0, -passYaw + side * 0.5, 0);
-        }
-        G.box(TRIM, 1.5, 0.04, 0.5, 0, 0.05, 0, 0, -passYaw, 0);      // threshold
-        const ban = assetClone('banner', 0.7);
-        if (ban) { ban.position.set(pvx * -0.9, 0, pvz * -0.9); g.add(ban); }
-        break;
-      }
-      // Chamfered pier: armored drum with a marker light.
-      B.cyl(hull, 0.28, 0.36, H + 0.14, scx, (H + 0.14) / 2, scz, 9);
-      B.cyl(capCol, 0.37, 0.31, 0.13, scx, H + 0.2, scz, 9);
-      B.frustum(glacisCol, 0.6, 0.6, 0.24, 0.7, scx, 0.12, scz, -run);
-      G.box(TRIM, 0.14, 0.09, 0.14, scx, H + 0.32, scz);
-      for (const s of segs) {
-        seg3(s, s.len, 0.26, 0.62, glacisCol, 0.13);                   // sloped-footing band
-        seg3(s, s.len, H - 0.24, 0.34, hull, (H - 0.24) / 2 + 0.24);   // curtain plate
-        seg3(s, s.len * 0.42, H * 0.42, 0.36, shade(hull, 0.93), H * 0.52); // inset panel
-        seg3(s, s.len + 0.05, 0.14, 0.44, capCol, H + 0.07);           // parapet walk
-        // Merlons: three armored teeth per curtain.
-        for (let k = 0; k < 3; k++) {
-          const t = (k + 0.5) / 3 - 0.5;
-          B.box(shade(hull, 0.9), 0.16, 0.2, 0.4, s.mx + Math.cos(s.yaw) * t * s.len, H + 0.22, s.mz - Math.sin(s.yaw) * t * s.len, 0, -s.yaw, 0);
-        }
-        if (shock) {
-          G.box(0x4dd8c8, s.len, 0.06, 0.09, s.mx, H + 0.19, s.mz, 0, -s.yaw, 0);
-          B.cyl(0x2f4a48, 0.035, 0.035, 0.2, s.mx, H + 0.08, s.mz, 6);
-        }
-      }
-      if (shock) G.box(0x4dd8c8, 0.18, 0.18, 0.18, scx, H + 0.42, scz);
-      if (bastion) {
-        for (const s of segs) seg3(s, s.len, 0.16, 0.52, shade(hull, 0.87), H - 0.35);
-      }
-      if (!segs.length) B.box(hull, 0.9, H, 0.9, 0, H / 2, 0); // stranded stub
+      if (shock) G.box(0x6ff6ff, 0.16, 0.16, 0.16, scx, pierH + 0.95, scz);
+      // T3: banners on alternate piers and a sentry on the walk.
+      const odd = ((b.x + b.z) & 1) === 1;
+      if (tier >= 3 && segs.length && odd) banner(scx, scz, pierH + 1.2, -run);
+      if (tier >= 3 && segs.length && !odd) guard(segs[0].mx, segs[0].mz, -run + Math.PI / 2);
+      if (!segs.length) B.box(stone, 0.9, H, 0.9, 0, H / 2, 0); // stranded stub
       break;
     }
     case 'outpost': {
