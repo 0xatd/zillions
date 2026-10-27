@@ -749,30 +749,53 @@ export class TerrainField {
     for (const f of river.fords) {
       const a = f + facing, dx = Math.cos(a), dz = Math.sin(a);
       const r = rimRadius(rim, f);
-      let last = -1;
+      // Lateral distance from the ford line to open water on one flank.
+      const gap = (d, side) => {
+        for (let o = 0; o <= 7; o += 0.5) {
+          const x = Math.floor(s.x + dx * d - dz * o * side), z = Math.floor(s.z + dz * d + dx * o * side);
+          if (!this.inBounds(x, z)) return 7;
+          if (this.tiles[this.idx(x, z)] === TILE.WATER) return o;
+        }
+        return 99;
+      };
+      // The span runs from just before the first stretch with water on a
+      // flank to just past the last, so its inner end clears the wall and
+      // postern and both pylons stand on the banks in view.
+      let last = -1, wet0 = -1, wet1 = -1, narrow = 99;
       for (let d = r; d <= r + 14; d += 0.25) {
         const x = Math.floor(s.x + dx * d), z = Math.floor(s.z + dz * d);
         if (!this.inBounds(x, z)) break;
         const t = this.tiles[this.idx(x, z)];
         if (t === TILE.SAND) last = d;
         else if (last > 0 && t !== TILE.WATER) break;
+        const g = Math.min(gap(d, -1), gap(d, 1));
+        if (g <= 6) { if (wet0 < 0) wet0 = d; wet1 = d; narrow = Math.min(narrow, g); }
       }
       if (last < 0) continue;
-      const d0 = r + 1.0, d1 = last + 0.9;
-      const hw = 1.8;
+      let d0 = r + 1.0, d1 = last + 0.9, hw = 1.8;
+      if (wet0 > 0) {
+        d0 = Math.max(r + 3.2, wet0 - 1.2);
+        d1 = Math.max(d0 + 6, wet1 + 1.2);
+        // Widen the deck over a broad isthmus so figures crossing it stay on
+        // the planks (the model is scaled across to match).
+        hw = Math.max(1.8, Math.min(2.3, narrow - 0.6));
+      }
       const b = { x0: s.x + dx * d0, z0: s.z + dz * d0, x1: s.x + dx * d1, z1: s.z + dz * d1, hw, base: null };
       this.bridges.push(b);
-      // Sink the sand under the span (presentation only: tiles unchanged).
-      const ext = Math.ceil(d1 + 3);
-      for (let oz = -ext; oz <= ext; oz++) {
-        for (let ox = -ext; ox <= ext; ox++) {
-          const x = Math.round(s.x) + ox, z = Math.round(s.z) + oz;
-          if (!this.inBounds(x, z)) continue;
-          const k = this.idx(x, z);
-          if (this.tiles[k] !== TILE.SAND) continue;
-          const px = x + 0.5 - b.x0, pz = z + 0.5 - b.z0;
-          const along = px * dx + pz * dz, across = -px * dz + pz * dx;
-          if (along > 1.2 && along < d1 - d0 - 1.2 && Math.abs(across) <= hw + 1.2) this.riverBed[k] = 1;
+      // Sink the ford under the span right out to the water on both flanks
+      // (presentation only: tiles unchanged), so no sand or grass bank lip
+      // shows past the deck edge.
+      const L = d1 - d0;
+      for (let a = 0.6; a <= L - 0.6; a += 0.5) {
+        const d = d0 + a;
+        for (const side of [-1, 1]) {
+          const reach = Math.min(gap(d, side), hw + 2.4);
+          for (let o = 0; o <= reach; o += 0.5) {
+            const x = Math.floor(s.x + dx * d - dz * o * side), z = Math.floor(s.z + dz * d + dx * o * side);
+            if (!this.inBounds(x, z)) continue;
+            const k = this.idx(x, z), t = this.tiles[k];
+            if (t === TILE.SAND || t === TILE.GRASS) this.riverBed[k] = 1;
+          }
         }
       }
     }
