@@ -674,8 +674,10 @@ HERO_LOOK = {
               'cape': 0x7a1414, 'hair': 0x6b3f22},
     'alexander': {'main': 0x2f8f46, 'trim': 0xf3c53d, 'bike': 0xeee5cf, 'glow': 0x8ff3ff,
                   'cape': 0x1f6a33, 'hair': 0x3a2a1c},
-    'danny': {'main': 0x2468c9, 'trim': 0x16181e, 'bike': 0x22262f, 'glow': 0x7dffb2,
-              'cape': 0x173f7a, 'hair': 0x16181e},
+    # Daniel stays the hooded shadow, but in bright cobalt with slate-blue
+    # leathers and a silver hood rim so he reads at game zoom (v5).
+    'danny': {'main': 0x3a8ef0, 'trim': 0x3a4866, 'bike': 0x5a6c90, 'glow': 0x7dffb2,
+              'cape': 0x2a66c8, 'hair': 0x3a4866, 'rim': 0xdce8f8},
 }
 
 
@@ -849,7 +851,7 @@ def hero(k, key, pal):
         _bike(B, G, look, 1.16, 0.34, 0.16, 0.36, 'stealth')
         seat = 0.4
         neck = _rider(B, G, pal, look, seat, boot=look['trim'])
-        top, fz = _head(B, pal, neck, hz, skin=0x2a2d36, eyes=0x2a2d36)
+        top, fz = _head(B, pal, neck, hz, skin=0x55627e, eyes=0x55627e)
         ph = math.pi / 8
         # hood: an eight-sided cowl a size bigger than the head, open at the
         # front, drawn to a soft point behind
@@ -858,8 +860,9 @@ def hero(k, key, pal):
         B.prism(look['main'], 8, r * 1.02, r * 0.55, 0.2, 0, neck + 0.18, hz - 0.05, phase=ph)
         B.prism(look['main'], 6, r * 0.5, 0.0, 0.14, 0, neck + 0.36, hz - 0.1, rx=-0.5)
         B.box(look['main'], 0.32, 0.36, 0.1, 0, neck - 0.02, hz - 0.15)             # hood back
-        # the face opening: dark mask with a bright visor across the eyes
-        B.box(0x16181e, 0.26, 0.22, 0.03, 0, neck + 0.04, fz + 0.012)
+        B.prism(look['rim'], 8, r * 1.05, r * 1.05, 0.035, 0, neck + 0.17, hz - 0.04, phase=ph)  # silver hood rim
+        # the face opening: slate mask with a bright visor across the eyes
+        B.box(0x2c3852, 0.24, 0.2, 0.03, 0, neck + 0.04, fz + 0.012)
         G.box(look['glow'], 0.24, 0.05, 0.02, 0, neck + 0.14, fz + 0.03)
         B.box(look['cape'], 0.3, 0.08, 0.08, 0, neck - 0.04, fz - 0.03)              # scarf wrap
         B.box(look['cape'], 0.09, 0.04, 0.44, 0.07, neck - 0.04, -0.46, 0.35, 0.2, 0)  # scarf tails
