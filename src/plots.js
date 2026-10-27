@@ -1165,13 +1165,10 @@ function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed })
   // Cliffs: open grass on the upper side of a step, clear of plots and streets.
   const cliff = new Uint8Array(N * N);
   const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  for (let z = sz - ext; z <= sz + ext; z++) {
-    for (let x = sx - ext; x <= sx + ext; x++) {
-      const k = z * N + x;
-      if (tier[k] <= 0 || locked[k] || map.tiles[k] !== TILE.GRASS) continue;
-      if (N4.some(([dx, dz]) => { const t = tier[(z + dz) * N + x + dx]; return t >= 0 && t < tier[k]; })) cliff[k] = 1;
-    }
-  }
+  // Inside the walls the tiers meet in soft grassy banks, not crag: the only
+  // cliff on the landform is its rim, one clean continuous wall. (The cliff
+  // machinery below stays for the reachability repair, which then has
+  // nothing to cut.)
   // Isolated cliff stubs (a single tile with no cliff neighbour) read as
   // rubble, not a terrace edge: leave them as ramp.
   for (let k = 0; k < N * N; k++) {
@@ -1289,10 +1286,10 @@ function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed })
       }
     }
   }
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 4; pass++) {
     const next = hgt.slice();
     for (let k = 0; k < N * N; k++) {
-      if (tier[k] < 0 || cliff[k] || !map.isWalkable(k % N, (k / N) | 0)) continue;
+      if (tier[k] < 0 || cliff[k] || (foot[k] && pass > 1) || !map.isWalkable(k % N, (k / N) | 0)) continue;
       const x = k % N, z = (k / N) | 0;
       let sum = 0, n = 0, diff = false;
       for (let dz = -1; dz <= 1; dz++) {

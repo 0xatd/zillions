@@ -24,7 +24,7 @@ const TAU = Math.PI * 2;
 // tiles, where cliffs are crag and ramps are the only walkable links between
 // tiers). Lowland valleys the horde climbs out of, the outer terrace the
 // rampart stands on, the district terrace, and the keep's crown.
-export const LEDGE = { low: 0.05, out: 2.1, mid: 3.25, top: 4.4, lip: 0.22 };
+export const LEDGE = { low: 0.05, out: 2.1, mid: 2.65, top: 3.2, lip: 0.22 };
 
 const ellipse = (a, b) => (t) => 1 / Math.sqrt((Math.cos(t) / a) ** 2 + (Math.sin(t) / b) ** 2);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -34,29 +34,34 @@ export const angDiff = (a, b) => Math.abs(wrap(a - b));
 // sectors of walled (non-natural) rim; everything else is closed by `natural`
 // (per angle: 'cliff' or 'water'). `gates` sit inside the open sectors.
 export const SITE_FORMS = {
-  // Greenfall: a lobed hilltop. Cliffs all round; the front ramp and two
-  // flank ramps climb onto it, each walled across with a gate.
+  // Greenfall: a forest clearing on a gentle meadow rise. Dense old wood
+  // closes the rim; three rides cut through the trees, each walled across
+  // with a gate. No cliffs: the ground rolls.
   bastion: {
-    label: 'hilltop plateau',
+    label: 'forest clearing',
     base: (t) => 1.0 + 0.1 * Math.cos(2 * t + 0.6),
     open: [[0, 0.5], [2.05, 0.36], [-2.05, 0.36]],
     gates: [0, 2.05, -2.05],
-    natural: () => 'cliff',
+    natural: () => 'forest',
+    roll: 0.42,
     wobble: 0.13,
   },
-  // Rotmire: a fen island, broad across the front. The bog is the back wall;
-  // the front is a long straight-ish wall with two causeway gates and a
-  // postern on one flank.
+  // Rotmire: a river bend. The river comes in on one flank, wraps the back
+  // and leaves on the other; the neck of land facing the hives is walled with
+  // two gates, and a ford across the back of the bend carries a postern.
   fort: {
-    label: 'fen island',
-    base: ellipse(0.86, 1.22),
-    open: [[0, 0.62], [1.62, 0.3]],
-    gates: [0.32, -0.32, 1.62],
-    natural: (t) => (Math.abs(t) > 2.0 ? 'water' : 'cliff'),
+    label: 'river bend',
+    base: ellipse(0.92, 1.12),
+    open: [[0, 0.52], [2.25, 0.2]],
+    gates: [0.28, -0.28, 2.25],
+    natural: () => 'water',
+    river: { arms: [1.0, -1.0], fords: [2.25] },
+    roll: 0.3,
     wobble: 0.1,
   },
   // Five rocky spurs; the gates sit in the valleys between them.
   star: {
+    cliffs: true,
     label: 'spurred crag',
     base: (t) => 1.0 + 0.18 * Math.cos(5 * t),
     open: [[Math.PI * 0.2, 0.3], [Math.PI, 0.3], [-Math.PI * 0.2, 0.3]],
@@ -67,6 +72,7 @@ export const SITE_FORMS = {
   // Barrow Hills: a long ridge spur pointing at the enemy. Cliffs down both
   // long flanks; a heavy gate on the nose, a postern at the heel.
   crescent: {
+    cliffs: true,
     label: 'ridge spur',
     base: ellipse(1.42, 0.74),
     open: [[0, 0.55], [Math.PI, 0.42]],
@@ -78,6 +84,7 @@ export const SITE_FORMS = {
   // the valley mouth is walled across with the main gate, and a narrow side
   // gully carries a postern.
   keyhole: {
+    cliffs: true,
     label: 'valley head',
     base: (t) => 0.92 + 0.3 * Math.exp(-((wrap(t) / 0.5) ** 2)),
     open: [[0, 0.42], [2.35, 0.24]],

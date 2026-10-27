@@ -107,7 +107,7 @@ export class GameMap extends TerrainField {
             const d = Math.max(Math.abs(dx), Math.abs(dz));
             if (t === TILE.WATER) dw = Math.min(dw, d);
             if (t === TILE.FOREST && d <= 1) nearForest[i] = 1;
-            if (t === TILE.MOUNTAIN && d <= 1 && !(this.terraceCliff && this.terraceCliff[this.idx(x + dx, z + dz)])) nearCrag[i] = 1;
+            if (t === TILE.MOUNTAIN && d <= 1 && !this.isLedgeRock(this.idx(x + dx, z + dz))) nearCrag[i] = 1;
           }
         }
         nearWater[i] = dw <= 2 ? 1 - dw / 3 : 0;
@@ -136,7 +136,7 @@ export class GameMap extends TerrainField {
             const ti = this.idx(tx, tz);
             const t = this.tiles[ti];
             // Terrace steps are grassy shelves: the rock shows on the face.
-            const tc = this.terraceCliff && this.terraceCliff[ti];
+            const tc = this.isLedgeRock(ti);
             col.setHex(this.colorOf(tc ? TILE.GRASS : t));
             r += col.r; g += col.g; b += col.b; n++;
             wet += nearWater[ti];
@@ -470,6 +470,13 @@ export class GameMap extends TerrainField {
     return g;
   }
 
+  // Rock of a cliff-bound landform (its rim, the switchback cuts, any terrace
+  // step): drawn as a turf top over a strata face, not as crag.
+  isLedgeRock(i) {
+    if (this.terraceCliff && this.terraceCliff[i]) return true;
+    return !!(this.ledgeW && this.ledgeW[i] >= 0.999 && this.tiles[i] === TILE.MOUNTAIN);
+  }
+
   _buildRocks() {
     // Crag dressing exists to say "you cannot walk here". Jagged rock teeth
     // crowd the RIM — every crag tile that touches walkable ground grows a
@@ -486,7 +493,7 @@ export class GameMap extends TerrainField {
           // rockfall — the cliff foot reads weathered, not laser-cut.
           if (this.isWalkable(x, z)
             && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => this.inBounds(x + dx, z + dz) && this.tiles[this.idx(x + dx, z + dz)] === TILE.MOUNTAIN)
-            && rng() < 0.5) {
+            && rng() < (this.ledgeW && this.ledgeW[this.idx(x, z)] >= 0.999 ? 0.12 : 0.5)) {
             const n = 1 + (rng() < 0.4 ? 1 : 0);
             for (let i = 0; i < n; i++) {
               scree.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.6 + rng() * 0.9, r: rng() * Math.PI * 2 });
@@ -498,8 +505,8 @@ export class GameMap extends TerrainField {
           this.isWalkable(x + dx, z + dz));
         // Terrace steps inside the city are drawn by the strata face; only an
         // odd boulder sits on their lip so the streets stay readable.
-        if (rim && this.terraceCliff && this.terraceCliff[this.idx(x, z)]) {
-          if (rng() < 0.22) boulders.push({ x: x + 0.3 + rng() * 0.4, z: z + 0.3 + rng() * 0.4, s: 0.45 + rng() * 0.3, r: rng() * Math.PI * 2 });
+        if (this.isLedgeRock(this.idx(x, z))) {
+          if (rim && rng() < 0.08) boulders.push({ x: x + 0.3 + rng() * 0.4, z: z + 0.3 + rng() * 0.4, s: 0.45 + rng() * 0.3, r: rng() * Math.PI * 2 });
           continue;
         }
         if (rim) {

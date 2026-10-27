@@ -874,6 +874,47 @@ class App {
       g.add(lane);
       g.add(stripe);
     }
+    // Switchback roads down the cliff face below each gate: a paved ribbon
+    // draped over the cut so the zig-zag reads from the game camera.
+    const site = (this.map.sites || []).reduce((b, s) => (!b || Math.hypot(s.x - cx, s.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? s : b), null);
+    if (terraced && site && site.switchbacks) {
+      const ribbon = (pts, w, y, mat) => {
+        const P = [];
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L * 3));
+          const nx = -(bz - az) / L * w / 2, nz = (bx - ax) / L * w / 2;
+          // Overrun each leg by half a width so the turns are filled.
+          const ex = (bx - ax) / L * w / 2, ez = (bz - az) / L * w / 2;
+          for (let k = 0; k < n; k++) {
+            const f0 = k / n, f1 = (k + 1) / n;
+            const x0 = ax + (bx - ax) * f0 - (k === 0 ? ex : 0), z0 = az + (bz - az) * f0 - (k === 0 ? ez : 0);
+            const x1 = ax + (bx - ax) * f1 + (k === n - 1 ? ex : 0), z1 = az + (bz - az) * f1 + (k === n - 1 ? ez : 0);
+            // The road's own grade, lifted onto the ground where the ground
+            // swells a little; never climbing onto the rock beside it.
+            const h0 = ah + (bh - ah) * f0, h1 = ah + (bh - ah) * f1;
+            const v = [[x0 + nx, z0 + nz, h0], [x0 - nx, z0 - nz, h0], [x1 - nx, z1 - nz, h1], [x1 + nx, z1 + nz, h1]];
+            for (const idx of [0, 1, 2, 0, 2, 3]) {
+              const [vx, vz, vh] = v[idx];
+              const gy = this.map.groundY(vx, vz);
+              P.push(vx, (gy > vh && gy - vh < 0.25 ? gy : vh) + y, vz);
+            }
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+        geo.computeVertexNormals();
+        const m = new THREE.Mesh(geo, mat);
+        m.receiveShadow = true;
+        return m;
+      };
+      const roadMat = toyMat({ color: 0xb3a487, side: THREE.DoubleSide });
+      const edgeMat = toyMat({ color: 0x7c6a52, side: THREE.DoubleSide });
+      for (const pts of site.switchbacks) {
+        g.add(ribbon(pts, 1.75, 0.04, edgeMat));
+        g.add(ribbon(pts, 1.35, 0.06, roadMat));
+      }
+    }
     return g;
   }
 

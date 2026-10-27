@@ -559,9 +559,11 @@ export class TerrainField {
     const eCrag = L.mountT + 0.38 * (1 - L.mountT);
     const eBog = L.waterT - 0.06 * span;
     const noise = this._moistNoise;
-    // Real elevation for the renderer: the plateau stands a full terrace above
-    // the valleys (ledgeH, blended in by ledgeW). The outpost stays a flat pan.
-    const ledge = !form.ring;
+    // Real elevation for the renderer, only where the land is a cliff-bound
+    // plateau: it stands a full terrace above the valleys (ledgeH, blended in
+    // by ledgeW). Forest clearings and river bends stay on rolling ground,
+    // and the outpost is a flat pan.
+    const ledge = !!form.cliffs;
     if (ledge) {
       this.ledgeH = new Float32Array(N * N);
       this.ledgeW = new Float32Array(N * N);
@@ -576,6 +578,30 @@ export class TerrainField {
         }
       }
     }
+    // Switchback: from the shelf in front of a cliff-top gate, a road cut into
+    // the cliff face runs sideways, turns, runs back, and drops out onto the
+    // valley floor. Local frame: u = out from the shelf edge, s = across.
+    // Everything in the cut that is not road is rock, stepped down leg by leg.
+    const SW = { half: 6.6, depth: 7.9, w: 1.2 };
+    const swPath = [[0, -0.6], [0, 1.6], [4.9, 1.6], [4.9, 5.2], [-4.9, 5.2], [-4.9, 9.6]];
+    const swLen = [0];
+    for (let q = 1; q < swPath.length; q++) {
+      swLen.push(swLen[q - 1] + Math.hypot(swPath[q][0] - swPath[q - 1][0], swPath[q][1] - swPath[q - 1][1]));
+    }
+    const swTotal = swLen[swLen.length - 1];
+    const swNear = (sx, ux) => {
+      let best = Infinity, at = 0;
+      for (let q = 1; q < swPath.length; q++) {
+        const [ax, ay] = swPath[q - 1], [bx, by] = swPath[q];
+        const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy;
+        const f = clamp(((sx - ax) * vx + (ux - ay) * vy) / L2, 0, 1);
+        const d = Math.hypot(sx - ax - vx * f, ux - ay - vy * f);
+        if (d < best) { best = d; at = swLen[q - 1] + f * Math.sqrt(L2); }
+      }
+      return [best, at];
+    };
+    // Road height falls along the road; the last stretch is on the valley floor.
+    const swH = (at) => LEDGE.out + (LEDGE.low - LEDGE.out) * clamp(at / (swTotal - 2.2), 0, 1);
     this.sites.forEach((s, i) => {
       const facing = cityFacing(this, s.x, s.z);
       const rim = makeRim(key, facing, CITY_WALL_R * (form.ring ? 1.08 : 1.0), this.seed, i);
@@ -583,7 +609,25 @@ export class TerrainField {
       const m = rimMaxRadius(rim);
       if (m + 9 > pad + 4) rim.R *= (pad - 5) / m;
       s.rim = rim;
-      const ext = Math.ceil(pad + 6);
+      // The switchback cuts below each gate on a cliff-bound plateau.
+      const cuts = ledge ? form.gates.map((g) => {
+        const a = g + facing;
+        const r0 = rimRadius(rim, g) + 2.2;
+        return { g, cx: s.x + Math.cos(a) * r0, cz: s.z + Math.sin(a) * r0, dx: Math.cos(a), dz: Math.sin(a) };
+      }) : [];
+      // The road centre-lines, in world space, for the renderer to pave.
+      s.switchbacks = cuts.map((c) => swPath.map(([sv, u], q) => [c.cx + c.dx * u - c.dz * sv, c.cz + c.dz * u + c.dx * sv, swH(swLen[q])]));
+      const inCut = (wx, wz) => {
+        for (const c of cuts) {
+          const rx = wx - c.cx, rz = wz - c.cz;
+          const u = rx * c.dx + rz * c.dz;
+          const sv = -rx * c.dz + rz * c.dx;
+          if (u >= -0.2 && u <= SW.depth + 2.2 && Math.abs(sv) <= SW.half) return [sv, u];
+        }
+        return null;
+      };
+      const river = form.river;
+      const ext = Math.ceil(pad + 12);
       const sx = Math.round(s.x), sz = Math.round(s.z);
       for (let dz = -ext; dz <= ext; dz++) {
         for (let dx = -ext; dx <= ext; dx++) {
@@ -591,43 +635,82 @@ export class TerrainField {
           if (!this.inBounds(x, z) || x < 2 || z < 2 || x > N - 3 || z > N - 3) continue;
           const px = x + 0.5 - s.x, pz = z + 0.5 - s.z;
           const d = Math.hypot(px, pz);
-          if (d > pad + 6) continue;
           const t = Math.atan2(Math.sin(Math.atan2(pz, px) - facing), Math.cos(Math.atan2(pz, px) - facing));
           const r = rimRadius(rim, t);
+          const k = this.idx(x, z);
+          const cut = d >= r + 1.6 ? inCut(x + 0.5, z + 0.5) : null;
+          if (cut) {
+            const [sv, u] = cut;
+            const [dist, at] = swNear(sv, u);
+            if (dist <= SW.w) {
+              this.tiles[k] = TILE.PATH; elev[k] = eHigh; setLedge(k, swH(at));
+            } else if (u <= SW.depth) {
+              // Rock: as high as the road leg above it, a touch proud.
+              let hTop = LEDGE.out + LEDGE.lip;
+              if (u > 2.0) {
+                const above = swNear(sv, Math.max(0, u - 1.9));
+                hTop = Math.min(hTop, swH(above[1]) + 0.3);
+              }
+              this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; setLedge(k, Math.max(LEDGE.low + 0.5, hTop));
+            } else {
+              if (!TILE_INFO[this.tiles[k]].walk) this.tiles[k] = TILE.GRASS;
+              elev[k] = eLow; setLedge(k, LEDGE.low);
+            }
+            continue;
+          }
+          if (d > pad + 6) continue;
           const open = rimOpen(rim, t);
           const nat = form.natural(t);
-          const k = this.idx(x, z);
           const n1 = noise(x * 0.23 + 40, z * 0.23 + 40, 2);
-          const rw = open ? 2.2 : nat === 'water' ? 3.2 + n1 * 3 : 2.4 + Math.max(0, n1 - 0.4) * 9;
           const tile = this.tiles[k];
+          const ford = river && river.fords.some((f) => angDiff(t, f) * Math.max(4, d) <= 1.7);
+          const rw = open && !ford ? 2.2
+            : nat === 'water' ? 6 + n1 * 4
+            : nat === 'forest' ? 3.4 + n1 * 4
+            : 2.4 + (ledge ? n1 * 0.6 : Math.max(0, n1 - 0.4) * 9);
           if (d < r) {
             if (tile !== TILE.GOLDORE && tile !== TILE.STONEORE) this.tiles[k] = TILE.GRASS;
-            elev[k] = eHigh;
+            // Rolling meadow: a soft rise toward the keep and a few low swells.
+            const roll = form.roll || 0;
+            const n4 = noise(x * 0.09 + 700, z * 0.09 + 700, 2);
+            elev[k] = eHigh + roll * span * ((n4 - 0.5) * 0.7 + 0.25 * clamp(1 - d / r, 0, 1));
             setLedge(k, LEDGE.out);
             continue;
           }
           if (d < r + rw) {
-            if (open) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; setLedge(k, LEDGE.out); } else if (nat === 'water') {
+            if (ford) {
+              // The ford: a shallow sandy crossing, flanked by the river.
+              if (open && d < r + 2.2) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; } else { this.tiles[k] = TILE.SAND; elev[k] = L.waterT + 0.02 * span; }
+            } else if (open) { this.tiles[k] = TILE.GRASS; elev[k] = eHigh; setLedge(k, LEDGE.out); } else if (nat === 'water') {
               this.tiles[k] = TILE.WATER; elev[k] = eBog;
+            } else if (nat === 'forest') {
+              this.tiles[k] = TILE.FOREST; elev[k] = eHigh - 0.05 * span;
             } else {
-              this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag + (n1 - 0.5) * 0.08;
-              // The cliff lip: a rocky crest just proud of the terrace.
-              setLedge(k, LEDGE.out + LEDGE.lip + Math.max(0, n1 - 0.45) * 0.5);
+              this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag;
+              // The cliff lip: one clean rocky crest just proud of the terrace.
+              setLedge(k, LEDGE.out + LEDGE.lip);
             }
             continue;
           }
+          // River arms: the river runs on out of the bend on both flanks.
+          if (river && river.arms.some((a) => angDiff(t, a) * d <= 2.2 + n1 * 1.6)) {
+            this.tiles[k] = TILE.WATER; elev[k] = eBog;
+            continue;
+          }
           const u = d - (r + rw);
-          // Ramps run down from the open rim; cliffs drop straight to the shelf.
-          const nearOpen = form.ring || form.open.some(([c, hw]) => angDiff(t, c) <= hw + 0.12);
+          // Off a cliff-bound plateau the gates open onto ground that falls
+          // away gently; on one, everything drops sheer to the valley floor
+          // except the switchback cuts.
+          const nearOpen = form.ring || (!ledge && form.open.some(([c, hw]) => angDiff(t, c) <= hw + 0.12));
           let e = nearOpen ? eHigh + (eLow - eHigh) * clamp(u / 7, 0, 1) : eLow;
           const w = clamp((pad + 6 - d) / 6, 0, 1);
           elev[k] = elev[k] * (1 - w) + e * w;
-          // The glacis below an open rim climbs from the valley floor over
-          // nine tiles; everywhere else the foot of the cliff is lowland.
-          if (TILE_INFO[this.tiles[k]].walk || this.tiles[k] === TILE.FOREST) {
-            const hl = nearOpen ? LEDGE.out + (LEDGE.low - LEDGE.out) * clamp(u / 9, 0, 1) : LEDGE.low;
-            setLedge(k, hl, w);
+          if (ledge && form.open.some(([c, hw]) => angDiff(t, c) <= hw) && u < 1.3) {
+            // The shelf in front of an open wall ends in a rock lip too.
+            this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; setLedge(k, LEDGE.out + LEDGE.lip);
+            continue;
           }
+          if (TILE_INFO[this.tiles[k]].walk || this.tiles[k] === TILE.FOREST) setLedge(k, LEDGE.low, w);
           if (d > pad + 2) continue;
           if (u < 2.6 || road[k]) {
             if (!TILE_INFO[tile].walk) this.tiles[k] = TILE.GRASS;
@@ -642,8 +725,10 @@ export class TerrainField {
             if (u > 9 && n3 > 0.66) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; }
             continue;
           }
-          if (!corridor && u < 6 && n3 > 0.6) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; setLedge(k, 0, 0); continue; }
-          if (n2 > (corridor ? 0.64 : 0.54)) this.tiles[k] = TILE.FOREST;
+          // Below a cliff: no loose crag hugging the face (it would break the
+          // wall line); elsewhere a few outcrops.
+          if (!ledge && !corridor && u < 6 && n3 > 0.6) { this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; continue; }
+          if (n2 > (corridor ? 0.64 : nat === 'forest' ? 0.46 : 0.54)) this.tiles[k] = TILE.FOREST;
         }
       }
     });

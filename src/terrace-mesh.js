@@ -5,8 +5,10 @@
 // face instead of a one-tile smear of slope. Off the landform the shared
 // corners stand, except where a corner touches a ledge tile.
 import * as THREE from 'three';
+import { TILE } from './config.js';
 
-const SAME_LEVEL = 0.5;
+const SAME_LEVEL = 0.8;
+const TILE_MOUNTAIN = TILE.MOUNTAIN;
 
 export function tileCorners(map, cornerH, cw) {
   if (!map.ledgeW) return null;
@@ -17,16 +19,15 @@ export function tileCorners(map, cornerH, cw) {
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = z * N + x, hT = th[i];
+      // Rock on the landform is a flat-topped block: its faces stay sheer and
+      // nothing slants into a shard. Ground blends only with ground.
+      const rock = map.tiles[i] === TILE_MOUNTAIN && map.ledgeW[i] >= 0.999;
+      if (rock) { out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = out[i * 4 + 3] = hT; continue; }
       for (let c = 0; c < 4; c++) {
         const qx = x + (c & 1), qz = z + (c >> 1);
-        let touches = map.ledgeW[i] > 0;
-        for (let dz = -1; dz <= 0 && !touches; dz++) {
-          for (let dx = -1; dx <= 0; dx++) {
-            const tx = qx + dx, tz = qz + dz;
-            if (map.inBounds(tx, tz) && map.ledgeW[tz * N + tx] > 0) touches = true;
-          }
-        }
-        if (!touches) { out[i * 4 + c] = cornerH[qz * cw + qx]; continue; }
+        // Only tiles fully on the landform split from their neighbours; the
+        // fade-out ring and the country beyond share corners (no seams).
+        if (map.ledgeW[i] < 0.999) { out[i * 4 + c] = cornerH[qz * cw + qx]; continue; }
         let sum = 0, n = 0;
         for (let dz = -1; dz <= 0; dz++) {
           for (let dx = -1; dx <= 0; dx++) {
@@ -34,6 +35,7 @@ export function tileCorners(map, cornerH, cw) {
             if (!map.inBounds(tx, tz)) continue;
             const hh = th[tz * N + tx];
             if (Math.abs(hh - hT) > SAME_LEVEL) continue;
+            if (map.tiles[tz * N + tx] === TILE_MOUNTAIN && map.ledgeW[tz * N + tx] >= 0.999) continue;
             sum += hh; n++;
           }
         }
@@ -85,12 +87,13 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex) {
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = (z * N + x) * 4;
-      if (x + 1 < N) {
+      const full = map.ledgeW[z * N + x] >= 0.999;
+      if (x + 1 < N && full && map.ledgeW[z * N + x + 1] >= 0.999) {
         const j = (z * N + x + 1) * 4;
         lit = 0.78;
         face(x + 1, z, x + 1, z + 1, tileCH[i + 1], tileCH[i + 3], tileCH[j], tileCH[j + 2]);
       }
-      if (z + 1 < N) {
+      if (z + 1 < N && full && map.ledgeW[(z + 1) * N + x] >= 0.999) {
         const j = ((z + 1) * N + x) * 4;
         lit = 0.92;
         face(x, z + 1, x + 1, z + 1, tileCH[i + 2], tileCH[i + 3], tileCH[j], tileCH[j + 1]);
