@@ -10,11 +10,15 @@ Read this before you review, audit, or change Zillions.
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`.
 - Static GitHub Pages is only a fallback/review build.
 
-The live game is the playable foundation for a new science-fantasy MMO. The
-player signs in, selects a character, loads a persistent planetary location,
-and can use an Orbital Lift to navigate the known galaxy. Current Zillions
-siege maps and heroes are temporary content and art scaffolding. They are not
-the permanent boundary of the new game.
+The live game is a siege game. The player signs in, selects a character,
+presses Deploy, and plays a campaign, survival, or labyrinth mission, alone or
+in co-op. The living world (overworld, galaxy map, parties, encounters, region
+workers) was removed.
+
+Signed-in XP, levels, loot, Salvage Alloy, and stats are granted only by the
+server (`api/match-result.js` and the `apply_match_result()` RPC). The client
+sends a bounded match report and renders what the server returns. Guest
+progress stays in the browser. See `docs/backend.md`.
 
 ## Shipped Combat Loop
 
@@ -233,9 +237,9 @@ nonconsecutive windows as ready. Both changes cause repeated guest freezes.
 
 ## Not Implemented
 
-`docs/design-vision.md` describes folklore factions, fog of war, world-placed
-missions, landmarks, and a strategic galaxy simulation. Those systems are not
-built. The endless procedural frontier worlds are built and shipped.
+`docs/design-vision.md` describes folklore factions, world-placed missions,
+and landmarks. Those systems are not built. The endless procedural campaign
+maps are built and shipped. A persistent shared world is out of scope.
 
 ## Product Boundaries
 

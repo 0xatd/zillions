@@ -1,6 +1,6 @@
 # Zillions repository guide for language models
 
-Project: new browser-based science-fantasy MMO using Zillions as its current playable foundation
+Project: Zillions, a browser siege game (campaign, survival, labyrinth, and up to 4-player lockstep co-op) with persistent signed-in characters
 Production: https://zillions.taborlin.co
 Repository: https://github.com/0xatd/zillions
 Default branch: main
@@ -15,7 +15,6 @@ Default branch: main
 - docs/review-guide.md: pull request review gate
 - docs/art-direction.md: 3D shape language, scale, names, sockets, and budgets
 - docs/art-pipeline.md: Blender source, GLB export, runtime fallback, and review
-- docs/galaxy-meta-integration.md: how the galaxy and meta-progression modules wire into the shell
 
 ## Source of truth
 
@@ -33,9 +32,7 @@ Default branch: main
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
-- src/overworld.js owns galaxy destinations, persistent world descriptors, Orbital Lifts, walking, and world-scoped ghost presence.
-- src/galaxy.js generates star systems, world kinds, threat tiers, and world descriptors from one seed.
-- src/factions.js owns the faction roster, presence archetypes, and ownership assignment.
+- src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and
   authority-ready mutation proposals.
 - src/items.js owns item bases, weapons, affixes, damage types, and deterministic
@@ -49,7 +46,9 @@ Default branch: main
   never literals in the input handler.
 - src/lockstep-hash.js owns the per-window state hash peers compare. It is a pure
   function over a Game so it can be checked headless.
-- src/meta.js owns run payouts, the meta-upgrade tree, and the run-start bonus payload.
+- src/meta.js owns the guest (offline) Alloy ledger, the meta-upgrade tree, and threat tiers.
+- src/match-rewards.js owns the pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, and Alloy.
+- src/match-outbox.js keeps unconfirmed signed-in match reports and resends them with the same requestId.
 - src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
@@ -57,18 +56,20 @@ Default branch: main
 - src/menu-vignette.js owns the menu attract show (presentation only, no sim).
 - src/online.js owns Supabase room and signaling state.
 - src/net.js owns WebRTC transport and diagnostics.
-- src/auth.js owns sign-in, profiles, saves, and stats.
+- src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
 - src/building-art.js owns building meshes, walls and gates (presentation only).
-- api/ contains Vercel server routes. api/economy.js is the authenticated,
+- api/ contains Vercel server routes. api/match-result.js is the only grant path
+  for signed-in XP, levels, loot, Alloy, and stats (through the service-role
+  apply_match_result() RPC). api/economy.js is the authenticated,
   server-authoritative inventory and currency boundary.
 - supabase/schema.sql is the database schema source.
-- supabase/migrations/20260820203000_earth_region_topology.sql defines the
-  dormant canonical universe, Earth region, faction-control, lease, and
-  cross-region handoff authority.
+- supabase/migrations/ holds hand-applied migrations. 20261027000000 is
+  DESTRUCTIVE (drops the removed living-world tables); 20261027000100 adds
+  server-authoritative progress and revokes client stat writes.
 
 ## Critical rules
 
@@ -82,6 +83,7 @@ Default branch: main
 - Keep multiplayer version, connection, eligibility, Ready, and load gates.
 - Never show private Google identity.
 - Never commit secrets.
+- Grant signed-in XP, loot, Alloy, and stats only on the server.
 - Never seed fake production activity.
 - Keep 3D presentation separate from deterministic collision and simulation.
 - Validate authored GLBs and review silhouettes at gameplay distance.
@@ -89,6 +91,7 @@ Default branch: main
 ## Validation
 
 Run npm run check.
+Run npm run check:postgres (throwaway local Postgres).
 Run git diff --check.
 Run a local Vercel production build.
 Do not call a pull request deployable until all three pass.

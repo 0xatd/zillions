@@ -33,6 +33,10 @@ Vercel serves the game and same-origin API routes:
 - `api/auth-config.js` exposes only browser-safe Supabase config.
 - `api/economy.js` authenticates the player, validates item and vendor inputs,
   and calls the atomic Supabase economy function. The service key stays on the server.
+- `api/match-result.js` is the only route that grants signed-in XP, levels,
+  loot, Alloy, and stats. See "Server-Authoritative Match Results" below.
+
+There are no Vercel crons. Environment variables are listed in `.env.example`.
 
 Do not put server-only secrets in responses. The Supabase anon key is browser
 configuration, but service-role keys and Blob tokens must stay in Vercel env.
@@ -48,13 +52,14 @@ Supabase owns the real account backend:
 - Private match history.
 - Public/private room records, room players, ready state, hero picks, global
   lobby chat, room chat, in-game team chat, friendships, and invites.
-- Canonical galaxy topology, planets, Earth regions, faction control, world
-  parties, worker leases, and cross-region handoffs.
+- Server-owned characters, item instances, wallets, and match reports.
 
-The living-world migrations remain inactive until isolated migration, RLS,
-lease, replay, and concurrency checks pass. The first topology keeps `earth-1`
-for compatibility. It adds Sol, Earth, Greenfall region authority, three Earth
-factions, region simulation state, and lease-fenced party handoffs.
+The living world (galaxy topology, planets, regions, factions, parties,
+encounters, companies, markets, worker leases) was removed from the game.
+`supabase/migrations/20261027000000_drop_living_world_DESTRUCTIVE.sql` drops
+its tables and functions. Review it, back up, and apply it by hand; it is not
+reversible. The historical living-world migrations stay in the folder so the
+migration chain still replays.
 
 The active gameplay rules identifier is `survival-plots`. Do not introduce
 branch, agent, or prototype names into persisted room or match records.
@@ -125,15 +130,19 @@ Defined in `supabase/schema.sql`:
 - `profiles`: one row per authenticated player. Stores the public username in
   `handle`, mirrors it in `display_name`, tracks `username_set`, selected hero,
   avatar color, timestamps, and last seen time.
-- Supabase Auth user metadata stores `last_world`. This keeps the selected
-  galaxy destination with the account without exposing it as public profile
-  data.
+- Supabase Auth user metadata stores the character roster's appearance, Lattice,
+  and the selected character. It is client-writable, so the server never reads
+  rewards from it (it was read once, by the progress migration's backfill).
 - `player_stats`: lifetime games, wins, losses, kills, best day/wave,
-  buildings built, and favorite hero.
+  buildings built, favorite hero, campaign progress, best survival, relics,
+  completed quests, and labyrinth clears. Server-written only.
 - `save_slots`: authenticated cloud save slots. Current UI uses `slot_key =
   'latest'`.
 - `match_history`: completed run summaries. Records are private by default,
-  with optional public visibility for future leaderboards.
+  with optional public visibility for future leaderboards. Server-written only.
+- `match_reports`: one row per accepted match report (`unique(user_id,
+  request_id)`, and one per user per co-op room). Stores the response so a
+  replay returns it. Server-written only.
 - `rooms`: live multiplayer room browser records and host game setup.
 - `room_players`: live room seats, usernames, hero picks, connection state, and
   highest unlocked campaign level.
@@ -145,7 +154,11 @@ Defined in `supabase/schema.sql`:
 RLS policy intent:
 
 - Authenticated users can read public lobby/profile surfaces.
-- Users can create/update their own profile, stats, saves, and match history.
+- Users can create/update their own profile and saves.
+- Users can read, but not write, their own stats, match history, characters,
+  items, and wallet. The `player_stats_insert_self`, `player_stats_update_self`,
+  and `match_history_insert_self` policies were dropped and table write grants
+  revoked from `anon` and `authenticated`.
 - Room hosts control their own rooms.
 - Authenticated users can read and write global lobby chat as themselves.
 - Users can read, create, accept, and remove their own friendship rows.
@@ -170,8 +183,9 @@ RLS policy intent:
 5. The browser creates a private fallback handle if the profile is missing.
 6. If `username_set` is false, the account gate asks the player to claim a
    username before the game shell opens.
-7. Signed-in play syncs selected hero, stats, latest save, and private match
-   history to Supabase.
+7. Signed-in play syncs the selected hero, character roster metadata, and
+   latest save to Supabase. Stats, match history, levels, loot, and Alloy are
+   written only by `api/match-result.js`.
 
 ### Multiplayer Today
 
@@ -190,17 +204,6 @@ RLS policy intent:
 11. In-game team chat writes to `room_chat` with `channel = 'game'`.
 12. The match simulation is peer-to-peer. Watch mode is read-only.
 
-### Multiplayer Target
-
-The next backend step is to make the Multiplayer hub feel like a conquest map:
-
-1. Worlds are live rooms or games.
-2. Players can see signed-in players moving around.
-3. Regions show safe, contested, Xeno-held, and player-held territory.
-4. Rooms show seats, ready state, hero picks, friends, and chat.
-5. Host starts WebRTC match.
-6. Match result writes to Supabase stats/history.
-
 ## Agent Rules
 
 - Keep `zillions.taborlin.co` as the canonical production URL.
@@ -214,8 +217,10 @@ The next backend step is to make the Multiplayer hub feel like a conquest map:
 - Update `README.md` when player-facing backend behavior changes.
 - Run `npm run check` and `git diff --check` before calling backend changes
   done.
-- For live backend changes, smoke test `/api/state`, `/api/lobby`, and Google
-  account flow when relevant.
+- For live backend changes, smoke test sign-in, a signed-in match end, and the
+  Market when relevant.
+- Never add a client write path for stats, match history, character progress,
+  items, or wallets.
 
 ## Authoritative Economy
 
@@ -238,33 +243,67 @@ pre-sale key, base, affixes, sockets, price, and revision data. The request
 shape leaves room for a future server-defined `vendor_id` and stock version.
 
 The first signed-in request registers character identity only. It starts the
-authoritative character at level 1 with a one-time account grant of 500 Alloy and no items. Browser-owned
+authoritative character at level 1 (characters that existed before the progress
+migration were backfilled once from their old metadata level) with a one-time account grant of 500 Alloy and no items. Browser-owned
 legacy currency and item keys stay in an offline, read-only archive marked
 `pending_audited_migration`. They never enter authoritative tables without a
 future server-derived snapshot or one-time server-issued migration ticket.
 Static local play cannot change authoritative state.
+
+## Server-Authoritative Match Results
+
+`api/match-result.js` accepts `{ requestId, characterId, roomId?, report }`
+with the player's Supabase bearer token.
+
+1. The token is verified against Supabase Auth. The user id comes from the
+   token, never from the body.
+2. A known `requestId` returns the stored response (idempotent replay).
+3. `validateMatchReport()` (`src/match-rewards.js`) rejects unknown versions,
+   modes, difficulties, locked campaign levels, and any counter outside bounds
+   derived from the match duration and the map (kills, coins, nests, nodes,
+   Threat, boss time, pack size).
+4. Every looted item key is re-derived from the level's map seed and must match
+   the item level for the reported difficulty. Authored field finds are
+   allow-listed. Boss and quest items cannot be smuggled in as finds.
+5. Side quests are re-evaluated from the reported counters. A client "done"
+   flag is ignored.
+6. A co-op report must name a room the player is seated in, the room must have
+   started, and the match cannot be longer than the room has existed.
+7. `computeMatchRewards()` turns the report into XP, levels, items, Alloy, and
+   stat deltas.
+8. `apply_match_result()` (security definer, `service_role` only) applies it in
+   one transaction: advisory lock per player, duplicate check, one report per
+   co-op room, 15-second rate limit, a wall-clock check (match time must fit
+   since the previous report; solo time is halved for 2x speed), a
+   compare-and-set on `game_characters.progress_revision`, once-per-account
+   quests, once-per-character authored items, the 60-item stash cap, the
+   wallet credit, `player_stats`, `match_history`, and `match_reports`.
+
+The client keeps unconfirmed reports in `localStorage`
+(`zillions_pending_matches`) and resends them with the same `requestId` on the
+next sign-in, so a closed tab does not lose a match and a resend cannot double
+grant.
+
+Guest (offline) play never calls the route; its progress stays in the browser.
+
+### Remaining trust gaps
+
+- Combat counters are bounded client claims, not a server replay of the match.
+  A modified client can still report a plausible best case.
+- Manual (non-room) WebRTC co-op has no room id and is reported as solo.
+- `room_players` rows are created by clients, so the participant check proves
+  the reporter took a seat, not that they played; one report per room limits
+  the damage.
+- The guest meta tree (`src/meta.js`) is local only and does not affect
+  signed-in rewards.
 
 ## Known Limits
 
 - Room browser data, player rosters, and host setup are real Supabase data.
 - Mid-game Join as a new controlling player is not supported. Use Watch.
 - Vercel Blob lobby data is legacy compatibility, not production social state.
-- Server-authoritative multiplayer is not implemented.
-- There is no anti-cheat.
+- Server-authoritative combat is not implemented. Rewards are server-granted
+  but derived from bounded client reports.
+- There is no anti-cheat beyond the report bounds and loot proofs.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
-
-# Immutable Planet Manifests
-
-The planet seed creates topology one time. `world_manifests` stores the seed,
-generator version, content hash, and full canonical manifest. The database
-rejects a second manifest for the same planet unless every field is identical.
-Application roles cannot update, delete, truncate, or replace the stored row.
-The database owner remains an explicit operations trust boundary because an
-owner can alter or drop database objects. The manifest fingerprint detects
-accidental drift. It is not a cryptographic security boundary.
-
-Do not regenerate a live planet after a deployment. Store faction control,
-damage, construction, settlement growth, and other campaign history in the
-mutable authority tables. Create a new planet or use an explicit manifest
-version and reviewed migration when topology must change.

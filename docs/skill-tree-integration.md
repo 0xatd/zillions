@@ -6,7 +6,7 @@ decisions a change to it has to respect.
 Owned by `src/skilltree.js`. Checked by `scripts/skilltree-check.mjs` and
 `scripts/character-sheet-check.mjs`.
 
-The Lattice is a large shared passive tree for MMO characters. It borrows the
+The Lattice is a large shared passive tree for persistent characters. It borrows the
 mechanical structure of an action-RPG passive tree. It uses Zillions names,
 Zillions stat keys, and Zillions data only.
 
@@ -137,8 +137,8 @@ valuable mechanic to take from the reference design.
 
 ## Generation, Not Authoring
 
-Do not hand-place 720 nodes. Generate them, the way `terrain.js`, `lanes.js`
-and `galaxy.js` already generate their structures.
+Do not hand-place 720 nodes. Generate them, the way `terrain.js` and `lanes.js`
+already generate their structures.
 
 `src/skilltree.js` builds the graph from a fixed seed plus an authored Sector
 table. The authored table holds Sector identity, Relay payoffs and Doctrine
@@ -159,7 +159,9 @@ character, next to a tree version:
 ```
 
 Character state syncs through `user_metadata.mmo_characters` in `src/auth.js`,
-capped at eight characters. A compact id array fits. A real `characters` table
+capped at eight characters. A compact id array fits. Level and XP no longer
+come from that blob for signed-in players: `game_characters` is
+authoritative and only `api/match-result.js` raises it. A real `characters` table
 is the right destination once the Lattice ships; the blob is the weak link in
 this path, not the Lattice.
 

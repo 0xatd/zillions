@@ -41,13 +41,12 @@ and keep the world.
 
 The current continuous siege loop implements this layer.
 
-### The Galaxy
+### The Campaign
 
-Choose the next world. Carry hero progress, equipment, allies, and liberated
-worlds forward.
+Choose the next mission. Carry hero progress and equipment forward.
 
-The deterministic frontier-world picker is shipped. A strategic simulation of
-factions spreading between worlds is not shipped.
+The endless procedural campaign is shipped. A persistent shared world (the
+removed living world) is out of scope.
 
 ## Shipped Foundations to Preserve
 
@@ -116,22 +115,6 @@ Examples:
 Do not add large visual props that block movement without clear collision and
 map tests.
 
-## Future Direction: Strategic Galaxy State
-
-A later galaxy layer can model ownership and pressure between worlds.
-
-Possible state:
-
-- liberated worlds
-- threatened worlds
-- Hive expansion routes
-- Folk alliances
-- player supply routes
-- time-limited rescue opportunities
-
-The strategic layer must remain legible. It must not require the tactical game
-to run on a server while no player is present.
-
 ## Future Direction: Multiplayer Operations
 
 The next multiplayer improvements can include:
@@ -169,7 +152,7 @@ current interaction model needs more complexity.
 
 Evaluate a future proposal with these questions:
 
-1. Does the proposal improve the minute, planet, or galaxy loop?
+1. Does the proposal improve the minute, planet, or campaign loop?
 2. Does the proposal reuse a current system?
 3. Does the proposal keep direct hero control readable?
 4. Does the proposal preserve deterministic simulation?
@@ -182,11 +165,11 @@ If the answer to several questions is no, do not build the proposal yet.
 ## Explicitly Not Shipped
 
 - folklore factions
-- strategic faction simulation between worlds
+- any persistent shared world or strategic simulation between maps
 - persistent explored-map memory beyond the shipped tactical vision shroud
 - world-placed dynamic missions
 - authored landmark system
 - server-authoritative combat
-- anti-cheat enforcement
+- anti-cheat enforcement beyond server-side match-report bounds and loot proofs
 
 Do not describe these systems as current behavior.

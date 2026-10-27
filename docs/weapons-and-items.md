@@ -45,8 +45,8 @@ Keep the string. Make the string a seed.
   uniques and every existing profile keeps working.
 
 This is the whole trick, and it fits how this repository already works.
-`galaxy.js`, `terrain.js` and `lanes.js` all generate their content from a
-seed instead of storing it. Items become the fourth.
+`terrain.js` and `lanes.js` both generate their content from a
+seed instead of storing it. Items follow the same rule.
 
 Two costs to accept:
 
