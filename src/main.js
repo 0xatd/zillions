@@ -3882,9 +3882,9 @@ class App {
           ud.tagKey = tagKey;
           if (ud.tag) { rec.group.remove(ud.tag); ud.tag.material.map.dispose(); ud.tag.material.dispose(); }
           ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].icon, `${Math.ceil(nt.cost)}`);
-          ud.tag.scale.set(1.5, 0.75, 1);
+          ud.tag.scale.set(2.0, 1.0, 1);
           const [tx, tz] = ud.labelPos;
-          ud.tag.position.set(tx, 1.45, tz);
+          ud.tag.position.set(tx, 1.7, tz);
           rec.group.add(ud.tag);
         }
       }
