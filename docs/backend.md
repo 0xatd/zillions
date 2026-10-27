@@ -307,6 +307,39 @@ browser.
 - Deferred replays are flagged, not clawed back. `match_replays` rows stay
   `pending` until an operator checks them offline.
 - `room_players` seats prove the reporter took a seat, not that they played.
+- The Lattice and class still live in client-writable auth metadata. The
+  replay caps the Lattice by level, and a rewire is charged by the server, but
+  a player can still edit their own allocation directly.
+
+## Account Upgrade Tree
+
+Signed-in accounts own their upgrade tree on the server
+(`supabase/migrations/20261027000300_account_upgrades.sql`,
+`api/account-upgrades.js`).
+
+- `account_upgrade_catalog` holds node ids, prerequisites and Alloy costs. It
+  mirrors `META_NODES` in `src/meta.js`; `npm run check:postgres` fails if they
+  drift. Requests carry a node id, never a price.
+- `account_upgrades` holds owned nodes; `account_upgrade_imports` marks the
+  one-time import. Both are read-own under RLS with no client writes.
+- `account_upgrade_mutate()` (security definer, `service_role` only) handles:
+  - `buy`: prerequisites owned, not already owned, wallet debited by the
+    catalog cost in the same transaction.
+  - `import_local`: once per account, the browser's local tree is offered;
+    nodes are granted free in tier order only if their prerequisites are
+    owned and the total stays within 600 Alloy of node value. Local Alloy is
+    never imported. The client sends it with request id `import-local-v1`
+    on sign-in, so a retry is idempotent.
+  - `rewire_lattice`: charges 45 Alloy (`REWIRE_COST`) per point of the
+    Lattice the server holds for that character in auth metadata, and clears
+    it in the same transaction. The client syncs its profile first and resets
+    its own copy only after the server confirms.
+- Every request is idempotent through `economy_requests` and audited in
+  `economy_audit_events`.
+
+The tree's node effects are not yet read by the simulation (neither the guest
+tree nor the account tree changes a match), and there is no tree screen yet;
+the account tree is the server-side ledger they will read from.
 
 ## Known Limits
 

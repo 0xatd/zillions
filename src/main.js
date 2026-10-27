@@ -34,14 +34,14 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { REPLAY_VERSION } from './match-replay.js';
-import { matchResultRequest, matchStartRequest } from './backend.js';
+import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
-  addMmoCharacter, characterCamp, recordMmoInstance,
+  addMmoCharacter, characterCamp, recordMmoInstance, rewireLattice,
 } from './mmo-characters.js';
 import {
   FOG_DARKNESS,
@@ -155,6 +155,7 @@ class App {
       onCraftBuyComponent: (character, componentId) => this._craftMutation(character, (current) => buyCraftComponent(current, componentId)),
       onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, (current) => craftAuthoritative(current, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
+      onLatticeRewire: (character) => this._rewireLatticeOnServer(character),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
@@ -1147,6 +1148,7 @@ class App {
       }
       // Claim any match the server never confirmed (closed tab, offline).
       this._flushPendingMatches().catch((err) => console.warn('pending match flush failed', err));
+      this._syncAccountUpgrades().catch((err) => console.warn('account upgrade sync failed', err));
       // Auth events are read/hydration boundaries. Persisting account metadata
       // here calls auth.updateUser(), which emits another auth event and used
       // to recurse until Supabase rate-limited /auth/v1/user.
@@ -1362,6 +1364,62 @@ class App {
       this.profile.metaCurrency = current?.authoritativeBalance ?? this.profile.metaCurrency;
       if (persistProfile) this._saveProfile();
     }
+    return result;
+  }
+
+  // The signed-in upgrade tree lives on the server. The first time an account
+  // signs in with a local (guest) tree, it is offered once; the server grants
+  // what fits its cap and never imports local Alloy.
+  async _syncAccountUpgrades() {
+    if (!this.auth?.isSignedIn()) return null;
+    let state = await accountUpgradeRequest('state');
+    if (!state?.ok) return null;
+    const localNodes = Object.keys(loadMeta().nodes || {});
+    if (!state.imported && localNodes.length) {
+      const imported = await accountUpgradeRequest('import_local', { requestId: 'import-local-v1', nodes: localNodes })
+        .catch((error) => (error?.message === 'already_imported' ? null : Promise.reject(error)));
+      if (imported?.ok) {
+        state = { ...state, imported: true, owned: imported.owned };
+        if (imported.granted?.length) {
+          this.ui.showBanner(`⬡ ${imported.granted.length} upgrade${imported.granted.length === 1 ? '' : 's'} from this browser now belong to your account.`, '', 3200);
+        }
+      }
+    }
+    this.profile.accountUpgrades = [...(state.owned || [])];
+    return state;
+  }
+
+  async _buyAccountUpgrade(nodeId) {
+    if (!this.auth?.isSignedIn()) return null;
+    const result = await accountUpgradeRequest('buy', { requestId: crypto.randomUUID(), nodeId });
+    if (result?.ok) {
+      this.profile.accountUpgrades = [...(result.owned || [])];
+      this.profile.metaCurrency = result.wallet?.balance ?? this.profile.metaCurrency;
+      for (const entry of this.profile.mmoCharacters || []) {
+        if (Number.isFinite(entry.authoritativeBalance)) entry.authoritativeBalance = result.wallet.balance;
+      }
+      this._storeProfileLocally();
+    }
+    return result;
+  }
+
+  // Signed-in rewire: the server charges the Alloy and clears the Lattice it
+  // holds for this character in one transaction; only then does the local
+  // copy reset. The profile is synced first so the server counts the same
+  // points the sheet shows.
+  async _rewireLatticeOnServer(character) {
+    if (!this.auth?.isSignedIn() || !character) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character.id) || character;
+    await this.auth.syncLocalProfile(this.profile);
+    const result = await accountUpgradeRequest('rewire_lattice', { requestId: crypto.randomUUID(), characterId: character.id });
+    if (!result?.ok) return result;
+    rewireLattice(character);
+    for (const entry of this.profile.mmoCharacters || []) {
+      if (Number.isFinite(entry.authoritativeBalance)) entry.authoritativeBalance = result.wallet.balance;
+    }
+    this.profile.metaCurrency = result.wallet?.balance ?? this.profile.metaCurrency;
+    this._saveProfile();
     return result;
   }
 

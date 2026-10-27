@@ -2009,7 +2009,19 @@ export class UI {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
       if (this.cb.useAuthoritativeEconomy?.()) {
-        this.showBanner('✋ Lattice rewiring is unavailable until its server transaction is enabled.', 'bad', 3200);
+        // Signed in: the server prices it from the Lattice it holds and
+        // charges the account wallet; nothing changes locally until it has.
+        const cost = rewireCost((character.lattice || []).length);
+        if (!window.confirm(`Rewire the whole Lattice for about ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
+        Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
+          if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
+          this.showBanner(`⚡ Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
+          this._renderCharacterSheet();
+        }).catch((error) => {
+          const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
+            : 'The rewire could not be confirmed. Your Lattice is unchanged.';
+          this.showBanner(`✋ ${reason}`, 'bad', 3200);
+        });
         return;
       }
       const cost = rewireCost((character.lattice || []).length);

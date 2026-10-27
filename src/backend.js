@@ -1,6 +1,7 @@
 const ECONOMY_API = '/api/economy';
 const MATCH_RESULT_API = '/api/match-result';
 const MATCH_START_API = '/api/match-start';
+const ACCOUNT_UPGRADES_API = '/api/account-upgrades';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -58,5 +59,19 @@ export async function matchStartRequest(payload = {}) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'match_start_failed'), { status: response.status, result });
+  return result;
+}
+
+// Signed-in account upgrade tree: state, buy, the one-time import of the local
+// tree, and the paid Lattice rewire. Costs are the server's, never these.
+export async function accountUpgradeRequest(action, payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) return null;
+  const response = await fetch(ACCOUNT_UPGRADES_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'account_upgrade_failed'), { status: response.status, result });
   return result;
 }

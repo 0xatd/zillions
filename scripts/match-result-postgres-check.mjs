@@ -9,6 +9,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
+import { META_NODES } from '../src/meta.js';
+import { REWIRE_COST } from '../src/skilltree.js';
 
 const root = new URL('..', import.meta.url).pathname;
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -129,6 +131,44 @@ try {
   eq((await q('select count(*)::int n from match_history')).rows[0].n, 4, 'match history written by the server only');
   eq((await q(`select has_function_privilege('authenticated', 'public.issue_match_ticket(uuid,text,integer,text,text,bigint,uuid,integer)', 'EXECUTE') f`)).rows[0].f, false, 'ticket RPC not callable by clients');
   eq((await q(`select has_table_privilege('authenticated', 'public.match_tickets', 'INSERT') i`)).rows[0].i, false, 'clients cannot mint tickets');
+
+  // Account upgrade tree: server-priced purchases, a one-time capped import,
+  // and the paid Lattice rewire.
+  await q(read('supabase/migrations/20261027000300_account_upgrades.sql'));
+  const catalog = (await q('select node_id, branch, tier, cost, requires from account_upgrade_catalog order by node_id')).rows;
+  eq(catalog, META_NODES.map((n) => ({ node_id: n.id, branch: n.branch, tier: n.tier, cost: n.cost, requires: [...n.requires] }))
+    .sort((a, b) => a.node_id.localeCompare(b.node_id)), 'server catalog mirrors META_NODES');
+  const upgrade = (rid, action, payload, actor = uid) =>
+    q('select public.account_upgrade_mutate($1, $2, $3, $4) r', [actor, rid, action, payload]).then((r) => r.rows[0].r);
+  const wallet = (n) => q('update player_wallets set salvage_alloy = $2 where user_id = $1', [uid, n]);
+  await wallet(1000);
+  await rejects(upgrade('upg-00000001', 'buy', { node_id: 'supply_depot' }), /upgrade_locked/, 'prerequisites are enforced');
+  const bought = await upgrade('upg-00000002', 'buy', { node_id: 'supply_cache', cost: 1 });
+  eq([bought.cost, bought.wallet.balance, bought.owned], [120, 880, ['supply_cache']], 'the catalog cost is charged, not the request');
+  eq((await upgrade('upg-00000002', 'buy', { node_id: 'supply_cache', cost: 1 })).duplicate, true, 'purchases are idempotent');
+  eq((await q('select salvage_alloy::int n from player_wallets where user_id = $1', [uid])).rows[0].n, 880, 'a retried purchase charges once');
+  await rejects(upgrade('upg-00000003', 'buy', { node_id: 'supply_cache' }), /already_owned/, 'a node is bought once');
+  await wallet(100);
+  await rejects(upgrade('upg-00000004', 'buy', { node_id: 'warband_vigor' }), /insufficient_funds/, 'purchases cannot overdraw');
+  const imported = await upgrade('import-local-v1', 'import_local',
+    { nodes: ['warband_vigor', 'warband_edge', 'warband_focus', 'command_harness', 'supply_cache', 'bogus'] });
+  eq([imported.granted, imported.wallet.balance], [['warband_vigor', 'warband_edge'], 100], 'import grants only prerequisite-closed nodes, free, without touching Alloy');
+  await rejects(upgrade('import-local-v2', 'import_local', { nodes: ['command_slot'] }), /already_imported/, 'the import runs once per account');
+  const all = await upgrade('import-local-v1', 'import_local', { nodes: META_NODES.map((n) => n.id) }, other);
+  eq([all.granted, all.grantedValue], [['supply_cache', 'warband_vigor', 'command_slot'], 440], 'the import is capped');
+  await q(`update auth.users set raw_user_meta_data = jsonb_set(raw_user_meta_data, '{mmo_characters,0,lattice}', '["n1","n2","n3"]') where id = $1`, [uid]);
+  await rejects(upgrade('rew-00000001', 'rewire_lattice', { client_character_id: 'mmo_a' }), /insufficient_funds/, 'a rewire must be affordable');
+  eq((await q(`select jsonb_array_length(raw_user_meta_data#>'{mmo_characters,0,lattice}') n from auth.users where id = $1`, [uid])).rows[0].n, 3, 'a refused rewire keeps the Lattice');
+  await wallet(200);
+  const rewired = await upgrade('rew-00000002', 'rewire_lattice', { client_character_id: 'mmo_a' });
+  eq([rewired.returned, rewired.cost, rewired.wallet.balance], [3, 3 * REWIRE_COST, 200 - 3 * REWIRE_COST], 'rewire charges REWIRE_COST per point');
+  eq((await q(`select raw_user_meta_data#>'{mmo_characters,0,lattice}' l, raw_user_meta_data->'campaign' c from auth.users where id = $1`, [uid])).rows[0], { l: [], c: 3 }, 'rewire clears only that Lattice');
+  await rejects(upgrade('rew-00000003', 'rewire_lattice', { client_character_id: 'mmo_a' }), /nothing_to_rewire/, 'an empty Lattice cannot be rewired');
+  await rejects(upgrade('rew-00000004', 'rewire_lattice', { client_character_id: 'nobody' }), /character_not_found/, 'rewire needs a registered character');
+  await q(read('supabase/migrations/20261027000300_account_upgrades.sql'));
+  eq((await q('select count(*)::int n from account_upgrades')).rows[0].n, 6, 'the upgrade migration is safe to re-run');
+  eq((await q(`select has_function_privilege('authenticated', 'public.account_upgrade_mutate(uuid,text,text,jsonb)', 'EXECUTE') f`)).rows[0].f, false, 'upgrade RPC not callable by clients');
+  eq((await q(`select has_table_privilege('authenticated', 'public.account_upgrades', 'INSERT') i`)).rows[0].i, false, 'clients cannot grant themselves upgrades');
 
   // Even if Supabase's default grants are re-applied, RLS has no write policy.
   const policies = (await q(`select policyname from pg_policies where tablename in ('player_stats','match_history') order by 1`)).rows.map((r) => r.policyname);

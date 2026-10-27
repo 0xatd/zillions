@@ -113,6 +113,7 @@ procedural renderer and must not stop a match from starting.
 | `api/match-start.js` | Issues signed, single-use match tickets (seed, room) |
 | `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; replays required matches |
 | `api/economy.js` | Market, stash, equipment, and Forge transactions |
+| `api/account-upgrades.js` | Account upgrade tree purchases, one-time local import, paid Lattice rewire |
 
 `supabase/schema.sql` defines the durable schema.
 
@@ -173,6 +174,7 @@ seat that the same account owned before disconnect.
 | Account and public username | Supabase |
 | Cloud saves (resume snapshot) | Supabase |
 | Character level, XP, career stats | Supabase `game_characters`, written only by `apply_match_result()` |
+| Account upgrade tree | Supabase `account_upgrades`, written only by `account_upgrade_mutate()` |
 | Stash, equipment, Alloy wallet | Supabase `item_instances` / `player_wallets`, written only by service-role RPCs |
 | Games, wins, kills, campaign progress, relics, quests | Supabase `player_stats`, written only by `apply_match_result()` |
 | Match history and report idempotency | Supabase `match_history` / `match_reports`, written only by `apply_match_result()` |

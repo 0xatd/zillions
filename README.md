@@ -307,6 +307,8 @@ Vercel serves the static game and these same-origin API routes:
 - `api/match-result.js` — the only grant path for signed-in XP, loot, Alloy,
   and stats
 - `api/economy.js` — Market, stash, equipment, and Forge transactions
+- `api/account-upgrades.js` — account upgrade tree, one-time local import,
+  paid Lattice rewire
 
 There are no scheduled crons. `.env.example` lists every environment
 variable. Do not commit credentials or environment values. See
