@@ -23,7 +23,7 @@
 //     runs on Node (V8); a run played on another engine can legitimately
 //     diverge. That is why a mismatch is not an accusation: the server grants
 //     what its own replay produced and flags the report for review.
-import { SIM_DT, HEROES, levelById, isLabyrinthLevel, normalizeHeroUpgrades } from './config.js';
+import { SIM_DT, HEROES, levelById, isLabyrinthLevel, normalizeHeroUpgrades, CULTURE_ARMIES, DEFAULT_CULTURE } from './config.js';
 import { Game } from './game.js';
 import { TerrainField } from './terrain.js';
 import { buildMatchReport } from './match-report.js';
@@ -83,6 +83,7 @@ export function validateReplayPayload(raw) {
     replay: {
       v: REPLAY_VERSION, frames, heroIndex, heroes, log,
       character: isObj(raw.character) ? raw.character : null,
+      culture: typeof raw.culture === 'string' && Object.hasOwn(CULTURE_ARMIES, raw.culture) ? raw.culture : DEFAULT_CULTURE,
     },
   };
 }
@@ -151,7 +152,7 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
   let game;
   try {
     const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed });
+    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed, culture: replay.culture });
   } catch (error) {
     return { status: 'invalid', error: 'replay_setup_failed', detail: String(error?.message || error).slice(0, 120) };
   }

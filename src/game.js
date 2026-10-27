@@ -23,6 +23,7 @@ import {
   HEROES, HERO_MAX_LEVEL, XP_RADIUS, xpForLevel, abilityRank, heroGrowthUnits, levelById,
   HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, normalizeHeroUpgrades, heroUnspentUpgrades,
   LABYRINTH_LIVES, BLESSING_KEYS,
+  cultureKey, unitDefFor,
 } from './config.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
@@ -97,6 +98,9 @@ export class Game {
     this.economy = { startGold: START_GOLD, income: 1, pressure: 1, ...(this.level.economy || {}) };
     this.boss = null;
     this.rngSeed = Number.isInteger(opts?.rngSeed) ? opts.rngSeed >>> 0 : 999;
+    // The base culture: the castle's look and which army its camps muster
+    // (config.js CULTURE_ARMIES). Part of the match like the difficulty.
+    this.culture = cultureKey(snap ? snap.culture : opts?.culture);
     this.rng = makeRNG(this.rngSeed);
 
     this.gold = this.economy.startGold;
@@ -211,6 +215,7 @@ export class Game {
   snapshot() {
     return {
       v: 5, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
+      culture: this.culture,
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
       phase: this.phase, finalStand: this.finalStand ? 1 : 0,
       gold: snapNum(this.gold),
@@ -1317,7 +1322,7 @@ export class Game {
     this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
     if (!free) {
       if (unitKey) {
-        const unit = UNITS[unitKey];
+        const unit = this.unitDef(unitKey);
         const guard = def.dmg ? ` Short-range guns add ${def.dmg} damage at ${def.range} tiles.` : '';
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s.${guard} 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
       } else {
@@ -2575,8 +2580,11 @@ export class Game {
 
   // ---------- units ----------
 
+  // The definition this match's culture musters for a trade.
+  unitDef(key) { return unitDefFor(this.culture, key); }
+
   _spawnUnit(key, x, z, camp = null) {
-    const d = UNITS[key];
+    const d = this.unitDef(key);
     const u = {
       id: nextId++, key, def: d, x, z, hp: d.hp, maxHp: d.hp,
       camp, path: null, pathI: 0, cooldown: 0, target: null,

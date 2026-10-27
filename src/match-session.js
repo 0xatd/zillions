@@ -24,5 +24,9 @@ export function parseSharedMatch(raw) {
 // The input log the server replays, or null when this game never recorded one.
 export function matchReplayPayload(game, match, heroIndex) {
   if (!game?.inputLog || !match?.heroes) return null;
-  return { v: REPLAY_VERSION, frames: game.steps, heroIndex, heroes: match.heroes, log: game.inputLog };
+  const out = { v: REPLAY_VERSION, frames: game.steps, heroIndex, heroes: match.heroes, log: game.inputLog };
+  // The base culture changes which army the camps muster; the replay must
+  // run the same one. Omitted for the default so older payloads match.
+  if (game.culture && game.culture !== 'european') out.culture = game.culture;
+  return out;
 }

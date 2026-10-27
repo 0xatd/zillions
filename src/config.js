@@ -294,6 +294,75 @@ export const UNITS = {
   },
 };
 
+// ---------- Base cultures: four defense armies ----------
+// A culture is the look of your castle AND the men it musters. Every culture
+// fields the same three trades from the same camps (militia / ranger /
+// sniper), so building stays Thronefall-simple; what changes is how the
+// squads fight. European is the reference line (the plain UNITS stats).
+// Overrides are deterministic stat/behaviour keys the sim already reads:
+// evadeChance and armor/thorns (damageUnit), splash (unit attacks), range,
+// rof, speed. Power is kept within a few percent of the reference so the
+// difficulty curve holds whichever culture the player picks.
+export const CULTURE_ARMIES = {
+  european: {
+    name: 'European', banner: 'Star Knights',
+    blurb: 'Balanced shield line, steady archers, heavy rail snipers.',
+    units: {},
+  },
+  asian: {
+    name: 'Asian', banner: 'Jade Lantern Dynasty',
+    blurb: 'Swift glaive guards that slip blows, rapid repeaters, rocket fire-lances that blast packs.',
+    units: {
+      soldier: { name: 'Glaive Guard', hp: 118, dmg: 12, rof: 2.9, range: 7, speed: 4.0, evadeChance: 0.18,
+        trait: 'Evades 18% of blows · fast' },
+      ranger: { name: 'Repeater Archer', hp: 64, dmg: 4.6, rof: 2.3, range: 6.8, speed: 4.8,
+        trait: 'Very fast fire, short reach' },
+      sniper: { name: 'Fire-Lance', hp: 84, dmg: 44, rof: 0.6, range: 12, splash: 1.5,
+        trait: 'Rocket splash hits the whole pack' },
+    },
+  },
+  south_american: {
+    name: 'South American', banner: 'Sun Terrace Guard',
+    blurb: 'Slow obsidian shieldbearers that wound what bites them, darting jaguar scouts, solar atlatls.',
+    units: {
+      soldier: { name: 'Obsidian Shieldbearer', hp: 176, dmg: 13, rof: 2.0, range: 7, speed: 3.0, armor: 0.15, thorns: 0.3,
+        trait: '15% armour · reflects 30% of melee' },
+      ranger: { name: 'Jaguar Scout', hp: 74, dmg: 6.4, rof: 1.5, range: 7.5, speed: 5.2,
+        trait: 'Fastest runners, longer darts' },
+      sniper: { name: 'Solar Atlatl', hp: 96, dmg: 56, rof: 0.56, range: 13, splash: 0.9, armor: 0.1,
+        trait: 'Sturdy, small splash' },
+    },
+  },
+  middle_eastern: {
+    name: 'Middle Eastern', banner: 'Mirage Court',
+    blurb: 'Hard-hitting long-reach lancers, fast dune riders, astrolabe longguns with the longest sight.',
+    units: {
+      soldier: { name: 'Mirage Lancer', hp: 124, dmg: 19, rof: 1.95, range: 8.5, speed: 4.1,
+        trait: 'Heavy hits, long reach, quick' },
+      ranger: { name: 'Dune Rider', hp: 64, dmg: 7.4, rof: 1.35, range: 8, speed: 5.6,
+        trait: 'Mounted: fastest unit' },
+      sniper: { name: 'Astrolabe Longgun', hp: 80, dmg: 78, rof: 0.47, range: 16, speed: 2.8,
+        trait: 'Longest range in the game' },
+    },
+  },
+};
+export const DEFAULT_CULTURE = 'european';
+export function cultureKey(key) {
+  return typeof key === 'string' && Object.hasOwn(CULTURE_ARMIES, key) ? key : DEFAULT_CULTURE;
+}
+const _armyDefs = new Map();
+// The unit definition a culture musters for a trade (cached, frozen shape).
+export function unitDefFor(culture, key) {
+  const base = UNITS[key];
+  if (!base) return base;
+  const army = CULTURE_ARMIES[cultureKey(culture)];
+  const o = army.units[key];
+  if (!o) return base;
+  const id = `${cultureKey(culture)}:${key}`;
+  if (!_armyDefs.has(id)) _armyDefs.set(id, { ...base, ...o, culture: cultureKey(culture) });
+  return _armyDefs.get(id);
+}
+
 // ---------- The horde: roles, not stat blocks ----------
 // Every entry asks the player a DIFFERENT question. `ranged` outranges walls,
 // `burrow` walks through them, `siege` ignores your army entirely, and `call`

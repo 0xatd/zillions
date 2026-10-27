@@ -5,11 +5,11 @@
 </head><body><div id="t">Toy kit — <span id="c"></span> (?only=castle&cols=4)</div>
 <script type="module">
 // Review page for the Blender toy kit (tools/art/toy_kit). Lays every asset
-// of the default culture on a grid under the game's light rig. Not shipped
+// of a culture (?culture=asian, default European) on a grid under the game's light rig. Not shipped
 // gameplay; presentation review only.
 import * as THREE from 'three';
-import { loadAssets, kitClone, hasKit } from './src/assets.js';
-import { culture } from './src/cultures.js';
+import { loadAssets, loadKitCulture, kitClone, hasKit } from './src/assets.js';
+import { culture, setActiveCulture } from './src/cultures.js';
 const q = new URLSearchParams(location.search);
 const c = culture(q.get('culture') || undefined);
 document.getElementById('c').textContent = c.name;
@@ -23,6 +23,8 @@ scene.add(new THREE.AmbientLight(0x6a7fb0, 0.35));
 const sun = new THREE.DirectionalLight(0xffffff, 2.3); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 await loadAssets();
+setActiveCulture(c.key);
+await loadKitCulture(c.key);
 const only = q.get('only');
 const names = c.assets.filter((n) => hasKit(n) && (!only || only.split(',').some((o) => n.includes(o))));
 const cols = Number(q.get('cols')) || Math.ceil(Math.sqrt(names.length * W / H));

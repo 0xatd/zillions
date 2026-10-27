@@ -9,7 +9,7 @@ const PORTRAITS = {
 };
 import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
-  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
+  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS, CULTURE_ARMIES, cultureKey,
 } from './config.js';
 import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
@@ -323,7 +323,9 @@ export class UI {
           <div class="levelrow" id="levelrow"></div>
           <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
-          <div class="steplabel diff-label">3 · Difficulty</div>
+          <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
+          <div class="diffseg cultureseg" id="cultureseg"></div>
+          <div class="steplabel diff-label">4 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
           <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
@@ -706,6 +708,25 @@ export class UI {
         if (this.cb.onDifficultyPick) this.cb.onDifficultyPick(key);
       };
       seg.appendChild(b);
+    }
+    // ----- setup: culture (base look + army) -----
+    let savedCulture = null;
+    try { savedCulture = localStorage.getItem('zillions.culture'); } catch (e) { /* private mode */ }
+    this.selectedCulture = cultureKey(savedCulture);
+    const cseg = q('#cultureseg');
+    for (const [key, c] of Object.entries(CULTURE_ARMIES)) {
+      const b = document.createElement('button');
+      b.className = 'diffbtn' + (key === this.selectedCulture ? ' sel' : '');
+      b.dataset.culture = key;
+      b.innerHTML = `${c.name}<small>${c.banner}</small>`;
+      const troops = ['soldier', 'ranger', 'sniper'].map((u) => c.units[u]?.name).filter(Boolean);
+      b.title = `${c.blurb}${troops.length ? `\n${troops.join(' · ')}` : ''}`;
+      b.onclick = () => {
+        this.selectedCulture = key;
+        try { localStorage.setItem('zillions.culture', key); } catch (e) { /* private mode */ }
+        for (const el of cseg.children) el.classList.toggle('sel', el === b);
+      };
+      cseg.appendChild(b);
     }
     q('#s-start').onclick = () => this.cb.onStart(this.selectedDiff, this.selectedHero);
 

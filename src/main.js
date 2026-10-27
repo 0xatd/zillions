@@ -3,14 +3,15 @@ import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
+import { setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -694,8 +695,9 @@ class App {
       this.startReadyGuests.clear();
       this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
       const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
-      this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, match: shared }));
-      await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, match });
+      const culture = cultureKey(this.ui.selectedCulture);
+      this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
+      await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
     } finally {
       this._hostLaunching = false;
     }
@@ -756,6 +758,12 @@ class App {
     const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
     const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    // The base culture: a resumed run keeps its own, a guest takes the host's,
+    // a fresh solo/host run uses the setup pick. It sets which army the camps
+    // muster (sim) and which kit the base is built from (art).
+    const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
+    setActiveCulture(cultureId);
+    await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
     const soloTicket = !snap && !mp
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
@@ -764,7 +772,7 @@ class App {
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
-      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed } : {});
+      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
     // Record inputs for the server replay. A resumed run continues the log it
     // saved; a resume without one cannot be replayed.
     if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
@@ -2222,7 +2230,7 @@ class App {
       this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
       const match = this._sharedMatch(m.match);
       if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match }, m.snap);
-      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode, match });
+      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode, culture: m.culture, match });
       this.net.send({ t: 'startReady' });
       this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
     }
