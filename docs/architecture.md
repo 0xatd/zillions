@@ -112,8 +112,6 @@ procedural renderer and must not stop a match from starting.
 | `api/auth-config.js` | Public auth configuration route |
 | `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats |
 | `api/economy.js` | Market, stash, equipment, and Forge transactions |
-| `api/state.js` | Legacy Blob state route (not called by the current client) |
-| `api/lobby.js` | Legacy Blob lobby route (not called by the current client) |
 
 `supabase/schema.sql` defines the durable schema.
 

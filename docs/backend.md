@@ -10,7 +10,6 @@ this file.
 - Web host: Vercel project `zillions`
 - Static fallback: GitHub Pages at `https://0xatd.github.io/zillions/`
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`
-- Legacy/cloud mirror: Vercel Blob through same-origin Vercel API routes
 - Match networking: browser WebRTC DataChannels, host-sequenced lockstep
 
 Production is account-first. On `zillions.taborlin.co`, the game shell requires
@@ -27,9 +26,6 @@ username. They must not show the email address or a Google account name.
 
 Vercel serves the game and same-origin API routes:
 
-- `api/state.js` stores and reads authenticated JSON state in private Vercel Blob storage.
-- `api/lobby.js` stores legacy short-lived lobby presence/chat in Vercel Blob
-  for compatibility only.
 - `api/auth-config.js` exposes only browser-safe Supabase config.
 - `api/economy.js` authenticates the player, validates item and vendor inputs,
   and calls the atomic Supabase economy function. The service key stays on the server.
@@ -39,7 +35,7 @@ Vercel serves the game and same-origin API routes:
 There are no Vercel crons. Environment variables are listed in `.env.example`.
 
 Do not put server-only secrets in responses. The Supabase anon key is browser
-configuration, but service-role keys and Blob tokens must stay in Vercel env.
+configuration, but service-role keys and ticket secrets must stay in Vercel env.
 
 ### Supabase
 
@@ -78,8 +74,7 @@ localStorage remains the development/offline fallback:
 - Latest solo/host save.
 
 When backend support is available, the browser syncs signed-in account state to
-Supabase. Vercel Blob is still used for compatibility state and legacy/static
-smoke paths, but signed-in social state must not depend on it.
+Supabase. Vercel Blob is no longer used.
 
 ### WebRTC
 
@@ -90,38 +85,12 @@ separate future project.
 
 ## Current Data Model
 
-### Vercel Blob State Mirror
+### Removed Vercel Blob Routes
 
-`/api/state` accepts `profile`, `settings`, `save`, and `game`.
-The route requires a Supabase access token. The token user must own the
-`playerId`. The route rejects anonymous requests and mismatched player IDs.
-
-Blob paths use this shape:
-
-```text
-players/<playerId>/profile/current.json
-players/<playerId>/settings/current.json
-players/<playerId>/save/latest.json
-players/<playerId>/game/<id>.json
-```
-
-This is compatibility storage for signed-in account mirrors and smoke tests.
-Blob objects use private access. Supabase remains the account source of truth.
-
-### Vercel Blob Legacy Lobby
-
-`/api/lobby` accepts `join`, `heartbeat`, `chat`, and `leave`.
-
-Blob paths use this shape:
-
-```text
-lobbies/<mode>/players/<playerId>.json
-lobbies/<mode>/chat/<timestamp>-<playerId>-<random>.json
-```
-
-Presence expires after about 60 seconds. Heartbeats run from the browser. This
-route is legacy compatibility for smoke tests and old static clients. It is not
-the production social identity path.
+The legacy `/api/state` and `/api/lobby` Vercel Blob routes were removed: the
+client had stopped calling them (saves, rooms, chat and presence all use
+Supabase). Blob objects they wrote earlier are not deleted by this change; the
+`BLOB_READ_WRITE_TOKEN` environment variable is no longer read.
 
 ### Supabase Tables
 
@@ -209,7 +178,7 @@ RLS policy intent:
 - Keep `zillions.taborlin.co` as the canonical production URL.
 - Keep static/local development fallback working.
 - Keep production account-gated.
-- Never commit env values, service-role keys, Blob tokens, Google client
+- Never commit env values, service-role keys, ticket secrets, Google client
   secrets, private keys, or raw credentials.
 - Do not copy backend config from other Taborlin products.
 - Update `supabase/schema.sql` and this doc together when the backend model
@@ -301,7 +270,6 @@ Guest (offline) play never calls the route; its progress stays in the browser.
 
 - Room browser data, player rosters, and host setup are real Supabase data.
 - Mid-game Join as a new controlling player is not supported. Use Watch.
-- Vercel Blob lobby data is legacy compatibility, not production social state.
 - Server-authoritative combat is not implemented. Rewards are server-granted
   but derived from bounded client reports.
 - There is no anti-cheat beyond the report bounds and loot proofs.

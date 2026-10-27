@@ -302,9 +302,6 @@ Vercel serves the static game and these same-origin API routes:
 - `api/match-result.js` — the only grant path for signed-in XP, loot, Alloy,
   and stats
 - `api/economy.js` — Market, stash, equipment, and Forge transactions
-- `api/lobby.js`, `api/state.js` — legacy Vercel Blob routes. The current
-  client does not call them (rooms and chat use Supabase); they are kept only
-  until a follow-up removes them.
 
 There are no scheduled crons. `.env.example` lists every environment
 variable. Do not commit credentials or environment values. See

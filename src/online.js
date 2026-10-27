@@ -1,6 +1,6 @@
 // Online lobby: Zillions production account + room/social model.
-// Supabase config is loaded from /api/auth-config. Vercel Blob stays as a
-// legacy/static compatibility path; signed-in social state lives in Supabase.
+// Supabase config is loaded from /api/auth-config; signed-in social state
+// lives in Supabase.
 
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 const FRESH_MS = 2 * 60 * 1000;

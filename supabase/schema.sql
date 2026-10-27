@@ -1,6 +1,5 @@
 -- Zillions Supabase backend schema.
--- Keep this schema compatible with the optional localStorage/Vercel Blob
--- fallback until the browser app is fully migrated.
+-- Guest play stays in localStorage; signed-in state lives here.
 
 create extension if not exists pgcrypto;
 

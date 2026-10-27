@@ -305,8 +305,8 @@ maps are built and shipped. A persistent shared world is out of scope.
 
 Signed-in social state belongs in Supabase: `lobby_chat` for global lobby chat,
 `friendships` for friend requests and online state, and `room_chat` for both
-setup-room chat and in-game team chat through the `channel` column. Keep Vercel
-Blob as legacy/dev compatibility only.
+setup-room chat and in-game team chat through the `channel` column. Vercel Blob
+is not used.
 
 ## Required Checks
 

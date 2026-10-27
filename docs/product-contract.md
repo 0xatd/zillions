@@ -309,11 +309,9 @@ Vercel owns:
 - `/api/auth-config`
 - `/api/match-result` (the only reward grant path)
 - `/api/economy`
-- `/api/state`, `/api/lobby` (legacy Blob routes, unused by the current client)
 
-Vercel Blob is a temporary compatibility layer for guest smoke tests and old
-state mirror data. It is not the source of truth for signed-in chat, friends,
-accounts, or rooms.
+Vercel Blob is no longer used. The legacy `/api/state` and `/api/lobby` Blob
+routes were removed once nothing called them.
 
 WebRTC still owns match transport. The server does not simulate combat; it is
 authoritative for rewards and economy.
@@ -325,7 +323,7 @@ Play Online or Custom Games.
 
 - Preserve the production account backend when porting gameplay.
 - Preserve `package.json` and `npm run check`.
-- Preserve `api/auth-config.js`, `api/state.js`, and `api/lobby.js`.
+- Preserve `api/auth-config.js`.
 - Preserve `src/auth.js` and `src/backend.js`.
 - Remove any wrong product Supabase URL before merge.
 - Do not expose `assets.html` from the game screen.
