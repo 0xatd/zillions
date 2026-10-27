@@ -33,7 +33,7 @@ import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
-import { REPLAY_VERSION } from './match-replay.js';
+import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
 import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
@@ -643,19 +643,9 @@ class App {
   }
 
   // The match fields a host shares with its guests (never its own ticket).
-  _sharedMatchFields() {
-    const m = this._match;
-    return m ? { seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null } : null;
-  }
+  _sharedMatchFields() { return sharedMatchFields(this._match); }
 
-  _sharedMatch(raw) {
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return {
-      seed: Number.isInteger(raw?.seed) ? raw.seed : null,
-      roomId: typeof raw?.roomId === 'string' && uuid.test(raw.roomId) ? raw.roomId : null,
-      joinToken: typeof raw?.joinToken === 'string' ? raw.joinToken.slice(0, 128) : null,
-    };
-  }
+  _sharedMatch(raw) { return parseSharedMatch(raw); }
 
   // What this peer needs at match end: ticket, room, the exact hero setups the
   // sim started from, and (for resumed runs) the input log so far.
@@ -1663,12 +1653,7 @@ class App {
   }
 
   // The recorded inputs for the server replay (src/match-replay.js).
-  _matchReplay() {
-    const g = this.game;
-    const m = this._match;
-    if (!g?.inputLog || !m?.heroes) return null;
-    return { v: REPLAY_VERSION, frames: g.steps, heroIndex: this.myPlayer, heroes: m.heroes, log: g.inputLog };
-  }
+  _matchReplay() { return matchReplayPayload(this.game, this._match, this.myPlayer); }
 
   async _submitMatchResult(won, h, character) {
     const quests = this.game?.questResults || [];

@@ -37,7 +37,6 @@ const SIEGE_GUARD_R = 3.6;        // closer than this and you deal with the guar
 const DIRECT_APPROACH_R = 24;     // inside this, walk straight at the objective
 const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, it's a sealed pocket
-const COMBAT_CELL = 8;            // broad-phase bucket width for uncapped armies
 const FIRST_SIEGE_KINDS = new Set(['house', 'farm', 'tower', 'camp_militia']);
 const FIRST_SIEGE_REWARD = 24;
 
@@ -48,42 +47,8 @@ const LABYRINTH_DOOR_ID = 2000000000;
 const snapNum = (v) => (Number.isFinite(v) ? v : 0);
 const snapRoute = (route) => Array.isArray(route) ? route.map(([x, z]) => [snapNum(x), snapNum(z)]) : null;
 
-export function combatBuckets(actors) {
-  const buckets = new Map();
-  for (const actor of actors) {
-    if (actor.dead) continue;
-    const key = `${Math.floor(actor.x / COMBAT_CELL)},${Math.floor(actor.z / COMBAT_CELL)}`;
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(actor); else buckets.set(key, [actor]);
-  }
-  return buckets;
-}
-
-export const ARMY_PEAK_SAMPLE_SECONDS = 1;
-export function sampleArmyPeak(units, peak, time, nextSampleAt = 0) {
-  if (time + 1e-9 < nextSampleAt) return nextSampleAt;
-  const composition = {};
-  for (const unit of units) {
-    if (unit.hero || unit.dead) continue;
-    composition[unit.key] = (composition[unit.key] || 0) + 1;
-  }
-  for (const [key, count] of Object.entries(composition)) {
-    peak[key] = Math.max(peak[key] || 0, count);
-  }
-  return (Math.floor(time / ARMY_PEAK_SAMPLE_SECONDS) + 1) * ARMY_PEAK_SAMPLE_SECONDS;
-}
-
-export function nearbyBuckets(buckets, fallback, x, z, radius) {
-  if (!buckets) return fallback;
-  const found = [];
-  const minX = Math.floor((x - radius) / COMBAT_CELL), maxX = Math.floor((x + radius) / COMBAT_CELL);
-  const minZ = Math.floor((z - radius) / COMBAT_CELL), maxZ = Math.floor((z + radius) / COMBAT_CELL);
-  for (let bz = minZ; bz <= maxZ; bz++) for (let bx = minX; bx <= maxX; bx++) {
-    const bucket = buckets.get(`${bx},${bz}`);
-    if (bucket) found.push(...bucket);
-  }
-  return found;
-}
+export { combatBuckets, nearbyBuckets, sampleArmyPeak, ARMY_PEAK_SAMPLE_SECONDS } from './spatial.js';
+import { combatBuckets, nearbyBuckets, sampleArmyPeak } from './spatial.js';
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -3476,10 +3441,13 @@ export class Game {
     this._updateCoins();
     this._updateLoot(dt);
     this._updateFlow(dt);
-    this._unitBuckets = combatBuckets(this.units);
-    this._zombieBuckets = combatBuckets(this.zombies);
+    // Pooled per Game (not snapshotted): rebuilt from the actor lists each tick.
+    this._unitBucketPool ||= new Map();
+    this._zombieBucketPool ||= new Map();
+    this._unitBuckets = combatBuckets(this.units, this._unitBucketPool);
+    this._zombieBuckets = combatBuckets(this.zombies, this._zombieBucketPool);
     this._updateZombies(dt);
-    this._zombieBuckets = combatBuckets(this.zombies);
+    this._zombieBuckets = combatBuckets(this.zombies, this._zombieBucketPool);
     this._updateAuras(dt);
     this._updateBrews(dt);
     this._updateUnits(dt);
@@ -3494,9 +3462,12 @@ export class Game {
       if (!u.hero) u.auraDmg = 1;
       u.auraCrit = 0;
       u.auraArmor = 0;
-      u.auraSources = [];
+      if (u.auraSources) u.auraSources.length = 0; else u.auraSources = [];
     }
-    for (const zb of this.zombies) zb.auraSources = [];
+    // Reused per actor rather than reallocated every tick for every zombie.
+    for (const zb of this.zombies) {
+      if (zb.auraSources) zb.auraSources.length = 0; else zb.auraSources = [];
+    }
     for (const h of this.heroes) {
       if (h.dead) continue;
       const aura = h.def.aura;
