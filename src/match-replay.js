@@ -232,4 +232,3 @@ export function replayReasons(report, context = {}, random = Math.random) {
   if (!reasons.length && random() < SPOT_CHECK_RATE) reasons.push('spot_check');
   return [...new Set(reasons)];
 }
-
