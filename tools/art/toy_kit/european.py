@@ -54,6 +54,46 @@ def banner(B, pal, x, z, y=0, h=1.2, color=None, flip=False, big=1.0):
     B.box(pal['trim'], 0.36 * big, 0.05, 0.035, x + off * big, y + h - 0.07, z)
 
 
+def window(B, G, pal, x, y, z, w=0.14, h=0.18, shutters=True, sill=True):
+    """Front-facing (+z) lit window: wood frame, optional shutters and sill."""
+    B.box(pal['wood'], w + 0.06, h + 0.06, 0.03, x, y - 0.03, z)
+    G.box(pal['warm'], w, h, 0.04, x, y, z + 0.005)
+    B.box(pal['wood'], w, 0.025, 0.045, x, y + h * 0.48, z + 0.01)        # mullion bar
+    if shutters:
+        for sx in (-1, 1):
+            B.box(pal['roof2'], w * 0.45, h + 0.04, 0.03, x + sx * (w * 0.5 + w * 0.28), y - 0.02, z + 0.005)
+    if sill:
+        B.box(pal['stone2'], w + 0.1, 0.035, 0.07, x, y - 0.06, z + 0.02)
+
+
+def flower_box(B, pal, x, y, z, w=0.22):
+    B.box(pal['wood'], w, 0.06, 0.07, x, y, z + 0.03)
+    for i, c in enumerate((pal['accent'], pal['crop2'], pal['accent'])):
+        B.box(c, 0.05, 0.05, 0.05, x + (i - 1) * w * 0.32, y + 0.06, z + 0.03)
+    B.box(pal['leaf'], w * 0.9, 0.03, 0.06, x, y + 0.055, z + 0.03)
+
+
+def chimney(B, pal, x, y, z, h=0.45, w=0.18):
+    B.box(pal['stone3'], w, h, w, x, y, z)
+    B.box(pal['stone2'], w + 0.06, 0.06, w + 0.06, x, y + h, z)
+    B.box(pal['dark'], w * 0.5, 0.04, w * 0.5, x, y + h + 0.06, z)
+
+
+def timber_front(B, pal, w, y0, y1, z, posts=3):
+    """Half-timbering on a +z wall: top/bottom beams, posts and one brace."""
+    c = shade(pal['wood'], 0.85)
+    B.box(c, w, 0.05, 0.03, 0, y0, z)
+    B.box(c, w, 0.05, 0.03, 0, y1 - 0.05, z)
+    for i in range(posts):
+        x = -w / 2 + 0.03 + i * (w - 0.06) / (posts - 1)
+        B.box(c, 0.05, y1 - y0, 0.03, x, y0, z)
+    B.box(c, 0.04, (y1 - y0) * 1.1, 0.03, -w * 0.25, y0 + 0.02, z, 0, 0, 0.6)
+
+
+def ridge(B, pal, w, y, z=0, ry=0.0, length=1.0):
+    B.box(shade(pal['roof'], 0.72), 0.06, 0.05, length, 0, y, z, 0, ry, 0)
+
+
 def round_tower(B, G, pal, x, z, r, h, roof=True, crest=True, seg=8, window=True):
     B.prism(pal['stone3'], seg, r * 1.15, r * 1.05, 0.18, x, 0, z)
     B.prism(pal['stone'], seg, r, r * 0.95, h, x, 0.18, z)
@@ -65,8 +105,14 @@ def round_tower(B, G, pal, x, z, r, h, roof=True, crest=True, seg=8, window=True
             B.prism(pal['trim'], 4, 0.05, 0, 0.3, x, top + 0.12 + r * 2.1, z)
     else:
         merlons_ring(B, pal['stone'], r * 1.04, top + 0.12, n=seg, size=r * 0.32, h=r * 0.3, x=x, z=z)
+    if h > 0.9:
+        B.prism(pal['stone2'], seg, r * 1.02, r * 1.02, 0.07, x, 0.18 + h * 0.34, z)   # stone course
+        for a in (TAU / 4 + TAU / 8, TAU / 4 - TAU / 8):
+            B.box(pal['dark'], 0.05, 0.16, 0.03, x + math.cos(a) * r * 0.96, 0.18 + h * 0.48, z + math.sin(a) * r * 0.96,
+                  0, -a + TAU / 4, 0)                                                   # arrow slits
     if window:
         G.box(pal['warm'], 0.1, 0.18, 0.04, x, top * 0.62, z + r * 0.97)
+        B.box(pal['stone2'], 0.16, 0.04, 0.06, x, top * 0.62 + 0.18, z + r * 0.97)
     return top
 
 
@@ -158,8 +204,12 @@ def castle(k, t, pal):
     r = 2.0 + min(t, 3) * 0.1
     base = hex_plinth(B, G, pal, r, steps=2 if t < 3 else 3, lamps=False)
     if t == 1:
-        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=1)
+        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=0)
         door(B, pal, 0.4, 0.6, 0, 0.81, base)
+        for x in (-0.5, 0.5):
+            window(B, G, pal, x, base + 1.0, 0.81, w=0.16, h=0.22)
+        B.box(pal['stone2'], 1.76, 0.07, 1.66, 0, base + 0.75, 0)
+        chimney(B, pal, -0.55, base + 1.9, -0.45, h=0.6, w=0.2)
         banner(B, pal, 1.15, 0.85, base, 1.6, flip=True)
         return
     # T2+: a chunky square curtain with four round corner towers.
@@ -188,8 +238,18 @@ def castle(k, t, pal):
     # the keep: one big block, one smaller crowning block with the roof
     kw = 1.8 if t == 2 else 2.0
     kh = 2.1 if t == 2 else 2.6
-    top = keep_block(B, G, pal, kw, kw, kh, base, roof='merlon', windows=1)
+    top = keep_block(B, G, pal, kw, kw, kh, base, roof='merlon', windows=0)
     door(B, pal, 0.42, 0.62, 0, kw / 2 + 0.01, base)
+    for x in (-kw * 0.28, kw * 0.28):
+        window(B, G, pal, x, base + kh * 0.55, kw / 2 + 0.01, w=0.16, h=0.24, shutters=False)
+    B.box(pal['stone2'], kw + 0.06, 0.08, kw + 0.06, 0, base + kh * 0.42, 0)   # string course
+    # portcullis bars in the gate
+    for bx in (-0.24, -0.08, 0.08, 0.24):
+        B.box(pal['steel'], 0.04, gh - 0.34, 0.03, bx, 0.02, half + 0.27)
+    B.box(pal['steel'], 0.7, 0.04, 0.03, 0, (gh - 0.3) * 0.55, half + 0.27)
+    if t >= 3:
+        for (x, z) in corners[:2]:
+            banner(B, pal, x, z, tower_h + 0.18 + tr * 2.1, 0.7, big=0.6)
     upper_w = kw * 0.6
     uh = 0.8 if t == 2 else 1.2
     top2 = keep_block(B, G, pal, upper_w, upper_w, uh, top, roof='pyramid', windows=0)
@@ -240,43 +300,77 @@ def tower(k, t, pal):
 # ---------------------------------------------------------------- houses
 
 def house(k, t, pal):
+    """Cottages that grow into a timbered townhouse: overhanging roofs,
+    chimneys, framed lit windows with shutters, a flower box."""
     B, G = k.B, k.G
     B.box(pal['stone3'], 1.6, 0.1, 1.5, 0, 0, 0)
     if t == 1:
-        B.box(pal['stone'], 1.0, 0.65, 0.85, 0, 0.1, 0)
-        B.gable(pal['roof'], 1.0, 0.5, 0.85, 0, 0.75, 0, ry=math.pi / 2)
-        door(B, pal, 0.2, 0.36, 0.2, 0.43, 0.1)
-        G.box(pal['warm'], 0.14, 0.14, 0.04, -0.22, 0.42, 0.44)
-        B.box(pal['wood'], 0.26, 0.2, 0.26, 0.6, 0.1, 0.5)
+        B.box(pal['stone3'], 1.06, 0.14, 0.91, 0, 0.1, 0)                    # foundation course
+        B.box(pal['stone'], 1.0, 0.55, 0.85, 0, 0.24, 0)
+        for sx in (-1, 1):
+            B.box(pal['wood'], 0.06, 0.55, 0.06, sx * 0.48, 0.24, 0.41)      # corner posts
+        B.gable(pal['roof'], 1.0, 0.52, 0.85, 0, 0.79, 0, ry=math.pi / 2, overhang=0.14)
+        ridge(B, pal, 1.0, 1.29, ry=math.pi / 2, length=1.2)
+        chimney(B, pal, -0.3, 0.95, -0.2, h=0.42)
+        door(B, pal, 0.2, 0.36, 0.2, 0.43, 0.24)
+        window(B, G, pal, -0.22, 0.48, 0.43)
+        flower_box(B, pal, -0.22, 0.39, 0.43)
+        B.box(pal['wood'], 0.26, 0.2, 0.26, 0.6, 0.1, 0.5)                   # woodpile
+        B.box(shade(pal['wood'], 0.8), 0.3, 0.06, 0.3, 0.6, 0.3, 0.5)
         return
     if t == 2:
-        B.box(pal['stone'], 1.15, 1.25, 0.95, 0, 0.1, 0)
-        B.box(pal['stone2'], 1.2, 0.07, 1.0, 0, 0.7, 0)
-        B.gable(pal['roof'], 1.15, 0.6, 0.95, 0, 1.35, 0, ry=math.pi / 2)
-        B.box(pal['stone2'], 0.2, 0.55, 0.2, 0.35, 1.45, -0.2)
-        door(B, pal, 0.22, 0.4, 0, 0.48, 0.1)
-        for x in (-0.33, 0.33):
-            G.box(pal['warm'], 0.14, 0.16, 0.04, x, 0.95, 0.48)
+        B.box(pal['stone3'], 1.21, 0.12, 1.01, 0, 0.1, 0)
+        B.box(pal['stone2'], 1.15, 0.6, 0.95, 0, 0.22, 0)                    # stone ground floor
+        B.box(pal['stone'], 1.25, 0.62, 1.05, 0, 0.82, 0)                    # jettied upper floor
+        timber_front(B, pal, 1.25, 0.82, 1.44, 0.53, posts=4)
+        B.gable(pal['roof'], 1.25, 0.62, 1.05, 0, 1.44, 0, ry=math.pi / 2, overhang=0.15)
+        ridge(B, pal, 1.25, 2.06, ry=math.pi / 2, length=1.45)
+        chimney(B, pal, 0.38, 1.6, -0.25, h=0.62)
+        door(B, pal, 0.22, 0.4, 0, 0.48, 0.22)
+        for x in (-0.36, 0.36):
+            window(B, G, pal, x, 0.36, 0.48, shutters=False)
+            window(B, G, pal, x, 1.04, 0.53)
+        flower_box(B, pal, -0.36, 0.95, 0.53)
+        flower_box(B, pal, 0.36, 0.95, 0.53)
         return
     if t == 3:
-        B.box(pal['stone'], 1.2, 1.3, 0.8, -0.1, 0.1, -0.25)
-        B.gable(pal['roof'], 1.2, 0.6, 0.8, -0.1, 1.4, -0.25, ry=math.pi / 2)
-        B.box(pal['stone'], 0.6, 1.0, 0.7, 0.35, 0.1, 0.35)
-        B.gable(pal['roof2'], 0.6, 0.45, 0.7, 0.35, 1.1, 0.35)
+        B.box(pal['stone3'], 1.26, 0.12, 0.86, -0.1, 0.1, -0.25)
+        B.box(pal['stone'], 1.2, 1.2, 0.8, -0.1, 0.2, -0.25)
+        timber_front(B, pal, 1.2, 0.78, 1.4, 0.16, posts=3)
+        B.gable(pal['roof'], 1.2, 0.6, 0.8, -0.1, 1.4, -0.25, ry=math.pi / 2, overhang=0.14)
+        ridge(B, pal, 1.2, 2.0, z=-0.25, ry=math.pi / 2, length=1.4)
+        B.box(pal['stone'], 0.6, 0.9, 0.7, 0.35, 0.2, 0.35)
+        B.gable(pal['roof2'], 0.6, 0.45, 0.7, 0.35, 1.1, 0.35, overhang=0.12)
+        chimney(B, pal, -0.5, 1.55, -0.45, h=0.55)
         round_tower(B, G, pal, -0.6, 0.35, 0.22, 1.6)
-        door(B, pal, 0.22, 0.4, 0.35, 0.71, 0.1)
+        door(B, pal, 0.22, 0.4, 0.35, 0.71, 0.2)
+        window(B, G, pal, 0.35, 0.82, 0.71, shutters=False)
         for x in (-0.45, 0.1):
-            G.box(pal['warm'], 0.14, 0.16, 0.04, x, 0.95, 0.16)
+            window(B, G, pal, x, 0.95, 0.16)
+        flower_box(B, pal, 0.1, 0.86, 0.16)
         return
-    # t4: tall townhouse — three storeys, one roof, a chimney
-    B.box(pal['stone'], 1.2, 2.3, 1.05, 0, 0.1, 0)
-    for y in (0.85, 1.6):
-        B.box(pal['stone2'], 1.26, 0.08, 1.1, 0, y, 0)
-        for x in (-0.33, 0.0, 0.33):
-            G.box(pal['warm'], 0.14, 0.18, 0.04, x, y + 0.3, 0.53)
-    B.gable(pal['roof'], 1.2, 0.6, 1.05, 0, 2.4, 0, ry=math.pi / 2)
-    B.box(pal['stone2'], 0.22, 0.6, 0.22, 0.38, 2.5, -0.25)
-    door(B, pal, 0.24, 0.45, 0, 0.53, 0.1)
+    # t4: tall timbered townhouse — three storeys, a dormer, two chimneys
+    B.box(pal['stone3'], 1.26, 0.14, 1.11, 0, 0.1, 0)
+    B.box(pal['stone2'], 1.2, 0.75, 1.05, 0, 0.24, 0)
+    B.box(pal['stone'], 1.3, 1.4, 1.12, 0, 0.99, 0)
+    timber_front(B, pal, 1.3, 0.99, 1.69, 0.565, posts=4)
+    timber_front(B, pal, 1.3, 1.69, 2.39, 0.565, posts=4)
+    for y in (0.99, 1.69):
+        B.box(pal['stone2'], 1.36, 0.08, 1.18, 0, y - 0.04, 0)
+    for x in (-0.36, 0.0, 0.36):
+        window(B, G, pal, x, 1.2, 0.565)
+        window(B, G, pal, x, 1.9, 0.565, shutters=False)
+    for x in (-0.36, 0.36):
+        window(B, G, pal, x, 0.5, 0.53, shutters=False)
+    B.gable(pal['roof'], 1.3, 0.66, 1.12, 0, 2.39, 0, ry=math.pi / 2, overhang=0.16)
+    ridge(B, pal, 1.3, 3.05, ry=math.pi / 2, length=1.5)
+    B.box(pal['stone'], 0.34, 0.3, 0.3, 0, 2.45, 0.42)                     # dormer
+    B.gable(pal['roof2'], 0.34, 0.2, 0.34, 0, 2.75, 0.42, overhang=0.06)
+    window(B, G, pal, 0, 2.52, 0.575, w=0.12, h=0.14, shutters=False, sill=False)
+    chimney(B, pal, 0.42, 2.55, -0.3, h=0.7)
+    chimney(B, pal, -0.42, 2.55, -0.3, h=0.55)
+    door(B, pal, 0.24, 0.45, 0, 0.53, 0.24)
+    banner(B, pal, 0.72, 0.4, 0.9, 1.0, big=0.7)
 
 
 # ---------------------------------------------------------------- farm
@@ -289,17 +383,36 @@ def farm(k, t, pal):
         z = -0.75 + i * (1.5 / (rows - 1))
         c = pal['crop'] if (i + t) % 2 else pal['crop2']
         B.box(c, 1.1 if t < 3 else 0.9, 0.16, 0.2, -0.3 if t < 3 else -0.45, 0.08, z)
+    # split-rail fence on three sides
+    for x in (-0.88, 0.88):
+        for z in (-0.88, 0, 0.88):
+            B.box(pal['wood'], 0.06, 0.28, 0.06, x, 0.08, z)
+        B.box(shade(pal['wood'], 0.9), 0.04, 0.04, 1.8, x, 0.26, 0)
+    for z in (-0.88,):
+        for x in (-0.44, 0.44):
+            B.box(pal['wood'], 0.06, 0.28, 0.06, x, 0.08, z)
+        B.box(shade(pal['wood'], 0.9), 1.8, 0.04, 0.04, 0, 0.26, z)
     if t == 1:
-        for x in (-0.88, 0.88):
-            for z in (-0.88, 0, 0.88):
-                B.box(pal['wood'], 0.06, 0.28, 0.06, x, 0.08, z)
         B.box(pal['wood'], 0.4, 0.35, 0.4, 0.62, 0.08, 0.55)
-        B.gable(pal['roof'], 0.4, 0.24, 0.4, 0.62, 0.43, 0.55)
+        B.gable(pal['roof'], 0.4, 0.24, 0.4, 0.62, 0.43, 0.55, overhang=0.1)
+        B.box(pal['dark'], 0.14, 0.22, 0.03, 0.62, 0.08, 0.76)
+        # scarecrow
+        B.box(pal['wood'], 0.04, 0.6, 0.04, -0.62, 0.08, 0.62)
+        B.box(pal['wood'], 0.4, 0.04, 0.04, -0.62, 0.48, 0.62)
+        B.box(pal['accent'], 0.16, 0.18, 0.08, -0.62, 0.36, 0.62)
+        B.box(0xe9cf8a, 0.12, 0.12, 0.12, -0.62, 0.56, 0.62)
+        B.prism(pal['wood'], 6, 0.12, 0, 0.1, -0.62, 0.68, 0.62)
         return
     # barn + silo
     B.box(pal['accent'], 0.6, 0.55, 0.75, 0.55, 0.08, 0.3)
-    B.gable(pal['roof2'], 0.6, 0.35, 0.75, 0.55, 0.63, 0.3)
-    B.box(pal['stone'], 0.2, 0.3, 0.04, 0.55, 0.08, 0.68)
+    B.gable(pal['roof2'], 0.6, 0.35, 0.75, 0.55, 0.63, 0.3, overhang=0.1)
+    B.box(pal['stone'], 0.26, 0.34, 0.04, 0.55, 0.08, 0.68)                 # barn door + white X
+    B.box(pal['stone'], 0.04, 0.4, 0.05, 0.55, 0.06, 0.69, 0, 0, 0.6)
+    B.box(pal['stone'], 0.04, 0.4, 0.05, 0.55, 0.06, 0.69, 0, 0, -0.6)
+    B.box(pal['dark'], 0.12, 0.12, 0.04, 0.55, 0.5, 0.68)                   # hayloft
+    for (hx, hz) in ((-0.15, 0.72), (0.12, 0.8)):                           # haystacks
+        B.prism(pal['crop2'], 6, 0.14, 0.1, 0.16, hx, 0.08, hz)
+        B.prism(shade(pal['crop2'], 0.9), 6, 0.1, 0, 0.1, hx, 0.24, hz)
     B.prism(pal['stone'], 8, 0.22, 0.22, 1.0, 0.6, 0.08, -0.5)
     B.prism(pal['roof'], 8, 0.25, 0, 0.3, 0.6, 1.08, -0.5)
     if t >= 3:
@@ -374,8 +487,16 @@ def camp(k, t, pal, trade='militia'):
     hall_w = 1.1 if t == 1 else 1.3
     B.box(pal['stone'], hall_w, 0.7 if t == 1 else 0.95, 0.75, 0, 0.1, -0.45)
     rh = 0.8 if t == 1 else 1.05
-    B.gable(col, hall_w, 0.42, 0.75, 0, rh, -0.45, ry=math.pi / 2)
+    B.box(pal['stone3'], hall_w + 0.06, 0.12, 0.81, 0, 0.1, -0.45)          # foundation course
+    B.gable(col, hall_w, 0.42, 0.75, 0, rh, -0.45, ry=math.pi / 2, overhang=0.14)
+    B.box(shade(col, 0.7), 0.06, 0.05, hall_w + 0.3, 0, rh + 0.42, -0.45, 0, math.pi / 2, 0)
+    chimney(B, pal, hall_w * 0.32, rh + 0.1, -0.62, h=0.4, w=0.16)
     door(B, pal, 0.26, 0.45, 0, -0.07, 0.1)
+    for sx in (-1, 1):
+        window(B, G, pal, sx * hall_w * 0.32, 0.42, -0.07, w=0.12, h=0.14, shutters=False)
+    # shield over the door in the trade colour
+    B.box(pal['trim'], 0.2, 0.2, 0.03, 0, rh - 0.2, -0.065)
+    B.box(col, 0.15, 0.15, 0.04, 0, rh - 0.175, -0.06)
     banner(B, pal, -0.8, -0.1, 0.1, 1.3, color=col)
     # training yard: weapon rack + dummies
     B.box(pal['wood'], 0.5, 0.06, 0.08, -0.45, 0.4, 0.55)
@@ -549,75 +670,173 @@ def marksman(k, pal):
 # Daniel: a low, finned stealth bike with twin blades.
 
 HERO_LOOK = {
-    'scott': {'main': 0xb32020, 'trim': 0xf4f1e8, 'bike': 0x3a3f4c, 'glow': 0xff8a5c},
-    'alexander': {'main': 0x2f8f46, 'trim': 0xf3c53d, 'bike': 0xeee5cf, 'glow': 0x8ff3ff},
-    'danny': {'main': 0x2468c9, 'trim': 0x16181e, 'bike': 0x22262f, 'glow': 0x7dffb2},
+    'scott': {'main': 0xb32020, 'trim': 0xf4f1e8, 'bike': 0x3a3f4c, 'glow': 0xff8a5c,
+              'cape': 0x7a1414, 'hair': 0x6b3f22},
+    'alexander': {'main': 0x2f8f46, 'trim': 0xf3c53d, 'bike': 0xeee5cf, 'glow': 0x8ff3ff,
+                  'cape': 0x1f6a33, 'hair': 0x3a2a1c},
+    'danny': {'main': 0x2468c9, 'trim': 0x16181e, 'bike': 0x22262f, 'glow': 0x7dffb2,
+              'cape': 0x173f7a, 'hair': 0x16181e},
 }
-
-
-def _bike(B, G, look, length, width, height, nose, fins=False, heavy=False):
-    y0 = 0.22
-    B.box(look['bike'], width, height, length, 0, y0, -0.05)
-    B.box(look['main'], width * 0.8, height * 0.6, nose, 0, y0 + height * 0.25, length / 2 + nose / 2 - 0.08)
-    B.prism(look['main'], 4, width * 0.42, 0, nose * 0.7, 0, y0 + height * 0.55, length / 2 + nose * 0.75,
-            rx=math.pi / 2, phase=math.pi / 4)
-    B.box(look['trim'], width + 0.04, 0.05, length * 0.7, 0, y0 + height, -0.05)
-    for sx in (-1, 1):
-        B.box(look['bike'], 0.12 if heavy else 0.08, 0.14, length * 0.7, sx * (width / 2 + 0.06), y0 - 0.04, -0.05)
-        G.box(look['glow'], 0.1, 0.03, length * 0.55, sx * (width / 2 + 0.06), y0 - 0.06, -0.05)
-    G.box(look['glow'], width * 0.6, 0.1, 0.05, 0, y0 + height * 0.3, -length / 2 - 0.07)  # thruster
-    G.box(look['glow'], width * 0.7, 0.03, length * 0.8, 0, 0.1, -0.05)                   # hover wash
-    B.box(pal_dark(), 0.5 * width, 0.05, 0.05, 0, y0 + height + 0.18, length / 2 - 0.12)   # handlebar
-    if fins:
-        for sx in (-1, 1):
-            B.box(look['main'], 0.03, 0.22, 0.3, sx * width * 0.35, y0 + height, -length / 2 + 0.15, 0, 0, sx * 0.4)
 
 
 def pal_dark():
     return 0x23262e
 
 
+def _bike(B, G, look, length, width, height, nose, style):
+    """Hoverbike: hull, fairing with headlamp, saddle, side pods with hover
+    glow, tail fender and exhausts. style picks the silhouette."""
+    y0 = 0.22
+    dk = pal_dark()
+    hl = length / 2
+    # hull, tapered: a wide mid block and a narrower tail
+    B.box(look['bike'], width, height, length * 0.62, 0, y0, 0.02)
+    B.box(shade(look['bike'], 0.82), width * 0.78, height * 0.86, length * 0.4, 0, y0 + 0.02, -hl + length * 0.2)
+    # fairing + nose
+    B.box(look['main'], width * 0.86, height * 0.7, nose, 0, y0 + height * 0.22, hl - nose / 2 + 0.04)
+    B.prism(look['main'], 4, width * 0.42, 0, nose * 0.8, 0, y0 + height * 0.55, hl + nose * 0.32,
+            rx=math.pi / 2, phase=math.pi / 4)
+    G.box(0xfff4c8, width * 0.34, 0.07, 0.03, 0, y0 + height * 0.5, hl + 0.06)      # headlamp
+    # windscreen
+    B.box(shade(look['glow'], 0.55), width * 0.6, 0.16, 0.03, 0, y0 + height + 0.02, hl - nose - 0.02, -0.5, 0, 0)
+    # trim stripe and saddle
+    B.box(look['trim'], width + 0.03, 0.045, length * 0.66, 0, y0 + height * 0.62, 0.0)
+    B.box(dk, width * 0.5, 0.07, 0.34, 0, y0 + height, -0.14)
+    # handlebar
+    B.box(dk, 0.56 * width + 0.12, 0.045, 0.05, 0, y0 + height + 0.16, hl - nose - 0.12)
+    for sx in (-1, 1):
+        B.box(dk, 0.05, 0.18, 0.05, sx * width * 0.22, y0 + height, hl - nose - 0.12, -0.3, 0, 0)
+    # side pods with hover glow
+    pod = 0.13 if style == 'heavy' else 0.09
+    for sx in (-1, 1):
+        B.box(shade(look['bike'], 0.7), pod, 0.14, length * 0.72, sx * (width / 2 + pod / 2), y0 - 0.05, -0.02)
+        G.box(look['glow'], pod * 0.8, 0.03, length * 0.56, sx * (width / 2 + pod / 2), y0 - 0.07, -0.02)
+        # exhausts
+        B.prism(dk, 6, 0.045, 0.04, 0.16, sx * width * 0.26, y0 + height * 0.35, -hl - 0.02, rx=math.pi / 2)
+        G.box(look['glow'], 0.05, 0.05, 0.02, sx * width * 0.26, y0 + height * 0.33, -hl - 0.17)
+    G.box(look['glow'], width * 0.7, 0.03, length * 0.78, 0, 0.1, -0.02)            # hover wash
+    # tail fender
+    B.box(look['main'], width * 0.7, 0.05, 0.22, 0, y0 + height * 0.9, -hl + 0.06, 0.25, 0, 0)
+    if style == 'heavy':
+        # bull bar and armour plates
+        B.box(look['trim'], width + 0.1, 0.06, 0.06, 0, y0 + 0.02, hl + 0.06)
+        for sx in (-1, 1):
+            B.box(shade(look['main'], 0.85), 0.05, height * 0.8, length * 0.34, sx * (width / 2 + 0.01), y0 + 0.04, 0.12)
+    elif style == 'lancer':
+        # long nose spike and a gold fin
+        B.prism(look['trim'], 4, 0.04, 0, 0.36, 0, y0 + height * 0.5, hl + nose * 0.5, rx=math.pi / 2, phase=math.pi / 4)
+        B.box(look['trim'], 0.03, 0.16, 0.32, 0, y0 + height, -hl + 0.2, 0.3, 0, 0)
+    else:
+        # swept stealth fins and blade vanes
+        for sx in (-1, 1):
+            B.box(look['main'], 0.03, 0.24, 0.32, sx * width * 0.36, y0 + height * 0.8, -hl + 0.16, 0.5, 0, sx * 0.45)
+            B.box(look['trim'], 0.2, 0.02, 0.36, sx * (width / 2 + 0.12), y0 + 0.04, 0.1, 0, sx * 0.3, 0)
+
+
+def _rider(B, G, pal, look, seat, wide=1.0, boot=None):
+    """Seated rider: thighs on the saddle, shins to the pegs, belt, torso
+    with a lighter chest plate. Returns the neck height."""
+    boot = boot or pal_dark()
+    for sx in (-1, 1):
+        B.box(shade(look['main'], 0.7), 0.12 * wide, 0.12, 0.34, sx * 0.13 * wide, seat - 0.12, 0.02)  # thigh
+        B.box(boot, 0.11 * wide, 0.26, 0.13, sx * 0.15 * wide, seat - 0.34, 0.16, -0.25, 0, 0)          # shin+boot
+    B.box(pal_dark(), 0.38 * wide, 0.07, 0.25, 0, seat - 0.02, -0.12)                  # belt
+    B.box(look['trim'], 0.07, 0.06, 0.03, 0, seat - 0.01, 0.01)                         # buckle
+    B.box(look['main'], 0.36 * wide, 0.3, 0.24, 0, seat + 0.04, -0.12)                  # torso
+    B.box(shade(look['main'], 1.2), 0.26 * wide, 0.18, 0.04, 0, seat + 0.12, 0.0)      # chest plate
+    return seat + 0.34
+
+
+def _face(B, pal, y, z, w=0.22, eyes=0x1b1d24):
+    B.box(pal['skin'], w, 0.22, 0.22, 0, y, z)                     # head
+    for sx in (-1, 1):
+        B.box(eyes, 0.035, 0.045, 0.02, sx * 0.05, y + 0.11, z + 0.11)
+    B.box(shade(pal['skin'], 0.8), 0.05, 0.04, 0.03, 0, y + 0.06, z + 0.11)  # nose
+
+
+def _cape(B, look, top, z, w, length, sway=0.0):
+    """Two-panel cape from the shoulders, flaring back."""
+    B.box(look['cape'], w, length * 0.55, 0.035, 0, top - length * 0.55, z, -0.18, 0, sway)
+    B.box(shade(look['cape'], 0.85), w * 1.12, length * 0.5, 0.035, 0, top - length * 1.0, z - 0.1, -0.42, 0, sway)
+
+
 def hero(k, key, pal):
     B, G = k.B, k.G
     look = HERO_LOOK[key]
+    dk = pal_dark()
     if key == 'scott':
-        _bike(B, G, look, 1.0, 0.46, 0.26, 0.28, heavy=True)
-        seat = 0.5
-        B.box(look['main'], 0.44, 0.36, 0.3, 0, seat, -0.12)          # torso
-        B.box(look['trim'], 0.6, 0.16, 0.36, 0, seat + 0.3, -0.12)    # pauldrons
-        B.box(look['main'], 0.3, 0.28, 0.3, 0, seat + 0.42, -0.1)     # helm
-        G.box(look['glow'], 0.22, 0.05, 0.03, 0, seat + 0.55, 0.06)
-        B.box(pal_dark(), 0.06, 0.8, 0.06, 0.14, seat + 0.05, -0.32, -0.6, 0, 0)  # maul haft
-        B.box(look['bike'], 0.34, 0.24, 0.24, 0.14, seat + 0.62, -0.62, -0.6, 0, 0)
-        G.box(0x7a9cf0, 0.36, 0.06, 0.26, 0.14, seat + 0.72, -0.6, -0.6, 0, 0)
-        arm_w, arm_c = 0.14, look['main']
-    elif key == 'alexander':
-        _bike(B, G, look, 1.3, 0.38, 0.2, 0.4)
-        seat = 0.46
-        B.box(look['main'], 0.34, 0.34, 0.24, 0, seat, -0.15)
-        B.box(look['trim'], 0.36, 0.05, 0.26, 0, seat + 0.12, -0.15)
-        B.box(pal['skin'], 0.22, 0.22, 0.22, 0, seat + 0.36, -0.12)
-        B.box(look['trim'], 0.26, 0.08, 0.26, 0, seat + 0.56, -0.12)  # gold circlet helm
-        B.box(look['main'], 0.3, 0.42, 0.04, 0, seat - 0.05, -0.3)    # cape
-        B.box(pal_dark(), 0.06, 0.06, 1.0, -0.16, seat + 0.18, -0.25, 0.5, 0, 0)  # rail rifle
-        G.box(look['glow'], 0.03, 0.03, 0.4, -0.16, seat + 0.24, -0.15, 0.5, 0, 0)
-        banner(B, pal, 0.15, -0.6, 0.4, 1.0, color=look['main'])
-        arm_w, arm_c = 0.11, look['main']
-    else:
-        _bike(B, G, look, 1.15, 0.34, 0.16, 0.36, fins=True)
-        seat = 0.4
-        B.box(look['trim'], 0.32, 0.3, 0.24, 0, seat, -0.12)
-        B.box(look['main'], 0.34, 0.05, 0.26, 0, seat + 0.08, -0.12)
-        B.box(look['main'], 0.26, 0.26, 0.26, 0, seat + 0.3, -0.06)
-        B.prism(look['main'], 4, 0.2, 0, 0.26, 0, seat + 0.5, -0.08, phase=math.pi / 4)  # hood
-        G.box(look['glow'], 0.16, 0.04, 0.03, 0, seat + 0.42, 0.08)
+        # The brawler: a broad red bruiser on a heavy armoured bike, open
+        # crested helm over a bearded face, gravity maul across the back.
+        _bike(B, G, look, 1.02, 0.5, 0.27, 0.28, 'heavy')
+        seat = 0.52
+        neck = _rider(B, G, pal, look, seat, wide=1.2)
+        for sx in (-1, 1):                                             # big round pauldrons
+            B.prism(look['trim'], 6, 0.13, 0.1, 0.12, sx * 0.27, neck - 0.08, -0.12)
+            B.box(look['main'], 0.2, 0.04, 0.2, sx * 0.27, neck + 0.04, -0.12)
+        _face(B, pal, neck, -0.1, w=0.24)
+        B.box(look['hair'], 0.25, 0.1, 0.08, 0, neck - 0.01, 0.0)                 # beard
+        B.box(look['hair'], 0.16, 0.06, 0.06, 0, neck - 0.05, 0.02)
+        B.box(look['main'], 0.29, 0.14, 0.27, 0, neck + 0.17, -0.12)              # helm dome
+        B.box(look['main'], 0.29, 0.2, 0.06, 0, neck + 0.02, -0.24)               # helm back
         for sx in (-1, 1):
-            B.box(0xd8dde6, 0.04, 0.6, 0.04, sx * 0.1, seat + 0.05, -0.28, -0.4, 0, sx * 0.4)
-            G.box(look['glow'], 0.02, 0.4, 0.02, sx * 0.1, seat + 0.2, -0.3, -0.4, 0, sx * 0.4)
+            B.box(look['main'], 0.04, 0.16, 0.16, sx * 0.14, neck + 0.04, -0.08)  # cheek guards
+        B.box(look['trim'], 0.05, 0.12, 0.3, 0, neck + 0.29, -0.13)               # crest
+        G.box(look['glow'], 0.24, 0.035, 0.02, 0, neck + 0.17, 0.02)              # brow band
+        _cape(B, look, neck - 0.02, -0.26, 0.34, 0.36)
+        # gravity maul slung across the back
+        B.box(dk, 0.06, 0.86, 0.06, 0.04, seat - 0.05, -0.32, -0.15, 0, -0.75)
+        B.box(look['bike'], 0.36, 0.24, 0.24, 0.36, seat + 0.5, -0.4, 0, 0, -0.75)
+        B.box(look['trim'], 0.4, 0.05, 0.27, 0.36, seat + 0.5, -0.4, 0, 0, -0.75)
+        G.box(0x7a9cf0, 0.04, 0.16, 0.2, 0.52, seat + 0.62, -0.4, 0, 0, -0.75)
+        arm_w, arm_c = 0.15, look['main']
+        sh = 0.27
+    elif key == 'alexander':
+        # The lancer: long cream-and-green racer, gold-crowned helm with a
+        # plume, a flowing green cape, rail rifle and his house banner.
+        _bike(B, G, look, 1.32, 0.38, 0.2, 0.42, 'lancer')
+        seat = 0.46
+        neck = _rider(B, G, pal, look, seat)
+        for sx in (-1, 1):
+            B.box(look['trim'], 0.15, 0.08, 0.2, sx * 0.21, neck - 0.07, -0.12, 0, 0, sx * -0.35)
+        _face(B, pal, neck, -0.11)
+        B.box(look['hair'], 0.23, 0.08, 0.2, 0, neck + 0.16, -0.14)               # hair under helm
+        B.box(look['main'], 0.25, 0.1, 0.25, 0, neck + 0.19, -0.12)               # half helm
+        B.box(look['trim'], 0.27, 0.05, 0.27, 0, neck + 0.18, -0.12)              # gold circlet
+        for i, sx in enumerate((-0.09, 0, 0.09)):
+            B.prism(look['trim'], 4, 0.035, 0, 0.09 if i != 1 else 0.13, sx, neck + 0.23, -0.01, phase=math.pi / 4)
+        B.box(0xc4473b, 0.05, 0.15, 0.18, 0, neck + 0.27, -0.2, 0.55, 0, 0)       # plume
+        _cape(B, look, neck - 0.02, -0.25, 0.36, 0.58, sway=0.08)
+        B.box(look['trim'], 0.36, 0.04, 0.04, 0, neck - 0.05, -0.24)              # cape clasp bar
+        B.box(dk, 0.06, 0.06, 1.0, -0.2, seat + 0.16, -0.25, 0.5, 0, 0)           # rail rifle
+        G.box(look['glow'], 0.03, 0.03, 0.4, -0.2, seat + 0.22, -0.15, 0.5, 0, 0)
+        banner(B, pal, 0.17, -0.62, 0.4, 1.05, color=look['main'])
+        arm_w, arm_c = 0.11, look['main']
+        sh = 0.22
+    else:
+        # The shadow: low finned stealth bike, hooded with a glowing visor
+        # and masked face, scarf streaming behind, twin blades crossed.
+        _bike(B, G, look, 1.16, 0.34, 0.16, 0.36, 'stealth')
+        seat = 0.4
+        neck = _rider(B, G, pal, look, seat, boot=look['trim'])
+        B.box(look['trim'], 0.3, 0.06, 0.22, 0, neck - 0.08, -0.12)              # dark collar
+        _face(B, pal, neck, -0.07, w=0.2)
+        B.box(look['main'], 0.21, 0.09, 0.05, 0, neck, 0.03)                     # mask
+        G.box(look['glow'], 0.18, 0.04, 0.02, 0, neck + 0.11, 0.045)             # visor
+        B.prism(look['main'], 4, 0.2, 0.1, 0.24, 0, neck + 0.08, -0.1, phase=math.pi / 4)  # hood
+        B.prism(look['main'], 4, 0.1, 0, 0.08, 0, neck + 0.32, -0.12, phase=math.pi / 4)  # hood peak
+        B.box(look['main'], 0.24, 0.24, 0.06, 0, neck - 0.02, -0.2)              # hood back
+        B.box(look['cape'], 0.08, 0.04, 0.42, 0.06, neck - 0.04, -0.42, 0.35, 0.2, 0)   # scarf tail
+        B.box(look['cape'], 0.07, 0.04, 0.3, 0.12, neck - 0.14, -0.7, 0.55, 0.35, 0)
+        for sx in (-1, 1):                                                       # crossed blades
+            B.box(0xd8dde6, 0.04, 0.62, 0.04, sx * 0.08, seat + 0.02, -0.28, -0.25, 0, sx * 0.55)
+            G.box(look['glow'], 0.02, 0.42, 0.02, sx * 0.08, seat + 0.14, -0.29, -0.25, 0, sx * 0.55)
+            B.box(look['trim'], 0.12, 0.03, 0.06, sx * 0.08, seat + 0.0, -0.28, -0.25, 0, sx * 0.55)
         arm_w, arm_c = 0.1, look['trim']
+        sh = 0.21
     for name, sx in (('arm_l', -1), ('arm_r', 1)):
-        A = k.part(name, origin=(sx * 0.22, seat + 0.28, -0.08))
-        A.box(arm_c, arm_w, 0.12, 0.38, sx * 0.22, seat + 0.2, 0.08, -0.35, 0, 0)
+        A = k.part(name, origin=(sx * sh, seat + 0.28, -0.08))
+        A.box(arm_c, arm_w, 0.12, 0.38, sx * sh, seat + 0.2, 0.08, -0.35, 0, 0)
+        A.box(look['trim'] if key != 'danny' else look['main'], arm_w + 0.02, 0.08, 0.08, sx * sh, seat + 0.03, 0.4, -0.35, 0, 0)  # gauntlet
 
 
 # ---------------------------------------------------------------- enemies
