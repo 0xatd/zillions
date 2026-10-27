@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HEROES, HERO_UPGRADE_KEYS, HERO_UPGRADE_MAX, PLOT_KINDS } from '../src/config.js';
@@ -91,7 +91,15 @@ assert.ok(packageJson.scripts?.check?.includes('sim-determinism-check.mjs'), 'np
 assert.ok(packageJson.scripts?.check?.includes('art-asset-check.mjs'), 'npm run check must validate production GLBs');
 assert.ok(packageJson.scripts?.check?.includes('art-state-check.mjs'), 'npm run check must validate presentation states');
 assert.ok(packageJson.scripts?.check?.includes('fog-of-war-check.mjs'), 'npm run check must validate fog-of-war source rules');
-assert.ok(packageJson.scripts?.check?.includes('galaxy-check.mjs'), 'npm run check must validate the galaxy and meta-progression layers');
+assert.ok(packageJson.scripts?.check?.includes('meta-check.mjs'), 'npm run check must validate procedural levels and the meta-progression ladder');
+assert.ok(packageJson.scripts?.check?.includes('match-result-check.mjs'), 'npm run check must validate server-authoritative match rewards');
+for (const removed of ['galaxy-check.mjs', 'overworld-check.mjs', 'galaxy-state-check.mjs', 'living-world']) {
+  assert.ok(!JSON.stringify(packageJson.scripts).includes(removed), `package scripts must not reference the removed MMO layer (${removed})`);
+}
+for (const removed of ['src/galaxy.js', 'src/overworld.js', 'src/living-world.js', 'api/living-world.js', 'api/galaxy-state.js']) {
+  assert.ok(!existsSync(join(root, removed)), `${removed} belongs to the removed MMO layer`);
+}
+assert.ok(!read('vercel.json').includes('living-world'), 'vercel.json must not schedule removed living-world crons');
 assert.ok(packageJson.scripts?.check?.includes('first-siege-check.mjs'), 'npm run check must validate the guided First Siege');
 assert.ok(packageJson.scripts?.check?.includes('stabilization-check.mjs'), 'npm run check must validate entry and control contracts');
 assert.ok(read('src/main.js').includes('this._updateFogOfWar()'), 'main renderer must update the tactical vision shroud');
@@ -203,12 +211,12 @@ const uiSource = read('src/ui.js');
 assert.doesNotMatch(uiSource, /id="a-custom"/, 'the signed-out login screen must not expose account game modes');
 assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must expose Cinematics');
 assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
-assert.match(uiSource, /id="m-enter-world">ENTER WORLD/, 'Character Select must use the traditional Enter World action');
+assert.match(uiSource, /id="m-enter-world">DEPLOY/, 'Character Select must deploy straight to the siege missions');
 assert.match(uiSource, /id="m-custom">CUSTOM GAMES/, 'Character Select must retain Custom Games');
 assert.match(uiSource, /id="m-delete-character">DELETE CHARACTER/, 'Character Select must expose confirmed character deletion');
-assert.match(uiSource, /id="screen-world-menu"/, 'the overworld must have a separate Game Menu');
-assert.match(uiSource, /id="ow-characters">CHARACTER SELECT/, 'the Game Menu must expose Character Select explicitly');
-assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open the overworld');
+assert.doesNotMatch(uiSource, /id="screen-world-menu"|id="living-world-map"|id="screen-galaxy"/, 'the overworld, living-world map, and galaxy screens were removed');
+assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open mission select');
+assert.match(mainSource, /onCampaignMap: \(\) => this\._openCampaignSelect\(\)/, 'Enter World must route to the campaign mission select');
 assert.match(uiSource, /id="screen-solo"/, 'custom games must have their own mode screen');
 assert.match(uiSource, /id="solo-survival-resume"/, 'survival resumes must stay inside Survival');
 assert.doesNotMatch(uiSource, /id="m-continuerow"/, 'Continue must not return as a generic home-screen action');
@@ -220,10 +228,10 @@ assert.match(mainSource, /new MenuVignette/, 'title scene must preserve the live
 assert.match(mainSource, /constellationGeo/, 'title orbit must use stars and constellation marks instead of a ringed moon');
 assert.match(mainSource, /new THREE\.DataTexture\(globePixels/, 'title orbit must render a readable textured globe');
 assert.doesNotMatch(mainSource, /moonRing/, 'title orbit must not restore the distracting Saturn-like moon');
-// The character screen must stay reachable from the persistent world. The key
+// The character screen must stay reachable from the between-mission menus. The key
 // is no longer a literal — it comes from the binding table — so this asserts
 // the dispatch rather than the letter, and keybind-check pins the default to C.
-assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet' && this\.ow[\s\S]*this\.ui\.showCharacterSheet\('gear'\)/, 'Character Info must be reachable from the persistent world');
+assert.match(mainSource, /!this\.game && actionFor\(this\.binds\(\), k, 'hub'\) === 'character_sheet'[\s\S]*this\.ui\.showCharacterSheet\('gear'\)/, 'Character Info must be reachable from the menus');
 assert.match(uiSource, /toggleCharacterScreen\(\)[\s\S]*characterOpen[\s\S]*this\._showScreen\('main'\)/, 'the character-screen shortcut must toggle back to the world');
 assert.match(uiSource, /id="m-logout">LOG OUT/, 'the signed-in character screen must expose logout');
 assert.match(mainSource, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'logout must terminate the account session');

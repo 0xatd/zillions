@@ -112,8 +112,8 @@ try {
     form.requestSubmit();
     const selected = !document.querySelector('#screen-main').classList.contains('hidden');
     document.querySelector('#m-enter-world').click();
-    return selected && app.ui.shell.base === 'overworld' && app.ui.overlayHidden() && app.ow?.world?.id === 'earth';
-  })()`), true, 'new account must create a character, return to Character Select, and enter Earth');
+    return selected && !document.querySelector('#screen-setup').classList.contains('hidden') && !app.ow && !app.owMap;
+  })()`), true, 'new account must create a character, return to Character Select, and deploy straight to the siege missions');
   await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
@@ -159,7 +159,7 @@ try {
       const skip = guide.querySelector('[data-guide-skip]');
       let campaignOpened = 0;
       app.ui.cb.onCampaignMap = () => { campaignOpened++; };
-      const offlineWired = !guide.classList.contains('hidden') && action?.textContent === 'ENTER WORLD'
+      const offlineWired = !guide.classList.contains('hidden') && action?.textContent === 'DEPLOY'
         && /sign in/i.test(guide.textContent) && !!skip;
       action.click();
       const offlineRouted = campaignOpened === 1;
@@ -195,35 +195,16 @@ try {
   })()`), true, 'first-deployment guide must route offline players to a mission, signed-in players to Market, and persist its per-character skip');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
-    const noCustom = !document.querySelector('#ow-custom-quick') && !document.querySelector('#ow-custom');
+    const noWorld = !document.querySelector('[id^="ow-"]') && !document.querySelector('#living-world-map') && !document.querySelector('#screen-world-menu');
     const characterCustom = !!document.querySelector('#m-custom');
-    const party = document.querySelector('#ow-party');
-    const map = document.querySelector('#ow-map');
-    map.click();
-    const mapOpened = !document.querySelector('#living-world-map').classList.contains('hidden');
-    document.querySelector('#lw-close').click();
-    return noCustom && characterCustom && !!party && !!map && mapOpened;
-  })()`), true, 'the overworld HUD must expose Party and World Map while Custom Games remains character-menu only');
-  assert.equal(await evaluate(`(() => {
-    const app = window.__app;
-    const gate = app.owMap.overworldLayout.gates.find((entry) => !entry.portal && entry.levelId === 1);
-    let launches = 0;
-    let rallies = 0;
-    app._launchGateMission = () => { launches++; };
-    app._joinGateRally = () => { rallies++; };
-    app._onOverworldEvent({ t: 'gate', gate, state: { locked: false, cleared: false } });
-    document.querySelector('#gate-go').click();
-    return launches === 1 && rallies === 0 && document.querySelector('#gate-confirm').classList.contains('hidden');
-  })()`), true, 'ENTER MISSION must launch the selected map in one click instead of silently creating a rally');
-  assert.equal(await evaluate(`(() => {
-    const app = window.__app;
+    app.ui._showScreen('main');
     app.ui._showScreen('help');
     document.querySelector('#h-back').click();
-    return app.ui.shell.base === 'overworld' && app.ui.overlayHidden();
-  })()`), true, 'Help must close back to the overworld');
+    return noWorld && characterCustom && !document.querySelector('#screen-main').classList.contains('hidden');
+  })()`), true, 'the living world is gone: no overworld HUD or world map, Custom Games stays on Character Select, and Help closes back to it');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
-    app.ui._customFrom = 'world-menu';
+    app.ui._customFrom = 'main';
     app.ui.showCustomBrowser({ games: [], offline: true, hostName: 'journey' });
     app.ui._showScreen('custom');
     const live = [...document.querySelectorAll('.custom-primary-tab')].find((button) => button.dataset.view === 'live');
@@ -361,6 +342,21 @@ try {
       head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
     }, -.3);
   }
+  // Runs last: showEnd replaces the overlay markup, as a finished match does.
+  assert.equal(await evaluate(`(() => {
+    const ui = window.__app.ui;
+    const stats = { kills: 10, built: 2, lost: 0, coins: 50, nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null };
+    ui.showEnd(true, stats, 3, 1, 'campaign', 0, { heroName: 'Journey Test', level: 1, pending: true, grants: [], quests: [] }, null);
+    const pending = /Reporting the siege/.test(document.querySelector('#end-rewards').textContent);
+    ui.setEndRewards({ heroName: 'Journey Test', level: 2, xp: 300, levels: [2], alloy: 12, grants: ['targeting_optic'], skipped: [{ key: 'x', reason: 'stash_full' }],
+      quests: [{ id: 'l1q1', name: 'First Blood', desc: 'Slay 150', reward: 'targeting_optic', done: true }], pending: false });
+    const text = document.querySelector('#end-rewards').textContent;
+    const granted = /level 2/.test(text) && text.includes('+300 XP') && text.includes('+12') && /First Blood/.test(text) && /Stash full/.test(text) && !/Reporting/.test(text);
+    ui.setEndRewards({ pending: false, error: 'Command rejected this report (level_locked). No rewards were granted.', grants: [], quests: [] });
+    const rejected = /No rewards were granted/.test(document.querySelector('#end-rewards').textContent);
+    const back = document.querySelector('#b-restart').textContent === 'Return to missions';
+    return pending && granted && rejected && back;
+  })()`), true, 'the end screen must show pending, then exactly the server-granted rewards (or the rejection)');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

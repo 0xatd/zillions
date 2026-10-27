@@ -31,7 +31,7 @@ const camp = characterCamp(vanguard, profile.relics);
 assert.deepEqual(camp.relics, ['relic']);
 assert.equal(camp.level, 1);
 assert.equal(camp.characterStyle.classKey, 'vanguard',
-  'combat must receive the same class-role silhouette used by creator, paper doll and overworld');
+  'combat must receive the same class-role silhouette used by creator, paper doll and siege');
 
 const levels = grantMmoExperience(vanguard, 1000000);
 assert.ok(levels.length > 1, 'large awards must cross multiple levels safely');
@@ -39,17 +39,16 @@ assert.ok(vanguard.level <= 100, 'character levels must cap at 100');
 assert.equal(vanguard.talentPoints, vanguard.level - 1, 'every earned level must grant one talent point');
 
 const before = vanguard.items.length;
-const result = recordMmoInstance(vanguard, { won: true, kills: 200, xp: 50, world: 'frontier-7', items: ['optic', 'optic'] });
+const result = recordMmoInstance(vanguard, { won: true, kills: 200, xp: 50, items: ['optic', 'optic'] });
 assert.equal(vanguard.stats.instances, 1);
 assert.equal(vanguard.stats.victories, 1);
 assert.equal(vanguard.stats.kills, 200);
-assert.equal(vanguard.lastWorld, 'frontier-7');
+assert.equal(vanguard.lastWorld, undefined, 'the living world is gone; characters carry no world');
 assert.equal(vanguard.items.length, before + 1, 'instance extraction must deduplicate equipment');
 assert.deepEqual(result.items, ['optic']);
 
 const auth = new AuthClient();
 auth.session = { user: { user_metadata: {
-  last_world: 'frontier-7',
   mmo_character_id: vanguard.id,
   mmo_characters: [vanguard],
 } } };
@@ -59,7 +58,7 @@ const cloudProfile = auth.profileFromBundle({
 });
 assert.equal(cloudProfile.mmoCharacterId, vanguard.id, 'signed-in auth must restore the selected MMO character');
 assert.deepEqual(cloudProfile.mmoCharacters, [vanguard], 'signed-in auth must restore the MMO roster');
-assert.equal(cloudProfile.lastWorld, 'frontier-7', 'signed-in auth must restore the character world');
+assert.equal(cloudProfile.lastWorld, undefined, 'signed-in auth no longer restores a living-world location');
 
 const mainSource = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 assert.match(mainSource, /const titleCharacter = selectedMmoCharacter\(this\.profile\);/,

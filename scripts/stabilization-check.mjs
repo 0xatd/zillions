@@ -17,16 +17,16 @@ const css = read('style.css');
 assert.match(ui, /id="a-google"[\s\S]*Continue with Google/, 'the signed-out front door must name the Google provider');
 assert.match(ui, /id="a-email-form"[\s\S]*Continue with email/, 'the signed-out front door must support passwordless email sign-in');
 assert.match(main, /showLoginBackdrop\(\)/, 'the login screen must start the animated orbital backdrop');
-assert.match(main, /!this\.game && !this\.ow && this\.titleSpace[\s\S]*_updateTitleSpace\(t\)/,
-  'the orbital title backdrop must animate while no world or battle is active');
+assert.match(main, /!this\.game && this\.titleSpace[\s\S]*_updateTitleSpace\(t\)/,
+  'the orbital title backdrop must animate while no battle is active');
 assert.match(auth, /signInWithEmail\(email\)[\s\S]*signInWithOtp\([\s\S]*emailRedirectTo: `\$\{location\.origin\}\/`/,
   'email sign-in must use a same-origin passwordless magic link');
 assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never become signed-in account home');
-assert.match(ui, /id="m-enter-world">ENTER WORLD</, 'Character Select must own Enter World');
+assert.match(ui, /id="m-enter-world">DEPLOY</, 'Character Select must own Deploy');
 assert.match(ui, /id="m-custom">CUSTOM GAMES</, 'Character Select must retain Custom Games');
-assert.doesNotMatch(ui, /id="ow-custom(?:-quick)?"/, 'the overworld HUD must not expose Custom Games');
-assert.match(main, /showGateConfirm\([\s\S]*onEnter: \(diff\)[\s\S]*_launchGateMission\(ev\.gate, diff\)/,
-  'a campaign gate must launch the selected map directly from ENTER MISSION');
+assert.doesNotMatch(ui, /id="ow-|screen-world-menu/, 'the removed overworld HUD and Game Menu must not return');
+assert.match(main, /_openCampaignSelect\(\)[\s\S]*showSetup\(\{ mode: 'campaign' \}\)/,
+  'Enter World must open the campaign mission select directly');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,
   'authenticated entry must open Character Select or character creation');
 assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
@@ -66,7 +66,6 @@ assert.doesNotMatch(main, /if \(u\.hero && this\.mpRole === 'guest'/,
   'local movement lead must not shift every hero on a guest client');
 assert.match(online, /this\._presenceBeat = setInterval[\s\S]*}, 15 \* 1000\);/, 'presence writes must stay on the slower heartbeat');
 assert.match(online, /this\._gamesPoll = setInterval[\s\S]*refreshGames\(\)[\s\S]*}, 5 \* 1000\);/, 'the read-only lobby fallback must self-heal within five seconds');
-assert.match(main, /this\.ow\.world\?\.id !== character\.lastWorld[\s\S]*_travelToWorld/, 'character switching must move to that character’s world');
 assert.match(ui, /creator-cancel[\s\S]*mmoCharacters[\s\S]*_backOverlay/, 'mandatory character creation must not cancel into an empty roster');
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
