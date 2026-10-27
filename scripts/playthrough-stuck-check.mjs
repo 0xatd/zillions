@@ -28,7 +28,7 @@ const SAMPLE = 0.5;      // seconds between watcher samples
 function play(targetLevel) {
   const level = levelById(targetLevel);
   const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-  const game = new Game(map, process.env.DIFF || 'normal', 'scott', null, targetLevel, 'campaign');
+  const game = new Game(map, process.env.DIFF || 'normal', 'scott', null, targetLevel, 'campaign', { culture: process.env.CULTURE || 'european' });
   const targetSite = 0;
   let restoreSame = null;
   let plan = null, lastStance = null, route = [], routeGoal = '';
@@ -73,6 +73,9 @@ function play(targetLevel) {
     if (blocked || routeGoal !== goal || !route.length || Math.hypot(route[0][0] - hero.x, route[0][1] - hero.z) > 1.6) {
       routeGoal = goal;
       route = findRoute(hero, x, z, stopRadius);
+      // Goal ringed by buildings (a plot built shut on every side): settle
+      // for the nearest reachable tile instead of pressing into the stone.
+      for (let r = stopRadius + 1; !route.length && r <= stopRadius + 4; r++) route = findRoute(hero, x, z, r);
     }
     while (route.length && Math.hypot(route[0][0] - hero.x, route[0][1] - hero.z) < 0.5) route.shift();
     const [tx, tz] = route[0] || [x, z];
