@@ -57,9 +57,17 @@ export function tileCorners(map, cornerH, cw) {
 // 2D sim is untouched. out.cut[i] = cut corner (0..3, bit0 = +x, bit1 = +z)
 // or -1; out.cutH[i*3..] = ground heights at the cut corner, then at its
 // x-adjacent and z-adjacent corners.
+// Walkable terrace tiles get a half-depth cut (v5): the notch corner is
+// trimmed back to the edge midpoints (out.cutS[i] = 0.5, rock = 1), so a
+// staircase rim beside a walkable shelf reads as a run of bevels instead of
+// square teeth. Figures keep sampling the tile's own top there (see
+// tileGroundY), so nobody sinks; the trimmed corner is under a quarter of a
+// figure's footprint from the edge it already overhangs.
+const WALK_CUT = 0.5;
 function chamferSteps(map, th, out) {
   const N = map.size;
   const cut = new Int8Array(N * N).fill(-1);
+  const cutS = new Float32Array(N * N);
   const cutH = new Float32Array(N * N * 3);
   const full = (x, z) => map.inBounds(x, z) && map.ledgeW[z * N + x] >= 0.999;
   const lower = (x, z, h) => full(x, z) && th[z * N + x] < h - SAME_LEVEL;
@@ -67,7 +75,8 @@ function chamferSteps(map, th, out) {
   for (let z = 1; z < N - 1; z++) {
     for (let x = 1; x < N - 1; x++) {
       const i = z * N + x;
-      if (TILE_INFO[map.tiles[i]].walk || map.ledgeW[i] < 0.999) continue;
+      if (map.ledgeW[i] < 0.999) continue;
+      const walk = !!TILE_INFO[map.tiles[i]].walk;
       const h = th[i];
       for (let c = 0; c < 4; c++) {
         const sx = c & 1 ? 1 : -1, sz = c & 2 ? 1 : -1;
@@ -76,6 +85,7 @@ function chamferSteps(map, th, out) {
         const cx = c & 1, cz = c >> 1;
         const A = (z * N + x + sx) * 4, B = ((z + sz) * N + x) * 4;
         cut[i] = c;
+        cutS[i] = walk ? WALK_CUT : 1;
         // Corner (cx, cz) of this tile is corner (1-cx, cz) of A; corner
         // (1-cx, cz) of this tile is corner (1-cx, 1-cz) of B; corner
         // (cx, 1-cz) of this tile is corner (1-cx, 1-cz) of A.
@@ -87,18 +97,37 @@ function chamferSteps(map, th, out) {
     }
   }
   out.cut = cut;
+  out.cutS = cutS;
   out.cutH = cutH;
 }
 
-// Height of tile i's corner c as seen along one of its edges (e = the other
-// corner of that edge). On a chamfered tile the two edges that meet at the
-// cut corner belong to the dropped half.
-function edgeH(tileCH, i, c, e) {
+// Height along tile i's edge from corner c (u = 0) to corner e (u = 1),
+// honouring a chamfer. On a cut tile the part of each edge next to the cut
+// corner (u within cutS of it) belongs to the dropped half; `side` (+1/-1)
+// picks which side of that split a sample at exactly the split point takes.
+function edgeAt(tileCH, i, c, e, u, side = 0) {
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const up = lerp(tileCH[i * 4 + c], tileCH[i * 4 + e], u);
   const k = tileCH.cut ? tileCH.cut[i] : -1;
-  if (k < 0 || (c !== k && e !== k)) return tileCH[i * 4 + c];
-  if (c === k) return tileCH.cutH[i * 3];
-  // c is adjacent to the cut corner: x-adjacent differs in bit 0.
-  return (c ^ k) === 1 ? tileCH.cutH[i * 3 + 1] : tileCH.cutH[i * 3 + 2];
+  if (k < 0 || (c !== k && e !== k)) return up;
+  const S = tileCH.cutS[i] || 1;
+  // distance from the cut corner along the edge, and the low ground there
+  const d = c === k ? u : 1 - u;
+  const other = c === k ? e : c;
+  const H = tileCH.cutH, j = i * 3;
+  const far = (other ^ k) === 1 ? H[j + 1] : H[j + 2];
+  const inCut = side === 0 ? d <= S : (c === k ? (side < 0 ? d <= S : d < S) : (side > 0 ? d <= S : d < S));
+  if (!inCut) return up;
+  return lerp(H[j], far, d);
+}
+
+// Split points (fractions from c to e) of tile i's edge c->e.
+function edgeSplits(tileCH, i, c, e) {
+  const k = tileCH.cut ? tileCH.cut[i] : -1;
+  if (k < 0 || (c !== k && e !== k)) return [];
+  const S = tileCH.cutS[i] || 1;
+  if (S >= 0.999) return [];
+  return [c === k ? S : 1 - S];
 }
 
 // The two triangles of tile (x, z) as [x, z, y] vertex triples, honouring
@@ -114,19 +143,32 @@ export function tileTris(map, tileCH, x, z) {
     ];
   }
   const cx = k & 1, cz = k >> 1;
-  const c0 = P(cx, cz, tileCH.cutH[i * 3]);
-  const cX = P(1 - cx, cz, tileCH.cutH[i * 3 + 1]);
-  const cZ = P(cx, 1 - cz, tileCH.cutH[i * 3 + 2]);
+  const S = tileCH.cutS[i] || 1;
+  const H = tileCH.cutH, j = i * 3;
   const at = (ox, oz) => P(ox, oz, tileCH[b + ox + 2 * oz]);
-  const top = [at(1 - cx, 1 - cz), at(1 - cx, cz), at(cx, 1 - cz)];
-  const low = [c0, cX, cZ];
-  // Wind both counter-clockwise seen from above (+y normal).
+  const lerp = (a, b2, t) => a + (b2 - a) * t;
+  // Wind every triangle counter-clockwise seen from above (+y normal).
   const up = (t) => {
     const [a, b2, c] = t;
     const ny = (b2[1] - a[1]) * (c[0] - a[0]) - (b2[0] - a[0]) * (c[1] - a[1]);
     return ny >= 0 ? t : [a, c, b2];
   };
-  return [up(top), up(low)];
+  const c0 = P(cx, cz, H[j]);
+  if (S >= 0.999) {
+    const cX = P(1 - cx, cz, H[j + 1]);
+    const cZ = P(cx, 1 - cz, H[j + 2]);
+    const top = [at(1 - cx, 1 - cz), at(1 - cx, cz), at(cx, 1 - cz)];
+    return [up(top), up([c0, cX, cZ])];
+  }
+  // Half cut: an upper pentagon and a low corner triangle.
+  const ux = cx + (1 - 2 * cx) * S, uz = cz + (1 - 2 * cz) * S;
+  const hC = tileCH[b + cx + 2 * cz];
+  const MXu = [x + ux, z + cz, lerp(hC, tileCH[b + (1 - cx) + 2 * cz], S)];
+  const MZu = [x + cx, z + uz, lerp(hC, tileCH[b + cx + 2 * (1 - cz)], S)];
+  const MXl = [x + ux, z + cz, lerp(H[j], H[j + 1], S)];
+  const MZl = [x + cx, z + uz, lerp(H[j], H[j + 2], S)];
+  const O = at(1 - cx, 1 - cz), CX = at(1 - cx, cz), CZ = at(cx, 1 - cz);
+  return [up([O, CX, MXu]), up([O, MXu, MZu]), up([O, MZu, CZ]), up([c0, MXl, MZl])];
 }
 
 // Strata skirt: a sheer rock face wherever two neighbouring tiles disagree on
@@ -176,24 +218,44 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
       emit(ya, yb, ya < y0 + 0.1 ? foot : bands[((k % 6) + 6) % 6]);
     }
   };
+  // One shared edge, A -> B: tile t runs corner c1 -> c2 along it, its
+  // neighbour nb runs d1 -> d2. A half chamfer splits an edge, so the face is
+  // emitted per piece between split points.
+  const edge = (ax, az, bx, bz, t, c1, c2, nb, d1, d2) => {
+    const us = [0, ...edgeSplits(tileCH, t, c1, c2), ...edgeSplits(tileCH, nb, d1, d2), 1].sort((a, b) => a - b);
+    for (let q = 0; q + 1 < us.length; q++) {
+      const u0 = us[q], u1 = us[q + 1];
+      if (u1 - u0 < 1e-4) continue;
+      face(ax + (bx - ax) * u0, az + (bz - az) * u0, ax + (bx - ax) * u1, az + (bz - az) * u1,
+        edgeAt(tileCH, t, c1, c2, u0, 1), edgeAt(tileCH, t, c1, c2, u1, -1),
+        edgeAt(tileCH, nb, d1, d2, u0, 1), edgeAt(tileCH, nb, d1, d2, u1, -1));
+    }
+  };
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const t = z * N + x;
       const full = map.ledgeW[t] >= 0.999;
       if (x + 1 < N && full && map.ledgeW[t + 1] >= 0.999) {
         lit = 0.8;
-        face(x + 1, z, x + 1, z + 1, edgeH(tileCH, t, 1, 3), edgeH(tileCH, t, 3, 1), edgeH(tileCH, t + 1, 0, 2), edgeH(tileCH, t + 1, 2, 0));
+        edge(x + 1, z, x + 1, z + 1, t, 1, 3, t + 1, 0, 2);
       }
       if (z + 1 < N && full && map.ledgeW[t + N] >= 0.999) {
         lit = 0.94;
-        face(x, z + 1, x + 1, z + 1, edgeH(tileCH, t, 2, 3), edgeH(tileCH, t, 3, 2), edgeH(tileCH, t + N, 0, 1), edgeH(tileCH, t + N, 1, 0));
+        edge(x, z + 1, x + 1, z + 1, t, 2, 3, t + N, 0, 1);
       }
       // The chamfer face along the cut diagonal.
       const k = tileCH.cut ? tileCH.cut[t] : -1;
       if (k >= 0) {
         const cx = k & 1, cz = k >> 1;
+        const S = tileCH.cutS[t] || 1;
+        const H = tileCH.cutH, j = t * 3, b = t * 4;
+        const hC = tileCH[b + cx + 2 * cz];
+        const hX = tileCH[b + (1 - cx) + 2 * cz], hZ = tileCH[b + cx + 2 * (1 - cz)];
+        const ux = cx + (1 - 2 * cx) * S, uz = cz + (1 - 2 * cz) * S;
         lit = 0.87;
-        face(x + 1 - cx, z + cz, x + cx, z + 1 - cz, tileCH[t * 4 + (1 - cx) + 2 * cz], tileCH[t * 4 + cx + 2 * (1 - cz)], tileCH.cutH[t * 3 + 1], tileCH.cutH[t * 3 + 2]);
+        face(x + ux, z + cz, x + cx, z + uz,
+          hC + (hX - hC) * S, hC + (hZ - hC) * S,
+          H[j] + (H[j + 1] - H[j]) * S, H[j] + (H[j + 2] - H[j]) * S);
       }
     }
   }
@@ -218,8 +280,9 @@ export function tileGroundY(map, tileCH, x, z) {
   const fx = Math.min(1, Math.max(0, x - tx)), fz = Math.min(1, Math.max(0, z - tz));
   const i = (tz * N + tx) * 4;
   const k = tileCH.cut ? tileCH.cut[tz * N + tx] : -1;
-  if (k >= 0) {
+  if (k >= 0 && (tileCH.cutS[tz * N + tx] || 1) >= 0.999) {
     // Chamfered rock: the cut half is the ground below, the rest the block.
+    // (A walkable half cut keeps the tile's own top: figures never sink.)
     const cx = k & 1, cz = k >> 1;
     const ux = cx ? fx : 1 - fx, uz = cz ? fz : 1 - fz;
     if (ux + uz > 1) {

@@ -80,9 +80,10 @@ export class GameMap extends TerrainField {
     // Biome interiors stay one clean field of color, but every boundary —
     // shore, treeline, crag foot, path edge — becomes a one-tile gradient
     // instead of an axis-aligned staircase between two flat hexes.
-    const positions = new Float32Array(N * N * 6 * 3);
-    const colors = new Float32Array(N * N * 6 * 3);
-    const uvs = new Float32Array(N * N * 6 * 2);
+    // Half-chamfered tiles carry four triangles, so leave room for them.
+    let positions = new Float32Array(N * N * 6 * 3);
+    let colors = new Float32Array(N * N * 6 * 3);
+    let uvs = new Float32Array(N * N * 6 * 2);
     const col = new THREE.Color();
     const scratch = new THREE.Color();
     const blightCol = new THREE.Color(0x3c2547);
@@ -208,6 +209,32 @@ export class GameMap extends TerrainField {
         }
         const cliff = skirted ? 0 : Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
         if (cliff > 0) col.multiplyScalar(1 - cliff);
+        // Interior tiers (v5): inside the walls the district and crown
+        // terraces sit only ~0.55 above the outer one and blend into a soft
+        // walkable bank, which read as a smudge. Paint that bank as a stone
+        // revetment (paving tone, a touch darker) so each tier has an edge.
+        if (skirted) {
+          let lo = Infinity, hi = -Infinity;
+          for (let dz = -1; dz <= 0; dz++) {
+            for (let dx = -1; dx <= 0; dx++) {
+              const tx = x + dx, tz = z + dz;
+              if (!this.inBounds(tx, tz)) continue;
+              const ti = this.idx(tx, tz);
+              if (!TILE_INFO[this.tiles[ti]].walk) continue;
+              const th = this.heightAt(tx, tz);
+              lo = Math.min(lo, th); hi = Math.max(hi, th);
+            }
+          }
+          const step = hi - lo;
+          if (step > 0.3 && step < 0.8 && lo > 1) {
+            // Paving stone, pulled toward the theme's shadow so it reads on
+            // pale snow and dark moor alike.
+            scratch.setHex(this.theme?.palette?.path ?? 0x9a8a70);
+            col.lerp(scratch, 0.7);
+            scratch.setHex(this.theme?.palette?.shadow ?? 0x2a2a3a);
+            col.lerp(scratch, 0.35);
+          }
+        }
         // Blighted ground around every hive lair: the stain reads from across
         // the map, so a lair is a place, not a prop dropped on clean grass.
         for (const [nx, nz] of this.nestSpots || []) {
@@ -239,10 +266,26 @@ export class GameMap extends TerrainField {
             [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
             [x + 1, h10, z], [x, h01, z + 1], [x + 1, h11, z + 1],
           ];
+        if (p + verts.length * 3 > positions.length) {
+          const grow = (a, n) => { const b2 = new Float32Array(a.length * 2 > n ? a.length * 2 : n * 2); b2.set(a); return b2; };
+          positions = grow(positions, p + verts.length * 3);
+          colors = grow(colors, p + verts.length * 3);
+          uvs = grow(uvs, ((p + verts.length * 3) / 3) * 2);
+        }
         for (const [vx, vy, vz] of verts) {
           positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
-          const o = (vz * cw + vx) * 3;
-          colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
+          // Corner colour; a chamfer's edge-midpoint vertex blends its tile's.
+          const fx = Math.min(1, vx - x), fz = Math.min(1, vz - z);
+          if ((fx === 0 || fx === 1) && (fz === 0 || fz === 1)) {
+            const o = (vz * cw + vx) * 3;
+            colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
+          } else {
+            const o00 = (z * cw + x) * 3, o10 = o00 + 3, o01 = o00 + cw * 3, o11 = o01 + 3;
+            for (let ch = 0; ch < 3; ch++) {
+              colors[p + ch] = (cornerCol[o00 + ch] * (1 - fx) + cornerCol[o10 + ch] * fx) * (1 - fz)
+                + (cornerCol[o01 + ch] * (1 - fx) + cornerCol[o11 + ch] * fx) * fz;
+            }
+          }
           const up = (p / 3) * 2;
           uvs[up] = vx * 0.21; uvs[up + 1] = vz * 0.21; // world-scale grain tiling
           p += 3;
@@ -250,6 +293,9 @@ export class GameMap extends TerrainField {
       }
     }
 
+    if (p < positions.length) {
+      positions = positions.slice(0, p); colors = colors.slice(0, p); uvs = uvs.slice(0, (p / 3) * 2);
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -311,7 +357,7 @@ export class GameMap extends TerrainField {
       }
       node.position.set((b.x0 + b.x1) / 2, b.base, (b.z0 + b.z1) / 2);
       node.rotation.y = Math.atan2(vx, vz);
-      node.scale.set(1, 1, L / 10);
+      node.scale.set(b.hw / 1.8, 1, L / 10);
       group.add(node);
     }
     return group;
