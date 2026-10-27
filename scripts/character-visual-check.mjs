@@ -22,6 +22,6 @@ assert.ok(art.includes("race === 'robot'") && art.includes('segmented limbs') &&
   'Human and Robot origins need different dominant head and limb silhouettes');
 assert.ok(ui.includes("classKey: this._creatorClass") && ui.includes('classKey: character.classKey'),
   'creator and paper doll must pass the same class role identity as live models');
-assert.ok(main.includes('classKey: character.classKey') && characters.includes("classKey: MMO_CLASSES[character?.classKey]"),
-  'overworld and combat must preserve the selected class role identity');
+assert.ok(characters.includes("classKey: MMO_CLASSES[character?.classKey]"),
+  'combat must preserve the selected class role identity');
 console.log('character-visual-check: creator, paper doll and live models share distinct cosmetic and gear states');

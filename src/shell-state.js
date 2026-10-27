@@ -1,7 +1,6 @@
 export const SHELL_BASES = Object.freeze({
   AUTH: 'account',
   CHARACTER_SELECT: 'main',
-  OVERWORLD: 'overworld',
   MISSION: 'mission',
 });
 
@@ -15,7 +14,6 @@ export class ShellState {
     this.base = SHELL_BASES.AUTH;
     this.overlay = null;
     this.returnOverlay = null;
-    this.missionReturn = null;
   }
 
   enterBase(base) {
@@ -39,16 +37,13 @@ export class ShellState {
     return this.snapshot();
   }
 
-  enterMission(returnPoint) {
-    this.missionReturn = returnPoint ? { ...returnPoint } : null;
+  enterMission() {
     return this.enterBase(SHELL_BASES.MISSION);
   }
 
+  // A finished mission lands back on character select / mission select.
   finishMission() {
-    const returnPoint = this.missionReturn ? { ...this.missionReturn } : null;
-    this.missionReturn = null;
-    this.enterBase(SHELL_BASES.OVERWORLD);
-    return returnPoint;
+    return this.enterBase(SHELL_BASES.CHARACTER_SELECT);
   }
 
   snapshot() {

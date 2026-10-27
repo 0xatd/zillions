@@ -7,7 +7,7 @@
 //
 //   * The tree is GENERATED, not authored. Seven hundred hand-placed nodes is
 //     a decade of maintenance; a fixed seed plus a small sector table is not.
-//     `terrain.js`, `lanes.js` and `galaxy.js` already work this way.
+//     `terrain.js` and `lanes.js` already work this way.
 //   * Effects are DATA. A trace or a relay is a bag of numbers on the same mod
 //     keys `itemMods()` already speaks, folded in once at run start. No node
 //     carries behaviour, so this module can never change what the simulation

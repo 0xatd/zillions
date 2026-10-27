@@ -76,9 +76,6 @@ function roomToGame(row) {
     difficulty: row.difficulty || 'normal',
     // Custom games (the WC3 browser) ride the same rooms with a kind tag.
     custom: metadata.kind === 'custom',
-    rally: metadata.kind === 'rally',
-    rallyWorldId: metadata.worldId || null,
-    rallyGateKey: metadata.gateKey || null,
     mapName: metadata.mapName || null,
     // A selected roster is authoritative. metadata.players is only a legacy
     // fallback for rows fetched without the nested relation.
@@ -494,7 +491,7 @@ export class OnlineLobby {
   // the portal filter to these. (See isCustomGame at module level.)
 
   async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1,
-    name = null, maxPlayers = 4, kind = null, mapName = null, worldId = null, gateKey = null } = {}) {
+    name = null, maxPlayers = 4, kind = null, mapName = null } = {}) {
     const metadata = {
       level,
       mode,
@@ -503,8 +500,6 @@ export class OnlineLobby {
       protocolVersion: LOBBY_PROTOCOL_VERSION,
       clientVersion: CLIENT_VERSION,
       ...(kind ? { kind, mapName: mapName || null } : {}),
-      ...(worldId ? { worldId } : {}),
-      ...(gateKey ? { gateKey } : {}),
     };
     const { data, error } = await this.sb.from('rooms').insert({
       name: name || `${this.me.name}'s frontier`,
