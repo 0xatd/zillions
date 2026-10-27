@@ -1,8 +1,8 @@
 const PLAYER_KEY = 'zillions_player_id';
 const API = '/api/state';
 const LOBBY_API = '/api/lobby';
-const GALAXY_API = '/api/galaxy-state';
 const ECONOMY_API = '/api/economy';
+const MATCH_RESULT_API = '/api/match-result';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -54,16 +54,6 @@ export async function getRemoteState() {
   return response.json();
 }
 
-export async function getGalaxyState() {
-  if (!backendEnabled()) return null;
-  const response = await fetch(GALAXY_API, {
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-  });
-  if (!response.ok) return null;
-  return response.json();
-}
-
 export async function putState(kind, id, data) {
   if (!backendEnabled()) return null;
   const response = await fetch(API, {
@@ -92,6 +82,20 @@ export async function economyRequest(action, payload = {}) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'economy_request_failed'), { status: response.status, result });
+  return result;
+}
+
+// Signed-in match end. The server validates the report and is the only party
+// that grants XP, loot, Alloy and stats; the response is what the client shows.
+export async function matchResultRequest(payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) return null;
+  const response = await fetch(MATCH_RESULT_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: response.status, result });
   return result;
 }
 

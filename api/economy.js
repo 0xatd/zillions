@@ -1,6 +1,5 @@
-import { itemInfo } from '../src/config.js';
-import { resolveItem } from '../src/items.js';
-import { VENDORS, vendorRotation, vendorSellPrice, vendorStock } from '../src/vendor.js';
+import { itemPayload } from '../src/match-rewards.js';
+import { VENDORS, vendorRotation, vendorStock } from '../src/vendor.js';
 import { COMPONENTS, CRAFTING_MATERIALS, evaluateRecipe, evaluateSocketInsert, evaluateSocketRemove } from '../src/crafting.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
@@ -30,17 +29,6 @@ async function authenticatedUser(authorization, url, anonKey) {
   if (!authorization.startsWith('Bearer ')) return null;
   const response = await fetch(`${url}/auth/v1/user`, { headers: { authorization, apikey: anonKey } });
   return response.ok ? response.json() : null;
-}
-
-function itemPayload(key) {
-  const item = itemInfo(key);
-  if (!item) return null;
-  const rolled = resolveItem(key);
-  return {
-    legacy_key: key, base_id: rolled?.baseKey || key, item_level: Math.max(1, Number(item.ilvl) || 1),
-    rarity: Math.max(1, Number(item.rarity) || 1), affixes: rolled?.affixes || [], sockets: [], binding: 'account',
-    slot_pool: item.slot || rolled?.slot || 'unknown', economy_data: { sell_price: vendorSellPrice(key) },
-  };
 }
 
 function registrationPayload(body) {

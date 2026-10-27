@@ -15,9 +15,20 @@
 //     `zillions_*` key namespace as saves and profiles; swap the backend with
 //     `setMetaBackend()` and a server owns the same state with no other change.
 //
-// Headless and three-free like terrain.js — `scripts/galaxy-check.mjs` drives
+// Headless and three-free like terrain.js — `scripts/meta-check.mjs` drives
 // the whole award/spend surface in plain Node.
-import { threatTierFor } from './galaxy.js';
+//
+// This ledger is GUEST / OFFLINE progress only. A signed-in player's Alloy is
+// granted by the server (api/match-result.js -> player_wallets) and never by
+// this module.
+
+// Threat tier of a level difficulty multiplier: 0 for Earth-grade worlds,
+// then one tier per point of multiplier past 2, capped at tier 9.
+export function threatTierFor(mult) {
+  const m = Number.isFinite(mult) ? mult : 0;
+  if (m <= 2) return 0;
+  return Math.max(1, Math.min(9, Math.ceil(m - 2)));
+}
 
 export const META_KEY = 'zillions_meta';
 export const META_VERSION = 1;
