@@ -1,6 +1,6 @@
 """Build the toy kit GLBs.
 
-  blender --background --python tools/art/toy_kit/build.py -- [--culture european] [--out assets/kit]
+  blender --background --python tools/art/toy_kit/build.py -- [--culture european] [--out assets/kit] [--only a,b]
 
 Writes assets/kit/<culture>/<asset>.glb plus manifest.json listing every
 asset and its tier. Deterministic: no randomness anywhere.
@@ -15,6 +15,7 @@ sys.path.insert(0, HERE)
 from kit import Kit, export_kit  # noqa: E402
 from cultures import CULTURES  # noqa: E402
 import walls  # noqa: E402
+import bridge  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 
@@ -56,6 +57,7 @@ def jobs(culture):
     out.append(('prop_rock_a', lambda k: U.rock(k, pal, 0)))
     out.append(('prop_rock_b', lambda k: U.rock(k, pal, 1)))
     out.append(('prop_cliff', lambda k: U.cliff(k, pal)))
+    out.append(('bridge_span', lambda k: bridge.bridge(k, pal)))
     return out
 
 
@@ -63,18 +65,23 @@ def main():
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     culture = 'european'
     out_root = os.path.join(ROOT, 'assets', 'kit')
+    only = None
     for i, a in enumerate(argv):
         if a == '--culture':
             culture = argv[i + 1]
         if a == '--out':
             out_root = os.path.abspath(argv[i + 1])
+        if a == '--only':
+            only = set(argv[i + 1].split(','))
     out_dir = os.path.join(out_root, culture)
     names = []
     for name, fn in jobs(culture):
+        names.append(name)
+        if only and name not in only:
+            continue
         k = Kit(name)
         fn(k)
         export_kit(k, out_dir)
-        names.append(name)
     with open(os.path.join(out_dir, 'manifest.json'), 'w') as f:
         json.dump({'culture': culture, 'status': CULTURES[culture]['status'], 'assets': names}, f, indent=1)
         f.write('\n')

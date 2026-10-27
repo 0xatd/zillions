@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
-import { tileCorners, cliffSkirt, tileGroundY } from './terrace-mesh.js';
+import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -24,7 +24,10 @@ export class GameMap extends TerrainField {
   // Ground under a point. On the terraced landform the per-tile corners keep
   // a figure on its own terrace right up to the cliff edge.
   groundY(x, z) {
-    if (this._tileCH) return tileGroundY(this, this._tileCH, x, z);
+    if (this._tileCH) {
+      const g = tileGroundY(this, this._tileCH, x, z);
+      return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
+    }
     return super.groundY(x, z);
   }
 
@@ -138,6 +141,9 @@ export class GameMap extends TerrainField {
             // Terrace steps are grassy shelves: the rock shows on the face.
             const tc = this.isLedgeRock(ti);
             col.setHex(this.colorOf(tc ? TILE.GRASS : t));
+            // The switchback bed is a darker shelf; the paved ribbon on top
+            // carries the road colour, so the zig-zag stands out.
+            if (this.swRoad && this.swRoad[ti]) col.setHex(this.colorOf(TILE.GRASS)).multiplyScalar(0.8);
             r += col.r; g += col.g; b += col.b; n++;
             wet += nearWater[ti];
             shadeF += nearForest[ti];
@@ -187,7 +193,20 @@ export class GameMap extends TerrainField {
         if (x < N) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x + 1)]));
         if (z > 0) drop = Math.max(drop, Math.abs(h - cornerH[(z - 1) * cw + x]));
         if (z < N) drop = Math.max(drop, Math.abs(h - cornerH[(z + 1) * cw + x]));
-        const cliff = Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
+        // On the terraced landform the strata skirt draws every real face, so
+        // the corner tint would only smear dark wedges onto the terrace tops
+        // and the valley floor along the rim, the gate shelf and the
+        // switchback cuts. Keep it only where the land still rolls.
+        let skirted = false;
+        if (this.ledgeW) {
+          skirted = true;
+          for (let dz = -1; dz <= 0 && skirted; dz++) {
+            for (let dx = -1; dx <= 0; dx++) {
+              if (this.inBounds(x + dx, z + dz) && this.ledgeW[this.idx(x + dx, z + dz)] < 0.999) { skirted = false; break; }
+            }
+          }
+        }
+        const cliff = skirted ? 0 : Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
         if (cliff > 0) col.multiplyScalar(1 - cliff);
         // Blighted ground around every hive lair: the stain reads from across
         // the map, so a lair is a place, not a prop dropped on clean grass.
@@ -214,10 +233,12 @@ export class GameMap extends TerrainField {
         const h01 = tileCH ? tileCH[ti4 + 2] : cornerH[(z + 1) * cw + x];
         const h11 = tileCH ? tileCH[ti4 + 3] : cornerH[(z + 1) * cw + (x + 1)];
 
-        const verts = [
-          [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
-          [x + 1, h10, z], [x, h01, z + 1], [x + 1, h11, z + 1],
-        ];
+        const verts = tileCH
+          ? tileTris(this, tileCH, x, z).flat().map(([vx, vz, vy]) => [vx, vy, vz])
+          : [
+            [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
+            [x + 1, h10, z], [x, h01, z + 1], [x + 1, h11, z + 1],
+          ];
         for (const [vx, vy, vz] of verts) {
           positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
           const o = (vz * cw + vx) * 3;
@@ -241,7 +262,7 @@ export class GameMap extends TerrainField {
     terrain.receiveShadow = true;
     terrain.name = 'terrain';
     group.add(terrain);
-    const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS));
+    const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS), this.theme?.palette?.shadow);
     if (strata) group.add(strata);
 
     // Water plane above sunken tiles.
@@ -260,7 +281,39 @@ export class GameMap extends TerrainField {
     group.add(this._buildRocks());
     group.add(this._buildOre());
     group.add(this._buildDetail());
+    if (this.bridges && this.bridges.length) group.add(this._buildBridges());
     if (this.labyrinthLayout) group.add(this._buildLabyrinthLandmarks());
+    return group;
+  }
+
+  // River bridges (see TerrainField._spanFords): the kit's 10-unit span,
+  // stretched along the crossing and seated on the higher bank.
+  _buildBridges() {
+    const group = new THREE.Group();
+    const body = kitGeo('bridge_span', 'body');
+    const glow = kitGeo('bridge_span', 'glow');
+    const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+    for (const b of this.bridges) {
+      if (b.base === null) b.base = this.bridgeBase(b);
+      const vx = b.x1 - b.x0, vz = b.z1 - b.z0, L = Math.hypot(vx, vz);
+      const node = new THREE.Group();
+      if (body) {
+        const m = new THREE.Mesh(body, bodyMat);
+        m.castShadow = true; m.receiveShadow = true;
+        node.add(m);
+        if (glow) node.add(new THREE.Mesh(glow, glowMat));
+      } else {
+        // Headless / kit-less fallback: a plain cambered plank deck.
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(b.hw * 2, 0.3, 10), toyMat({ color: 0xb3a78c }));
+        deck.position.y = 0.1;
+        node.add(deck);
+      }
+      node.position.set((b.x0 + b.x1) / 2, b.base, (b.z0 + b.z1) / 2);
+      node.rotation.y = Math.atan2(vx, vz);
+      node.scale.set(1, 1, L / 10);
+      group.add(node);
+    }
     return group;
   }
 

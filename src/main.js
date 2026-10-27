@@ -65,6 +65,55 @@ const _tmpColB = new THREE.Color();
 const _tmpColC = new THREE.Color();
 const _tmpColD = new THREE.Color();
 
+
+// Inverted-hull ink outline for a toy-kit figure: each mesh gets a back-face
+// twin pushed out along smoothed normals (so flat-shaded facets don't split).
+// Returns the outline meshes so callers can hide them (stealth).
+const OUTLINE_GEO = new WeakMap();
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x0e0b10, side: THREE.BackSide });
+OUTLINE_MAT.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec3 inkNormal;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(inkNormal) * 0.045;');
+};
+function outlineGeometry(geo) {
+  let out = OUTLINE_GEO.get(geo);
+  if (out) return out;
+  out = geo.clone();
+  out.userData.kitShared = true;
+  const pos = out.attributes.position, nor = out.attributes.normal;
+  const acc = new Map();
+  const key = (i) => `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+  for (let i = 0; i < pos.count; i++) {
+    const k = key(i);
+    const a = acc.get(k) || [0, 0, 0];
+    if (nor) { a[0] += nor.getX(i); a[1] += nor.getY(i); a[2] += nor.getZ(i); }
+    acc.set(k, a);
+  }
+  const ink = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const a = acc.get(key(i));
+    const l = Math.hypot(a[0], a[1], a[2]) || 1;
+    ink[i * 3] = a[0] / l; ink[i * 3 + 1] = a[1] / l || 1; ink[i * 3 + 2] = a[2] / l;
+  }
+  out.setAttribute('inkNormal', new THREE.BufferAttribute(ink, 3));
+  OUTLINE_GEO.set(geo, out);
+  return out;
+}
+function addInkOutline(root) {
+  const meshes = [];
+  root.traverse((o) => { if (o.isMesh && !o.userData.ink) meshes.push(o); });
+  const outs = [];
+  for (const m of meshes) {
+    const o = new THREE.Mesh(outlineGeometry(m.geometry), OUTLINE_MAT);
+    o.userData.ink = true;
+    o.userData.keepOpacity = true;
+    m.add(o);
+    outs.push(o);
+  }
+  return outs;
+}
+
 class App {
   constructor() {
     this.canvas = document.getElementById('game');
@@ -908,11 +957,50 @@ class App {
         m.receiveShadow = true;
         return m;
       };
-      const roadMat = toyMat({ color: 0xb3a487, side: THREE.DoubleSide });
-      const edgeMat = toyMat({ color: 0x7c6a52, side: THREE.DoubleSide });
+      // Pale packed roadbed between dark kerbs, so the zig-zag reads as a
+      // road against snow and violet moor alike; a lamp post at every turn
+      // and along the long legs marks the way up from the default camera.
+      // Stacked ribbons a few cm apart z-fight from the game camera; a
+      // polygon offset keeps the kerb strictly under the bed and the bed
+      // under the centre line.
+      const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
+      const edgeMat = layer(0x4a3c2e, -1);
+      const roadMat = layer(0xd8c49a, -3);
+      const centreMat = layer(0xf1e4c4, -5);
+      const posts = [];
       for (const pts of site.switchbacks) {
-        g.add(ribbon(pts, 1.75, 0.04, edgeMat));
-        g.add(ribbon(pts, 1.35, 0.06, roadMat));
+        g.add(ribbon(pts, 2.05, 0.04, edgeMat));
+        g.add(ribbon(pts, 1.55, 0.06, roadMat));
+        g.add(ribbon(pts, 0.22, 0.075, centreMat));
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az);
+          const nx = -(bz - az) / L, nz = (bx - ax) / L;
+          const n = Math.max(1, Math.round(L / 2.2));
+          for (let k = q === 1 ? 0 : 1; k <= n; k++) {
+            const f = k / n;
+            const px = ax + (bx - ax) * f, pz = az + (bz - az) * f, ph = ah + (bh - ah) * f;
+            for (const side of [-1, 1]) posts.push([px + nx * 1.15 * side, pz + nz * 1.15 * side, ph, k === n || k === 0]);
+          }
+        }
+      }
+      if (posts.length) {
+        const postGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.7, 5).translate(0, 0.35, 0);
+        const capGeo = new THREE.OctahedronGeometry(0.11, 0).translate(0, 0.78, 0);
+        const postMesh = new THREE.InstancedMesh(postGeo, toyMat({ color: 0x2f2a33 }), posts.length);
+        const capMesh = new THREE.InstancedMesh(capGeo, new THREE.MeshBasicMaterial({ color: 0xffc35a }), posts.length);
+        const M = new THREE.Matrix4();
+        posts.forEach(([px, pz, ph, turn], k) => {
+          const gy = this.map.groundY(px, pz);
+          const y = Math.abs(gy - ph) < 0.6 ? Math.max(gy, ph) : ph;
+          const sc = turn ? 1.3 : 1;
+          M.makeScale(sc, sc, sc).setPosition(px, y, pz);
+          postMesh.setMatrixAt(k, M);
+          capMesh.setMatrixAt(k, M);
+        });
+        postMesh.castShadow = true;
+        g.add(postMesh);
+        g.add(capMesh);
       }
     }
     return g;
@@ -4079,6 +4167,7 @@ class App {
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
       if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
         if (mat.map) mat.map.dispose();
@@ -4123,6 +4212,11 @@ class App {
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
+        // At the follow camera's distance a hero is only ~40px tall, so it is
+        // drawn a size up from the troops and wears a dark ink outline that
+        // keeps its silhouette off same-coloured ground (Alexander on grass).
+        kit.node.scale.multiplyScalar(1.25);
+        g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
         g.userData.bob = { node: kit.node, y: kit.node.position.y };
@@ -4145,9 +4239,17 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
+      // Hero marker: a bright gold ring on a dark backing disc, so the hero
+      // reads against sand, grass and snow alike.
+      const backGeo = new THREE.RingGeometry(0.46, 0.8, 32);
+      backGeo.rotateX(-Math.PI / 2);
+      const back = new THREE.Mesh(backGeo, new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.42, depthWrite: false }));
+      back.position.y = 0.025;
+      back.userData.keepOpacity = true;
+      g.add(back);
+      const haloGeo = new THREE.RingGeometry(0.55, 0.7, 32);
       haloGeo.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.5, depthWrite: false }));
+      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffcf4d, transparent: true, opacity: 0.9, depthWrite: false }));
       halo.position.y = 0.03;
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
@@ -4357,11 +4459,12 @@ class App {
         if (rec.op !== wantOp) {
           rec.op = wantOp;
           rec.mesh.traverse((o) => {
-            if (o.isMesh) {
+            if (o.isMesh && !o.userData.keepOpacity) {
               o.material.transparent = true;
               o.material.opacity = wantOp;
             }
           });
+          for (const o of rec.mesh.userData.outlines || []) o.visible = wantOp === 1;
         }
         const aura = rec.mesh.userData.aura;
         if (aura) {

@@ -567,6 +567,9 @@ export class TerrainField {
     if (ledge) {
       this.ledgeH = new Float32Array(N * N);
       this.ledgeW = new Float32Array(N * N);
+      // Switchback road tiles (presentation: the renderer paves a ribbon on
+      // them and keeps the cut bed a darker shelf so the zig-zag reads).
+      this.swRoad = new Uint8Array(N * N);
     }
     const setLedge = (k, h, w = 1) => { if (ledge) { this.ledgeH[k] = h; this.ledgeW[k] = w; } };
     // Tiles the war roads run on stay clear of dressing.
@@ -643,7 +646,7 @@ export class TerrainField {
             const [sv, u] = cut;
             const [dist, at] = swNear(sv, u);
             if (dist <= SW.w) {
-              this.tiles[k] = TILE.PATH; elev[k] = eHigh; setLedge(k, swH(at));
+              this.tiles[k] = TILE.PATH; elev[k] = eHigh; setLedge(k, swH(at)); this.swRoad[k] = 1;
             } else if (u <= SW.depth) {
               // Rock: as high as the road leg above it, a touch proud.
               let hTop = LEDGE.out + LEDGE.lip;
@@ -731,7 +734,71 @@ export class TerrainField {
           if (n2 > (corridor ? 0.64 : nat === 'forest' ? 0.46 : 0.54)) this.tiles[k] = TILE.FOREST;
         }
       }
+      if (river) this._spanFords(s, rim, facing, river);
     });
+  }
+
+  // The river-bend postern crosses on a bridge. The sim keeps the ford
+  // exactly as it was — a strip of walkable sand tiles — so pathing is
+  // untouched; the renderer sinks that strip under the water (riverBed),
+  // lays the span over it and lifts figures onto its deck (deckY).
+  _spanFords(s, rim, facing, river) {
+    const N = this.size;
+    if (!this.riverBed) this.riverBed = new Uint8Array(N * N);
+    if (!this.bridges) this.bridges = [];
+    for (const f of river.fords) {
+      const a = f + facing, dx = Math.cos(a), dz = Math.sin(a);
+      const r = rimRadius(rim, f);
+      let last = -1;
+      for (let d = r; d <= r + 14; d += 0.25) {
+        const x = Math.floor(s.x + dx * d), z = Math.floor(s.z + dz * d);
+        if (!this.inBounds(x, z)) break;
+        const t = this.tiles[this.idx(x, z)];
+        if (t === TILE.SAND) last = d;
+        else if (last > 0 && t !== TILE.WATER) break;
+      }
+      if (last < 0) continue;
+      const d0 = r + 1.0, d1 = last + 0.9;
+      const hw = 1.8;
+      const b = { x0: s.x + dx * d0, z0: s.z + dz * d0, x1: s.x + dx * d1, z1: s.z + dz * d1, hw, base: null };
+      this.bridges.push(b);
+      // Sink the sand under the span (presentation only: tiles unchanged).
+      const ext = Math.ceil(d1 + 3);
+      for (let oz = -ext; oz <= ext; oz++) {
+        for (let ox = -ext; ox <= ext; ox++) {
+          const x = Math.round(s.x) + ox, z = Math.round(s.z) + oz;
+          if (!this.inBounds(x, z)) continue;
+          const k = this.idx(x, z);
+          if (this.tiles[k] !== TILE.SAND) continue;
+          const px = x + 0.5 - b.x0, pz = z + 0.5 - b.z0;
+          const along = px * dx + pz * dz, across = -px * dz + pz * dx;
+          if (along > 1.2 && along < d1 - d0 - 1.2 && Math.abs(across) <= hw + 1.2) this.riverBed[k] = 1;
+        }
+      }
+    }
+  }
+
+  // Deck height of a bridge at a world point, or -Infinity off every deck.
+  // The deck rests on the higher bank at both ends with a gentle camber,
+  // matching the kit's bridge_span model (tools/art/toy_kit/bridge.py).
+  deckY(x, z) {
+    if (!this.bridges) return -Infinity;
+    for (const b of this.bridges) {
+      const vx = b.x1 - b.x0, vz = b.z1 - b.z0, L = Math.hypot(vx, vz);
+      const px = x - b.x0, pz = z - b.z0;
+      const along = (px * vx + pz * vz) / L, across = Math.abs((-px * vz + pz * vx) / L);
+      if (along < 0 || along > L || across > b.hw + 0.15) continue;
+      if (b.base === null) b.base = this.bridgeBase(b);
+      return b.base + 0.45 * Math.cos(Math.PI * (along - L / 2) / L);
+    }
+    return -Infinity;
+  }
+
+  bridgeBase(b) {
+    const h = (x, z) => this.heightAt(Math.floor(x), Math.floor(z));
+    const vx = b.x1 - b.x0, vz = b.z1 - b.z0, L = Math.hypot(vx, vz);
+    const ux = vx / L, uz = vz / L;
+    return Math.max(h(b.x0 - ux * 0.6, b.z0 - uz * 0.6), h(b.x1 + ux * 0.6, b.z1 + uz * 0.6), 0.1) + 0.04;
   }
 
   // ---- city sites -------------------------------------------------------
@@ -1462,6 +1529,8 @@ export class TerrainField {
     if (!this.inBounds(x, z)) return -0.7;
     const i = this.idx(x, z);
     const t = this.tiles[i];
+    // Ford sand under a bridge span lies under the river (renderer only).
+    if (this.riverBed && this.riverBed[i]) return -0.5;
     const lw = this.ledgeW ? this.ledgeW[i] : 0;
     if (lw > 0 && t !== TILE.WATER) {
       const h = lw >= 1 ? 0 : this._naturalHeight(i, t);
@@ -1518,7 +1587,8 @@ export class TerrainField {
     const h10 = this.cornerHeight(tx + 1, tz);
     const h01 = this.cornerHeight(tx, tz + 1);
     const h11 = this.cornerHeight(tx + 1, tz + 1);
-    return (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+    const g = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+    return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
   }
 
   countNearby(x0, z0, radius, tile) {

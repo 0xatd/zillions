@@ -20,6 +20,7 @@ const KIT_ASSETS = [
   'hero_scott', 'hero_alexander', 'hero_danny',
   'enemy_walker', 'enemy_runner', 'enemy_brute', 'enemy_spitter', 'enemy_burrower', 'enemy_sieger', 'enemy_caller',
   'prop_tree_round', 'prop_tree_pine', 'prop_rock_a', 'prop_rock_b', 'prop_cliff',
+  'bridge_span',
 ];
 
 export const CULTURES = {
