@@ -11,7 +11,8 @@ import {
 } from '../src/match-rewards.js';
 import { BOSS_DROPS, DIFFICULTY, FIELD_LOOT, LEVELS, levelById, rollLootKey, worldItemLevel } from '../src/config.js';
 import { xpToMmoLevel } from '../src/mmo-characters.js';
-import handler, { processMatchResult } from '../api/match-result.js';
+import handler, { processMatchResult as processWithTicket } from '../api/match-result.js';
+import { signTicket } from '../api/_lib/match-ticket.js';
 import { overlayServerProgress, serverProgress, AuthClient } from '../src/auth.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from '../src/match-outbox.js';
 
@@ -115,12 +116,23 @@ eq(itemPayload('not_an_item'), null, 'unknown keys produce no row');
 // ---- endpoint flow with a fake store ----------------------------------------
 const USER = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
-function fakeStore({ character = { id: 'c1', level: 1, xp: 0, progress_revision: 7 }, stats = {}, membership = null, stale = 0, existing = null } = {}) {
+// Tickets and replays have their own tests (tests/*.test.mjs). Here every
+// report carries a valid ticket issued 30 minutes ago and the store reports a
+// prior best far above it, so no replay is required.
+const SECRET = 'test-secret-test-secret-test-secret!';
+const T0 = Date.parse('2026-10-26T12:00:00Z');
+const ticketFor = (over = {}) => signTicket({ tid: '44444444-4444-4444-8444-444444444444', uid: USER, lvl: 1, mode: 'campaign',
+  diff: 'normal', seed: 7, rid: null, iat: Math.floor(T0 / 1000) - 1800, exp: Math.floor(T0 / 1000) + 3600, ...over }, SECRET);
+const processMatchResult = ({ body: b, now = T0, ...rest }) => processWithTicket({
+  secret: SECRET, random: () => 1, now, body: { ticket: ticketFor(b?.roomId && UUID_RE.test(b.roomId) ? { rid: b.roomId } : {}), ...b }, ...rest,
+});
+const UUID_RE = /^[0-9a-f-]{36}$/i;
+function fakeStore({ character = { id: 'c1', level: 1, xp: 0, progress_revision: 7 }, stats = { campaign_cleared: 5 }, membership = null, stale = 0, existing = null } = {}) {
   const calls = [];
   return {
     calls,
     async findReport() { return existing; },
-    async loadContext() { return { character, stats, membership }; },
+    async loadContext() { return { character, stats, membership, previousReports: [report({ kills: 1e7 })], items: [] }; },
     async applyResult(args) {
       calls.push(args);
       if (stale-- > 0) throw Object.assign(new Error('stale_progress'), { status: 409 });
@@ -128,7 +140,7 @@ function fakeStore({ character = { id: 'c1', level: 1, xp: 0, progress_revision:
     },
   };
 }
-const body = (over = {}) => ({ requestId: 'req-12345678', characterId: 'mmo_a', report: report(), ...over });
+const body = (over = {}) => ({ requestId: 'req-12345678', characterId: 'mmo_a', report: report({ bossKillT: 200 }), ...over });
 const store = fakeStore();
 const applied = await processMatchResult({ userId: USER, body: body(), store });
 ok(applied.ok && store.calls.length === 1, 'valid report applied once');
@@ -146,10 +158,10 @@ eq(retry.calls.length, 2, 'stale progress is recomputed once');
 await assert.rejects(processMatchResult({ userId: USER, body: body(), store: fakeStore({ stale: 2 }) }), /stale_progress/); checks++;
 await assert.rejects(processMatchResult({ userId: USER, body: body(), store: fakeStore({ character: null }) }), (e) => e.status === 404); checks++;
 await assert.rejects(processMatchResult({ userId: USER, body: body({ requestId: '' }), store }), (e) => e.message === 'missing_request_id'); checks++;
-await assert.rejects(processMatchResult({ userId: USER, body: body({ report: report({ kills: 1e9 }) }), store }), (e) => e.status === 422); checks++;
+await assert.rejects(processMatchResult({ userId: USER, body: body({ report: report({ kills: 1e9, bossKillT: 200 }) }), store }), (e) => e.status === 422); checks++;
 await assert.rejects(processMatchResult({ userId: USER, body: body({ roomId: 'not-a-uuid' }), store }), (e) => e.message === 'invalid_room'); checks++;
 await assert.rejects(processMatchResult({ userId: USER, body: body({ roomId: ROOM }), store: fakeStore() }), (e) => e.status === 403, 'non-participant rejected'); checks++;
-const now = Date.parse('2026-10-26T12:00:00Z');
+const now = T0;
 await assert.rejects(processMatchResult({ userId: USER, now, body: body({ roomId: ROOM }),
   store: fakeStore({ membership: { user_id: USER, rooms: { status: 'open', created_at: '2026-10-26T10:00:00Z' } } }) }), (e) => e.message === 'room_not_started'); checks++;
 await assert.rejects(processMatchResult({ userId: USER, now, body: body({ roomId: ROOM }),
@@ -158,7 +170,11 @@ const coop = fakeStore({ membership: { user_id: USER, rooms: { status: 'finished
 await processMatchResult({ userId: USER, now, body: body({ roomId: ROOM }), store: coop });
 eq(coop.calls[0].p_room_id, ROOM, 'co-op participant report carries the room for per-room dedupe');
 const locked = fakeStore({ stats: { campaign_cleared: 0 } });
-await assert.rejects(processMatchResult({ userId: USER, body: body({ report: report({ levelId: 2 }) }), store: locked }), (e) => e.message === 'level_locked'); checks++;
+await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, random: () => 1, store: locked,
+  body: body({ ticket: ticketFor({ lvl: 2 }), report: report({ levelId: 2, bossKillT: 200 }) }) }), (e) => e.message === 'level_locked'); checks++;
+await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store, body: { ...body(), ticket: undefined } }), (e) => e.message === 'missing_ticket'); checks++;
+await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store, body: body({ ticket: ticketFor({ uid: ROOM }) }) }), (e) => e.message === 'ticket_mismatch'); checks++;
+await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store, body: body({ ticket: ticketFor({ iat: Math.floor(T0 / 1000) - 60 }) }) }), (e) => e.message === 'implausible_duration', 'duration measured from the server ticket clock'); checks++;
 
 // HTTP shell: method, configuration, auth.
 const fakeRes = () => { const r = { status: 0, body: null, headers: {} };

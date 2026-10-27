@@ -23,7 +23,13 @@ export function readPendingMatches(now = Date.now()) {
 function write(list) {
   const store = storage();
   if (!store) return;
-  try { store.setItem(KEY, JSON.stringify(list.slice(-MAX_PENDING))); } catch { /* storage full or blocked */ }
+  try { store.setItem(KEY, JSON.stringify(list.slice(-MAX_PENDING))); }
+  catch {
+    // Storage full: keep the reports without their replay logs. A report
+    // that needed a replay is then refused, but the others still pay out.
+    try { store.setItem(KEY, JSON.stringify(list.slice(-MAX_PENDING).map(({ replay, ...rest }) => rest))); }
+    catch { /* storage blocked */ }
+  }
 }
 
 export function queuePendingMatch(pending, now = Date.now()) {

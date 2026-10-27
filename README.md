@@ -79,8 +79,12 @@ Character Info separates the overview, equipment, abilities, the Lattice, the
 Market (Orbital Exchange) and the Forge.
 
 **The server is the only thing that hands out XP, loot, Alloy, and stats.**
-When a signed-in match ends, the client sends a match report to
-`api/match-result.js`. The server verifies the session, bounds-checks every
+A signed-in match starts with a signed, single-use ticket from
+`api/match-start.js` that fixes the player, mission, room and map seed. When
+the match ends, the client sends the ticket, a match report and its input log
+to `api/match-result.js`. The server verifies the session and ticket, replays
+personal bests, first clears, loot runs, suspicious results and a random
+sample from the seed and input log, bounds-checks every
 number against the match duration and map, re-derives every looted item key
 from the map seed, re-evaluates side quests itself, and then grants the
 result in one transaction through the `apply_match_result()` database
@@ -299,6 +303,7 @@ Vercel is the production host. The production project is `zillions`.
 Vercel serves the static game and these same-origin API routes:
 
 - `api/auth-config.js` — public Supabase and ICE configuration
+- `api/match-start.js` — signed match tickets (seed, co-op room)
 - `api/match-result.js` — the only grant path for signed-in XP, loot, Alloy,
   and stats
 - `api/economy.js` — Market, stash, equipment, and Forge transactions

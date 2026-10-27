@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, PACK_SLOTS,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
 } from './config.js';
 import { GameMap } from './map.js';
 import { surveySite } from './plots.js';
@@ -32,8 +32,9 @@ import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
-import { MATCH_REPORT_VERSION } from './match-rewards.js';
-import { matchResultRequest } from './backend.js';
+import { buildMatchReport } from './match-report.js';
+import { REPLAY_VERSION } from './match-replay.js';
+import { matchResultRequest, matchStartRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import { persistRunTelemetry } from './run-telemetry.js';
@@ -121,14 +122,7 @@ class App {
               return;
             }
           }
-          const level = this.ui.selectedLevel || 1;
-          const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.startExpectedGuests = this.peers.length;
-          this.startReadyGuests.clear();
-          this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
-          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
-          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode });
-          if (this.lobby && this.lobby.game) this.lobby.touchGame({ status: 'playing' });
+          this._launchHostMatch(d, hero, mode);
         } else {
           this.startGame(d, hero);
         }
@@ -596,6 +590,104 @@ class App {
     }
   }
 
+  // ---------------- match tickets ----------------
+  // A signed-in match starts with a server ticket (api/match-start.js). It
+  // carries the match seed every peer runs, the room the match is credited
+  // to, and makes the end-of-match report single use. Signed-out play needs
+  // no ticket and keeps the fixed seed it always had.
+  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
+    if (!this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
+    const character = selectedMmoCharacter(this.profile);
+    if (!character) return null;
+    try {
+      return await matchStartRequest({
+        characterId: character.id, levelId, mode, difficulty, roomId, joinToken,
+        ...(manualCoop ? { manualCoop: { displayName: this._publicName(), hero } } : {}),
+      });
+    } catch (error) {
+      console.warn('match ticket failed', error);
+      return { ok: false, error: error?.message || 'match_start_failed' };
+    }
+  }
+
+  // Co-op host: get the ticket (and, for invite-code games, a private room)
+  // BEFORE telling guests to start, so every peer runs the ticket's seed and
+  // knows the room id from the first frame — not looked up at match end.
+  async _launchHostMatch(d, hero, mode) {
+    if (this._hostLaunching) return;
+    this._hostLaunching = true;
+    try {
+      const level = this.ui.selectedLevel || 1;
+      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+      const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
+      // The server only issues room tickets for a room that is in game.
+      if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
+      const ticket = await this._requestMatchTicket({ levelId: level, mode, difficulty: d, roomId: lobbyRoom, manualCoop: !lobbyRoom, hero });
+      const match = {
+        ticket: ticket?.ok ? ticket.ticket : null,
+        seed: ticket?.ok ? ticket.seed : null,
+        roomId: ticket?.ok ? ticket.roomId : lobbyRoom,
+        joinToken: ticket?.ok ? ticket.joinToken || null : null,
+        error: ticket && !ticket.ok ? ticket.error : null,
+      };
+      this.startExpectedGuests = this.peers.length;
+      this.startReadyGuests.clear();
+      this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
+      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, match: shared }));
+      await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, match });
+    } finally {
+      this._hostLaunching = false;
+    }
+  }
+
+  // The match fields a host shares with its guests (never its own ticket).
+  _sharedMatchFields() {
+    const m = this._match;
+    return m ? { seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null } : null;
+  }
+
+  _sharedMatch(raw) {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return {
+      seed: Number.isInteger(raw?.seed) ? raw.seed : null,
+      roomId: typeof raw?.roomId === 'string' && uuid.test(raw.roomId) ? raw.roomId : null,
+      joinToken: typeof raw?.joinToken === 'string' ? raw.joinToken.slice(0, 128) : null,
+    };
+  }
+
+  // What this peer needs at match end: ticket, room, the exact hero setups the
+  // sim started from, and (for resumed runs) the input log so far.
+  _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket }) {
+    const resumed = snap ? this._resumeMatch || null : null;
+    this._resumeMatch = null;
+    const given = mp?.match || null;
+    const match = {
+      ticket: resumed?.ticket || given?.ticket || (soloTicket?.ok ? soloTicket.ticket : null),
+      seed: resumed?.seed ?? given?.seed ?? (soloTicket?.ok ? soloTicket.seed : null),
+      roomId: resumed?.roomId || given?.roomId || null,
+      joinToken: resumed?.joinToken || given?.joinToken || null,
+      heroes: JSON.parse(JSON.stringify(resumed?.heroes || heroKeys || null)),
+      log: resumed?.log || null,
+      error: given?.error || (soloTicket && !soloTicket.ok ? soloTicket.error : null),
+      ticketPromise: null,
+    };
+    // Guests (and resumed co-op peers) fetch their own ticket for the room in
+    // the background; it is only needed when the match ends.
+    if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
+      match.ticketPromise = this._requestMatchTicket({
+        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
+      }).then((ticket) => {
+        if (ticket?.ok) {
+          if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
+          match.ticket = ticket.ticket;
+        } else match.error = ticket?.error || 'match_start_failed';
+        return ticket;
+      });
+    }
+    return match;
+  }
+
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
@@ -614,10 +706,24 @@ class App {
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    // Solo signed-in runs fetch their ticket (and match seed) first.
+    const soloTicket = !snap && !mp
+      ? await this._requestMatchTicket({ levelId, mode, difficulty })
+      : null;
+    this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
+      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed } : {});
+    // Record inputs for the server replay. A resumed run continues the log it
+    // saved; a resume without one cannot be replayed.
+    if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
+      this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
+    }
+    if (this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
+      this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
+    }
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1445,9 +1551,18 @@ class App {
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
+      // The local save also keeps the match ticket and the input log so far,
+      // so a resumed signed-in run can still be replayed by the server. The
+      // cloud copy stays snapshot-only.
+      const m = this._match;
+      const match = m ? {
+        ticket: m.ticket || null, seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null,
+        heroes: m.heroes, log: this.game.inputLog ? this.game.inputLog.slice() : null,
+      } : null;
       const persist = () => {
         try {
-          localStorage.setItem('zillions_save', JSON.stringify(save));
+          try { localStorage.setItem('zillions_save', JSON.stringify(match ? { ...save, match } : save)); }
+          catch { localStorage.setItem('zillions_save', JSON.stringify(save)); }
           if (this.auth?.isSignedIn()) this.auth.syncLatestSave(save).catch((err) => console.warn('save sync failed', err));
         } catch { /* storage full */ }
       };
@@ -1482,43 +1597,51 @@ class App {
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
-  // What the client claims happened. The server bounds-checks every field and
-  // re-derives loot and quests itself (src/match-rewards.js).
-  _matchReport(won, h) {
+  // What the client claims happened. The server bounds-checks every field,
+  // re-derives loot and quests itself (src/match-rewards.js), and replays the
+  // input log through the same buildMatchReport() when a replay is required.
+  _matchReport(won) {
+    return buildMatchReport(this.game, { won: !!won, heroIndex: this.myPlayer, heroKey: this.ui.selectedHero || null });
+  }
+
+  // The recorded inputs for the server replay (src/match-replay.js).
+  _matchReplay() {
     const g = this.game;
-    const s = g.stats || {};
-    const hq = (g.plots || []).find((plot) => plot.kind === 'hq');
-    return {
-      version: MATCH_REPORT_VERSION,
-      mode: g.mode || 'campaign',
-      levelId: g.levelId,
-      difficulty: g.diffKey || 'normal',
-      won: !!won,
-      durationSeconds: Math.round(g.time || 0),
-      threatLevel: g.threatLevel | 0,
-      kills: s.kills | 0, coins: Math.floor(s.coins || 0), nests: s.nests | 0, nodes: s.nodes | 0,
-      built: s.built | 0, lost: s.lost | 0, bestHeld: s.bestHeld | 0, heroDeaths: s.heroDeaths | 0,
-      bossKillT: s.bossKillT == null ? null : Number(s.bossKillT),
-      hqTier: hq?.tier | 0,
-      standingBuildings: (g.buildings || []).filter((b) => b.alive && b.kind !== 'wall').length,
-      pack: [...new Set(h?.pack || [])].slice(0, PACK_SLOTS),
-      hero: h?.key || this.ui.selectedHero || null,
-    };
+    const m = this._match;
+    if (!g?.inputLog || !m?.heroes) return null;
+    return { v: REPLAY_VERSION, frames: g.steps, heroIndex: this.myPlayer, heroes: m.heroes, log: g.inputLog };
   }
 
   async _submitMatchResult(won, h, character) {
     const quests = this.game?.questResults || [];
-    const pending = {
-      requestId: globalThis.crypto?.randomUUID?.() || `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-      characterId: character?.id || null,
-      roomId: this.onlineMode && this.lobby?.game?.id ? this.lobby.game.id : null,
-      report: this._matchReport(won, h),
-    };
-    if (!pending.characterId) {
+    const match = this._match || {};
+    // Captured now, synchronously: the report and log describe this game.
+    const report = this._matchReport(won);
+    const replay = this._matchReplay();
+    if (!character?.id) {
       this._endExtras = { pending: false, error: 'Create a character to earn rewards.', grants: [], quests };
       this.ui.setEndRewards?.(this._endExtras);
       return;
     }
+    if (!match.ticket && match.ticketPromise) await match.ticketPromise.catch(() => null);
+    if (!match.ticket) {
+      this._endExtras = {
+        pending: false, grants: [], quests,
+        error: `This match started without a reward ticket (${match.error || (match.roomId ? 'room' : 'offline')}). No rewards were granted.`,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
+    const pending = {
+      requestId: globalThis.crypto?.randomUUID?.() || `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      characterId: character.id,
+      // The room comes from match start, not from lobby state at match end
+      // (which can already be cleared). The server takes it from the ticket.
+      roomId: match.roomId || null,
+      ticket: match.ticket,
+      report,
+      ...(replay ? { replay } : {}),
+    };
     queuePendingMatch(pending);
     try {
       const result = await this._sendMatchResult(pending);
@@ -1730,9 +1853,12 @@ class App {
           this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
           return;
         }
-        this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1 }));
+        const shared = save.match ? { seed: save.match.seed ?? null, roomId: save.match.roomId || null, joinToken: save.match.joinToken || null } : null;
+        this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1, match: shared }));
+        this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
       } else if (!this.mpRole) {
+        this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, null, save.snap);
       }
     }, (error) => this._discardBrokenSave(error));
@@ -1895,8 +2021,9 @@ class App {
     }
     else if (m.t === 'start') {
       this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
-      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
+      const match = this._sharedMatch(m.match);
+      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match }, m.snap);
+      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode, match });
       this.net.send({ t: 'startReady' });
       this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
     }
@@ -1913,7 +2040,7 @@ class App {
       // windows banked while the sim was rebuilding.
       this._resyncing = true;
       this._resyncBuffer = new Map();
-      this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap)
+      this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match: this._sharedMatch(m.match) }, m.snap)
         .then(() => {
           const buf = this._resyncBuffer || new Map();
           const next = Math.ceil(m.frame / NET_STEP);
@@ -2536,7 +2663,7 @@ class App {
         this.guestCmdQueues[idx] = [];
         // One live tick, frozen and shipped: the guest rebuilds from it and
         // rejoins lockstep at our frame counter.
-        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame });
+        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields() });
         this.game.msg(`⚔️ ${this.guestNames[idx] || `Player ${idx + 2}`} reconnected — their hero fights again.`, 'good');
       } else {
         this.peers.push(peer);

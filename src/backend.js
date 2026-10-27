@@ -1,5 +1,6 @@
 const ECONOMY_API = '/api/economy';
 const MATCH_RESULT_API = '/api/match-result';
+const MATCH_START_API = '/api/match-start';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -42,5 +43,20 @@ export async function matchResultRequest(payload = {}) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: response.status, result });
+  return result;
+}
+
+// Signed-in match start: a signed, single-use ticket plus the match seed.
+// Invite-code co-op hosts ask for a room (manualCoop) and guests present the
+// host's join token, so both are credited as co-op.
+export async function matchStartRequest(payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) return null;
+  const response = await fetch(MATCH_START_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'match_start_failed'), { status: response.status, result });
   return result;
 }

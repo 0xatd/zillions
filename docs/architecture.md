@@ -110,7 +110,8 @@ procedural renderer and must not stop a match from starting.
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
-| `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats |
+| `api/match-start.js` | Issues signed, single-use match tickets (seed, room) |
+| `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; replays required matches |
 | `api/economy.js` | Market, stash, equipment, and Forge transactions |
 
 `supabase/schema.sql` defines the durable schema.
@@ -184,13 +185,19 @@ seat that the same account owned before disconnect.
 When a signed-in match ends, the client never grants anything itself.
 
 ```text
+POST /api/match-start           signed single-use ticket: user, mission, seed, room
+  -> new Game(..., { rngSeed })   ticket seed; commands logged with their tick
 victory/defeat event
-  -> Main._matchReport()          what the client claims (counters, pack keys)
+  -> Main._matchReport()          what the client claims (buildMatchReport)
   -> match outbox (localStorage)  survives a closed tab; same requestId on resend
   -> POST /api/match-result       bearer token verified with Supabase auth
        -> validateMatchReport()   bounds vs duration, map, level unlocks
        -> verifyLootKey()         every pack key re-derived from the map seed
        -> evaluateQuests()        quests re-run on the reported counters
+       -> verifyTicket()          HMAC, expiry, user, mission; room from ticket
+       -> server clock            duration fits time since the ticket
+       -> replayMatch()           required replays re-run seed + input log;
+                                  the server's report is what pays
        -> co-op room check        reporter must be a seated room participant
        -> computeMatchRewards()   XP, levels, items, Alloy, stats
        -> apply_match_result()    one transaction: idempotency, rate limit,

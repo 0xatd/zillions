@@ -219,59 +219,100 @@ legacy currency and item keys stay in an offline, read-only archive marked
 future server-derived snapshot or one-time server-issued migration ticket.
 Static local play cannot change authoritative state.
 
+## Match Tickets
+
+A signed-in match starts with `POST /api/match-start`
+(`{ levelId, mode, difficulty, roomId?, joinToken?, manualCoop? }`, bearer
+token). The server:
+
+1. Verifies the token and the level, mode and difficulty.
+2. For an invite-code (manual WebRTC) host, `manualCoop: true` creates a
+   private `rooms` row (`create_manual_coop_room()`, `metadata.manual`) and
+   returns a `joinToken` (HMAC of the room id). The host passes
+   `{ seed, roomId, joinToken }` to guests in the `start` message; each guest
+   then calls match-start with `roomId + joinToken` and is seated
+   (`seat_manual_coop_player()`). Lobby rooms use their existing seats.
+3. `issue_match_ticket()` records a single-use row in `match_tickets`
+   (user, level, mode, difficulty, seed, room, issue time; 6 per minute).
+4. The response carries an HMAC-SHA256 ticket signed with
+   `MATCH_TICKET_SECRET`: `base64url(payload).base64url(sig)`, valid 48 hours.
+
+The match seed comes from the ticket. Solo seeds are random per ticket; room
+seeds are HMAC(roomId) so every peer runs the same simulation. The client
+passes it to `new Game(..., { rngSeed })`.
+
 ## Server-Authoritative Match Results
 
-`api/match-result.js` accepts `{ requestId, characterId, roomId?, report }`
-with the player's Supabase bearer token.
+`api/match-result.js` accepts
+`{ requestId, characterId, ticket, report, replay? }` with the player's bearer
+token. `roomId` is taken from the ticket, never from the body.
 
 1. The token is verified against Supabase Auth. The user id comes from the
    token, never from the body.
 2. A known `requestId` returns the stored response (idempotent replay).
-3. `validateMatchReport()` (`src/match-rewards.js`) rejects unknown versions,
+3. The ticket signature, expiry, user, level, mode and difficulty are checked.
+   Missing or bad tickets get `401/403/409` (`missing_ticket`,
+   `invalid_ticket`, `ticket_expired`, `ticket_mismatch`).
+4. `validateMatchReport()` (`src/match-rewards.js`) rejects unknown versions,
    modes, difficulties, locked campaign levels, and any counter outside bounds
-   derived from the match duration and the map (kills, coins, nests, nodes,
-   Threat, boss time, pack size).
-4. Every looted item key is re-derived from the level's map seed and must match
-   the item level for the reported difficulty. Authored field finds are
-   allow-listed. Boss and quest items cannot be smuggled in as finds.
-5. Side quests are re-evaluated from the reported counters. A client "done"
-   flag is ignored.
-6. A co-op report must name a room the player is seated in, the room must have
-   started, and the match cannot be longer than the room has existed.
-7. `computeMatchRewards()` turns the report into XP, levels, items, Alloy, and
+   derived from the match duration and the map.
+5. The reported duration must fit the server clock since the ticket was
+   issued (x2 for solo speed, x1 for co-op, plus 120 s slack).
+6. **Replay.** `replayReasons()` (`src/match-replay.js`) decides whether the
+   match must be replayed: a personal best for that level and mode, a first
+   clear, a survival best, any loot, kills/coins/buildings above half the
+   bound, an implausible duration or boss time, or a 15% spot check. A
+   required replay without an input log is refused (`422 replay_required`).
+   The server rebuilds the map and `Game` from the ticket seed and the
+   reporter's camp **as stored on the server** (level, stash/equipped items,
+   relics; Lattice capped by level), then runs the logged commands at their
+   recorded tick on the fixed 1/30 s step until the game ends, and rebuilds the
+   report with the same `buildMatchReport()` the client uses.
+   - Match: rewards are paid, `replay_status = 'verified'`.
+   - Mismatch: the **server's** report is validated and paid instead; the
+     claim is kept in `claimed_report` and the row is `flagged`.
+   - Over budget (`MATCH_REPLAY_BUDGET_MS`, default 8000 ms): the match pays
+     on the bounds-checked claim, `replay_status = 'deferred'`, flagged, and
+     the log is stored in `match_replays` (`pending`) for offline checking.
+   - Invalid log: refused.
+7. Loot keys are re-derived from the map seed; quests are re-evaluated.
+8. `computeMatchRewards()` turns the report into XP, levels, items, Alloy, and
    stat deltas.
-8. `apply_match_result()` (security definer, `service_role` only) applies it in
-   one transaction: advisory lock per player, duplicate check, one report per
-   co-op room, 15-second rate limit, a wall-clock check (match time must fit
-   since the previous report; solo time is halved for 2x speed), a
-   compare-and-set on `game_characters.progress_revision`, once-per-account
-   quests, once-per-character authored items, the 60-item stash cap, the
-   wallet credit, `player_stats`, `match_history`, and `match_reports`.
+9. `apply_match_result()` (security definer, `service_role` only) re-checks
+   and spends the ticket, re-checks the server-clock duration, and applies the
+   result in one transaction (advisory lock, duplicate check, one report per
+   ticket and per co-op room, rate limit, CAS on `progress_revision`, quest and
+   item dedupe, stash cap, wallet credit, stats, history, replay columns).
+   A manual co-op room is marked finished.
 
 The client keeps unconfirmed reports in `localStorage`
 (`zillions_pending_matches`) and resends them with the same `requestId` on the
 next sign-in, so a closed tab does not lose a match and a resend cannot double
-grant.
+grant. If the outbox hits the storage quota, the input log is dropped first.
 
-Guest (offline) play never calls the route; its progress stays in the browser.
+Guest (offline) play never calls either route; its progress stays in the
+browser.
 
-### Remaining trust gaps
+### What the replay does and does not prove
 
-- Combat counters are bounded client claims, not a server replay of the match.
-  A modified client can still report a plausible best case.
-- Manual (non-room) WebRTC co-op has no room id and is reported as solo.
-- `room_players` rows are created by clients, so the participant check proves
-  the reporter took a seat, not that they played; one report per room limits
-  the damage.
-- The guest meta tree (`src/meta.js`) is local only and does not affect
-  signed-in rewards.
+- It proves the reported counters follow from the seed, the server-known camp
+  and the logged commands. It does **not** prove a human produced the
+  commands: a bot driving a real client still produces a valid log.
+- In co-op, teammates' camps are taken from the log as claimed (bounded only).
+- Resumed matches and guests who resynced mid-match have no complete log;
+  if a replay is required they cannot be paid (`replay_required`).
+- Floating-point results could in principle differ between a browser and
+  Node. A divergence pays the server result and flags the report; it never
+  grants more than the server computed.
+- Deferred replays are flagged, not clawed back. `match_replays` rows stay
+  `pending` until an operator checks them offline.
+- `room_players` seats prove the reporter took a seat, not that they played.
 
 ## Known Limits
 
 - Room browser data, player rosters, and host setup are real Supabase data.
 - Mid-game Join as a new controlling player is not supported. Use Watch.
-- Server-authoritative combat is not implemented. Rewards are server-granted
-  but derived from bounded client reports.
-- There is no anti-cheat beyond the report bounds and loot proofs.
+- Combat runs in the browser. The server replays required matches from the
+  ticket seed and input log; other matches are bounds-checked claims.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
