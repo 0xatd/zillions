@@ -12,8 +12,8 @@ import math
 from kit import shade
 
 PALETTE = {
-    'stone': 0xeee5cf, 'stone2': 0xd8ccb1, 'stone3': 0xb5a68a, 'roof': 0x3f70c8,
-    'roof2': 0x2f569e, 'trim': 0xf2c14e, 'banner': 0x3f70c8, 'accent': 0xc4473b,
+    'stone': 0xe9d8b4, 'stone2': 0xd2bc92, 'stone3': 0xa88f6c, 'roof': 0x3a66c4,
+    'roof2': 0x3a66c4, 'trim': 0xf2c14e, 'banner': 0x3f70c8, 'accent': 0xc4473b,
     'wood': 0x9a6b44, 'steel': 0x9aa6b6, 'dark': 0x343c4c, 'glow': 0x8ff3ff,
     'warm': 0xffd27a, 'cloth': 0x3f70c8, 'skin': 0xf0c8a0, 'field': 0x8b6a45,
     'crop': 0xa7d45a, 'crop2': 0xe9cf5a, 'leaf': 0x6fbf5a,
@@ -150,76 +150,57 @@ def turret_head(T, pal, s=1.0, twin=False, coil=False, oy=0.0, oz=0.0):
 # ---------------------------------------------------------------- castle
 
 def castle(k, t, pal):
+    """Iconic, uncluttered keep: warm stone, one blue roof colour, a single
+    banner. Each tier adds one readable mass (curtain + towers, then height,
+    then a spire) instead of more small parts. Scale matches the figurines:
+    the door is ~1.4 figurines tall."""
     B, G = k.B, k.G
     r = 2.0 + min(t, 3) * 0.1
-    base = hex_plinth(B, G, pal, r, steps=2 if t < 3 else 3)
+    base = hex_plinth(B, G, pal, r, steps=2 if t < 3 else 3, lamps=False)
     if t == 1:
-        top = keep_block(B, G, pal, 1.6, 1.5, 1.7, base, roof='pyramid')
-        door(B, pal, 0.36, 0.55, 0, 0.76, base)
-        banner(B, pal, -1.2, 0.9, base, 1.5)
-        banner(B, pal, 1.2, 0.9, base, 1.5, flip=True)
-        for x in (-1.4, 1.4):
-            B.box(pal['wood'], 0.32, 0.26, 0.32, x, base, -0.9)
+        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=1)
+        door(B, pal, 0.4, 0.6, 0, 0.81, base)
+        banner(B, pal, 1.15, 0.85, base, 1.6, flip=True)
         return
-    # T2+: curtain wall square with corner towers around the keep
+    # T2+: a chunky square curtain with four round corner towers.
     half = 1.45 if t == 2 else 1.6
-    wall_h = 0.8 if t == 2 else 1.15 if t == 3 else 1.3
-    thick = 0.26 if t == 2 else 0.4
+    wall_h = 0.8 if t == 2 else 1.1
+    thick = 0.34 if t == 2 else 0.42
     corners = [(-half, -half), (half, -half), (half, half), (-half, half)]
     for i in range(4):
         x0, z0 = corners[i]
         x1, z1 = corners[(i + 1) % 4]
-        if i == 2:  # front wall gets the gatehouse gap
-            curtain(B, pal, x0, z0, 0.42, z1, wall_h, thick)
-            curtain(B, pal, -0.42, z0, x1, z1, wall_h, thick)
+        if i == 2:  # the front wall leaves a clear gate opening
+            curtain(B, pal, x0, z0, 0.45, z1, wall_h, thick)
+            curtain(B, pal, -0.45, z0, x1, z1, wall_h, thick)
         else:
             curtain(B, pal, x0, z0, x1, z1, wall_h, thick)
-    tower_h = 1.6 if t == 2 else 2.4 if t == 3 else 2.8
-    tr = 0.38 if t == 2 else 0.46
+    tower_h = 1.6 if t == 2 else 2.2 if t == 3 else 2.5
+    tr = 0.42 if t == 2 else 0.5
     for (x, z) in corners:
-        top = round_tower(B, G, pal, x, z, tr, tower_h)
-        if t >= 3:
-            banner(B, pal, x + (0.3 if x > 0 else -0.3), z, top - 0.2, 1.1, flip=x < 0)
-    # gatehouse
-    gh = wall_h + 0.5
-    for sx in (-0.5, 0.5):
-        B.box(pal['stone'], 0.32, gh, 0.5, sx, base * 0 + 0, half)
-        B.box(pal['roof'], 0.4, 0.08, 0.56, sx, gh, half)
-        B.prism(pal['roof'], 4, 0.3, 0, 0.36, sx, gh + 0.08, half, phase=math.pi / 4)
-    B.box(pal['stone2'], 0.72, 0.22, 0.46, 0, gh - 0.22, half)
-    G.box(pal['glow'] if t >= 3 else pal['warm'], 0.66, 0.04, 0.3, 0, 0.02, half)
-    # the keep
-    kw = 1.7 if t == 2 else 1.9
-    kh = 2.2 if t == 2 else 2.7
-    top = keep_block(B, G, pal, kw, kw, kh, base, roof='merlon', windows=3)
-    door(B, pal, 0.4, 0.6, 0, kw / 2 + 0.01, base)
-    upper_w = kw * 0.62
-    uh = 0.9 if t == 2 else 1.4
-    top2 = keep_block(B, G, pal, upper_w, upper_w, uh, top, roof='pyramid', windows=1)
-    B.prism(pal['trim'], 4, 0.07, 0, 0.4, 0, top2 + upper_w * 0.62 * 0.98, 0)
-    banner(B, pal, 0, -kw / 2 - 0.05, top, 1.3, color=pal['banner'], big=1.2)
-    if t >= 3:
-        # energy band and bigger banners: the keep is now a power plant
-        for side in range(4):
-            a = side * math.pi / 2
-            G.box(pal['glow'], kw * 0.86 if side % 2 == 0 else 0.04, 0.07, 0.04 if side % 2 == 0 else kw * 0.86,
-                  math.sin(a) * (kw / 2 + 0.02), base + kh * 0.35, math.cos(a) * (kw / 2 + 0.02))
-        for (x, z, yaw) in ((-half * 0.5, half, 0.0), (half * 0.5, half, 0.0), (-half, 0, -math.pi / 2), (half, 0, math.pi / 2)):
-            guard(B, pal, x, wall_h + 0.08, z, yaw)
-        banner(B, pal, -0.9, half + 0.25, 0, 2.0, big=1.3)
-        banner(B, pal, 0.9, half + 0.25, 0, 2.0, flip=True, big=1.3)
+        round_tower(B, G, pal, x, z, tr, tower_h, crest=False, window=False)
+    # gate: two squat flanking piers and a lintel — a plain dark opening
+    gh = wall_h + 0.35
+    for sx in (-0.55, 0.55):
+        B.box(pal['stone2'], 0.34, gh, 0.52, sx, 0, half)
+    B.box(pal['stone2'], 1.44, 0.24, 0.52, 0, gh - 0.24, half)
+    B.box(pal['dark'], 0.74, gh - 0.3, 0.06, 0, 0, half + 0.24)
+    # the keep: one big block, one smaller crowning block with the roof
+    kw = 1.8 if t == 2 else 2.0
+    kh = 2.1 if t == 2 else 2.6
+    top = keep_block(B, G, pal, kw, kw, kh, base, roof='merlon', windows=1)
+    door(B, pal, 0.42, 0.62, 0, kw / 2 + 0.01, base)
+    upper_w = kw * 0.6
+    uh = 0.8 if t == 2 else 1.2
+    top2 = keep_block(B, G, pal, upper_w, upper_w, uh, top, roof='pyramid', windows=0)
+    banner(B, pal, 0, kw / 2 + 0.05, top, 1.4, big=1.25)
     if t >= 4:
-        # citadel spire with a floating energy core
-        B.prism(pal['stone'], 8, 0.32, 0.22, 2.0, 0, top2 + 0.2, 0)
-        B.prism(pal['roof'], 8, 0.34, 0, 0.5, 0, top2 + 2.2, 0)
-        core = k.part('part_core', origin=(0, top2 + 3.05, 0), glow=True)
-        core.octa(pal['glow'], 0.26, 0.42, 0, top2 + 3.05, 0)
-        for i in range(4):
-            a = i / 4 * TAU + math.pi / 4
-            G.box(pal['glow'], 0.06, 0.06, 0.06, math.cos(a) * 0.5, top2 + 2.9, math.sin(a) * 0.5)
-        for (x, z, yaw) in ((-half, -half * 0.4, -math.pi / 2), (half, -half * 0.4, math.pi / 2),
-                            (-half * 0.5, -half, math.pi), (half * 0.5, -half, math.pi)):
-            guard(B, pal, x, wall_h + 0.08, z, yaw)
+        # citadel spire: a tall slender roofed tower rising from the keep
+        B.prism(pal['stone'], 8, 0.34, 0.26, 1.6, 0, top2 + 0.3, 0)
+        B.prism(pal['roof'], 8, 0.42, 0, 0.9, 0, top2 + 1.9, 0)
+        # gold finial: the renderer's part_core (it turns slowly)
+        core = k.part('part_core', origin=(0, top2 + 2.8, 0))
+        core.prism(pal['trim'], 4, 0.07, 0, 0.4, 0, top2 + 2.8, 0)
 
 
 # ---------------------------------------------------------------- tower
@@ -286,18 +267,15 @@ def house(k, t, pal):
         door(B, pal, 0.22, 0.4, 0.35, 0.71, 0.1)
         for x in (-0.45, 0.1):
             G.box(pal['warm'], 0.14, 0.16, 0.04, x, 0.95, 0.16)
-        banner(B, pal, 0.68, -0.6, 0.1, 1.9, flip=True)
         return
-    # t4: arcology townhouse — three storeys and an energy spire
+    # t4: tall townhouse — three storeys, one roof, a chimney
     B.box(pal['stone'], 1.2, 2.3, 1.05, 0, 0.1, 0)
     for y in (0.85, 1.6):
         B.box(pal['stone2'], 1.26, 0.08, 1.1, 0, y, 0)
         for x in (-0.33, 0.0, 0.33):
             G.box(pal['warm'], 0.14, 0.18, 0.04, x, y + 0.3, 0.53)
-    G.box(pal['glow'], 1.22, 0.06, 1.07, 0, 2.15, 0)
     B.gable(pal['roof'], 1.2, 0.6, 1.05, 0, 2.4, 0, ry=math.pi / 2)
-    B.prism(pal['steel'], 4, 0.06, 0, 0.9, 0, 3.0, 0)
-    G.octa(pal['glow'], 0.1, 0.14, 0, 3.55, 0)
+    B.box(pal['stone2'], 0.22, 0.6, 0.22, 0.38, 2.5, -0.25)
     door(B, pal, 0.24, 0.45, 0, 0.53, 0.1)
 
 
