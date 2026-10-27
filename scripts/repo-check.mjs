@@ -133,7 +133,7 @@ assert.ok(online.includes('updateRoomPlayer'), 'online rooms must persist hero/r
 const canonicalHeroes = {
   scott: { name: 'Scott English', color: 0xb32020, trim: 0xf4f1e8 },
   alexander: { name: 'Alexander Thomas', color: 0x2f8f46, trim: 0xf3c53d },
-  danny: { name: 'Danny Donovan', color: 0x2468c9, trim: 0x111318 },
+  danny: { name: 'Daniel Donovan', color: 0x2468c9, trim: 0x111318 },
   turtle: { name: 'Turtle Voss', color: 0x3f6b5e, trim: 0xb8ae86 },
   john: { name: 'John Marlowe', color: 0x3a3a3f, trim: 0xf0ece0 },
   tiger: { name: 'Tiger Reyes', color: 0xd8721f, trim: 0x1c1a18 },
@@ -148,7 +148,7 @@ for (const [key, expected] of Object.entries(canonicalHeroes)) {
 }
 assert.ok(read('docs/agent-brief.md').includes('The canonical hero roster is Scott English'),
   'agent brief must identify the canonical roster');
-assert.ok(read('docs/hero-audio-pack.md').includes('This pack covers Scott English, Alexander Thomas, and Danny Donovan only.'),
+assert.ok(read('docs/hero-audio-pack.md').includes('This pack covers Scott English, Alexander Thomas, and Daniel Donovan only.'),
   'hero audio guide must state its actual three-hero coverage');
 
 assert.deepEqual(HERO_UPGRADE_KEYS, ['aura', 'passive1', 'passive2', 'ult'], 'hero upgrade branch order changed');

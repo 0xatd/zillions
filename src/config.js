@@ -468,18 +468,18 @@ export const HEROES = {
     ],
   },
   danny: {
-    key: 'danny', name: 'Danny Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
+    key: 'danny', name: 'Daniel Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
     tagline: 'Long range. Now you see him. They never do.',
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
     levelHp: 27, levelDmg: 5, regen: 2.0,
     aura: {
       key: 'siphon', name: 'Nutrient Siphon', icon: '💀', radius: 5.5, drain: 5, leech: 0.5, color: 0x7fd85e,
-      desc: 'A necrotic field wicks the juices out of the dead near Danny (5 hp/s) and feeds them back to him.',
+      desc: 'A necrotic field wicks the juices out of the dead near Daniel (5 hp/s) and feeds them back to him.',
     },
     ability: {
       key: 'weave', name: 'The Weave', icon: '🕸️', cd: 12,
       cast: 'weave', dur: [3, 4, 5], dmg: [50, 85, 130], speed: 1.6,
-      desc: 'Danny slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
+      desc: 'Daniel slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
     },
     passives: [
       { key: 'ghostmotor', name: 'Ghost Motor', icon: '👟', mods: { speed: 0.08, rof: 0.08 }, desc: 'Move speed and fire rate.' },

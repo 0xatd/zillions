@@ -108,7 +108,7 @@ The canonical roster is:
 
 - Scott English
 - Alexander Thomas
-- Danny Donovan
+- Daniel Donovan
 - Turtle Voss
 - John Marlowe
 - Tiger Reyes

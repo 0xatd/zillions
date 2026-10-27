@@ -2,7 +2,7 @@
 
 These are saved and partially wired runtime assets for Zillions. They are short
 Warcraft III / Dota-style click barks and first-pass generated audio samples.
-This pack covers Scott English, Alexander Thomas, and Danny Donovan only.
+This pack covers Scott English, Alexander Thomas, and Daniel Donovan only.
 Turtle Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock currently use the
 shared procedural sound effects and do not have voice barks.
 

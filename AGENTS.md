@@ -87,7 +87,7 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 
 ### Heroes
 
-- Keep this roster: Scott English, Alexander Thomas, Danny Donovan, Turtle
+- Keep this roster: Scott English, Alexander Thomas, Daniel Donovan, Turtle
   Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock.
 - Treat `src/config.js` as the source of truth for hero data.
 - Keep hero progression valid through level 100.
