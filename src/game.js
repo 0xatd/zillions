@@ -50,6 +50,30 @@ const snapRoute = (route) => Array.isArray(route) ? route.map(([x, z]) => [snapN
 export { combatBuckets, nearbyBuckets, sampleArmyPeak, ARMY_PEAK_SAMPLE_SECONDS } from './spatial.js';
 import { combatBuckets, nearbyBuckets, sampleArmyPeak } from './spatial.js';
 
+const DETOUR_DIRS = [1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1];
+
+// True when every grid tile the segment (x0,z0)->(x1,z1) passes through is
+// open — an exact voxel traversal, so no blocked corner is skipped.
+function segOpen(x0, z0, x1, z1, pass) {
+  let tx = Math.floor(x0), tz = Math.floor(z0);
+  const ex = Math.floor(x1), ez = Math.floor(z1);
+  const dx = x1 - x0, dz = z1 - z0;
+  const sx = dx > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+  const idx = dx !== 0 ? Math.abs(1 / dx) : Infinity, idz = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+  let mx = dx !== 0 ? (dx > 0 ? tx + 1 - x0 : x0 - tx) * idx : Infinity;
+  let mz = dz !== 0 ? (dz > 0 ? tz + 1 - z0 : z0 - tz) * idz : Infinity;
+  for (let guard = 0; guard < 256; guard++) {
+    if (!pass(tx, tz)) return false;
+    if (tx === ex && tz === ez) return true;
+    if (Math.abs(mx - mz) < 1e-9) {
+      // Exactly through a corner: both side tiles count.
+      if (!pass(tx + sx, tz) || !pass(tx, tz + sz)) return false;
+      tx += sx; tz += sz; mx += idx; mz += idz;
+    } else if (mx < mz) { tx += sx; mx += idx; } else { tz += sz; mz += idz; }
+  }
+  return false;
+}
+
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
   // opts.rngSeed: the match seed (from the server-issued match ticket). Every
@@ -207,6 +231,10 @@ export class Game {
       labyrinthEncounters: this.labyrinthEncounters.map((e) => ({ ...e })),
       flowSeeds: this.mode === 'labyrinth' ? [...(this._flowSeeds || [])] : null,
       flowT: snapNum(this.flowTimer),
+      // A building change this tick marks the fields dirty; the live game
+      // rebuilds them (and resets the clock) at the top of the next tick, so
+      // a restored one must too.
+      flowDirty: !!this.flowDirty,
       timers: {
         incomeT: snapNum(this.incomeT), incomeAcc: snapNum(this._incomeAcc), incomeRate: snapNum(this.incomeRate),
         nodeT: snapNum(this._nodeT), campT: snapNum(this._campT), supportT: snapNum(this._supportT), armyPeakSampleAt: snapNum(this._armyPeakSampleAt), bossSpawnT: this.bossSpawnT != null ? snapNum(this.bossSpawnT) : null,
@@ -224,7 +252,7 @@ export class Game {
         lostByKind: { ...(this.stats.lostByKind || {}) },
         armyPeak: { ...(this.stats.armyPeak || {}) },
       },
-      rng: this.rng.getState(), nextId: getNextId(), steps: this.steps, rngSeed: this.rngSeed,
+      rng: this.rng.getState(), nextId: getNextId(), steps: this.steps, rngSeed: this.rngSeed, lootSerial: this._lootSerial || 0,
       plots: this.plots.map((p) => ({
         id: p.id, tier: p.tier, paid: snapNum(p.paid), branch: p.branch,
         ruined: p.ruined ? 1 : 0, musterT: p.musterT != null ? snapNum(p.musterT) : null,
@@ -267,7 +295,7 @@ export class Game {
         level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd),
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
         mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
-        coinAcc: snapNum(h._coinAcc || 0),
+        coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
@@ -302,6 +330,8 @@ export class Game {
         frenzy: snapNum(z.frenzy || 0), speedMul: snapNum(z.speedMul || 1), raider: !!z.raider,
         armor: snapNum(z.armor || 0), maxHp: snapNum(z.maxHp || 0),
         spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0), bossPhase: z.bossPhase || 0,
+        // A spitter mid-volley holds still while _spitTarget is set.
+        spit: z._spitTarget ? z._spitTarget.id : null,
       }]),
     };
   }
@@ -490,6 +520,7 @@ export class Game {
       h.sprint = !!hs.sprint;
       h.payHold = !!hs.pay;
       h._coinAcc = hs.coinAcc || 0;
+      h._auraT = hs.auraT || 0;
       h.stealth = !!hs.stealth;
       h.weaveT = hs.weaveT || 0;
       h.weaveDmg = hs.weaveDmg || 0;
@@ -545,11 +576,17 @@ export class Game {
     }
 
     for (const [u, saved] of pendingActorTargets) {
-      if (saved.target != null) u.target = zombiesById.get(saved.target) || null;
+      if (saved.target != null) {
+        u.target = zombiesById.get(saved.target) || null;
+        // A target that died this tick is gone from the save; the live actor
+        // still holds it, sees it dead and re-acquires next tick — so do we.
+        if (!u.target) u.retargetT = 0;
+      }
       if (saved.targetNest != null) u.targetNest = this.nests[saved.targetNest] || null;
     }
     for (const [zb, meta] of pendingZombieTargets) {
       if (meta.targetU != null) zb.targetU = actorsById.get(meta.targetU) || null;
+      if (meta.spit != null) zb._spitTarget = this.buildings.find((b) => b.id === meta.spit) || null;
     }
     this.units.sort((a, b) => (a._restoreOrder ?? 0) - (b._restoreOrder ?? 0));
     for (const u of this.units) delete u._restoreOrder;
@@ -559,6 +596,7 @@ export class Game {
     setNextId(snap.nextId);
     this.steps = Number.isInteger(snap.steps) ? snap.steps : 0;
     if (Number.isInteger(snap.rngSeed)) this.rngSeed = snap.rngSeed >>> 0;
+    if (Number.isInteger(snap.lootSerial)) this._lootSerial = snap.lootSerial;
     this.flowDirty = true;
     if (this.mode === 'labyrinth' && Array.isArray(snap.flowSeeds)) {
       // Rebuild the exact hunting field the save was using — recomputing from
@@ -575,8 +613,18 @@ export class Game {
         if (id !== 0 && this.gateIds.has(id)) restoreGateTiles.push(i);
       }
       this.exitField.compute(this.occ, restoreGateTiles, this.gateIds, true);
+      this._computeEnclosure();
       this.flowDirty = false;
       this.flowTimer = snap.flowT ?? 0;
+    } else if (this.phase === 'live') {
+      // Siege fields are a pure function of the buildings, so build them now
+      // and keep the saved refresh clock. Leaving them dirty recomputed on
+      // the first tick and reset the clock to 2.5 s — a restored peer then
+      // refreshed on a different beat from an uninterrupted one (found by the
+      // playthrough check's mid-match restore).
+      this._updateFlow(0);
+      this.flowTimer = snap.flowT ?? 0;
+      if (snap.flowDirty) this.flowDirty = true;
     }
     this.msg(this.mode === 'labyrinth'
       ? '📂 The labyrinth remembers you — the trial continues.'
@@ -1299,11 +1347,16 @@ export class Game {
     for (let dz = 0; dz < size; dz++) for (let dx = 0; dx < size; dx++) {
       this.occ[(z + dz) * this.map.size + (x + dx)] = b.id;
     }
+    this._occStamp = (this._occStamp || 0) + 1;
     if (gate) this.gateIds.add(b.id);
     const N = this.map.size;
     // Eject anyone standing on the fresh foundation — you pay standing ON the
     // plot, so the new walls must not entomb you.
-    for (const u of this.units) {
+    // The horde too: a creep left inside a fresh wall tile, or sealed in a
+    // nook by it, can never walk again (playthrough check, QA 2026-10-27).
+    const actors = this.zombies.length ? [...this.units, ...this.zombies] : this.units;
+    for (const u of actors) {
+      if (u.dead) continue;
       const ux = u.x | 0, uz = u.z | 0;
       if (ux >= x && ux < x + size && uz >= z && uz < z + size) {
         this._ejectActor(u, x + (size >> 1), z + (size >> 1));
@@ -1317,7 +1370,8 @@ export class Game {
     // open map, gets moved to the nearest tile that is NOT part of that
     // pocket, i.e. just outside whatever just sealed them in.
     const bx = x + (size >> 1), bz = z + (size >> 1);
-    for (const u of this.units) {
+    for (const u of actors) {
+      if (u.dead) continue;
       const ux = u.x | 0, uz = u.z | 0;
       if (ux >= x && ux < x + size && uz >= z && uz < z + size) continue; // already handled above
       if (Math.max(Math.abs(ux - bx), Math.abs(uz - bz)) > size + 12) continue; // too far to be affected
@@ -1363,6 +1417,7 @@ export class Game {
   // inside it are skipped, since hopping there would just be the same trap.
   _ejectActor(u, cx, cz, pocket = null) {
     const N = this.map.size;
+    let fallback = null;
     for (let r = 1; r < 24; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
@@ -1372,13 +1427,21 @@ export class Game {
           const idx = nz * N + nx;
           if (pocket && pocket.has(idx)) continue;
           const occId = this.occ[idx];
+          // ...and never into a fresh pocket: a hero standing on a new wall
+          // tile was dropped into the one-tile nook beside it, between the
+          // wall and a cliff, and stood there for the rest of the match.
           if (this.map.isWalkable(nx, nz) && (occId === 0 || this.gateIds.has(occId))) {
-            u.x = nx + 0.5; u.z = nz + 0.5;
-            return;
+            if (this._reachablePocket(nx, nz, POCKET_CAP).size >= POCKET_CAP) {
+              u.x = nx + 0.5; u.z = nz + 0.5;
+              return;
+            }
+            // Small rooms everywhere (the labyrinth): nearest free tile it is.
+            if (!fallback) fallback = [nx + 0.5, nz + 0.5];
           }
         }
       }
     }
+    if (fallback) { u.x = fallback[0]; u.z = fallback[1]; }
   }
 
   _safeTile(x, z) {
@@ -1411,7 +1474,73 @@ export class Game {
   // take over from the other side.
   _wantsGate(actor, tx, tz) {
     if ((actor.gateCool || 0) > 0) return false;
-    return this._wallBetween(actor.x, actor.z, tx, tz);
+    // With a closed circuit of walls the question is simply "am I inside and
+    // is my destination outside". The straight-line wall test alone sent a
+    // squad that had just left by the north gate straight back in, because
+    // the line to a hive in the south crosses the whole compound.
+    const enc = this._enclosure;
+    if (enc) {
+      const N = this.map.size;
+      const inA = enc[(actor.z | 0) * N + (actor.x | 0)] === 1;
+      const inT = enc[(tz | 0) * N + (tx | 0)] === 1;
+      return inA && !inT;
+    }
+    // No closed circuit (walls half built, or a breach): only stone right in
+    // front of the squad counts — a far target's line crossing the whole
+    // compound is not a reason to turn back for a gate.
+    // Houses are walked round (the detour), not left by a gate.
+    const d = Math.hypot(tx - actor.x, tz - actor.z);
+    const k = d > 6 ? 6 / d : 1;
+    const N = this.map.size, steps = Math.ceil(Math.min(d, 6) * 2);
+    for (let i = 1; i <= steps; i++) {
+      const t = (i / steps) * k;
+      const id = this.occ[((actor.z + (tz - actor.z) * t) | 0) * N + ((actor.x + (tx - actor.x) * t) | 0)];
+      if (id !== 0 && !this.gateIds.has(id) && this._wallIds && this._wallIds.has(id)) return true;
+    }
+    return false;
+  }
+
+  // Derived (never snapshotted): the ground the city's walls close off,
+  // flooded from the keep with every structure, gates included, as a stop.
+  // Null when the circuit leaks — no walls yet, or a breach.
+  _computeEnclosure() {
+    this._enclosure = null;
+    this._wallIds = new Set();
+    for (const b of this.buildings) if (b.alive && b.kind === 'wall') this._wallIds.add(b.id);
+    if (!this.hq || !this.hq.alive || !this.gateIds.size) return;
+    const N = this.map.size, occ = this.occ;
+    const enc = this._enclosureBuf || (this._enclosureBuf = new Uint8Array(N * N));
+    enc.fill(0);
+    const stack = [];
+    const r = Math.ceil((this.hq.size || 2) / 2) + 1;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      const x = (this.hq.cx | 0) + dx, z = (this.hq.cz | 0) + dz;
+      if (x < 0 || z < 0 || x >= N || z >= N) continue;
+      const k = z * N + x;
+      if (!enc[k] && occ[k] === 0 && this.map.isWalkable(x, z)) { enc[k] = 1; stack.push(k); }
+    }
+    let count = stack.length;
+    const CAP = 9000;
+    while (stack.length) {
+      const k = stack.pop();
+      const x = k % N, z = (k / N) | 0;
+      if (x === 0 || z === 0 || x === N - 1 || z === N - 1) return;
+      for (let i = 0; i < 4; i++) {
+        const nk = k + (i === 0 ? 1 : i === 1 ? -1 : i === 2 ? N : -N);
+        if (enc[nk] || occ[nk] !== 0 || !this.map.isWalkable(nk % N, (nk / N) | 0)) continue;
+        enc[nk] = 1; stack.push(nk);
+        if (++count > CAP) return;
+      }
+    }
+    // Footprints touching the inside (houses, and the inner face of the
+    // wall) read as inside too, so a destination on one is not "outside".
+    for (let k = 0; k < N * N; k++) {
+      if (enc[k] || occ[k] === 0 || this.gateIds.has(occ[k])) continue;
+      const x = k % N, z = (k / N) | 0;
+      if ((x > 0 && enc[k - 1] === 1) || (x < N - 1 && enc[k + 1] === 1) || (z > 0 && enc[k - N] === 1) || (z < N - 1 && enc[k + N] === 1)) enc[k] = 2;
+    }
+    for (let k = 0; k < N * N; k++) if (enc[k] === 2) enc[k] = 1;
+    this._enclosure = enc;
   }
 
   // A squad mid-descent can wedge into a concave building corner: every
@@ -1507,7 +1636,11 @@ export class Game {
     plot.musterSeq = (plot.musterSeq || 0) + 1;
     for (let i = 0; i < def.count; i++) {
       const a = (i / Math.max(1, def.count)) * Math.PI * 2;
-      const u = this._spawnUnit(kindDef.unit, plot.cx + Math.cos(a) * 1.6, plot.cz + 1.4 + Math.sin(a) * 0.8, plot.id);
+      let sx = plot.cx + Math.cos(a) * 1.6, sz = plot.cz + 1.4 + Math.sin(a) * 0.8;
+      // Terrain-hugging districts put some camps' doorsteps on a cliff lip:
+      // never muster a soldier into rock or a neighbour's walls.
+      if (!this._safeTile(sx, sz)) [sx, sz] = this._reseat(sx, sz) || [sx, sz];
+      const u = this._spawnUnit(kindDef.unit, sx, sz, plot.id);
       u.homeNodeId = plot.nodeId != null ? plot.nodeId : null;
       u.squadId = squadId;
       u.squadIndex = i;
@@ -1550,7 +1683,7 @@ export class Game {
     b.hp = 0;
     for (let dz = 0; dz < b.size; dz++) for (let dx = 0; dx < b.size; dx++) {
       const i = (b.z + dz) * this.map.size + (b.x + dx);
-      if (this.occ[i] === b.id) this.occ[i] = 0;
+      if (this.occ[i] === b.id) { this.occ[i] = 0; this._occStamp = (this._occStamp || 0) + 1; }
     }
     this.gateIds.delete(b.id);
     this.buildings = this.buildings.filter((o) => o !== b);
@@ -1681,6 +1814,7 @@ export class Game {
         const at = z * this.map.size + x;
         if (closed && this.occ[at] === 0) this.occ[at] = LABYRINTH_DOOR_ID;
         else if (!closed && this.occ[at] === LABYRINTH_DOOR_ID) this.occ[at] = 0;
+        this._occStamp = (this._occStamp || 0) + 1;
       }
     }
     this.flowDirty = true;
@@ -2018,7 +2152,10 @@ export class Game {
     // and forcing a short hop back out through a lane node is how squads used
     // to circle an objective they were already standing next to.
     const [gx, gz] = this._giPoint(gi);
-    if (dist2(actor.x, actor.z, gx, gz) < DIRECT_APPROACH_R * DIRECT_APPROACH_R) {
+    // ...but only in plain sight: a hive 20 tiles off behind a crag is a
+    // lane walk, not a beeline into the rock.
+    if (dist2(actor.x, actor.z, gx, gz) < DIRECT_APPROACH_R * DIRECT_APPROACH_R
+      && this._walkLine(actor.x, actor.z, gx, gz)) {
       actor.route = null;
       // The direct approach has no watchdog at all — if stone stands between
       // the squad and the objective, take the gate before the grinding starts.
@@ -2039,7 +2176,12 @@ export class Game {
     // and oscillating between the two forever — the whole army marching all day
     // and never once reaching the objective.
     let start = 0, bd = Infinity;
+    const enc = friendly ? this._enclosure : null;
+    const N = this.map.size;
+    const side = enc ? enc[(actor.z | 0) * N + (actor.x | 0)] : 0;
     for (let i = 0; i < pts.length; i++) {
+      // Outside the walls, never join at a lane node inside them.
+      if (enc && side === 0 && enc[(pts[i][1] | 0) * N + (pts[i][0] | 0)] === 1) continue;
       const d = dist2(actor.x, actor.z, pts[i][0], pts[i][1]);
       if (d < bd) { bd = d; start = i; }
     }
@@ -2108,8 +2250,54 @@ export class Game {
         return false;
       }
     }
+    // A waypoint standing in a building or on rock can never be reached; the
+    // squad used to jiggle against the wall beside it until the watchdog
+    // sent it off on a gate-exit detour, and back. Close is close enough.
+    const N = this.map.size;
+    const wo = this.occ[(wz | 0) * N + (wx | 0)];
+    const blockedWp = !zombie && (!this.map.isWalkable(wx | 0, wz | 0) || (wo !== 0 && !this.gateIds.has(wo)));
+    const reach = zombie ? 0 : this._fieldReach(actor, wx, wz);
+    if (!zombie && !actor.hero && (reach < 0 || blockedWp)) {
+      // The lane is terrain-only, so buildings can sit across it and a far
+      // waypoint can lie outside the planner's window. Steer down a
+      // whole-map field to the route's END instead of grinding at (or
+      // skipping blindly past) the lane, swallowing any waypoints we pass.
+      const [ex, ez] = actor.route[actor.route.length - 1];
+      const er = this._fieldReach(actor, ex, ez, true);
+      if (er === 0) { actor.route = null; return false; }
+      if (er > 0) {
+        const dir = this._fieldDir(actor, ex, ez, true);
+        if (dir) {
+          this._moveActor(actor, dir[0], dir[1], speed, dt);
+          while (actor.routeI < actor.route.length - 1
+            && Math.hypot(actor.route[actor.routeI][0] - actor.x, actor.route[actor.routeI][1] - actor.z) < 3) actor.routeI++;
+          actor.routeStuck = 0;
+          actor.routeBest = Infinity;
+          actor.facing = Math.atan2(dir[0], dir[1]);
+          return true;
+        }
+      }
+    }
+    if ((blockedWp && Math.hypot(wx - actor.x, wz - actor.z) < 4.5)
+      || (!zombie && reach === -1)) {
+      // ...and a waypoint we are cut off from (across a crag inside the
+      // planner's window) is one to skip, not to grind toward.
+      actor.routeI++;
+      actor.routeStuck = 0;
+      actor.routeBest = Infinity;
+      if (actor.routeI >= actor.route.length) { actor.route = null; return false; }
+      return true;
+    }
     if (zombie) this._moveZombie(actor, dx / d, dz / d, speed, dt, true);
-    else this._moveActor(actor, dx / d, dz / d, speed, dt);
+    else if (!this._moveActor(actor, dx / d, dz / d, speed, dt, wx, wz)
+      && Math.hypot(wx - actor.x, wz - actor.z) < 4.5) {
+      // The waypoint (or our formation slot beside it) sits in a building or
+      // on rock: close enough — take the next leg instead of grinding.
+      actor.routeI++;
+      actor.routeStuck = 0;
+      actor.routeBest = Infinity;
+      if (actor.routeI >= actor.route.length) { actor.route = null; return false; }
+    }
     actor.facing = Math.atan2(dx, dz);
     return true;
   }
@@ -3001,21 +3189,250 @@ export class Game {
   }
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
-  _moveActor(a, dx, dz, speed, dt) {
+  _moveActor(a, dx, dz, speed, dt, gx = null, gz = null) {
     const step = speed * dt;
     // If somehow inside a building footprint, any walkable step out is legal.
-    const trapped = this.occ[(a.z | 0) * this.map.size + (a.x | 0)] > 0;
+    const trapped = this.occ[(a.z | 0) * this.map.size + (a.x | 0)] > 0
+      || !this.map.isWalkable(a.x | 0, a.z | 0);
     const pass = (x, z) => {
       if (!this.map.isWalkable(x | 0, z | 0)) return false;
       if (trapped) return true;
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       return id === 0 || this.gateIds.has(id);
     };
+    // Standing in rock or inside a footprint (a wall raised on top of us, a
+    // doorstep on a cliff lip): walk straight to the nearest open tile first.
+    // Sliding about inside the footprint used to pin squads in wall tiles.
+    if (trapped && !a.hero && !this._safeTile(a.x, a.z)) {
+      const seat = this._reseat(a.x, a.z, 4);
+      if (seat) {
+        const cx = seat[0] - a.x, cz = seat[1] - a.z, c = Math.hypot(cx, cz);
+        if (c > 1e-3) { const k = Math.min(step, c) / c; a.x += cx * k; a.z += cz * k; return true; }
+      }
+    }
     const nx = a.x + dx * step, nz = a.z + dz * step;
+    // A goal outside the planner's window (a lane node across the map) gets
+    // the whole-map field; the windowed one cannot see us and returned
+    // nothing, leaving the direct step and the local detour to undo each
+    // other every tick in a cliff notch (playthrough check, Greenfall).
+    const far = gx != null && Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34;
+    // Heading somewhere known with a house or crag across the next few
+    // tiles of the straight line: take the field's way round from the start.
+    // Stepping straight first and correcting next tick made squads shuttle
+    // between the two headings in a notch (playthrough check, 2026-10).
+    if (gx != null && !a.hero && !trapped) {
+      const L = Math.hypot(gx - a.x, gz - a.z), M = Math.min(L, 6);
+      const open = L < 1e-3 || segOpen(a.x, a.z, a.x + (gx - a.x) / L * M, a.z + (gz - a.z) / L * M,
+        (x, z) => pass(x + 0.5, z + 0.5));
+      if (!open) {
+        const fd = this._fieldDir(a, gx, gz, far);
+        if (fd) {
+          const ex = a.x + fd[0] * step, ez = a.z + fd[1] * step;
+          if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+        }
+      }
+    }
     if (pass(nx, nz)) { a.x = nx; a.z = nz; return true; }
-    if (pass(nx, a.z)) { a.x = nx; return true; }
-    if (pass(a.x, nz)) { a.z = nz; return true; }
+    // Everyone but a player-steered hero first plans a short way round
+    // (a building corner, a cliff notch, a hold point on the far side of a
+    // house) — plain axis-sliding there flip-flops against the detour.
+    if (!a.hero) {
+      // With a known destination, descend a walk-distance field to it (it
+      // knows the way between houses and round crags); otherwise plan a
+      // short way round along the heading.
+      const det = (gx != null && !trapped && this._fieldDir(a, gx, gz, far))
+        || this._detour(a.x, a.z, dx, dz, (x, z) => pass(x + 0.5, z + 0.5));
+      if (det) {
+        const ex = a.x + det[0] * step, ez = a.z + det[1] * step;
+        if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+      }
+    }
+    // Slide along the obstacle — only on an axis we really move along; a
+    // near-zero "slide" used to report progress while pressed flat on a wall.
+    if (Math.abs(dx) > 0.2 && pass(nx, a.z)) { a.x = nx; return true; }
+    if (Math.abs(dz) > 0.2 && pass(a.x, nz)) { a.z = nz; return true; }
+    // Pinned against a corner with a known way round: drift to the middle
+    // of our own tile, from where the field's straight lines are clear.
+    if (gx != null && !a.hero && !trapped) {
+      const cx = (a.x | 0) + 0.5 - a.x, cz = (a.z | 0) + 0.5 - a.z, c = Math.hypot(cx, cz);
+      if (c > 0.05) {
+        const k = Math.min(step, c) / c;
+        a.x += cx * k; a.z += cz * k;
+        return true;
+      }
+    }
     return false;
+  }
+
+  // Walk-distance field to one goal tile over ground a squad can use (open
+  // or a gate), in a window round the goal. A pure function of the map and
+  // the occupancy grid — memoised by goal tile and occupancy stamp, never
+  // snapshotted, so restore and lockstep replay stay exact.
+  // `full` floods the whole map instead of the planner's window — used only
+  // for a route's destination (a handful of distinct tiles), never per
+  // waypoint, so the cost stays a few floods per building change.
+  _goalField(gx, gz, full = false) {
+    const N = this.map.size, R = 36;
+    const W = full ? N : R * 2 + 1;
+    const cx = Math.max(0, Math.min(N - 1, gx | 0)), cz = Math.max(0, Math.min(N - 1, gz | 0));
+    const stamp = this._occStamp || 0;
+    if (!this._goalFields || this._goalStamp !== stamp) { this._goalFields = new Map(); this._goalStamp = stamp; }
+    const key = cz * N + cx + (full ? N * N : 0);
+    let f = this._goalFields.get(key);
+    if (f) return f;
+    const ox = full ? 0 : cx - R, oz = full ? 0 : cz - R;
+    const d = new Int16Array(W * W).fill(-1);
+    const q = new Int32Array(W * W);
+    const occ = this.occ;
+    const pass = (x, z) => x >= 0 && z >= 0 && x < N && z < N && this.map.isWalkable(x, z)
+      && (occ[z * N + x] === 0 || this.gateIds.has(occ[z * N + x]));
+    let head = 0, tail = 0;
+    // Seed the goal, or, when it sits in a building or on rock, the open
+    // ground hugging it.
+    for (let r = 0; r <= 3 && tail === 0; r++) {
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const x = cx + dx, z = cz + dz;
+        if (!pass(x, z)) continue;
+        const c = (z - oz) * W + (x - ox);
+        if (d[c] < 0) { d[c] = 0; q[tail++] = c; }
+      }
+    }
+    while (head < tail) {
+      const c = q[head++];
+      const lx = c % W, lz = (c / W) | 0;
+      for (let k = 0; k < 4; k++) {
+        const nx = lx + DETOUR_DIRS[k * 2], nz = lz + DETOUR_DIRS[k * 2 + 1];
+        if (nx < 0 || nz < 0 || nx >= W || nz >= W) continue;
+        const nc = nz * W + nx;
+        if (d[nc] >= 0 || !pass(ox + nx, oz + nz)) continue;
+        d[nc] = d[c] + 1;
+        q[tail++] = nc;
+      }
+    }
+    f = { ox, oz, W, d, pass };
+    if (this._goalFields.size > 96) this._goalFields.delete(this._goalFields.keys().next().value);
+    this._goalFields.set(key, f);
+    return f;
+  }
+
+  // Walk distance from the actor's tile to a goal: -2 outside the planner's
+  // window (unknown), -1 cut off, else tiles.
+  _fieldReach(a, gx, gz, full = false) {
+    const f = this._goalField(gx, gz, full);
+    const lx = (a.x | 0) - f.ox, lz = (a.z | 0) - f.oz;
+    if (lx < 0 || lz < 0 || lx >= f.W || lz >= f.W) return -2;
+    return f.d[lz * f.W + lx];
+  }
+
+  // Heading down a goal field from an actor's tile; null when the actor is
+  // outside the window or cut off from the goal.
+  _fieldDir(a, gx, gz, full = false) {
+    const f = this._goalField(gx, gz, full);
+    const at = (x, z) => {
+      const lx = x - f.ox, lz = z - f.oz;
+      return lx < 0 || lz < 0 || lx >= f.W || lz >= f.W ? -1 : f.d[lz * f.W + lx];
+    };
+    let x = a.x | 0, z = a.z | 0;
+    let here = at(x, z);
+    if (here <= 0) return null;
+    // Greedy descent a few tiles; aim at the furthest one in plain line.
+    let aimX = null, aimZ = null;
+    for (let step = 0; step < 4; step++) {
+      let bx = 0, bz = 0, bd = here;
+      for (let k = 0; k < 8; k++) {
+        const ox = DETOUR_DIRS[k * 2], oz = DETOUR_DIRS[k * 2 + 1];
+        const v = at(x + ox, z + oz);
+        if (v < 0 || v >= bd) continue;
+        if (ox && oz && (!f.pass(x + ox, z) || !f.pass(x, z + oz))) continue;
+        bd = v; bx = ox; bz = oz;
+      }
+      if (!bx && !bz) break;
+      x += bx; z += bz; here = bd;
+      const px = x + 0.5, pz = z + 0.5;
+      // Every tile the segment touches must be open (grid traversal, not
+      // sampling): sampled checks clipped blocked corners right beside the
+      // actor and aimed it into a notch wall.
+      const open = segOpen(a.x, a.z, px, pz, f.pass);
+      if (!open && aimX != null) break;
+      aimX = px; aimZ = pz;
+      if (here === 0) break;
+    }
+    if (aimX == null) return null;
+    const ddx = aimX - a.x, ddz = aimZ - a.z, L = Math.hypot(ddx, ddz);
+    return L < 1e-3 ? null : [ddx / L, ddz / L];
+  }
+
+  // True when the straight line between two points crosses only walkable
+  // ground (buildings ignored — the horde chews those).
+  _walkLine(x0, z0, x1, z1) {
+    const d = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.ceil(d / 0.5);
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      if (!this.map.isWalkable((x0 + (x1 - x0) * t) | 0, (z0 + (z1 - z0) * t) | 0)) return false;
+    }
+    return true;
+  }
+
+  // Local planner for a wedged walker: breadth-first over the tiles within
+  // DETOUR_R, pick the reached tile closest to a point well along the wanted
+  // heading, and return the heading to the next tile on the way there.
+  // Stateless and RNG-free, so snapshot/restore and lockstep stay exact.
+  _detour(x0, z0, dx, dz, passTile) {
+    const R = 10, W = R * 2 + 1;
+    const N = this.map.size;
+    const sx = x0 | 0, sz = z0 | 0;
+    const gx = x0 + dx * (R + 4), gz = z0 + dz * (R + 4);
+    if (!this._detourPrev) { this._detourPrev = new Int16Array(W * W); this._detourQ = new Int16Array(W * W); }
+    const prev = this._detourPrev, q = this._detourQ;
+    prev.fill(-2);
+    const c0 = R * W + R;
+    prev[c0] = -1;
+    let head = 0, tail = 0, best = -1;
+    // Demand real progress: a tile barely nearer than where we stand is the
+    // local-minimum jiggle against a crag, not a way round it.
+    let bestD = Math.max(0, Math.hypot(x0 - gx, z0 - gz) - 1.5) ** 2;
+    q[tail++] = c0;
+    while (head < tail) {
+      const c = q[head++];
+      const lx = c % W, lz = (c / W) | 0;
+      for (let k = 0; k < 8; k++) {
+        const ox = DETOUR_DIRS[k * 2], oz = DETOUR_DIRS[k * 2 + 1];
+        const nx = lx + ox, nz = lz + oz;
+        if (nx < 0 || nz < 0 || nx >= W || nz >= W) continue;
+        const nc = nz * W + nx;
+        if (prev[nc] !== -2) continue;
+        const tx = sx + nx - R, tz = sz + nz - R;
+        if (tx < 0 || tz < 0 || tx >= N || tz >= N || !passTile(tx, tz)) continue;
+        if (ox && oz && (!passTile(sx + lx - R + ox, sz + lz - R) || !passTile(sx + lx - R, sz + lz - R + oz))) continue;
+        prev[nc] = c;
+        q[tail++] = nc;
+        const d = (tx + 0.5 - gx) ** 2 + (tz + 0.5 - gz) ** 2;
+        if (d < bestD) { bestD = d; best = nc; }
+      }
+    }
+    if (best < 0) return null;
+    // Walk back to the first step and aim at its centre (aiming further
+    // ahead cuts the very corner we are wedged on). Look one step further
+    // only when the straight line there is open tile-for-tile.
+    let c = best, path = [];
+    while (c !== c0 && c >= 0) { path.push(c); c = prev[c]; }
+    let step = path[path.length - 1] ?? best;
+    if (path.length > 1) {
+      const s2 = path[path.length - 2];
+      const ax = sx + (s2 % W) - R + 0.5, az = sz + ((s2 / W) | 0) - R + 0.5;
+      let open = true;
+      for (let i = 1; i <= 6 && open; i++) {
+        const t = i / 6;
+        open = passTile((x0 + (ax - x0) * t) | 0, (z0 + (az - z0) * t) | 0);
+      }
+      if (open) step = s2;
+    }
+    const wx = sx + (step % W) - R + 0.5, wz = sz + ((step / W) | 0) - R + 0.5;
+    const ddx = wx - x0, ddz = wz - z0, L = Math.hypot(ddx, ddz);
+    if (L < 1e-3) return null;
+    return [ddx / L, ddz / L];
   }
 
   // ---------- zombies ----------
@@ -3563,6 +3980,7 @@ export class Game {
         if (id !== 0 && this.gateIds.has(id)) gateTiles.push(i);
       }
       this.exitField.compute(this.occ, gateTiles, this.gateIds, true);
+      this._computeEnclosure();
       this.flowDirty = false;
       this.flowTimer = this.mode === 'labyrinth' ? 0.8 : 2.5;
     }
@@ -3702,7 +4120,10 @@ export class Game {
         for (const u of nearbyBuckets(this._unitBuckets, this.units, zb.x, zb.z, Math.sqrt(bd))) {
           if (u.dead || (u.hero && u.stealth)) continue;
           const d = dist2(zb.x, zb.z, u.x, u.z);
-          if (d < bd) { bd = d; best = u; }
+          // Never lock on across a cliff or water: the chase is a straight
+          // line, and a zombie pressed into a rock face below a hero on the
+          // plateau was the commonest stuck figure in the playthrough check.
+          if (d < bd && (range || this._walkLine(zb.x, zb.z, u.x, u.z))) { bd = d; best = u; }
         }
         zb.targetU = best;
       }
@@ -3722,7 +4143,12 @@ export class Game {
             this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
           }
         } else {
+          const px = zb.x, pz = zb.z, pa = zb.atkT;
           this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
+          // Pinned against a rock face with the target up on the ledge (the
+          // lock was taken from elsewhere): let go and follow the horde's
+          // field for a while instead of pressing into the cliff for good.
+          if (zb.x === px && zb.z === pz && zb.atkT === pa) { zb.targetU = null; zb.retarget = 2; }
         }
         continue;
       }
@@ -3807,6 +4233,16 @@ export class Game {
       }
       return;
     }
+    // A beeline across a cliff or a lake parks the sieger on the shore for
+    // good — take the horde's flow field until the target is in plain sight.
+    // Exact tile walk, at any range: a sieger four tiles from its target
+    // with a crag corner between used to beeline into the rock forever
+    // (playthrough check, Barrow Hills). Buildings on the line are fine —
+    // it chews through those.
+    if (!segOpen(zb.x, zb.z, best.cx, best.cz, (x, z) => this.map.isWalkable(x, z))) {
+      const dir = this.flow.dirAt(zb.x | 0, zb.z | 0);
+      if (dir) { this._moveZombie(zb, dir[0], dir[1], zb.def.chase * zb.speedMul, dt, true); return; }
+    }
     this._moveZombie(zb, dx / d, dz / d, zb.def.chase * zb.speedMul, dt, true);
   }
 
@@ -3846,11 +4282,26 @@ export class Game {
       const a = this.rng() * Math.PI * 2;
       zb.dirX = Math.cos(a); zb.dirZ = Math.sin(a);
     } else {
-      // Aggro but blocked by terrain: slide along axes.
-      if (this.map.isWalkable((zb.x + dx * speed * dt) | 0, zb.z | 0) && this.occ[(zb.z | 0) * this.map.size + ((zb.x + dx * speed * dt) | 0)] === 0) {
-        zb.x += dx * speed * dt;
-      } else if (this.map.isWalkable(zb.x | 0, (zb.z + dz * speed * dt) | 0) && this.occ[((zb.z + dz * speed * dt) | 0) * this.map.size + (zb.x | 0)] === 0) {
-        zb.z += dz * speed * dt;
+      // Aggro but blocked by terrain: slide along axes, and if both are shut
+      // (a cliff notch) plan a short way round over open ground.
+      const N = this.map.size, st = speed * dt;
+      const free = (x, z) => this.map.isWalkable(x | 0, z | 0) && this.occ[(z | 0) * N + (x | 0)] === 0;
+      if (Math.abs(dx) > 0.2 && free(zb.x + dx * st, zb.z)) {
+        zb.x += dx * st;
+      } else if (Math.abs(dz) > 0.2 && free(zb.x, zb.z + dz * st)) {
+        zb.z += dz * st;
+      } else {
+        const det = this._detour(zb.x, zb.z, dx, dz, (x, z) => this.map.isWalkable(x, z));
+        if (det && this.map.isWalkable((zb.x + det[0] * st) | 0, (zb.z + det[1] * st) | 0)) {
+          const nx2 = zb.x + det[0] * st, nz2 = zb.z + det[1] * st;
+          const occ2 = this.occ[(nz2 | 0) * N + (nx2 | 0)];
+          if (occ2 === 0) { zb.x = nx2; zb.z = nz2; }
+          else if (zb.atkT <= 0) {
+            zb.atkT = 0.85;
+            const b = this.buildings.find((o) => o.id === occ2);
+            if (b) this._damageBuilding(b, zb.def.dmg, zb);
+          }
+        }
       }
     }
   }
@@ -3892,9 +4343,8 @@ export class Game {
             const d = Math.hypot(dx, dz);
             if (d > 1.2) {
               const sprint = d > 7 ? 1.4 : 1;
-              this._moveActor(u, dx / d, dz / d, u.def.speed * sprint, dt);
+              u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed * sprint, dt, tx, tz);
               u.facing = Math.atan2(dx, dz);
-              u.moving = true;
             } else u.moving = false;
           }
         } else if (this.stance === 'attack') {
@@ -3907,9 +4357,10 @@ export class Game {
           const dx = u.holdX - u.x, dz = u.holdZ - u.z;
           const d = Math.hypot(dx, dz);
           if (d > 1.4) {
-            this._moveActor(u, dx / d, dz / d, u.def.speed * 0.8, dt);
+            // A slot it cannot reach (shoved behind a house) is close enough.
+            u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed * 0.8, dt, u.holdX, u.holdZ);
             u.facing = Math.atan2(dx, dz);
-            u.moving = true;
+            if (!u.moving && d < 6) { u.holdX = u.x; u.holdZ = u.z; }
           } else u.moving = false;
         }
       }
@@ -4026,7 +4477,10 @@ export class Game {
         // forever because the retarget cycle re-acquires the same zombie
         // through the rampart. Drop it and let the push (and the gate exit)
         // take over; standing fire over walls stays legal below.
-        if (this._wallBetween(u.x, u.z, u.target.x, u.target.z)) {
+        if (this._wallBetween(u.x, u.z, u.target.x, u.target.z)
+          || !this._walkLine(u.x, u.z, u.target.x, u.target.z)) {
+          // ...and the same across water or a crag: chasing in a straight
+          // line there pins the squad to the shore.
           u.target = null;
           u.retargetT = Math.max(u.retargetT || 0, 1); // walk a beat before re-acquiring
         } else {
@@ -4046,9 +4500,8 @@ export class Game {
           // The hive is behind our own wall — route to it, don't grind at it.
           u.targetNest = null;
         } else {
-          this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
+          u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, n.x, n.z);
           u.facing = Math.atan2(dx, dz);
-          u.moving = true;
         }
       } else u.moving = false;
       if (u.targetNest) return;
@@ -4138,11 +4591,11 @@ export class Game {
       const [ox, oz] = this._formationOffset(u, rawX, rawZ);
       const dx = tx + ox - u.x, dz = tz + oz - u.z;
       const d = Math.hypot(dx, dz);
-      if (d > 3.5) {
-        this._moveActor(u, dx / d, dz / d, u.def.speed, dt);
+      if (d > 3.5 && !(Math.hypot(tx - u.x, tz - u.z) < 7 && this._fieldReach(u, tx + ox, tz + oz) === -1)) {
+        // A formation slot on rock or inside a building: hold where we are.
+        u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, tx + ox, tz + oz);
         u.facing = Math.atan2(dx, dz);
-        u.moving = true;
-        return;
+        if (u.moving || Math.hypot(tx - u.x, tz - u.z) > 8) return;
       }
     }
     u.moving = false;

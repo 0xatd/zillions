@@ -34,6 +34,10 @@ function floodFrom(map, sx, sz) {
         const nx = x + DIRS[k][0], nz = z + DIRS[k][1];
         if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
         if (!map.isWalkable(nx, nz)) continue;
+        // No squeezing diagonally between two blocked tiles: nothing that
+        // walks can follow that (the flow field and movement refuse it too),
+        // and lanes threaded through such pinches left squads on the shore.
+        if (k >= 4 && (!map.isWalkable(nx, z) || !map.isWalkable(x, nz))) continue;
         const nd = d + (k < 4 ? 1 : 1.5);
         const ni = nz * N + nx;
         if (nd < dist[ni] - 1e-6) {
@@ -60,6 +64,7 @@ function extractPath(map, field, tx, tz) {
     for (const [dx, dz] of DIRS) {
       const nx = x + dx, nz = z + dz;
       if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+      if (dx && dz && (!map.isWalkable(nx, z) || !map.isWalkable(x, nz))) continue;
       const d = field[nz * N + nx];
       if (d < bd) { bd = d; bx = nx; bz = nz; }
     }
