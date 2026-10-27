@@ -140,7 +140,8 @@ test('match-result: a personal best must carry a replay, and the replay decides'
   assert.equal(slowStore.calls[0].p_replay.status, 'deferred', 'over budget is deferred, never judged');
   assert.ok(slowStore.calls[0].p_replay.log, 'deferred replays carry the log for the offline verifier');
 
-  const wrongSeed = signTicket(payload({ seed: 1 }), SECRET);
+  // Seed 2: (seed 1 happens to reproduce the same short-run counters on the v3 Greenfall terrain.)
+  const wrongSeed = signTicket(payload({ seed: 2 }), SECRET);
   const seedStore = resultStore();
   await run({ ...base, ticket: wrongSeed, replay }, { store: seedStore });
   assert.equal(seedStore.calls[0].p_replay.status, 'mismatch', 'a run played on another seed does not verify');
