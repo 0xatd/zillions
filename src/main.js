@@ -958,11 +958,27 @@ class App {
             }
           }
         }
+        // Round landing at every turn (and both ends): a fan of the same
+        // half-width, so a hairpin never leaves a wedge of the layer below
+        // showing on its outer side.
+        const lift = (vx, vz, vh) => { const gy = this.map.groundY(vx, vz); return (gy > vh && gy - vh < 0.25 ? gy : vh) + y; };
+        for (let q = 0; q < pts.length; q++) {
+          const [cx0, cz0, ch] = pts[q];
+          const seg = 14, r = w / 2;
+          for (let k = 0; k < seg; k++) {
+            const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2;
+            const p0x = cx0 + Math.cos(a0) * r, p0z = cz0 + Math.sin(a0) * r;
+            const p1x = cx0 + Math.cos(a1) * r, p1z = cz0 + Math.sin(a1) * r;
+            P.push(cx0, lift(cx0, cz0, ch), cz0, p1x, lift(p1x, p1z, ch), p1z, p0x, lift(p0x, p0z, ch), p0z);
+          }
+        }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
         geo.computeVertexNormals();
         const m = new THREE.Mesh(geo, mat);
-        m.receiveShadow = true;
+        // The road never takes the cliff's cast shadow: the cut sits in the
+        // lee of the rim on some maps and the zig-zag must still read.
+        m.receiveShadow = false;
         return m;
       };
       // Pale packed roadbed between dark kerbs, so the zig-zag reads as a
@@ -972,12 +988,14 @@ class App {
       // polygon offset keeps the kerb strictly under the bed and the bed
       // under the centre line.
       const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
-      const edgeMat = layer(0x4a3c2e, -1);
+      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
+      // meet and their kerbs overlap it reads as a paved apron, not a hole.
+      const edgeMat = layer(0x8a7658, -1);
       const roadMat = layer(0xd8c49a, -3);
       const centreMat = layer(0xf1e4c4, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
-        g.add(ribbon(pts, 2.05, 0.04, edgeMat));
+        g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
         g.add(ribbon(pts, 0.22, 0.075, centreMat));
         for (let q = 1; q < pts.length; q++) {
