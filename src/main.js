@@ -1,5 +1,6 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
+import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
@@ -58,21 +59,28 @@ const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
+// Scratch colours for the per-frame sky/light update (no per-frame allocs).
+const _tmpColA = new THREE.Color();
+const _tmpColB = new THREE.Color();
+const _tmpColC = new THREE.Color();
+const _tmpColD = new THREE.Color();
 
 class App {
   constructor() {
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
+    // colour lands on screen as that colour.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
+    this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-    this.camDist = 30;
+    this.camDist = 46;           // high, narrow diorama camera (FOV 30)
+    this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
@@ -365,7 +373,7 @@ class App {
     group.name = 'planet-edge-title';
     const planet = new THREE.Mesh(
       new THREE.SphereGeometry(185, 48, 24),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
+      toyMat({ color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
     );
     planet.position.set(MAP_SIZE / 2, -185, MAP_SIZE / 2 + 18);
     group.add(planet);
@@ -815,7 +823,7 @@ class App {
     const squarePlaza = plan && plan.key === 'fort';
     const disc = new THREE.Mesh(
       squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xa6a091 }),
+      toyMat({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
@@ -830,7 +838,7 @@ class App {
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     g.add(ring);
-    const laneMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xb3ad9e });
+    const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
@@ -863,10 +871,10 @@ class App {
       ring.position.set(s.x, 0.06, s.z);
       gr.add(ring);
       gr.userData.ring = ring;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 }));
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xc9a44a }));
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), toyMat({ color: 0xc9a44a }));
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
@@ -926,13 +934,13 @@ class App {
     const g = new THREE.Group();
     const vid = (n.id || 0) * 7919;
     const rot = (k) => ((vid >> k) % 628) / 100;
-    const mat = (c, e = 0) => new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const mat = (c, e = 0) => toyMat({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
     const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
 
     // Churned dead-earth ring.
     const ringGeo = new THREE.CircleGeometry(3.1, 20);
     ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
+    const ring = new THREE.Mesh(ringGeo, toyMat({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
     ring.position.y = 0.03;
     ring.receiveShadow = true;
     g.add(ring);
@@ -1026,7 +1034,7 @@ class App {
         mesh = new THREE.Group();
         const gem = new THREE.Mesh(
           new THREE.OctahedronGeometry(0.34, 0),
-          new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+          toyMat({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
         );
         gem.castShadow = true;
         mesh.add(gem);
@@ -2960,24 +2968,24 @@ class App {
   }
 
   _setupLights() {
-    // Cel look: one warm sun sitting LOW so every tree and tower throws a
-    // long graphic shadow; shadows are filled with saturated cool ambient
-    // (navy, never black) — the reference's colored-shadow trick.
-    this.sun = new THREE.DirectionalLight(0xfff0cf, 2.2);
+    // Toy lighting: one sun for crisp shape shadows, and a fill whose ground
+    // colour is the map's shadow colour — so every shadowed face on a map
+    // shares one tint, like a painted diorama. Totals are tuned so a lit top
+    // face shows its picked colour with tone mapping off.
+    this.sun = new THREE.DirectionalLight(0xffffff, 2.3);
     this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const s = 62;
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
-    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
-    // Warm earth bounce from below, cool sky from above — the two-tone fill
-    // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.58);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x1d3557, 0.75);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x33406e, 0.2);
+    this.amb = new THREE.AmbientLight(0x6a7fb0, 0.35);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.FogExp2(0xa8cfc4, 0.0045);
+    this.scene.fog = new THREE.Fog(0xa8cfc4, 90, 240);
     this.scene.background = new THREE.Color(0xa8cfc4);
   }
 
@@ -3054,7 +3062,7 @@ class App {
   _spawnPayCoins(fx, fz, tx, tz, n) {
     if (!this._payCoinGeo) {
       this._payCoinGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.05, 10);
-      this._payCoinMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
+      this._payCoinMat = toyMat({ color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
     }
     for (let i = 0; i < n; i++) {
       if (this.payCoins.length >= 48) return;
@@ -3406,7 +3414,7 @@ class App {
   _setupCoins() {
     const MAXC = 400;
     const geo = new THREE.CylinderGeometry(0.22, 0.22, 0.07, 12);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
+    const mat = toyMat({ color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
     this.coinMesh = new THREE.InstancedMesh(geo, mat, MAXC);
     this.coinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.coinMesh.castShadow = true;
@@ -3451,7 +3459,7 @@ class App {
     // A real felled body (limbs splayed, baked gore) instead of a tumbling
     // crate — instance color still tints it per type.
     const geo = buildCorpseGeometry();
-    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffffff, vertexColors: true }), MAXC);
+    this.corpseMesh = new THREE.InstancedMesh(geo, toyMat({ color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
     this.corpseMesh.frustumCulled = false;
@@ -3670,14 +3678,14 @@ class App {
     const grp = new THREE.Group();
     const pylon = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.11, 0.55, 6),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x565c60 }),
+      toyMat({ color: 0x565c60 }),
     );
     pylon.position.set(x, 0.28, z);
     pylon.castShadow = true;
     grp.add(pylon);
     const gem = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.17, 0),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
+      toyMat({ color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
     );
     gem.position.set(x, 0.95, z);
     grp.add(gem);
@@ -4329,10 +4337,10 @@ class App {
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
         gr.add(ring);
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x39332a }));
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
         gr.add(pole);
-        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xd8c07a }));
+        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), toyMat({ color: 0xd8c07a }));
         flag.position.set(node.x + 0.75, 3.8, node.z);
         gr.add(flag);
         const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());
@@ -4445,7 +4453,7 @@ class App {
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 14, 60);
+      this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 22, 95);
     }, { passive: false });
 
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -4679,7 +4687,9 @@ class App {
       this.focus.y += (gy - this.focus.y) * (1 - Math.exp(-4 * dt));
     }
 
-    const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
+    // Diorama angle: steep enough to read the whole base like a board game,
+    // steeper still as you pull back.
+    const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
     let sx = 0, sz = 0;
     if (this.shake > 0) {
@@ -4694,8 +4704,16 @@ class App {
     );
     this.camera.lookAt(this.focus.x + sx, this.focus.y, this.focus.z + sz);
 
-    this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
-    this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+    // Sun high and over the camera's left shoulder: the faces you look at
+    // are lit, and shadows fall up-screen to the right like a lit tabletop.
+    this.sun.position.set(this.focus.x - 34, this.focus.y + 78, this.focus.z + 26);
+    this.sun.target.position.set(this.focus.x, this.focus.y, this.focus.z);
+    const shadowSpan = clamp(this.camDist * 0.85, 26, 74);
+    if (Math.abs(shadowSpan - (this._shadowSpan || 0)) > 1) {
+      this._shadowSpan = shadowSpan;
+      Object.assign(this.sun.shadow.camera, { left: -shadowSpan, right: shadowSpan, top: shadowSpan, bottom: -shadowSpan });
+      this.sun.shadow.camera.updateProjectionMatrix();
+    }
   }
 
   // No day and no night any more — but the sky still tells you something. The
@@ -4704,26 +4722,34 @@ class App {
   _updateDayNight(dt) {
     const g = this.game;
     const dread = g.phase === 'found' ? 0 : Math.min(1, (g.threat || 0) / Math.max(1, THREAT.max * 0.7));
-    const want = 1 - dread * 0.8;
+    const want = 1 - dread * 0.55;
     this._bright = this._bright === undefined ? want : this._bright + (want - this._bright) * (1 - Math.exp(-2.2 * dt));
     const b = this._bright;
-    const daySky = new THREE.Color(this.pal && this.pal.sky ? this.pal.sky : 0xa8cfc4);
-    const duskSky = new THREE.Color(0xd98a6a);
-    const nightSky = new THREE.Color(0x232b4e);
-
-    this.sun.intensity = lerp(0.85, 2.75, b);
-    // Warm gold by day, ember at dusk, cool moon-blue at night.
-    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xffeabf), b));
-    this.hemi.intensity = lerp(0.35, 0.8, b);
-    this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
-    this.hemi.groundColor.copy(new THREE.Color(0x2c3550).lerp(new THREE.Color(0x9a7a58), b));
-    this.amb.intensity = lerp(0.85, 0.45, b);
-    this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
-    const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
-    this.scene.background = sky;
-    this.scene.fog.color.copy(sky);
+    const pal = this.pal || {};
+    const shadowHex = paletteShadow(pal);
+    if (shadowHex !== this._shadowHex) {
+      this._shadowHex = shadowHex;
+      this.tacticalVisuals.setShadowColor(shadowHex);
+    }
+    const shadow = _tmpColA.setHex(shadowHex);
+    const horizon = _tmpColB.setHex(pal.sky !== undefined ? pal.sky : 0xa8cfc4);
+    const top = _tmpColC.setHex(paletteSkyTop(pal));
+    // Threat drains the warmth out of the light toward the shadow colour —
+    // a late siege LOOKS late without any day/night clock.
+    this.sun.intensity = lerp(1.25, 2.3, b);
+    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
+    this.hemi.intensity = lerp(0.55, 0.75, b);
+    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.hemi.groundColor.copy(shadow);
+    this.amb.intensity = 0.35;
+    this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
+    horizon.lerp(shadow, (1 - b) * 0.6);
+    top.lerp(shadow, (1 - b) * 0.7);
+    this.scene.background = this.sky.set(top, horizon) || horizon.clone();
+    this.scene.fog.color.copy(horizon);
+    const b2 = b;
     // Windows glow when it's dark.
-    const glow = lerp(0.85, 0, b);
+    const glow = lerp(0.85, 0, b2);
     if (Math.abs(glow - (this._winGlow || 0)) > 0.05) {
       this._winGlow = glow;
       for (const rec of this.buildingMeshes.values()) {
@@ -5437,7 +5463,7 @@ class App {
       this.minimapT -= dt;
       if (this.minimapT <= 0) {
         this.minimapT = 0.15;
-        const viewSize = this.camDist * 1.1;
+        const viewSize = this.camDist * 0.62;
         this.ui.drawMinimap(this.game, this.focus, viewSize);
       }
     }

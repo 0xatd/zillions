@@ -8,13 +8,14 @@
 // wins where an authored asset exists; these are the "procedural fallback"
 // the production-art rules keep alive — now worth looking at.
 import * as THREE from 'three';
+import { toyMat } from './toy-style.js';
 import { applyRim } from './tactical-visuals.js';
 import { itemInfo } from './config.js';
 import { COSMETIC_RENDERERS } from './cosmetics.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
 const M = (c, e = 0) => applyRim(
-  new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.38, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
+  toyMat({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e }),
   { color: 0xfff3e0, power: 2.2, strength: 0.42 },
 );
 

@@ -13,6 +13,7 @@
 // Presentation only: nothing here touches simulation state. Variation is
 // keyed off plot ids and tile coords — deterministic, so peers agree.
 import * as THREE from 'three';
+import { toyMat } from './toy-style.js';
 import { assetClone, assetPart } from './assets.js';
 
 // The art-slice GLBs predate the detailed procedural kit and read flatter
@@ -264,8 +265,7 @@ export function groundSkirt(b) {
   const r = Math.max(1.15, (b.size || 1.5) * 0.72);
   const geo = new THREE.CircleGeometry(r, 18);
   geo.rotateX(-Math.PI / 2);
-  const skirt = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08,
-    color: 0x37322b, transparent: true, opacity: 0.42, depthWrite: false,
+  const skirt = new THREE.Mesh(geo, toyMat({ color: 0x1d2a3a, transparent: true, opacity: 0.16, depthWrite: false,
   }));
   skirt.position.y = 0.03;
   skirt.receiveShadow = true;
@@ -301,7 +301,7 @@ export function buildBuildingMesh(b, ctx = {}) {
   const B = merger();          // hull, steel, concrete — Lambert, shadowed
   const G = merger();          // marker lights, lenses — always lit
   const W = merger();          // habitation glass — glows at night
-  const M = (color, e = 0) => new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08, color, emissive: e ? color : 0x000000, emissiveIntensity: e });
+  const M = (color, e = 0) => toyMat({ color, emissive: e ? color : 0x000000, emissiveIntensity: e });
   // Separate-mesh helpers for ANIMATED parts only.
   const liveBox = (w, h, dep, color, x = 0, y = 0, z = 0, e = 0) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), M(color, e));
@@ -441,8 +441,7 @@ export function buildBuildingMesh(b, ctx = {}) {
       B.box(FRAME, 1.9, 0.06, 0.08, 0, 1.02, 0);
       const glassGeo = new THREE.CylinderGeometry(0.95, 0.95, 1.8, 12, 1, true, 0, Math.PI);
       glassGeo.rotateZ(Math.PI / 2); // vault axis along the crop rows
-      const glass = new THREE.Mesh(glassGeo, new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08,
-        color: 0xbfe8e0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
+      const glass = new THREE.Mesh(glassGeo, toyMat({ color: 0xbfe8e0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
       }));
       glass.position.y = 0.25;
       glass.scale.y = 0.5;
@@ -914,7 +913,7 @@ export function buildBuildingMesh(b, ctx = {}) {
 
   // Merged output: body (shadowed hull), glow (always-lit), windows (night).
   if (!B.empty()) {
-    g.add(B.build(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08, vertexColors: true, map: colonyAtlas() }), true));
+    g.add(B.build(toyMat({ vertexColors: true, map: colonyAtlas() }), true));
   }
   if (!G.empty()) {
     const glow = G.build(new THREE.MeshBasicMaterial({ vertexColors: true }));
@@ -922,8 +921,7 @@ export function buildBuildingMesh(b, ctx = {}) {
     g.add(glow);
   }
   if (!W.empty()) {
-    const win = W.build(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.08,
-      color: WINDOW, emissive: WINDOW, emissiveIntensity: 0, vertexColors: true,
+    const win = W.build(toyMat({ color: WINDOW, emissive: WINDOW, emissiveIntensity: 0, vertexColors: true,
     }));
     win.castShadow = false;
     win.userData.window = true;
