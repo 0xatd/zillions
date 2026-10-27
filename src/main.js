@@ -4431,6 +4431,10 @@ class App {
         ringGeo.rotateX(-Math.PI / 2);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
+        // The home node sits on the keep: its capture circle would ring the
+        // castle like a target — the walls already say whose ground it is.
+        const hq = (g.plots || []).find((p) => p.kind === 'hq');
+        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
