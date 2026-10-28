@@ -1857,7 +1857,16 @@ class App {
       this.ui.setEndRewards?.(this._endExtras);
       return;
     }
+    const userId = this.auth?.user?.id || null;
+    if (!userId) {
+      this._endExtras = { pending: false, grants: [], quests, error: 'Sign in to earn rewards. No rewards were granted.' };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
     const pending = {
+      // The account that played this match. The outbox only ever resends or
+      // drops a report for the account that is signed in.
+      userId,
       requestId: globalThis.crypto?.randomUUID?.() || `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
       characterId: character.id,
       // The room comes from match start, not from lobby state at match end
@@ -1874,7 +1883,7 @@ class App {
     } catch (error) {
       console.warn('match result failed', error);
       const retryable = retryableMatchError(error);
-      if (!retryable) dropPendingMatch(pending.requestId);
+      if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
       this._endExtras = {
         ...(this._endExtras || {}), pending: false, grants: [], quests,
         error: retryable
@@ -1886,6 +1895,11 @@ class App {
   }
 
   async _sendMatchResult(pending) {
+    // Never send one account's report with another account's session. Not a
+    // rejection either: the report stays queued for its own account.
+    if (!pending.userId || pending.userId !== this.auth?.user?.id) {
+      throw Object.assign(new Error('account_changed'), { status: 0 });
+    }
     if (pending.characterId) {
       const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
       // A character the server has never seen is registered first; the
@@ -1894,7 +1908,7 @@ class App {
     }
     const result = await matchResultRequest(pending);
     if (!result?.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: 503 });
-    dropPendingMatch(pending.requestId);
+    dropPendingMatch(pending.requestId, pending.userId);
     return result;
   }
 
@@ -1902,13 +1916,18 @@ class App {
   // Same requestId, so the server grants each match at most once.
   async _flushPendingMatches() {
     if (!this.auth?.isSignedIn()) return;
-    for (const pending of readPendingMatches()) {
+    const userId = this.auth.user?.id;
+    // Only this account's own reports; another account's stay untouched.
+    for (const pending of readPendingMatches(userId)) {
       try {
         const result = await this._sendMatchResult(pending);
         const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
         if (character) this._applyMatchResult(character, result, [], { quiet: true });
       } catch (error) {
-        if (!retryableMatchError(error)) dropPendingMatch(pending.requestId);
+        if (!retryableMatchError(error)) { dropPendingMatch(pending.requestId, userId); continue; }
+        // Rate limited or the server is busy: stop and try again next time
+        // rather than burn through the queue.
+        if (error?.status === 429 || error?.status >= 500) break;
       }
     }
   }

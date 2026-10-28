@@ -97,7 +97,6 @@ set search_path = public
 as $$
 declare
   c_min_interval constant interval := interval '15 seconds';
-  c_clock_slack constant integer := 120;
   c_stash_cap constant integer := 60;
   v_existing public.match_reports%rowtype;
   v_character public.game_characters%rowtype;
@@ -136,15 +135,13 @@ begin
     raise exception 'duplicate_room_report';
   end if;
 
+  -- Rate limit only. Match length is NOT compared with the time since the
+  -- previous report: reports can arrive late and back to back from the
+  -- client's outbox (offline, closed tab), so receipt time says nothing about
+  -- when a match was played. The server-clock duration check is against the
+  -- signed match ticket's issue time (20261027000200).
   select max(created_at) into v_last from public.match_reports where user_id = p_actor;
-  if v_last is not null then
-    if now() - v_last < c_min_interval then raise exception 'rate_limited'; end if;
-    -- A match cannot have lasted longer than the time since the last one ended.
-    -- Solo play runs at up to 2x, so sim seconds / 2 is the wall-clock floor.
-    if (v_duration + 1) / 2 > extract(epoch from now() - v_last)::integer + c_clock_slack then
-      raise exception 'implausible_duration';
-    end if;
-  end if;
+  if v_last is not null and now() - v_last < c_min_interval then raise exception 'rate_limited'; end if;
 
   select * into v_character from public.game_characters
   where user_id = p_actor and client_character_id = p_client_character_id

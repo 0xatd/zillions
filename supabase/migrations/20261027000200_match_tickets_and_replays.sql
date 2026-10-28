@@ -15,8 +15,10 @@
 --   3. create_manual_coop_room() / seat_manual_coop_player(): give invite-code
 --      (copy/paste WebRTC) co-op a private rooms row so its players get co-op
 --      credit and the one-report-per-room rule applies.
---   4. match_reports gains ticket, server-clock and replay columns;
---      match_replays keeps replays that are verified after the request.
+--   4. match_reports gains ticket, server-clock and replay columns. A replay
+--      that did not finish is never stored or paid: /api/match-result returns
+--      a retryable error instead, and this function refuses any replay status
+--      other than not_required / verified / mismatch.
 --   5. apply_match_result(..., p_ticket_id, p_replay) replaces the 6-argument
 --      version: it spends the ticket and checks match length against the
 --      ticket's server issue time.
@@ -181,19 +183,6 @@ alter table public.match_reports
 create unique index if not exists match_reports_one_per_ticket on public.match_reports(ticket_id) where ticket_id is not null;
 create index if not exists match_reports_flagged_idx on public.match_reports(created_at desc) where flagged;
 
-create table if not exists public.match_replays (
-  report_id uuid primary key references public.match_reports(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  ticket_id uuid references public.match_tickets(id) on delete set null,
-  payload jsonb not null,
-  status text not null default 'pending' check (status in ('pending', 'verified', 'mismatch', 'invalid')),
-  mismatch jsonb not null default '[]'::jsonb,
-  created_at timestamptz not null default now(),
-  verified_at timestamptz
-);
-create index if not exists match_replays_pending_idx on public.match_replays(created_at) where status = 'pending';
-alter table public.match_replays enable row level security;
-revoke all on public.match_replays from anon, authenticated;
 
 -- 5. apply_match_result with a ticket ------------------------------------------
 drop function if exists public.apply_match_result(uuid, text, text, uuid, bigint, jsonb);
@@ -257,6 +246,12 @@ begin
     raise exception 'duplicate_room_report';
   end if;
 
+  -- Rewards are only ever applied from a verdict. An unfinished replay
+  -- ('deferred') or anything unknown is refused, so it can never pay out.
+  if v_replay_status not in ('not_required', 'verified', 'mismatch') then
+    raise exception 'replay_unverified';
+  end if;
+
   -- The match ticket: issued by /api/match-start, owned by this player, for
   -- this mission, unexpired and unused. It is spent in this transaction, so
   -- any later failure rolls the spend back too.
@@ -279,15 +274,11 @@ begin
   end if;
   update public.match_tickets set used_at = now(), request_id = p_request_id where id = v_ticket.id;
 
+  -- Rate limit only. The duration check above uses the ticket's issue time,
+  -- which is when the match started; the previous report's receipt time is
+  -- not, because queued reports can be delivered late and back to back.
   select max(created_at) into v_last from public.match_reports where user_id = p_actor;
-  if v_last is not null then
-    if now() - v_last < c_min_interval then raise exception 'rate_limited'; end if;
-    -- A match cannot have lasted longer than the time since the last one ended.
-    -- Solo play runs at up to 2x, so sim seconds / 2 is the wall-clock floor.
-    if (v_duration + 1) / 2 > extract(epoch from now() - v_last)::integer + c_clock_slack then
-      raise exception 'implausible_duration';
-    end if;
-  end if;
+  if v_last is not null and now() - v_last < c_min_interval then raise exception 'rate_limited'; end if;
 
   select * into v_character from public.game_characters
   where user_id = p_actor and client_character_id = p_client_character_id
@@ -418,17 +409,8 @@ begin
     coalesce((v_report->>'levelId')::integer, 0), coalesce(v_duration, 0), v_report, v_response,
     v_ticket.id, v_elapsed, v_replay_status, coalesce(p_replay->'reasons', '[]'::jsonb),
     coalesce(p_replay->'mismatch', '[]'::jsonb), p_replay->'claimed',
-    v_replay_status in ('mismatch', 'deferred', 'unverifiable'))
+    v_replay_status = 'mismatch')
   returning id into v_report_id;
-
-  -- Replays that did not fit the request budget are kept for
-  -- scripts/verify-replays.mjs.
-  if v_replay_status = 'deferred' and p_replay ? 'log' then
-    insert into public.match_replays(report_id, user_id, ticket_id, payload)
-    values (v_report_id, p_actor, v_ticket.id, jsonb_build_object(
-      'levelId', v_ticket.level_id, 'mode', v_ticket.mode, 'difficulty', v_ticket.difficulty,
-      'seed', v_ticket.seed, 'replay', p_replay->'log', 'claimed', v_report));
-  end if;
 
   -- Invite-code rooms exist only for reward bookkeeping; close them once
   -- someone reports. Teammates can still report a finished room.

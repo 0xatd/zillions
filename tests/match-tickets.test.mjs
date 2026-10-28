@@ -134,12 +134,6 @@ test('match-result: a personal best must carry a replay, and the replay decides'
   assert.equal(sent.p_result.report.kills, report.kills, 'the server-replayed counters pay out, not the claim');
   assert.equal(settled.report.kills, report.kills);
 
-  const slowStore = resultStore();
-  let t = 0;
-  await run({ ...base, replay }, { store: slowStore, replayBudgetMs: 1, clock: () => (t += 5) });
-  assert.equal(slowStore.calls[0].p_replay.status, 'deferred', 'over budget is deferred, never judged');
-  assert.ok(slowStore.calls[0].p_replay.log, 'deferred replays carry the log for the offline verifier');
-
   // Seed 2: (seed 1 happens to reproduce the same short-run counters on the v3 Greenfall terrain.)
   const wrongSeed = signTicket(payload({ seed: 2 }), SECRET);
   const seedStore = resultStore();
@@ -147,4 +141,31 @@ test('match-result: a personal best must carry a replay, and the replay decides'
   assert.equal(seedStore.calls[0].p_replay.status, 'mismatch', 'a run played on another seed does not verify');
 
   await assert.rejects(run({ ...base, roomId: ROOM, replay }), /ticket_mismatch/, 'a solo ticket cannot be reported as co-op');
+});
+
+test('match-result: a replay timeout grants nothing, not even a forged claim, and is retryable', async () => {
+  const { report, replay } = recorded();
+  const ticket = signTicket(payload(), SECRET);
+  // The reviewer's repro: claim far more than the run did (60 vs 10 kills).
+  const forged = { ...report, kills: report.kills + 50, nests: report.nests, coins: report.coins + 40 };
+  for (const claim of [forged, report]) {
+    const store = resultStore();
+    let t = 0;
+    await assert.rejects(
+      processMatchResult({
+        userId: USER, body: { requestId: 'req-timeout-1', characterId: 'mmo_a', ticket, report: claim, replay },
+        store, secret: SECRET, now: NOW, random: () => 1, replayBudgetMs: 1, clock: () => (t += 5),
+      }),
+      (e) => e.message === 'replay_retry_later' && e.status === 503 && e.retryAfterSeconds > 0,
+    );
+    assert.equal(store.calls.length, 0, 'nothing reaches apply_match_result: no XP, loot, Alloy, stats, and the ticket stays unspent');
+  }
+  // The same request with enough budget is judged on the server's replay.
+  const store = resultStore();
+  await processMatchResult({
+    userId: USER, body: { requestId: 'req-timeout-1', characterId: 'mmo_a', ticket, report: forged, replay },
+    store, secret: SECRET, now: NOW, random: () => 1,
+  });
+  assert.equal(store.calls[0].p_replay.status, 'mismatch');
+  assert.equal(store.calls[0].p_result.report.kills, report.kills, 'the retry pays the replayed kills, not the claim');
 });

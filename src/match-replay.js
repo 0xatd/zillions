@@ -37,7 +37,8 @@ export const REPLAY_LIMITS = Object.freeze({
   maxLogEntries: 120000,
   maxPlayers: 4,
   // Wall-clock budget for an inline replay inside the match-result function.
-  // Longer replays are stored and verified later (scripts/verify-replays.mjs).
+  // A replay that runs past it is not a verdict: /api/match-result grants
+  // nothing and answers 503 replay_retry_later so the client resends later.
   inlineBudgetMs: 40000,
   deadlineCheckEvery: 240,
 });

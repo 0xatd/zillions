@@ -255,7 +255,10 @@ token. `roomId` is taken from the ticket, never from the body.
    `invalid_ticket`, `ticket_expired`, `ticket_mismatch`).
 4. `validateMatchReport()` (`src/match-rewards.js`) rejects unknown versions,
    modes, difficulties, locked campaign levels, and any counter outside bounds
-   derived from the match duration and the map.
+   derived from the match duration and the map. The Threat ceiling follows
+   every Threat source in `Game._updateSiege()`: the base clock plus per-hive
+   pressure (up to three live hives) times the difficulty multiplier, plus
+   the one-off bumps for each node capture and each razed hive.
 5. The reported duration must fit the server clock since the ticket was
    issued (x2 for solo speed, x1 for co-op, plus 120 s slack).
 6. **Replay.** `replayReasons()` (`src/match-replay.js`) decides whether the
@@ -271,24 +274,40 @@ token. `roomId` is taken from the ticket, never from the body.
    - Match: rewards are paid, `replay_status = 'verified'`.
    - Mismatch: the **server's** report is validated and paid instead; the
      claim is kept in `claimed_report` and the row is `flagged`.
-   - Over budget (`MATCH_REPLAY_BUDGET_MS`, default 8000 ms): the match pays
-     on the bounds-checked claim, `replay_status = 'deferred'`, flagged, and
-     the log is stored in `match_replays` (`pending`) for offline checking.
+   - Over budget (`MATCH_REPLAY_BUDGET_MS`, default 8000 ms): **nothing is
+     granted** (fail closed). The request fails with `503 replay_retry_later`
+     (`Retry-After: 300`), nothing is written and the ticket stays unspent, so
+     the client keeps the report in its outbox and resends it later with the
+     same `requestId`. `apply_match_result()` also refuses any replay status
+     other than `not_required` / `verified` / `mismatch`
+     (`replay_unverified`), so an unverified claim cannot pay out even if a
+     caller tries.
    - Invalid log: refused.
-7. Loot keys are re-derived from the map seed; quests are re-evaluated.
+7. Rolled loot keys must be keys this match actually scattered: the server
+   rebuilds the match setup from the ticket's level, mode, difficulty and
+   seed (`src/loot-table.js`) and checks the complete key (base, affix seed,
+   item level, rarity). Quests are re-evaluated.
 8. `computeMatchRewards()` turns the report into XP, levels, items, Alloy, and
    stat deltas.
 9. `apply_match_result()` (security definer, `service_role` only) re-checks
    and spends the ticket, re-checks the server-clock duration, and applies the
    result in one transaction (advisory lock, duplicate check, one report per
-   ticket and per co-op room, rate limit, CAS on `progress_revision`, quest and
+   ticket and per co-op room, rate limit (15 s between reports; match length
+   is checked against the ticket's issue time, never against when the
+   previous report arrived, so late outbox reports are accepted), CAS on
+   `progress_revision`, quest and
    item dedupe, stash cap, wallet credit, stats, history, replay columns).
    A manual co-op room is marked finished.
 
 The client keeps unconfirmed reports in `localStorage`
 (`zillions_pending_matches`) and resends them with the same `requestId` on the
 next sign-in, so a closed tab does not lose a match and a resend cannot double
-grant. If the outbox hits the storage quota, the input log is dropped first.
+grant. Every entry records the user id that played it; only the signed-in
+account's own reports are resent or dropped, so two accounts sharing a
+browser never send each other's reports. Network errors, 5xx (including
+`replay_retry_later`), 429, `stale_progress` and `request_in_progress` keep
+the report queued; other refusals drop it. If the outbox hits the storage
+quota, the input log is dropped first.
 
 Guest (offline) play never calls either route; its progress stays in the
 browser.
@@ -304,8 +323,10 @@ browser.
 - Floating-point results could in principle differ between a browser and
   Node. A divergence pays the server result and flags the report; it never
   grants more than the server computed.
-- Deferred replays are flagged, not clawed back. `match_replays` rows stay
-  `pending` until an operator checks them offline.
+- A replay that cannot finish inside the function budget is never paid. A
+  match long enough to always exceed the budget stays queued until its ticket
+  expires (48 h); raise `MATCH_REPLAY_BUDGET_MS` (and the function's max
+  duration) if long survival runs need it.
 - `room_players` seats prove the reporter took a seat, not that they played.
 - The Lattice and class still live in client-writable auth metadata. The
   replay caps the Lattice by level, and a rewire is charged by the server, but

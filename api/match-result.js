@@ -12,7 +12,10 @@
 //   5. replays the recorded input log headlessly (src/match-replay.js) when
 //      the run is a personal best, looks suspicious, carries loot, or is
 //      spot-checked; a replay that disagrees pays out what the SERVER's sim
-//      produced and flags the report,
+//      produced and flags the report. A replay that does not finish inside
+//      the budget grants NOTHING: the request fails with a retryable 503
+//      (replay_retry_later), the ticket stays unspent, and the client keeps
+//      the report in its outbox and resends it later,
 //   6. writes everything in ONE transaction through apply_match_result()
 //      (security definer, service_role only), which also spends the ticket
 //      and enforces idempotency, one reward per co-op room per player, and a
@@ -21,14 +24,17 @@
 import { computeMatchRewards, itemPayload, matchScore, validateMatchReport } from '../src/match-rewards.js';
 import { socketComponentMods } from '../src/crafting.js';
 import { diffReports, replayMatch, replayReasons, validateReplayPayload, withServerCamp } from '../src/match-replay.js';
+import { scatteredLootKeys } from '../src/loot-table.js';
+import { isRolledKey } from '../src/items.js';
 import { ticketSecret, verifyTicket } from './_lib/match-ticket.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 // Reports carry the replay input log (a few hundred KB for a long match).
 const BODY_LIMIT = 2 * 1024 * 1024;
-// Inline replay budget. Runs that need longer are stored and verified by
-// scripts/verify-replays.mjs; they pay out on the claim and are flagged.
+// Inline replay budget. A run that needs longer is refused with a retryable
+// error and pays nothing until a replay completes (fail closed).
 const DEFAULT_REPLAY_BUDGET_MS = 8000;
+const REPLAY_RETRY_AFTER_SECONDS = 300;
 // Solo games can run at 2x; lockstep co-op runs at 1x.
 const SPEED_CAP = { solo: 2, room: 1 };
 const CLOCK_SLACK_SECONDS = 120;
@@ -39,6 +45,7 @@ const RPC_ERRORS = {
   stale_progress: 409, duplicate_room_report: 409, request_in_progress: 409,
   rate_limited: 429, implausible_duration: 422, character_not_found: 404,
   missing_ticket: 422, invalid_ticket: 422, ticket_used: 409, ticket_expired: 422, ticket_mismatch: 422,
+  replay_unverified: 503,
 };
 
 const send = (res, status, body) => { res.writeHead(status, JSON_HEADERS); res.end(JSON.stringify(body)); };
@@ -103,6 +110,16 @@ export function supabaseStore({ url, serviceKey, fetchImpl = fetch }) {
   };
 }
 
+// Rolled loot is proven against what this match's seed really scattered
+// (src/loot-table.js). Only built when a pack carries a rolled key: one Game
+// setup, cached per seed.
+export function lootTableFor(ticket, pack, known = null) {
+  const keys = Array.isArray(pack) ? pack : [];
+  if (!keys.some((key) => typeof key === 'string' && isRolledKey(key))) return known || new Set();
+  if (known && known.size) return known;
+  return scatteredLootKeys({ levelId: ticket.lvl, mode: ticket.mode, difficulty: ticket.diff, seed: Number(ticket.seed) });
+}
+
 // What the server knows about the reporter's hero, for the replay.
 export function serverHero(context) {
   const items = Array.isArray(context.items) ? context.items : [];
@@ -119,7 +136,7 @@ export function serverHero(context) {
 
 // Decide whether to replay, run it, and settle which report pays out.
 // Returns { report, replay } where replay is what apply_match_result stores.
-export function settleReplay({ report, ticket, body, context, serverElapsedSeconds, random, budgetMs, clock }) {
+export function settleReplay({ report, ticket, body, context, serverElapsedSeconds, random, budgetMs, clock, lootTable = null }) {
   const best = context.previousReports.reduce((max, prior) => Math.max(max, matchScore(prior)), -Infinity);
   const reasons = replayReasons(report, {
     bestScore: Number.isFinite(best) ? best : null,
@@ -141,15 +158,18 @@ export function settleReplay({ report, ticket, body, context, serverElapsedSecon
     replay, now: clock, deadline: started + budgetMs,
   });
   if (result.status === 'timeout') {
-    // Not a verdict. Pay on the bounds-checked claim, flag it, and keep the
-    // log for the offline verifier.
-    return { report, replay: { status: 'deferred', reasons, log: checked.replay } };
+    // Not a verdict either way, so nothing is granted and nothing is spent:
+    // the client keeps the report and resends it (same requestId, same
+    // ticket) later. Fail closed; never pay on the unverified claim.
+    throw httpError('replay_retry_later', 503, { detail: reasons.join(','), retryAfterSeconds: REPLAY_RETRY_AFTER_SECONDS });
   }
   if (result.status !== 'complete') throw httpError(result.error || 'replay_invalid', 422, { detail: result.detail || null });
   const mismatch = diffReports(report, result.report);
   if (!mismatch.length) return { report, replay: { status: 'verified', reasons } };
   // The server's own run is what pays out. Re-validate it like any report.
-  const replayed = validateMatchReport({ ...result.report, hero: report.hero }, { campaignCleared: context.stats.campaign_cleared || 0 });
+  const replayed = validateMatchReport({ ...result.report, hero: report.hero }, {
+    campaignCleared: context.stats.campaign_cleared || 0, lootTable: lootTableFor(ticket, result.report.pack, lootTable),
+  });
   if (!replayed.ok) throw httpError('replay_mismatch', 422, { detail: mismatch.join(',') });
   return { report: replayed.report, replay: { status: 'mismatch', reasons, mismatch, claimed: report } };
 }
@@ -182,12 +202,13 @@ export async function processMatchResult({
   const roomId = ticket.rid || null;
   if (claimedRoom && claimedRoom !== roomId) throw httpError('ticket_mismatch', 422, { detail: 'room' });
   const serverElapsedSeconds = Math.max(0, Math.floor((now - Number(ticket.iat) * 1000) / 1000));
+  const lootTable = lootTableFor(ticket, body?.report?.pack);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const context = await store.loadContext(userId, clientCharacterId, roomId, { levelId: ticket.lvl, mode: ticket.mode });
     if (!context.character) throw httpError('character_not_found', 404);
     context.previousReports ||= [];
-    const checked = validateMatchReport(body?.report, { campaignCleared: context.stats.campaign_cleared || 0 });
+    const checked = validateMatchReport(body?.report, { campaignCleared: context.stats.campaign_cleared || 0, lootTable });
     if (!checked.ok) throw httpError(checked.error, 422, { detail: checked.detail || null });
     const ticketCheck = verifyTicket(body.ticket, secret, {
       userId, now, levelId: checked.report.levelId, mode: checked.report.mode, difficulty: checked.report.difficulty,
@@ -198,7 +219,7 @@ export async function processMatchResult({
       throw httpError('implausible_duration', 422, { detail: 'server_clock' });
     }
     const settled = settleReplay({
-      report: checked.report, ticket, body, context, serverElapsedSeconds, random, budgetMs: replayBudgetMs, clock,
+      report: checked.report, ticket, body, context, serverElapsedSeconds, random, budgetMs: replayBudgetMs, clock, lootTable,
     });
     const report = settled.report;
 
@@ -283,6 +304,11 @@ export default async function handler(req, res) {
     return send(res, 200, result);
   } catch (error) {
     const status = error?.status || 500;
-    return send(res, status, { ok: false, error: status === 500 ? 'match_result_error' : error.message, ...(error?.detail ? { detail: error.detail } : {}) });
+    if (error?.retryAfterSeconds) res.setHeader('retry-after', String(error.retryAfterSeconds));
+    return send(res, status, {
+      ok: false, error: status === 500 ? 'match_result_error' : error.message,
+      ...(error?.detail ? { detail: error.detail } : {}),
+      ...(error?.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+    });
   }
 }

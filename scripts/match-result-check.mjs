@@ -11,6 +11,7 @@ import {
 } from '../src/match-rewards.js';
 import { BOSS_DROPS, DIFFICULTY, FIELD_LOOT, LEVELS, levelById, rollLootKey, worldItemLevel } from '../src/config.js';
 import { xpToMmoLevel } from '../src/mmo-characters.js';
+import { scatteredLootKeys } from '../src/loot-table.js';
 import handler, { processMatchResult as processWithTicket } from '../api/match-result.js';
 import { signTicket } from '../api/_lib/match-ticket.js';
 import { overlayServerProgress, serverProgress, AuthClient } from '../src/auth.js';
@@ -26,8 +27,10 @@ const report = (over = {}) => ({
   durationSeconds: 900, threatLevel: 4, kills: 400, coins: 300, nests: 3, nodes: 5, built: 30, lost: 0,
   bestHeld: 4, heroDeaths: 0, bossKillT: 60, hqTier: 3, standingBuildings: 25, pack: [], hero: 'scott', ...over,
 });
+// Rolled keys are proven against the loot the match's own seed scattered.
+const table = scatteredLootKeys({ levelId: 1, mode: 'campaign', difficulty: 'normal', seed: 4242 });
 const valid = (over = {}, ctx = {}) => {
-  const checked = validateMatchReport(report(over), ctx);
+  const checked = validateMatchReport(report(over), { lootTable: table, ...ctx });
   assert.ok(checked.ok, `expected a valid report, got ${checked.error} ${checked.detail || ''}`);
   return checked.report;
 };
@@ -62,14 +65,17 @@ eq(validateMatchReport(report({ difficulty: 'godmode' })).error, 'invalid_diffic
 eq(valid({ mode: 'survival', won: true }).won, false, 'survival cannot be reported as a win');
 
 // ---- loot proofs ------------------------------------------------------------
-const legit = realLoot(1, 3);
-ok(verifyLootKey(legit, { levelId: 1 }), 'a key the map really scatters verifies');
+const legit = [...table][0];
+ok(table.size > 0 && verifyLootKey(legit, { levelId: 1, lootTable: table }), 'a key the match really scattered verifies');
+ok(!verifyLootKey(legit, { levelId: 1 }), 'without the match loot table a rolled key is refused (fail closed)');
+ok([...table].some((key) => !scatteredLootKeys({ levelId: 1, seed: 4243 }).has(key)), 'another seed scatters other loot');
 ok(verifyLootKey(FIELD_LOOT.rare[0], { levelId: 1 }), 'authored field finds verify');
-ok(!verifyLootKey(realLoot(1, 3, 2, 'brutal'), { levelId: 1, difficulty: 'normal' }), 'item level must match the reported difficulty');
-ok(!verifyLootKey(realLoot(2, 3), { levelId: 1 }), 'a key from another level does not verify');
-const [base, seed, ilvl] = legit.split(':');
-ok(!verifyLootKey(`${base}:${(parseInt(seed, 36) + 1).toString(36)}:${ilvl}:3`, { levelId: 1 }), 'forged seed rejected');
-ok(!verifyLootKey(`${base}:${seed}:${Number(ilvl) + 20}:3`, { levelId: 1 }), 'inflated item level rejected');
+ok(!verifyLootKey(realLoot(1, 3, 2, 'brutal'), { levelId: 1, difficulty: 'normal', lootTable: table }), 'item level must match the reported difficulty');
+ok(!verifyLootKey(realLoot(2, 3), { levelId: 1, lootTable: table }), 'a key from another level does not verify');
+const [base, seed, ilvl, rarity] = legit.split(':');
+ok(!verifyLootKey(`${base}:${(parseInt(seed, 36) + 1).toString(36)}:${ilvl}:${rarity}`, { levelId: 1, lootTable: table }), 'forged seed rejected');
+ok(!verifyLootKey(`${base}:${seed}:${Number(ilvl) + 20}:${rarity}`, { levelId: 1, lootTable: table }), 'inflated item level rejected');
+ok(!verifyLootKey(`${base}:${seed}:${ilvl}:${rarity === '3' ? '2' : '3'}`, { levelId: 1, lootTable: table }), 'forged rarity on a real seed rejected');
 ok(!verifyLootKey('zillion_eye', { levelId: 1 }), 'boss drops cannot be smuggled in as field finds');
 eq(validateMatchReport(report({ pack: ['zillion_eye'] })).error, 'unverifiable_loot', 'unverifiable pack rejects the report');
 eq(validateMatchReport(report({ pack: [legit, realLoot(1, 4), realLoot(1, 5), realLoot(1, 6), realLoot(1, 7)] })).detail, 'pack', 'pack capped at PACK_SLOTS');
@@ -205,16 +211,27 @@ eq(auth.profileFromBundle({ profile: { handle: 't', username_set: true }, stats:
 {
   const memory = new Map();
   globalThis.localStorage = { getItem: (k) => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, String(v)) };
-  queuePendingMatch({ requestId: 'r1', report: {} });
-  queuePendingMatch({ requestId: 'r1', report: {} });
-  eq(readPendingMatches().length, 1, 'requeue keeps one copy per requestId');
-  for (let i = 2; i <= 8; i++) queuePendingMatch({ requestId: `r${i}`, report: {} });
-  eq(readPendingMatches().map((p) => p.requestId), ['r4', 'r5', 'r6', 'r7', 'r8'], 'outbox capped at the newest five');
-  dropPendingMatch('r8');
-  ok(!readPendingMatches().some((p) => p.requestId === 'r8'), 'confirmed report dropped');
-  eq(readPendingMatches(Date.now() + 8 * 864e5), [], 'week-old reports expire');
+  const A = 'user-a', B = 'user-b';
+  queuePendingMatch({ userId: A, requestId: 'r1', report: {} });
+  queuePendingMatch({ userId: A, requestId: 'r1', report: {} });
+  eq(readPendingMatches(A).length, 1, 'requeue keeps one copy per requestId');
+  for (let i = 2; i <= 8; i++) queuePendingMatch({ userId: A, requestId: `r${i}`, report: {} });
+  eq(readPendingMatches(A).map((p) => p.requestId), ['r4', 'r5', 'r6', 'r7', 'r8'], 'outbox capped at the newest five per account');
+  queuePendingMatch({ userId: B, requestId: 'b1', report: {} });
+  eq(readPendingMatches(B).map((p) => p.requestId), ['b1'], "another account's reports are kept apart");
+  ok(!readPendingMatches(A).some((p) => p.userId !== A), 'an account only ever reads its own reports');
+  eq(readPendingMatches(null), [], 'signed out: nothing to flush');
+  ok(!queuePendingMatch({ requestId: 'anon', report: {} }), 'a report without an account is never queued');
+  dropPendingMatch('b1', A);
+  eq(readPendingMatches(B).length, 1, "one account cannot drop another account's report");
+  dropPendingMatch('r8', A);
+  ok(!readPendingMatches(A).some((p) => p.requestId === 'r8'), 'confirmed report dropped');
+  eq(readPendingMatches(A, Date.now() + 8 * 864e5), [], 'week-old reports expire');
   ok(retryableMatchError(new TypeError('fetch failed')) && retryableMatchError({ status: 503 }) && retryableMatchError({ status: 429 }), 'network/server/rate errors retry');
-  ok(retryableMatchError({ status: 409, message: 'stale_progress' }) && !retryableMatchError({ status: 409, message: 'duplicate_room_report' }), 'only stale CAS conflicts retry');
+  ok(retryableMatchError({ status: 409, message: 'stale_progress' }) && retryableMatchError({ status: 409, message: 'request_in_progress' })
+    && !retryableMatchError({ status: 409, message: 'duplicate_room_report' }), 'only stale CAS conflicts and in-flight duplicates retry');
+  ok(retryableMatchError({ status: 503, message: 'replay_retry_later' }), 'an unfinished replay is kept and retried, not dropped');
+  ok(retryableMatchError({ status: 0, message: 'account_changed' }), "another account's report is kept, not dropped");
   ok(!retryableMatchError({ status: 422 }) && !retryableMatchError({ status: 403 }), 'rejected reports are dropped');
   delete globalThis.localStorage;
 }
