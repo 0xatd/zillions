@@ -947,21 +947,21 @@ class App {
             const f0 = k / n, f1 = (k + 1) / n;
             const x0 = ax + (bx - ax) * f0 - (k === 0 ? ex : 0), z0 = az + (bz - az) * f0 - (k === 0 ? ez : 0);
             const x1 = ax + (bx - ax) * f1 + (k === n - 1 ? ex : 0), z1 = az + (bz - az) * f1 + (k === n - 1 ? ez : 0);
-            // The road's own grade, lifted onto the ground where the ground
-            // swells a little; never climbing onto the rock beside it.
+            // The road's own grade, seated on a swell of the bed. A stair tooth
+            // beside the cut is taller than this and must not jag the ribbon.
             const h0 = ah + (bh - ah) * f0, h1 = ah + (bh - ah) * f1;
             const v = [[x0 + nx, z0 + nz, h0], [x0 - nx, z0 - nz, h0], [x1 - nx, z1 - nz, h1], [x1 + nx, z1 + nz, h1]];
             for (const idx of [0, 1, 2, 0, 2, 3]) {
               const [vx, vz, vh] = v[idx];
               const gy = this.map.groundY(vx, vz);
-              P.push(vx, (gy > vh && gy - vh < 0.25 ? gy : vh) + y, vz);
+              P.push(vx, (gy > vh && gy - vh < 0.1 ? gy : vh) + y, vz);
             }
           }
         }
         // Round landing at every turn (and both ends): a fan of the same
         // half-width, so a hairpin never leaves a wedge of the layer below
         // showing on its outer side.
-        const lift = (vx, vz, vh) => { const gy = this.map.groundY(vx, vz); return (gy > vh && gy - vh < 0.25 ? gy : vh) + y; };
+        const lift = (vx, vz, vh) => { const gy = this.map.groundY(vx, vz); return (gy > vh && gy - vh < 0.1 ? gy : vh) + y; };
         for (let q = 0; q < pts.length; q++) {
           const [cx0, cz0, ch] = pts[q];
           const seg = 14, r = w / 2;

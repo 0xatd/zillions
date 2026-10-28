@@ -286,6 +286,10 @@ export class GameMap extends TerrainField {
                 + (cornerCol[o01 + ch] * (1 - fx) + cornerCol[o11 + ch] * fx) * fz;
             }
           }
+          // A switchback notch paved over in tileCorners: match the road bed.
+          if (tileCH && tileCH.roadFill && tileCH.roadFill[z * N + x]) {
+            colors[p] *= 0.82; colors[p + 1] *= 0.82; colors[p + 2] *= 0.82;
+          }
           const up = (p / 3) * 2;
           uvs[up] = vx * 0.21; uvs[up + 1] = vz * 0.21; // world-scale grain tiling
           p += 3;
