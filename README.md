@@ -82,10 +82,8 @@ Market (Orbital Exchange) and the Forge.
 A signed-in match starts with a signed, single-use ticket from
 `api/match-start.js` that fixes the player, mission, room and map seed. When
 the match ends, the client sends the ticket, a match report and its input log
-to `api/match-result.js`. The server verifies the session and ticket, replays
-personal bests, first clears, loot runs, suspicious results and a random
-sample from the seed and input log, bounds-checks every
-number against the match duration and map, re-derives every looted item key
+to `api/match-result.js`. The server verifies the session and ticket,
+bounds-checks every number against the match duration and map, re-derives every looted item key
 from the map seed, re-evaluates side quests itself, and then grants the
 result in one transaction through the `apply_match_result()` database
 function. The end screen shows only what the server confirmed. Clients have no

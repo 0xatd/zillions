@@ -21,7 +21,8 @@ export function parseSharedMatch(raw) {
   };
 }
 
-// The input log the server replays, or null when this game never recorded one.
+// The input log a leaderboard verifier can replay, or null when this game
+// never recorded one.
 export function matchReplayPayload(game, match, heroIndex) {
   if (!game?.inputLog || !match?.heroes) return null;
   const out = { v: REPLAY_VERSION, frames: game.steps, heroIndex, heroes: match.heroes, log: game.inputLog };

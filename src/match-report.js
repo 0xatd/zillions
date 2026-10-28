@@ -1,8 +1,9 @@
 // The match report a finished siege produces — built from a Game.
 //
 // Pure and headless: the browser calls it when a signed-in match ends, and the
-// server calls the SAME function on its own replayed Game (src/match-replay.js)
-// so a verified replay and a client claim are compared field for field.
+// leaderboard verifier (src/match-replay.js verifyReplay) calls the SAME
+// function on its own replayed Game, so a replay and a client claim are
+// compared field for field.
 import { PACK_SLOTS } from './config.js';
 
 export const MATCH_REPORT_VERSION = 1;

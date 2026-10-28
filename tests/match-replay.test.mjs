@@ -5,7 +5,7 @@ import { TerrainField } from '../src/terrain.js';
 import { SIM_DT, levelById } from '../src/config.js';
 import { buildMatchReport } from '../src/match-report.js';
 import {
-  REPLAY_VERSION, diffReports, replayMatch, replayReasons, validateReplayPayload, rebuildOwnCamp,
+  REPLAY_VERSION, diffReports, isFlagged, replayMatch, reviewReasons, validateReplayPayload, rebuildOwnCamp,
 } from '../src/match-replay.js';
 import { makeRNG } from '../src/utils.js';
 
@@ -97,17 +97,18 @@ test('the reporter camp is rebuilt from server-owned level and items', () => {
   assert.deepEqual(camp.items, []);
 });
 
-test('replay policy always replays bests, loot and suspicious runs', () => {
+test('review policy keeps logs of leaderboard candidates and flags suspicious runs', () => {
   const report = {
     mode: 'campaign', levelId: 2, won: true, durationSeconds: 600, threatLevel: 3, kills: 100, coins: 100,
     nests: 1, nodes: 1, built: 10, lost: 0, bossKillT: null, pack: [],
   };
-  const never = () => 1;
-  assert.ok(replayReasons(report, { bestScore: null }, never).includes('personal_best'));
-  assert.ok(replayReasons(report, { bestScore: 1e9, campaignCleared: 1 }, never).includes('first_clear'));
-  assert.deepEqual(replayReasons(report, { bestScore: 1e9, campaignCleared: 5 }, never), []);
-  assert.deepEqual(replayReasons(report, { bestScore: 1e9, campaignCleared: 5 }, () => 0), ['spot_check']);
-  assert.ok(replayReasons({ ...report, kills: 9000 }, { bestScore: 1e9, campaignCleared: 5 }, never).includes('suspicious_kills'));
-  assert.ok(replayReasons({ ...report, pack: ['x'] }, { bestScore: 1e9, campaignCleared: 5 }, never).includes('loot'));
-  assert.ok(replayReasons(report, { bestScore: 1e9, campaignCleared: 5, serverElapsedSeconds: 100 }, never).includes('suspicious_speed'));
+  assert.ok(reviewReasons(report, { bestScore: null }).includes('personal_best'));
+  assert.ok(reviewReasons(report, { bestScore: 1e9, campaignCleared: 1 }).includes('first_clear'));
+  assert.deepEqual(reviewReasons(report, { bestScore: 1e9, campaignCleared: 5 }), [], 'no random spot checks');
+  assert.deepEqual(reviewReasons({ ...report, pack: ['x'] }, { bestScore: 1e9, campaignCleared: 5 }), [], 'loot is proven by the loot table, not a replay');
+  const kills = reviewReasons({ ...report, kills: 9000 }, { bestScore: 1e9, campaignCleared: 5 });
+  assert.ok(kills.includes('suspicious_kills') && isFlagged(kills));
+  const speed = reviewReasons(report, { bestScore: 1e9, campaignCleared: 5, serverElapsedSeconds: 100 });
+  assert.ok(speed.includes('suspicious_speed') && isFlagged(speed));
+  assert.equal(isFlagged(['personal_best', 'first_clear']), false, 'a best alone is not suspicious');
 });

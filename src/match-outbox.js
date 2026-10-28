@@ -43,8 +43,8 @@ function write(list) {
   const kept = capped(list);
   try { store.setItem(KEY, JSON.stringify(kept)); }
   catch {
-    // Storage full: keep the reports without their replay logs. A report
-    // that needed a replay is then refused, but the others still pay out.
+    // Storage full: keep the reports without their input logs. They still
+    // pay out; they just can't be verified for a leaderboard later.
     try { store.setItem(KEY, JSON.stringify(kept.map(({ replay, ...rest }) => rest))); }
     catch { /* storage blocked */ }
   }
@@ -71,8 +71,7 @@ export function dropPendingMatch(requestId, userId) {
   write(readAll().filter((entry) => !(entry.userId === userId && entry.requestId === requestId)));
 }
 
-// Network failures, server errors (including a replay that did not finish in
-// time: 503 replay_retry_later), rate limits, a lost compare-and-set race, a
+// Network failures, server errors, rate limits, a lost compare-and-set race, a
 // concurrent submit of the same request, and a report for an account that is
 // not the one signed in right now are worth resending later. Anything else
 // (bad report, duplicate room, wrong character) never will be, so it is

@@ -261,28 +261,24 @@ token. `roomId` is taken from the ticket, never from the body.
    the one-off bumps for each node capture and each razed hive.
 5. The reported duration must fit the server clock since the ticket was
    issued (x2 for solo speed, x1 for co-op, plus 120 s slack).
-6. **Replay.** `replayReasons()` (`src/match-replay.js`) decides whether the
-   match must be replayed: a personal best for that level and mode, a first
-   clear, a survival best, any loot, kills/coins/buildings above half the
-   bound, an implausible duration or boss time, or a 15% spot check. A
-   required replay without an input log is refused (`422 replay_required`).
-   The server rebuilds the map and `Game` from the ticket seed and the
-   reporter's camp **as stored on the server** (level, stash/equipped items,
-   relics; Lattice capped by level), then runs the logged commands at their
-   recorded tick on the fixed 1/30 s step until the game ends, and rebuilds the
-   report with the same `buildMatchReport()` the client uses.
-   - Match: rewards are paid, `replay_status = 'verified'`.
-   - Mismatch: the **server's** report is validated and paid instead; the
-     claim is kept in `claimed_report` and the row is `flagged`.
-   - Over budget (`MATCH_REPLAY_BUDGET_MS`, default 8000 ms): **nothing is
-     granted** (fail closed). The request fails with `503 replay_retry_later`
-     (`Retry-After: 300`), nothing is written and the ticket stays unspent, so
-     the client keeps the report in its outbox and resends it later with the
-     same `requestId`. `apply_match_result()` also refuses any replay status
-     other than `not_required` / `verified` / `mismatch`
-     (`replay_unverified`), so an unverified claim cannot pay out even if a
-     caller tries.
-   - Invalid log: refused.
+6. **No replay on the reward path.** Like Thronefall, Slay the Spire and
+   most small indie games, rewards are granted on the cheap checks in this
+   list (signed ticket, plausibility bounds, server clock, loot table), not on
+   a server re-simulation. `reviewReasons()` (`src/match-replay.js`) only
+   decides what to keep for a future leaderboard:
+   - A leaderboard candidate (personal best for that level and mode, first
+     clear, survival best) or a suspicious run (kills/coins/buildings above
+     half the bound, a duration faster than 1.5x the server clock, a boss
+     kill in the first 10% of the match) keeps its input log in
+     `match_reports.replay_log` (`replay_status = 'unverified'`), with the
+     reporter's camp rebuilt from server data (level, stash/equipped items,
+     relics; Lattice capped by level) baked in.
+   - Suspicious runs are also `flagged`. Other runs store no log
+     (`replay_status = 'none'`).
+   - A missing or malformed log never blocks a payout; the run just can't be
+     verified later (`review_reasons` gets `invalid_log`).
+   - `verifyReplay()` re-runs a stored log and compares it field by field.
+     Nothing calls it per match; see `docs/leaderboards.md`.
 7. Rolled loot keys must be keys this match actually scattered: the server
    rebuilds the match setup from the ticket's level, mode, difficulty and
    seed (`src/loot-table.js`) and checks the complete key (base, affix seed,
@@ -296,7 +292,7 @@ token. `roomId` is taken from the ticket, never from the body.
    is checked against the ticket's issue time, never against when the
    previous report arrived, so late outbox reports are accepted), CAS on
    `progress_revision`, quest and
-   item dedupe, stash cap, wallet credit, stats, history, replay columns).
+   item dedupe, stash cap, wallet credit, stats, history, review columns).
    A manual co-op room is marked finished.
 
 The client keeps unconfirmed reports in `localStorage`
@@ -304,33 +300,31 @@ The client keeps unconfirmed reports in `localStorage`
 next sign-in, so a closed tab does not lose a match and a resend cannot double
 grant. Every entry records the user id that played it; only the signed-in
 account's own reports are resent or dropped, so two accounts sharing a
-browser never send each other's reports. Network errors, 5xx (including
-`replay_retry_later`), 429, `stale_progress` and `request_in_progress` keep
+browser never send each other's reports. Network errors, 5xx, 429, `stale_progress` and `request_in_progress` keep
 the report queued; other refusals drop it. If the outbox hits the storage
 quota, the input log is dropped first.
 
 Guest (offline) play never calls either route; its progress stays in the
 browser.
 
-### What the replay does and does not prove
+### What the server does and does not prove
 
-- It proves the reported counters follow from the seed, the server-known camp
-  and the logged commands. It does **not** prove a human produced the
-  commands: a bot driving a real client still produces a valid log.
-- In co-op, teammates' camps are taken from the log as claimed (bounded only).
-- Resumed matches and guests who resynced mid-match have no complete log;
-  if a replay is required they cannot be paid (`replay_required`).
-- Floating-point results could in principle differ between a browser and
-  Node. A divergence pays the server result and flags the report; it never
-  grants more than the server computed.
-- A replay that cannot finish inside the function budget is never paid. A
-  match long enough to always exceed the budget stays queued until its ticket
-  expires (48 h); raise `MATCH_REPLAY_BUDGET_MS` (and the function's max
-  duration) if long survival runs need it.
+- Proven: the ticket (user, mission, seed, single use, expiry), the match
+  length against the server clock, campaign unlocks, every rolled loot key,
+  quests, XP / Alloy formulas and caps, one reward per co-op room.
+- Bounded, not proven: kills, coins, buildings, Threat and duration are
+  client-reported and clamped to plausible rates. A cheater can claim a
+  better-than-real run inside those bounds. For a co-op game with no
+  leaderboards that mostly hurts the cheater; a future leaderboard replays
+  its top and flagged entries before showing them (`docs/leaderboards.md`).
+- A replay proves counters follow from the seed, the camp and the logged
+  commands. It does **not** prove a human produced the commands.
+- Resumed matches and guests who resynced mid-match have no complete log, so
+  they can still be paid but cannot be verified for a leaderboard.
 - `room_players` seats prove the reporter took a seat, not that they played.
 - The Lattice and class still live in client-writable auth metadata. The
-  replay caps the Lattice by level, and a rewire is charged by the server, but
-  a player can still edit their own allocation directly.
+  stored camp caps the Lattice by level, and a rewire is charged by the
+  server, but a player can still edit their own allocation directly.
 
 ## Account Upgrade Tree
 

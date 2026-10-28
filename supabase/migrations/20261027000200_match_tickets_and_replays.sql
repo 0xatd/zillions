@@ -1,5 +1,5 @@
 -- ============================================================================
--- Match tickets, invite-code co-op rooms, and replay bookkeeping.
+-- Match tickets, invite-code co-op rooms, and leaderboard review bookkeeping.
 --
 -- REVIEW BEFORE APPLYING. Apply manually in Supabase AFTER
 -- 20261027000100_server_authoritative_progress.sql, together with a deploy
@@ -15,13 +15,15 @@
 --   3. create_manual_coop_room() / seat_manual_coop_player(): give invite-code
 --      (copy/paste WebRTC) co-op a private rooms row so its players get co-op
 --      credit and the one-report-per-room rule applies.
---   4. match_reports gains ticket, server-clock and replay columns. A replay
---      that did not finish is never stored or paid: /api/match-result returns
---      a retryable error instead, and this function refuses any replay status
---      other than not_required / verified / mismatch.
---   5. apply_match_result(..., p_ticket_id, p_replay) replaces the 6-argument
+--   4. match_reports gains ticket, server-clock and review columns. Matches
+--      are NOT replayed on the reward path. A leaderboard candidate keeps its
+--      input log (replay_log, replay_status 'unverified') so a future
+--      leaderboard can replay its top or flagged entries and record
+--      'verified' / 'mismatch'; leaderboard_hidden lets an admin hide one.
+--      See docs/leaderboards.md.
+--   5. apply_match_result(..., p_ticket_id, p_review) replaces the 6-argument
 --      version: it spends the ticket and checks match length against the
---      ticket's server issue time.
+--      ticket's server issue time. Review data never blocks a payout.
 -- ============================================================================
 
 begin;
@@ -171,15 +173,20 @@ $$;
 revoke all on function public.seat_manual_coop_player(uuid, uuid, text, text) from public, anon, authenticated;
 grant execute on function public.seat_manual_coop_player(uuid, uuid, text, text) to service_role;
 
--- 4. Replay bookkeeping ---------------------------------------------------------
+-- 4. Review bookkeeping ---------------------------------------------------------
+-- replay_status: 'legacy' (before this migration), 'none' (no log kept),
+-- 'unverified' (log kept, not replayed yet), 'verified' / 'mismatch' (set by
+-- a future leaderboard verifier, which also fills replay_mismatch).
 alter table public.match_reports
   add column if not exists ticket_id uuid references public.match_tickets(id) on delete set null,
   add column if not exists server_elapsed_seconds integer,
-  add column if not exists replay_status text not null default 'legacy',
-  add column if not exists replay_reasons jsonb not null default '[]'::jsonb,
+  add column if not exists replay_status text not null default 'legacy'
+    check (replay_status in ('legacy', 'none', 'unverified', 'verified', 'mismatch')),
+  add column if not exists review_reasons jsonb not null default '[]'::jsonb,
+  add column if not exists replay_log jsonb,
   add column if not exists replay_mismatch jsonb not null default '[]'::jsonb,
-  add column if not exists claimed_report jsonb,
-  add column if not exists flagged boolean not null default false;
+  add column if not exists flagged boolean not null default false,
+  add column if not exists leaderboard_hidden boolean not null default false;
 create unique index if not exists match_reports_one_per_ticket on public.match_reports(ticket_id) where ticket_id is not null;
 create index if not exists match_reports_flagged_idx on public.match_reports(created_at desc) where flagged;
 
@@ -195,7 +202,7 @@ create or replace function public.apply_match_result(
   p_expected_progress_revision bigint,
   p_result jsonb,
   p_ticket_id uuid,
-  p_replay jsonb default '{}'::jsonb
+  p_review jsonb default '{}'::jsonb
 ) returns jsonb
 language plpgsql
 security definer
@@ -227,7 +234,8 @@ declare
   v_ticket public.match_tickets%rowtype;
   v_elapsed integer;
   v_report_id uuid;
-  v_replay_status text := coalesce(nullif(p_replay->>'status', ''), 'not_required');
+  v_log jsonb := case when jsonb_typeof(p_review->'log') = 'object' then p_review->'log' end;
+  v_reasons jsonb := case when jsonb_typeof(p_review->'reasons') = 'array' then p_review->'reasons' else '[]'::jsonb end;
 begin
   if p_actor is null or coalesce(p_request_id, '') = '' or v_report is null then
     raise exception 'invalid_match_result';
@@ -244,12 +252,6 @@ begin
     select 1 from public.match_reports where user_id = p_actor and room_id = p_room_id
   ) then
     raise exception 'duplicate_room_report';
-  end if;
-
-  -- Rewards are only ever applied from a verdict. An unfinished replay
-  -- ('deferred') or anything unknown is refused, so it can never pay out.
-  if v_replay_status not in ('not_required', 'verified', 'mismatch') then
-    raise exception 'replay_unverified';
   end if;
 
   -- The match ticket: issued by /api/match-start, owned by this player, for
@@ -398,18 +400,13 @@ begin
       'bestSurvival', v_stats.best_survival, 'questsDone', v_stats.quests_done,
       'relics', v_stats.relics, 'labyrinthClears', v_stats.labyrinth_clears));
 
-  v_response := v_response || jsonb_build_object('replay', jsonb_build_object(
-    'status', v_replay_status, 'reasons', coalesce(p_replay->'reasons', '[]'::jsonb),
-    'mismatch', coalesce(p_replay->'mismatch', '[]'::jsonb)));
-
   insert into public.match_reports(user_id, request_id, character_id, room_id, mode, level_id,
     duration_seconds, report, response_payload, ticket_id, server_elapsed_seconds, replay_status,
-    replay_reasons, replay_mismatch, claimed_report, flagged)
+    review_reasons, replay_log, flagged)
   values (p_actor, p_request_id, v_character.id, p_room_id, v_mode,
     coalesce((v_report->>'levelId')::integer, 0), coalesce(v_duration, 0), v_report, v_response,
-    v_ticket.id, v_elapsed, v_replay_status, coalesce(p_replay->'reasons', '[]'::jsonb),
-    coalesce(p_replay->'mismatch', '[]'::jsonb), p_replay->'claimed',
-    v_replay_status = 'mismatch')
+    v_ticket.id, v_elapsed, case when v_log is null then 'none' else 'unverified' end, v_reasons,
+    v_log, coalesce(p_review->'flagged' = 'true'::jsonb, false))
   returning id into v_report_id;
 
   -- Invite-code rooms exist only for reward bookkeeping; close them once

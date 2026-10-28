@@ -1,4 +1,10 @@
-// Server-side match replay.
+// Deterministic match replay (verification capability, not run per match).
+//
+// /api/match-result does NOT replay matches on the reward path; rewards are
+// granted on the cheap checks (signed ticket, plausibility bounds, loot table).
+// The input log of a leaderboard candidate is stored with its report so a
+// future leaderboard can replay its top or flagged entries before showing
+// them (docs/leaderboards.md). Everything below is that verifier.
 //
 // The simulation (src/game.js) is pure and deterministic: given the same map
 // seed, level, difficulty, mode, hero loadouts, match seed and the same
@@ -21,8 +27,8 @@
 //     loadouts are replayed as their host received them.
 //   - Floating-point Math functions can differ across JS engines. The replay
 //     runs on Node (V8); a run played on another engine can legitimately
-//     diverge. That is why a mismatch is not an accusation: the server grants
-//     what its own replay produced and flags the report for review.
+//     diverge. That is why a mismatch is not an accusation: a leaderboard
+//     verifier should hide the entry and queue it for human review.
 import { SIM_DT, HEROES, levelById, isLabyrinthLevel, normalizeHeroUpgrades, CULTURE_ARMIES, DEFAULT_CULTURE } from './config.js';
 import { Game } from './game.js';
 import { TerrainField } from './terrain.js';
@@ -36,10 +42,6 @@ export const REPLAY_LIMITS = Object.freeze({
   maxSteps: Math.ceil(MATCH_LIMITS.maxDurationSeconds / SIM_DT),
   maxLogEntries: 120000,
   maxPlayers: 4,
-  // Wall-clock budget for an inline replay inside the match-result function.
-  // A replay that runs past it is not a verdict: /api/match-result grants
-  // nothing and answers 503 replay_retry_later so the client resends later.
-  inlineBudgetMs: 40000,
   deadlineCheckEvery: 240,
 });
 
@@ -178,6 +180,18 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
   };
 }
 
+// Verify a stored report against its stored input log (for a leaderboard's
+// top or flagged entries). `match` is { levelId, mode, difficulty, seed }.
+// Returns { status: 'verified' | 'mismatch' | 'timeout' | 'invalid', ... }.
+export function verifyReplay({ match, report, replay, now, deadline }) {
+  const checked = validateReplayPayload(replay);
+  if (!checked.ok) return { status: 'invalid', error: checked.error, detail: checked.detail || null };
+  const result = replayMatch({ ...match, replay: checked.replay, now, deadline });
+  if (result.status !== 'complete') return result;
+  const mismatch = diffReports(report, result.report);
+  return mismatch.length ? { status: 'mismatch', mismatch, replayed: result.report } : { status: 'verified' };
+}
+
 // Which fields of the claim disagree with the replay.
 export function diffReports(claimed, replayed) {
   const out = [];
@@ -199,21 +213,16 @@ export function diffReports(claimed, replayed) {
 
 // ---------------------------------------------------------------- policy
 //
-// When must a report be replayed before it pays out? Replaying everything is
-// the goal; these rules make sure the reports that matter most are always
-// replayed even when the budget is tight:
-//   1. personal_best   — a score above the player's best on that level/mode,
-//                        a first campaign clear, a survival best, or a first
-//                        labyrinth clear.
-//   2. suspicious      — any counter above half of its plausibility ceiling,
-//                        a claimed duration faster than the server clock
-//                        allows at 1.5x, a boss kill in the first 10% of a
-//                        match, or a run that is near the XP / Alloy caps.
-//   3. spot_check      — a random sample of everything else (SPOT_CHECK_RATE).
-export const SPOT_CHECK_RATE = 0.15;
+// Which reports keep their input log for later leaderboard verification, and
+// which are flagged for review. Nothing here blocks or changes a payout.
+//   1. personal_best / first_clear / survival_best — the only runs that can
+//      move a player up a leaderboard, so their log is kept.
+//   2. suspicious_*  — any counter above half of its plausibility ceiling, a
+//      claimed duration faster than the server clock allows at 1.5x, or a
+//      boss kill in the first 10% of a match. These are kept AND flagged.
 export const SUSPICION_SHARE = 0.5;
 
-export function replayReasons(report, context = {}, random = Math.random) {
+export function reviewReasons(report, context = {}) {
   const reasons = [];
   const L = MATCH_LIMITS;
   const d = Math.max(1, report.durationSeconds);
@@ -230,7 +239,7 @@ export function replayReasons(report, context = {}, random = Math.random) {
   if (report.built > (d * L.builtPerSecond + L.builtSlack) * share) reasons.push('suspicious_built');
   if (context.serverElapsedSeconds != null && report.durationSeconds > context.serverElapsedSeconds * 1.5 + 30) reasons.push('suspicious_speed');
   if (report.bossKillT != null && report.bossKillT < d * 0.1) reasons.push('suspicious_boss');
-  if (report.pack?.length) reasons.push('loot');
-  if (!reasons.length && random() < SPOT_CHECK_RATE) reasons.push('spot_check');
   return [...new Set(reasons)];
 }
+
+export const isFlagged = (reasons) => reasons.some((reason) => reason.startsWith('suspicious_'));

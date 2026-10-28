@@ -1,8 +1,8 @@
 // Applies supabase/schema.sql plus every migration to a throwaway local
 // Postgres (embedded-postgres binaries, never a real project) and exercises
 // apply_match_result(): backfill, grants, idempotency, rate limit, CAS,
-// duplicate rooms, the duration clock, late outbox delivery, unverified
-// replays, and the client-write revokes.
+// duplicate rooms, the duration clock, late outbox delivery, review
+// bookkeeping (kept input logs, flags), and the client-write revokes.
 //   npm run check:postgres
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -29,6 +29,7 @@ const client = new pg.Client({ host: data, port, user: 'postgres', database: 'po
 let checks = 0;
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const rejects = async (promise, re, msg) => { await assert.rejects(promise, re, msg); checks++; };
+const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 try {
   await client.connect();
   const q = (sql, params) => client.query(sql, params);
@@ -57,8 +58,8 @@ try {
 
   const issue = (room = null, level = 1, actor = uid) =>
     q(`select public.issue_match_ticket($1, 'mmo_a', $2, 'campaign', 'normal', 7, $3, 3600) t`, [actor, level, room]).then((r) => r.rows[0].t);
-  const callWith = (ticketId, rid, result, rev, room = null, replay = {}) =>
-    q(`select public.apply_match_result($1, $2, 'mmo_a', $3, $4, $5, $6, $7) r`, [uid, rid, room, rev, result, ticketId, replay]).then((r) => r.rows[0].r);
+  const callWith = (ticketId, rid, result, rev, room = null, review = {}) =>
+    q(`select public.apply_match_result($1, $2, 'mmo_a', $3, $4, $5, $6, $7) r`, [uid, rid, room, rev, result, ticketId, review]).then((r) => r.rows[0].r);
   // A ticket issued half an hour ago: long enough ago for a 600 s match.
   const aged = async (room = null) => {
     const t = await issue(room);
@@ -119,26 +120,27 @@ try {
   const roomTicket = await issue(room);
   eq((await issue(room)).id, roomTicket.id, 'reconnecting to a room reuses its unused ticket');
   await q(`update match_tickets set issued_at = now() - interval '30 minutes' where id = $1`, [roomTicket.id]);
-  const coop = await callWith(roomTicket.id, 'req-00000006', result, 3, room, { status: 'verified', reasons: ['personal_best'] });
-  eq(coop.replay.status, 'verified', 'replay outcome is returned');
+  const log = { v: 1, frames: 18000, heroIndex: 0, heroes: ['scott', 'scott'], log: [[0, { t: 'found', s: 0, p: 0 }]] };
+  const coop = await callWith(roomTicket.id, 'req-00000006', result, 3, room, { reasons: ['personal_best'], flagged: false, log });
+  eq(coop.ok, true, 'a leaderboard candidate pays straight away');
+  ok(!('replay' in coop), 'review data is not echoed to the client');
   eq((await q(`select status from rooms where id = $1`, [room])).rows[0].status, 'finished', 'invite-code room closes after a report');
-  eq((await q(`select room_id, replay_status, flagged from match_reports where request_id = 'req-00000006'`)).rows[0], { room_id: room, replay_status: 'verified', flagged: false }, 'co-op report credited to the room');
+  eq((await q(`select room_id, replay_status, flagged, leaderboard_hidden, review_reasons, replay_log->'frames' f from match_reports where request_id = 'req-00000006'`)).rows[0],
+    { room_id: room, replay_status: 'unverified', flagged: false, leaderboard_hidden: false, review_reasons: ['personal_best'], f: 18000 }, 'co-op report credited to the room; its input log is kept for a later leaderboard check');
+  eq((await q(`select replay_status, replay_log is null n from match_reports where request_id = 'req-00000001'`)).rows[0], { replay_status: 'none', n: true }, 'no log kept when none is passed');
   await age();
   await rejects(callWith(roomTicket.id, 'req-00000007', result, 4, room), /duplicate_room_report/, 'one report per player per co-op room');
-  // A replay that never finished is not a verdict: refused, nothing granted,
-  // and the ticket stays unspent so the client can resend.
-  const deferred = await aged();
-  const before = (await q('select count(*)::int n from item_instances')).rows[0].n;
-  await rejects(callWith(deferred.id, 'req-00000008', result, 4, null, { status: 'deferred', reasons: ['spot_check'] }), /replay_unverified/, 'an unfinished replay can never pay out');
-  eq((await q(`select count(*)::int n from match_reports where request_id = 'req-00000008'`)).rows[0].n, 0, 'no report row for an unverified replay');
-  eq((await q('select count(*)::int n from item_instances')).rows[0].n, before, 'no items for an unverified replay');
-  eq((await q(`select used_at is null u from match_tickets where id = $1`, [deferred.id])).rows[0].u, true, 'the ticket stays unspent for the retry');
+  // A malformed review payload (old caller, bad shape) never blocks a payout.
   // Delayed outbox delivery: a 30-minute match played two hours ago arrives
   // 20 s after another report. Receipt time is not play time.
+  const delayed = await aged();
   await q(`update match_reports set created_at = now() - interval '20 seconds'`);
-  await q(`update match_tickets set issued_at = now() - interval '2 hours' where id = $1`, [deferred.id]);
-  const late = await callWith(deferred.id, 'req-00000009', { ...result, report: { ...result.report, durationSeconds: 1800 } }, 4, null, { status: 'verified', reasons: ['spot_check'] });
-  eq(late.replay.status, 'verified', 'a late, back-to-back outbox report is accepted');
+  await q(`update match_tickets set issued_at = now() - interval '2 hours' where id = $1`, [delayed.id]);
+  const late = await callWith(delayed.id, 'req-00000009', { ...result, report: { ...result.report, durationSeconds: 1800 } }, 4, null,
+    { status: 'deferred', reasons: 'not-an-array', flagged: true, log: 'not-an-object' });
+  eq(late.ok, true, 'a late, back-to-back outbox report is accepted');
+  eq((await q(`select replay_status, review_reasons, flagged, replay_log is null n from match_reports where request_id = 'req-00000009'`)).rows[0],
+    { replay_status: 'none', review_reasons: [], flagged: true, n: true }, 'bad review fields are normalised; the flag is kept for moderation');
   eq((await q('select count(*)::int n from match_history')).rows[0].n, 4, 'match history written by the server only');
   eq((await q(`select has_function_privilege('authenticated', 'public.issue_match_ticket(uuid,text,integer,text,text,bigint,uuid,integer)', 'EXECUTE') f`)).rows[0].f, false, 'ticket RPC not callable by clients');
   eq((await q(`select has_table_privilege('authenticated', 'public.match_tickets', 'INSERT') i`)).rows[0].i, false, 'clients cannot mint tickets');

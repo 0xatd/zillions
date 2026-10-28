@@ -122,15 +122,14 @@ eq(itemPayload('not_an_item'), null, 'unknown keys produce no row');
 // ---- endpoint flow with a fake store ----------------------------------------
 const USER = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
-// Tickets and replays have their own tests (tests/*.test.mjs). Here every
-// report carries a valid ticket issued 30 minutes ago and the store reports a
-// prior best far above it, so no replay is required.
+// Tickets and review bookkeeping have their own tests (tests/*.test.mjs). Here
+// every report carries a valid ticket issued 30 minutes ago.
 const SECRET = 'test-secret-test-secret-test-secret!';
 const T0 = Date.parse('2026-10-26T12:00:00Z');
 const ticketFor = (over = {}) => signTicket({ tid: '44444444-4444-4444-8444-444444444444', uid: USER, lvl: 1, mode: 'campaign',
   diff: 'normal', seed: 7, rid: null, iat: Math.floor(T0 / 1000) - 1800, exp: Math.floor(T0 / 1000) + 3600, ...over }, SECRET);
 const processMatchResult = ({ body: b, now = T0, ...rest }) => processWithTicket({
-  secret: SECRET, random: () => 1, now, body: { ticket: ticketFor(b?.roomId && UUID_RE.test(b.roomId) ? { rid: b.roomId } : {}), ...b }, ...rest,
+  secret: SECRET, now, body: { ticket: ticketFor(b?.roomId && UUID_RE.test(b.roomId) ? { rid: b.roomId } : {}), ...b }, ...rest,
 });
 const UUID_RE = /^[0-9a-f-]{36}$/i;
 function fakeStore({ character = { id: 'c1', level: 1, xp: 0, progress_revision: 7 }, stats = { campaign_cleared: 5 }, membership = null, stale = 0, existing = null } = {}) {
@@ -176,7 +175,7 @@ const coop = fakeStore({ membership: { user_id: USER, rooms: { status: 'finished
 await processMatchResult({ userId: USER, now, body: body({ roomId: ROOM }), store: coop });
 eq(coop.calls[0].p_room_id, ROOM, 'co-op participant report carries the room for per-room dedupe');
 const locked = fakeStore({ stats: { campaign_cleared: 0 } });
-await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, random: () => 1, store: locked,
+await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store: locked,
   body: body({ ticket: ticketFor({ lvl: 2 }), report: report({ levelId: 2, bossKillT: 200 }) }) }), (e) => e.message === 'level_locked'); checks++;
 await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store, body: { ...body(), ticket: undefined } }), (e) => e.message === 'missing_ticket'); checks++;
 await assert.rejects(processWithTicket({ userId: USER, secret: SECRET, now: T0, store, body: body({ ticket: ticketFor({ uid: ROOM }) }) }), (e) => e.message === 'ticket_mismatch'); checks++;
@@ -230,7 +229,6 @@ eq(auth.profileFromBundle({ profile: { handle: 't', username_set: true }, stats:
   ok(retryableMatchError(new TypeError('fetch failed')) && retryableMatchError({ status: 503 }) && retryableMatchError({ status: 429 }), 'network/server/rate errors retry');
   ok(retryableMatchError({ status: 409, message: 'stale_progress' }) && retryableMatchError({ status: 409, message: 'request_in_progress' })
     && !retryableMatchError({ status: 409, message: 'duplicate_room_report' }), 'only stale CAS conflicts and in-flight duplicates retry');
-  ok(retryableMatchError({ status: 503, message: 'replay_retry_later' }), 'an unfinished replay is kept and retried, not dropped');
   ok(retryableMatchError({ status: 0, message: 'account_changed' }), "another account's report is kept, not dropped");
   ok(!retryableMatchError({ status: 422 }) && !retryableMatchError({ status: 403 }), 'rejected reports are dropped');
   delete globalThis.localStorage;

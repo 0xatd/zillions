@@ -773,8 +773,8 @@ class App {
     this.pal = level.theme.palette; // drives sky/fog grading
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
       Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
-    // Record inputs for the server replay. A resumed run continues the log it
-    // saved; a resume without one cannot be replayed.
+    // Record inputs for leaderboard verification. A resumed run continues the
+    // log it saved; a resume without one cannot be verified (it still pays).
     if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
@@ -1782,7 +1782,7 @@ class App {
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
       // The local save also keeps the match ticket and the input log so far,
-      // so a resumed signed-in run can still be replayed by the server. The
+      // so a resumed signed-in run can still be verified later. The
       // cloud copy stays snapshot-only.
       const m = this._match;
       const match = m ? {
@@ -1828,13 +1828,13 @@ class App {
   }
 
   // What the client claims happened. The server bounds-checks every field,
-  // re-derives loot and quests itself (src/match-rewards.js), and replays the
-  // input log through the same buildMatchReport() when a replay is required.
+  // re-derives loot and quests itself (src/match-rewards.js), and keeps the
+  // input log of a best run so a future leaderboard can replay it.
   _matchReport(won) {
     return buildMatchReport(this.game, { won: !!won, heroIndex: this.myPlayer, heroKey: this.ui.selectedHero || null });
   }
 
-  // The recorded inputs for the server replay (src/match-replay.js).
+  // The recorded inputs, kept for leaderboard verification (src/match-replay.js).
   _matchReplay() { return matchReplayPayload(this.game, this._match, this.myPlayer); }
 
   async _submitMatchResult(won, h, character) {

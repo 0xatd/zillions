@@ -111,7 +111,7 @@ procedural renderer and must not stop a match from starting.
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
 | `api/match-start.js` | Issues signed, single-use match tickets (seed, room) |
-| `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; replays required matches |
+| `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; keeps input logs of leaderboard candidates |
 | `api/economy.js` | Market, stash, equipment, and Forge transactions |
 | `api/account-upgrades.js` | Account upgrade tree purchases, one-time local import, paid Lattice rewire |
 
@@ -198,8 +198,8 @@ victory/defeat event
        -> evaluateQuests()        quests re-run on the reported counters
        -> verifyTicket()          HMAC, expiry, user, mission; room from ticket
        -> server clock            duration fits time since the ticket
-       -> replayMatch()           required replays re-run seed + input log;
-                                  the server's report is what pays
+       -> reviewReasons()         bests / suspicious runs keep their input log
+                                  for a later leaderboard check (no replay)
        -> co-op room check        reporter must be a seated room participant
        -> computeMatchRewards()   XP, levels, items, Alloy, stats
        -> apply_match_result()    one transaction: idempotency, rate limit,
@@ -210,8 +210,9 @@ victory/defeat event
 
 A replayed `requestId` returns the stored response and grants nothing. A
 player can report one result per co-op room. Reports are rate limited and must
-fit inside the wall-clock time since the previous report. Combat counters are
-still client claims, bounded but not replayed; see `docs/backend.md`.
+fit inside the wall-clock time since the match ticket was issued. Combat
+counters are still client claims, bounded but not replayed; see
+`docs/backend.md` and `docs/leaderboards.md`.
 
 ## Gear, the Lattice, and Meta
 

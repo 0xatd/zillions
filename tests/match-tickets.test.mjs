@@ -9,7 +9,8 @@ import { Game } from '../src/game.js';
 import { TerrainField } from '../src/terrain.js';
 import { SIM_DT, levelById } from '../src/config.js';
 import { buildMatchReport } from '../src/match-report.js';
-import { REPLAY_VERSION } from '../src/match-replay.js';
+import { MATCH_LIMITS } from '../src/match-rewards.js';
+import { REPLAY_VERSION, verifyReplay } from '../src/match-replay.js';
 import { makeRNG } from '../src/utils.js';
 
 const SECRET = 'unit-test-secret-unit-test-secret-0123';
@@ -100,72 +101,68 @@ function recorded(seed = 4242, steps = 3600) {
   return { report, replay: { v: REPLAY_VERSION, frames: game.steps, heroIndex: 0, heroes: 'alexander', log: game.inputLog } };
 }
 
-function resultStore() {
+function resultStore({ previousReports = [] } = {}) {
   const calls = [];
   return {
     calls,
     async findReport() { return null; },
     async loadContext() {
-      return { character: { id: 'c1', level: 1, xp: 0, progress_revision: 1 }, stats: { campaign_cleared: 3 }, membership: null, previousReports: [], items: [] };
+      return { character: { id: 'c1', level: 1, xp: 0, progress_revision: 1 }, stats: { campaign_cleared: 3 }, membership: null, previousReports, items: [] };
     },
     async applyResult(args) { calls.push(args); return { ok: true, character: { level: args.p_result.level } }; },
   };
 }
 
-test('match-result: a personal best must carry a replay, and the replay decides', async () => {
+const MATCH = { levelId: 1, mode: 'campaign', difficulty: 'normal', seed: 4242 };
+
+test('match-result: pays on the cheap checks and never replays inline', async () => {
   const { report, replay } = recorded();
   const ticket = signTicket(payload(), SECRET);
-  const base = { requestId: 'req-replay-1', characterId: 'mmo_a', ticket, report };
-  const run = (body, extra = {}) => processMatchResult({ userId: USER, body, store: extra.store || resultStore(), secret: SECRET, now: NOW, random: () => 1, ...extra });
+  const base = { requestId: 'req-review-1', characterId: 'mmo_a', ticket, report };
+  const run = (body, store = resultStore()) => processMatchResult({ userId: USER, body, store, secret: SECRET, now: NOW }).then(() => store.calls[0]);
 
-  await assert.rejects(run(base), (e) => e.message === 'replay_required' && /personal_best/.test(e.detail));
+  // A personal best keeps its input log (with the server-known camp) for a
+  // future leaderboard check. It pays straight away.
+  const kept = await run({ ...base, replay });
+  assert.deepEqual(kept.p_review.reasons, ['personal_best']);
+  assert.equal(kept.p_review.flagged, false);
+  assert.equal(kept.p_review.log.log.length, replay.log.length);
+  assert.equal(kept.p_ticket_id, payload().tid);
+  assert.equal(kept.p_result.report.kills, report.kills);
 
-  const okStore = resultStore();
-  await run({ ...base, replay }, { store: okStore });
-  assert.equal(okStore.calls[0].p_replay.status, 'verified');
-  assert.equal(okStore.calls[0].p_ticket_id, payload().tid);
+  // No log, or a malformed one, never blocks the payout.
+  const noLog = await run(base);
+  assert.equal(noLog.p_review.log, null);
+  assert.ok(noLog.p_result, 'paid without a log');
+  const badLog = await run({ ...base, replay: { v: REPLAY_VERSION, frames: -1 } });
+  assert.equal(badLog.p_review.log, null);
+  assert.ok(badLog.p_review.reasons.includes('invalid_log'));
 
-  const forgedStore = resultStore();
-  const forged = { ...report, kills: report.kills + 50, coins: report.coins + 40 };
-  const settled = await run({ ...base, report: forged, replay }, { store: forgedStore });
-  const sent = forgedStore.calls[0];
-  assert.equal(sent.p_replay.status, 'mismatch');
-  assert.deepEqual(sent.p_replay.mismatch.sort(), ['coins', 'kills']);
-  assert.equal(sent.p_result.report.kills, report.kills, 'the server-replayed counters pay out, not the claim');
-  assert.equal(settled.report.kills, report.kills);
-
-  // Seed 2: (seed 1 happens to reproduce the same short-run counters on the v3 Greenfall terrain.)
-  const wrongSeed = signTicket(payload({ seed: 2 }), SECRET);
-  const seedStore = resultStore();
-  await run({ ...base, ticket: wrongSeed, replay }, { store: seedStore });
-  assert.equal(seedStore.calls[0].p_replay.status, 'mismatch', 'a run played on another seed does not verify');
+  // Not a best and not suspicious: nothing to keep.
+  const beaten = await run({ ...base, replay }, resultStore({ previousReports: [{ ...report, won: true, kills: 9999, threatLevel: 99 }] }));
+  assert.deepEqual(beaten.p_review, { reasons: [], flagged: false, log: null });
 
   await assert.rejects(run({ ...base, roomId: ROOM, replay }), /ticket_mismatch/, 'a solo ticket cannot be reported as co-op');
 });
 
-test('match-result: a replay timeout grants nothing, not even a forged claim, and is retryable', async () => {
+test('match-result: suspicious runs are flagged, and the stored log can verify them later', async () => {
   const { report, replay } = recorded();
   const ticket = signTicket(payload(), SECRET);
-  // The reviewer's repro: claim far more than the run did (60 vs 10 kills).
-  const forged = { ...report, kills: report.kills + 50, nests: report.nests, coins: report.coins + 40 };
-  for (const claim of [forged, report]) {
-    const store = resultStore();
-    let t = 0;
-    await assert.rejects(
-      processMatchResult({
-        userId: USER, body: { requestId: 'req-timeout-1', characterId: 'mmo_a', ticket, report: claim, replay },
-        store, secret: SECRET, now: NOW, random: () => 1, replayBudgetMs: 1, clock: () => (t += 5),
-      }),
-      (e) => e.message === 'replay_retry_later' && e.status === 503 && e.retryAfterSeconds > 0,
-    );
-    assert.equal(store.calls.length, 0, 'nothing reaches apply_match_result: no XP, loot, Alloy, stats, and the ticket stays unspent');
-  }
-  // The same request with enough budget is judged on the server's replay.
+  // Claim far more than the run did, but still inside the hard bounds.
+  const killCap = Math.max(1, report.durationSeconds) * MATCH_LIMITS.killsPerSecond + MATCH_LIMITS.killSlack;
+  const forged = { ...report, kills: Math.floor(killCap * 0.9), coins: report.coins + 40 };
   const store = resultStore();
-  await processMatchResult({
-    userId: USER, body: { requestId: 'req-timeout-1', characterId: 'mmo_a', ticket, report: forged, replay },
-    store, secret: SECRET, now: NOW, random: () => 1,
-  });
-  assert.equal(store.calls[0].p_replay.status, 'mismatch');
-  assert.equal(store.calls[0].p_result.report.kills, report.kills, 'the retry pays the replayed kills, not the claim');
+  await processMatchResult({ userId: USER, body: { requestId: 'req-flag-1', characterId: 'mmo_a', ticket, report: forged, replay }, store, secret: SECRET, now: NOW });
+  const sent = store.calls[0];
+  assert.ok(sent.p_review.reasons.some((r) => r.startsWith('suspicious_')), sent.p_review.reasons.join(','));
+  assert.equal(sent.p_review.flagged, true);
+  assert.equal(sent.p_result.report.kills, forged.kills, 'inside the bounds the claim pays as reported (like comparable games)');
+
+  // What a future leaderboard does with its top / flagged entries.
+  const verdict = verifyReplay({ match: MATCH, report: forged, replay: JSON.parse(JSON.stringify(sent.p_review.log)) });
+  assert.equal(verdict.status, 'mismatch');
+  assert.deepEqual(verdict.mismatch.sort(), ['coins', 'kills']);
+  assert.equal(verifyReplay({ match: MATCH, report, replay: sent.p_review.log }).status, 'verified');
+  // Seed 2: (seed 1 happens to reproduce the same short-run counters on the v3 Greenfall terrain.)
+  assert.equal(verifyReplay({ match: { ...MATCH, seed: 2 }, report, replay: sent.p_review.log }).status, 'mismatch', 'a run played on another seed does not verify');
 });

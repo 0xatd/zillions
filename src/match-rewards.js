@@ -12,9 +12,9 @@
 //     outcomes (re-evaluated here from the reported counters), boss drops,
 //     XP / Alloy formulas and caps, one reward per co-op room per player.
 //   - Bounded but still client-reported: kills, coins, nests, buildings,
-//     duration. They are clamped to physically plausible rates; a full
-//     deterministic replay of the lockstep command log is the follow-up that
-//     would turn these into proofs.
+//     duration. They are clamped to physically plausible rates. Leaderboard
+//     candidates keep their input log so a future leaderboard can replay its
+//     top entries (docs/leaderboards.md); rewards never wait on a replay.
 import {
   BOSS_DROPS, DIFFICULTY, FIELD_LOOT, ITEMS, LEVELS, PACK_SLOTS, THREAT,
   isLabyrinthLevel, itemInfo, levelById,
