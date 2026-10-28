@@ -294,6 +294,75 @@ export const UNITS = {
   },
 };
 
+// ---------- Base cultures: four defense armies ----------
+// A culture is the look of your castle AND the men it musters. Every culture
+// fields the same three trades from the same camps (militia / ranger /
+// sniper), so building stays Thronefall-simple; what changes is how the
+// squads fight. European is the reference line (the plain UNITS stats).
+// Overrides are deterministic stat/behaviour keys the sim already reads:
+// evadeChance and armor/thorns (damageUnit), splash (unit attacks), range,
+// rof, speed. Power is kept within a few percent of the reference so the
+// difficulty curve holds whichever culture the player picks.
+export const CULTURE_ARMIES = {
+  european: {
+    name: 'European', banner: 'Star Knights',
+    blurb: 'Balanced shield line, steady archers, heavy rail snipers.',
+    units: {},
+  },
+  asian: {
+    name: 'Asian', banner: 'Jade Lantern Dynasty',
+    blurb: 'Swift glaive guards that slip blows, rapid repeaters, rocket fire-lances that blast packs.',
+    units: {
+      soldier: { name: 'Glaive Guard', hp: 118, dmg: 12, rof: 2.9, range: 7, speed: 4.0, evadeChance: 0.18,
+        trait: 'Evades 18% of blows · fast' },
+      ranger: { name: 'Repeater Archer', hp: 64, dmg: 4.6, rof: 2.3, range: 6.8, speed: 4.8,
+        trait: 'Very fast fire, short reach' },
+      sniper: { name: 'Fire-Lance', hp: 84, dmg: 44, rof: 0.6, range: 12, splash: 1.5,
+        trait: 'Rocket splash hits the whole pack' },
+    },
+  },
+  south_american: {
+    name: 'South American', banner: 'Sun Terrace Guard',
+    blurb: 'Slow obsidian shieldbearers that wound what bites them, darting jaguar scouts, solar atlatls.',
+    units: {
+      soldier: { name: 'Obsidian Shieldbearer', hp: 176, dmg: 13, rof: 2.0, range: 7, speed: 3.0, armor: 0.15, thorns: 0.3,
+        trait: '15% armour · reflects 30% of melee' },
+      ranger: { name: 'Jaguar Scout', hp: 74, dmg: 6.4, rof: 1.5, range: 7.5, speed: 5.2,
+        trait: 'Fastest runners, longer darts' },
+      sniper: { name: 'Solar Atlatl', hp: 96, dmg: 56, rof: 0.56, range: 13, splash: 0.9, armor: 0.1,
+        trait: 'Sturdy, small splash' },
+    },
+  },
+  middle_eastern: {
+    name: 'Middle Eastern', banner: 'Mirage Court',
+    blurb: 'Hard-hitting long-reach lancers, fast dune riders, astrolabe longguns with the longest sight.',
+    units: {
+      soldier: { name: 'Mirage Lancer', hp: 124, dmg: 19, rof: 1.95, range: 8.5, speed: 4.1,
+        trait: 'Heavy hits, long reach, quick' },
+      ranger: { name: 'Dune Rider', hp: 64, dmg: 7.4, rof: 1.35, range: 8, speed: 5.6,
+        trait: 'Mounted: fastest unit' },
+      sniper: { name: 'Astrolabe Longgun', hp: 80, dmg: 78, rof: 0.47, range: 16, speed: 2.8,
+        trait: 'Longest range in the game' },
+    },
+  },
+};
+export const DEFAULT_CULTURE = 'european';
+export function cultureKey(key) {
+  return typeof key === 'string' && Object.hasOwn(CULTURE_ARMIES, key) ? key : DEFAULT_CULTURE;
+}
+const _armyDefs = new Map();
+// The unit definition a culture musters for a trade (cached, frozen shape).
+export function unitDefFor(culture, key) {
+  const base = UNITS[key];
+  if (!base) return base;
+  const army = CULTURE_ARMIES[cultureKey(culture)];
+  const o = army.units[key];
+  if (!o) return base;
+  const id = `${cultureKey(culture)}:${key}`;
+  if (!_armyDefs.has(id)) _armyDefs.set(id, { ...base, ...o, culture: cultureKey(culture) });
+  return _armyDefs.get(id);
+}
+
 // ---------- The horde: roles, not stat blocks ----------
 // Every entry asks the player a DIFFERENT question. `ranged` outranges walls,
 // `burrow` walks through them, `siege` ignores your army entirely, and `call`
@@ -468,18 +537,18 @@ export const HEROES = {
     ],
   },
   danny: {
-    key: 'danny', name: 'Danny Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
+    key: 'danny', name: 'Daniel Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
     tagline: 'Long range. Now you see him. They never do.',
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
     levelHp: 27, levelDmg: 5, regen: 2.0,
     aura: {
       key: 'siphon', name: 'Nutrient Siphon', icon: '💀', radius: 5.5, drain: 5, leech: 0.5, color: 0x7fd85e,
-      desc: 'A necrotic field wicks the juices out of the dead near Danny (5 hp/s) and feeds them back to him.',
+      desc: 'A necrotic field wicks the juices out of the dead near Daniel (5 hp/s) and feeds them back to him.',
     },
     ability: {
       key: 'weave', name: 'The Weave', icon: '🕸️', cd: 12,
       cast: 'weave', dur: [3, 4, 5], dmg: [50, 85, 130], speed: 1.6,
-      desc: 'Danny slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
+      desc: 'Daniel slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
     },
     passives: [
       { key: 'ghostmotor', name: 'Ghost Motor', icon: '👟', mods: { speed: 0.08, rof: 0.08 }, desc: 'Move speed and fire rate.' },
@@ -775,7 +844,7 @@ export const LEVELS = [
     ],
     blurb: 'Rolling moorland and black pines. Learn to hold a line — then move it.',
     theme: { terrain: 'moor', city: 'bastion',
-      palette: { grass: 0x5a8a52, forest: 0x35603c, water: 0x3fa0a8, mountain: 0xb8b4a6, sand: 0xb8a878, path: 0x8a7a5e, sky: 0x9cc4b0 } },
+      palette: { grass: 0x4a9a72, forest: 0x3d8566, canopy: 0x9fd46a, water: 0x52b8d6, mountain: 0xd8cfb4, sand: 0xd2c08e, path: 0xc8a06a, sky: 0xc4ead8, skyTop: 0x5fa8b8, shadow: 0x1f3a5f } },
     boss: { name: 'The Butcher', icon: '🔪', hp: 2600, dmg: 60, speed: 1.1, chase: 2.1, scale: 3.0,
       color: 0x9c2f2f, score: 60, enrage: 0.5,
       desc: 'A mountain of meat and cleavers. Enrages at half health.' },
@@ -790,7 +859,7 @@ export const LEVELS = [
     ],
     blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
     theme: { terrain: 'fen', city: 'fort', liquidName: 'Bog water',
-      palette: { grass: 0x4e6a4a, forest: 0x314e38, water: 0x4e9a68, mountain: 0x9a9488, sand: 0x8a8562, path: 0x6e6a4e, sky: 0x8aa896 } },
+      palette: { grass: 0x6a8f52, forest: 0x557a46, canopy: 0xb8c95e, water: 0x4aa596, mountain: 0xbab29a, sand: 0xa69a64, path: 0x9a7f52, sky: 0xd6e2b4, skyTop: 0x6f9478, shadow: 0x22383e } },
     boss: { name: 'Plague Mother', icon: '🪳', hp: 3100, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
       color: 0x6e8f3a, score: 80, spawn: { every: 10, count: 5, type: 'walker' },
       desc: 'Every few seconds she births another brood. Kill her fast.' },
@@ -807,8 +876,8 @@ export const LEVELS = [
     // liquid: 'lava' switches the whole liquid treatment — glowing surface,
     // ember shoreline, bright crust rim — so molten channels can never be
     // mistaken for ground you can walk.
-    theme: { terrain: 'wastes', city: 'star', liquid: 'lava', liquidName: 'Molten rock',
-      palette: { grass: 0xa86a42, forest: 0x6e4e36, water: 0xc25a2e, mountain: 0xcf9a6a, sand: 0xc28a58, path: 0x8a5e40, sky: 0xd8a878 } },
+    theme: { terrain: 'wastes', city: 'outpost', liquid: 'lava', liquidName: 'Molten rock',
+      palette: { grass: 0xe9a43e, forest: 0xc9783a, canopy: 0x8a3a2a, water: 0xd8461e, mountain: 0xf2d39a, sand: 0xf0bd62, path: 0xc0743c, sky: 0xffdca6, skyTop: 0xe58a52, shadow: 0x14304a } },
     boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
       color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },
       desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
@@ -823,7 +892,7 @@ export const LEVELS = [
     ],
     blurb: 'A field of grave mounds and blind hollows. The ground itself is on their side.',
     theme: { terrain: 'hills', city: 'crescent',
-      palette: { grass: 0x4e5c80, forest: 0x38466a, water: 0x5a9ac8, mountain: 0xc8d2e0, sand: 0x7a84a0, path: 0x8a7a88, sky: 0x7a8ab0 } },
+      palette: { grass: 0xcfe2ea, forest: 0xb4cddc, canopy: 0x4f86ad, water: 0x5aa8d8, mountain: 0xf2f8fa, sand: 0xb6cad8, path: 0x93a7bf, sky: 0xeaf4f7, skyTop: 0x8db3d2, shadow: 0x3b2f5c } },
     boss: { name: 'Gravelord', icon: '⚰️', hp: 5600, dmg: 55, speed: 0.95, chase: 1.8, scale: 3.4,
       color: 0x3f4b66, score: 130, armor: 0.35, spawn: { every: 12, count: 8, type: 'walker' },
       desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
@@ -838,7 +907,7 @@ export const LEVELS = [
     ],
     blurb: 'A world split by one great rift. Three passes through it — and everything ends here.',
     theme: { terrain: 'vale', city: 'keyhole', liquidName: 'Void water',
-      palette: { grass: 0x453a5e, forest: 0x2f2848, water: 0x6a4a9a, mountain: 0x8a7aa2, sand: 0x5e5578, path: 0x6a5a72, sky: 0x584e78 } },
+      palette: { grass: 0x6c5292, forest: 0x5d4682, canopy: 0xe07aae, water: 0x9d6ee0, mountain: 0xbcaadc, sand: 0x8a76aa, path: 0xa889b4, sky: 0xc6addf, skyTop: 0x4b3a7c, shadow: 0x1a1438 } },
     boss: { name: 'The Zillion', icon: '👁️', hp: 9000, dmg: 75, speed: 1.0, chase: 2.2, scale: 4.2,
       color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.2,
       spawn: { every: 10, count: 6, type: 'runner' }, roar: { every: 15, radius: 14, dur: 3.5 },
@@ -934,7 +1003,7 @@ export const LABYRINTH_LEVELS = [
     quests: [],
     blurb: 'Choose a route through four of six chambers, then face the Butcher.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Black water',
-      palette: { grass: 0x6a7a58, forest: 0x3c5240, water: 0x2f5a6a, mountain: 0x8a8296, sand: 0x9a8e6e, path: 0x7a6e56, sky: 0x6a7a88 } },
+      palette: { grass: 0x74865e, forest: 0x5f7552, canopy: 0x9fb76a, water: 0x3a6c7e, mountain: 0x948ca2, sand: 0xa49878, path: 0x8a7c60, sky: 0xb4c4c4, skyTop: 0x5e7488, shadow: 0x1e2a3c } },
     boss: { name: 'The Butcher Below', icon: '🔪', hp: 3000, dmg: 55, speed: 1.1, chase: 2.2, scale: 3.0,
       color: 0x9c2f2f, score: 80, enrage: 0.5,
       desc: 'A mountain of meat and cleavers, fattened in the dark. Enrages at half health.' },
@@ -946,7 +1015,7 @@ export const LABYRINTH_LEVELS = [
     quests: [],
     blurb: 'The same descent, under fiercer pursuit. The broodmother waits at the end.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Grave water',
-      palette: { grass: 0x4e6a6a, forest: 0x2f4a4e, water: 0x3a6a8a, mountain: 0x7a8aa0, sand: 0x76806e, path: 0x5e6a62, sky: 0x58707e } },
+      palette: { grass: 0x5a7a76, forest: 0x4a6a68, canopy: 0x7fb0a0, water: 0x3d7898, mountain: 0x8a9ab0, sand: 0x86907c, path: 0x6e7a70, sky: 0xa8bec4, skyTop: 0x4a6478, shadow: 0x18283a } },
     boss: { name: 'Vault Mother', icon: '🪳', hp: 4200, dmg: 42, speed: 0.95, chase: 1.8, scale: 3.2,
       color: 0x6e8f3a, score: 110, spawn: { every: 8, count: 5, type: 'walker' },
       desc: 'Every few seconds she births another brood. In a corridor, that is a wall.' },
@@ -958,7 +1027,7 @@ export const LABYRINTH_LEVELS = [
     quests: [],
     blurb: 'Six chambers and a king in the last one. Nobody has walked out of this trial.',
     theme: { terrain: 'labyrinth', city: null, liquidName: 'Void water',
-      palette: { grass: 0x565270, forest: 0x3a3656, water: 0x4a3a7a, mountain: 0x7a6e92, sand: 0x6e6684, path: 0x5e5674, sky: 0x4e4868 } },
+      palette: { grass: 0x625d80, forest: 0x524c70, canopy: 0xa48ad0, water: 0x5a4690, mountain: 0x8a7ea4, sand: 0x7c7494, path: 0x6c6484, sky: 0x9e94bc, skyTop: 0x3e3864, shadow: 0x161230 } },
     boss: { name: 'The Sunless King', icon: '⚰️', hp: 6200, dmg: 60, speed: 0.95, chase: 1.9, scale: 3.6,
       color: 0x3f4b66, score: 170, armor: 0.3, spawn: { every: 11, count: 7, type: 'walker' }, enrage: 0.35,
       desc: 'Bone-plated, brood-raising, and furious at the end. Bring everything the chambers gave you.' },

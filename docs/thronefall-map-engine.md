@@ -203,7 +203,7 @@ Every map is produced by the same fixed pipeline. Each stage is a pure
 function of the seed plus the stages before it — no stage reads a file, the
 clock, or `Math.random()`:
 
-1. **Level descriptor** (`config.js LEVELS` / `galaxyLevel(id)`) — the only
+1. **Level descriptor** (`config.js LEVELS` / `galaxyLevel(id)` (the procedural campaign)) — the only
    authored input: archetype name, seed, size, palette, boss, economy. The
    infinite galaxy recombines 5 landforms × 5 city plans with hue-shifted
    palettes, so authored content is O(archetypes + plans), not O(maps).

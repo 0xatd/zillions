@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { TerrainField, TERRAIN_SHAPES } from '../src/terrain.js';
 import { generatePlots, CITY_PLANS } from '../src/plots.js';
 import { Game } from '../src/game.js';
+import { SITE_FORMS, rimRadius, rimMaxRadius } from '../src/site-plan.js';
+const landShares = [];
 import { LEVELS, LABYRINTH_LEVELS, levelById, galaxyLevel, TILE, TILE_INFO, ITEMS, PACK_SLOTS, SIEGE, itemInfo } from '../src/config.js';
 
 const REPORT = process.argv.includes('--report');
@@ -174,8 +176,7 @@ for (const level of LEVELS) {
     }
     assert.ok(plots.filter((p) => p.kind === 'tower').length >= 6,
       `${label} site ${i} has too few tower plots to defend a wall`);
-    assert.equal(!!hq.plan.inner, !!CITY_PLANS[planKey].inner,
-      `${label} site ${i} did not raise the inner ward its plan calls for`);
+    assert.ok(!hq.plan.inner, `${label} site ${i} raised a concentric inner ward — bases follow the land now`);
 
     // The boundary must have NO holes — but the wall is only half of it now.
     // Crag, water and deep wood are the other half, so the test is: walk out
@@ -220,23 +221,32 @@ for (const level of LEVELS) {
       assert.ok(camps >= 1, `${label} site ${i}: ${w.name} has no muster camp to hold or push from`);
     }
 
-    // --- the pad: inside its disc, the ground is the founders', not the
-    // landform's. 100% walkable and buildable, no exceptions, no rounding
-    // charity — this is the whole promise of the pad system.
+    // --- the landform: every Earth/galaxy city stands on a terrain-adapted
+    // plateau (src/site-plan.js). Its interior is the founders' ground —
+    // 100% walkable and buildable — and its rim is the land's: cliff or bog
+    // wherever the form closes the line, open (walled) ground at the ramps.
     {
-      const R = site.padR;
-      assert.ok(R >= 22 && R <= 30, `${label} site ${i} pad radius ${R} is off-spec`);
-      let bad = 0;
-      for (let dz = -R; dz <= R; dz++) {
-        for (let dx = -R; dx <= R; dx++) {
-          if (dx * dx + dz * dz > R * R) continue;
+      const rim = site.rim;
+      assert.ok(rim && rim.key === planKey, `${label} site ${i} raised no landform for its ${planKey} plan`);
+      assert.ok(site.padR >= 22 && site.padR <= 30, `${label} site ${i} pad radius ${site.padR} is off-spec`);
+      let bad = 0, rimN = 0, rimNat = 0;
+      const ext = Math.ceil(rimMaxRadius(rim) + 3);
+      for (let dz = -ext; dz <= ext; dz++) {
+        for (let dx = -ext; dx <= ext; dx++) {
           const x = Math.round(site.x) + dx, z = Math.round(site.z) + dz;
-          if (!map.inBounds(x, z)) { bad++; continue; }
-          if (!map.isWalkable(x, z) || !map.isBuildable(x, z)) bad++;
+          const px = x + 0.5 - site.x, pz = z + 0.5 - site.z;
+          const d = Math.hypot(px, pz);
+          const t = Math.atan2(Math.sin(Math.atan2(pz, px) - rim.facing), Math.cos(Math.atan2(pz, px) - rim.facing));
+          const r = rimRadius(rim, t);
+          if (d < r - 0.5) { if (!map.isWalkable(x, z) || !map.isBuildable(x, z)) bad++; continue; }
+          if (d >= r + 0.5 && d < r + 1.5) { rimN++; if (!map.isWalkable(x, z)) rimNat++; }
         }
       }
-      assert.equal(bad, 0,
-        `${label} site ${i}: ${bad} tiles inside its own pad are not flat buildable ground`);
+      assert.equal(bad, 0, `${label} site ${i}: ${bad} plateau tiles are not flat buildable ground`);
+      const share = rimNat / Math.max(1, rimN);
+      if (SITE_FORMS[planKey].ring) assert.ok(share < 0.05, `${label} site ${i}: the outpost ring is not on open ground`);
+      else assert.ok(share > 0.3, `${label} site ${i}: only ${(share * 100) | 0}% of the rim is cliff/water — the land is not the wall`);
+      landShares.push(share);
     }
 
     // --- every slot on real ground: a plot footprint the land refuses is a
@@ -542,15 +552,25 @@ assert.ok(siteStats.every((s) => s.outer >= 1),
 // one is an untested one. The labyrinth landform belongs to the Labyrinth
 // trial roster (scripts/labyrinth-check.mjs exercises it), not the campaign.
 const usedTerrain = new Set(LEVELS.map((l) => l.theme.terrain));
+// Bases follow the land: no two Earth missions raise the same landform, and
+// exactly one (the badlands outpost) is a ring.
+{
+  const forms = LEVELS.map((l) => SITE_FORMS[l.theme.city]);
+  assert.equal(new Set(forms.map((f) => f.label)).size, LEVELS.length, 'two Earth missions share a base landform');
+  assert.equal(forms.filter((f) => f.ring).length, 1, 'exactly one Earth mission is the ring outpost set piece');
+  console.log(`map-check: rim closed by land ${landShares.map((v) => Math.round(v * 100) + '%').join(' ')}`);
+}
 const labyrinthTerrain = new Set(LABYRINTH_LEVELS.map((l) => l.theme.terrain));
 for (const key of Object.keys(TERRAIN_SHAPES)) {
   assert.ok(usedTerrain.has(key) || labyrinthTerrain.has(key), `landform "${key}" is not used by any level`);
 }
-const usedPlans = new Set(LEVELS.map((l) => l.theme.city));
+// The star crag is a galaxy-only landform since the badlands outpost took L3.
+const usedPlans = new Set([...LEVELS.map((l) => l.theme.city),
+  ...Array.from({ length: 25 }, (_, i) => galaxyLevel(LEVELS.length + 1 + i).theme.city)]);
 for (const key of Object.keys(CITY_PLANS)) {
   assert.ok(usedPlans.has(key), `city plan "${key}" is not used by any level`);
 }
-assert.equal(usedPlans.size, LEVELS.length, 'two levels share a city plan — the bases would look the same');
+assert.equal(new Set(LEVELS.map((l) => l.theme.city)).size, LEVELS.length, 'two levels share a city plan — the bases would look the same');
 assert.equal(usedTerrain.size, LEVELS.length, 'two levels share a landform — the maps would look the same');
 
 console.log(`map-check: ${LEVELS.length} levels, ${usedTerrain.size} landforms, ${usedPlans.size} city plans — all distinct.`);

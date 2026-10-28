@@ -5,23 +5,15 @@ systems, menus, backend code, or docs.
 
 ## Target
 
-Zillions is the current playable foundation for a new science-fantasy MMO set
-across a navigable galaxy. The current art, named heroes, siege maps, and
-encounter structures are scaffolding. They may change without redefining the
-new game's world model.
+Zillions is a browser siege game. The living world (overworld, planet hubs,
+galaxy map, Orbital Lifts, parties, encounters, companies, markets, and region
+workers) was removed. Do not reintroduce a persistent shared world without a
+new product decision.
 
-The galaxy is the only hard world boundary. A signed-in character can persist
-across planets, stations, ships, shared planetary zones, and private or party
-instances. Each destination owns its own world descriptor and presence
-channel. Entering an instance does not replace the galaxy journey; the player
-returns to a persistent location with progress and equipment.
-
-The existing Zillions combat and construction systems remain playable content
-while the new game develops:
-
-The player signs in, enters a living frontier, chooses or joins a world, rides a
-hero, founds a fortified city, buys pre-planned plots with coins, and pushes the
-front line outward until the planet is taken.
+The player signs in, picks a character, deploys to a mission, rides a hero,
+founds a fortified city, buys pre-planned plots with coins, and pushes the
+front line outward until the map is taken. Signed-in characters keep their
+level, gear, and Lattice between sieges.
 
 Use continuous siege on a lane graph as the gameplay base:
 
@@ -107,9 +99,9 @@ sustained zombie flood. The run is won only by killing the final boss.
    Each whole Threat level triggers a simultaneous surge from every hive.
 5. Campaign maps end when every hive is razed and the champion leading the
    final counterattack is killed — or when the Keep falls.
-6. Earth and frontier battlefields currently provide the playable instances.
-   The star map and Orbital Lifts connect their planetary hubs. Frontier worlds
-   are deterministic from their number and stay liberated on the profile.
+6. After the five Earth missions, campaign maps are generated from their level
+   number alone and continue without end. Campaign progress is server-owned
+   for signed-in players.
 
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.
@@ -121,7 +113,7 @@ hive brood nest; razing it advances the revive checkpoint and offers each
 player a pick-1-of-3 blessing (run-scoped stat boons). The horde's flow field
 is seeded on the heroes, the team shares a pool of lives, and razing every
 chamber summons the trial's champion — kill it to clear the trial. Labyrinth
-runs never advance campaign progress or unlock galaxy planets.
+runs never advance campaign progress or unlock procedural campaign maps.
 
 The Labyrinth is playable solo and co-op up to 3 players, through both online
 rooms and manual invite codes. Multiplayer setup screens carry war-mode chips
@@ -170,12 +162,12 @@ unbound action is honest and a shadowed one is a silent bug.
 
 ## Character Progression
 
-An MMO character carries a build between adventures, and it has three layers
+A persistent character carries a build between sieges, and it has three layers
 that must stay separate.
 
 Gear is rolled. An item is a key that resolves to a base, an item level, a
-rarity and its affixes; item level comes from the world, so loot quality is
-tied to how far out the player has travelled. Eleven slots are available:
+rarity and its affixes; item level comes from the mission and its difficulty, so
+loot quality is tied to how deep into the campaign the player has gone. Eleven slots are available:
 head, chest, hands, legs, boots, weapon, off-hand, a second weapon set, and two
 implants. Visible armour changes the procedural character silhouette. Weapon
 and off-hand exist twice, and X draws the other set in the field on a
@@ -212,26 +204,29 @@ The rules these must keep:
   not sell the same bonus.
 - Nothing is unrecoverable. A reshaped tree, a lost level or a rewire refunds
   and prunes; it never breaks a character.
+- The server owns rewards. Signed-in XP, levels, loot, Salvage Alloy, and stats
+  are granted only by `api/match-result.js`. The client reports what happened;
+  it never grants. Guest progress stays in the browser and is never uploaded.
 - No trade until a server owns item creation.
 - Do not activate player trade or paid inventory until the server owns item
   creation, inventory, currency, and every buy/sell transaction.
 
 ## Longer-Range Direction
 
-`docs/design-vision.md` holds the next horizon: folklore factions as
-rule-changers, persistent explored-map memory, world-placed missions,
-landmarks, and strategic galaxy state. Basic galaxy navigation is implemented.
-Deeper strategic simulation is not.
+`docs/design-vision.md` holds possible future ideas: folklore factions as
+rule-changers, persistent explored-map memory, and landmarks. None of them are
+implemented. A persistent shared world is out of scope.
 
 ## Production UX Rules
 
 - Production must be account-first.
 - Signed-out players see the login screen. Signed-in players see Character
   Select. The generic marketing title is not an account home.
-- Character Select shows the complete roster and owns `Enter World`, character
+- Character Select shows the complete roster and owns `Deploy`, character
   creation and deletion, Character Info, Custom Games, system options, and Log Out.
-- The in-world Game Menu owns Return to World, Character Select, Custom Games,
-  system options, and Log Out. It does not reuse Character Select as a pause menu.
+  `Deploy` opens mission select.
+- The in-match Game Menu owns Resume, How to play, Settings, Restart, and Quit
+  to menu. It does not reuse Character Select as a pause menu.
 - Character Info uses separate Character, Equipment, Abilities, and Lattice
   views. Equipment is interactive. The player can inspect and compare items,
   click or double-click to equip and unequip, drag an item between the stash
@@ -269,17 +264,14 @@ prototype.
 
 Target shape:
 
-- Each world is a live lobby or playable game.
-- Players can see other signed-in players moving around the lobby/world layer.
-- Worlds show territory state: safe, contested, Xeno-held, player-held.
-- Xeno factions hold regions, nests, energy fields, or planets.
 - Open games are real backend rooms.
 - Room players have real seats, ready state, hero picks, and chat.
 - Active games support read-only Watch. Previous guests can Rejoin their seat.
 - The room blocks Start until every guest connects and loads the battlefield.
 - Campaign Start blocks a level that any seated player has not unlocked.
 - Starting a room launches the current WebRTC match for now.
-- Match results write back to profiles, stats, saves, and history.
+- Match results are reported to `api/match-result.js`; the server writes
+  stats, history, character progress, loot, and Alloy.
 
 Use placeholders only when they are clearly marked as coming soon and not mixed
 with real production data.
@@ -309,37 +301,29 @@ Supabase owns:
 - Global lobby chat (`lobby_chat`).
 - Friend requests, accepted friends, and friend online state (`friendships`).
 - Room setup chat and in-game team chat (`room_chat.channel = 'room' | 'game'`).
-- Canonical universe, star system, planet, region, faction, and ownership state.
-- Region worker leases and replay-safe cross-region party handoffs.
-
-Earth is the first canonical planet. Greenfall is its first active region.
-Every region, settlement, route, and strategic site has faction control state.
-The state includes its owner, claimant, control strength, garrison, unrest,
-siege or blockade state, and causal control history. A planet can use one or
-many region workers. Players must still experience one shared planet.
+- Server-owned characters, item instances, wallets, and match reports.
 
 Vercel owns:
 
 - Static game host.
 - `/api/auth-config`
-- `/api/state`
-- `/api/lobby`
+- `/api/match-result` (the only reward grant path)
+- `/api/economy`
 
-Vercel Blob is a temporary compatibility layer for guest smoke tests and old
-state mirror data. It is not the source of truth for signed-in chat, friends,
-accounts, or rooms.
+Vercel Blob is no longer used. The legacy `/api/state` and `/api/lobby` Blob
+routes were removed once nothing called them.
 
-WebRTC still owns match transport. The server is not authoritative yet.
+WebRTC still owns match transport. The server does not simulate combat; it is
+authoritative for rewards and economy.
 
-Mission rooms support one to four players. Physical mission gates create or
-join a rally room. Walking away closes the prompt and leaves the rally. The
-mission returns each player to the saved overworld planet and coordinates.
+Mission rooms support one to four players. Players create or join rooms from
+Play Online or Custom Games.
 
 ## Non-Negotiables
 
 - Preserve the production account backend when porting gameplay.
 - Preserve `package.json` and `npm run check`.
-- Preserve `api/auth-config.js`, `api/state.js`, and `api/lobby.js`.
+- Preserve `api/auth-config.js`.
 - Preserve `src/auth.js` and `src/backend.js`.
 - Remove any wrong product Supabase URL before merge.
 - Do not expose `assets.html` from the game screen.

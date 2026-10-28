@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zillions toy kit preview</title>
+<style>html,body{margin:0;background:#cfe3e8;font:13px system-ui}canvas{display:block}#t{position:fixed;left:8px;top:6px;color:#1d3557}</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }</script>
+</head><body><div id="t">Toy kit — <span id="c"></span> (?only=castle&cols=4)</div>
+<script type="module">
+// Review page for the Blender toy kit (tools/art/toy_kit). Lays every asset
+// of a culture (?culture=asian, default European) on a grid under the game's light rig. Not shipped
+// gameplay; presentation review only.
+import * as THREE from 'three';
+import { loadAssets, loadKitCulture, kitClone, hasKit } from './src/assets.js';
+import { culture, setActiveCulture } from './src/cultures.js';
+const q = new URLSearchParams(location.search);
+const c = culture(q.get('culture') || undefined);
+document.getElementById('c').textContent = c.name;
+const W = innerWidth, H = innerHeight;
+const r = new THREE.WebGLRenderer({ antialias: true });
+r.setSize(W, H); r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap;
+document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xcfe3e8);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x1d3557, 0.75));
+scene.add(new THREE.AmbientLight(0x6a7fb0, 0.35));
+const sun = new THREE.DirectionalLight(0xffffff, 2.3); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+await loadAssets();
+setActiveCulture(c.key);
+await loadKitCulture(c.key);
+const only = q.get('only');
+const names = c.assets.filter((n) => hasKit(n) && (!only || only.split(',').some((o) => n.includes(o))));
+const cols = Number(q.get('cols')) || Math.ceil(Math.sqrt(names.length * W / H));
+const step = Number(q.get('step')) || 5;
+names.forEach((n, i) => {
+  const m = kitClone(n);
+  const big = n.startsWith('castle');
+  m.position.set((i % cols) * step, 0, Math.floor(i / cols) * step);
+  m.rotation.y = Number(q.get('yaw')) || 0;
+  m.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+  scene.add(m);
+  const g = new THREE.Mesh(new THREE.CylinderGeometry(step * 0.45, step * 0.45, 0.05, 6), new THREE.MeshLambertMaterial({ color: 0x4a9a72 }));
+  g.position.copy(m.position); g.position.y = -0.03; g.receiveShadow = true; scene.add(g);
+});
+const rows = Math.ceil(names.length / cols);
+const cx = (cols - 1) * step / 2, cz = (rows - 1) * step / 2;
+const span = Math.max(cols, rows * W / H) * step;
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 1000);
+const dist = span * (Number(q.get("zoom")) || 1.15);
+const pitch = Number(q.get('pitch')) || 0.8; // ?pitch=0.4 for a low, close-up look
+cam.position.set(cx, dist * pitch, cz + dist * Math.sqrt(Math.max(0.05, 1.03 - pitch * pitch))); cam.lookAt(cx, Number(q.get('look')) || 0, cz);
+sun.position.set(cx - 34, 78, cz + 26); sun.target.position.set(cx, 0, cz); scene.add(sun, sun.target);
+const sc = sun.shadow.camera; sc.left = sc.bottom = -span; sc.right = sc.top = span; sc.far = 300; sc.updateProjectionMatrix();
+r.render(scene, cam);
+window.__kitReady = names.length;
+</script></body></html>

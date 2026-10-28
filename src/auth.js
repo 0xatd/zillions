@@ -51,6 +51,36 @@ function campaignProgress(value, fallback = null) {
   return Number.isFinite(progress) ? Math.max(0, Math.floor(progress)) : fallback;
 }
 
+// Server-owned account progress (player_stats, written by apply_match_result).
+export function serverProgress(stats = {}) {
+  if (!Number.isInteger(stats?.campaign_cleared)) return {};
+  return {
+    bestSurvival: Number(stats.best_survival) || 0,
+    relics: Array.isArray(stats.relics) ? stats.relics.filter((key) => typeof key === 'string') : [],
+    questsDone: stats.quests_done && typeof stats.quests_done === 'object' ? { ...stats.quests_done } : {},
+    labyrinthClears: stats.labyrinth_clears && typeof stats.labyrinth_clears === 'object' ? { ...stats.labyrinth_clears } : {},
+  };
+}
+
+// Level and XP live in game_characters. Metadata copies are client-written,
+// so the server row always wins when it carries the progress columns.
+export function overlayServerProgress(characters = [], rows = []) {
+  const byId = new Map((Array.isArray(rows) ? rows : [])
+    .filter((row) => row && row.progress_revision != null)
+    .map((row) => [row.client_character_id, row]));
+  return characters.map((character) => {
+    const row = byId.get(character?.id);
+    if (!row) return character;
+    return {
+      ...character,
+      level: Math.max(1, Math.min(100, Number(row.level) || 1)),
+      xp: Math.max(0, Number(row.xp) || 0),
+      stats: { instances: 0, victories: 0, kills: 0, ...(row.stats || {}) },
+      progressRevision: Number(row.progress_revision) || 1,
+    };
+  });
+}
+
 export class AuthClient {
   constructor() {
     this.client = null;
@@ -174,7 +204,12 @@ export class AuthClient {
     const username = publicName(profile);
     const mmoCharacters = Array.isArray(this.user?.user_metadata?.mmo_characters)
       ? this.user.user_metadata.mmo_characters : null;
-    const campaign = campaignProgress(this.user?.user_metadata?.campaign);
+    // Server progress (player_stats.campaign_cleared) wins once the
+    // server-progress migration is applied; the metadata copy is a legacy
+    // fallback for databases that have not run it yet.
+    const campaign = Number.isInteger(stats.campaign_cleared)
+      ? stats.campaign_cleared
+      : campaignProgress(this.user?.user_metadata?.campaign);
     return {
       name: username,
       username,
@@ -185,10 +220,10 @@ export class AuthClient {
       kills: stats.total_kills || 0,
       bestDay: stats.best_day || 0,
       lastHero: profile.selected_hero || stats.favorite_hero || null,
-      lastWorld: this.user?.user_metadata?.last_world || 'earth',
       ...(campaign !== null ? { campaign } : {}),
+      ...serverProgress(stats),
       ...(mmoCharacters ? {
-        mmoCharacters,
+        mmoCharacters: overlayServerProgress(mmoCharacters, bundle.characters),
         mmoCharacterId: this.user?.user_metadata?.mmo_character_id || mmoCharacters[0]?.id || null,
       } : {}),
       updatedAt: Date.parse(profile.updated_at || stats.updated_at || '') || 0,
@@ -230,32 +265,35 @@ export class AuthClient {
       this.profile = data;
     }
 
-    const { error: statsError } = await this.client.from('player_stats').upsert({
-      user_id: user.id,
-      favorite_hero: selectedHero,
-    }, { onConflict: 'user_id' });
-    if (statsError) throw statsError;
+    // player_stats is server-owned (api/match-result.js); the signup trigger
+    // creates the row and only apply_match_result() changes it.
   }
 
   async loadProfileBundle() {
     if (!this.client || !this.user) return null;
     await this.ensureProfile();
     const userId = this.user.id;
-    const [{ data: profile, error: profileError }, { data: stats, error: statsError }] = await Promise.all([
+    // `*` keeps this working both before and after the server-progress
+    // migration adds its columns.
+    const [{ data: profile, error: profileError }, { data: stats, error: statsError }, characterResult] = await Promise.all([
       this.client.from('profiles')
         .select('id,handle,display_name,selected_hero,username_set,updated_at,last_seen_at')
         .eq('id', userId)
         .maybeSingle(),
       this.client.from('player_stats')
-        .select('games_played,wins,losses,total_kills,best_day,best_wave,buildings_built,favorite_hero,updated_at')
+        .select('*')
         .eq('user_id', userId)
         .maybeSingle(),
+      this.client.from('game_characters')
+        .select('*')
+        .eq('user_id', userId),
     ]);
     if (profileError) throw profileError;
     if (statsError) throw statsError;
     this.profile = profile || this.profile;
     this.stats = stats || this.stats;
-    return { profile, stats };
+    const characters = !characterResult?.error && Array.isArray(characterResult?.data) ? characterResult.data : [];
+    return { profile, stats, characters };
   }
 
   async setUsername(value) {
@@ -281,38 +319,28 @@ export class AuthClient {
 
   async syncLocalProfile(localProfile = {}) {
     if (!this.client || !this.user) return;
-    const games = Number(localProfile.games || 0);
-    const wins = Number(localProfile.wins || 0);
     const hero = localProfile.lastHero || 'alexander';
     const campaign = Math.max(
       campaignProgress(localProfile.campaign, 0),
       campaignProgress(this.user?.user_metadata?.campaign, 0),
     );
     await this.ensureProfile(localProfile);
-    const [{ error: profileError }, { error: statsError }, userResult] = await Promise.all([
+    // Stats and progression are NOT synced from here: the server grants them
+    // (api/match-result.js). Metadata keeps cosmetic character state (name,
+    // look, Lattice choices); level/XP in it are overwritten from
+    // game_characters on every load.
+    const [{ error: profileError }, userResult] = await Promise.all([
       this.client.from('profiles').update({
         selected_hero: hero,
         last_seen_at: isoNow(),
       }).eq('id', this.user.id),
-      this.client.from('player_stats').upsert({
-        user_id: this.user.id,
-        games_played: games,
-        wins,
-        losses: Math.max(0, games - wins),
-        total_kills: Number(localProfile.kills || 0),
-        best_day: Number(localProfile.bestDay || 0),
-        favorite_hero: hero,
-        updated_at: isoNow(),
-      }, { onConflict: 'user_id' }),
       this.client.auth.updateUser({ data: {
-        last_world: localProfile.lastWorld || 'earth',
         campaign,
         mmo_character_id: localProfile.mmoCharacterId || null,
         mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 8) : [],
       } }),
     ]);
     if (profileError) throw profileError;
-    if (statsError) throw statsError;
     const { data: userData, error: userError } = userResult;
     if (userError) throw userError;
     if (userData?.user && this.session) {
@@ -367,21 +395,4 @@ export class AuthClient {
     if (error) throw error;
   }
 
-  async recordMatch(summary) {
-    if (!this.client || !this.user || !summary) return;
-    const { error } = await this.client.from('match_history').insert({
-      user_id: this.user.id,
-      mode: summary.mode || 'survival',
-      rules: summary.rules || 'survival-plots',
-      hero: summary.heroKeys?.[0] || summary.hero || null,
-      result: summary.won ? 'win' : 'loss',
-      day_reached: Number(summary.day || 0),
-      kills: Number(summary.kills || 0),
-      buildings_built: Number(summary.built || 0),
-      duration_seconds: Number(summary.durationSeconds || 0),
-      visibility: 'private',
-      summary,
-    });
-    if (error) throw error;
-  }
 }

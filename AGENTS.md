@@ -17,7 +17,9 @@ Use `llms.txt` when you need a compact repository index.
 
 ## Product Boundary
 
-Zillions is a sci-fi planet-conquest siege game. The core loop is:
+Zillions is a sci-fi siege game and only a siege game. The living world
+(overworld, galaxy map, parties, encounters, companies, region workers) was
+removed; do not reintroduce it without a product decision. The core loop is:
 
 1. Control one hero.
 2. Found one terrain-aware colony.
@@ -85,7 +87,7 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 
 ### Heroes
 
-- Keep this roster: Scott English, Alexander Thomas, Danny Donovan, Turtle
+- Keep this roster: Scott English, Alexander Thomas, Daniel Donovan, Turtle
   Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock.
 - Treat `src/config.js` as the source of truth for hero data.
 - Keep hero progression valid through level 100.
@@ -96,7 +98,11 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 
 - Supabase owns identity, rooms, seats, chat, saves, and match history.
 - WebRTC carries match commands.
-- The backend is not server-authoritative.
+- The backend does not run the combat simulation. It is authoritative for
+  rewards: only `api/match-result.js` (via `apply_match_result()`) grants
+  signed-in XP, levels, loot, Alloy, and stats. Never add a client write path
+  for `player_stats`, `match_history`, `game_characters`, `item_instances`, or
+  `player_wallets`, and never trust a client-claimed reward.
 - Block stale protocol and build versions before they take a seat or Watch.
 - Require each occupied seat to be connected and campaign-eligible.
 - Require each guest to mark Ready in the room.
@@ -120,13 +126,14 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/config.js`: balance, heroes, levels, plots, items, and siege constants.
 - `src/game.js`: deterministic simulation and snapshots.
 - `src/terrain.js`: terrain field and terrain-derived sites.
-- `src/galaxy.js`: procedural star systems, world kinds, and world descriptors.
-- `src/factions.js`: faction roster, presence archetypes, and ownership.
 - `src/items.js`: item bases, weapons, affixes, damage types, and item generation.
 - `src/skilltree.js`: the Lattice — sectors, tree generation, allocation, payload.
 - `src/lockstep-hash.js`: the per-window state hash every peer compares.
 - `src/keybinds.js`: the control scheme — actions, defaults, and rebinding.
-- `src/meta.js`: persistent meta-progression state, upgrade tree, and payouts.
+- `src/meta.js`: guest (offline) Alloy ledger, meta-upgrade tree, and threat tiers.
+- `src/match-rewards.js`: pure, shared match-reward rules (validation, loot
+  proofs, quests, XP, Alloy). Used by `api/match-result.js` and the client.
+- `src/match-outbox.js`: unconfirmed signed-in match reports, resent by requestId.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
 - `src/lanes.js`: deterministic lane graph.
@@ -135,10 +142,11 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/ui.js`: menus, room UI, HUD, and overlays.
 - `src/online.js`: Supabase lobby, rooms, seats, and signaling.
 - `src/net.js`: WebRTC transport and diagnostics.
-- `src/auth.js`: authentication and profile sync.
+- `src/auth.js`: authentication, profile sync, and server-progress hydration.
 - `src/backend.js`: Vercel API client.
 - `src/supabase.js`: shared Supabase client and write timeout.
-- `api/`: Vercel server routes.
+- `api/`: Vercel server routes. `api/match-result.js` grants match rewards;
+  `api/economy.js` owns Market, stash, and Forge transactions.
 - `supabase/schema.sql`: database schema source.
 
 See `docs/architecture.md` for data flows and module details.
@@ -178,6 +186,7 @@ Use `docs/review-guide.md` for the full gate.
 
 ```bash
 npm run check
+npm run check:postgres   # local throwaway Postgres; never a real project
 git diff --check
 jq empty assets/audio/manifest.json
 jq empty assets/audio/click-pack/index.json
@@ -198,14 +207,16 @@ rg -n 'source credential|api key|private key|sb_publishable_' . \
 Test the affected flow in a browser. For broad changes, also test:
 
 1. Sign in and reach the main menu.
-2. Start an Earth campaign mission.
+2. Press Deploy and start an Earth campaign mission.
 3. Found a colony.
 4. Build and upgrade one plot.
 5. Change the army stance.
 6. Verify that squads and hives continue to muster.
 7. Create, join, Ready, start, leave, and close an online room.
-8. Verify that `assets.html` still loads.
-9. Verify that `art-slice.html` loads when the change touches 3D art.
+8. Finish a signed-in match and confirm the end screen shows the
+   server-confirmed XP, loot, and Alloy.
+9. Verify that `assets.html` still loads.
+10. Verify that `art-slice.html` loads when the change touches 3D art.
 
 ## Production Art Rules
 

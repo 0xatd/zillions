@@ -28,9 +28,9 @@ export function firstHourGuidance(character, { online = true } = {}) {
     market: ['Claim your first field upgrade', 'Open the Market. Compare an item against your current loadout before spending Salvage Alloy.', 'OPEN MARKET'],
     equip: ['Equip what you bought', 'Open Equipment, inspect the green and red attribute changes, then equip your chosen item.', 'OPEN EQUIPMENT'],
     forge: ['Tune one item at the Forge', 'Add or calibrate a socket, or install a component. The workbench shows its exact stat effect.', 'OPEN FORGE'],
-    mission: ['Join the living world', 'Enter Greenfall, learn town services, recruit your first company, trade supplies, and resolve one encounter. The old campaign is now optional training.', 'ENTER GREENFALL'],
-    offline: ['Deploy now or sign in for persistent gear', 'Market and Forge require a signed-in account. You can enter Earth and play a field mission now.', 'ENTER WORLD'],
-    complete: ['Your company is ready', 'Greenfall is now your persistent multiplayer world. Travel, trade, fight, and change who controls it.', 'OPEN WORLD MAP'],
+    mission: ['Hold your first siege', 'Pick a campaign mission and defend it. Signed-in XP, loot and Alloy are granted by the server when the siege ends.', 'DEPLOY'],
+    offline: ['Deploy now or sign in for persistent gear', 'Market and Forge require a signed-in account. You can deploy and play a campaign mission now.', 'DEPLOY'],
+    complete: ['You are ready', 'Push deeper into the campaign, run survival, or bring friends into co-op.', 'MISSIONS'],
   }[step];
   return { step, title: content[0], body: content[1], action: content[2] };
 }

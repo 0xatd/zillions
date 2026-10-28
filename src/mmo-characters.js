@@ -1,6 +1,7 @@
-// Persistent player-created characters for the galaxy game. Named Zillions
-// heroes remain in Custom Games; MMO characters carry their own class, level,
-// equipment, appearance and last world between instances.
+// Persistent player-created siege characters. Named Zillions heroes remain in
+// Custom Games; created characters carry their own class, level, equipment and
+// appearance between sieges. For signed-in players level, XP, stats and loot
+// are granted by api/match-result.js; recordMmoInstance() is the guest path.
 
 import {
   EQUIP_SLOTS, slotPool, setSlots, equippedKeys, isRolledKey, meetsRequirement, hasOwn,
@@ -10,6 +11,7 @@ import {
   canAllocate, canDeallocate, LATTICE_VERSION,
 } from './skilltree.js';
 import { itemInfo, itemMods } from './config.js';
+import { xpToNextLevel } from './match-rewards.js';
 
 export const MAX_MMO_CHARACTERS = 8;
 // What a character can keep between adventures. Rolled gear is unique, so
@@ -247,7 +249,6 @@ export function makeMmoCharacter(name, classKey = 'vanguard', appearance = 'iron
     items: [],
     equipment: {},
     upgrades: {},
-    lastWorld: 'earth',
     createdAt: now,
     stats: { instances: 0, victories: 0, kills: 0 },
   };
@@ -287,7 +288,7 @@ export function normalizeMmoCharacters(profile) {
     character.upgrades = character.upgrades && typeof character.upgrades === 'object' ? character.upgrades : {};
     character.stats = { instances: 0, victories: 0, kills: 0, ...(character.stats || {}) };
     character.firstHourGuideDismissed = character.firstHourGuideDismissed === true;
-    character.lastWorld = character.lastWorld || profile.lastWorld || 'earth';
+    delete character.lastWorld;
   }
   if (!profile.mmoCharacters.some((c) => c.id === profile.mmoCharacterId)) {
     profile.mmoCharacterId = profile.mmoCharacters[0]?.id || null;
@@ -308,9 +309,10 @@ export function addMmoCharacter(profile, character) {
   return character;
 }
 
+// One XP curve for guest and server progress: the server grants signed-in XP
+// with the same function (src/match-rewards.js).
 export function xpToMmoLevel(level) {
-  const n = Math.max(1, Math.min(99, Number(level) || 1));
-  return 120 + n * 55 + Math.floor(n ** 1.55 * 18);
+  return xpToNextLevel(level);
 }
 
 export function grantMmoExperience(character, amount) {
@@ -417,12 +419,11 @@ export function rewireLattice(character) {
   return spent;
 }
 
-export function recordMmoInstance(character, { won = false, kills = 0, xp = 0, world = null, items = [] } = {}) {
+export function recordMmoInstance(character, { won = false, kills = 0, xp = 0, items = [] } = {}) {
   if (!character) return { levels: [], items: [] };
   character.stats.instances++;
   if (won) character.stats.victories++;
   character.stats.kills += Math.max(0, kills | 0);
-  if (world) character.lastWorld = world;
   // Rolled items are unique by construction, so the old identity dedupe stopped
   // meaning anything the moment gear started rolling. A stash cap replaces it:
   // authored items still land once, rolled ones stack up to the cap.

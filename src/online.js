@@ -1,6 +1,6 @@
 // Online lobby: Zillions production account + room/social model.
-// Supabase config is loaded from /api/auth-config. Vercel Blob stays as a
-// legacy/static compatibility path; signed-in social state lives in Supabase.
+// Supabase config is loaded from /api/auth-config; signed-in social state
+// lives in Supabase.
 
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 const FRESH_MS = 2 * 60 * 1000;
@@ -10,7 +10,9 @@ const CURRENT_RULES = 'survival-plots';
 // v4: the Labyrinth mode — a new room mode older builds would simulate as a
 // founding campaign run, a new lockstep `blessing` command they would drop,
 // and changed found-phase flow-field semantics.
-export const LOBBY_PROTOCOL_VERSION = 5;
+// v6: siege-only reward tickets, revised terrain and culture-specific armies.
+// v5 production clients cannot simulate this release in lockstep.
+export const LOBBY_PROTOCOL_VERSION = 6;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
@@ -76,9 +78,6 @@ function roomToGame(row) {
     difficulty: row.difficulty || 'normal',
     // Custom games (the WC3 browser) ride the same rooms with a kind tag.
     custom: metadata.kind === 'custom',
-    rally: metadata.kind === 'rally',
-    rallyWorldId: metadata.worldId || null,
-    rallyGateKey: metadata.gateKey || null,
     mapName: metadata.mapName || null,
     // A selected roster is authoritative. metadata.players is only a legacy
     // fallback for rows fetched without the nested relation.
@@ -494,7 +493,7 @@ export class OnlineLobby {
   // the portal filter to these. (See isCustomGame at module level.)
 
   async createGame({ visibility = 'public', level = 1, mode = 'campaign', difficulty = 'normal', unlockedLevel = 1,
-    name = null, maxPlayers = 4, kind = null, mapName = null, worldId = null, gateKey = null } = {}) {
+    name = null, maxPlayers = 4, kind = null, mapName = null } = {}) {
     const metadata = {
       level,
       mode,
@@ -503,8 +502,6 @@ export class OnlineLobby {
       protocolVersion: LOBBY_PROTOCOL_VERSION,
       clientVersion: CLIENT_VERSION,
       ...(kind ? { kind, mapName: mapName || null } : {}),
-      ...(worldId ? { worldId } : {}),
-      ...(gateKey ? { gateKey } : {}),
     };
     const { data, error } = await this.sb.from('rooms').insert({
       name: name || `${this.me.name}'s frontier`,
@@ -848,7 +845,7 @@ export class OnlineLobby {
 export const LORE = [
   ['The Long Dusk', 'Nobody agrees on when the plague began — only that the frontier stopped answering, west to east, until the maps went quiet. What was left of the Marches learned a simple arithmetic: the dead do not sleep. They gather where the hives feed, and every league of ground you take makes them answer.'],
   ['The Keeps', 'The old kingdoms built their keeps on ley-crossings — plazas ringed by housing, mills at the treelines, gold veins within riding distance. That is why every ruin you reclaim feels planned: it was. You are not building a city. You are waking one up and pushing its roads back into the dark.'],
-  ['The Company', 'Scott English walks slow because everything near him does — space thickens around that man, and his shotgun ends arguments the gravity started. Alexander Thomas kills from a horizon away while a cloud of nanites stitches his troops back together; when the dead close in, the grenade goes forward and he goes backward. Danny Donovan? The horde has never seen Danny Donovan. It only feels itself getting thinner. Turtle Voss has not taken a backward step since the Marches, and neither has whatever is standing behind him. John Marlowe fights like the bar is already closing and gets meaner every time he hits the ground. Tiger Reyes never arrives alone — by the time you count the copies it is too late to matter. And Aaron Whitlock wins most of his fights before the first shot, mending and quickening everyone near him while something he called stands and fights in his place.'],
+  ['The Company', 'Scott English walks slow because everything near him does — space thickens around that man, and his shotgun ends arguments the gravity started. Alexander Thomas kills from a horizon away while a cloud of nanites stitches his troops back together; when the dead close in, the grenade goes forward and he goes backward. Daniel Donovan? The horde has never seen Daniel Donovan. It only feels itself getting thinner. Turtle Voss has not taken a backward step since the Marches, and neither has whatever is standing behind him. John Marlowe fights like the bar is already closing and gets meaner every time he hits the ground. Tiger Reyes never arrives alone — by the time you count the copies it is too late to matter. And Aaron Whitlock wins most of his fights before the first shot, mending and quickening everyone near him while something he called stands and fights in his place.'],
   ['The Front Line', 'Camps do not wait for orders. They muster, march, and hold what they can. Hives do the same in reverse. The war is the line between those two economies, and the best commanders move that line before it moves them.'],
   ['The Zillion', 'At the bottom of the Black Vale something wears the plague like a crown. The chronicles call it The Zillion because the scouts who counted its horde never agreed on a number, only on a magnitude. Five keeps stand between it and the last planet. Yours is one of them.'],
 ];

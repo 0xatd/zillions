@@ -11,7 +11,9 @@ Zillions has three runtime layers:
 2. Supabase stores durable account and multiplayer coordination data.
 3. Vercel serves the static application and same-origin API routes.
 
-The production backend is not server-authoritative for combat.
+The production backend is not server-authoritative for combat. It is
+authoritative for rewards: signed-in XP, levels, loot, Salvage Alloy, and
+stats are granted only by `api/match-result.js`.
 
 ## Browser Startup
 
@@ -23,18 +25,17 @@ The startup flow is:
 index.html
   -> src/main.js
      -> account gate
-     -> selected character or character creation
-     -> persistent overworld location
-     -> optional menu, galaxy map, or physical mission rally
-     -> deterministic mission instance
-     -> saved overworld location
+     -> selected character or character creation (Character Select)
+     -> Deploy -> mission select, Custom Games, or an online room
+     -> deterministic siege
+     -> end screen with server-confirmed rewards
+     -> Character Select
      -> Three.js render loop
 ```
 
 `src/shell-state.js` owns the shell base state and temporary overlay state.
-The overworld is the normal signed-in base state. Menus are temporary overlays.
-Mission launch stores the planet and coordinates. Mission completion restores
-that location.
+Character Select is the normal signed-in base state. Menus are temporary
+overlays. There is no overworld; the living world was removed.
 
 `src/main.js` composes the system. Keep domain rules in smaller modules when a
 module already owns that rule.
@@ -60,7 +61,8 @@ module already owns that rule.
 | `src/skilltree.js` | The Lattice: sector table, seeded tree generation, allocation rules, and the resolved payload |
 | `src/keybinds.js` | The control scheme: every action, its default key, and rebinding |
 | `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |
-| `src/meta.js` | Persistent meta-progression: run payouts, the upgrade tree, and the bonus payload a run starts with |
+| `src/meta.js` | Guest (offline) Alloy ledger, the meta-upgrade tree, and threat tiers |
+| `src/match-rewards.js` | Pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, Alloy, item rows |
 
 Simulation code must produce the same result on every peer. Add all new state
 to snapshots when the state can affect later simulation.
@@ -72,10 +74,6 @@ to snapshots when the state can affect later simulation.
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
-| `src/overworld.js` | Headless persistent worlds: galaxy catalog, world descriptors, stitched biomes, instance gates, Orbital Lifts, hero controller, ghost presence |
-| `src/world-manifest.js` | Pure planet topology generation, stable IDs, manifest validation, and pinned content hashes |
-| `src/galaxy.js` | Headless galaxy generation: spiral star systems, world kinds, threat tiers, and generated world descriptors |
-| `src/factions.js` | Faction roster, presence archetypes, and deterministic ownership assignment |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
@@ -97,7 +95,8 @@ procedural renderer and must not stop a match from starting.
 | --- | --- |
 | `src/main.js` | Runtime composition, render loop, input, save flow, co-op sequencing, and Watch |
 | `src/ui.js` | Main menu, setup, lobby, room, HUD, and overlays |
-| `src/shell-state.js` | Auth, character, overworld, mission, overlay, and return state |
+| `src/shell-state.js` | Auth, character, mission, overlay, and return state |
+| `src/match-outbox.js` | Signed-in match reports the server has not confirmed yet, resent with the same requestId |
 | `src/runtime-guard.js` | Fatal frame-loop recovery |
 | `style.css` | Application layout and visual styles |
 
@@ -106,19 +105,20 @@ procedural renderer and must not stop a match from starting.
 | File | Ownership |
 | --- | --- |
 | `src/supabase.js` | One shared Supabase client and write timeout |
-| `src/auth.js` | Google sign-in, username, profile, stats, and cloud saves |
+| `src/auth.js` | Google sign-in, username, profile, cloud saves, and read-only hydration of server stats and character progress |
 | `src/online.js` | Rooms, seats, roster refresh, chat, presence, and signaling |
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
-| `api/state.js` | Legacy state compatibility route |
-| `api/lobby.js` | Legacy lobby compatibility route |
+| `api/match-start.js` | Issues signed, single-use match tickets (seed, room) |
+| `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; keeps input logs of leaderboard candidates |
+| `api/economy.js` | Market, stash, equipment, and Forge transactions |
+| `api/account-upgrades.js` | Account upgrade tree purchases, one-time local import, paid Lattice rewire |
 
 `supabase/schema.sql` defines the durable schema.
 
-Physical mission gates use Supabase rooms as rally groups. A rally supports
-one to four players. The first player hosts the room. Other players at the same
-planetary gate can join the room. The mission still uses WebRTC lockstep.
+Co-op rooms support one to four players. The first player hosts the room.
+The mission uses WebRTC lockstep.
 
 ## Deterministic Simulation
 
@@ -169,72 +169,52 @@ seat that the same account owned before disconnect.
 
 | State | Owner |
 | --- | --- |
-| Combat, units, buildings, loot, and Threat | Browser `Game` snapshot |
+| Combat, units, buildings, loot, and Threat during a match | Browser `Game` snapshot |
 | Current peer commands | WebRTC lockstep |
 | Account and public username | Supabase |
-| Cloud saves and hero career | Supabase |
+| Cloud saves (resume snapshot) | Supabase |
+| Character level, XP, career stats | Supabase `game_characters`, written only by `apply_match_result()` |
+| Account upgrade tree | Supabase `account_upgrades`, written only by `account_upgrade_mutate()` |
+| Stash, equipment, Alloy wallet | Supabase `item_instances` / `player_wallets`, written only by service-role RPCs |
+| Games, wins, kills, campaign progress, relics, quests | Supabase `player_stats`, written only by `apply_match_result()` |
+| Match history and report idempotency | Supabase `match_history` / `match_reports`, written only by `apply_match_result()` |
+| Character appearance, Lattice, selected character | Auth user metadata (client-writable; cosmetic and build data only) |
 | Rooms, seats, chat, and signaling | Supabase |
-| Local development fallback | Browser local storage |
-| Legacy state mirror | Vercel Blob compatibility routes |
-| Last planetary location | Profile `lastWorld` with local mirror |
-| Galaxy topology, region ownership, parties, and world events | Supabase living-world authority |
-| Region simulation lease and cross-region handoff | Supabase service worker |
+| Guest (offline) progress | Browser local storage only, never uploaded |
 
-## Galaxy Travel
+## Match Results
 
-`src/overworld.js` owns the destination catalog and converts a destination ID
-into a world descriptor. Earth and each frontier planet use the same
-`Overworld` controller and renderer. An Orbital Lift opens the star map.
-Travel removes the current world scene, loads the selected descriptor, scopes
-presence to that world's channel, and stores `lastWorld` on the profile.
+When a signed-in match ends, the client never grants anything itself.
 
-Current Zillions battle maps are instances attached to planetary gates. The
-galaxy and world descriptors must not assume that future destinations use the
-same art, siege objectives, or encounter format.
+```text
+POST /api/match-start           signed single-use ticket: user, mission, seed, room
+  -> new Game(..., { rngSeed })   ticket seed; commands logged with their tick
+victory/defeat event
+  -> Main._matchReport()          what the client claims (buildMatchReport)
+  -> match outbox (localStorage)  survives a closed tab; same requestId on resend
+  -> POST /api/match-result       bearer token verified with Supabase auth
+       -> validateMatchReport()   bounds vs duration, map, level unlocks
+       -> verifyLootKey()         every pack key re-derived from the map seed
+       -> evaluateQuests()        quests re-run on the reported counters
+       -> verifyTicket()          HMAC, expiry, user, mission; room from ticket
+       -> server clock            duration fits time since the ticket
+       -> reviewReasons()         bests / suspicious runs keep their input log
+                                  for a later leaderboard check (no replay)
+       -> co-op room check        reporter must be a seated room participant
+       -> computeMatchRewards()   XP, levels, items, Alloy, stats
+       -> apply_match_result()    one transaction: idempotency, rate limit,
+                                  duration clock, CAS on progress_revision,
+                                  quest/item dedupe, stash cap, wallet credit
+  -> end screen shows exactly what the server returned
+```
 
-Do not move production social state back to Vercel Blob.
+A replayed `requestId` returns the stored response and grants nothing. A
+player can report one result per co-op room. Reports are rate limited and must
+fit inside the wall-clock time since the match ticket was issued. Combat
+counters are still client claims, bounded but not replayed; see
+`docs/backend.md` and `docs/leaderboards.md`.
 
-## Living World Authority
-
-The durable topology is `universe -> star system -> planet -> region ->
-location`. Earth is the first planet. Greenfall is the first active region.
-The `earth-1` shard identifier remains a compatibility key while authority
-moves to region workers.
-
-Each party has one authoritative region. Each route records its origin and
-destination region. A region has one simulation state row and at most one
-active worker lease. Lease epochs fence an old worker after another worker
-takes ownership.
-
-Cross-region travel uses a durable two-step handoff. The source records one
-idempotent pending request. The destination worker must hold the destination
-lease. Completion locks the handoff and party, verifies the expected party
-revision, then updates the movement order, location, region, and handoff in one
-transaction. A replay returns the committed result. A stale transfer fails.
-
-Faction control is durable world state. Regions, locations, and routes store
-ownership, claims, control strength, and conflict state. Region control history
-records why control changed and the world tick at which it changed.
-
-This authority does not yet run tactical combat. Tactical matches still use
-browser lockstep. A later battle-result boundary will write signed outcomes
-back to the living world.
-
-## Galaxy Generation and Meta-Progression
-
-`src/galaxy.js` generates the galaxy from one seed. Star systems sit on spiral
-arms with Sol at the hub. Each system carries one to three worlds, and each
-world resolves to a world descriptor in the shape `src/overworld.js` defines.
-
-Level identifiers are handed out in distance order, so the world further from
-Earth is always the harder world. A world reads its landform, palette, hives,
-boss and difficulty from `levelById()`. `src/galaxy.js` never invents level
-data; it decides where a world sits and what kind of world it is.
-
-Each world has a kind. A standard world is a campaign landing. A holdout runs
-the survival rules with fewer hives and higher pressure. A derelict carries a
-labyrinth hulk on its surface. `src/config.js` derives the kind from the planet
-number, so the simulation and the galaxy map always agree.
+## Gear, the Lattice, and Meta
 
 `src/items.js` owns gear. An item is a string, and the string can be a seed:
 `scatter_mk2:7f3a91:62:2` is base, roll seed, item level, and rarity.
@@ -249,10 +229,10 @@ Local and global mods stay apart. A weapon's own `+% damage` scales that
 weapon; the same roll on a coat scales the hero. `applyLocal()` folds the local
 bag into the weapon exactly once.
 
-`src/skilltree.js` owns the Lattice, the shared passive tree every MMO
+`src/skilltree.js` owns the Lattice, the shared passive tree every persistent
 character allocates into. The tree is generated from a fixed seed and a
-nine-sector table rather than hand-authored, the same way `terrain.js`,
-`lanes.js` and `galaxy.js` generate their structures. Traces, relays and
+nine-sector table rather than hand-authored, the same way `terrain.js` and
+`lanes.js` generate their structures. Traces, relays and
 attribute nodes are bags of numbers on the mod keys `itemMods()` already
 speaks. Doctrines are flags: `src/game.js` owns each rule in simulation code,
 because a node cannot ship behaviour without breaking snapshot restore and
@@ -262,48 +242,14 @@ Both modules resolve to numbers before a run starts. `characterCamp()` folds
 gear, the Lattice, and each weapon set into flat bags, and the simulation never
 queries an item, an affix, or a tree node while it runs.
 
-`src/meta.js` owns what a player keeps between runs. `runScore()` in
-`src/game.js` folds a finished run into one score. `awardRun()` converts that
-score into Salvage Alloy, `spend()` buys nodes from a twelve-node tree, and
-`metaBonuses()` returns the data payload a run reads at start. Node effects are
-data only. Local storage holds the state today under the `zillions_meta` key,
-and `setMetaBackend()` is the seam a server takes later.
+`src/meta.js` holds the guest (offline) Alloy ledger. `runScore()` in
+`src/game.js` folds a finished run into one score and `awardRun()` converts it
+into local Alloy for guests. Signed-in Alloy comes only from
+`matchAlloy()` in `src/match-rewards.js`, credited by the server.
 
-## Factions
-
-`src/factions.js` holds seven authored factions, three human and four xeno, and
-mints the rest from their number the way `galaxyLevel()` mints planets. It is a
-leaf module. It imports `src/utils.js` and nothing else, so `src/config.js` can
-import it later without an import cycle.
-
-A faction declares how it occupies space, and the difference is structural:
-
-| Presence | Holds worlds | Moves | Example |
-| --- | --- | --- | --- |
-| `worlds` | yes | no | The Remnant, The Brood |
-| `fleets` | no | yes | The Salvage Courts, The Gyre |
-| `drift` | no | yes | The Bloom |
-| `ruins` | derelicts only | no | The Cenotaph |
-
-A faction that holds ground owns worlds, and a world is a level id. A faction
-with no ground occupies a system's `presence[]` instead. A roaming site never
-carries a level id. An anchorage is not a landing, and giving one a level id
-would gate the campaign ladder behind content nobody can stand on.
-
-System ownership is a projection. `systemOwner()` computes it from the worlds
-under a system at read time. Do not store ownership on a generated system.
-Ownership changes with progress, and the galaxy's structure hash must not.
-
-Roaming positions work the same way. `presencePositionAt(site, epoch)` derives
-where a fleet or a bloom is from the site's drift parameters and an epoch every
-peer agrees on. The structure hash covers the anchor point only. Motion stays
-out of it.
-
-`scripts/galaxy-check.mjs` builds every generated world, walks every sampled
-world descriptor, asserts no groundless faction ever holds a world, and drives
-the award and spend math.
-
-The galaxy and meta modules are wired into the shell in a follow-up change.
+Campaign maps past the five authored Earth missions are generated by
+`levelById()` in `src/config.js` from the level number alone, so every peer
+builds the same map without shipping data.
 
 ## Save and Restore
 

@@ -1,9 +1,9 @@
 # Zillions
 
-Zillions is the current playable foundation for a new browser-based
-science-fantasy MMO. Create a persistent character, travel between worlds, and
-enter planetary adventures. The current planet-conquest art and siege loop are
-temporary content while the larger game develops.
+Zillions is a browser siege game. Pick a hero, found a colony on a
+terrain-shaped map, fund towers and camps with gold, push lane nodes, and burn
+out every hive before Threat buries you. Play alone or with up to three friends
+in lockstep co-op.
 
 Production: https://zillions.taborlin.co
 
@@ -35,23 +35,12 @@ Use this source order when documents disagree:
 5. `docs/agent-brief.md`.
 6. Future documents, including `docs/design-vision.md`.
 
-## Current Playable Game
+## The Game
 
-Normal play uses a traditional MMO flow: login with Google or an email magic
-link, character select, Enter World,
-last planetary location, Orbital Lift, and galaxy map. Each planet is a persistent
-shared hub with its own presence channel and entrances to playable instances.
-The profile remembers the last world.
-
-Character Info separates the character overview, equipment, abilities, and the
-Lattice. Equipment supports item inspection, comparisons, click actions, and
-drag-and-drop between compatible body slots and the persistent stash.
-Signed-in shop transactions use the server-owned inventory and Salvage Alloy
-ledger. Static local play keeps a separate offline-only ledger.
-
-Custom Games separates Live Games from Arcade. Live Games shows real player
-rooms that can be joined or watched. Arcade lists prebuilt campaign, Survival,
-and Labyrinth maps that can be played directly or used to host a room.
+Zillions is a siege game and nothing else. The persistent living world (the
+overworld, planet hubs, galaxy map, parties, encounters, companies, markets
+and the region workers behind them) was removed. Sign in, pick a character,
+press **Deploy**, choose a mission, and play.
 
 Zillions uses a continuous siege loop. There is no day, night, or bell phase.
 
@@ -65,35 +54,51 @@ Zillions uses a continuous siege loop. There is no day, night, or bell phase.
 Threat replaces a wave clock. Threat rises with time, living hives, and
 captured ground. Each whole Threat level triggers a hive surge.
 
-The five Earth missions use distinct landforms and colony plans. After Earth,
-the galaxy map opens deterministic frontier planets. Each planet currently
-contains a Zillions-style warzone instance and a route back to orbit. Future
-destinations can use other art and adventure structures.
-
-`src/galaxy.js` generates the galaxy itself: star systems on spiral arms, Sol
-at the hub, and worlds that get harder the further out you travel. A world is
-one of three kinds. A standard world is a campaign landing, a holdout runs the
-survival rules, and a derelict carries a labyrinth hulk on its surface.
-
-`src/meta.js` holds what a run leaves behind. Each landing pays Salvage Alloy
-against its score, and Alloy buys permanent nodes across supply, warband, and
-command branches. Both modules are headless and validated by
-`scripts/galaxy-check.mjs`. The shell wiring lands in a follow-up change.
-
 Living allied heroes and troops reveal the battlefield. The world outside
 their soft vision circles is almost black, including the minimap.
 
 ## Modes
 
-- **Play Online** is the primary mode. Create, join, rejoin, or watch a room.
-- **Story Campaign** contains the five Earth missions and later frontier worlds.
+- **Campaign** contains the five authored Earth missions. Once Earth is won,
+  procedurally generated campaign maps continue without end; each one is
+  derived from its level number alone, so every player and every co-op peer
+  gets the same map.
 - **Survival** is an endless siege with a boss every fifth Threat level.
+- **Labyrinth** trials are hero gauntlets with no colony.
+- **Co-op** (Play Online) supports up to four players. Each player controls
+  one hero; the players share gold, colony buildings, the enemy force, and the
+  win condition. Rooms can be created, joined, rejoined, or watched.
+- **Custom Games** separates Live Games (real rooms) from Arcade (prebuilt
+  campaign, Survival, and Labyrinth maps that can be played or hosted).
 
-Online matches support up to four players. Each player controls one hero. The
-players share gold, colony buildings, the enemy force, and the win condition.
+## Accounts and Progression
 
-Supabase stores accounts, usernames, rooms, chat, saves, and match history.
-WebRTC carries match commands. The backend does not run the combat simulation.
+Signed-in players log in with Google or an email magic link and keep
+persistent characters (class, origin, appearance, level, gear, Lattice).
+Character Info separates the overview, equipment, abilities, the Lattice, the
+Market (Orbital Exchange) and the Forge.
+
+**The server is the only thing that hands out XP, loot, Alloy, and stats.**
+A signed-in match starts with a signed, single-use ticket from
+`api/match-start.js` that fixes the player, mission, room and map seed. When
+the match ends, the client sends the ticket, a match report and its input log
+to `api/match-result.js`. The server verifies the session and ticket,
+bounds-checks every number against the match duration and map, re-derives every looted item key
+from the map seed, re-evaluates side quests itself, and then grants the
+result in one transaction through the `apply_match_result()` database
+function. The end screen shows only what the server confirmed. Clients have no
+write access to `player_stats`, `match_history`, `game_characters`,
+`item_instances`, or `player_wallets`. See `docs/backend.md`.
+
+Guest (offline) play keeps its own progress in browser storage only. It is
+never uploaded and never trusted by the server.
+
+Market and Forge transactions go through `api/economy.js` against the same
+server-owned inventory and Salvage Alloy ledger.
+
+Supabase stores accounts, usernames, rooms, chat, characters, inventories,
+wallets, stats, and match history. WebRTC carries co-op match commands. The
+backend does not run the combat simulation.
 
 ## Heroes
 
@@ -101,7 +106,7 @@ The canonical roster is:
 
 - Scott English
 - Alexander Thomas
-- Danny Donovan
+- Daniel Donovan
 - Turtle Voss
 - John Marlowe
 - Tiger Reyes
@@ -116,8 +121,8 @@ levels grant tapered stat growth.
 
 ### Why This Exists
 
-The goal was to give persistent characters real build depth, by merging the
-galaxy character system with an action-RPG passive tree.
+The goal was to give persistent characters real build depth by pairing them
+with an action-RPG passive tree.
 
 The reference is the Path of Exile 2 passive tree. The rule that governed every
 decision: **copy structure, never content.** One shared graph with per-class
@@ -130,7 +135,7 @@ and every term in it is a Zillions term.
 
 The system earned its place because the plumbing was already half built and
 doing nothing. `grantMmoExperience()` had granted one talent point per level
-since MMO characters shipped, and nothing ever spent one — a level 40 character
+since persistent characters shipped, and nothing ever spent one — a level 40 character
 held 39 dead points. The Lattice is the spend surface those points always
 needed.
 
@@ -154,12 +159,12 @@ built, the rules a change has to respect, and what was deliberately left out.
 
 ### What A Character Carries
 
-A galaxy character carries its own build between adventures.
+A character carries its own build between sieges.
 
 Gear is rolled. An item is a key such as `scatter_mk2:7f3a91:62:2` — base, roll
 seed, item level and rarity — and it resolves to the same item on every machine
-without storing anything but the key. Item level comes from the world, so loot
-gets better the further out you travel. Characters choose a Human or Robot
+without storing anything but the key. Item level comes from the mission and its
+difficulty, so loot gets better the deeper into the campaign you go. Characters choose a Human or Robot
 origin and assemble face, body, head, and leg variants. Head, chest, hands,
 legs, boots, weapons, and off-hands change the procedural model. Two implants
 remain internal stat gear. The weapon and off-hand exist twice: press X to draw
@@ -190,7 +195,7 @@ which reads the same table the game dispatches through.
 
 | Input | Action |
 | --- | --- |
-| W, A, S, D | Move in world and minimap directions |
+| W, A, S, D | Move in map and minimap directions |
 | Shift | Gallop at full health |
 | Space | Build mode: build/pay. Fight mode: dodge roll |
 | Q | Fight mode: primary ability (your hero special) |
@@ -223,7 +228,8 @@ Space and B build. In Fight mode, Space dodges and Q uses the primary ability.
 
 Requirements:
 
-- Node.js 20 or later
+- Node.js 22 (CI uses 22; 20 works except `check:browser`, which needs the
+  global `WebSocket`)
 - npm
 - A browser with WebGL
 
@@ -241,8 +247,9 @@ python3 -m http.server 8000
 
 Open `http://localhost:8000/`.
 
-The local build can use local browser storage. Production requires the
-Zillions Google and Supabase account flow.
+A static server plays as a guest with local browser storage. Signed-in play
+and the API routes need Supabase; copy `.env.example` to `.env.local`, fill it
+in, and run `vercel dev`. Never commit real values.
 
 ## Validation
 
@@ -252,10 +259,22 @@ Run the complete repository check:
 npm run check
 ```
 
-The command checks syntax, balance invariants, deterministic restore, all five
-maps, every generated galaxy world, meta-progression math, hero abilities,
-multiplayer signaling, room lifecycle, lobby behavior, and repository
-documentation.
+The command runs `precheck` first (auth, economy, crafting, shell state) and
+then checks syntax, balance invariants, deterministic restore, all five maps,
+generated campaign maps, server match-reward rules
+(`scripts/match-result-check.mjs`), hero abilities, multiplayer signaling,
+room lifecycle, lobby behavior, and repository documentation.
+
+Two more checks need local tooling:
+
+```bash
+npm run check:postgres   # schema + every migration on a throwaway local Postgres
+npm run check:browser    # headless Chrome shell journey
+```
+
+`check:postgres` never connects to a real Supabase project. CI
+(`.github/workflows/ci.yml`) runs `npm ci`, `npm run check`, and
+`npm run check:postgres` on every pull request.
 
 Also run these checks before you open a pull request:
 
@@ -281,18 +300,29 @@ Vercel is the production host. The production project is `zillions`.
 
 Vercel serves the static game and these same-origin API routes:
 
-- `api/auth-config.js`
-- `api/state.js`
-- `api/lobby.js`
+- `api/auth-config.js` — public Supabase and ICE configuration
+- `api/match-start.js` — signed match tickets (seed, co-op room)
+- `api/match-result.js` — the only grant path for signed-in XP, loot, Alloy,
+  and stats
+- `api/economy.js` — Market, stash, equipment, and Forge transactions
+- `api/account-upgrades.js` — account upgrade tree, one-time local import,
+  paid Lattice rewire
 
-Do not commit credentials or environment values. See `docs/backend.md` for the
-required services and data ownership rules.
+There are no scheduled crons. `.env.example` lists every environment
+variable. Do not commit credentials or environment values. See
+`docs/backend.md` for the required services and data ownership rules.
+
+Database changes live in `supabase/migrations/`. They are applied by hand in
+the Supabase SQL editor after review; nothing in this repository applies them
+automatically. `20261027000000_drop_living_world_DESTRUCTIVE.sql` permanently
+drops the living-world tables — review it and back up first.
 
 ## Important Product Rules
 
 - Show public usernames. Never show Google names or email addresses.
 - Show only real rooms, players, and statistics.
 - Keep all simulation changes deterministic.
+- Grant signed-in XP, loot, Alloy, and stats only on the server.
 - Require every occupied multiplayer seat to be compatible, connected, and
   eligible before match start.
 - Keep all guests behind the battlefield load barrier before lockstep starts.

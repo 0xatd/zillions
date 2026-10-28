@@ -9,7 +9,7 @@ const PORTRAITS = {
 };
 import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
-  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS,
+  HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS, CULTURE_ARMIES, cultureKey,
 } from './config.js';
 import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
@@ -37,7 +37,6 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
-import { clusterLivingWorldParties, livingWorldReadyStatus, livingWorldRouteLine, livingWorldViewport, normalizeLivingWorld } from './living-world-ui.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -61,9 +60,6 @@ export class UI {
     this.shell = new ShellState();
     this.msgSeen = 0;
     this.pauseOpen = false;
-    this._livingWorld = normalizeLivingWorld();
-    this._livingWorldView = { zoom: 1, x: 0, y: 0 };
-    this._livingWorldStatus = { mode: 'idle', message: '' };
     this._buildDOM();
   }
 
@@ -90,24 +86,6 @@ export class UI {
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
-      <div id="ow-quick-actions" class="owquick hidden">
-        <button id="ow-party" class="tbtn ow-party-action" title="Create a party or invite friends">＋ PARTY</button>
-        <button id="ow-map" class="tbtn ow-map-action" title="Open world map and mission finder">🗺 WORLD MAP</button>
-        <button id="ow-menu" class="tbtn" title="Game menu (Esc)">☰ MENU</button>
-      </div>
-
-      <aside id="ow-party-frames" class="ow-party-frames hidden" aria-label="Party"></aside>
-
-      <section id="living-world-map" class="living-world-map hidden" role="dialog" aria-modal="true" aria-label="World map">
-        <div class="lw-shell">
-          <header class="lw-head"><div><span>LIVING WORLD</span><h1 id="lw-world-name">EARTH FRONTIER</h1><small id="lw-region"></small></div><div class="lw-head-actions"><button class="tbtn" id="lw-party">＋ PARTY</button><button class="tbtn" id="lw-close">CLOSE</button></div></header>
-          <div class="lw-body">
-            <div class="lw-map-stage" id="lw-map-stage"><div id="lw-regions" class="lw-regions"></div><div class="lw-map-grid"></div><div id="lw-world-layer" class="lw-world-layer"><svg id="lw-terrain" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Earth geography"></svg><svg id="lw-routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg><div id="lw-map-nodes"></div></div><div class="lw-map-tools"><button class="tbtn" data-map-zoom="out" aria-label="Zoom out">−</button><b id="lw-zoom">1×</b><button class="tbtn" data-map-zoom="in" aria-label="Zoom in">+</button><button class="tbtn" data-map-zoom="reset">EARTH</button></div><div id="lw-map-status" class="lw-map-status" role="status"></div><div class="lw-legend"><span><i class="free"></i> Allied</span><span><i class="hive"></i> Hostile</span><span><i class="neutral"></i> Neutral</span><span>Dashed route: contested</span></div></div>
-            <aside class="lw-finder"><span class="lw-kicker">WAR COUNCIL</span><h2>Choose your next move</h2><p>Travel the roads for opportunities, manage your company, or resolve an active encounter.</p><div id="lw-company" class="lw-selection"></div><div id="lw-encounters"></div><div id="lw-governance"></div><div id="lw-logistics" class="lw-selection"></div><div id="lw-missions"></div><div id="lw-selection" class="lw-selection"><small>SELECT A DESTINATION</small><b>World map</b><p>Known towns support travel. Discovered fronts support direct deployment.</p></div></aside>
-          </div>
-        </div>
-      </section>
-
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -191,7 +169,7 @@ export class UI {
         </div>
 
         <div id="screen-main" class="mainmenu character-select">
-          <div class="character-heading"><span>GALAXY ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment, level and last world persist between adventures. Press C in the world to return here.</small></div>
+          <div class="character-heading"><span>ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment and level persist between sieges. Press C from the main menu to return here.</small></div>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
           <div id="character-stage" class="character-stage">
             <div id="character-avatar" class="character-avatar" aria-label="Selected character">
@@ -207,20 +185,8 @@ export class UI {
             </div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">ENTER WORLD</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
+          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
-        </div>
-
-        <div id="screen-world-menu" class="world-menu hidden">
-          <div class="world-menu-card">
-            <span class="world-menu-eyebrow">ZILLIONS</span><h1>GAME MENU</h1>
-            <button class="menubtn primary" id="ow-resume">RETURN TO WORLD</button>
-            <button class="menubtn" id="ow-world-map">WORLD MAP & MISSIONS</button>
-            <button class="menubtn" id="ow-party-menu">CREATE / VIEW PARTY</button>
-            <button class="menubtn" id="ow-characters">CHARACTER SELECT</button>
-            <button class="menubtn" id="ow-settings">SYSTEM</button>
-            <button class="menubtn danger" id="ow-logout">LOG OUT</button>
-          </div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -275,7 +241,7 @@ export class UI {
         </div>
 
         <div id="screen-character-create" class="character-create-screen hidden">
-          <div class="creator-head"><span>NEW GALAXY CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
+          <div class="creator-head"><span>NEW CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
           <form id="character-create-form" class="creator-form creator-xl">
             <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>The same procedural model appears in the world and in combat.</span></section>
             <div class="creator-controls">
@@ -347,13 +313,6 @@ export class UI {
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
-        <div id="screen-galaxy" class="galaxy-screen hidden">
-          <div class="galaxy-head"><span>STARSHIP NAVIGATION</span><h1>THE KNOWN GALAXY</h1><p>Select a destination. Planetary zones and battle instances load inside the same persistent journey.</p></div>
-          <div id="galaxy-map" class="galaxy-map"></div>
-          <aside id="galaxy-detail" class="galaxy-detail"></aside>
-          <button class="tbtn galaxy-back" id="galaxy-back">← RETURN</button>
-        </div>
-
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
             <button class="tbtn roomexit" id="s-back">← Back</button>
@@ -364,7 +323,9 @@ export class UI {
           <div class="levelrow" id="levelrow"></div>
           <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
-          <div class="steplabel diff-label">3 · Difficulty</div>
+          <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
+          <div class="diffseg cultureseg" id="cultureseg"></div>
+          <div class="steplabel diff-label">4 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
           <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
@@ -561,12 +522,6 @@ export class UI {
       if (!character) return;
       if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
     };
-    q('#ow-resume').onclick = () => this.hideOverlay();
-    q('#ow-world-map').onclick = () => { this.hideOverlay(); this.openLivingWorldMap(); };
-    q('#ow-party-menu').onclick = () => { this.hideOverlay(); this._partyAction(); };
-    q('#ow-characters').onclick = () => this._showScreen('main');
-    q('#ow-settings').onclick = () => { this._settingsReturn = 'world-menu'; this._showScreen('settings'); };
-    q('#ow-logout').onclick = () => this.cb.onSignOut && this.cb.onSignOut();
     q('#creator-cancel').onclick = () => {
       if (!(this._profile?.mmoCharacters || []).length) return;
       this._backOverlay('main');
@@ -581,11 +536,8 @@ export class UI {
         customization: { ...(this._creatorParts || {}) },
       });
     };
-    // Back out of the browser to where you walked in from — the title
-    // utilities row, or (if a portal ever reopens it in-world) straight back
-    // to the walk. Landing on the hub from everywhere was its own loop.
+    // Back out of the browser to where you walked in from.
     q('#cu-back').onclick = () => {
-      if (this._overworldMode) { this.hideOverlay(); return; }
       this._showScreen(this._customFrom || 'main');
     };
     q('#cu-refresh').onclick = () => this.cb.onCustomRefresh && this.cb.onCustomRefresh();
@@ -641,7 +593,6 @@ export class UI {
       } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
     };
     q('#l-back').onclick = () => this._showScreen('main');
-    q('#galaxy-back').onclick = () => this._overworldMode ? this.hideOverlay() : this._showScreen('main');
     for (const back of this.root.querySelectorAll('.info-back')) back.onclick = () => this._backOverlay();
 
     // ----- lobby -----
@@ -758,6 +709,25 @@ export class UI {
       };
       seg.appendChild(b);
     }
+    // ----- setup: culture (base look + army) -----
+    let savedCulture = null;
+    try { savedCulture = localStorage.getItem('zillions.culture'); } catch (e) { /* private mode */ }
+    this.selectedCulture = cultureKey(savedCulture);
+    const cseg = q('#cultureseg');
+    for (const [key, c] of Object.entries(CULTURE_ARMIES)) {
+      const b = document.createElement('button');
+      b.className = 'diffbtn' + (key === this.selectedCulture ? ' sel' : '');
+      b.dataset.culture = key;
+      b.innerHTML = `${c.name}<small>${c.banner}</small>`;
+      const troops = ['soldier', 'ranger', 'sniper'].map((u) => c.units[u]?.name).filter(Boolean);
+      b.title = `${c.blurb}${troops.length ? `\n${troops.join(' · ')}` : ''}`;
+      b.onclick = () => {
+        this.selectedCulture = key;
+        try { localStorage.setItem('zillions.culture', key); } catch (e) { /* private mode */ }
+        for (const el of cseg.children) el.classList.toggle('sel', el === b);
+      };
+      cseg.appendChild(b);
+    }
     q('#s-start').onclick = () => this.cb.onStart(this.selectedDiff, this.selectedHero);
 
     // ----- toolbar -----
@@ -766,18 +736,6 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
-    q('#ow-menu').onclick = () => this.toggleOverlay();
-    q('#ow-party').onclick = () => this._partyAction();
-    q('#ow-map').onclick = () => this.openLivingWorldMap();
-    q('#lw-party').onclick = () => this._partyAction();
-    q('#lw-close').onclick = () => this.closeLivingWorldMap();
-    for (const button of this.root.querySelectorAll('[data-map-zoom]')) button.onclick = () => this._changeLivingWorldZoom(button.dataset.mapZoom);
-    const mapStage = q('#lw-map-stage');
-    mapStage.onwheel = (event) => { event.preventDefault(); this._changeLivingWorldZoom(event.deltaY < 0 ? 'in' : 'out'); };
-    let drag = null;
-    mapStage.onpointerdown = (event) => { if (event.target.closest('button')) return; drag = { x: event.clientX, y: event.clientY, ox: this._livingWorldView.x, oy: this._livingWorldView.y }; mapStage.setPointerCapture?.(event.pointerId); };
-    mapStage.onpointermove = (event) => { if (!drag) return; this._livingWorldView.x = drag.ox + event.clientX - drag.x; this._livingWorldView.y = drag.oy + event.clientY - drag.y; this._applyLivingWorldView(); };
-    mapStage.onpointerup = mapStage.onpointercancel = () => { if (drag) this.cb.onLivingWorldViewport?.(this._livingWorldViewport()); drag = null; };
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -990,13 +948,13 @@ export class UI {
     ov.classList.remove('hidden');
     this._lastScreen = name;
     if (name === 'account') this.shell.enterBase(SHELL_BASES.AUTH);
-    else if (name === 'main' && !this._overworldMode) this.shell.enterBase(SHELL_BASES.CHARACTER_SELECT);
+    else if (name === 'main') this.shell.enterBase(SHELL_BASES.CHARACTER_SELECT);
     else this.shell.openOverlay(name);
     this._paintScreen(name);
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'world-menu', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'galaxy']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -1007,10 +965,6 @@ export class UI {
     if (target) {
       this._lastScreen = target;
       this._paintScreen(target);
-      return;
-    }
-    if (this.shell.base === SHELL_BASES.OVERWORLD) {
-      this.hideOverlay();
       return;
     }
     this._showScreen(this.shell.base === SHELL_BASES.AUTH ? 'account' : fallback);
@@ -1277,7 +1231,7 @@ export class UI {
       list.appendChild(button);
     }
     list.classList.toggle('empty', !characters.length);
-    if (!characters.length) list.innerHTML = '<div class="character-empty"><b>NO CHARACTERS</b><span>Create your first survivor to enter the galaxy.</span></div>';
+    if (!characters.length) list.innerHTML = '<div class="character-empty"><b>NO CHARACTERS</b><span>Create your first commander to begin the siege.</span></div>';
     const enter = this.root.querySelector('#m-enter-world');
     if (enter) enter.disabled = !characters.length;
     const create = this.root.querySelector('#m-create-character');
@@ -1313,7 +1267,7 @@ export class UI {
     const character = characters.find((entry) => entry.id === this._profile?.mmoCharacterId) || characters[0];
     if (!character) {
       this.root.querySelector('#character-name').textContent = 'CREATE YOUR FIRST CHARACTER';
-      this.root.querySelector('#character-tagline').textContent = 'Choose a class and begin on Earth.';
+      this.root.querySelector('#character-tagline').textContent = 'Choose a class and take the field.';
       this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
       this.root.querySelector('#character-sigil').textContent = '✦';
       this.root.querySelector('#character-loadout').innerHTML = '';
@@ -1471,7 +1425,7 @@ export class UI {
 
   showCharacterSheet(tab = null) {
     if (!this._sheetCharacter()) return;
-    this._sheetReturn = this._overworldMode ? 'overworld' : (this._lastScreen === 'world-menu' ? 'world-menu' : 'main');
+    this._sheetReturn = 'main';
     if (tab) this._sheetTab = tab;
     this._sheetTab = this._sheetTab || 'character';
     this._sheetSelection = null;
@@ -1480,8 +1434,7 @@ export class UI {
   }
 
   _closeCharacterSheet() {
-    if (this._sheetReturn === 'overworld') this.hideOverlay();
-    else this._showScreen(this._sheetReturn || 'main');
+    this._showScreen(this._sheetReturn || 'main');
   }
 
   _renderCharacterSheet() {
@@ -1519,7 +1472,7 @@ export class UI {
     this.root.querySelector('#sheet-panel-character').innerHTML = `
       <section class="character-paperdoll" style="--character-color:${appearance.color}"><canvas id="paperdoll-preview-canvas"></canvas><div class="paperdoll-aura"></div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
       <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
-      <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Instances</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div><div><span>Current world</span><b>${escapeHtml(character.lastWorldId || 'Earth')}</b></div></section>`;
+      <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Sieges</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div></section>`;
     this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
       customization: character.customization, equipment: character.equipment,
       proxyHero: character.proxyHero, classKey: character.classKey, canvasId: 'paperdoll-preview-canvas' });
@@ -1656,7 +1609,7 @@ export class UI {
       const step = firstHourStep(character);
       forgeGuide.innerHTML = step === 'forge'
         ? 'Next: select an owned item, then add a socket or install a matching component. Costs are shown before confirmation.'
-        : `Forge changes persist. A stale or failed request consumes nothing.${step === 'mission' ? ' <button data-next-mission>ENTER WORLD →</button>' : ''}`;
+        : `Forge changes persist. A stale or failed request consumes nothing.${step === 'mission' ? ' <button data-next-mission>DEPLOY →</button>' : ''}`;
       forgeGuide.querySelector('[data-next-mission]')?.addEventListener('click', () => { this._closeCharacterSheet(); this.cb.onCampaignMap?.(); });
     }
     resources.innerHTML = `<b>${META_CURRENCY.icon} ${character.authoritativeBalance ?? '—'} ${META_CURRENCY.name}</b>${Object.values(CRAFTING_MATERIALS).map((m) => `<span>${m.icon} ${m.name}: <b>${materials[m.id] || 0}</b></span>`).join('')}`;
@@ -2077,7 +2030,19 @@ export class UI {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
       if (this.cb.useAuthoritativeEconomy?.()) {
-        this.showBanner('✋ Lattice rewiring is unavailable until its server transaction is enabled.', 'bad', 3200);
+        // Signed in: the server prices it from the Lattice it holds and
+        // charges the account wallet; nothing changes locally until it has.
+        const cost = rewireCost((character.lattice || []).length);
+        if (!window.confirm(`Rewire the whole Lattice for about ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
+        Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
+          if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
+          this.showBanner(`⚡ Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
+          this._renderCharacterSheet();
+        }).catch((error) => {
+          const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
+            : 'The rewire could not be confirmed. Your Lattice is unchanged.';
+          this.showBanner(`✋ ${reason}`, 'bad', 3200);
+        });
         return;
       }
       const cost = rewireCost((character.lattice || []).length);
@@ -2261,225 +2226,6 @@ export class UI {
     }
   }
 
-  // ----- overworld: the campaign map behind the war-council overlay -----
-  // The title screen remains the front door. Story Campaign enters the
-  // walkable planet; Esc (or the ⚙ button) opens the council over it.
-  setOverworldMode(on) {
-    this._overworldMode = !!on;
-    if (on) this.shell.enterBase(SHELL_BASES.OVERWORLD);
-    this.root.querySelector('#overlay').classList.toggle('overworld', !!on);
-    this.root.querySelector('#ow-quick-actions').classList.toggle('hidden', !on);
-    this.root.querySelector('#ow-party-frames').classList.toggle('hidden', !on);
-    this.root.querySelector('#minimap-wrap').classList.toggle('hidden', !on);
-    if (!on) this.closeLivingWorldMap();
-    else this._renderPartyFrames();
-  }
-
-  drawOverworldMinimap(overworld, map) {
-    const top = this.root.querySelector('#minimap-top');
-    const size = map?.size || 1;
-    if (top.width !== size) { top.width = size; top.height = size; }
-    const ctx = top.getContext('2d');
-    ctx.clearRect(0, 0, size, size);
-    for (const gate of [...(map?.overworldLayout?.gates || []), map?.overworldLayout?.cave].filter(Boolean)) {
-      ctx.fillStyle = gate.portal ? '#86d8ff' : gate.locked ? '#707782' : '#ffd75e';
-      ctx.beginPath(); ctx.arc(gate.x, gate.z, gate.portal ? 2.2 : 1.7, 0, Math.PI * 2); ctx.fill();
-    }
-    const hero = overworld?.hero;
-    if (hero) {
-      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#07131d'; ctx.lineWidth = 0.9;
-      ctx.beginPath(); ctx.arc(hero.x, hero.z, 2.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    }
-  }
-
-  setLivingWorldState(state) {
-    this._livingWorld = normalizeLivingWorld(state);
-    this._renderPartyFrames();
-    if (!this.root.querySelector('#living-world-map')?.classList.contains('hidden')) this._renderLivingWorldMap();
-  }
-
-  setLivingWorldMapStatus(mode, message = '') {
-    const resolved = mode === 'ready' && !message ? livingWorldReadyStatus(this._livingWorld) : message;
-    this._livingWorldStatus = { mode, message: resolved };
-    const status = this.root.querySelector('#lw-map-status');
-    if (status) { status.dataset.state = mode; status.textContent = resolved; }
-  }
-
-  _partyAction() {
-    const party = this._livingWorld.party;
-    if (party.id) this.cb.onPartyOpen?.(party);
-    else this.cb.onPartyCreate?.();
-  }
-
-  _renderPartyFrames() {
-    const box = this.root.querySelector('#ow-party-frames');
-    if (!box) return;
-    const party = this._livingWorld.party;
-    const members = party.members || [];
-    const self = members.find((member) => member.self);
-    const pending = party.pendingInvites || [];
-    box.innerHTML = `<div class="opf-head"><span>PARTY</span><button id="opf-invite">${this._livingWorld.party.id ? '+ INVITE' : '+ CREATE'}</button></div>${members.length ? members.map((member) => {
-      const health = Math.max(0, Math.min(100, Number(member.health) || 0));
-      return `<button class="opf-member" data-member="${escapeHtml(member.id)}"><span class="opf-portrait">${escapeHtml((member.className || '?').slice(0, 1))}</span><span class="opf-copy"><b>${escapeHtml(member.name)}</b><small>${escapeHtml(member.role || member.className)} · ${escapeHtml(member.status || 'Ready')}</small><i><em style="width:${health}%"></em></i><small class="opf-location">⌖ ${escapeHtml(member.location || 'Unknown')} · ⚔ ${Number(member.companyStrength) || 0}</small></span><strong>${health}%</strong></button>`;
-    }).join('') : '<p class="opf-empty">Create a party to invite friends and travel together.</p>'}${pending.map((invite) => `<button class="opf-invite-card" data-invite="${escapeHtml(invite.id)}">JOIN ${escapeHtml(invite.partyName || 'PARTY')}</button>`).join('')}${party.socialPartyId ? `<div class="opf-actions"><button data-mode="grouped" class="${self?.travelMode === 'grouped' ? 'active' : ''}">TRAVEL TOGETHER</button><button data-mode="split" class="${self?.travelMode === 'split' ? 'active' : ''}">SPLIT</button><button id="opf-leave">LEAVE</button></div>` : ''}`;
-    box.querySelector('#opf-invite').onclick = () => this._partyAction();
-    for (const button of box.querySelectorAll('[data-member]')) button.onclick = () => this.cb.onPartyMemberLocate?.(button.dataset.member);
-    for (const button of box.querySelectorAll('[data-mode]')) button.onclick = () => this.cb.onPartyTravelMode?.(button.dataset.mode);
-    for (const button of box.querySelectorAll('[data-invite]')) button.onclick = () => this.cb.onPartyInviteAccept?.(pending.find((invite) => invite.id === button.dataset.invite));
-    const leave = box.querySelector('#opf-leave'); if (leave) leave.onclick = () => this.cb.onPartyLeave?.();
-  }
-
-  openLivingWorldMap() {
-    this._renderLivingWorldMap();
-    this.root.querySelector('#living-world-map').classList.remove('hidden');
-    this.cb.onLivingWorldOpen?.(this._livingWorld.world.id);
-    clearInterval(this._livingWorldPoll);
-    this._livingWorldPoll = setInterval(() => this.cb.onLivingWorldViewport?.(this._livingWorldViewport()), 3000);
-  }
-
-  closeLivingWorldMap() {
-    this.root.querySelector('#living-world-map')?.classList.add('hidden');
-    clearInterval(this._livingWorldPoll); this._livingWorldPoll = null;
-  }
-
-  _changeLivingWorldZoom(action) {
-    if (action === 'reset') this._livingWorldView = { zoom: 1, x: 0, y: 0 };
-    else this._livingWorldView.zoom = Math.max(1, Math.min(4, this._livingWorldView.zoom * (action === 'in' ? 1.35 : 1 / 1.35)));
-    if (this._livingWorldView.zoom === 1) { this._livingWorldView.x = 0; this._livingWorldView.y = 0; }
-    this._renderLivingWorldMap();
-    this.cb.onLivingWorldViewport?.(this._livingWorldViewport());
-  }
-
-  _livingWorldViewport() {
-    const stage = this.root.querySelector('#lw-map-stage');
-    return livingWorldViewport(this._livingWorldView, { width: stage?.clientWidth, height: stage?.clientHeight });
-  }
-
-  _applyLivingWorldView() {
-    const layer = this.root.querySelector('#lw-world-layer');
-    if (!layer) return;
-    const view = this._livingWorldView;
-    layer.style.transform = `translate(${Math.round(view.x)}px,${Math.round(view.y)}px) scale(${view.zoom.toFixed(3)})`;
-    const zoom = this.root.querySelector('#lw-zoom');
-    if (zoom) zoom.textContent = `${view.zoom.toFixed(1)}×`;
-  }
-
-  _clusterLivingWorldParties(parties) {
-    return clusterLivingWorldParties(parties, this._livingWorldView.zoom);
-  }
-
-  _renderLivingWorldMap() {
-    const state = this._livingWorld;
-    this.root.querySelector('#lw-world-name').textContent = state.world.name;
-    this.root.querySelector('#lw-region').textContent = `${state.world.region} · WORLD TIME ${state.world.time}`;
-    const regions = this.root.querySelector('#lw-regions');
-    regions.innerHTML = state.regions.map((region) => `<button class="lw-region ${region.owner}${region.current ? ' current' : ''}" data-region="${escapeHtml(region.id)}"><span>${escapeHtml(region.current ? 'YOU ARE HERE' : region.controlState.toUpperCase())}</span><b>${escapeHtml(region.name)}</b><small>${escapeHtml(region.ownerName)} · ${Math.round(region.controlStrength * 100)}% control</small></button>`).join('');
-    const polygonPath = (polygon) => (polygon || []).map((point, index) => `${index ? 'L' : 'M'}${Math.max(0, Math.min(100, Number(point?.[0]) || 0)).toFixed(3)} ${Math.max(0, Math.min(100, Number(point?.[1]) || 0)).toFixed(3)}`).join(' ') + ' Z';
-    const terrain = this.root.querySelector('#lw-terrain');
-    const regionState = new Map(state.regions.map((region) => [region.id, region]));
-    terrain.innerHTML = [
-      ...(state.topology?.landmasses || []).map((landmass) => `<path class="lw-landmass" d="${polygonPath(landmass.polygon)}"><title>${escapeHtml(landmass.name)}</title></path>`),
-      ...(state.topology?.provinces || []).map((province) => { const control = regionState.get(province.id); return `<path class="lw-province ${escapeHtml(control?.owner || 'neutral')} biome-${escapeHtml(province.biome || 'temperate')}${control?.current ? ' current' : ''}" d="${polygonPath(province.polygon)}"><title>${escapeHtml(province.name)}${control ? ` · ${escapeHtml(control.ownerName)}` : ''}</title></path>`; }),
-    ].join('');
-    const routes = this.root.querySelector('#lw-routes');
-    routes.innerHTML = `<defs><marker id="lw-route-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z"/></marker></defs>` + state.routes.map(livingWorldRouteLine).join('');
-    const nodes = this.root.querySelector('#lw-map-nodes');
-    const displayedParties = this._clusterLivingWorldParties(state.parties);
-    nodes.innerHTML = [
-      ...state.settlements.map((item) => `<button class="lw-node settlement ${item.owner}${item.known ? '' : ' unknown'}" style="left:${item.x}%;top:${item.y}%" data-kind="settlement" data-id="${escapeHtml(item.id)}"><i>◆</i><b>${escapeHtml(item.known ? item.name : 'Unknown settlement')}</b><small>${escapeHtml(item.kind)} · ${escapeHtml(item.ownerName)}${item.controlState !== 'controlled' ? ` · ${escapeHtml(item.controlState)}` : ''}</small></button>`),
-      ...displayedParties.map((item) => `<button class="lw-node army ${item.owner}${item.moving ? ' moving' : ''}${item.count > 1 ? ' cluster' : ''}" style="left:${item.x}%;top:${item.y}%" data-kind="army" data-id="${escapeHtml(item.id)}"><i>${item.count > 1 ? item.count : '⚑'}</i><b>${escapeHtml(item.count > 1 ? `${item.count} parties` : item.name)}</b><small>${Number(item.strength) || 0} · ${escapeHtml(item.count > 1 ? 'regional force' : item.intent)}</small></button>`),
-      ...(state.sieges || []).map((item) => `<button class="lw-node siege" style="left:${item.x}%;top:${item.y}%" data-kind="siege" data-id="${escapeHtml(item.id)}"><i>⚔</i><b>SIEGE</b><small>${Math.round(Number(item.progress || 0) * 100)}%</small></button>`),
-      ...(state.hotspots || []).map((item) => `<button class="lw-node hotspot ${escapeHtml(item.type)}" style="left:${item.x}%;top:${item.y}%" data-kind="hotspot" data-id="${escapeHtml(item.id)}"><i>${item.type === 'pursuit' ? '➤' : item.type === 'raid' ? '♦' : '⚔'}</i><b>${escapeHtml(item.label)}</b><small>${escapeHtml(item.state || 'active')}</small></button>`),
-      ...state.missions.filter((item) => item.known).map((item) => `<button class="lw-node mission${item.unlocked ? '' : ' locked'}" style="left:${item.x}%;top:${item.y}%" data-kind="mission" data-id="${escapeHtml(item.id)}"><i>✦</i><b>${escapeHtml(item.name)}</b><small>${item.unlocked ? 'READY' : 'LOCKED'}</small></button>`),
-    ].join('');
-    const status = this.root.querySelector('#lw-map-status');
-    const normalStatus = livingWorldReadyStatus(state);
-    status.dataset.state = this._livingWorldStatus.mode;
-    status.textContent = this._livingWorldStatus.message || normalStatus;
-    this._applyLivingWorldView();
-    const missions = this.root.querySelector('#lw-missions');
-    const companyBox = this.root.querySelector('#lw-company');
-    const encounterBox = this.root.querySelector('#lw-encounters');
-    const governanceBox = this.root.querySelector('#lw-governance');
-    const logistics = this.root.querySelector('#lw-logistics');
-    const supplies = state.logistics?.supplies || [], cargo = state.logistics?.cargo || [], raids = state.logistics?.raids || [];
-    logistics.innerHTML = `<small>COMPANY LOGISTICS</small><b>${supplies.length ? supplies.map((item) => `${escapeHtml(item.supply_key)} ${Math.floor(Number(item.quantity) || 0)}`).join(' · ') : 'No supply report'}</b><p>${cargo.length ? `${cargo.length} cargo type${cargo.length === 1 ? '' : 's'} aboard` : 'No cargo'}${raids.some((raid) => raid.state === 'pending') ? ' · RAID IN PROGRESS' : ''}</p>`;
-    const company = state.company;
-    companyBox.innerHTML = company ? `<small>YOUR COMPANY</small><b>${escapeHtml(company.name || 'Company')} · ${company.members?.length || 0}/${Number(company.member_capacity) || 0}</b><p>Treasury ${Number(company.treasury) || 0} · revision ${Number(company.revision) || 0}</p><div class="lw-company-actions">${(company.recruits || []).filter((offer) => Number(offer.available) > 0).slice(0, 2).map((offer) => `<button class="tbtn" data-company="recruit" data-key="${escapeHtml(offer.recruit_key)}">RECRUIT ${escapeHtml(offer.name)} · ${Number(offer.price)}</button>`).join('')}${(company.supplyOffers || []).slice(0, 2).map((offer) => `<button class="tbtn" data-company="buy_supplies" data-key="${escapeHtml(offer.supply_key)}">BUY ${escapeHtml(offer.supply_key).toUpperCase()} · ${Number(offer.unit_price)}</button>`).join('')}</div>` : '<small>YOUR COMPANY</small><b>Enter Greenfall to found your company.</b>';
-    encounterBox.innerHTML = state.encounters.length ? state.encounters.map((encounter) => `<div class="lw-selection"><small>${escapeHtml(encounter.state.toUpperCase())} ENCOUNTER</small><b>${escapeHtml(encounter.ownSide === 'attacker' ? 'You caught a hostile force' : 'A hostile force caught you')}</b><p>Terrain: ${escapeHtml(JSON.stringify(encounter.terrain || {}))}</p><div class="lw-company-actions">${encounter.engagement ? (encounter.engagement.mode==='autosim' ? '<button class="tbtn" data-encounter="autosim" data-id="'+escapeHtml(encounter.id)+'">AUTO-COMMAND</button>' : '<button class="tbtn" data-encounter="live" data-id="'+escapeHtml(encounter.id)+'">COMMAND BATTLE</button>') : ['fight','escape','surrender','parley','rearguard'].map((choice) => `<button class="tbtn" data-encounter="${choice}" data-id="${escapeHtml(encounter.id)}">${choice.toUpperCase()}</button>`).join('')}</div></div>`).join('') : '';
-    const sieges = state.governance?.sieges || [], holdings = state.governance?.holdings || [];
-    governanceBox.innerHTML = sieges.length || holdings.length ? `<div class="lw-selection"><small>TERRITORY</small><b>${holdings.length} holding${holdings.length === 1 ? '' : 's'} · ${sieges.length} active siege${sieges.length === 1 ? '' : 's'}</b>${sieges.map((siege) => `<p>${escapeHtml(siege.status.toUpperCase())} · ${Math.round(Number(siege.progress || 0) * 100)}% · supply ${Math.round(Number(siege.defender_supply || 0))}</p><div class="lw-company-actions"><button class="tbtn" data-governance="set_siege_stance" data-id="${escapeHtml(siege.id)}" data-stance="assault">ASSAULT</button><button class="tbtn" data-governance="lift_siege" data-id="${escapeHtml(siege.id)}">LIFT</button></div>`).join('')}</div>` : '';
-    missions.innerHTML = state.missions.length ? state.missions.map((mission) => `<button class="lw-mission" data-kind="mission" data-id="${escapeHtml(mission.id)}" ${!mission.known ? 'disabled' : ''}><span>${mission.unlocked ? 'AVAILABLE' : mission.known ? 'DISCOVERED' : 'UNKNOWN'}</span><b>${escapeHtml(mission.known ? mission.name : 'Undiscovered front')}</b><small>${escapeHtml(mission.difficulty)}</small></button>`).join('') : '<p class="lw-empty">No mission intelligence is available yet.</p>';
-    for (const button of this.root.querySelectorAll('#living-world-map [data-kind]')) button.onclick = () => this._selectLivingWorldTarget(button.dataset.kind, button.dataset.id);
-    for (const button of companyBox.querySelectorAll('[data-company]')) button.onclick = () => this.cb.onLivingWorldCompany?.(button.dataset.company, button.dataset.company === 'recruit' ? { recruitKey: button.dataset.key, quantity: 1 } : { supplyKey: button.dataset.key, quantity: 5 });
-    for (const button of encounterBox.querySelectorAll('[data-encounter]')) button.onclick = () => this.cb.onLivingWorldEncounter?.(state.encounters.find((entry) => entry.id === button.dataset.id), button.dataset.encounter);
-    for (const button of governanceBox.querySelectorAll('[data-governance]')) button.onclick = () => this.cb.onLivingWorldGovernance?.(button.dataset.governance, button.dataset.governance === 'set_siege_stance' ? { siegeId: button.dataset.id, stance: button.dataset.stance } : { siegeId: button.dataset.id });
-  }
-
-  _selectLivingWorldTarget(kind, id) {
-    const state = this._livingWorld;
-    const item = kind === 'settlement' ? state.settlements.find((entry) => entry.id === id)
-      : kind === 'army' ? state.parties.find((entry) => entry.id === id)
-      : kind === 'siege' ? state.sieges.find((entry) => entry.id === id)
-      : kind === 'hotspot' ? state.hotspots.find((entry) => entry.id === id)
-      : state.missions.find((entry) => entry.id === id);
-    if (!item) return;
-    const selection = this.root.querySelector('#lw-selection');
-    const canFastTravel = kind === 'settlement' && item.known && item.fastTravel;
-    const canTravel = kind === 'settlement' && item.known && item.reachable;
-    const canDeploy = kind === 'mission' && item.known && item.unlocked;
-    const travelLabel = item.crossRegion ? 'TRAVEL TO REGION' : 'TRAVEL ROUTE';
-    const marketRows = kind === 'settlement' && state.party.locationId === item.id ? (state.markets || []).filter((row) => row.location_id === item.id) : [];
-    const market = marketRows.length ? `<div class="lw-market"><small>MARKET</small>${marketRows.map((row) => `<div><b>${escapeHtml(row.commodity_key)}</b><span>stock ${Number(row.stock) || 0}</span><button class="tbtn" data-trade="buy" data-key="${escapeHtml(row.commodity_key)}">BUY ${Number(row.buy_price) || 0}</button><button class="tbtn" data-trade="sell" data-key="${escapeHtml(row.commodity_key)}">SELL ${Number(row.sell_price) || 0}</button></div>`).join('')}</div>` : '';
-    selection.innerHTML = `<small>${kind === 'army' ? 'WORLD PARTY' : kind === 'mission' ? 'MISSION' : kind === 'siege' ? 'ACTIVE SIEGE' : kind === 'hotspot' ? 'WORLD HOTSPOT' : 'DESTINATION'}</small><b>${escapeHtml(item.name || item.label || (kind === 'siege' ? 'Contested stronghold' : 'Unknown'))}</b><p>${escapeHtml(item.blurb || item.intent || (kind === 'siege' ? `${Math.round(Number(item.progress || 0) * 100)}% siege progress` : kind === 'hotspot' ? `${item.type} · ${item.state || 'active'}` : `${item.kind} · ${item.ownerName || item.owner}${item.crossRegion ? ' · Cross-region handoff' : ''}`))}</p>${canTravel ? `<div class="lw-travel-actions"><button class="menubtn primary" data-travel="travel">${travelLabel}</button>${canFastTravel ? '<button class="menubtn" data-travel="fast">FAST TRAVEL</button>' : ''}</div>` : canDeploy ? '<button class="menubtn primary" id="lw-act">ASSEMBLE PARTY & DEPLOY</button>' : kind === 'army' ? '<button class="menubtn" id="lw-act">TRACK PARTY</button>' : kind === 'settlement' && state.party.locationId === item.id ? '' : '<button class="menubtn" disabled>NO VALID ROUTE</button>'}${market}`;
-    for (const action of selection.querySelectorAll('[data-travel]')) action.onclick = () => this.cb.onLivingWorldFastTravel?.(item.id, action.dataset.travel);
-    for (const action of selection.querySelectorAll('[data-trade]')) action.onclick = () => this.cb.onLivingWorldTrade?.({ locationId: item.id, commodityKey: action.dataset.key, side: action.dataset.trade, quantity: 1 });
-    const action = selection.querySelector('#lw-act');
-    if (action) action.onclick = () => {
-      if (canTravel) this.cb.onLivingWorldFastTravel?.(item.id, 'travel');
-      else if (canDeploy) this.cb.onLivingWorldMission?.(item.levelId, { mission: item, party: state.party });
-      else this.cb.onLivingWorldTrackParty?.(item.id);
-    };
-  }
-
-  showGalaxy(destinations, currentWorld = 'earth', macro = null) {
-    const map = this.root.querySelector('#galaxy-map');
-    const detail = this.root.querySelector('#galaxy-detail');
-    const ownership = macro?.worlds || {};
-    const recent = (macro?.events || []).slice(0, 3);
-    map.innerHTML = '';
-    const select = (destination) => {
-      for (const node of map.querySelectorAll('.galaxy-node')) node.classList.toggle('sel', node.dataset.world === destination.id);
-      const owner = ownership[destination.id]?.owner;
-      const state = destination.id === currentWorld ? 'CURRENT LOCATION'
-        : owner === 'free' ? 'FREE WORLD'
-        : owner === 'hive' ? 'HIVE OCCUPIED'
-        : destination.cleared ? 'LIBERATED'
-        : destination.unlocked ? 'ROUTE AVAILABLE' : 'ROUTE LOCKED';
-      detail.innerHTML = `<span>${state}</span><h2>${destination.name}</h2><p>${destination.subtitle}</p>
-        ${destination.threat ? `<small>FRONTIER DEPTH ${destination.threat}</small>` : '<small>ORIGIN WORLD</small>'}
-        ${recent.length ? `<div class="galaxy-events"><b>RECENT WAR CHANGES</b>${recent.map((event) => `<span>${event.outcome === 'liberated' ? '✓' : '·'} ${escapeHtml(event.worldId)} · ${escapeHtml(event.outcome)}</span>`).join('')}</div>` : ''}
-        <button id="galaxy-travel" class="menubtn primary" ${!destination.unlocked || destination.id === currentWorld ? 'disabled' : ''}>
-          ${destination.id === currentWorld ? 'YOU ARE HERE' : destination.unlocked ? 'TRAVEL' : 'LOCKED'}
-        </button>`;
-      const travel = detail.querySelector('#galaxy-travel');
-      travel.onclick = () => this.cb.onGalaxyTravel && this.cb.onGalaxyTravel(destination.id);
-    };
-    destinations.forEach((destination, index) => {
-      const node = document.createElement('button');
-      const owner = ownership[destination.id]?.owner;
-      node.className = `galaxy-node${destination.unlocked ? '' : ' locked'}${owner ? ` owner-${owner}` : destination.cleared ? ' cleared' : ''}`;
-      node.dataset.world = destination.id;
-      node.style.setProperty('--gx', `${12 + ((index * 31) % 74)}%`);
-      node.style.setProperty('--gy', `${18 + ((index * 47) % 62)}%`);
-      node.innerHTML = `<i></i><b>${destination.name}</b><small>${destination.id === currentWorld ? 'YOU ARE HERE' : owner === 'free' ? 'FREE' : owner === 'hive' ? 'HIVE' : destination.cleared ? 'LIBERATED' : destination.unlocked ? 'AVAILABLE' : 'LOCKED'}</small>`;
-      node.onclick = () => select(destination);
-      map.appendChild(node);
-    });
-    this._showScreen('galaxy');
-    select(destinations.find((destination) => destination.id === currentWorld) || destinations[0]);
-  }
-
   overlayHidden() {
     return this.root.querySelector('#overlay').classList.contains('hidden');
   }
@@ -2488,11 +2234,6 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
     this.shell.overlay = null;
     this.shell.returnOverlay = null;
-  }
-
-  toggleOverlay() {
-    if (this.overlayHidden()) this._showScreen('world-menu');
-    else this.hideOverlay();
   }
 
   toggleCharacterScreen() {
@@ -2589,76 +2330,6 @@ export class UI {
     const inp = modal.querySelector('#jc-input');
     inp.value = '';
     setTimeout(() => inp.focus(), 50);
-  }
-
-  // ----- overworld: walk-in confirm -----
-  // Walking into a gate asks before it commits you to a front: the panel
-  // carries the level's blurb and the difficulty choice, and Enter takes the
-  // same onStart path the setup screen's START button uses.
-  showGateConfirm({ gate, diff = 'normal', onEnter, onLeave }) {
-    let modal = this.root.querySelector('#gate-confirm');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'gate-confirm';
-      modal.className = 'gateprompt hidden';
-      this.root.appendChild(modal);
-    }
-    const cave = !!gate.cave;
-    const character = this._sheetCharacter();
-    const level = cave ? null : levelById(gate.levelId || 1);
-    const guide = character ? firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() }) : null;
-    const loadout = character && Object.keys(legalEquipment(character)).length
-      ? 'Loadout ready. Your equipped attributes and socket effects will be applied when the mission starts.'
-      : 'No persistent gear equipped. You can still deploy, or return to Character Info for a field upgrade.';
-    const diffSeg = cave ? '' : `
-      <div class="steplabel field-label">Difficulty</div>
-      <div class="diffseg gate-diff">${Object.entries(DIFFICULTY).map(([key, d]) =>
-        `<button class="diffbtn${key === diff ? ' sel' : ''}" data-diff="${key}">${d.label}</button>`).join('')}</div>`;
-    modal.innerHTML = `
-      <div class="gatepromptcard">
-        <span class="roomeyebrow">Mission · Solo deployment</span>
-        <h2>${cave ? '🌀 Enter the Labyrinth?' : `⚔️ Enter ${gate.name}?`}</h2>
-        <p>${cave
-          ? 'A dark mouth in the crag. No colony, no army — one hero against the deep.'
-          : gate.blurb}</p>
-        ${cave ? '' : `<p class="gateboss">${gate.boss.icon} <b>${gate.boss.name}</b> leads the counterattack.</p>`}
-        ${cave ? '' : `<div class="gate-loadout"><b>${loadout}</b><small>Optional mission rewards · ${missionRewardSummary(level)}</small>${guide?.step === 'mission' ? '<em>FIRST DEPLOYMENT READY</em>' : ''}</div>`}
-        ${diffSeg}
-        <div class="roomconfirmactions">
-          <button class="tbtn" id="gate-back">CLOSE</button>
-          <button class="tbtn danger" id="gate-go">${cave ? 'OPEN TRIALS' : 'ENTER MISSION'}</button>
-        </div>
-      </div>`;
-    const close = () => modal.classList.add('hidden');
-    modal.querySelector('#gate-back').onclick = () => { close(); onLeave && onLeave(); };
-    let chosen = diff;
-    for (const b of modal.querySelectorAll('.gate-diff .diffbtn')) {
-      b.onclick = () => {
-        chosen = b.dataset.diff;
-        for (const o of modal.querySelectorAll('.gate-diff .diffbtn')) o.classList.toggle('sel', o === b);
-      };
-    }
-    modal.querySelector('#gate-go').onclick = () => { close(); onEnter && onEnter(chosen); };
-    modal.classList.remove('hidden');
-  }
-
-  setGateRally({ players = 1, maxPlayers = 4, role = 'solo', ready = false, canLaunch = false } = {}) {
-    const modal = this.root.querySelector('#gate-confirm');
-    const eyebrow = modal?.querySelector('.roomeyebrow');
-    const go = modal?.querySelector('#gate-go');
-    if (eyebrow) eyebrow.textContent = `Mission rally · ${players}/${maxPlayers} players`;
-    if (!go) return;
-    if (role === 'host') {
-      go.textContent = canLaunch ? `LAUNCH PARTY (${players})` : `WAITING FOR PARTY (${players})`;
-      go.disabled = !canLaunch;
-    } else if (role === 'guest') {
-      go.textContent = ready ? 'READY — WAITING FOR HOST' : 'MARK READY';
-      go.disabled = ready;
-    }
-  }
-
-  hideGatePrompt() {
-    this.root.querySelector('#gate-confirm')?.classList.add('hidden');
   }
 
   _reflectQuality(q) {
@@ -3645,7 +3316,6 @@ export class UI {
 
   hideStart() {
     this.root.querySelector('#overlay').classList.add('hidden');
-    this.root.querySelector('#ow-quick-actions')?.classList.add('hidden');
     this.pauseOpen = false;
   }
 
@@ -3666,6 +3336,29 @@ export class UI {
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
+  // Rewards block of the end screen. Signed-in rewards arrive from the server
+  // after the screen opens, so this re-renders in place via setEndRewards().
+  _endRewardsHtml(extra) {
+    if (!extra) return '';
+    const questRows = (extra.quests || []).map((q) => {
+      const it = itemInfo(q.reward);
+      return `<div class="questrow ${q.done ? 'done' : ''}">${q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc || ''}
+        <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
+    }).join('');
+    const quests = questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : '';
+    if (extra.pending) return `${quests}<p class="tagline">⏳ Reporting the siege to command — rewards are granted by the server…</p>`;
+    if (extra.error) return `${quests}<p class="tagline">⚠️ ${extra.error}</p>`;
+    const grants = (extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
+    const full = (extra.skipped || []).filter((entry) => entry.reason === 'stash_full').length;
+    return `${quests}${extra.heroName ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${extra.alloy ? ` · +${extra.alloy} ${META_CURRENCY.short}` : ''}${grants.length
+      ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}${full ? `<p class="tagline">📦 Stash full — ${full} item${full === 1 ? '' : 's'} could not be stored.</p>` : ''}`;
+  }
+
+  setEndRewards(extra) {
+    const host = this.root.querySelector('#end-rewards');
+    if (host) host.innerHTML = this._endRewardsHtml(extra);
+  }
+
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
@@ -3673,12 +3366,6 @@ export class UI {
     const lv = levelById(levelId || 1);
     const survival = mode === 'survival';
     const labyrinth = mode === 'labyrinth';
-    const questRows = (extra && extra.quests || []).map((q) => {
-      const it = itemInfo(q.reward);
-      return `<div class="questrow ${q.done ? 'done' : ''}">${q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}
-        <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
-    }).join('');
-    const grants = (extra && extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
     const review = runReview({ won, stats, threat, mode, game });
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
@@ -3706,13 +3393,11 @@ export class UI {
           <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
-        ${questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : ''}
-        ${extra ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${grants.length
-          ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}
-        ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the galaxy' : ''}</p>` : ''}
+        <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
+        ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the war' : ''}</p>` : ''}
         <div class="endactions">
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
-          <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+          <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();

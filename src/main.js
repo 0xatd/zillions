@@ -1,15 +1,17 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
+import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
-  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES,
+  ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
-import { GameMap } from './map.js';
+import { setActiveCulture } from './cultures.js';
+import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, assetClone, assetPart } from './assets.js';
+import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -27,29 +29,22 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
-import { HordeArt, buildCorpseGeometry } from './horde-art.js';
+import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
-import { knownGalaxy, descriptorForWorldId, galaxyDestinationList } from './galaxy.js';
-import { loadMeta, awardRun, metaBonuses } from './meta.js';
+import { loadMeta, awardRun } from './meta.js';
+import { buildMatchReport } from './match-report.js';
+import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
+import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
+import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
-import { getGalaxyState } from './backend.js';
-import {
-  enterLivingWorld, getLivingWorldCompany, getLivingWorldGovernance, getLivingWorldProjection, getLivingWorldParty, LatestLivingWorldRequest, livingWorldProjectionToUi, livingWorldRefreshFailure, sendLivingWorldBattleAction, sendLivingWorldCommand, sendLivingWorldCompanyCommand, sendLivingWorldGovernanceCommand, sendLivingWorldPartyCommand, setLivingWorldSession,
-} from './living-world-client.js';
-import { deliverBattleOutbox, loadBattleOutbox } from './living-world-battle-outbox.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
-  addMmoCharacter, characterCamp, recordMmoInstance,
+  addMmoCharacter, characterCamp, recordMmoInstance, rewireLattice,
 } from './mmo-characters.js';
-import {
-  stitchOverworld, Overworld, gateState,
-  earthWorldDescriptor, overworldChannel,
-  OVERWORLD_SIZE, OVERWORLD_GHOSTS,
-} from './overworld.js';
 import {
   FOG_DARKNESS,
   FOG_EDGE_SOFTNESS,
@@ -65,48 +60,59 @@ const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
+// Scratch colours for the per-frame sky/light update (no per-frame allocs).
+const _tmpColA = new THREE.Color();
+const _tmpColB = new THREE.Color();
+const _tmpColC = new THREE.Color();
+const _tmpColD = new THREE.Color();
 
-// The overworld's renderer half: the headless stitch from overworld.js poured
-// through GameMap's cel terrain pipeline. Each region wears its own level's
-// palette, so the planet reads as the campaign itself.
-class OverworldMap extends GameMap {
-  constructor(campaign = 0, worldId = 'earth') {
-    // The planet is a descriptor: Earth today, other servers' universes
-    // tomorrow — same stitch, same renderer, different data.
-    const world = descriptorForWorldId(knownGalaxy(), worldId, campaign);
-    super(world.seed, { palette: { water: 0x3d6e8a } }, { size: world.size, nests: 0 });
-    this._owWorld = world;
-    // super() stitched with a zero-campaign descriptor (the ladder is not
-    // known until super returns); re-stitch with the real campaign so locked
-    // fronts bake stained ground on first build. Idempotent — fresh rng.
-    this.generate();
+
+// Inverted-hull ink outline for a toy-kit figure: each mesh gets a back-face
+// twin pushed out along smoothed normals (so flat-shaded facets don't split).
+// Returns the outline meshes so callers can hide them (stealth).
+const OUTLINE_GEO = new WeakMap();
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x0e0b10, side: THREE.BackSide });
+OUTLINE_MAT.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec3 inkNormal;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(inkNormal) * 0.045;');
+};
+function outlineGeometry(geo) {
+  let out = OUTLINE_GEO.get(geo);
+  if (out) return out;
+  out = geo.clone();
+  out.userData.kitShared = true;
+  const pos = out.attributes.position, nor = out.attributes.normal;
+  const acc = new Map();
+  const key = (i) => `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+  for (let i = 0; i < pos.count; i++) {
+    const k = key(i);
+    const a = acc.get(k) || [0, 0, 0];
+    if (nor) { a[0] += nor.getX(i); a[1] += nor.getY(i); a[2] += nor.getZ(i); }
+    acc.set(k, a);
   }
-
-   generate() { stitchOverworld(this, this._owWorld || earthWorldDescriptor()); }
-
-   // buildTerrain asks colorOf(tile) without a position — but idx(x, z) is
-   // always called for the same tile first, so the last query tells us where
-   // the color is going. Region palette by position, one biome per band.
-   idx(x, z) { this._q = [x, z]; return super.idx(x, z); }
-
-   regionPalette(x, z) {
-     // Colour comes from whichever region's descriptor owns this tile.
-     const regions = (this.overworldWorld && this.overworldWorld.regions) || [];
-     const r = this.region ? this.region[this.idx(Math.floor(x), Math.floor(z))] : 0;
-     const lv = regions[r] || regions[0];
-     return lv && lv.palette;
-   }
-
-   colorOf(t, x, z) {
-     const q = x !== undefined ? [x, z] : this._q;
-     const p = q ? this.regionPalette(q[0], q[1]) : (this.overworldWorld.regions[0].palette);
-     const map = {
-       [TILE.GRASS]: p.grass, [TILE.FOREST]: p.forest, [TILE.WATER]: p.water,
-       [TILE.MOUNTAIN]: p.mountain, [TILE.SAND]: p.sand, [TILE.PATH]: p.path,
-       [TILE.GOLDORE]: p.sand, [TILE.STONEORE]: p.mountain,
-     };
-     return map[t] !== undefined ? map[t] : TILE_INFO[t].color;
-   }
+  const ink = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const a = acc.get(key(i));
+    const l = Math.hypot(a[0], a[1], a[2]) || 1;
+    ink[i * 3] = a[0] / l; ink[i * 3 + 1] = a[1] / l || 1; ink[i * 3 + 2] = a[2] / l;
+  }
+  out.setAttribute('inkNormal', new THREE.BufferAttribute(ink, 3));
+  OUTLINE_GEO.set(geo, out);
+  return out;
+}
+function addInkOutline(root) {
+  const meshes = [];
+  root.traverse((o) => { if (o.isMesh && !o.userData.ink) meshes.push(o); });
+  const outs = [];
+  for (const m of meshes) {
+    const o = new THREE.Mesh(outlineGeometry(m.geometry), OUTLINE_MAT);
+    o.userData.ink = true;
+    o.userData.keepOpacity = true;
+    m.add(o);
+    outs.push(o);
+  }
+  return outs;
 }
 
 class App {
@@ -114,15 +120,17 @@ class App {
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
+    // colour lands on screen as that colour.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(48, 1, 0.5, 600);
+    this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-    this.camDist = 30;
+    this.camDist = 46;           // high, narrow diorama camera (FOV 30)
+    this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
@@ -172,14 +180,7 @@ class App {
               return;
             }
           }
-          const level = this.ui.selectedLevel || 1;
-          const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
-          this.startExpectedGuests = this.peers.length;
-          this.startReadyGuests.clear();
-          this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
-          this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode }));
-          this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode });
-          if (this.lobby && this.lobby.game) this.lobby.touchGame({ status: 'playing' });
+          this._launchHostMatch(d, hero, mode);
         } else {
           this.startGame(d, hero);
         }
@@ -212,6 +213,7 @@ class App {
       onCraftBuyComponent: (character, componentId) => this._craftMutation(character, (current) => buyCraftComponent(current, componentId)),
       onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, (current) => craftAuthoritative(current, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
+      onLatticeRewire: (character) => this._rewireLatticeOnServer(character),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
@@ -231,24 +233,7 @@ class App {
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
-      onCampaignMap: () => this._enterOverworld(),
-      onPartyCreate: () => this._createLivingWorldParty(),
-      onPartyOpen: () => this._openLivingWorldParty(),
-      onPartyLeave: () => this._leaveLivingWorldParty(),
-      onPartyTravelMode: (mode) => this._setLivingWorldPartyTravelMode(mode),
-      onPartyInviteAccept: (invite) => this._acceptLivingWorldPartyInvite(invite),
-      onPartyMemberLocate: (memberId) => this._locateLivingWorldPartyMember(memberId),
-      onLivingWorldOpen: () => this._refreshLivingWorld(),
-      onLivingWorldViewport: (viewport) => this._refreshLivingWorldViewport(viewport),
-      onLivingWorldFastTravel: (locationId, mode) => this._requestLivingWorldTravel(locationId, mode),
-      onLivingWorldTrade: (payload) => this._livingWorldTrade(payload),
-      onLivingWorldMission: (levelId, context) => this._launchLivingWorldMission(levelId, context),
-      onLivingWorldCompany: (action, payload) => this._livingWorldCompanyAction(action, payload),
-      onLivingWorldEncounter: (encounter, action) => this._livingWorldEncounterAction(encounter, action),
-      onLivingWorldGovernance: (action, payload) => this._livingWorldGovernanceAction(action, payload),
-      onLivingWorldTrackParty: (partyId) => this._trackLivingWorldParty(partyId),
-      onGalaxyOpen: () => this._openGalaxyMap(),
-      onGalaxyTravel: (worldId) => this._travelToWorld(worldId),
+      onCampaignMap: () => this._openCampaignSelect(),
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -282,6 +267,8 @@ class App {
     this._setupLights();
     this._setupParticles();
     this._setupZombieMeshes();
+    // Start pulling the toy kit now so the menu horde swaps to it early.
+    this._loadArt().catch(() => {});
     this._setupCoins();
     this._setupBars();
     this._setupCorpses();
@@ -345,7 +332,6 @@ class App {
     if (initialCharacter) {
       this.ui.selectedHero = initialCharacter.proxyHero;
       this.profile.lastHero = initialCharacter.proxyHero;
-      this.profile.lastWorld = initialCharacter.lastWorld || this.profile.lastWorld || 'earth';
     }
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => this._autosave(true));
@@ -404,7 +390,7 @@ class App {
   // A real last stand still runs on the surface. The extra geometry makes it
   // read as one small battlefield on a much larger planet under siege.
   showMenuBackdrop(levelId = 1) {
-    if (this.game || this.ow || this.menuTerrain) return;
+    if (this.game || this.menuTerrain) return;
     const level = levelById(levelId);
     const map = new GameMap(level.seed, level.theme);
     this.menuMap = map;
@@ -427,7 +413,7 @@ class App {
   }
 
   showLoginBackdrop() {
-    if (this.game || this.ow || this.titleSpace) return;
+    if (this.game || this.titleSpace) return;
     this.focus.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camera.position.set(MAP_SIZE / 2 + 22, 27, MAP_SIZE / 2 + 35);
     this.camera.lookAt(this.focus);
@@ -439,7 +425,7 @@ class App {
     group.name = 'planet-edge-title';
     const planet = new THREE.Mesh(
       new THREE.SphereGeometry(185, 48, 24),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
+      toyMat({ color: 0x101923, emissive: 0x07101d, emissiveIntensity: 0.45 }),
     );
     planet.position.set(MAP_SIZE / 2, -185, MAP_SIZE / 2 + 18);
     group.add(planet);
@@ -615,357 +601,16 @@ class App {
     this.menuMap = null;
   }
 
-  // ---------------- overworld ----------------
-  // The menu is a place: the five fronts stitched onto one small planet,
-  // walked by the player's selected hero. Entering a front's gate starts the
-  // run through the same onStart path the setup screen uses.
-
-  _enterOverworld(worldId = null) {
+  // ---------------- mission select ----------------
+  // "Enter World" opens the campaign mission select for the selected
+  // character. The game is a siege game: every run starts from here.
+  _openCampaignSelect() {
     if (this.game) return;
-    // Already on the planet — the hub's ENTER WORLD means "resume the walk",
-    // not a no-op. It used to early-return with the overlay still up, which
-    // read as a dead button inside the custom-games loop (QA 2026-08-18).
-    if (this.ow) {
-      this._makeOverworldHero();
-      this.ui.hideOverlay();
-      return;
-    }
-    const character = selectedMmoCharacter(this.profile);
-    if (!character) {
-      this.ui.setProfile(this.profile);
+    if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
       this.ui.showCharacterCreator();
       return;
     }
-    this.ui.selectedHero = character.proxyHero;
-    worldId = worldId || character.lastWorld || this.profile.lastWorld || 'earth';
-    this._clearMenuBackdrop();
-    this.ui.setOverworldMode(true);
-    const map = new OverworldMap(this.profile.campaign || 0, worldId);
-    const sky = map.overworldWorld.regions[0]?.palette?.sky || 0x7eaeb5;
-    this.scene.background = new THREE.Color(sky);
-    this.scene.fog.color.setHex(sky);
-    this.scene.fog.density = 0.0045;
-    this.owMap = map;
-    this.ow = new Overworld(map, { world: map.overworldWorld });
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('zillions-overworld-return') || 'null');
-      if (saved?.worldId === map.overworldWorld.id && Number.isFinite(saved.x) && Number.isFinite(saved.z)) {
-        this.ow.hero.x = saved.x;
-        this.ow.hero.z = saved.z;
-        this.ow.hero.facing = Number(saved.facing) || 0;
-        sessionStorage.removeItem('zillions-overworld-return');
-      }
-    } catch { /* unavailable or corrupt session storage: use world spawn */ }
-    this.owTerrain = map.buildTerrain();
-    this.scene.add(this.owTerrain);
-    map.drawMinimap(document.getElementById('minimap-base'));
-    this.ui.drawOverworldMinimap(this.ow, map);
-    this.owGates = [];
-    for (const gate of [...map.overworldLayout.gates, map.overworldLayout.cave].filter(Boolean)) {
-      this.owGates.push(this._makeOverworldGate(gate));
-    }
-    this._makeOverworldHero();
-    this.profile.lastWorld = map.overworldWorld.id;
-    character.lastWorld = map.overworldWorld.id;
-    this._saveProfile();
-    this.ui.hideOverlay();
-    this.ui.showBanner(`🪐 ${map.overworldWorld.name} · WASD to walk · enter the Orbital Lift to navigate`, '', 6000);
-    this._refreshLivingWorld().catch(() => {});
-  }
-
-  async _openGalaxyMap() {
-    const currentWorld = this.ow?.world?.id || this.profile.lastWorld || 'earth';
-    const depth = 12 + metaBonuses().unlock.galaxyDepth;
-    const destinations = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth);
-    let macro = null;
-    try { macro = await getGalaxyState(); } catch { /* local galaxy still works */ }
-    this.ui.showGalaxy(destinations, currentWorld, macro);
-  }
-
-  _livingWorldSelf() {
-    const character = selectedMmoCharacter(this.profile);
-    return {
-      id: character?.id || this.auth?.user?.id || 'self',
-      name: character?.name || this.profile?.name || 'Commander',
-      className: character?.classKey ? (MMO_CLASSES[character.classKey]?.name || character.classKey) : 'Commander',
-      health: 100,
-    };
-  }
-
-  async _refreshLivingWorld(viewport = null) {
-    if (!this.auth?.isSignedIn()) {
-      this.ui.setLivingWorldState({});
-      this.ui.showBanner('Sign in to enter the persistent living world.', 'bad', 2600);
-      return null;
-    }
-    this._livingWorldRequestGate ||= new LatestLivingWorldRequest();
-    const requestSequence = this._livingWorldRequestGate.next();
-    this.ui.setLivingWorldMapStatus('loading', viewport ? 'Loading this front…' : 'Loading world intelligence…');
-    try {
-      let [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(this.ow?.world?.id || this.profile.lastWorld || 'earth', viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
-      if (!projection?.shard) throw new Error('world_not_initialized');
-      if (!(projection.ownParties || []).length) {
-        const character = selectedMmoCharacter(this.profile);
-        if (!character?.id) throw new Error('living_world_character_required');
-        await enterLivingWorld(character.id);
-        [projection, socialParty, company, governance] = await Promise.all([getLivingWorldProjection(projection.shard.id, viewport), getLivingWorldParty(), getLivingWorldCompany(), getLivingWorldGovernance()]);
-      }
-      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
-      const state = livingWorldProjectionToUi(projection, { ...this._livingWorldSelf(), userId: this.auth.user.id }, socialParty, company, governance);
-      this.livingWorldState = state;
-      this.ui.setLivingWorldState(state);
-      this.ui.setLivingWorldMapStatus('ready', '');
-      return state;
-    } catch (error) {
-      if (!this._livingWorldRequestGate.isCurrent(requestSequence)) return null;
-      const failure = livingWorldRefreshFailure(this.livingWorldState, viewport);
-      if (!failure.retained) { this.livingWorldState = null; this.ui.setLivingWorldState({}); }
-      this.ui.setLivingWorldMapStatus(failure.mode, failure.message);
-      const unavailable = ['living_world_backend_not_configured', 'living_world_projection_failed', 'world_not_initialized'].includes(error?.message);
-      const tutorial = error?.message === 'tutorial_campaign_required';
-      this.ui.showBanner(tutorial ? 'Complete Greenfall training once to enter the living world.' : unavailable ? 'Living-world simulation is not active yet. Existing missions remain available.' : 'World intelligence could not be refreshed.', unavailable ? '' : 'bad', 3000);
-      return null;
-    }
-  }
-
-  _refreshLivingWorldViewport(viewport) {
-    clearTimeout(this._livingWorldViewportTimer);
-    this._livingWorldViewportTimer = setTimeout(() => this._refreshLivingWorld(viewport), 140);
-  }
-
-  _livingWorldUnavailable(feature) {
-    this.ui.showBanner(`${feature} is not available until the authoritative shard is initialized.`, 'bad', 3000);
-  }
-
-  _openLivingWorldParty() {
-    const party = this.livingWorldState?.party;
-    if (!party?.socialPartyId) return this._createLivingWorldParty();
-    const targetHandle = globalThis.prompt?.('Invite a player by Zillions username:')?.trim().toLowerCase();
-    if (!targetHandle) return;
-    this._sendLivingWorldPartyAction('invite', { partyId: party.socialPartyId, targetHandle }).then(() => {
-      this.ui.showBanner('Party invitation sent.', '', 2400); this._refreshLivingWorld();
-    }).catch(() => this.ui.showBanner('The party invitation was rejected.', 'bad', 2600));
-  }
-
-  async _sendLivingWorldPartyAction(action, fields = {}) {
-    return sendLivingWorldPartyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `party-${Date.now().toString(36)}`, action, payload: {}, ...fields });
-  }
-
-  async _createLivingWorldParty() {
-    try { await this._sendLivingWorldPartyAction('create', { payload: { name: `${this._livingWorldSelf().name}'s Party`, shardId: this.livingWorldState?.world?.id || 'earth-1' } }); await this._refreshLivingWorld(); this.ui.showBanner('Party created.', '', 2200); }
-    catch (error) { this.ui.showBanner(error?.message === 'already_in_party' ? 'You already have a party.' : 'Party creation was rejected.', 'bad', 2500); }
-  }
-
-  async _leaveLivingWorldParty() {
-    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId || !globalThis.confirm?.('Leave this party? Your company remains in the world.')) return;
-    try { await this._sendLivingWorldPartyAction('leave', { partyId }); await this._refreshLivingWorld(); this.ui.showBanner('You left the party.', '', 2200); }
-    catch { this.ui.showBanner('Could not leave the party.', 'bad', 2400); }
-  }
-
-  async _setLivingWorldPartyTravelMode(mode) {
-    const partyId = this.livingWorldState?.party?.socialPartyId; if (!partyId) return;
-    try { await this._sendLivingWorldPartyAction('travel_mode', { partyId, payload: { mode } }); await this._refreshLivingWorld(); this.ui.showBanner(mode === 'grouped' ? 'Your company will travel with the party.' : 'Your company may travel separately.', '', 2400); }
-    catch { this.ui.showBanner('Travel mode was rejected.', 'bad', 2400); }
-  }
-
-  async _acceptLivingWorldPartyInvite(invite) {
-    try { await this._sendLivingWorldPartyAction('accept', { partyId: invite.partyId, inviteId: invite.id }); await this._refreshLivingWorld(); this.ui.showBanner(`Joined ${invite.partyName || 'party'}.`, '', 2400); }
-    catch { this.ui.showBanner('The party invitation could not be accepted.', 'bad', 2600); }
-  }
-
-  _locateLivingWorldPartyMember(memberId) {
-    const member = this.livingWorldState?.party?.members?.find((entry) => entry.id === memberId);
-    if (!member) return this._livingWorldUnavailable('Party location');
-    this.ui.openLivingWorldMap();
-    this.ui.showBanner(`${member.name} · ${member.location}`, '', 2400);
-  }
-
-  _trackLivingWorldParty(partyId) {
-    const party = this.livingWorldState?.parties?.find((entry) => entry.id === partyId);
-    if (!party) return this._livingWorldUnavailable('Army tracking');
-    this.ui.showBanner(`Tracking ${party.name} · ${party.intent}`, '', 2400);
-  }
-
-  async _requestLivingWorldTravel(locationId, mode = 'travel') {
-    const state = this.livingWorldState;
-    const party = state?.party;
-    const route = state?.routes?.find((entry) => entry.originId === party?.locationId && entry.destinationId === locationId);
-    const destination = state?.settlements?.find((entry) => entry.id === locationId);
-    if (!party?.id || !party.revision || !route) return this._livingWorldUnavailable('Travel');
-    try {
-      const grouped = (party.members || []).filter((member) => member.travelMode === 'grouped');
-      if (mode === 'fast' && party.socialPartyId && grouped.length > 1) {
-        this.ui.showBanner('Fast travel requires party members to use split travel. Group travel uses the road simulation.', 'bad', 3200); return;
-      }
-      if (party.socialPartyId && grouped.length > 1) await sendLivingWorldPartyCommand({
-        action: 'group_travel', requestId: globalThis.crypto?.randomUUID?.() || `party-world-${Date.now().toString(36)}`,
-        partyId: party.socialPartyId, payload: { routeId: route.id, expectedRevisions: Object.fromEntries(grouped.map((member) => [member.worldPartyId, Number(member.worldPartyRevision)])) },
-      }); else await sendLivingWorldCommand({
-        type: 'issue_movement', requestId: globalThis.crypto?.randomUUID?.()
-          || `world-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, shardId: state.world.id,
-        partyId: party.id, expectedRevision: party.revision, payload: { routeId: route.id, mode: mode === 'fast' && destination?.fastTravel ? 'fast' : 'travel' },
-      });
-      // Command acceptance is not arrival. Refresh to show only state the
-      // authority has actually committed.
-      await this._refreshLivingWorld();
-      this.ui.showBanner('Movement order submitted to the world simulation.', '', 2600);
-    } catch (error) {
-      this.ui.showBanner(error?.status === 409 ? 'World state changed. Refresh and try again.' : 'The movement order was rejected.', 'bad', 2800);
-    }
-  }
-
-  async _livingWorldTrade(payload) {
-    const state = this.livingWorldState, party = state?.party;
-    if (!party?.id || !party?.revision || party.locationId !== payload.locationId) return this._livingWorldUnavailable('Market trade');
-    try {
-      await sendLivingWorldCommand({ type: 'trade_market', requestId: globalThis.crypto?.randomUUID?.() || `trade-${Date.now().toString(36)}`, shardId: state.world.id, partyId: party.id, expectedRevision: party.revision, payload });
-      await this._refreshLivingWorld(); this.ui.showBanner(`${payload.side === 'buy' ? 'Purchase' : 'Sale'} submitted to the market.`, '', 2200);
-    } catch (error) { this.ui.showBanner(error?.message || 'Market trade was rejected.', 'bad', 2600); }
-  }
-
-  async _livingWorldCompanyAction(action, payload) {
-    const company = this.livingWorldState?.company;
-    if (!company?.partyId || !company?.revision) return this._livingWorldUnavailable('Company management');
-    try {
-      await sendLivingWorldCompanyCommand({ requestId: globalThis.crypto?.randomUUID?.() || `company-${Date.now().toString(36)}`, partyId: company.partyId, expectedRevision: Number(company.revision), action, payload });
-      await this._refreshLivingWorld(); this.ui.showBanner('Company order completed.', '', 2200);
-    } catch (error) { this.ui.showBanner(error?.message || 'Company order was rejected.', 'bad', 2600); }
-  }
-
-  async _livingWorldEncounterAction(encounter, action) {
-    const party = this.livingWorldState?.party;
-    try {
-      if (action === 'autosim' && encounter.engagement?.id) {
-        await sendLivingWorldBattleAction({ action: 'autosim', engagementId: encounter.engagement.id, encounterRevision: Number(encounter.revision), requestId: globalThis.crypto?.randomUUID?.() || `battle-${Date.now().toString(36)}` });
-      } else if (action === 'live' && encounter.engagement?.id) {
-        const launched=await sendLivingWorldBattleAction({action:'launch',engagementId:encounter.engagement.id,encounterRevision:Number(encounter.revision),requestId:globalThis.crypto?.randomUUID?.()||`battle-${Date.now().toString(36)}`});
-        this._livingWorldBattle={assignment:launched.assignment,token:launched.token,commands:[]};
-        this.closePauseMenu?.();this.ui.closeLivingWorldMap();this.ui.selectedMode='living_world_battle';this.ui.selectedLevel=1;
-        await this.startGame('normal','alexander');
-        return;
-      } else {
-        await sendLivingWorldCommand({ type: 'set_encounter_choice', requestId: globalThis.crypto?.randomUUID?.() || `encounter-${Date.now().toString(36)}`, shardId: this.livingWorldState.world.id, partyId: party.id, expectedRevision: party.revision, payload: { encounterId: encounter.id, choice: action, decisionRevision: Number(encounter.revision), rearguardStackIds: [], diversion: {} } });
-      }
-      await this._refreshLivingWorld(); this.ui.showBanner(action === 'autosim' ? 'Battle resolved and written back.' : 'Encounter decision submitted.', '', 2400);
-    } catch (error) { this.ui.showBanner(error?.message || 'Encounter action was rejected.', 'bad', 2800); }
-  }
-
-  async _livingWorldGovernanceAction(action, payload) {
-    const party = this.livingWorldState?.party;
-    if (!party?.id || !party.revision) return this._livingWorldUnavailable('Governance');
-    try { await sendLivingWorldGovernanceCommand({ requestId: globalThis.crypto?.randomUUID?.() || `governance-${Date.now().toString(36)}`, partyId: party.id, expectedRevision: party.revision, action, payload }); await this._refreshLivingWorld(); this.ui.showBanner('Governance order completed.', '', 2300); }
-    catch (error) { this.ui.showBanner(error?.message || 'Governance order was rejected.', 'bad', 2800); }
-  }
-
-  _launchLivingWorldMission(levelId) {
-    if (!Number.isInteger(Number(levelId)) || Number(levelId) < 1) return this._livingWorldUnavailable('Mission deployment');
-    this.closePauseMenu?.();
-    this.ui.closeLivingWorldMap();
-    this._launchGateMission({ levelId: Number(levelId), cave: false }, this.ui.selectedDiff || 'normal');
-  }
-
-  _travelToWorld(worldId) {
-    const depth = 12 + metaBonuses().unlock.galaxyDepth;
-    const destination = galaxyDestinationList(knownGalaxy(), this.profile.campaign || 0, depth)
-      .find((world) => world.id === worldId);
-    if (!destination || !destination.unlocked) {
-      this.audio.deny();
-      this.ui.showBanner('🔒 That route is beyond the current frontier.', 'bad', 2600);
-      return;
-    }
-    if (this.ow?.world?.id === worldId) {
-      this.ui.hideOverlay();
-      return;
-    }
-    this._clearOverworld();
-    this.ui.setOverworldMode(false);
-    this._enterOverworld(worldId);
-  }
-
-  _clearOverworld() {
-    if (this.owTerrain) { this.scene.remove(this.owTerrain); this._disposeObject3D(this.owTerrain); }
-    for (const g of this.owGates || []) { this.scene.remove(g); this._disposeObject3D(g); }
-    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
-    for (const m of (this.owGhostMeshes || new Map()).values()) { this.scene.remove(m); this._disposeObject3D(m); }
-    this.owTerrain = null;
-    this.owGates = [];
-    this.owHero = null;
-    this.owGhostMeshes = new Map();
-    this.owMap = null;
-    this.ow = null;
-    if (this._owGhostChan) { try { this.lobby?.sb?.removeChannel?.(this._owGhostChan); } catch { /* already gone */ } this._owGhostChan = null; }
-  }
-
-  // A front's gate: two posts, a lintel, a banner whose colour is the state
-  // of the war there, and the boss's name overhead. Locked gates stand on
-  // blighted ground with a slow corrupted pulse.
-  _makeOverworldGate(gate) {
-    const st = gateState(gate);
-    const gr = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 });
-    for (const dx of [-1.5, 1.5]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 3.4, 0.42), wood);
-      post.position.set(dx, 1.7, 0);
-      post.castShadow = true;
-      gr.add(post);
-    }
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.4, 0.5), wood);
-    lintel.position.y = 3.4;
-    lintel.castShadow = true;
-    gr.add(lintel);
-    const bannerColor = st.cleared ? 0xc9a44a : st.locked ? 0x2c2438 : 0xe8843c;
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.2, 1.1),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: bannerColor, side: THREE.DoubleSide }),
-    );
-    banner.position.y = 2.6;
-    gr.add(banner);
-    gr.userData.banner = banner;
-    const ringGeo = new THREE.RingGeometry(2.4, 3.0, 40);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: st.locked ? 0x8a4aff : st.cleared ? 0xc9a44a : 0xfff2d8,
-      transparent: true, opacity: 0.4, depthWrite: false,
-    }));
-    ring.position.y = 0.06;
-    gr.add(ring);
-    gr.userData.ring = ring;
-    const icon = gate.cave ? '🌀' : gate.portal ? '🚀' : gate.boss.icon;
-    const name = gate.cave ? 'THE LABYRINTH' : gate.name.toUpperCase();
-    const sub = gate.cave ? 'the trials below'
-      : gate.portal ? 'starship navigation'
-      : st.locked ? '🔒 sealed' : st.cleared ? '✅ taken' : `${gate.boss.name}`;
-    const label = this._makeLabelSprite(icon, name);
-    label.position.y = 5.6;
-    label.scale.set(5.2, 2.6, 1);
-    gr.add(label);
-    gr.userData.sub = sub;
-    gr.position.set(gate.x, this.owMap.groundY(gate.x, gate.z), gate.z);
-    gr.userData.gate = gate;
-    this.scene.add(gr);
-    return gr;
-  }
-
-  // The player's chosen hero walks the overworld in miniature — the real unit
-  // mesh, real walk cycle, smaller aura. Rebuilt when the pick changes.
-  _makeOverworldHero() {
-    if (this.owHero) { this.scene.remove(this.owHero); this._disposeObject3D(this.owHero); }
-    const key = this.ui.selectedHero || 'alexander';
-    const def = HEROES[key] || HEROES.alexander;
-    const character = selectedMmoCharacter(this.profile);
-    const mesh = this._makeUnitMesh({ hero: true, key, def, auraRadius: 1.3, characterStyle: character ? {
-      raceKey: character.raceKey, appearance: character.appearance,
-      customization: character.customization, equipment: character.equipment, classKey: character.classKey,
-    } : null });
-    const tint = character ? Number.parseInt((character.appearance === 'crimson' ? 'b94b51'
-      : character.appearance === 'cobalt' ? '4679b8'
-      : character.appearance === 'bone' ? 'b7aa8c'
-      : character.appearance === 'void' ? '6d568f'
-      : character.appearance === 'forest' ? '4f785d' : '8493a6'), 16) : null;
-    if (tint != null) mesh.userData.characterTint = tint;
-    mesh.scale.setScalar(1.0);
-    this.owHero = mesh;
-    this.scene.add(mesh);
+    this.ui.showSetup({ mode: 'campaign' });
   }
 
   _setCharacterPreview(style) {
@@ -1006,237 +651,93 @@ class App {
     }
   }
 
-  _updateOverworld(dt, t) {
-    const ow = this.ow;
-    if (!ow) return;
-    // Steering only while the hub overlay is closed; typing in lobby inputs
-    // already swallows keys, and a menu open over the world means "at ease".
-    if (!this.ui.overlayHidden()) ow.setDir(0, 0);
-    else {
-      // The hub walks on the same bindings the battlefield does.
-      const binds = this.binds();
-      let dx = 0, dz = 0;
-      if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
-      if (isHeld(binds, this.keys, 'move_down')) dz += 1;
-      if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
-      if (isHeld(binds, this.keys, 'move_right')) dx += 1;
-      ow.setDir(dx, dz);
-    }
-    for (const ev of ow.update(dt)) this._onOverworldEvent(ev);
-
-    const h = ow.hero;
-    this._overworldMinimapT = (this._overworldMinimapT || 0) - dt;
-    if (this._overworldMinimapT <= 0) {
-      this._overworldMinimapT = 0.1;
-      this.ui.drawOverworldMinimap(ow, this.owMap);
-    }
-    if (this.owHero) {
-      this.owHero.position.set(h.x, this.owMap.groundY(h.x, h.z), h.z);
-      this.owHero.rotation.y = h.facing;
-      // The real walk cycle from _syncUnits, mirrored here so the overworld
-      // hero moves like he does in a fight.
-      const pose = unitPose(h.moving ? 'run' : 'idle', t * (h.moving ? 10 : 1.8));
-      const body = this.owHero.userData.body;
-      if (body) {
-        body.position.y = pose.y;
-        body.rotation.z = pose.roll;
-      }
-      const limbs = this.owHero.userData.limbs;
-      if (limbs) {
-        if (limbs.legL) limbs.legL.rotation.x = pose.stride;
-        if (limbs.legR) limbs.legR.rotation.x = -pose.stride;
-        if (limbs.armL) limbs.armL.rotation.x = -pose.stride * 0.55;
-        if (limbs.armR) limbs.armR.rotation.x = pose.stride * 0.55;
-      }
-    }
-
-    // Gates breathe: locked ones pulse a corrupted violet, open ones ripple
-    // gently, and every banner sways on its pole.
-    for (const gr of this.owGates) {
-      const st = gateState(gr.userData.gate);
-      const ph = (t * 0.7) % 1;
-      gr.userData.ring.material.opacity = st.locked
-        ? 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))
-        : 0.3 * (1 - ph * 0.6);
-      gr.userData.ring.scale.setScalar(1 + ph * 0.12);
-      gr.userData.banner.rotation.y = Math.sin(t * 1.8 + gr.position.x) * 0.22;
-    }
-    this._updateOverworldGhosts(dt, t);
-  }
-
-  _onOverworldEvent(ev) {
-    if (ev.t === 'gateleave') {
-      this.ui.hideGatePrompt();
-      this._leaveGateRally().catch(() => {});
-      return;
-    }
-    if (ev.t !== 'gate') return;
-    if (ev.state.locked) {
-      this.shake = 0.35;
-      this.audio.deny();
-      this.ui.showBanner('🔒 The road ends here — take the front before it first.', 'bad', 2600);
-      return;
-    }
-    this.owEnterNote = ev.gate.cave ? 'The Labyrinth' : ev.gate.name;
-    if (ev.gate.portal) {
-      if (ev.gate.action === 'custom') {
-        this._openCustomGames();
-        return;
-      }
-      this._openGalaxyMap();
-      return;
-    }
-    this.ui.showGateConfirm({
-      gate: ev.gate,
-      diff: this.ui.selectedDiff,
-      onLeave: () => this._leaveGateRally().catch(() => {}),
-      onEnter: (diff) => {
-        if (ev.gate.cave) {
-          this.ui.selectedMode = 'labyrinth';
-          this.ui.showSetup({ mode: 'labyrinth' });
-          return;
-        }
-        // A campaign gate is the direct single-player door. Party formation
-        // belongs in Custom Games, where players can see and control the room
-        // they are joining. Do not turn this button into a hidden two-click
-        // public rally flow.
-        this._launchGateMission(ev.gate, diff);
-      },
-    });
-  }
-
-  _launchGateMission(gate, diff) {
-    this.ui.selectedMode = gate.cave ? 'labyrinth' : 'campaign';
-    this.ui.selectedLevel = gate.levelId || 1;
-    this.ui.selectedDiff = diff;
-    this.ui.cb.onStart(diff, this.ui.selectedHero);
-  }
-
-  async _joinGateRally(gate, diff) {
-    const lobby = await this._openLobby().catch(() => null);
-    if (!lobby?.connected) {
-      this._launchGateMission(gate, diff);
-      return;
-    }
-    const worldId = this.ow?.world?.id || 'earth';
-    const gateKey = gate.cave ? `labyrinth:${gate.levelId || 1}` : `level:${gate.levelId}`;
-    const matches = (await lobby.refreshGames().catch(() => []))
-      .filter((game) => game.rally && game.status === 'open'
-        && game.rallyWorldId === worldId && game.rallyGateKey === gateKey);
-
-    if (lobby.game?.rally && lobby.game.rallyWorldId === worldId && lobby.game.rallyGateKey === gateKey) {
-      const game = lobby.game;
-      if (this.mpRole === 'host') {
-        const readiness = roomLaunchReadiness(game, this.peers.length + 1);
-        if (readiness.ready) this._launchGateMission(gate, diff);
-      } else {
-        await this._setRoomReady(true);
-      }
-      return;
-    }
-
-    if (matches[0]) {
-      await this.joinOnlineGame(matches[0], { compact: true });
-      await this._setRoomReady(true);
-      this.ui.setGateRally({ players: this.lobby?.game?.players || matches[0].players, maxPlayers: matches[0].max_players, role: 'guest', ready: true });
-      return;
-    }
-
-    this.audio.init();
-    this.mpRole = 'host';
-    this.onlineMode = true;
-    this.onlinePending = new Map();
-    const game = await lobby.createGame({
-      visibility: 'public', level: gate.levelId || 1, mode: gate.cave ? 'labyrinth' : 'campaign',
-      difficulty: diff, unlockedLevel: highestUnlockedLevel(this.profile.campaign),
-      name: `${gate.name || 'Mission'} rally`, maxPlayers: 4, kind: 'rally',
-      mapName: gate.name || 'Mission', worldId, gateKey,
-    });
-    await lobby.updateRoomPlayer({ hero: this.ui.selectedHero, ready: true }).catch(() => {});
-    this._onRoomUpdate(lobby.game || game);
-  }
-
-  async _leaveGateRally() {
-    if (!this.lobby?.game?.rally || this.netMode) return;
-    await this.lobby.leaveRoom();
-    for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
-    try { this.net?.destroy(); } catch { /* closed */ }
-    this.peers = [];
-    this.net = null;
-    this.mpRole = null;
-    this.onlineMode = false;
-  }
-
-  // ----- multiplayer ghosts: presence garnish, never game netcode -----
-
-  _owGhostSend(payload) {
-    if (!OVERWORLD_GHOSTS || !this.lobby?.connected || !this.lobby.sb || !this.lobby.me) return;
+  // ---------------- match tickets ----------------
+  // A signed-in match starts with a server ticket (api/match-start.js). It
+  // carries the match seed every peer runs, the room the match is credited
+  // to, and makes the end-of-match report single use. Signed-out play needs
+  // no ticket and keeps the fixed seed it always had.
+  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
+    if (!this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
+    const character = selectedMmoCharacter(this.profile);
+    if (!character) return null;
     try {
-      if (!this._owGhostChan) {
-        // Presence is scoped per planet: ghosts you see walk YOUR world.
-        this._owGhostChan = this.lobby.sb.channel(overworldChannel(this.ow.world.id))
-          .on('broadcast', { event: 'pos' }, ({ payload: p }) => {
-            if (!this.ow || !p || p.id === this.lobby.me.id) return;
-            if (p.worldId && p.worldId !== this.ow.world.id) return; // another planet's ghost
-            this.ow.ghostUpsert(p.id, p, this.ow.time);
-            if (p.enter) this._owGhostNote(p);
-          })
-          .subscribe();
-      }
-      const res = this._owGhostChan.send({ type: 'broadcast', event: 'pos', payload });
-      if (res && res.catch) res.catch(() => {});
-    } catch { /* the overworld is walkable alone */ }
-  }
-
-  _updateOverworldGhosts(dt, t) {
-    if (!OVERWORLD_GHOSTS) return;
-    this._owGhostAcc = (this._owGhostAcc || 0) + dt;
-    if (this._owGhostAcc >= 0.25) {
-      this._owGhostAcc = 0;
-      const h = this.ow.hero;
-      this._owGhostSend({
-        id: this.lobby?.me?.id || 'local',
-        name: this._publicName(),
-        hero: this.ui.selectedHero,
-        worldId: this.ow.world.id,
-        x: Math.round(h.x * 10) / 10, z: Math.round(h.z * 10) / 10,
-        enter: this.owEnterNote || undefined,
+      return await matchStartRequest({
+        characterId: character.id, levelId, mode, difficulty, roomId, joinToken,
+        ...(manualCoop ? { manualCoop: { displayName: this._publicName(), hero } } : {}),
       });
-      this.owEnterNote = null;
-      this.ow.ghostSweep(6, this.ow.time);
+    } catch (error) {
+      console.warn('match ticket failed', error);
+      return { ok: false, error: error?.message || 'match_start_failed' };
     }
-    this.owGhostMeshes = this.owGhostMeshes || new Map();
-    for (const [id, g] of this.ow.ghosts) {
-      let mesh = this.owGhostMeshes.get(id);
-      if (!mesh) {
-        const def = HEROES[g.hero] || HEROES.alexander;
-        mesh = this._makeUnitMesh({ hero: true, key: g.hero, def, auraRadius: 1.3 });
-        mesh.scale.setScalar(0.92);
-        mesh.userData.label = this._makeLabelSprite('👤', g.name);
-        mesh.userData.label.position.y = 2.6;
-        mesh.userData.label.scale.set(3.4, 1.7, 1);
-        mesh.add(mesh.userData.label);
-        this.scene.add(mesh);
-        this.owGhostMeshes.set(id, mesh);
-      }
-      mesh.position.set(g.x, this.owMap.groundY(g.x, g.z), g.z);
-      mesh.userData.label.material.opacity = 0.85;
-    }
-    for (const [id, mesh] of this.owGhostMeshes) {
-      if (!this.ow.ghosts.has(id)) {
-        this.scene.remove(mesh);
-        this._disposeObject3D(mesh);
-        this.owGhostMeshes.delete(id);
-      }
-    }
-    void t;
   }
 
-  // "X entered Greenfall Marches" — the hub chat strip doubles as the war
-  // report for whoever is walking the same planet.
-  _owGhostNote(p) {
-    this._hubChatLog = [...(this._hubChatLog || []), { name: p.name || 'A commander', text: `entered ${p.enter}` }];
-    this.ui.hubChat(this._hubChatLog);
+  // Co-op host: get the ticket (and, for invite-code games, a private room)
+  // BEFORE telling guests to start, so every peer runs the ticket's seed and
+  // knows the room id from the first frame — not looked up at match end.
+  async _launchHostMatch(d, hero, mode) {
+    if (this._hostLaunching) return;
+    this._hostLaunching = true;
+    try {
+      const level = this.ui.selectedLevel || 1;
+      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+      const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
+      // The server only issues room tickets for a room that is in game.
+      if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
+      const ticket = await this._requestMatchTicket({ levelId: level, mode, difficulty: d, roomId: lobbyRoom, manualCoop: !lobbyRoom, hero });
+      const match = {
+        ticket: ticket?.ok ? ticket.ticket : null,
+        seed: ticket?.ok ? ticket.seed : null,
+        roomId: ticket?.ok ? ticket.roomId : lobbyRoom,
+        joinToken: ticket?.ok ? ticket.joinToken || null : null,
+        error: ticket && !ticket.ok ? ticket.error : null,
+      };
+      this.startExpectedGuests = this.peers.length;
+      this.startReadyGuests.clear();
+      this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
+      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      const culture = cultureKey(this.ui.selectedCulture);
+      this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
+      await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
+    } finally {
+      this._hostLaunching = false;
+    }
+  }
+
+  // The match fields a host shares with its guests (never its own ticket).
+  _sharedMatchFields() { return sharedMatchFields(this._match); }
+
+  _sharedMatch(raw) { return parseSharedMatch(raw); }
+
+  // What this peer needs at match end: ticket, room, the exact hero setups the
+  // sim started from, and (for resumed runs) the input log so far.
+  _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket }) {
+    const resumed = snap ? this._resumeMatch || null : null;
+    this._resumeMatch = null;
+    const given = mp?.match || null;
+    const match = {
+      ticket: resumed?.ticket || given?.ticket || (soloTicket?.ok ? soloTicket.ticket : null),
+      seed: resumed?.seed ?? given?.seed ?? (soloTicket?.ok ? soloTicket.seed : null),
+      roomId: resumed?.roomId || given?.roomId || null,
+      joinToken: resumed?.joinToken || given?.joinToken || null,
+      heroes: JSON.parse(JSON.stringify(resumed?.heroes || heroKeys || null)),
+      log: resumed?.log || null,
+      error: given?.error || (soloTicket && !soloTicket.ok ? soloTicket.error : null),
+      ticketPromise: null,
+    };
+    // Guests (and resumed co-op peers) fetch their own ticket for the room in
+    // the background; it is only needed when the match ends.
+    if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
+      match.ticketPromise = this._requestMatchTicket({
+        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
+      }).then((ticket) => {
+        if (ticket?.ok) {
+          if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
+          match.ticket = ticket.ticket;
+        } else match.error = ticket?.error || 'match_start_failed';
+        return ticket;
+      });
+    }
+    return match;
   }
 
   // ---------------- game start ----------------
@@ -1246,39 +747,40 @@ class App {
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
-    this.ui.hideGatePrompt();
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
       this.ui.showBanner('Loading…', '', 1500);
-      await loadAssets();
-      this.assetsLoaded = true;
+      await this._loadArt();
     }
-    // Remember launches that came off the walkable planet: victory's
-    // "Return to world" keys off this, because the profile's character may
-    // not be hydrated by the time the button is clicked — and losing the
-    // relay dumped returning commanders on the title screen (QA 2026-08-18).
-    this._runFromOverworld = !!this.ow;
-    if (this.ow) {
-      const point = {
-        worldId: this.ow.world?.id || 'earth',
-        x: this.ow.hero.x,
-        z: this.ow.hero.z,
-        facing: this.ow.hero.facing || 0,
-      };
-      try { sessionStorage.setItem('zillions-overworld-return', JSON.stringify(point)); } catch { /* blocked storage */ }
-      this.ui.shell.enterMission(point);
-    }
-    this._clearOverworld();
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
     const level = levelById(levelId);
     const seed = snap ? snap.seed : level.seed;
+    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    // The base culture: a resumed run keeps its own, a guest takes the host's,
+    // a fresh solo/host run uses the setup pick. It sets which army the camps
+    // muster (sim) and which kit the base is built from (art).
+    const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
+    setActiveCulture(cultureId);
+    await loadKitCulture(cultureId);
+    // Solo signed-in runs fetch their ticket (and match seed) first.
+    const soloTicket = !snap && !mp
+      ? await this._requestMatchTicket({ levelId, mode, difficulty })
+      : null;
+    this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : this._livingWorldBattle ? 'alexander' : { k: heroKey, camp: this.campFor(heroKey) };
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode);
-    if(this._livingWorldBattle&&!snap)this.game.configureLivingWorldBattle(this._livingWorldBattle.assignment);
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
+      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
+    // Record inputs for leaderboard verification. A resumed run continues the
+    // log it saved; a resume without one cannot be verified (it still pays).
+    if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
+      this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
+    }
+    if (this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
+      this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
+    }
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1377,39 +879,155 @@ class App {
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
     const squarePlaza = plan && plan.key === 'fort';
+    // On a terraced site the pad and walkways are draped over the ground so
+    // they follow the steps instead of floating flat over the lower terraces.
+    const terraced = !!this.map._tileCH;
+    const drape = (mesh, lift) => {
+      if (!terraced) return mesh;
+      mesh.updateMatrix();
+      const geo = mesh.geometry.clone();
+      geo.applyMatrix4(mesh.matrix);
+      const pa = geo.attributes.position;
+      for (let k = 0; k < pa.count; k++) pa.setY(k, this.map.groundY(pa.getX(k), pa.getZ(k)) + lift);
+      geo.computeVertexNormals();
+      mesh.geometry = geo;
+      mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0); mesh.scale.set(1, 1, 1);
+      return mesh;
+    };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6) : new THREE.CircleGeometry(7.2, 40),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xa6a091 }),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
+      toyMat({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
     disc.position.set(cx, plazaY + 0.015, cz);
+    drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = new THREE.RingGeometry(5.6, 5.85, 48);
+    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
       color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
+    drape(ring, 0.05);
     g.add(ring);
-    const laneMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xb3ad9e });
+    const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
     for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), laneMat);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
       lane.rotation.x = -Math.PI / 2;
       lane.rotation.z = -a;
       lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
       lane.receiveShadow = true;
-      g.add(lane);
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len), stripeMat);
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
       stripe.rotation.copy(lane.rotation);
       stripe.position.copy(lane.position);
       stripe.position.y = plazaY + 0.022;
+      drape(lane, 0.025); drape(stripe, 0.04);
+      g.add(lane);
       g.add(stripe);
+    }
+    // Switchback roads down the cliff face below each gate: a paved ribbon
+    // draped over the cut so the zig-zag reads from the game camera.
+    const site = (this.map.sites || []).reduce((b, s) => (!b || Math.hypot(s.x - cx, s.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? s : b), null);
+    if (terraced && site && site.switchbacks) {
+      const ribbon = (pts, w, y, mat) => {
+        const P = [];
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L * 3));
+          const nx = -(bz - az) / L * w / 2, nz = (bx - ax) / L * w / 2;
+          // Overrun each leg by half a width so the turns are filled.
+          const ex = (bx - ax) / L * w / 2, ez = (bz - az) / L * w / 2;
+          for (let k = 0; k < n; k++) {
+            const f0 = k / n, f1 = (k + 1) / n;
+            const x0 = ax + (bx - ax) * f0 - (k === 0 ? ex : 0), z0 = az + (bz - az) * f0 - (k === 0 ? ez : 0);
+            const x1 = ax + (bx - ax) * f1 + (k === n - 1 ? ex : 0), z1 = az + (bz - az) * f1 + (k === n - 1 ? ez : 0);
+            // The road's own grade, lifted onto the ground where the ground
+            // swells a little; never climbing onto the rock beside it.
+            const h0 = ah + (bh - ah) * f0, h1 = ah + (bh - ah) * f1;
+            const v = [[x0 + nx, z0 + nz, h0], [x0 - nx, z0 - nz, h0], [x1 - nx, z1 - nz, h1], [x1 + nx, z1 + nz, h1]];
+            for (const idx of [0, 1, 2, 0, 2, 3]) {
+              const [vx, vz, vh] = v[idx];
+              const gy = this.map.groundY(vx, vz);
+              P.push(vx, (gy > vh && gy - vh < 0.25 ? gy : vh) + y, vz);
+            }
+          }
+        }
+        // Round landing at every turn (and both ends): a fan of the same
+        // half-width, so a hairpin never leaves a wedge of the layer below
+        // showing on its outer side.
+        const lift = (vx, vz, vh) => { const gy = this.map.groundY(vx, vz); return (gy > vh && gy - vh < 0.25 ? gy : vh) + y; };
+        for (let q = 0; q < pts.length; q++) {
+          const [cx0, cz0, ch] = pts[q];
+          const seg = 14, r = w / 2;
+          for (let k = 0; k < seg; k++) {
+            const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2;
+            const p0x = cx0 + Math.cos(a0) * r, p0z = cz0 + Math.sin(a0) * r;
+            const p1x = cx0 + Math.cos(a1) * r, p1z = cz0 + Math.sin(a1) * r;
+            P.push(cx0, lift(cx0, cz0, ch), cz0, p1x, lift(p1x, p1z, ch), p1z, p0x, lift(p0x, p0z, ch), p0z);
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+        geo.computeVertexNormals();
+        const m = new THREE.Mesh(geo, mat);
+        // The road never takes the cliff's cast shadow: the cut sits in the
+        // lee of the rim on some maps and the zig-zag must still read.
+        m.receiveShadow = false;
+        return m;
+      };
+      // Pale packed roadbed between dark kerbs, so the zig-zag reads as a
+      // road against snow and violet moor alike; a lamp post at every turn
+      // and along the long legs marks the way up from the default camera.
+      // Stacked ribbons a few cm apart z-fight from the game camera; a
+      // polygon offset keeps the kerb strictly under the bed and the bed
+      // under the centre line.
+      const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
+      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
+      // meet and their kerbs overlap it reads as a paved apron, not a hole.
+      const edgeMat = layer(0x8a7658, -1);
+      const roadMat = layer(0xd8c49a, -3);
+      const centreMat = layer(0xf1e4c4, -5);
+      const posts = [];
+      for (const pts of site.switchbacks) {
+        g.add(ribbon(pts, 1.85, 0.04, edgeMat));
+        g.add(ribbon(pts, 1.55, 0.06, roadMat));
+        g.add(ribbon(pts, 0.22, 0.075, centreMat));
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az);
+          const nx = -(bz - az) / L, nz = (bx - ax) / L;
+          const n = Math.max(1, Math.round(L / 2.2));
+          for (let k = q === 1 ? 0 : 1; k <= n; k++) {
+            const f = k / n;
+            const px = ax + (bx - ax) * f, pz = az + (bz - az) * f, ph = ah + (bh - ah) * f;
+            for (const side of [-1, 1]) posts.push([px + nx * 1.15 * side, pz + nz * 1.15 * side, ph, k === n || k === 0]);
+          }
+        }
+      }
+      if (posts.length) {
+        const postGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.7, 5).translate(0, 0.35, 0);
+        const capGeo = new THREE.OctahedronGeometry(0.11, 0).translate(0, 0.78, 0);
+        const postMesh = new THREE.InstancedMesh(postGeo, toyMat({ color: 0x2f2a33 }), posts.length);
+        const capMesh = new THREE.InstancedMesh(capGeo, new THREE.MeshBasicMaterial({ color: 0xffc35a }), posts.length);
+        const M = new THREE.Matrix4();
+        posts.forEach(([px, pz, ph, turn], k) => {
+          const gy = this.map.groundY(px, pz);
+          const y = Math.abs(gy - ph) < 0.6 ? Math.max(gy, ph) : ph;
+          const sc = turn ? 1.3 : 1;
+          M.makeScale(sc, sc, sc).setPosition(px, y, pz);
+          postMesh.setMatrixAt(k, M);
+          capMesh.setMatrixAt(k, M);
+        });
+        postMesh.castShadow = true;
+        g.add(postMesh);
+        g.add(capMesh);
+      }
     }
     return g;
   }
@@ -1427,10 +1045,10 @@ class App {
       ring.position.set(s.x, 0.06, s.z);
       gr.add(ring);
       gr.userData.ring = ring;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x3a3228 }));
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xc9a44a }));
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), toyMat({ color: 0xc9a44a }));
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
@@ -1490,13 +1108,13 @@ class App {
     const g = new THREE.Group();
     const vid = (n.id || 0) * 7919;
     const rot = (k) => ((vid >> k) % 628) / 100;
-    const mat = (c, e = 0) => new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
+    const mat = (c, e = 0) => toyMat({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
     const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
 
     // Churned dead-earth ring.
     const ringGeo = new THREE.CircleGeometry(3.1, 20);
     ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
+    const ring = new THREE.Mesh(ringGeo, toyMat({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
     ring.position.y = 0.03;
     ring.receiveShadow = true;
     g.add(ring);
@@ -1590,7 +1208,7 @@ class App {
         mesh = new THREE.Group();
         const gem = new THREE.Mesh(
           new THREE.OctahedronGeometry(0.34, 0),
-          new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
+          toyMat({ color: 0xffd75e, emissive: 0xa8791a, emissiveIntensity: 0.6 }),
         );
         gem.castShadow = true;
         mesh.add(gem);
@@ -1663,10 +1281,8 @@ class App {
   async _initAuth() {
     try {
       const status = await this.auth.init();
-      setLivingWorldSession(this.auth.session);
       await this._applyAuth(status);
       this.auth.onAuthChange((next) => {
-        setLivingWorldSession(this.auth.session);
         this._applyAuth(next).catch((err) => {
           console.warn('auth sync failed', err);
           this.ui.setAccount({ ...this.auth.status(), error: 'Profile sync failed. Try again.' });
@@ -1686,7 +1302,6 @@ class App {
   }
 
   async _applyAuth(status) {
-    setLivingWorldSession(this.auth.session);
     this.authStatus = status;
     if (status.signedIn) {
       await this.auth.ensureProfile(this.profile);
@@ -1703,6 +1318,9 @@ class App {
         try { await this._ensureAuthoritativeEconomy(character, { persistProfile: false }); }
         catch { this.ui.showBanner('Online inventory is unavailable. Legacy gear remains archived and no changes were made.', 'bad', 3200); }
       }
+      // Claim any match the server never confirmed (closed tab, offline).
+      this._flushPendingMatches().catch((err) => console.warn('pending match flush failed', err));
+      this._syncAccountUpgrades().catch((err) => console.warn('account upgrade sync failed', err));
       // Auth events are read/hydration boundaries. Persisting account metadata
       // here calls auth.updateUser(), which emits another auth event and used
       // to recurse until Supabase rate-limited /auth/v1/user.
@@ -1721,7 +1339,6 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
-    if (status.signedIn) await this._retryLivingWorldBattleOutbox();
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -1739,13 +1356,13 @@ class App {
     } else clearRetry(sessionStorage);
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
-      // Returning from a finished run: back onto the planet you launched
-      // from. No character yet (created mid-session edge)? Land on the
-      // roster, one click from making one — never a dead title screen.
+      // Returning from a finished run: straight back to mission select.
+      // No character yet (created mid-session edge)? Land on the roster,
+      // one click from making one — never a dead title screen.
       const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
-      if (returning) setTimeout(() => this._enterOverworld(
-        returning.lastWorld || this.profile.lastWorld || 'earth'), 0);
+      this.ui._accountAccepted = true;
+      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
@@ -1760,13 +1377,9 @@ class App {
   }
 
   _restartOrReturn() {
-    if(this.game?.mode==='living_world_battle'&&this._livingWorldBattle&&!this._livingWorldBattle.committed){
-      this.ui.showBanner(this._livingWorldBattle.error?'The persistent result was rejected. Retry the result before leaving.':'Verifying the persistent battle result…','bad',3200);return;
-    }
-    // Any campaign run that came off the planet — or belongs to a character —
-    // returns to the world, not the title screen.
-    if (this.game?.over && this.game.mode === 'campaign'
-      && (this._runFromOverworld || selectedMmoCharacter(this.profile))) {
+    // Any campaign run that belongs to a character returns to mission
+    // select, not the title screen.
+    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
       this.ui.shell.finishMission();
     }
@@ -1820,8 +1433,6 @@ class App {
   async _signOut() {
     try {
       this._authenticatedEntryHandled = false;
-      this._clearOverworld();
-      this.ui.setOverworldMode(false);
       await this.auth.signOut();
       await this._applyAuth(this.auth.status());
     } catch (err) {
@@ -1856,7 +1467,6 @@ class App {
   issue(cmd) {
     if (!this.game) return;
     if (this.mpRole === 'spectator') return;
-    if(this._livingWorldBattle&&this.game.mode==='living_world_battle')this._livingWorldBattle.commands.push({tick:Math.max(0,Math.round(this.game.time/SIM_DT)),command:structuredClone(cmd)});
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
     else this.net.send({ t: 'cmd', c: cmd });
@@ -1878,7 +1488,6 @@ class App {
     if (!character) return;
     this.profile.mmoCharacterId = character.id;
     this.profile.lastHero = character.proxyHero;
-    this.profile.lastWorld = character.lastWorld || this.profile.lastWorld || 'earth';
     this.ui.selectedHero = character.proxyHero;
     if (this.auth?.isSignedIn() && !Number.isFinite(character.authoritativeBalance)) {
       try { await this._ensureAuthoritativeEconomy(character); }
@@ -1888,10 +1497,6 @@ class App {
     }
     this._saveProfile();
     this.ui.setProfile(this.profile);
-    if (!this.game && this.ow) {
-      if (this.ow.world?.id !== character.lastWorld) this._travelToWorld(character.lastWorld || 'earth');
-      else this._makeOverworldHero();
-    }
   }
 
   _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
@@ -1906,12 +1511,11 @@ class App {
       return;
     }
     this.profile.lastHero = character.proxyHero;
-    this.profile.lastWorld = character.lastWorld;
     this.ui.selectedHero = character.proxyHero;
     this._saveProfile();
     this.ui.setProfile(this.profile);
     const klass = MMO_CLASSES[character.classKey];
-    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, enters the galaxy.`, '', 3000);
+    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, is ready for the siege.`, '', 3000);
     this.ui._showScreen('main');
   }
 
@@ -1932,6 +1536,62 @@ class App {
       this.profile.metaCurrency = current?.authoritativeBalance ?? this.profile.metaCurrency;
       if (persistProfile) this._saveProfile();
     }
+    return result;
+  }
+
+  // The signed-in upgrade tree lives on the server. The first time an account
+  // signs in with a local (guest) tree, it is offered once; the server grants
+  // what fits its cap and never imports local Alloy.
+  async _syncAccountUpgrades() {
+    if (!this.auth?.isSignedIn()) return null;
+    let state = await accountUpgradeRequest('state');
+    if (!state?.ok) return null;
+    const localNodes = Object.keys(loadMeta().nodes || {});
+    if (!state.imported && localNodes.length) {
+      const imported = await accountUpgradeRequest('import_local', { requestId: 'import-local-v1', nodes: localNodes })
+        .catch((error) => (error?.message === 'already_imported' ? null : Promise.reject(error)));
+      if (imported?.ok) {
+        state = { ...state, imported: true, owned: imported.owned };
+        if (imported.granted?.length) {
+          this.ui.showBanner(`⬡ ${imported.granted.length} upgrade${imported.granted.length === 1 ? '' : 's'} from this browser now belong to your account.`, '', 3200);
+        }
+      }
+    }
+    this.profile.accountUpgrades = [...(state.owned || [])];
+    return state;
+  }
+
+  async _buyAccountUpgrade(nodeId) {
+    if (!this.auth?.isSignedIn()) return null;
+    const result = await accountUpgradeRequest('buy', { requestId: crypto.randomUUID(), nodeId });
+    if (result?.ok) {
+      this.profile.accountUpgrades = [...(result.owned || [])];
+      this.profile.metaCurrency = result.wallet?.balance ?? this.profile.metaCurrency;
+      for (const entry of this.profile.mmoCharacters || []) {
+        if (Number.isFinite(entry.authoritativeBalance)) entry.authoritativeBalance = result.wallet.balance;
+      }
+      this._storeProfileLocally();
+    }
+    return result;
+  }
+
+  // Signed-in rewire: the server charges the Alloy and clears the Lattice it
+  // holds for this character in one transaction; only then does the local
+  // copy reset. The profile is synced first so the server counts the same
+  // points the sheet shows.
+  async _rewireLatticeOnServer(character) {
+    if (!this.auth?.isSignedIn() || !character) return null;
+    await this._ensureAuthoritativeEconomy(character);
+    character = this.profile.mmoCharacters?.find((entry) => entry.id === character.id) || character;
+    await this.auth.syncLocalProfile(this.profile);
+    const result = await accountUpgradeRequest('rewire_lattice', { requestId: crypto.randomUUID(), characterId: character.id });
+    if (!result?.ok) return result;
+    rewireLattice(character);
+    for (const entry of this.profile.mmoCharacters || []) {
+      if (Number.isFinite(entry.authoritativeBalance)) entry.authoritativeBalance = result.wallet.balance;
+    }
+    this.profile.metaCurrency = result.wallet?.balance ?? this.profile.metaCurrency;
+    this._saveProfile();
     return result;
   }
 
@@ -1993,7 +1653,6 @@ class App {
     const next = this.profile.mmoCharacters[Math.min(index, this.profile.mmoCharacters.length - 1)] || null;
     this.profile.mmoCharacterId = next?.id || null;
     this.profile.lastHero = next?.proxyHero || null;
-    this.profile.lastWorld = next?.lastWorld || 'earth';
     this.ui.selectedHero = next?.proxyHero || 'alexander';
     this._saveProfile();
     this.ui.setProfile(this.profile);
@@ -2025,9 +1684,6 @@ class App {
 
   _pickHero(key) {
     const msg = this._heroPayload(key);
-    // On the overworld the pick is visible immediately: the walking hero is
-    // rebuilt from the new unit def.
-    if (!this.game && this.ow) this._makeOverworldHero();
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
     if (this.lobby?.game) {
@@ -2125,9 +1781,18 @@ class App {
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
+      // The local save also keeps the match ticket and the input log so far,
+      // so a resumed signed-in run can still be verified later. The
+      // cloud copy stays snapshot-only.
+      const m = this._match;
+      const match = m ? {
+        ticket: m.ticket || null, seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null,
+        heroes: m.heroes, log: this.game.inputLog ? this.game.inputLog.slice() : null,
+      } : null;
       const persist = () => {
         try {
-          localStorage.setItem('zillions_save', JSON.stringify(save));
+          try { localStorage.setItem('zillions_save', JSON.stringify(match ? { ...save, match } : save)); }
+          catch { localStorage.setItem('zillions_save', JSON.stringify(save)); }
           if (this.auth?.isSignedIn()) this.auth.syncLatestSave(save).catch((err) => console.warn('save sync failed', err));
         } catch { /* storage full */ }
       };
@@ -2136,37 +1801,183 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
-  async _commitLivingWorldBattle() {
-    const battle=this._livingWorldBattle;
-    if(!battle||!this.game)return;
-    const replay={version:1,completedTick:Math.max(1,Math.round(this.game.time/SIM_DT)),commands:battle.commands};
-    try{
-      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction,entry:{assignmentToken:battle.token,replay}});
-      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
-      battle.committed=true;this.ui.showBanner('Battle result verified and written to the living world.','',3200);
-    }catch(error){battle.error=error?.message||'battle_result_rejected';this.ui.showBanner('Battle ended, but the authority rejected its replay. Do not leave this screen.','bad',6000);}
-  }
-
-  async _retryLivingWorldBattleOutbox() {
-    let pending;try{pending=loadBattleOutbox(sessionStorage);}catch{return;}
-    if (!pending?.assignmentToken || !pending?.replay || this._livingWorldOutboxRetrying) return;
-    this._livingWorldOutboxRetrying = true;
-    try {
-      const delivered=await deliverBattleOutbox({storage:sessionStorage,send:sendLivingWorldBattleAction});
-      if(delivered.status==='retry'||delivered.status==='requires_resolution')throw delivered.error;
-      this.ui.showBanner('Recovered and committed the previous battle result.', '', 3200);
-    } catch (error) {
-      this.ui.showBanner(error?.message === 'battle_assignment_expired' ? 'The previous battle result expired before recovery.' : 'Previous battle result is still waiting for authority recovery.', 'bad', 4200);
-    } finally { this._livingWorldOutboxRetrying = false; }
-  }
-
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
-    if(this.game?.mode==='living_world_battle'){
-      persistRunTelemetry(this.game);this.profile.games++;this.profile.kills+=this.game.stats.kills;this._saveProfile();
-      this._livingWorldBattleCommit=this._commitLivingWorldBattle();return;
-    }
     persistRunTelemetry(this.game);
+    this._endExtras = null;
+    const h = this.game.heroes[this.myPlayer];
+    try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
+    if (this.auth?.isSignedIn()) {
+      // Signed in: the server is the only source of XP, loot, Alloy and
+      // stats. Nothing is granted locally; the end screen shows what the
+      // server confirms.
+      this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
+      const character = selectedMmoCharacter(this.profile);
+      this._endExtras = character ? {
+        heroKey: character.proxyHero, heroName: character.name, level: character.level,
+        grants: [], quests: [], pending: true,
+      } : { pending: true, grants: [], quests: [] };
+      this._submitMatchResult(won, h, character);
+    } else {
+      this._recordGuestGameEnd(won, h);
+      this._saveProfile();
+    }
+    this._netPumpStop();
+    if (this.lobby) this.lobby.setMatchActive(false);
+    if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
+  }
+
+  // What the client claims happened. The server bounds-checks every field,
+  // re-derives loot and quests itself (src/match-rewards.js), and keeps the
+  // input log of a best run so a future leaderboard can replay it.
+  _matchReport(won) {
+    return buildMatchReport(this.game, { won: !!won, heroIndex: this.myPlayer, heroKey: this.ui.selectedHero || null });
+  }
+
+  // The recorded inputs, kept for leaderboard verification (src/match-replay.js).
+  _matchReplay() { return matchReplayPayload(this.game, this._match, this.myPlayer); }
+
+  async _submitMatchResult(won, h, character) {
+    const quests = this.game?.questResults || [];
+    const match = this._match || {};
+    // Captured now, synchronously: the report and log describe this game.
+    const report = this._matchReport(won);
+    const replay = this._matchReplay();
+    if (!character?.id) {
+      this._endExtras = { pending: false, error: 'Create a character to earn rewards.', grants: [], quests };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
+    if (!match.ticket && match.ticketPromise) await match.ticketPromise.catch(() => null);
+    if (!match.ticket) {
+      this._endExtras = {
+        pending: false, grants: [], quests,
+        error: `This match started without a reward ticket (${match.error || (match.roomId ? 'room' : 'offline')}). No rewards were granted.`,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
+    const userId = this.auth?.user?.id || null;
+    if (!userId) {
+      this._endExtras = { pending: false, grants: [], quests, error: 'Sign in to earn rewards. No rewards were granted.' };
+      this.ui.setEndRewards?.(this._endExtras);
+      return;
+    }
+    const pending = {
+      // The account that played this match. The outbox only ever resends or
+      // drops a report for the account that is signed in.
+      userId,
+      requestId: globalThis.crypto?.randomUUID?.() || `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      characterId: character.id,
+      // The room comes from match start, not from lobby state at match end
+      // (which can already be cleared). The server takes it from the ticket.
+      roomId: match.roomId || null,
+      ticket: match.ticket,
+      report,
+      ...(replay ? { replay } : {}),
+    };
+    queuePendingMatch(pending);
+    try {
+      const result = await this._sendMatchResult(pending);
+      this._applyMatchResult(character, result, quests);
+    } catch (error) {
+      console.warn('match result failed', error);
+      const retryable = retryableMatchError(error);
+      if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
+      this._endExtras = {
+        ...(this._endExtras || {}), pending: false, grants: [], quests,
+        error: retryable
+          ? 'Command could not confirm your rewards yet. They will be claimed automatically next time you sign in.'
+          : `Command rejected this report (${error?.message || 'invalid'}). No rewards were granted.`,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+    }
+  }
+
+  async _sendMatchResult(pending) {
+    // Never send one account's report with another account's session. Not a
+    // rejection either: the report stays queued for its own account.
+    if (!pending.userId || pending.userId !== this.auth?.user?.id) {
+      throw Object.assign(new Error('account_changed'), { status: 0 });
+    }
+    if (pending.characterId) {
+      const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
+      // A character the server has never seen is registered first; the
+      // economy snapshot also refreshes stash and wallet afterwards.
+      if (character && !Number.isFinite(character.authoritativeBalance)) await this._ensureAuthoritativeEconomy(character);
+    }
+    const result = await matchResultRequest(pending);
+    if (!result?.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: 503 });
+    dropPendingMatch(pending.requestId, pending.userId);
+    return result;
+  }
+
+  // Replays reports that never reached the server (closed tab, offline).
+  // Same requestId, so the server grants each match at most once.
+  async _flushPendingMatches() {
+    if (!this.auth?.isSignedIn()) return;
+    const userId = this.auth.user?.id;
+    // Only this account's own reports; another account's stay untouched.
+    for (const pending of readPendingMatches(userId)) {
+      try {
+        const result = await this._sendMatchResult(pending);
+        const character = this.profile.mmoCharacters?.find((entry) => entry.id === pending.characterId);
+        if (character) this._applyMatchResult(character, result, [], { quiet: true });
+      } catch (error) {
+        if (!retryableMatchError(error)) { dropPendingMatch(pending.requestId, userId); continue; }
+        // Rate limited or the server is busy: stop and try again next time
+        // rather than burn through the queue.
+        if (error?.status === 429 || error?.status >= 500) break;
+      }
+    }
+  }
+
+  // Render exactly what the server granted.
+  _applyMatchResult(character, result, quests = [], { quiet = false } = {}) {
+    const p = this.profile;
+    const current = p.mmoCharacters?.find((entry) => entry.id === character?.id) || character;
+    if (current && result.character) {
+      current.level = result.character.level;
+      current.xp = result.character.xp;
+      current.stats = { instances: 0, victories: 0, kills: 0, ...(result.character.stats || {}) };
+      current.progressRevision = result.character.progressRevision;
+    }
+    const st = result.stats || {};
+    p.games = st.gamesPlayed ?? p.games;
+    p.wins = st.wins ?? p.wins;
+    p.kills = st.kills ?? p.kills;
+    p.bestDay = st.bestDay ?? p.bestDay;
+    p.campaign = st.campaignCleared ?? p.campaign;
+    p.bestSurvival = st.bestSurvival ?? p.bestSurvival;
+    if (st.relics) p.relics = [...st.relics];
+    if (st.questsDone) p.questsDone = { ...st.questsDone };
+    if (st.labyrinthClears) p.labyrinthClears = { ...st.labyrinthClears };
+    if (result.wallet) p.metaCurrency = result.wallet.balance;
+    normalizeMmoCharacters(p);
+    if (!quiet) {
+      const serverQuests = new Set(result.questsCompleted || []);
+      this._endExtras = {
+        heroKey: current?.proxyHero, heroName: current?.name, level: current?.level,
+        grants: [...(result.grantedItems || []), ...(result.relicsGranted || [])],
+        quests: (result.quests || quests).map((q) => {
+          const authored = quests.find((entry) => entry.id === q.id) || {};
+          return { ...authored, ...q, desc: authored.desc || q.desc || '', done: !!q.done, claimed: serverQuests.has(q.id) };
+        }),
+        xp: result.xpGained, levels: result.levelsGained || [], alloy: result.alloyGained || 0,
+        skipped: result.skippedItems || [], pending: false,
+      };
+      this.ui.setEndRewards?.(this._endExtras);
+    }
+    this.ui.setProfile(p);
+    this.ui.setCampaign(p.campaign || 0);
+    // Pull the stash/wallet snapshot the server just changed.
+    if (current) this._ensureAuthoritativeEconomy(current).catch((err) => console.warn('economy refresh failed', err));
+    else this._storeProfileLocally();
+  }
+
+  // Guest / offline play: progress lives only in this browser (localStorage
+  // profile + meta ledger) and is never sent to, or trusted by, the server.
+  _recordGuestGameEnd(won, h) {
     const p = this.profile;
     p.games++;
     if (won && this.game.mode !== 'survival') p.wins++;
@@ -2190,8 +2001,6 @@ class App {
 
     // WC3-style persistence: the campaign hero keeps every level and item —
     // and quest/boss rewards granted here await them on the next map.
-    this._endExtras = null;
-    const h = this.game.heroes[this.myPlayer];
     // Named heroes belong to Custom Games. Their legacy career records remain
     // available there, but persistent campaign instances write to the selected
     // player-created character instead.
@@ -2262,7 +2071,6 @@ class App {
           won,
           kills: this.game.stats.kills,
           xp,
-          world: this.profile.lastWorld || 'earth',
           items: [...new Set([...(h.items || []), ...rewards])],
         });
         character.upgrades = { ...(character.upgrades || {}), ...(h.upgrades || {}) };
@@ -2278,24 +2086,6 @@ class App {
         this.ui.setProfile(p);
       }
     }
-    this._saveProfile();
-    try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
-    if (this.auth?.isSignedIn()) {
-      this.auth.clearLatestSave().catch((err) => console.warn('save clear failed', err));
-      this.auth.recordMatch({
-        mode: this.game.mode || 'campaign',
-        rules: 'continuous-siege',
-        hero: h?.key || this.ui.selectedHero,
-        won,
-        day: this.game.threatLevel,
-        kills: this.game.stats.kills,
-        built: this.game.stats.built || 0,
-        level: this.game.levelId,
-      }).catch((err) => console.warn('match history sync failed', err));
-    }
-    this._netPumpStop();
-    if (this.lobby) this.lobby.setMatchActive(false);
-    if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
   }
 
   async continueGame() {
@@ -2307,9 +2097,12 @@ class App {
           this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
           return;
         }
-        this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1 }));
+        const shared = save.match ? { seed: save.match.seed ?? null, roomId: save.match.roomId || null, joinToken: save.match.joinToken || null } : null;
+        this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1, match: shared }));
+        this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
       } else if (!this.mpRole) {
+        this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, null, save.snap);
       }
     }, (error) => this._discardBrokenSave(error));
@@ -2472,8 +2265,9 @@ class App {
     }
     else if (m.t === 'start') {
       this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
-      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap);
-      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode });
+      const match = this._sharedMatch(m.match);
+      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match }, m.snap);
+      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode, culture: m.culture, match });
       this.net.send({ t: 'startReady' });
       this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
     }
@@ -2490,7 +2284,7 @@ class App {
       // windows banked while the sim was rebuilding.
       this._resyncing = true;
       this._resyncBuffer = new Map();
-      this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest' }, m.snap)
+      this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match: this._sharedMatch(m.match) }, m.snap)
         .then(() => {
           const buf = this._resyncBuffer || new Map();
           const next = Math.ceil(m.frame / NET_STEP);
@@ -2765,15 +2559,6 @@ class App {
       title: 'Only the host can launch this room.',
     });
     const self = (game._players || []).find((player) => player.user_id === this.lobby?.me?.id);
-    if (game.rally) {
-      this.ui.setGateRally({
-        players: game.players || expectedPlayers,
-        maxPlayers: game.max_players || 4,
-        role: isHost ? 'host' : 'guest',
-        ready: !!self?.ready,
-        canLaunch: isHost && ready && compatible,
-      });
-    }
     this.ui.setRoomReady({
       visible: !isHost && !isSpectator && game.status === 'open',
       ready: !!self?.ready,
@@ -3122,7 +2907,7 @@ class App {
         this.guestCmdQueues[idx] = [];
         // One live tick, frozen and shipped: the guest rebuilds from it and
         // rejoins lockstep at our frame counter.
-        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame });
+        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields() });
         this.game.msg(`⚔️ ${this.guestNames[idx] || `Player ${idx + 2}`} reconnected — their hero fights again.`, 'good');
       } else {
         this.peers.push(peer);
@@ -3376,24 +3161,24 @@ class App {
   }
 
   _setupLights() {
-    // Cel look: one warm sun sitting LOW so every tree and tower throws a
-    // long graphic shadow; shadows are filled with saturated cool ambient
-    // (navy, never black) — the reference's colored-shadow trick.
-    this.sun = new THREE.DirectionalLight(0xfff0cf, 2.2);
+    // Toy lighting: one sun for crisp shape shadows, and a fill whose ground
+    // colour is the map's shadow colour — so every shadowed face on a map
+    // shares one tint, like a painted diorama. Totals are tuned so a lit top
+    // face shows its picked colour with tone mapping off.
+    this.sun = new THREE.DirectionalLight(0xffffff, 2.3);
     this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const s = 62;
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
-    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
-    // Warm earth bounce from below, cool sky from above — the two-tone fill
-    // that makes flat-shaded low-poly read as sunlit instead of fluorescent.
-    this.hemi = new THREE.HemisphereLight(0xdfe8dd, 0x9a7a58, 0.58);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x1d3557, 0.75);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x33406e, 0.2);
+    this.amb = new THREE.AmbientLight(0x6a7fb0, 0.35);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.FogExp2(0xa8cfc4, 0.0045);
+    this.scene.fog = new THREE.Fog(0xa8cfc4, 90, 240);
     this.scene.background = new THREE.Color(0xa8cfc4);
   }
 
@@ -3470,7 +3255,7 @@ class App {
   _spawnPayCoins(fx, fz, tx, tz, n) {
     if (!this._payCoinGeo) {
       this._payCoinGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.05, 10);
-      this._payCoinMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
+      this._payCoinMat = toyMat({ color: 0xf3c53d, emissive: 0xf3c53d, emissiveIntensity: 0.35 });
     }
     for (let i = 0; i < n; i++) {
       if (this.payCoins.length >= 48) return;
@@ -3767,10 +3552,26 @@ class App {
 
   // ---------------- zombies (instanced) ----------------
 
+  // Load GLB art once; when the toy kit lands, hand it to the map props and
+  // rebuild the horde pools on kit geometry. Presentation only.
+  _loadArt() {
+    if (!this._artLoading) {
+      this._artLoading = loadAssets().then(() => {
+        this.assetsLoaded = true;
+        setMapKit(kitGeometry);
+        if (hasKit('enemy_walker') && this.horde) {
+          this.horde.dispose();
+          this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+        }
+      });
+    }
+    return this._artLoading;
+  }
+
   _setupZombieMeshes() {
     // Per-type authored silhouettes, instanced — see horde-art.js. The menu
     // vignette writes into the same pools, so the menu horde IS the game's.
-    this.horde = new HordeArt(this.scene, ZMAX);
+    this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
     this._zdummy = new THREE.Object3D();
     this._zcolor = new THREE.Color();
   }
@@ -3822,7 +3623,7 @@ class App {
   _setupCoins() {
     const MAXC = 400;
     const geo = new THREE.CylinderGeometry(0.22, 0.22, 0.07, 12);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
+    const mat = toyMat({ color: 0xf5c542, emissive: 0xc79a1e, emissiveIntensity: 0.55 });
     this.coinMesh = new THREE.InstancedMesh(geo, mat, MAXC);
     this.coinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.coinMesh.castShadow = true;
@@ -3863,11 +3664,11 @@ class App {
   // damage source, tumble through the air, bounce, and sink into the mud.
 
   _setupCorpses() {
-    const MAXC = 300;
-    // A real felled body (limbs splayed, baked gore) instead of a tumbling
-    // crate — instance color still tints it per type.
-    const geo = buildCorpseGeometry();
-    this.corpseMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffffff, vertexColors: true }), MAXC);
+    const MAXC = 600;
+    // Toy-style kill pop: every dead drone shatters into a handful of crystal
+    // shards that bounce and shrink away. No bodies, no gore.
+    const geo = buildShardGeometry();
+    this.corpseMesh = new THREE.InstancedMesh(geo, toyMat({ color: 0xffffff, vertexColors: true }), MAXC);
     this.corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.corpseMesh.castShadow = true;
     this.corpseMesh.frustumCulled = false;
@@ -3877,19 +3678,24 @@ class App {
   }
 
   spawnCorpse(e) {
-    if (this.corpses.length >= 300) this.corpses.shift();
     const f = e.force || 1;
-    const sp = 2.5 * f + Math.random() * 2;
-    this.corpses.push({
-      x: e.x, y: this.map.groundY(e.x, e.z) + 0.5, z: e.z,
-      gy: this.map.groundY(e.x, e.z),
-      vx: (e.dx || 0) * sp + (Math.random() - 0.5), vy: 2.2 + 3.2 * f * Math.random(), vz: (e.dz || 0) * sp + (Math.random() - 0.5),
-      rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
-      wx: (Math.random() - 0.5) * 10 * f, wy: (Math.random() - 0.5) * 6,
-      life: 6 + Math.random() * 3, scale: e.big ? 1.7 : 1,
-      // Multiplies the corpse geometry's baked pale palette, so keep it bright.
-      color: e.big ? 0xa886c8 : 0xa4bc72,
-    });
+    const n = e.big ? 7 : 4;
+    const gy = this.map.groundY(e.x, e.z);
+    for (let k = 0; k < n; k++) {
+      if (this.corpses.length >= 600) this.corpses.shift();
+      const a = (k / n) * Math.PI * 2 + Math.random() * 0.8;
+      const sp = (1.6 + Math.random() * 1.8) * (0.7 + 0.3 * f);
+      this.corpses.push({
+        x: e.x, y: gy + 0.5 + Math.random() * 0.3, z: e.z, gy,
+        vx: Math.cos(a) * sp + (e.dx || 0) * 1.5 * f, vy: 3 + Math.random() * 2.5,
+        vz: Math.sin(a) * sp + (e.dz || 0) * 1.5 * f,
+        rx: Math.random() * Math.PI * 2, ry: Math.random() * Math.PI * 2, rz: 0,
+        wx: (Math.random() - 0.5) * 16, wy: (Math.random() - 0.5) * 12,
+        life: 0.8 + Math.random() * 0.5, max: 1.3,
+        scale: (e.big ? 1.6 : 1) * (0.7 + Math.random() * 0.6),
+        color: e.big ? 0xc8a6ff : k % 2 ? 0xb9a2f0 : 0x9fe8ff,
+      });
+    }
   }
 
   _updateCorpses(dt) {
@@ -3904,13 +3710,10 @@ class App {
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
         p.rx += p.wx * dt; p.ry += p.wy * dt;
         if (p.y < floor) { p.y = floor; p.vy *= -0.35; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.4; }
-      } else {
-        p.rx = Math.PI / 2; // settled flat
-        if (p.life < 1.5) p.y = floor - (1.5 - p.life) * 0.2; // sink away
       }
       d.position.set(p.x, p.y, p.z);
       d.rotation.set(p.rx, p.ry, p.rz);
-      d.scale.setScalar(p.scale);
+      d.scale.setScalar(p.scale * Math.min(1, p.life / 0.4)); // shrink away
       d.updateMatrix();
       this.corpseMesh.setMatrixAt(i, d.matrix);
       c.setHex(p.color);
@@ -4079,25 +3882,46 @@ class App {
     pips.tex.needsUpdate = true;
   }
 
-  // The Thronefall "stump", sci-fi: one small survey beacon per plot — a
-  // gunmetal pylon with a spinning amber holo-gem. Everything else (ghost,
-  // pips, icon) only appears when you ride up close.
-  _makeBeacon(x, z) {
+  // The build pad: a glowing hex plate on the exact spot a piece will rise
+  // (fixed posts, Thronefall-style). An unlit cyan rim + faint fill reads at
+  // any zoom, and a small holo-gem floats above it. Cost + icon ride a tag
+  // sprite (see _syncPlots), so every free spot says what goes there and
+  // what it costs without opening a menu.
+  _makeBeacon(x, z, r = 1.15) {
     const grp = new THREE.Group();
-    const pylon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.11, 0.55, 6),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x565c60 }),
-    );
-    pylon.position.set(x, 0.28, z);
-    pylon.castShadow = true;
-    grp.add(pylon);
-    const gem = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.17, 0),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xffb84d, emissive: 0xffb84d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }),
-    );
-    gem.position.set(x, 0.95, z);
+    if (!this._padMats) {
+      this._padMats = {
+        rim: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.9, depthWrite: false }),
+        fill: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.16, depthWrite: false }),
+        plate: toyMat({ color: 0x5d6b80 }),
+        gem: new THREE.MeshBasicMaterial({ color: 0xbff8ff }),
+      };
+    }
+    const m = this._padMats;
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, 6), m.plate);
+    plate.position.set(x, 0.04, z);
+    plate.rotation.y = Math.PI / 6;
+    plate.receiveShadow = true;
+    grp.add(plate);
+    const fillGeo = new THREE.CircleGeometry(r * 0.86, 6);
+    fillGeo.rotateX(-Math.PI / 2);
+    const fill = new THREE.Mesh(fillGeo, m.fill);
+    fill.position.set(x, 0.09, z);
+    fill.rotation.y = Math.PI / 6;
+    fill.userData.noOutline = true;
+    grp.add(fill);
+    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
+    rimGeo.rotateX(-Math.PI / 2);
+    const rim = new THREE.Mesh(rimGeo, m.rim);
+    rim.position.set(x, 0.095, z);
+    rim.rotation.y = Math.PI / 6;
+    rim.userData.noOutline = true;
+    grp.add(rim);
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(Math.min(0.2, r * 0.22), 0), m.gem);
+    gem.position.set(x, 0.75, z);
     grp.add(gem);
     grp.userData.gem = gem;
+    grp.userData.rim = rim;
     return grp;
   }
 
@@ -4106,7 +3930,8 @@ class App {
     const kind = PLOT_KINDS[plot.kind];
     const anchor = plot.anchor || plot.gate;
     const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
-    const beacon = this._makeBeacon(mx, mz);
+    const padR = plot.kind === 'wall' ? 0.5 : plot.kind === 'hq' ? 2.3 : 1.2;
+    const beacon = this._makeBeacon(mx, mz, padR);
     g.add(beacon);
     g.userData.beacon = beacon;
     const label = this._makeLabelSprite(kind.icon, '');
@@ -4216,6 +4041,7 @@ class App {
 
       if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
+        if (ud.tag) ud.tag.visible = false;
         ud.ring.visible = false;
         ud.prog.visible = false;
         if (ud.pips) ud.pips.sprite.visible = false;
@@ -4239,8 +4065,22 @@ class App {
       if (ud.beacon.visible) {
         const gem = ud.beacon.userData.gem;
         gem.rotation.y = t * 2;
-        gem.position.y = 0.95 + Math.sin(t * 2.4 + plot.id) * 0.08;
+        gem.position.y = 0.75 + Math.sin(t * 2.4 + plot.id) * 0.08;
       }
+      // Pad tag: what goes here + what it costs, on every free spot.
+      if (!built && !nt.branch) {
+        const tagKey = PLOT_KINDS[plot.kind].icon + '|' + Math.ceil(nt.cost);
+        if (ud.tagKey !== tagKey) {
+          ud.tagKey = tagKey;
+          if (ud.tag) { rec.group.remove(ud.tag); ud.tag.material.map.dispose(); ud.tag.material.dispose(); }
+          ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].icon, `${Math.ceil(nt.cost)}`);
+          ud.tag.scale.set(2.0, 1.0, 1);
+          const [tx, tz] = ud.labelPos;
+          ud.tag.position.set(tx, 1.7, tz);
+          rec.group.add(ud.tag);
+        }
+      }
+      if (ud.tag) ud.tag.visible = !built && !nt.branch && plot.id !== pipPlotId;
       const wantSub = nt.branch ? 'choose!'
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
@@ -4294,15 +4134,26 @@ class App {
 
   _makeBuildingMesh(b) {
     // Colony-kit construction lives in building-art.js; the renderer only
-    // supplies the wall-plot occupancy the smoothed rampart polyline needs.
-    if (!this._wallTiles) {
+    // supplies the wall-plot occupancy (the rampart line), the arch tiles,
+    // each gate's principal tile and the keep (walls face away from it).
+    const plots = this.game.plots;
+    if (!this._wallTiles || this._wallTilesFor !== plots.length) {
       const N = this.game.map.size;
+      this._wallTilesFor = plots.length;
       this._wallTiles = new Set();
-      for (const p of this.game.plots) {
-        if (p.kind === 'wall') for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
+      this._archTiles = new Set();
+      this._gateMain = new Set();
+      for (const p of plots) {
+        if (p.kind !== 'wall') continue;
+        for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
+        for (const [x, z] of p.arch || (p.gate ? [p.gate] : [])) this._archTiles.add(z * N + x);
+        if (p.gate) this._gateMain.add(p.gate[1] * N + p.gate[0]);
       }
     }
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles });
+    const hq = this.game.buildings.find((o) => o.kind === 'hq');
+    const center = hq ? [hq.cx, hq.cz] : null;
+    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+      archTiles: this._archTiles, gateMain: this._gateMain, center });
   }
 
   _syncBuildings() {
@@ -4327,7 +4178,7 @@ class App {
         this.scene.add(mesh);
         const materials = [];
         mesh.traverse((o) => {
-          if (!o.isMesh) return;
+          if (!o.isMesh || o.userData.skirt) return;
           for (const material of (Array.isArray(o.material) ? o.material : [o.material])) {
             if (!material || materials.includes(material)) continue;
             material.userData.artBaseColor = material.color?.clone() || null;
@@ -4359,13 +4210,32 @@ class App {
   _disposeObject3D(obj) {
     if (!obj) return;
     obj.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
+      // Toy-kit geometry is shared with its template — never free it here.
+      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
         if (mat.map) mat.map.dispose();
         mat.dispose();
       }
     });
+  }
+
+  // A toy-kit figurine (shared geometry, per-unit material copies so stealth
+  // fades and hit flashes stay per unit). Null when the kit piece is absent.
+  _kitFigure(name) {
+    if (!hasKit(name)) return null;
+    const node = kitClone(name);
+    const shared = kitMaterials();
+    const body = shared.body.clone(), glow = shared.glow.clone();
+    node.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
+    return {
+      node,
+      limbs: {
+        legL: assetPart(node, 'leg_l'), legR: assetPart(node, 'leg_r'),
+        armL: assetPart(node, 'arm_l'), armR: assetPart(node, 'arm_r'),
+      },
+    };
   }
 
   _makeUnitMesh(u) {
@@ -4383,8 +4253,19 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const authored = u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (authored) {
+      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (kit) {
+        // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
+        // At the follow camera's distance a hero is only ~40px tall, so it is
+        // drawn a size up from the troops and wears a dark ink outline that
+        // keeps its silhouette off same-coloured ground (Alexander on grass).
+        kit.node.scale.multiplyScalar(1.25);
+        g.userData.outlines = addInkOutline(kit.node);
+        body.add(kit.node);
+        g.userData.limbs = kit.limbs;
+        g.userData.bob = { node: kit.node, y: kit.node.position.y };
+      } else if (authored) {
         // Authored source uses real art-pipeline units. Normalize it to the
         // existing collision/readability scale; visual meshes never change
         // the deterministic unit radius.
@@ -4403,9 +4284,17 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      const haloGeo = new THREE.RingGeometry(0.5, 0.62, 28);
+      // Hero marker: a bright gold ring on a dark backing disc, so the hero
+      // reads against sand, grass and snow alike.
+      const backGeo = new THREE.RingGeometry(0.46, 0.8, 32);
+      backGeo.rotateX(-Math.PI / 2);
+      const back = new THREE.Mesh(backGeo, new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.42, depthWrite: false }));
+      back.position.y = 0.025;
+      back.userData.keepOpacity = true;
+      g.add(back);
+      const haloGeo = new THREE.RingGeometry(0.55, 0.7, 32);
       haloGeo.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xc9a44a, transparent: true, opacity: 0.5, depthWrite: false }));
+      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffcf4d, transparent: true, opacity: 0.9, depthWrite: false }));
       halo.position.y = 0.03;
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
@@ -4461,8 +4350,13 @@ class App {
       // snipers and hero summons get their own procedural rigs (unit-art.js)
       // so the army reads apart at a glance.
       const d = u.def;
-      const authored = u.key === 'soldier' ? assetClone('humanRifleman') : null;
-      if (authored) {
+      const kit = this._kitFigure(`unit_${u.key}`);
+      const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
+      if (kit) {
+        // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
+        body.add(kit.node);
+        g.userData.limbs = kit.limbs;
+      } else if (authored) {
         authored.scale.setScalar(0.48);
         authored.traverse((o) => {
           if (!o.isMesh) return;
@@ -4512,6 +4406,14 @@ class App {
       rec.lastHp = u.hp;
       rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
       rec.mesh.rotation.y = u.facing;
+      // Hoverbike idle: the hero floats on its wash, bobbing and rocking.
+      const bob = rec.mesh.userData.bob;
+      if (bob) {
+        const ph = t * 2.6 + (u.id % 7);
+        bob.node.position.y = bob.y + 0.05 + Math.sin(ph) * 0.045;
+        bob.node.rotation.z = Math.sin(ph * 0.63) * 0.035;
+        bob.node.rotation.x = Math.sin(ph * 0.81 + 1) * 0.02;
+      }
       // Render-only local lead makes a guest's own hero answer immediately
       // while lockstep catches up. Never apply this to the host or another
       // guest: their meshes must stay on confirmed simulation positions.
@@ -4602,11 +4504,12 @@ class App {
         if (rec.op !== wantOp) {
           rec.op = wantOp;
           rec.mesh.traverse((o) => {
-            if (o.isMesh) {
+            if (o.isMesh && !o.userData.keepOpacity) {
               o.material.transparent = true;
               o.material.opacity = wantOp;
             }
           });
+          for (const o of rec.mesh.userData.outlines || []) o.visible = wantOp === 1;
         }
         const aura = rec.mesh.userData.aura;
         if (aura) {
@@ -4744,11 +4647,15 @@ class App {
         ringGeo.rotateX(-Math.PI / 2);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
+        // The home node sits on the keep: its capture circle would ring the
+        // castle like a target — the walls already say whose ground it is.
+        const hq = (g.plots || []).find((p) => p.kind === 'hq');
+        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
         gr.add(ring);
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0x39332a }));
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
         gr.add(pole);
-        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.05, color: 0xd8c07a }));
+        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), toyMat({ color: 0xd8c07a }));
         flag.position.set(node.x + 0.75, 3.8, node.z);
         gr.add(flag);
         const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());
@@ -4790,14 +4697,13 @@ class App {
         this.ui.openGameChat();
         return;
       }
-      // Character info is not Character Select. The latter is reached from
-      // the Game Menu, matching traditional MMO navigation.
-      if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ow) {
+      // Character info shortcuts work from the menus between missions.
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'character_sheet' && this.ui._sheetCharacter?.()) {
         e.preventDefault();
         this.ui.showCharacterSheet('gear');
         return;
       }
-      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ow) {
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'lattice_panel' && this.ui._sheetCharacter?.()) {
         e.preventDefault();
         this.ui.showCharacterSheet('lattice');
         return;
@@ -4810,16 +4716,7 @@ class App {
         else this.ui._showScreen('heroes');
         return;
       }
-      if (!this.game) {
-        // The overworld owns Escape: the hub slides in as a translucent
-        // overlay and slides back out — the walk never stops underneath.
-        if (k === 'escape') {
-          e.preventDefault();
-          this.ui.toggleOverlay();
-          return;
-        }
-        return;
-      }
+      if (!this.game) return;
       // Every in-battle key goes through the binding table. Nothing here
       // knows a letter, so the scheme, the Settings screen and the help page
       // cannot drift apart.
@@ -4871,26 +4768,12 @@ class App {
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 14, 60);
+      this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 22, 95);
     }, { passive: false });
 
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       this.audio.init();
-      // Overworld click-to-move: a course set on the ground itself.
-      if (!this.game && this.ow && e.button === 0 && this.ui.overlayHidden()) {
-        this._owMouse = this._owMouse || new THREE.Vector2();
-        this._owRay = this._owRay || new THREE.Raycaster();
-        this._owPlane = this._owPlane || new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        this._owHit = this._owHit || new THREE.Vector3();
-        this._owMouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-        this._owRay.setFromCamera(this._owMouse, this.camera);
-        if (this._owRay.ray.intersectPlane(this._owPlane, this._owHit)) {
-          this._owHit.x = clamp(this._owHit.x, 1, this.owMap.size - 1);
-          this._owHit.z = clamp(this._owHit.z, 1, this.owMap.size - 1);
-          this.ow.setTarget(this._owHit.x, this._owHit.z);
-        }
-      }
     });
   }
 
@@ -5096,28 +4979,6 @@ class App {
   }
 
   _updateCamera(dt) {
-    if (!this.game && this.ow) {
-      // Overworld: the game camera glued to the walking hero — same iso
-      // angle, same soft lag, so the menu feels like the game's first step.
-      const h = this.ow.hero;
-      const k = 1 - Math.exp(-6 * dt);
-      this.focus.x += (h.x - this.focus.x) * k;
-      this.focus.z += (h.z - this.focus.z) * k;
-      this.focus.x = clamp(this.focus.x, 2, this.owMap.size - 2);
-      this.focus.z = clamp(this.focus.z, 2, this.owMap.size - 2);
-      this.focus.y += (Math.max(0, this.owMap.groundY(this.focus.x, this.focus.z)) - this.focus.y) * (1 - Math.exp(-4 * dt));
-      const dist = 30;
-      const elev = 0.78;
-      this.camera.position.set(
-        this.focus.x + Math.sin(this.camYaw) * Math.cos(elev) * dist,
-        this.focus.y + Math.sin(elev) * dist,
-        this.focus.z + Math.cos(this.camYaw) * Math.cos(elev) * dist,
-      );
-      this.camera.lookAt(this.focus);
-      this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
-      this.sun.target.position.set(this.focus.x, 0, this.focus.z);
-      return;
-    }
     if (!this.game) return;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
@@ -5141,7 +5002,9 @@ class App {
       this.focus.y += (gy - this.focus.y) * (1 - Math.exp(-4 * dt));
     }
 
-    const elev = lerp(0.72, 1.0, clamp((this.camDist - 12) / 68, 0, 1));
+    // Diorama angle: steep enough to read the whole base like a board game,
+    // steeper still as you pull back.
+    const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
     let sx = 0, sz = 0;
     if (this.shake > 0) {
@@ -5156,8 +5019,16 @@ class App {
     );
     this.camera.lookAt(this.focus.x + sx, this.focus.y, this.focus.z + sz);
 
-    this.sun.position.set(this.focus.x + 45, 80, this.focus.z + 25);
-    this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+    // Sun high and over the camera's left shoulder: the faces you look at
+    // are lit, and shadows fall up-screen to the right like a lit tabletop.
+    this.sun.position.set(this.focus.x - 34, this.focus.y + 78, this.focus.z + 26);
+    this.sun.target.position.set(this.focus.x, this.focus.y, this.focus.z);
+    const shadowSpan = clamp(this.camDist * 0.85, 26, 74);
+    if (Math.abs(shadowSpan - (this._shadowSpan || 0)) > 1) {
+      this._shadowSpan = shadowSpan;
+      Object.assign(this.sun.shadow.camera, { left: -shadowSpan, right: shadowSpan, top: shadowSpan, bottom: -shadowSpan });
+      this.sun.shadow.camera.updateProjectionMatrix();
+    }
   }
 
   // No day and no night any more — but the sky still tells you something. The
@@ -5166,26 +5037,34 @@ class App {
   _updateDayNight(dt) {
     const g = this.game;
     const dread = g.phase === 'found' ? 0 : Math.min(1, (g.threat || 0) / Math.max(1, THREAT.max * 0.7));
-    const want = 1 - dread * 0.8;
+    const want = 1 - dread * 0.55;
     this._bright = this._bright === undefined ? want : this._bright + (want - this._bright) * (1 - Math.exp(-2.2 * dt));
     const b = this._bright;
-    const daySky = new THREE.Color(this.pal && this.pal.sky ? this.pal.sky : 0xa8cfc4);
-    const duskSky = new THREE.Color(0xd98a6a);
-    const nightSky = new THREE.Color(0x232b4e);
-
-    this.sun.intensity = lerp(0.85, 2.75, b);
-    // Warm gold by day, ember at dusk, cool moon-blue at night.
-    this.sun.color.copy(new THREE.Color(0x9db8f0).lerp(new THREE.Color(0xffeabf), b));
-    this.hemi.intensity = lerp(0.35, 0.8, b);
-    this.hemi.color.copy(new THREE.Color(0x5a6aa8).lerp(new THREE.Color(0xdfe8dd), b));
-    this.hemi.groundColor.copy(new THREE.Color(0x2c3550).lerp(new THREE.Color(0x9a7a58), b));
-    this.amb.intensity = lerp(0.85, 0.45, b);
-    this.amb.color.copy(new THREE.Color(0x2c3765).lerp(new THREE.Color(0x33406e), b));
-    const sky = nightSky.clone().lerp(daySky.clone().lerp(duskSky, dread * 0.55), b);
-    this.scene.background = sky;
-    this.scene.fog.color.copy(sky);
+    const pal = this.pal || {};
+    const shadowHex = paletteShadow(pal);
+    if (shadowHex !== this._shadowHex) {
+      this._shadowHex = shadowHex;
+      this.tacticalVisuals.setShadowColor(shadowHex);
+    }
+    const shadow = _tmpColA.setHex(shadowHex);
+    const horizon = _tmpColB.setHex(pal.sky !== undefined ? pal.sky : 0xa8cfc4);
+    const top = _tmpColC.setHex(paletteSkyTop(pal));
+    // Threat drains the warmth out of the light toward the shadow colour —
+    // a late siege LOOKS late without any day/night clock.
+    this.sun.intensity = lerp(1.25, 2.3, b);
+    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
+    this.hemi.intensity = lerp(0.55, 0.75, b);
+    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.hemi.groundColor.copy(shadow);
+    this.amb.intensity = 0.35;
+    this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
+    horizon.lerp(shadow, (1 - b) * 0.6);
+    top.lerp(shadow, (1 - b) * 0.7);
+    this.scene.background = this.sky.set(top, horizon) || horizon.clone();
+    this.scene.fog.color.copy(horizon);
+    const b2 = b;
     // Windows glow when it's dark.
-    const glow = lerp(0.85, 0, b);
+    const glow = lerp(0.85, 0, b2);
     if (Math.abs(glow - (this._winGlow || 0)) > 0.05) {
       this._winGlow = glow;
       for (const rec of this.buildingMeshes.values()) {
@@ -5280,7 +5159,11 @@ class App {
     // The sim can run many ticks per frame (catch-up after a hidden tab, the
     // co-op pump). Replaying hundreds of stale FX events in one frame is a
     // hitch and an air-raid of sounds — keep only the freshest burst.
-    if (g.events.length > 90) g.events.splice(0, g.events.length - 30);
+    if (g.events.length > 90) {
+      // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
+      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      g.events.splice(0, g.events.length - 30, ...keep);
+    }
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
@@ -5352,17 +5235,18 @@ class App {
         }
         case 'zdeath':
           this.spawnCorpse(e);
-          this.burst(e.x, 0.4, e.z, { count: e.big ? 26 : 12, color: 0x8c1a1a, speed: e.big ? 3 : 2, life: 0.6, size: e.big ? 0.7 : 0.5, up: 2 });
+          this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
+          this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
           this.deathSfxT -= 1;
           if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
           break;
         case 'bite':
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
-          this.burst(e.x, 0.7, e.z, { count: 4, color: 0xb32020, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
+          this.burst(e.x, 0.7, e.z, { count: 4, color: 0xffb070, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
           break;
         case 'udeath':
-          this.burst(e.x, 0.5, e.z, { count: 20, color: 0xd23c3c, speed: 2.5, life: 0.7, size: 0.55, up: 2 });
+          this.burst(e.x, 0.5, e.z, { count: 20, color: 0xbfe0ff, speed: 2.5, life: 0.6, size: 0.55, up: 2 });
           this.audio.zombieDeath();
           break;
         case 'build':
@@ -5594,7 +5478,7 @@ class App {
           this.audio.victory();
           this.shake = Math.max(this.shake, 1.4);
           this.burst(e.x, 0.6, e.z, { count: 60, color: 0xffd75e, speed: 4.5, life: 1.2, size: 0.8, up: 4 });
-          this.burst(e.x, 0.5, e.z, { count: 40, color: 0x8c1a1a, speed: 3.5, life: 0.9, size: 0.7, up: 3 });
+          this.burst(e.x, 0.5, e.z, { count: 40, color: 0xc8a6ff, speed: 3.5, life: 0.9, size: 0.7, up: 3 });
           break;
         case 'enrage':
           this.audio.bossHorn();
@@ -5698,7 +5582,7 @@ class App {
     // Watch the game while it runs, and the menu while the attract show does —
     // the vignettes put real load on the backdrop, so the menu gets the same
     // safety net a live siege has.
-    const active = this.game ? !this.paused : !!this.ow;
+    const active = this.game ? !this.paused : false;
     if (!active || this.tacticalVisuals.quality !== 'high') {
       this.slowFrameT = 0;
       return;
@@ -5720,7 +5604,7 @@ class App {
     this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);
 
-    if (!this.game && !this.ow && this.titleSpace) {
+    if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
 
@@ -5899,12 +5783,10 @@ class App {
       this.minimapT -= dt;
       if (this.minimapT <= 0) {
         this.minimapT = 0.15;
-        const viewSize = this.camDist * 1.1;
+        const viewSize = this.camDist * 0.62;
         this.ui.drawMinimap(this.game, this.focus, viewSize);
       }
     }
-
-    if (!this.game && this.ow) this._updateOverworld(dt, t);
 
     this._updateParticles(dt);
     this._updateCorpses(dt);

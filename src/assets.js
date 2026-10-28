@@ -3,6 +3,7 @@
 // the procedural meshes, so the game always runs.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 
 const TEMPLATES = {};
 
@@ -41,9 +42,109 @@ export const ART_SLICE_KEYS = Object.freeze([
   'humanMine', 'humanWall', 'humanGate',
 ]);
 
+// ---- toy kit (per culture, vertex-coloured, see tools/art/toy_kit) ----
+// Shared runtime materials: every kit mesh is flat matte Lambert carrying its
+// baked vertex colours; meshes named glow/eyes are unlit so lamps, pads and
+// eyes read at any light level.
+let _kitBody = null, _kitGlow = null;
+export function kitMaterials() {
+  if (!_kitBody) {
+    _kitBody = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    _kitGlow = new THREE.MeshBasicMaterial({ vertexColors: true });
+  }
+  return { body: _kitBody, glow: _kitGlow };
+}
+// Loaded kits by culture. European is always loaded and is the fallback for
+// any piece a culture lacks; SHARED_KIT pieces always come from it.
+const KITS = {};
+const KIT_LOADING = {};
+
+function loadCultureKit(loader, key) {
+  if (KIT_LOADING[key]) return KIT_LOADING[key];
+  const c = CULTURES[key];
+  const mats = kitMaterials();
+  const out = (KITS[key] = KITS[key] || {});
+  const names = key === DEFAULT_CULTURE ? c.assets : c.assets.filter((n) => !SHARED_KIT.has(n));
+  KIT_LOADING[key] = Promise.all(names.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(`${c.kitPath}/${name}.glb`);
+      const root = gltf.scene;
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        o.geometry.userData.kitShared = true;
+        const glow = o.name === 'glow' || o.name === 'eyes' || o.material?.name === 'glow'
+          || o.parent?.name === 'glow' || o.parent?.name === 'eyes';
+        o.material = glow ? mats.glow : mats.body;
+        o.castShadow = !glow;
+        o.receiveShadow = !glow;
+        if (glow) o.userData.noOutline = true;
+      });
+      out[name] = root;
+    } catch (e) {
+      // Missing kit piece — callers fall back to European, then procedural.
+    }
+  })).then(() => out);
+  return KIT_LOADING[key];
+}
+
+function loadKit(loader) {
+  return loadCultureKit(loader, DEFAULT_CULTURE);
+}
+
+let _kitLoader = null;
+// Load (once) the kit for a culture so its base can be built. Resolves when
+// its pieces are in; unknown or unbuilt cultures resolve to European.
+export function loadKitCulture(key) {
+  const c = culture(key);
+  _kitLoader = _kitLoader || new GLTFLoader();
+  return loadCultureKit(_kitLoader, c.key);
+}
+
+function kitNode(name) {
+  const key = activeCulture();
+  if (key !== DEFAULT_CULTURE && !SHARED_KIT.has(name)) {
+    const own = KITS[key]?.[name];
+    if (own) return own;
+  }
+  return KITS[DEFAULT_CULTURE]?.[name] || null;
+}
+
+export function hasKit(name) {
+  return !!kitNode(name);
+}
+
+// Clone a kit asset. Geometry and the two shared materials are shared, so a
+// clone is cheap; callers must not dispose them (kitShared flags this).
+export function kitClone(name) {
+  const t = kitNode(name);
+  if (!t) return null;
+  const g = t.clone(true);
+  g.userData.kitShared = true;
+  return g;
+}
+
+// A named part's geometry (pivot-relative, as authored) plus its pivot, for
+// instanced use (horde bodies, trees, rocks).
+export function kitGeometry(name, part) {
+  const t = kitNode(name);
+  if (!t) return null;
+  let found = null;
+  t.traverse((o) => {
+    if (found) return;
+    if (o.name === part || (o.parent && o.parent.name === part && o.isMesh)) found = o;
+  });
+  if (!found) return null;
+  let mesh = found.isMesh ? found : null;
+  if (!mesh) found.traverse((o) => { if (!mesh && o.isMesh) mesh = o; });
+  if (!mesh) return null;
+  const pivot = found.position.clone();
+  return { geometry: mesh.geometry, pivot };
+}
+
 export function loadAssets() {
   const loader = new GLTFLoader();
-  return Promise.all(Object.entries(MANIFEST).map(async ([key, url]) => {
+  const kit = loadKit(loader);
+  return Promise.all([kit, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;
@@ -57,8 +158,7 @@ export function loadAssets() {
           // dressing and can use the cheaper material path.
           if (!authored) {
             const src = o.material;
-            o.material = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.03,
-              map: src.map || null,
+            o.material = new THREE.MeshLambertMaterial({ flatShading: true, map: src.map || null,
               color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
             });
           }
@@ -74,7 +174,7 @@ export function loadAssets() {
     } catch (e) {
       // Asset missing/unloadable — procedural fallback will be used.
     }
-  }));
+  })]);
 }
 
 // Clone an asset scaled so its horizontal footprint fits `fit` world units

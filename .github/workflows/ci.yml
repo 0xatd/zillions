@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `npm run check` runs `precheck` first (auth, economy, crafting, shell).
+      - run: npm run check
+      # Applies schema.sql + every migration to a throwaway local Postgres and
+      # exercises apply_match_result(). Never touches a real Supabase project.
+      - run: npm run check:postgres
+      - name: Whitespace errors in this change
+        if: github.event_name == 'pull_request'
+        run: git diff --check "origin/${{ github.base_ref }}...HEAD"

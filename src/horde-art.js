@@ -17,6 +17,7 @@
 // Callers (the game renderer and the menu vignette) feed world transforms in
 // through HordeArt.write(); nothing here can affect lockstep.
 import * as THREE from 'three';
+import { toyMat } from './toy-style.js';
 import { applyRim } from './tactical-visuals.js';
 
 // ---------------- merged-geometry builder ----------------
@@ -327,6 +328,16 @@ export function buildCorpseGeometry() {
   return geo;
 }
 
+// Toy-kit kill pop: no bodies, no gore. A dead drone SHATTERS into a few
+// faceted crystal shards that bounce, spin and shrink away. Instance colour
+// tints the pale shard per type.
+export function buildShardGeometry() {
+  const b = merger();
+  b.cone(0xffffff, 0.12, 0.26, 0, 0.13, 0, 0, 0, 0, 4);
+  b.cone(0xc9c4e8, 0.12, 0.16, 0, -0.08, 0, Math.PI, 0, 0, 4);
+  return b.build();
+}
+
 // ---------------- instanced writer ----------------
 
 const _d = new THREE.Object3D();
@@ -334,15 +345,45 @@ const _m1 = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _c = new THREE.Color();
 
+// Kit drones: body + arms (pivot-relative, swung at the shoulder) + eyes.
+// Eyes are re-baked white so the per-instance eye colour (amber idle, red
+// hunting, blue under an aura) reads exactly as before.
+const KIT_SWING = { // same cadence as the procedural rigs
+  walker: [0.16, 3.4], runner: [0.42, 9.0], brute: [0.11, 2.6], spitter: [0.12, 3.0],
+  burrower: [0.3, 5.5], sieger: [0.1, 2.4], caller: [0.24, 3.8],
+};
+function kitParts(kit, type) {
+  const name = `enemy_${type}`;
+  const body = kit(name, 'body'), arms = kit(name, 'arms'), eyes = kit(name, 'eyes');
+  if (!body || !arms) return null;
+  let eyeGeometry = null;
+  if (eyes) {
+    eyeGeometry = eyes.geometry.clone();
+    if (eyes.pivot.lengthSq() > 0) eyeGeometry.translate(eyes.pivot.x, eyes.pivot.y, eyes.pivot.z);
+    const c = eyeGeometry.getAttribute('color');
+    if (c) for (let i = 0; i < c.count; i++) c.setXYZ(i, 1, 1, 1);
+  }
+  const bodyGeo = body.pivot.lengthSq() > 0
+    ? body.geometry.clone().translate(body.pivot.x, body.pivot.y, body.pivot.z) : body.geometry;
+  const [swingAmp, swingRate] = KIT_SWING[type] || KIT_SWING.walker;
+  return {
+    body: bodyGeo, arms: arms.geometry, eyeGeometry,
+    eyes: [], pivot: [arms.pivot.x, arms.pivot.y, arms.pivot.z], swingAmp, swingRate,
+  };
+}
+
 export class HordeArt {
-  constructor(scene, max) {
+  // `kit` (optional): (assetName, partName) => {geometry, pivot} | null — the
+  // toy-kit provider from assets.js. When it has `enemy_<type>`, the hive
+  // drone from the Blender kit replaces the procedural silhouette.
+  constructor(scene, max, kit = null) {
     this.scene = scene;
     this.max = max;
     this.sets = {};
     for (const [type, buildParts] of Object.entries(BUILDERS)) {
-      const parts = buildParts();
+      const parts = (kit && kitParts(kit, type)) || buildParts();
       const bodyMat = applyRim(
-        new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.0, vertexColors: true }),
+        toyMat({ vertexColors: true }),
         { color: 0x9fb4de, power: 2.0, strength: 0.58 },
       );
       // body and arms share one rimmed material (clone() would drop the
@@ -350,9 +391,13 @@ export class HordeArt {
       // compiled program is identical for the pair.
       const body = new THREE.InstancedMesh(parts.body, bodyMat, max);
       const arms = new THREE.InstancedMesh(parts.arms, bodyMat, max);
-      const eyeGeo = merger();
-      for (const [x, y, z] of parts.eyes) eyeGeo.box(0xffffff, 0.055, 0.045, 0.045, x, y, z);
-      const eyes = new THREE.InstancedMesh(eyeGeo.build(), new THREE.MeshBasicMaterial({ vertexColors: true }), max);
+      let eyeGeom = parts.eyeGeometry;
+      if (!eyeGeom) {
+        const eyeGeo = merger();
+        for (const [x, y, z] of parts.eyes) eyeGeo.box(0xffffff, 0.055, 0.045, 0.045, x, y, z);
+        eyeGeom = eyeGeo.build();
+      }
+      const eyes = new THREE.InstancedMesh(eyeGeom, new THREE.MeshBasicMaterial({ vertexColors: true }), max);
       for (const m of [body, arms, eyes]) {
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         m.castShadow = m !== eyes;
@@ -422,7 +467,7 @@ export class HordeArt {
     for (const set of Object.values(this.sets)) {
       for (const m of [set.body, set.arms, set.eyes]) {
         this.scene.remove(m);
-        m.geometry.dispose();
+        if (!m.geometry.userData.kitShared) m.geometry.dispose();
         m.material.dispose();
         m.dispose();
       }
