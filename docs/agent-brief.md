@@ -36,8 +36,12 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   fastest single human producer, then accelerates with Threat. Humans overcome
   that deficit with multiple camps, captured outposts, and hive destruction.
 - Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
-  your own conquests. Each whole level triggers a surge — every hive musters at
-  once at `SURGE_MULT`.
+  your own conquests. Casual and Normal scale that clock by the full
+  difficulty multiplier. Brutal uses `threatClockMult()`, a fraction of its
+  extra, so the opening still exists. Squad counts use `hordeCountMult()` the
+  same way. Nest health, the boss, and the closing wave take the full
+  multiplier. Each whole level triggers a surge — every hive musters at once
+  at `SURGE_MULT`.
 - Lane graph in `src/lanes.js`: deterministic BFS-built lanes between capture
   nodes, hives, and the city. Squads route node-to-node. A third of the army
   (`_isHolder`, by unit id) takes and holds nodes; the rest march on hives.
@@ -137,8 +141,10 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - Hives have real health, spit defenders when damaged (`defendT`), and blight
   the ground within `NEST_BLIGHT_R`. Units siege a hive even while its garrison
   swarms, unless something is inside `SIEGE_GUARD_R`.
-- Campaign win: raze every hive, then kill the champion of the final
-  counterattack. Loss: the Keep falls.
+- Campaign win: raze every hive, then break the boss wave — the map's
+  champion plus an escort from `bossWaveCount()`. Loss: the Keep falls.
+  Horde damage steps up with the map (`hordeDamageScale`); health does not,
+  so shot-counts against walkers stay stable.
 
 ## Balance Status
 
@@ -154,7 +160,10 @@ Current automated guarantees:
   planets, route reachability, city closure, gates, troop exits, expansion-fort
   spacing, loot, and two minutes of siege.
 - Each authored level has a unique landform and city plan.
-- Nest health and campaign multipliers rise across the authored campaign.
+- Nest health and campaign multipliers rise across the authored campaign,
+  one gradual step per Earth map. Each map closes on a boss wave.
+- The four culture armies stay inside one power band, and every culture's
+  trooper kills a walker in the same number of shots.
 - Human playtesting is still the source of truth for difficulty and completion
   time.
 

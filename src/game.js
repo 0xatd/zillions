@@ -11,6 +11,7 @@
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
+  bossWaveCount, hordeDamageScale, threatClockMult, hordeCountMult,
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   DODGE_CD, DODGE_TIME, DODGE_IFRAMES, DODGE_SPEED,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
@@ -1719,7 +1720,7 @@ export class Game {
     // sieges, not a faster clock on top of more sieges. Razing below three
     // still visibly slows it, which is the reward for pushing.
     this.threat = Math.min(THREAT.max, this.threat
-      + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * dt * this.diff.mult);
+      + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * dt * threatClockMult(this.diff.mult));
     this.threatLevel = Math.max(1, Math.floor(this.threat) + 1);
     if (this.threatLevel > before) this._surge();
 
@@ -1745,9 +1746,11 @@ export class Game {
           this._spawnHorde(Math.round(18 * this.diff.mult * this.level.mult), [last.id], w.types);
         }
       } else {
-        this.msg('🔥 Every hive lies in ashes — but something enormous is already walking. Hold the Keep!', 'bad');
+        const count = bossWaveCount(this.level, this.diff.mult);
+        const name = this.level.boss?.name || 'The champion';
+        this.msg(`👑 BOSS WAVE — ${name} leads ${count} of the dead against the Keep.`, 'bad');
         this._spawnBoss(null);
-        this._edgeAssault(Math.round(48 * this.diff.mult * this.level.mult));
+        this._edgeAssault(count);
       }
     }
   }
@@ -1922,6 +1925,15 @@ export class Game {
     return best;
   }
 
+  // Later maps meet the next horde role a little sooner. Squad SIZE still
+  // follows the real Threat clock — only the mix moves — so a five-hive
+  // world does not also invent extra bodies just for being later.
+  _mixThreat() {
+    if (this.mode === 'labyrinth') return this.threat;
+    const mult = Number.isFinite(this.level?.mult) ? this.level.mult : 1;
+    return this.threat + Math.max(0, (mult - 0.92) * 1.7);
+  }
+
   _surge() {
     if (!this.liveNests()) return;
     this.msg(`☠️ THREAT ${this.threatLevel}. Every hive musters at once — they are coming from all sides.`, 'bad');
@@ -2001,7 +2013,7 @@ export class Game {
   _hiveMuster(nest, mult, firstSiege = false) {
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
     const share = 3 / Math.max(3, this.nests.length);
-    const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure * coopMult * mult * share);
+    const w = hiveSquad(this.threat, hordeCountMult(this.diff.mult) * this.level.mult * this.economy.pressure * coopMult * mult * share, this._mixThreat());
     // Ground the hive holds is where part of its muster ACTUALLY appears. This
     // moves pressure closer to you without adding any more of it — so taking a
     // hive-held node is worth doing for position, not just for income.
@@ -2038,9 +2050,12 @@ export class Game {
 
   // The final counterattack, once no hive is left to march from.
   _edgeAssault(size) {
-    const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
-    this._spawnHorde(size, [], w.types);
-    this.emit({ type: 'horde', final: true });
+    // The closer marches out of the hive ruins, not the map rim. A rim spawn
+    // can drop a body in a terrain pocket the flow field calls reachable and
+    // the body can never leave (playthrough, Black Vale).
+    const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure, this._mixThreat());
+    this._spawnHorde(size, this.nests.map((n) => n.id), w.types);
+    this.emit({ type: 'horde', final: true, wave: size });
   }
 
   // ---------- lane nodes ----------
@@ -2251,6 +2266,16 @@ export class Game {
         // it out the gate first (QA 2026-08-17: squads stuck in every base).
         if (!zombie && !actor.hero && this._wantsGate(actor, wx, wz)) {
           actor.gateExit = true;
+        } else if (!zombie && !actor.hero) {
+          // A route that dies in a notch used to be replaced by the same
+          // route. Step one tile off the line, chosen from the unit id so
+          // peers agree, and let the next path start from open ground.
+          const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          const [sx, sz] = dirs[actor.id & 3];
+          if (!this._moveActor(actor, sx, sz, speed, dt)) {
+            const [tx, tz] = dirs[(actor.id + 1) & 3];
+            this._moveActor(actor, tx, tz, speed, dt);
+          }
         }
         return false;
       }
@@ -2273,7 +2298,12 @@ export class Game {
       if (er > 0) {
         const dir = this._fieldDir(actor, ex, ez, true);
         if (dir) {
-          this._moveActor(actor, dir[0], dir[1], speed, dt);
+          // A blocked step must not clear the watchdog. Resetting it on a
+          // failed move left holders grinding a gate for the whole siege
+          // (playthrough, Black Vale): the field pointed into the wall and
+          // the squad never gave the route up.
+          const moved = this._moveActor(actor, dir[0], dir[1], speed, dt);
+          if (!moved) return true;
           while (actor.routeI < actor.route.length - 1
             && Math.hypot(actor.route[actor.routeI][0] - actor.x, actor.route[actor.routeI][1] - actor.z) < 3) actor.routeI++;
           actor.routeStuck = 0;
@@ -3445,6 +3475,15 @@ export class Game {
 
   // ---------- zombies ----------
 
+  // Later maps hit harder only after Threat is up, and the bonus is derived
+  // from the clock rather than baked into the zombie. Baking it at spawn
+  // made a restored horde disagree with the live one: the save does not
+  // record each body's birth threat.
+  _zombieDmg(zb) {
+    if (zb.boss) return zb.def.dmg;
+    return zb.def.dmg * hordeDamageScale(this.level, this.mode, this.threat);
+  }
+
   _spawnZombie(type, x, z, aggro, wave = false) {
     const d = ZOMBIES[type];
     if (!d) return null;
@@ -4147,7 +4186,7 @@ export class Game {
             zb.atkT = cd;
             // Thorns only reflects real melee contact (a bite), not a spitter's
             // ranged acid from outside the fight.
-            this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
+            this._damageUnit(u, this._zombieDmg(zb) * dmgMul, range ? null : zb);
             this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
           }
         } else {
@@ -4213,7 +4252,7 @@ export class Game {
     if (!best) return false;
     zb.atkT = 1 / (zb.def.rof || 0.5);
     zb.dirX = best.cx - zb.x; zb.dirZ = best.cz - zb.z;
-    this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
+    this._damageBuilding(best, this._zombieDmg(zb) * dmgMul, zb);
     this.emit({ type: 'spit', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz, targetKind: 'building' });
     return true;
   }
@@ -4236,7 +4275,7 @@ export class Game {
     if (d < best.size / 2 + 1.1) {
       if (zb.atkT <= 0) {
         zb.atkT = 1.1;
-        this._damageBuilding(best, zb.def.dmg * dmgMul, zb);
+        this._damageBuilding(best, this._zombieDmg(zb) * dmgMul, zb);
         this.emit({ type: 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: best.cx, tz: best.cz, x: best.cx, z: best.cz, targetKind: 'building' });
       }
       return;
@@ -4270,7 +4309,7 @@ export class Game {
         zb.atkT = 0.85;
         const b = this.buildings.find((o) => o.id === occId);
         if (b) {
-          this._damageBuilding(b, zb.def.dmg, zb);
+          this._damageBuilding(b, this._zombieDmg(zb), zb);
           // Shock fence: every bite bites back.
           if (b.def.zap) {
             this.damageZombie(zb, b.def.zap, b.cx, b.cz);
@@ -4307,7 +4346,7 @@ export class Game {
           else if (zb.atkT <= 0) {
             zb.atkT = 0.85;
             const b = this.buildings.find((o) => o.id === occ2);
-            if (b) this._damageBuilding(b, zb.def.dmg, zb);
+            if (b) this._damageBuilding(b, this._zombieDmg(zb), zb);
           }
         }
       }
@@ -4625,7 +4664,7 @@ export class Game {
     // to commit to, not a speed bump you walk over.
     if ((n.defendT || 0) <= this.time) {
       n.defendT = this.time + 9;
-      const w = hiveSquad(this.threat, this.diff.mult * this.level.mult);
+      const w = hiveSquad(this.threat, hordeCountMult(this.diff.mult) * this.level.mult, this._mixThreat());
       this._spawnHorde(Math.max(4, Math.round(w.size * 0.8)), [n.id], w.types);
       this.emit({ type: 'hivemuster', x: n.x, z: n.z });
     }

@@ -4,7 +4,8 @@ import { generatePlots } from '../src/plots.js';
 import { reachableFrom } from '../src/lanes.js';
 import {
   HEROES, LEVELS, NEST_HP_BASE, NEST_HP_LEVEL_SHARE, NODE_KINDS, PAY_RADIUS, PLOT_KINDS, SIEGE, UPGRADE_PAY_RATE,
-  START_GOLD, THREAT, TILE, UNITS, hiveInterval, hiveSquad,
+  START_GOLD, THREAT, TILE, UNITS, ZOMBIES, CULTURE_ARMIES, DIFFICULTY,
+  hiveInterval, hiveSquad, unitDefFor, bossWaveCount, hordeDamageScale, LABYRINTH_LEVELS,
 } from '../src/config.js';
 
 function fakeMap(level) {
@@ -424,6 +425,71 @@ for (const [name, cost, incomeGain] of paybacks) {
       assert.ok(share >= 0, `hive squad share for ${type} went negative at Threat ${threat}`);
     }
   }
+  // A later map may meet specialists sooner. That mix shift must not change
+  // how many bodies the squad contains.
+  const sized = hiveSquad(4, 1.2);
+  const mixed = hiveSquad(4, 1.2, 7);
+  assert.equal(mixed.size, sized.size, 'mix threat must not change squad size');
+  assert.ok(mixed.types.spitter > sized.types.spitter, 'a later map should field spitters sooner');
+}
+
+// Cultures share one power band. The trooper shot-count against a walker is
+// the breakpoint that used to split the roster: three shots snowball into a
+// loss, two shots into a win, on the same map.
+{
+  const shotsToKill = (dmg, hp) => Math.ceil((hp - 1e-9) / dmg);
+  const walkerShots = shotsToKill(UNITS.soldier.dmg, ZOMBIES.walker.hp);
+  const power = (def) => ({
+    dps: def.dmg * def.rof,
+    ehp: def.hp / ((1 - (def.armor || 0)) * (1 - (def.evadeChance || 0))),
+  });
+  for (const culture of Object.keys(CULTURE_ARMIES)) {
+    for (const key of ['soldier', 'ranger', 'sniper']) {
+      const got = power(unitDefFor(culture, key));
+      const ref = power(UNITS[key]);
+      const dpsR = got.dps / ref.dps;
+      const ehpR = got.ehp / ref.ehp;
+      assert.ok(dpsR >= 0.88 && dpsR <= 1.12, `${culture} ${key} dps is ${dpsR.toFixed(3)} of European`);
+      assert.ok(ehpR >= 0.88 && ehpR <= 1.18, `${culture} ${key} effective hp is ${ehpR.toFixed(3)} of European`);
+    }
+    const trooper = unitDefFor(culture, 'soldier');
+    assert.equal(shotsToKill(trooper.dmg, ZOMBIES.walker.hp), walkerShots,
+      `${culture} troopers need a different number of shots to drop a walker`);
+    assert.ok(Math.abs(trooper.speed - UNITS.soldier.speed) <= 0.25,
+      `${culture} troopers are too far from the European march speed`);
+  }
+}
+
+// Earth difficulty rises one step at a time, and the boss wave that closes
+// each map rises with it. Squad size is intentionally flatter than nest
+// health: Barrow Hills is a harsher landform, so its horde is not also a
+// bigger army. Casual stays under Normal stays under Brutal.
+{
+  const bodies = (lv) => lv.mult * lv.economy.pressure;
+  for (let i = 1; i < LEVELS.length; i++) {
+    const ratio = bodies(LEVELS[i]) / bodies(LEVELS[i - 1]);
+    assert.ok(ratio >= 1.04 && ratio <= 1.35,
+      `${LEVELS[i].name} horde step ${ratio.toFixed(3)} is not gradual`);
+  }
+  assert.ok(bodies(LEVELS[4]) <= bodies(LEVELS[0]) * 2.4, 'level 5 horde must not be a wall past level 1');
+  let prevWave = 0;
+  let prevScale = 0;
+  for (const lv of LEVELS) {
+    const wave = bossWaveCount(lv, 1);
+    const scale = hordeDamageScale(lv, 'campaign', 8);
+    assert.equal(hordeDamageScale(lv, 'campaign', 0), 1, `${lv.name} opening horde damage must stay authored`);
+    assert.ok(wave > prevWave, `${lv.name} boss wave does not grow`);
+    assert.ok(scale > prevScale, `${lv.name} late horde damage does not grow`);
+    prevWave = wave;
+    prevScale = scale;
+  }
+  const first = LEVELS[0];
+  assert.equal(hordeDamageScale(first, 'campaign', 8), 1, 'level 1 horde damage stays flat as Threat climbs');
+  assert.ok(bossWaveCount(first, DIFFICULTY.casual.mult) < bossWaveCount(first, DIFFICULTY.normal.mult));
+  assert.ok(bossWaveCount(first, DIFFICULTY.normal.mult) < bossWaveCount(first, DIFFICULTY.brutal.mult));
+  assert.equal(hordeDamageScale(LABYRINTH_LEVELS[0], 'labyrinth', 8), 1,
+    'labyrinth hordes keep their authored damage');
+  assert.ok(DIFFICULTY.casual.mult < DIFFICULTY.normal.mult && DIFFICULTY.normal.mult < DIFFICULTY.brutal.mult);
 }
 
 // Every hero — however many there are — must sit in the same rough power band

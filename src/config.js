@@ -301,8 +301,11 @@ export const UNITS = {
 // squads fight. European is the reference line (the plain UNITS stats).
 // Overrides are deterministic stat/behaviour keys the sim already reads:
 // evadeChance and armor/thorns (damageUnit), splash (unit attacks), range,
-// rof, speed. Power is kept within a few percent of the reference so the
-// difficulty curve holds whichever culture the player picks.
+// rof, speed. Damage, health and speed stay inside a narrow band of the
+// European line — and every culture's trooper still drops a walker in the
+// same number of shots — so the difficulty curve holds whichever culture
+// the player picks. A slower front line matters as much as the hit points:
+// a faster, frailer line runs into the hive blight and never masses.
 export const CULTURE_ARMIES = {
   european: {
     name: 'European', banner: 'Star Knights',
@@ -313,23 +316,23 @@ export const CULTURE_ARMIES = {
     name: 'Asian', banner: 'Jade Lantern Dynasty',
     blurb: 'Swift glaive guards that slip blows, rapid repeaters, rocket fire-lances that blast packs.',
     units: {
-      soldier: { name: 'Glaive Guard', hp: 118, dmg: 12, rof: 2.9, range: 7, speed: 4.0, evadeChance: 0.18,
-        trait: 'Evades 18% of blows · fast' },
-      ranger: { name: 'Repeater Archer', hp: 64, dmg: 4.6, rof: 2.3, range: 6.8, speed: 4.8,
-        trait: 'Very fast fire, short reach' },
-      sniper: { name: 'Fire-Lance', hp: 84, dmg: 44, rof: 0.6, range: 12, splash: 1.5,
-        trait: 'Rocket splash hits the whole pack' },
+      soldier: { name: 'Glaive Guard', hp: 132, dmg: 16, rof: 2.15, range: 7.7, speed: 3.55, evadeChance: 0.08,
+        trait: 'Evades 8% of blows · quick' },
+      ranger: { name: 'Repeater Archer', hp: 68, dmg: 6.4, rof: 1.55, range: 6.9, speed: 4.75,
+        trait: 'Fast fire, short reach' },
+      sniper: { name: 'Fire-Lance', hp: 86, dmg: 56, rof: 0.6, range: 12.5, splash: 1.25,
+        trait: 'Rocket splash hits the pack' },
     },
   },
   south_american: {
     name: 'South American', banner: 'Sun Terrace Guard',
     blurb: 'Slow obsidian shieldbearers that wound what bites them, darting jaguar scouts, solar atlatls.',
     units: {
-      soldier: { name: 'Obsidian Shieldbearer', hp: 176, dmg: 13, rof: 2.0, range: 7, speed: 3.0, armor: 0.15, thorns: 0.3,
-        trait: '15% armour · reflects 30% of melee' },
-      ranger: { name: 'Jaguar Scout', hp: 74, dmg: 6.4, rof: 1.5, range: 7.5, speed: 5.2,
-        trait: 'Fastest runners, longer darts' },
-      sniper: { name: 'Solar Atlatl', hp: 96, dmg: 56, rof: 0.56, range: 13, splash: 0.9, armor: 0.1,
+      soldier: { name: 'Obsidian Shieldbearer', hp: 148, dmg: 16, rof: 2.05, range: 7.6, speed: 3.25, armor: 0.08, thorns: 0.22,
+        trait: '8% armour · reflects 22% of melee' },
+      ranger: { name: 'Jaguar Scout', hp: 72, dmg: 6.8, rof: 1.48, range: 7.2, speed: 5.1,
+        trait: 'Fast runners, longer darts' },
+      sniper: { name: 'Solar Atlatl', hp: 92, dmg: 60, rof: 0.56, range: 13.2, splash: 0.7, armor: 0.06,
         trait: 'Sturdy, small splash' },
     },
   },
@@ -337,11 +340,11 @@ export const CULTURE_ARMIES = {
     name: 'Middle Eastern', banner: 'Mirage Court',
     blurb: 'Hard-hitting long-reach lancers, fast dune riders, astrolabe longguns with the longest sight.',
     units: {
-      soldier: { name: 'Mirage Lancer', hp: 124, dmg: 19, rof: 1.95, range: 8.5, speed: 4.1,
-        trait: 'Heavy hits, long reach, quick' },
-      ranger: { name: 'Dune Rider', hp: 64, dmg: 7.4, rof: 1.35, range: 8, speed: 5.6,
-        trait: 'Mounted: fastest unit' },
-      sniper: { name: 'Astrolabe Longgun', hp: 80, dmg: 78, rof: 0.47, range: 16, speed: 2.8,
+      soldier: { name: 'Mirage Lancer', hp: 136, dmg: 16, rof: 2.15, range: 8.3, speed: 3.55,
+        trait: 'Long reach, steady line' },
+      ranger: { name: 'Dune Rider', hp: 68, dmg: 7, rof: 1.42, range: 7.6, speed: 5.15,
+        trait: 'Mounted: fastest runners' },
+      sniper: { name: 'Astrolabe Longgun', hp: 86, dmg: 66, rof: 0.52, range: 15.5, speed: 3.0,
         trait: 'Longest range in the game' },
     },
   },
@@ -419,22 +422,56 @@ export function hiveInterval(threat) {
   return Math.max(5, 9 - threat * 0.18);
 }
 
-export function hiveSquad(threat, mult) {
-  const size = Math.max(3, Math.round((5 + threat * 0.72) * mult));
-  const runner   = threat >= 2 ? Math.min(0.26, 0.060 * (threat - 1)) : 0;
-  const spitter  = threat >= 3 ? Math.min(0.15, 0.035 * (threat - 2)) : 0;
-  const caller   = threat >= 4 ? Math.min(0.06, 0.015 * (threat - 3)) : 0;
-  const brute    = threat >= 5 ? Math.min(0.09, 0.018 * (threat - 4)) : 0;
-  const sieger   = threat >= 6 ? Math.min(0.10, 0.020 * (threat - 5)) : 0;
-  const burrower = threat >= 7 ? Math.min(0.09, 0.020 * (threat - 6)) : 0;
+export function hiveSquad(threat, mult, mixThreat = threat) {
+  // Size follows the real Threat clock. `mixThreat` can run ahead on a later
+  // map so the next horde role shows up a little sooner without also inflating
+  // the body count. Growth is linear and modest: a long siege gets harder,
+  // it does not become a different game.
+  const size = Math.max(3, Math.round((5 + threat * 0.55) * mult));
+  const t = Number.isFinite(mixThreat) ? mixThreat : threat;
+  const runner   = t >= 2 ? Math.min(0.26, 0.060 * (t - 1)) : 0;
+  const spitter  = t >= 3 ? Math.min(0.15, 0.035 * (t - 2)) : 0;
+  const caller   = t >= 4 ? Math.min(0.06, 0.015 * (t - 3)) : 0;
+  const brute    = t >= 5 ? Math.min(0.09, 0.018 * (t - 4)) : 0;
+  const sieger   = t >= 6 ? Math.min(0.10, 0.020 * (t - 5)) : 0;
+  const burrower = t >= 7 ? Math.min(0.09, 0.020 * (t - 6)) : 0;
   const rest = runner + spitter + caller + brute + sieger + burrower;
   const walker = Math.max(0.12, 1 - rest);
   return { size, types: { walker, runner, spitter, caller, brute, sieger, burrower } };
 }
 
+// Horde bodies hit harder on later maps, and only once Threat is up. The
+// opening is the same fight everywhere — a damage bonus from the first
+// walker is what used to collapse a colony before it had an army. Health
+// stays on the authored stat block so a trooper's shot-count against a
+// walker does not flip between maps. Labyrinth hordes stay authored.
+export function hordeDamageScale(level, mode = 'campaign', threat = 0) {
+  if (mode === 'labyrinth' || level?.labyrinth) return 1;
+  const idx = LEVELS.findIndex((l) => l.id === level?.id);
+  const step = idx >= 0 ? idx : Math.min(8, Math.max(0, (level?.id | 0) - 1));
+  const ramp = Math.max(0, Math.min(1, (threat - 2) / 8));
+  return 1 + step * 0.09 * ramp;
+}
+
+// The wave that walks in with the champion once every hive is razed. It
+// closes the map. The first three Earth maps get a short escort; Barrow
+// Hills and the Black Vale get a real army, so the champion is the fight.
+// Galaxy worlds continue from the Black Vale count. The labyrinth keeps
+// its own finale.
+export function bossWaveCount(level, diffMult = 1) {
+  const idx = LEVELS.findIndex((l) => l.id === level?.id);
+  // Earth: a small closer on the first maps, then a real army on the last
+  // two so the champion is the fight and not a victory lap.
+  const earth = [20, 26, 34, 70, 86];
+  const step = idx >= 0 ? idx : Math.min(8, Math.max(0, (level?.id | 0) - 1));
+  const base = idx >= 0 ? earth[idx] : Math.round(86 * (1.12 ** Math.max(0, step - 4)));
+  const mult = Number.isFinite(diffMult) && diffMult > 0 ? diffMult : 1;
+  return Math.max(8, Math.round(base * mult));
+}
+
 // Every whole Threat level, every hive musters at once. This is the drumbeat
 // that replaced nightfall.
-export const SURGE_MULT = 2.0;
+export const SURGE_MULT = 1.7;
 
 // ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
 // The whole kit stays Thronefall-simple: you steer, your weapon fires itself,
@@ -865,7 +902,7 @@ export const LEVELS = [
       desc: 'Every few seconds she births another brood. Kill her fast.' },
   },
   {
-    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.3, size: 200, nests: 4,
+    id: 3, name: 'Cinder Wastes', seed: 20303, mult: 1.12, size: 200, nests: 4,
     economy: { startGold: 72, income: 1.08, pressure: 1.0 },
     quests: [
       { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
@@ -878,13 +915,13 @@ export const LEVELS = [
     // mistaken for ground you can walk.
     theme: { terrain: 'wastes', city: 'outpost', liquid: 'lava', liquidName: 'Molten rock',
       palette: { grass: 0xe9a43e, forest: 0xc9783a, canopy: 0x8a3a2a, water: 0xd8461e, mountain: 0xf2d39a, sand: 0xf0bd62, path: 0xc0743c, sky: 0xffdca6, skyTop: 0xe58a52, shadow: 0x14304a } },
-    boss: { name: 'The Shrieker', icon: '🦇', hp: 4200, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
+    boss: { name: 'The Shrieker', icon: '🦇', hp: 3900, dmg: 45, speed: 1.3, chase: 2.6, scale: 2.8,
       color: 0x8a5fae, score: 100, roar: { every: 12, radius: 13, dur: 4 },
       desc: 'Its scream overloads towers, silencing them for seconds at a time.' },
   },
   {
-    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.6, size: 200, nests: 4,
-    economy: { startGold: 82, income: 1.12, pressure: 1.04 },
+    id: 4, name: 'Barrow Hills', seed: 20404, mult: 1.19, size: 200, nests: 4,
+    economy: { startGold: 74, income: 1.08, pressure: 1.03 },
     quests: [
       { id: 'l4q1', name: 'Tomb Raider', desc: 'Raze 3 hive nests', reward: 'ballistics_manual', check: (g) => g.stats.nests >= 3 },
       { id: 'l4q2', name: 'Deathless', desc: 'Win without your hero falling', reward: 'aura_amp', check: (g) => g.stats.heroDeaths === 0 },
@@ -893,13 +930,13 @@ export const LEVELS = [
     blurb: 'A field of grave mounds and blind hollows. The ground itself is on their side.',
     theme: { terrain: 'hills', city: 'crescent',
       palette: { grass: 0xcfe2ea, forest: 0xb4cddc, canopy: 0x4f86ad, water: 0x5aa8d8, mountain: 0xf2f8fa, sand: 0xb6cad8, path: 0x93a7bf, sky: 0xeaf4f7, skyTop: 0x8db3d2, shadow: 0x3b2f5c } },
-    boss: { name: 'Gravelord', icon: '⚰️', hp: 5600, dmg: 55, speed: 0.95, chase: 1.8, scale: 3.4,
-      color: 0x3f4b66, score: 130, armor: 0.35, spawn: { every: 12, count: 8, type: 'walker' },
-      desc: 'Bone-plated (takes 35% less damage) and raises the dead as it walks.' },
+    boss: { name: 'Gravelord', icon: '⚰️', hp: 4600, dmg: 52, speed: 0.95, chase: 1.8, scale: 3.4,
+      color: 0x3f4b66, score: 130, armor: 0.22, spawn: { every: 14, count: 5, type: 'walker' },
+      desc: 'Bone-plated (takes 22% less damage) and raises the dead as it walks.' },
   },
   {
-    id: 5, name: 'The Black Vale', seed: 20505, mult: 2.0, size: 200, nests: 5,
-    economy: { startGold: 96, income: 1.16, pressure: 1.08 },
+    id: 5, name: 'The Black Vale', seed: 20505, mult: 1.32, size: 200, nests: 5,
+    economy: { startGold: 96, income: 1.16, pressure: 1.02 },
     quests: [
       { id: 'l5q1', name: 'Blind the Eye', desc: 'Kill The Zillion within 120s', reward: 'void_shard', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 120 },
       { id: 'l5q2', name: 'Total Occupation', desc: 'Hold 7 lane nodes at once', reward: 'warlord_crest', check: (g) => g.stats.bestHeld >= 7 },
@@ -908,10 +945,10 @@ export const LEVELS = [
     blurb: 'A world split by one great rift. Three passes through it — and everything ends here.',
     theme: { terrain: 'vale', city: 'keyhole', liquidName: 'Void water',
       palette: { grass: 0x6c5292, forest: 0x5d4682, canopy: 0xe07aae, water: 0x9d6ee0, mountain: 0xbcaadc, sand: 0x8a76aa, path: 0xa889b4, sky: 0xc6addf, skyTop: 0x4b3a7c, shadow: 0x1a1438 } },
-    boss: { name: 'The Zillion', icon: '👁️', hp: 9000, dmg: 75, speed: 1.0, chase: 2.2, scale: 4.2,
-      color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.2,
-      spawn: { every: 10, count: 6, type: 'runner' }, roar: { every: 15, radius: 14, dur: 3.5 },
-      desc: 'All of it, at once: armored, enraging, screaming, and endlessly spawning.' },
+    boss: { name: 'The Zillion', icon: '👁️', hp: 5600, dmg: 68, speed: 1.0, chase: 2.2, scale: 4.2,
+      color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.16,
+      spawn: { every: 12, count: 4, type: 'runner' }, roar: { every: 16, radius: 13, dur: 3.2 },
+      desc: 'Armored, enraging, screaming, and still spawning. The last wave of the war.' },
   },
 ];
 
@@ -1104,8 +1141,9 @@ export function galaxyLevel(id) {
   for (const [k, v] of Object.entries(donor.theme.palette)) palette[k] = shiftHue(v, hue);
 
   const name = `${GALAXY_NAMES_A[(id * 7) % GALAXY_NAMES_A.length]} ${GALAXY_NAMES_B[(id * 11) % GALAXY_NAMES_B.length]}`;
-  // Difficulty climbs without ceiling, but gently — the galaxy is a long war.
-  const mult = 2.0 + n * 0.22;
+  // Difficulty climbs without ceiling, but gently — the galaxy continues
+  // from the last Earth map instead of jumping past it.
+  const mult = LEVELS[LEVELS.length - 1].mult + n * 0.2;
   const baseBoss = LEVELS[(id * 3) % LEVELS.length].boss;
   const boss = {
     ...baseBoss,
@@ -1150,7 +1188,28 @@ export function levelById(id) {
 }
 
 export const DIFFICULTY = {
-  casual: { label: 'Casual', mult: 0.5, ambient: 0.6 },
+  casual: { label: 'Casual', mult: 0.46, ambient: 0.55 },
   normal: { label: 'Normal', mult: 1.0, ambient: 1.0 },
-  brutal: { label: 'Brutal', mult: 1.7, ambient: 1.5 },
+  // Brutal is a harder horde, not a faster loss. 1.7 scaled the Threat
+  // clock and the squads together and every Earth map fell before the
+  // colony had an army.
+  brutal: { label: 'Brutal', mult: 1.18, ambient: 1.12 },
 };
+
+// How much of the difficulty multiplier the Threat clock actually uses.
+// Casual and Normal keep the full multiplier. Above Normal only part of
+// the extra reaches the clock, so Brutal escalates — it does not skip
+// the opening.
+export function threatClockMult(diffMult = 1) {
+  const m = Number.isFinite(diffMult) ? diffMult : 1;
+  if (m <= 1) return m;
+  return 1 + (m - 1) * 0.35;
+}
+
+// Squad size uses the same split. Nest health, the boss and the closing
+// wave still take the full multiplier, so a Brutal finale is a real fight.
+export function hordeCountMult(diffMult = 1) {
+  const m = Number.isFinite(diffMult) ? diffMult : 1;
+  if (m <= 1) return m;
+  return 1 + (m - 1) * 0.45;
+}

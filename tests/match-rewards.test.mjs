@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTY, THREAT, levelById } from '../src/config.js';
+import { DIFFICULTY, THREAT, levelById, threatClockMult } from '../src/config.js';
 import { MATCH_REPORT_VERSION, maxThreatLevel, validateMatchReport, verifyLootKey } from '../src/match-rewards.js';
 import { scatteredLootKeys } from '../src/loot-table.js';
 import { Game } from '../src/game.js';
@@ -17,7 +17,7 @@ const report = (over = {}) => ({
 function simulatedThreat({ seconds, liveNests, diff = 'normal', captures = 0, razes = 0 }) {
   let threat = 0;
   for (let t = 0; t < seconds; t++) {
-    threat = Math.min(THREAT.max, threat + (THREAT.perSecond + THREAT.perNest * Math.min(3, liveNests)) * 1 * DIFFICULTY[diff].mult);
+    threat = Math.min(THREAT.max, threat + (THREAT.perSecond + THREAT.perNest * Math.min(3, liveNests)) * 1 * threatClockMult(DIFFICULTY[diff].mult));
   }
   threat = Math.min(THREAT.max, threat + captures * THREAT.perCapture + razes * THREAT.perNestRazed);
   return Math.max(1, Math.floor(threat) + 1);
