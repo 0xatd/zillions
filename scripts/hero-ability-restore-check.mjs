@@ -40,6 +40,7 @@ function comparable(snapshot) {
     rng: snapshot.rng,
     time: snapshot.time,
     brews: snapshot.brews,
+    ordnance: snapshot.ordnance,
     units: snapshot.units,
     heroes: snapshot.heroes,
   };
@@ -49,7 +50,7 @@ function advance(game, ticks) {
   for (let i = 0; i < ticks; i++) game.update(SIM_DT);
 }
 
-for (const key of ['turtle', 'john', 'tiger', 'aaron']) {
+for (const key of ['scott', 'alexander', 'danny', 'turtle', 'john', 'tiger', 'aaron']) {
   const uninterrupted = makeGame(key);
   prepareAndCast(uninterrupted);
   const restored = makeGame(key, uninterrupted.snapshot());

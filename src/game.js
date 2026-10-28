@@ -167,6 +167,7 @@ export class Game {
     this._campT = 0;
     this._supportT = 0;
     this.brews = [];             // John's lingering beer-blast ground zones
+    this.ordnance = [];          // Alexander's grenades still in the air
 
     this.events = [];            // consumed by renderer/audio each frame
     this.messages = [];          // consumed by UI
@@ -248,6 +249,13 @@ export class Game {
         x: snapNum(b.x), z: snapNum(b.z), r: snapNum(b.r),
         t: snapNum(b.t), slow: snapNum(b.slow), tickT: snapNum(b.tickT || 0),
       })),
+      // In-flight grenades. A restore mid-lob has to finish the same blast.
+      ordnance: (this.ordnance || []).map((o) => ({
+        x: snapNum(o.x), z: snapNum(o.z), tx: snapNum(o.tx), tz: snapNum(o.tz),
+        t: snapNum(o.t), travel: snapNum(o.travel), r: snapNum(o.r),
+        dmg: snapNum(o.dmg), knock: snapNum(o.knock), stun: snapNum(o.stun),
+        heal: snapNum(o.heal || 0),
+      })),
       nests: this.nests.map((n) => [snapNum(n.hp), n.alive ? 1 : 0, snapNum(n.musterT), snapNum(n.defendT || 0)]),
       nodes: this.nodes.map((n) => [n.owner, snapNum(n.cap), n.capOwner || '', n.seen ? 1 : 0, n.empty ? 1 : 0, n.looted ? 1 : 0]),
       stats: {
@@ -303,7 +311,8 @@ export class Game {
         coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
-        weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
+        weaveKey: h.weaveKey || 0, weaveHits: [...(h.weaveHits || [])],
+        hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
         shield: snapNum(h.shieldHp || 0),
         fortifyT: snapNum(h.fortifyT || 0), fortifyArmor: snapNum(h.fortifyArmor || 0), fortifyThorns: snapNum(h.fortifyThorns || 0),
         summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
@@ -445,6 +454,10 @@ export class Game {
     this.brews = (snap.brews || []).map((b) => ({
       x: b.x, z: b.z, r: b.r, t: b.t, slow: b.slow, tickT: b.tickT || 0,
     }));
+    this.ordnance = (snap.ordnance || []).map((o) => ({
+      x: o.x, z: o.z, tx: o.tx, tz: o.tz, t: o.t, travel: o.travel,
+      r: o.r, dmg: o.dmg, knock: o.knock, stun: o.stun, heal: o.heal || 0,
+    }));
 
     const actorsById = new Map();
     const zombiesById = new Map();
@@ -530,6 +543,7 @@ export class Game {
       h.weaveT = hs.weaveT || 0;
       h.weaveDmg = hs.weaveDmg || 0;
       h.weaveKey = hs.weaveKey || 0;
+      h.weaveHits = [...(hs.weaveHits || [])];
       h.hasteT = hs.hasteT || 0;
       h.hasteMult = hs.hasteMult || 1;
       h.shieldHp = hs.shield || 0;
@@ -2707,7 +2721,7 @@ export class Game {
       equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
       characterStyle: camp?.characterStyle ? structuredClone(camp.characterStyle) : null,
       dodgeT: 0, dodgeIT: 0, dodgeCd: 0, dodgeX: 0, dodgeZ: 0,
-      reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
+      reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0, weaveHits: [],
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
     this._refreshHeroDerived(h, false);
@@ -2923,58 +2937,88 @@ export class Game {
     h.abilCd = ab.cd * Math.max(0.15, 1 - h.mods.cdr);
 
     switch (ab.cast) {
-      case 'aoeDmg': {
-        const r2 = ab.radius * ab.radius;
-        for (const zb of this.zombies) {
-          if (zb.dead) continue;
-          if (dist2(h.x, h.z, zb.x, zb.z) <= r2) {
-            if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
-            this.damageZombie(zb, ab.dmg[r] * ultMult, h.x, h.z);
+      case 'aoeDmg':
+      case 'hammer': {
+        // Gravity hammer: drag the nearby dead into the swing, then slam.
+        // The shock ring past the maul's reach hits lighter and stuns shorter.
+        // Bosses are too heavy to drag, and a wall stops the pull.
+        const R = ab.radius;
+        const shock = ab.cast === 'hammer' ? (ab.shock || 0) : 0;
+        const pull = ab.pull ? ab.pull[r] : 0;
+        if (pull > 0) {
+          for (const zb of this.zombies) {
+            if (zb.dead || zb.boss) continue;
+            const dx = h.x - zb.x, dz = h.z - zb.z;
+            const d = Math.hypot(dx, dz);
+            if (d > R || d < 0.45) continue;
+            this._nudge(zb, dx, dz, Math.min(pull, d - 0.45));
           }
         }
+        const outer = R + shock;
+        const core2 = R * R, outer2 = outer * outer;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          const d2v = dist2(h.x, h.z, zb.x, zb.z);
+          if (d2v > outer2) continue;
+          const core = d2v <= core2;
+          if (ab.stun) zb.stunT = Math.max(zb.stunT || 0, core ? ab.stun[r] : ab.stun[r] * 0.45);
+          this.damageZombie(zb, ab.dmg[r] * ultMult * (core ? 1 : 0.4), h.x, h.z);
+        }
+        if (ab.cast === 'hammer') this.emit({ type: 'hammer', x: h.x, z: h.z, r: R, shock });
         break;
       }
       case 'grenade': {
-        // Concussion grenade ahead + a small hop back (Sniper's scepter trick).
+        // Concussion grenade: the charge travels, then it blows. Alexander
+        // hops back on the throw, so the range he likes is already his again
+        // when the nanites in the casing mend whoever the blast spared.
         const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
         const ox = h.x, oz = h.z;
-        const bx = h.x + dirX * (ab.range || 4), bz = h.z + dirZ * (ab.range || 4);
-        const r2 = ab.radius * ab.radius;
-        for (const zb of this.zombies) {
-          if (zb.dead) continue;
-          const d2v = dist2(bx, bz, zb.x, zb.z);
-          if (d2v > r2) continue;
-          const d = Math.sqrt(d2v) || 1;
-          // Fling away from the blast (bosses are too heavy to throw).
-          if (!zb.boss) {
-            const push = ab.knock[r] * (1 - d / (ab.radius + 0.001)) + 0.6;
-            const nx = zb.x + ((zb.x - bx) / d) * push, nz = zb.z + ((zb.z - bz) / d) * push;
-            if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
-              zb.x = nx; zb.z = nz;
-            }
-          }
-          zb.stunT = Math.max(zb.stunT || 0, ab.stun[r]);
-          this.damageZombie(zb, ab.dmg[r] * ultMult, bx, bz);
+        const range = ab.range || 4;
+        let bx = ox, bz = oz;
+        for (let step = 0.45; step <= range + 1e-4; step += 0.45) {
+          const nx = ox + dirX * Math.min(step, range);
+          const nz = oz + dirZ * Math.min(step, range);
+          if (!this._openGround(nx, nz, false)) break;
+          bx = nx; bz = nz;
         }
+        if (bx === ox && bz === oz) { bx = ox + dirX * 1.1; bz = oz + dirZ * 1.1; }
+        const travel = ab.travel || 0.48;
+        this.ordnance.push({
+          x: ox, z: oz, tx: bx, tz: bz, t: 0, travel,
+          r: ab.radius, dmg: ab.dmg[r] * ultMult, knock: ab.knock[r], stun: ab.stun[r],
+          heal: (ab.heal && ab.heal[r]) || 0,
+        });
         for (let step = ab.hop || 3; step > 0.4; step -= 0.4) {
           const nx = ox - dirX * step, nz = oz - dirZ * step;
-          if (this.map.isWalkable(nx | 0, nz | 0) && this.occ[(nz | 0) * this.map.size + (nx | 0)] === 0) {
-            h.x = nx; h.z = nz;
-            break;
-          }
+          if (this._openGround(nx, nz, true)) { h.x = nx; h.z = nz; break; }
         }
-        this.emit({ type: 'grenade', fx: ox, fz: oz, tx: bx, tz: bz, r: ab.radius });
+        this.emit({ type: 'grenade', fx: ox, fz: oz, tx: bx, tz: bz, r: ab.radius, travel });
         break;
       }
-      case 'weave':
-        // Shukuchi-style: invisible and fast, passing through the horde —
-        // damage lands on everything Danny brushes (see _updateHeroOne).
+      case 'weave': {
+        // The opening cut is a blink along his facing. Then he is unseen and
+        // untouchable, and anything he brushes takes the cut once per cast.
         h.stealth = true;
         h.weaveT = ab.dur[r];
         h.weaveDmg = ab.dmg[r] * ultMult;
         h.weaveKey = (h.weaveKey || 0) + 1;
+        h.weaveHits = [];
+        const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
+        const ox = h.x, oz = h.z;
+        const dash = (ab.dash && ab.dash[r]) || 0;
+        if (dash > 0) this._nudge(h, dirX, dirZ, dash);
+        const cut = ab.cut || 1.25;
+        for (const zb of this.zombies) {
+          if (zb.dead) continue;
+          if (this._distToSeg(zb.x, zb.z, ox, oz, h.x, h.z) > cut) continue;
+          h.weaveHits.push(zb.id);
+          this.damageZombie(zb, h.weaveDmg, h.x, h.z);
+          this.emit({ type: 'weavehit', x: zb.x, z: zb.z });
+        }
+        this.emit({ type: 'thread', fx: ox, fz: oz, tx: h.x, tz: h.z });
         this.emit({ type: 'stealth', x: h.x, z: h.z });
         break;
+      }
       case 'fortify': {
         // Turtle: an armor/thorns spike plus an instant taunt — anything close
         // forgets there is anyone else on the field for the duration.
@@ -3044,7 +3088,80 @@ export class Game {
       }
     }
     this.wakeZombies(h.x, h.z, 8);
-    this.emit({ type: 'cast', heroId: h.id, x: h.x, z: h.z, radius: ab.radius || 3, icon: ab.icon, key: ab.key });
+    const castRadius = ab.cast === 'hammer' ? ab.radius + (ab.shock || 0) : (ab.radius || 3);
+    this.emit({ type: 'cast', heroId: h.id, x: h.x, z: h.z, radius: castRadius, icon: ab.icon, key: ab.key });
+  }
+
+  // Walkable ground that is not a solid footprint. Heroes may cross a gate;
+  // a shove never does, or a blast would plant the dead inside the city.
+  _openGround(x, z, gates) {
+    const tx = x | 0, tz = z | 0;
+    if (!this.map.isWalkable(tx, tz)) return false;
+    const id = this.occ[tz * this.map.size + tx];
+    return id === 0 || (gates && this.gateIds.has(id));
+  }
+
+  // Step along a heading and stop at the first blocked tile. A single
+  // teleport used to drop a body on the far side of a wall.
+  _nudge(actor, dirX, dirZ, dist) {
+    const len = Math.hypot(dirX, dirZ);
+    if (len < 1e-4 || dist <= 0) return 0;
+    const dx = dirX / len, dz = dirZ / len;
+    const gates = !!actor.hero;
+    let moved = 0;
+    while (moved + 1e-3 < dist) {
+      const hop = Math.min(0.35, dist - moved);
+      const nx = actor.x + dx * hop, nz = actor.z + dz * hop;
+      if (!this._openGround(nx, nz, gates)) break;
+      actor.x = nx; actor.z = nz;
+      moved += hop;
+    }
+    return moved;
+  }
+
+  _distToSeg(px, pz, ax, az, bx, bz) {
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    if (len2 < 1e-6) return Math.hypot(px - ax, pz - az);
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
+    return Math.hypot(px - (ax + dx * t), pz - (az + dz * t));
+  }
+
+  _updateOrdnance(dt) {
+    if (!this.ordnance.length) return;
+    for (const bomb of this.ordnance) {
+      bomb.t += dt;
+      if (bomb.t >= bomb.travel) this._detonateGrenade(bomb);
+    }
+    if (this.ordnance.some((b) => b.t >= b.travel)) {
+      this.ordnance = this.ordnance.filter((b) => b.t < b.travel);
+    }
+  }
+
+  _detonateGrenade(bomb) {
+    const bx = bomb.tx, bz = bomb.tz;
+    const r2 = bomb.r * bomb.r;
+    for (const zb of this.zombies) {
+      if (zb.dead) continue;
+      const d2v = dist2(bx, bz, zb.x, zb.z);
+      if (d2v > r2) continue;
+      const d = Math.sqrt(d2v) || 1;
+      if (!zb.boss) {
+        const push = bomb.knock * (1 - d / (bomb.r + 0.001)) + 0.6;
+        const dx = d2v < 0.04 ? 1 : (zb.x - bx) / d;
+        const dz = d2v < 0.04 ? 0 : (zb.z - bz) / d;
+        this._nudge(zb, dx, dz, push);
+      }
+      zb.stunT = Math.max(zb.stunT || 0, bomb.stun);
+      this.damageZombie(zb, bomb.dmg, bx, bz);
+    }
+    if (bomb.heal > 0) {
+      for (const u of this.units) {
+        if (u.dead) continue;
+        if (dist2(bx, bz, u.x, u.z) <= r2) u.hp = Math.min(u.maxHp, u.hp + bomb.heal);
+      }
+    }
+    this.emit({ type: 'grenadeboom', x: bx, z: bz, r: bomb.r, heal: bomb.heal > 0 ? 1 : 0 });
   }
 
   _updateHero(dt) {
@@ -3156,18 +3273,23 @@ export class Game {
     this._updateHeroProcs(h, dt);
 
     // The Weave: while it lasts, cut everything brushed against (once per cast).
+    // Hits live on the hero so a snapshot mid-phase does not cut them again.
     if (h.weaveT > 0) {
       h.weaveT -= dt;
-      const tag = h.id + ':' + h.weaveKey;
+      const hits = h.weaveHits || (h.weaveHits = []);
       for (const zb of this.zombies) {
-        if (zb.dead || zb._weaveTag === tag) continue;
+        if (zb.dead || hits.includes(zb.id)) continue;
         if (dist2(h.x, h.z, zb.x, zb.z) <= 1.8) {
-          zb._weaveTag = tag;
+          hits.push(zb.id);
           this.damageZombie(zb, h.weaveDmg, h.x, h.z);
           this.emit({ type: 'weavehit', x: zb.x, z: zb.z });
         }
       }
-      if (h.weaveT <= 0 && h.stealth) h.stealth = false;
+      if (h.weaveT <= 0) {
+        h.weaveT = 0;
+        if (h.stealth) h.stealth = false;
+        h.weaveHits = [];
+      }
     }
 
     // Direct WASD movement (Thronefall-style): slide along blockers, pass
@@ -3875,6 +3997,7 @@ export class Game {
     this._zombieBuckets = combatBuckets(this.zombies, this._zombieBucketPool);
     this._updateAuras(dt);
     this._updateBrews(dt);
+    this._updateOrdnance(dt);
     this._updateUnits(dt);
     this._updateTowers(dt);
     this._updateHero(dt);

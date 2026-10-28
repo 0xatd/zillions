@@ -123,6 +123,13 @@ export class UI {
         <div id="buildhint" class="hidden"></div>
       </div>
 
+      <button id="ability-btn" class="ability-btn hidden" type="button" aria-label="Hero ability">
+        <span class="asweep" aria-hidden="true"></span>
+        <span class="aicon"></span>
+        <b class="akey"></b>
+        <span class="acd"></span>
+      </button>
+
       <div id="minimap-wrap" class="hidden">
         <canvas id="minimap-base"></canvas>
         <canvas id="minimap-top"></canvas>
@@ -396,7 +403,7 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD always moves. In Fight mode, <kbd data-bind-label="dodge"></kbd> dodge-rolls and <kbd data-bind-label="ability1"></kbd> uses your special.</div>
+            <div><b>🕹️ You are the hero.</b> WASD always moves. In Fight mode, <kbd data-bind-label="dodge"></kbd> dodge-rolls and <kbd data-bind-label="ability1"></kbd> — or the round button — uses your special.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
             <div><b>🏗️ The city is pre-planned.</b> Use <kbd data-bind-label="build_mode"></kbd> for Build mode, then hold <kbd data-bind-label="dodge"></kbd> or <kbd data-bind-label="build"></kbd> at a glowing foundation.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
@@ -2593,6 +2600,11 @@ export class UI {
     face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
     this.root.querySelector('#a-name').textContent = character ? `${character.name} · ${klass.name}` : d.name;
     const big = this.root.querySelector('#bigaction');
+    const abilityBtn = this.root.querySelector('#ability-btn');
+    if (abilityBtn) abilityBtn.onclick = () => {
+      if (this._controlMode !== 'fight') return;
+      this.cb.onCast && this.cb.onCast();
+    };
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
       else if (this._bigMode === 'cast') this.cb.onCast();
@@ -2619,6 +2631,7 @@ export class UI {
   setControlMode(mode = 'build') {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
+    this._controlMode = mode;
     const fighting = mode === 'fight';
     chip.classList.toggle('fight', fighting);
     chip.classList.toggle('build', !fighting);
@@ -2796,11 +2809,14 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
+        const total = Math.max(0.1, stats ? stats.cooldown : ab.cd);
+        big.style.setProperty('--cd', `${cd > 0 ? Math.min(100, Math.round((cd / total) * 100)) : 0}%`);
         big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
-    }
+      this._syncAbilityButton(game, h, controlMode);
+    } else this._syncAbilityButton(game, null, controlMode);
 
     // Messages feed.
     const feed = q('#messages');
@@ -2817,6 +2833,34 @@ export class UI {
       setTimeout(() => { div.remove(); }, 7000);
       if (m.kind === 'bad') this.showBanner(m.text, 'bad');
     }
+  }
+
+  // The round cast button. Q and this button issue the same lockstep command.
+  // Fight mode shows it; Build mode keeps the thumb on construction.
+  _syncAbilityButton(game, h, controlMode) {
+    const btn = this.root.querySelector('#ability-btn');
+    if (!btn) return;
+    const show = !!(h && game && controlMode === 'fight' && !game.over && !this.pauseOpen);
+    btn.classList.toggle('hidden', !show);
+    if (!show || !h) return;
+    const ab = h.def.ability;
+    const cd = Math.max(0, h.abilCd || 0);
+    const total = Math.max(0.1, game.heroStats ? game.heroStats(h).cooldown : ab.cd);
+    const pct = cd > 0 ? Math.min(100, Math.round((cd / total) * 100)) : 0;
+    btn.style.setProperty('--cd', `${pct}%`);
+    btn.disabled = !!h.dead || cd > 0;
+    btn.classList.toggle('ready', !h.dead && cd <= 0);
+    btn.classList.toggle('cooling', cd > 0 || !!h.dead);
+    const label = `${ab.name}. ${h.dead ? 'Down' : cd > 0 ? `${Math.ceil(cd)} seconds` : 'Ready'}`;
+    if (btn.getAttribute('aria-label') !== label) btn.setAttribute('aria-label', label);
+    const icon = btn.querySelector('.aicon');
+    if (icon && icon.textContent !== ab.icon) icon.textContent = ab.icon;
+    const key = btn.querySelector('.akey');
+    const keyLabel = this._keyLabel('ability1');
+    if (key && key.textContent !== keyLabel) key.textContent = keyLabel;
+    const num = btn.querySelector('.acd');
+    if (num) num.textContent = cd > 0 ? String(Math.ceil(cd)) : '';
+    btn.title = `${ab.name} — ${ab.desc}`;
   }
 
   _updateUpgradePanel(game, h) {
