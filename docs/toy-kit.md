@@ -28,7 +28,23 @@ piers, T3 thicker again with an energy band, banners and sentries.
 
 ## Cultures
 A culture = palette + building shape set + unit set (`src/cultures.js`,
-`tools/art/toy_kit/cultures.py`). European is built and is the default.
-Asian, South American and Middle Eastern are registered proposals (palettes
-only; they borrow European shapes for previews and are not loaded by the
-game). There is no faction gameplay.
+`tools/art/toy_kit/cultures.py`, per-culture shape modules `european.py`,
+`asian.py`, `south_american.py`, `middle_eastern.py`, shared parts in
+`common.py`). All four are built (`assets/kit/<culture>/`) and playable; the
+player picks one on the level screen (European is the default). Each culture
+has its own keep, walls, gate, towers, houses and three unit models; farms,
+mills and workshops are still shared European shapes recoloured.
+
+Gameplay: every culture musters the same three trades from the same camps
+(militia / ranger / sniper), but `CULTURE_ARMIES` in `src/config.js`
+overrides their stats (evade, armour/thorns, splash, range, rate of fire,
+speed) within a few percent of the European power level:
+- European (Star Knights): reference line.
+- Asian (Jade Lantern Dynasty): evasive fast glaive guards, rapid short-reach
+  repeaters, rocket fire-lances with splash.
+- South American (Sun Terrace Guard): slow armoured shieldbearers that
+  reflect melee, fastest jaguar scouts, sturdy solar atlatls.
+- Middle Eastern (Mirage Court): heavy long-reach lancers, mounted dune
+  riders, astrolabe longguns with the longest range.
+The culture is part of the match (saved in replays) so the sim stays
+deterministic. Stuck sweep per culture: set `CULTURE=<key>` for the stuck check.
