@@ -17,6 +17,7 @@ kit: low-poly, flat-shaded, vertex-coloured, sci-fi, all original designs.
   (spins in XY), `part_core`, figure limbs `leg_l leg_r arm_l arm_r`, enemy
   `body arms eyes` (arms pivot at the shoulder; eyes re-tinted per instance).
 - Prop parts (`trunk`, `canopy`, `rock`) are white-ish so instance colour tints them per map palette.
+- The seven heroes are shared chibi riders taken from the European kit in every culture: Scott, Alexander, Daniel, Turtle, John, and Tiger on hoverbikes, Aaron on a disc. The game draws each one at 1.25× with an ink outline and a gold ring.
 
 ## Tiers (fixed spots, grows in place)
 Castle T1 keep → T2 curtain + four towers + gatehouse → T3 taller towers,

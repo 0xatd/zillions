@@ -225,6 +225,8 @@ const TROOPS = {
 };
 
 // ---------------- heroes ----------------
+// Fallback rigs. The live figurines are the toy-kit GLBs (hero_<key>), drawn
+// at 1.25× with an ink outline. These rigs remain for a missing kit piece.
 // Base rig scaled up a touch by the caller (1.18×). Each hero keeps their
 // config color/trim but earns a silhouette you can name from across the map.
 

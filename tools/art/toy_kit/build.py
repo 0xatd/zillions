@@ -49,7 +49,7 @@ def jobs(culture):
     out.append(('unit_soldier', lambda k: U.trooper(k, pal)))
     out.append(('unit_ranger', lambda k: U.ranger(k, pal)))
     out.append(('unit_sniper', lambda k: U.marksman(k, pal)))
-    for h in ('scott', 'alexander', 'danny'):
+    for h in ('scott', 'alexander', 'danny', 'turtle', 'john', 'tiger', 'aaron'):
         out.append((f'hero_{h}', lambda k, h=h: U.hero(k, h, pal)))
     for e, acc in ENEMY_ACCENTS.items():
         out.append((f'enemy_{e}', lambda k, e=e, acc=acc: U.enemy(k, e, acc)))

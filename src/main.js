@@ -4256,10 +4256,9 @@ class App {
       const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
-        // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
+        // Toy-kit hero figurine. At the follow camera's distance a hero is
+        // only ~40px tall, so it is drawn a size up from the troops and wears
+        // a dark ink outline that keeps its silhouette off same-coloured ground.
         kit.node.scale.multiplyScalar(1.25);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);

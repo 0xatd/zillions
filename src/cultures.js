@@ -17,7 +17,7 @@ const KIT_ASSETS = [
     `wall_t${t}_seg`, `wall_t${t}_post`, `gate_t${t}`,
   ]),
   'unit_soldier', 'unit_ranger', 'unit_sniper',
-  'hero_scott', 'hero_alexander', 'hero_danny',
+  'hero_scott', 'hero_alexander', 'hero_danny', 'hero_turtle', 'hero_john', 'hero_tiger', 'hero_aaron',
   'enemy_walker', 'enemy_runner', 'enemy_brute', 'enemy_spitter', 'enemy_burrower', 'enemy_sieger', 'enemy_caller',
   'prop_tree_round', 'prop_tree_pine', 'prop_rock_a', 'prop_rock_b', 'prop_cliff',
   'bridge_span',

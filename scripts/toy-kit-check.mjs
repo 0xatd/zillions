@@ -69,4 +69,19 @@ for (const a of Object.keys(own)) for (const b of Object.keys(own)) {
   for (const n of Object.keys(own[a])) assert.notEqual(own[a][n], own[b][n], `${a} and ${b} share the same ${n} — author a culture piece`);
 }
 assert.ok(SHARED_KIT.has('hero_danny') && !SHARED_KIT.has('castle_t1'), 'shared kit is heroes/horde/props only');
+// The seven named heroes share one chibi figurine each, always from the
+// European kit. A missing or cloned model drops that hero back to the old rig.
+const HERO_FIGURINES = ['hero_scott', 'hero_alexander', 'hero_danny', 'hero_turtle', 'hero_john', 'hero_tiger', 'hero_aaron'];
+const euroDir = path.join(root, CULTURES[DEFAULT_CULTURE].kitPath);
+const heroHashes = HERO_FIGURINES.map((name) => {
+  assert.ok(CULTURES[DEFAULT_CULTURE].assets.includes(name), `${name} missing from the shared kit`);
+  assert.ok(SHARED_KIT.has(name), `${name} must stay on the shared European kit`);
+  const file = path.join(euroDir, `${name}.glb`);
+  const buf = fs.readFileSync(file);
+  const json = readGlb(file);
+  const nodes = new Set(json.nodes.map((n) => n.name));
+  for (const part of ['arm_l', 'arm_r', 'body']) assert.ok(nodes.has(part), `${name} missing ${part}`);
+  return buf.toString('hex');
+});
+assert.equal(new Set(heroHashes).size, HERO_FIGURINES.length, 'each hero figurine must be its own model');
 console.log(`toy-kit-check: ${report.join(', ')}, ok`);
