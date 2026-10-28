@@ -10,7 +10,9 @@ const CURRENT_RULES = 'survival-plots';
 // v4: the Labyrinth mode — a new room mode older builds would simulate as a
 // founding campaign run, a new lockstep `blessing` command they would drop,
 // and changed found-phase flow-field semantics.
-export const LOBBY_PROTOCOL_VERSION = 5;
+// v6: siege-only reward tickets, revised terrain and culture-specific armies.
+// v5 production clients cannot simulate this release in lockstep.
+export const LOBBY_PROTOCOL_VERSION = 6;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
