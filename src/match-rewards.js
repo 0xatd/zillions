@@ -16,7 +16,7 @@
 //     candidates keep their input log so a future leaderboard can replay its
 //     top entries (docs/leaderboards.md); rewards never wait on a replay.
 import {
-  BOSS_DROPS, DIFFICULTY, FIELD_LOOT, ITEMS, LEVELS, PACK_SLOTS, THREAT,
+  BOSS_DROPS, DIFFICULTY, FIELD_LOOT, ITEMS, LEVELS, PACK_SLOTS, THREAT, threatClockMult,
   isLabyrinthLevel, itemInfo, levelById,
 } from './config.js';
 import { ITEM_BASES, hashString, parseItemKey, resolveItem, worldItemLevel } from './items.js';
@@ -138,7 +138,7 @@ export function verifyLootKey(key, { levelId, difficulty = 'normal', lootTable =
 
 // The highest Threat level a run can legitimately reach. Mirrors every
 // source in Game._updateSiege() and friends:
-//   - the clock: (perSecond + perNest * min(3, live nests)) * difficulty mult,
+//   - the clock: (perSecond + perNest * min(3, live nests)) * threatClockMult(difficulty),
 //     every live second (assume the nests all stay alive: the upper bound);
 //   - one-off bumps: perCapture per node the player flips (stats.nodes counts
 //     every flip) and perNestRazed per hive razed (stats.nests);
@@ -146,7 +146,7 @@ export function verifyLootKey(key, { levelId, difficulty = 'normal', lootTable =
 // Threat level is floor(threat) + 1, plus the shared slack for rounding.
 export function maxThreatLevel({ durationSeconds, levelId, difficulty = 'normal', nodes = 0, nests = 0 }) {
   const level = levelById(levelId);
-  const mult = (DIFFICULTY[difficulty] || DIFFICULTY.normal).mult;
+  const mult = threatClockMult((DIFFICULTY[difficulty] || DIFFICULTY.normal).mult);
   const clockNests = Math.min(3, Math.max(0, Number.isFinite(level?.nests) ? level.nests : 3));
   const rate = (THREAT.perSecond + THREAT.perNest * clockNests) * mult;
   const threat = Math.min(THREAT.max,
