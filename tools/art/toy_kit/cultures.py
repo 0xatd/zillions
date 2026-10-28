@@ -1,9 +1,9 @@
 """Culture registry: a culture = a palette + a building shape set + a unit set.
 
 All four are built. `european` is the default. Each culture authors its own
-keep, towers, houses, camps, ramparts (wall segment, post, gatehouse) and
-line troops; the economy buildings, outposts, heroes, horde and props are
-shared builders re-coloured by the culture palette.
+keep, towers, houses, camps, ramparts (wall segment, post, gatehouse),
+farms, mills, workshops and line troops. Mines, outposts, hero forges,
+heroes, the horde and props are shared builders re-coloured by the palette.
 """
 import european
 import asian
