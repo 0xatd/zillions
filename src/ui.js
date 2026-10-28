@@ -527,6 +527,16 @@ export class UI {
             </div>
           </div>
         </div>
+      </div>
+      <div id="game-confirm" class="gameconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="game-confirm-title">
+        <div class="gameconfirmcard">
+          <h2 id="game-confirm-title"></h2>
+          <p id="game-confirm-body"></p>
+          <div class="gameconfirmactions">
+            <button type="button" class="tbtn" id="game-confirm-cancel">CANCEL</button>
+            <button type="button" class="utilitybtn" id="game-confirm-ok">CONFIRM</button>
+          </div>
+        </div>
       </div>`;
 
     // ----- main menu -----
@@ -565,11 +575,18 @@ export class UI {
       this._confirmRewire(this._sheetCharacter(), { surface: 'upgrades' });
     };
     q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
-    q('#m-delete-character').onclick = () => {
+    q('#m-delete-character').onclick = async () => {
       const character = this._sheetCharacter();
       if (!character) return;
-      if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
+      const ok = await this.confirmDialog({
+        title: 'Delete character',
+        body: `Delete ${character.name}? This cannot be undone.`,
+        confirmLabel: 'DELETE',
+        danger: true,
+      });
+      if (ok) this.cb.onCharacterDelete?.(character.id);
     };
+    this._bindGameConfirm();
     q('#creator-cancel').onclick = () => {
       if (!(this._profile?.mmoCharacters || []).length) return;
       this._backOverlay('main');
@@ -2245,13 +2262,18 @@ export class UI {
 
   // Signed-in rewire is priced by the server from the Lattice it holds.
   // Offline rewire charges the browser ledger first, and only then clears.
-  _confirmRewire(character, { surface = 'sheet' } = {}) {
+  async _confirmRewire(character, { surface = 'sheet' } = {}) {
     if (!character || !(character.lattice || []).length || this._upgradeBusy) return;
     const spent = (character.lattice || []).length;
     const cost = rewireCost(spent);
     const signedIn = !!this.cb.useAuthoritativeEconomy?.();
     const price = `${signedIn ? 'about ' : ''}${cost} ${META_CURRENCY.name}`;
-    if (!window.confirm(`Rewire the whole Lattice for ${price}? Every point comes back. Upgrade nodes stay.`)) return;
+    const ok = await this.confirmDialog({
+      title: 'Rewire the Lattice',
+      body: `Rewire the whole Lattice for ${price}? Every point comes back. Upgrade nodes stay.`,
+      confirmLabel: 'REWIRE',
+    });
+    if (!ok) return;
     const done = (returned, paid) => {
       this.showBanner(`⚡ Rewired — ${returned} points returned for ${paid} ${META_CURRENCY.short}.`, '', 2800);
       if (surface === 'upgrades') {
@@ -3182,6 +3204,74 @@ export class UI {
     t.style.top = 'auto';
   }
   _hideTip() { this.tooltip.classList.add('hidden'); }
+
+  // One confirm for every destructive menu choice. Focus stays inside the
+  // panel; Enter confirms and Escape cancels.
+  confirmDialog({ title, body, confirmLabel = 'CONFIRM', cancelLabel = 'CANCEL', danger = false } = {}) {
+    if (this._confirmResolve) return Promise.resolve(false);
+    const modal = this.root.querySelector('#game-confirm');
+    const ok = modal.querySelector('#game-confirm-ok');
+    const cancel = modal.querySelector('#game-confirm-cancel');
+    modal.querySelector('#game-confirm-title').textContent = title || 'Confirm';
+    modal.querySelector('#game-confirm-body').textContent = body || '';
+    ok.textContent = confirmLabel;
+    cancel.textContent = cancelLabel;
+    ok.classList.toggle('danger', !!danger);
+    this._confirmReturnFocus = document.activeElement;
+    return new Promise((resolve) => {
+      this._confirmResolve = resolve;
+      modal.classList.remove('hidden');
+      ok.focus();
+    });
+  }
+
+  _bindGameConfirm() {
+    const modal = this.root.querySelector('#game-confirm');
+    const ok = modal.querySelector('#game-confirm-ok');
+    const cancel = modal.querySelector('#game-confirm-cancel');
+    const finish = (value) => {
+      if (!this._confirmResolve) return;
+      const resolve = this._confirmResolve;
+      this._confirmResolve = null;
+      modal.classList.add('hidden');
+      resolve(value);
+      const back = this._confirmReturnFocus;
+      this._confirmReturnFocus = null;
+      if (back && back.isConnected) back.focus();
+    };
+    ok.onclick = () => finish(true);
+    cancel.onclick = () => finish(false);
+    const buttons = () => [cancel, ok];
+    window.addEventListener('keydown', (event) => {
+      if (!this._confirmResolve) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(true);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nodes = buttons();
+      const index = nodes.indexOf(document.activeElement);
+      const next = event.shiftKey
+        ? (index <= 0 ? nodes.length - 1 : index - 1)
+        : (index < 0 || index === nodes.length - 1 ? 0 : index + 1);
+      nodes[next].focus();
+    }, true);
+    document.addEventListener('focusin', (event) => {
+      if (!this._confirmResolve || modal.contains(event.target)) return;
+      event.stopPropagation();
+      ok.focus();
+    }, true);
+  }
 
   showBanner(text, cls = '', dur = 3500) {
     this.banner.textContent = text;

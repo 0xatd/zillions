@@ -951,6 +951,36 @@ body::after {
 .roomconfirmcard h2 { margin: 7px 0 8px; color: #fff2bd; }
 .roomconfirmcard p { margin: 0 0 20px; color: #d8ecff; line-height: 1.5; }
 .roomconfirmactions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* In-game confirm. Same panel as Upgrades, so a destructive choice never
+   falls through to the browser's own dialog. */
+.gameconfirm {
+  position: fixed; inset: 0; z-index: 140;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(3, 5, 8, 0.76);
+  backdrop-filter: blur(8px);
+}
+.gameconfirmcard {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 22px 24px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
+}
+.gameconfirmcard h2 {
+  margin: 0 0 8px;
+  font-size: 20px; letter-spacing: 1px; color: var(--gold);
+}
+.gameconfirmcard p {
+  margin: 0 0 18px;
+  font-size: 14px; line-height: 1.45; color: #e8e6df;
+}
+.gameconfirmactions { display: flex; justify-content: flex-end; gap: 8px; }
+.gameconfirm button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
 .gateprompt {
   position: fixed; left: 50%; bottom: 26px; z-index: 42;
   width: min(520px, calc(100vw - 28px)); transform: translateX(-50%);

@@ -77,6 +77,8 @@ assert.match(css, /#lattice-canvas \{[^}]*touch-action: none/s, 'the canvas must
 // A player-authored character name is the only free text in this UI. It must
 // never be built into markup unescaped.
 assert.match(ui, /const escapeHtml =/, 'ui.js needs an HTML escape for player-authored names');
+assert.doesNotMatch(ui, /window\.confirm|\balert\s*\(|\bprompt\s*\(/, 'the game UI must not open a browser dialog');
+assert.match(ui, /id="game-confirm"/, 'confirms go through the in-game modal');
 assert.doesNotMatch(ui, /innerHTML = `[^`]*\$\{character\.name\}/s,
   'a character name is being built into markup unescaped — use escapeHtml() or textContent');
 assert.match(ui, /#sheet-name'\)\.textContent/, 'the sheet must write the character name with textContent');
