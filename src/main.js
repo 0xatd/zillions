@@ -29,6 +29,7 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { buildPop, hitImpulse, isBigEnemy, outcomeCue, waveCue } from './juice.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
@@ -61,6 +62,9 @@ const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // Scratch colours for the per-frame sky/light update (no per-frame allocs).
+const _flashWhite = new THREE.Color(0xfff4d2);
+const _knock = { x: 0, z: 0 };
+const _zeroKnock = { x: 0, z: 0 };
 const _tmpColA = new THREE.Color();
 const _tmpColB = new THREE.Color();
 const _tmpColC = new THREE.Color();
@@ -134,6 +138,13 @@ class App {
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
+    this.camBeat = 0;
+    this.camBeatDur = 1;
+    this.camBeatAmp = 0;
+    this.hitKnocks = new Map();
+    this.flashSeen = new Map();
+    this._outcomeTimer = null;
+    this._outcomeShown = false;
 
     this.speed = 1;
     this.paused = true;        // starts paused behind the menu
@@ -191,7 +202,7 @@ class App {
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
-      onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onMute: () => this.toggleMute(),
       onSettings: (s) => this.applySettings(s),
       onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
@@ -349,6 +360,7 @@ class App {
     // Settings restore: volumes apply inside AudioSys before any sound;
     // UI controls sync to whatever was persisted.
     this.ui.setSettingsUI(this._restoreSettings());
+    this.ui.setMuteUI(this.audio.muted);
     this.ui.fillHeroGrid(HEROES);
     // Living hub: connect the lobby quietly in the background so the main
     // menu shows live presence/games/chat before the player clicks PLAY.
@@ -743,6 +755,10 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    if (this._outcomeTimer) { clearTimeout(this._outcomeTimer); this._outcomeTimer = null; }
+    this._outcomeShown = false;
+    this.hitKnocks?.clear();
+    this.flashSeen?.clear();
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -3580,12 +3596,24 @@ class App {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
+    this._flashSweep = (this._flashSweep || 0) + 1;
+    if (this._flashSweep > 90 && (this.flashSeen.size > n + 12 || this.hitKnocks.size > n + 12)) {
+      this._flashSweep = 0;
+      const live = new Set();
+      for (let i = 0; i < g.zombies.length; i++) live.add(g.zombies[i].id);
+      for (const id of this.flashSeen.keys()) if (!live.has(id)) this.flashSeen.delete(id);
+      for (const id of this.hitKnocks.keys()) if (!live.has(id)) this.hitKnocks.delete(id);
+    }
     this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
-      // Hit pulse: a fast, meaty squash on damage.
+      const prevFlash = this.flashSeen.get(zb.id) || 0;
+      if (zb.hitFlash > prevFlash + 0.04) this._shove(zb, null, null);
+      this.flashSeen.set(zb.id, zb.hitFlash);
+      const knock = this._knockOffset(zb.id, dt);
+      // Hit pulse: a fast, meaty squash on damage, plus a shove off the hit.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
       const s = zb.def.scale;
       let lunge = 0;
@@ -3601,7 +3629,7 @@ class App {
       // Tint over the baked palette: white at rest, flushed in the lunge,
       // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
-      else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
+      else if (zb.hitFlash > 0) c.setRGB(2.15, 1.9, 1.6);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
       else c.setRGB(1, 1, 1);
@@ -3609,7 +3637,7 @@ class App {
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
       this.horde.write(
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
-        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
+        zb.x + (ax / ad) * lunge + knock.x, bob, zb.z + (az / ad) * lunge + knock.z,
         (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
         s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
         t, zb.phase, lunge, c, eyeHex,
@@ -4162,16 +4190,19 @@ class App {
     for (const b of g.buildings) {
       seen.add(b.id);
       const plot = g.plots.find((p) => p.id === b.plotId);
-      const tierKey = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const tierNum = plot ? plot.tier : 1;
+      const tierKey = tierNum + ':' + (plot ? plot.branch || '' : '');
       let rec = this.buildingMeshes.get(b.id);
+      let upgraded = false;
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
+        upgraded = tierNum > (rec.tierNum || 1);
         this.scene.remove(rec.mesh);
         this._disposeObject3D(rec.mesh);
         this.buildingMeshes.delete(b.id);
         rec = null;
       }
       if (!rec) {
-        b.plotTier = plot ? plot.tier : 1;
+        b.plotTier = tierNum;
         b.branch = plot ? plot.branch : null;
         const mesh = this._makeBuildingMesh(b);
         mesh.position.set(b.cx, this.map.groundY(b.cx, b.cz), b.cz);
@@ -4187,7 +4218,7 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
+        rec = { mesh, b, tierKey, tierNum, spawnT: this.clock.elapsedTime, materials, upgraded };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4458,6 +4489,7 @@ class App {
       const pose = unitPose(artState, t * (artState === 'run' ? 10 : 1.8) + u.id, {
         pulse: cuePulse, melee: attackKind === 'melee',
       });
+      this._flashUnit(rec, artState === 'hit' ? cuePulse : 0);
       const weaponParts = rec.mesh.userData.weaponParts || [];
       for (const part of weaponParts) {
         const rp = part.userData.restPos;
@@ -4756,7 +4788,7 @@ class App {
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
-        case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
+        case 'mute': this.toggleMute(); break;
         case 'pause': this.setSpeed(0); break;
         case 'menu': this.togglePauseMenu(); break;
         default:
@@ -4940,6 +4972,13 @@ class App {
     this.ui.setSpeedUI(this.speed, this.paused);
   }
 
+  // The HUD mute button and the M key share the settings checkbox. Both write
+  // `sfx` so a mute survives a reload.
+  toggleMute() {
+    this.applySettings({ sfx: !!this.audio.muted });
+    this.ui.setSettingsUI({ sfx: !this.audio.muted });
+  }
+
   // Settings: apply immediately and persist to localStorage. Volume and mute
   // compose inside AudioSys (gain = base * volume, or 0 when muted); quality
   // routes through TacticalVisuals so lockstep sim state stays untouched.
@@ -4950,7 +4989,10 @@ class App {
     } catch { /* storage can be blocked */ }
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
-    if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
+    if (s.sfx !== undefined) {
+      this.audio.setMuted(!s.sfx);
+      this.ui.setMuteUI(!s.sfx);
+    }
     if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
   }
 
@@ -5005,7 +5047,17 @@ class App {
     // Diorama angle: steep enough to read the whole base like a board game,
     // steeper still as you pull back.
     const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
-    const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
+    // A wave or an ending punches the distance, then gives it back. Yaw stays
+    // fixed — only the dolly moves.
+    let dist = this.camDist;
+    if (this.camBeat > 0) {
+      this.camBeat = Math.max(0, this.camBeat - dt);
+      const u = 1 - this.camBeat / (this.camBeatDur || 1);
+      const p = Math.sin(Math.min(1, Math.max(0, u)) * Math.PI);
+      dist += p * this.camBeatAmp;
+    }
+    dist = Math.max(18, dist);
+    const hx = Math.cos(elev) * dist, hy = Math.sin(elev) * dist;
     let sx = 0, sz = 0;
     if (this.shake > 0) {
       this.shake -= dt;
@@ -5161,7 +5213,7 @@ class App {
     // hitch and an air-raid of sounds — keep only the freshest burst.
     if (g.events.length > 90) {
       // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
-      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded' || e.type === 'victory' || e.type === 'defeat');
       g.events.splice(0, g.events.length - 30, ...keep);
     }
     for (const e of g.events) {
@@ -5235,12 +5287,19 @@ class App {
         }
         case 'zdeath':
           this.spawnCorpse(e);
+          this._killBurst(e);
           this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
           this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
-          this.deathSfxT -= 1;
-          if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
+          if (e.big) {
+            this.shake = Math.max(this.shake, 0.48);
+            this.audio.bigDeath();
+          } else {
+            this.deathSfxT -= 1;
+            if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
+          }
           break;
         case 'bite':
+          this._noteAttacker(e.fromId);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this.burst(e.x, 0.7, e.z, { count: 4, color: 0xffb070, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
@@ -5251,9 +5310,13 @@ class App {
           break;
         case 'build':
           if (!e.quiet) {
-            this.audio.build();
-            this.burst(e.x, 0.3, e.z, { count: 20, color: 0xc9b48a, speed: 2.4, life: 0.55, size: 0.65, up: 1.9, spread: 1.1 });
-            this.shake = Math.max(this.shake, 0.12);
+            const upgraded = (e.tier || 1) > 1;
+            if (upgraded) {
+              this.audio.upgrade();
+              this._sparkle(e.x, e.z, 18);
+            } else this.audio.build();
+            this.burst(e.x, 0.3, e.z, { count: upgraded ? 14 : 20, color: upgraded ? 0xfff2c0 : 0xc9b48a, speed: 2.4, life: 0.55, size: 0.65, up: 1.9, spread: 1.1 });
+            this.shake = Math.max(this.shake, upgraded ? 0.16 : 0.12);
           }
           break;
         case 'branch':
@@ -5304,9 +5367,7 @@ class App {
           this._pingHive(e.x, e.z);
           break;
         case 'surge':
-          this.audio.alarm();
-          this.shake = Math.max(this.shake, 0.7);
-          this.ui.showBanner(`☠️ THREAT ${e.level}`, 'Every hive musters at once', 2600);
+          this._presentWave('surge', { level: e.level });
           break;
         case 'nodeseen':
           this.audio.click();
@@ -5376,6 +5437,7 @@ class App {
           this.audio.click();
           break;
         case 'bhit':
+          if (e.fromId) this._noteAttacker(e.fromId);
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
@@ -5389,8 +5451,13 @@ class App {
           this.shake = Math.max(this.shake, 0.3);
           break;
         case 'horde':
-          this.audio.alarm();
-          this.shake = Math.max(this.shake, e.final ? 1.2 : 0.6);
+          this._presentWave('horde', { final: !!e.final });
+          break;
+        case 'roomwave':
+          this._presentWave('roomwave', { wave: e.wave });
+          break;
+        case 'pursuit':
+          this._presentWave('pursuit', { stage: e.stage });
           break;
 
         case 'deny': this.audio.deny(); break;
@@ -5471,7 +5538,7 @@ class App {
           break;
         case 'bossspawn':
           this.audio.bossHorn();
-          this.shake = Math.max(this.shake, 1.2);
+          this._presentWave('boss', { name: this.game.level?.boss?.name });
           this.burst(e.x, 0.5, e.z, { count: 30, color: 0xff3c2e, speed: 3, life: 1, size: 0.8, up: 3 });
           break;
         case 'bossdown':
@@ -5516,21 +5583,135 @@ class App {
           this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
           break;
         case 'victory':
-          this.audio.victory();
-          this.pause();
-          this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          this._presentOutcome(true);
           break;
         case 'defeat':
-          this.audio.defeat();
-          this.shake = 1.5;
-          this.pause();
-          this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          this._presentOutcome(false);
           break;
       }
     }
     g.events.length = 0;
+  }
+
+  _punchCamera(duration, amp) {
+    this.camBeat = duration;
+    this.camBeatDur = Math.max(0.05, duration);
+    this.camBeatAmp = amp;
+  }
+
+  _presentWave(type, extra) {
+    const cue = waveCue(type, extra);
+    if (!cue) return;
+    // The champion already has its own horn. Other waves share one brass call.
+    if (type !== 'boss') this.audio.waveHorn();
+    this.shake = Math.max(this.shake, cue.shake);
+    this._punchCamera(0.62, cue.punch);
+    this.ui.showMoment(cue.eyebrow, cue.title, cue.detail, cue.tone, Math.round(cue.hold * 1000));
+  }
+
+  _presentOutcome(won) {
+    if (this._outcomeShown || !this.game) return;
+    this._outcomeShown = true;
+    const g = this.game;
+    const cue = outcomeCue(won, { mode: g.mode, threat: g.threatLevel, defeatCause: g.defeatCause });
+    if (won) this.audio.victory();
+    else this.audio.defeat();
+    this.shake = Math.max(this.shake, cue.shake);
+    this._punchCamera(cue.hold, cue.punch);
+    const h = this.myHero();
+    const x = h && !h.dead ? h.x : (g.hq?.cx ?? this.focus.x);
+    const z = h && !h.dead ? h.z : (g.hq?.cz ?? this.focus.z);
+    if (won) this._sparkle(x, z, 26);
+    else {
+      this.burst(x, 1.2, z, { count: 22, color: 0xff5d52, speed: 2.4, life: 0.7, size: 0.7, up: 2.2, spread: 1.4 });
+      this.burst(x, 0.4, z, { count: 16, color: 0x2a2420, speed: 1.6, life: 0.8, size: 0.8, up: 1.2, spread: 1.6 });
+    }
+    this.ui.showMoment(cue.eyebrow, cue.title, cue.detail, cue.tone, Math.round(cue.hold * 1000) + 500);
+    this.pause();
+    this._recordGameEnd(won);
+    this._outcomeTimer = setTimeout(() => {
+      this._outcomeTimer = null;
+      if (this.game !== g) return;
+      this.ui.showEnd(won, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+    }, Math.round(cue.hold * 1000));
+  }
+
+  _shove(zb, fx, fz) {
+    const big = isBigEnemy(zb);
+    const impulse = hitImpulse(big);
+    let dx = fx == null ? -(zb.dirX || 0) : zb.x - fx;
+    let dz = fz == null ? -(zb.dirZ || 0) : zb.z - fz;
+    if (Math.hypot(dx, dz) < 0.05) { dx = -(zb.dirX || 1); dz = -(zb.dirZ || 0); }
+    const len = Math.hypot(dx, dz) || 1;
+    this.hitKnocks.set(zb.id, {
+      x: (dx / len) * impulse.knock,
+      z: (dz / len) * impulse.knock,
+      t: 0.18,
+      dur: 0.18,
+    });
+    this.audio.hit();
+  }
+
+  // A big body landing a blow shakes the board. Small attackers do not.
+  _noteAttacker(fromId) {
+    if (!fromId || !this.game) return;
+    const zb = this.game.zombies.find((z) => z.id === fromId);
+    if (!zb || !isBigEnemy(zb)) return;
+    this.shake = Math.max(this.shake, zb.boss ? 0.5 : hitImpulse(true).shake);
+    this.audio.hit();
+  }
+
+  _knockOffset(id, dt) {
+    const k = this.hitKnocks.get(id);
+    if (!k) return _zeroKnock;
+    k.t -= dt;
+    if (k.t <= 0) { this.hitKnocks.delete(id); return _zeroKnock; }
+    const p = Math.sin(Math.min(1, k.t / k.dur) * Math.PI);
+    _knock.x = k.x * p;
+    _knock.z = k.z * p;
+    return _knock;
+  }
+
+  _sparkle(x, z, count = 16) {
+    const gy = this.map ? this.map.groundY(x, z) : 0;
+    this.burst(x, gy + 1.15, z, { count, color: 0xfff6d0, speed: 2.4, life: 0.72, size: 0.55, up: 3.4, spread: 1.15 });
+    this.burst(x, gy + 0.55, z, { count: Math.max(4, count >> 1), color: 0xffffff, speed: 1.3, life: 0.4, size: 0.38, up: 2.2, spread: 0.55 });
+    this._impactRing(x, z, { color: 0xffd75e, count: 10, radius: 1.35, life: 0.32, size: 0.36 });
+  }
+
+  _killBurst(e) {
+    const gy = this.map ? this.map.groundY(e.x, e.z) : 0;
+    const n = e.big ? 14 : 8;
+    const color = e.big ? 0xffe08a : 0xe7d6ff;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.burst(e.x + Math.cos(a) * (e.big ? 0.7 : 0.35), gy + 0.45, e.z + Math.sin(a) * (e.big ? 0.7 : 0.35),
+        { count: 1, color, speed: e.big ? 2.2 : 1.4, life: 0.38, size: e.big ? 0.62 : 0.4, spread: 0.05, up: e.big ? 2.8 : 1.8 });
+    }
+  }
+
+  _flashUnit(rec, pulse) {
+    const body = rec.mesh?.userData?.body;
+    if (!body) return;
+    if (pulse <= 0.02) {
+      if (!rec._lit) return;
+      rec._lit = false;
+    } else rec._lit = true;
+    body.traverse((o) => {
+      if (!o.isMesh || o.userData.ink || !o.material?.emissive) return;
+      const mat = o.material;
+      if (!mat.userData.flashBase) {
+        mat.userData.flashBase = mat.emissive.clone();
+        mat.userData.flashBaseI = mat.emissiveIntensity || 0;
+      }
+      if (pulse > 0.02) {
+        mat.emissive.copy(mat.userData.flashBase).lerp(_flashWhite, Math.min(1, pulse));
+        mat.emissiveIntensity = mat.userData.flashBaseI + pulse * 1.4;
+      } else {
+        mat.emissive.copy(mat.userData.flashBase);
+        mat.emissiveIntensity = mat.userData.flashBaseI;
+      }
+    });
   }
 
   // Kick a living unit into a visible attack pose on the exact shot event.
@@ -5657,11 +5838,9 @@ class App {
       for (const rec of this.buildingMeshes.values()) {
         const age = t - (rec.spawnT || 0);
         const art = buildingArtState(rec.b, age);
-        if (art.phase === 'constructing') {
-          const k = clamp(age / 0.7, 0, 1);
-          const eased = 1 - (1 - k) ** 3;
-          rec.mesh.scale.set(0.86 + eased * 0.14, 0.08 + eased * 0.92, 0.86 + eased * 0.14);
-        } else rec.mesh.scale.setScalar(1);
+        const pop = buildPop(age, !!rec.upgraded);
+        if (pop.live) rec.mesh.scale.set(pop.x, pop.y, pop.z);
+        else rec.mesh.scale.set(1, 1, 1);
         if (rec.impact) {
           rec.impact.t -= dt;
           const p = Math.sin(clamp(1 - rec.impact.t / rec.impact.dur, 0, 1) * Math.PI);
@@ -5686,8 +5865,17 @@ class App {
           const flicker = art.phase === 'critical' ? (0.28 + Math.max(0, Math.sin(t * 17 + rec.b.id)) * 0.72) : 1;
           if (art.phase === 'critical' && material.emissive) material.emissive.lerp(new THREE.Color(0xff321f), 0.72);
           material.emissiveIntensity = art.phase === 'critical' ? Math.max(0.5, baseIntensity) * flicker : baseIntensity;
-          material.transparent = art.phase === 'constructing';
-          material.opacity = art.phase === 'constructing' ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
+          const rising = art.phase === 'constructing' && !rec.upgraded;
+          material.transparent = rising;
+          material.opacity = rising ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
+        }
+        if (rec.upgraded && age < 0.24) {
+          const f = 1 - age / 0.24;
+          for (const material of rec.materials || []) {
+            if (!material.emissive) continue;
+            material.emissive.lerp(_flashWhite, f * 0.75);
+            material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 0.4 + f);
+          }
         }
         if (rec.recoil > 0) {
           rec.recoil -= dt;

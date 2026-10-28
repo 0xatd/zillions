@@ -282,6 +282,42 @@ export class AudioSys {
 
   hitBuilding() { this._noise(0.09, { freq: 260, q: 1.4, gain: 0.08, type: 'lowpass' }); }
 
+  // A dry tick on a landed hit. Throttled so a volley stays one texture.
+  hit() {
+    const t = performance.now();
+    if (t - (this._hitT || 0) < 55) return;
+    this._hitT = t;
+    this._noise(0.045, { freq: 2100, q: 1.4, gain: 0.055, sweep: -1400 });
+    this._tone(0.04, { freq: 180, type: 'square', gain: 0.03, slide: -80 });
+  }
+
+  // Two-note brass for a wave. Original synthesis, not a sample.
+  waveHorn() {
+    this.init();
+    this._tone(0.48, { freq: 196, type: 'sawtooth', gain: 0.11, slide: 6, attack: 0.02 });
+    this._tone(0.48, { freq: 294, type: 'triangle', gain: 0.06, slide: 8, attack: 0.04 });
+    this._noise(0.22, { freq: 420, q: 0.55, gain: 0.06, type: 'lowpass' });
+    setTimeout(() => {
+      this._tone(0.62, { freq: 262, type: 'sawtooth', gain: 0.12, slide: -8, attack: 0.015 });
+      this._tone(0.62, { freq: 392, type: 'triangle', gain: 0.07, attack: 0.02 });
+    }, 260);
+  }
+
+  // Rising chime when a plot grows a tier and new parts appear.
+  upgrade() {
+    this.init();
+    [523, 659, 784, 1046].forEach((f, i) => {
+      setTimeout(() => this._tone(0.16, { freq: f, type: 'triangle', gain: 0.1, slide: 30 }), i * 68);
+    });
+    this._noise(0.1, { freq: 2600, q: 2.2, gain: 0.05, sweep: 700 });
+  }
+
+  bigDeath() {
+    this._noise(0.38, { freq: 160, q: 0.65, gain: 0.2, type: 'lowpass', sweep: -70 });
+    this._tone(0.42, { freq: 82, type: 'sawtooth', gain: 0.1, slide: -36, attack: 0.01 });
+    this._tone(0.2, { freq: 440, type: 'triangle', gain: 0.04, slide: -200 });
+  }
+
   // Rising coin dings — pitch climbs with each rapid pickup, Thronefall-style.
   coin() {
     const t = performance.now();
@@ -334,13 +370,27 @@ export class AudioSys {
   }
 
   victory() {
-    const notes = [523, 659, 784, 1047];
-    notes.forEach((f, i) => setTimeout(() => this._tone(0.5, { freq: f, type: 'triangle', gain: 0.14 }), i * 160));
+    this.init();
+    const notes = [392, 523, 659, 784, 1047];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._tone(0.55, { freq: f, type: 'triangle', gain: 0.13 });
+        this._tone(0.7, { freq: f * 2, type: 'sine', gain: 0.04 });
+      }, i * 150);
+    });
+    this._noise(0.25, { freq: 1800, q: 0.7, gain: 0.05, sweep: 400 });
   }
 
   defeat() {
-    const notes = [392, 330, 262, 196];
-    notes.forEach((f, i) => setTimeout(() => this._tone(0.7, { freq: f, type: 'sawtooth', gain: 0.1 }), i * 260));
+    this.init();
+    const notes = [392, 349, 311, 233, 175];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._tone(0.8, { freq: f, type: 'sawtooth', gain: 0.09, slide: -20 });
+        this._tone(0.9, { freq: f / 2, type: 'triangle', gain: 0.05, slide: -12 });
+      }, i * 240);
+    });
+    this._noise(0.5, { freq: 200, q: 0.6, gain: 0.1, type: 'lowpass', sweep: -80 });
   }
 
   // Slow ambient minor-chord pad, cycling forever. Quiet, moody.

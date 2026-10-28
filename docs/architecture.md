@@ -80,6 +80,7 @@ to snapshots when the state can affect later simulation.
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
 | `src/audio.js` | Music, voice, and sound effect playback |
+| `src/juice.js` | Presentation-only pops, hit recoil, wave cues, and end-of-match beats |
 
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.

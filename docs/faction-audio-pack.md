@@ -82,3 +82,4 @@ The generated sound effect pack is in `assets/audio/sfx-pack/`.
 - Use short cooldowns on voice barks so repeated orders do not overlap.
 - Route factions through separate gain nodes. Creature barks should sit lower than hero barks.
 - Before adding new audio files, check whether `src/audio.js` already has a procedural or MP3-backed cue for that event.
+- Match hits, upgrades, the wave horn, and the victory and defeat stingers are original synthesis in `src/audio.js`. License notes live in `assets/audio/LICENSES.md`.

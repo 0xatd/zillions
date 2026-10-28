@@ -2952,6 +2952,24 @@ export class UI {
     this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
   }
 
+  // A centered beat: wave horn, victory, defeat. Text only — no markup.
+  showMoment(eyebrowText, title, detail, tone = 'wave', dur = 2400) {
+    this.banner.textContent = '';
+    const eyebrow = document.createElement('span');
+    eyebrow.className = 'banner-eyebrow';
+    eyebrow.textContent = eyebrowText;
+    const heading = document.createElement('strong');
+    heading.className = 'banner-title';
+    heading.textContent = title;
+    const description = document.createElement('span');
+    description.className = 'banner-detail';
+    description.textContent = detail || '';
+    this.banner.append(eyebrow, heading, description);
+    this.banner.className = `show moment ${tone}`;
+    clearTimeout(this._bt);
+    this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
+  }
+
   showLocationBanner(title, detail, dur = 5600) {
     this.banner.textContent = '';
     const eyebrow = document.createElement('span');
