@@ -63,6 +63,7 @@ module already owns that rule.
 | `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |
 | `src/meta.js` | Guest (offline) Alloy ledger, the meta-upgrade tree, and threat tiers |
 | `src/match-rewards.js` | Pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, Alloy, item rows |
+| `src/perks.js` | Between-map campaign perks: the catalog, the deterministic offer, the legal chain, and the numbers the simulation and the plausibility ceilings read |
 
 Simulation code must produce the same result on every peer. Add all new state
 to snapshots when the state can affect later simulation.

@@ -27,6 +27,7 @@ import { isFlagged, reviewReasons, validateReplayPayload, withServerCamp } from 
 import { scatteredLootKeys } from '../src/loot-table.js';
 import { isRolledKey } from '../src/items.js';
 import { ticketSecret, verifyTicket } from './_lib/match-ticket.js';
+import { samePerkList } from '../src/perks.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 // Reports carry the input log (a few hundred KB for a long match).
@@ -147,6 +148,8 @@ export function reviewForReport({ report, ticket, body, context, serverElapsedSe
   const checked = validateReplayPayload(body.replay);
   const players = checked.ok && Array.isArray(checked.replay.heroes) ? checked.replay.heroes.length : 1;
   if (!checked.ok || (!ticket.rid && players !== 1)) return { reasons: [...reasons, 'invalid_log'], flagged, log: null };
+  // A log that names a different perk stack cannot verify this report.
+  if (!samePerkList(checked.replay.perks, report.perks)) return { reasons: [...reasons, 'invalid_log'], flagged, log: null };
   return { reasons, flagged, log: withServerCamp(checked.replay, serverHero(context)) };
 }
 
@@ -192,6 +195,8 @@ export async function processMatchResult({ userId, body, store, now = Date.now()
       throw httpError('implausible_duration', 422, { detail: 'server_clock' });
     }
     const report = checked.report;
+    const signedPerks = Array.isArray(ticket.perks) ? ticket.perks : [];
+    if (!samePerkList(report.perks, signedPerks)) throw httpError('ticket_mismatch', 422, { detail: 'perks' });
     const review = reviewForReport({ report, ticket, body, context, serverElapsedSeconds });
 
     if (roomId) {

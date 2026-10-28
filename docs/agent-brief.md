@@ -139,6 +139,10 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
   swarms, unless something is inside `SIEGE_GUARD_R`.
 - Campaign win: raze every hive, then kill the champion of the final
   counterattack. Loss: the Keep falls.
+- After a campaign clear the player picks one of three perks (`src/perks.js`).
+  The stack is match setup for later campaign maps: snapshot, lockstep hash,
+  signed ticket, report, and replay. Survival and Labyrinth do not take them.
+  There is still no day and no night.
 
 ## Balance Status
 

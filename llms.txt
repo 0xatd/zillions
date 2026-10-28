@@ -48,6 +48,7 @@ Default branch: main
   function over a Game so it can be checked headless.
 - src/meta.js owns the guest (offline) Alloy ledger, the meta-upgrade tree, and threat tiers.
 - src/match-rewards.js owns the pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, and Alloy.
+- src/perks.js owns between-map campaign perks: the catalog, the offer, the legal chain, and the modifiers the simulation and the match bounds read.
 - src/match-outbox.js keeps unconfirmed signed-in match reports and resends them with the same requestId.
 - src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
@@ -70,6 +71,7 @@ Default branch: main
 - supabase/migrations/ holds hand-applied migrations. 20261027000000 is
   DESTRUCTIVE (drops the removed living-world tables); 20261027000100 adds
   server-authoritative progress and revokes client stat writes.
+  20261028000300 stores the campaign perk stack on match tickets.
 
 ## Critical rules
 

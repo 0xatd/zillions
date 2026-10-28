@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { SIM_DT, levelById } from '../src/config.js';
+import { normalizePerks } from '../src/perks.js';
 import { TerrainField } from '../src/terrain.js';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -28,7 +29,10 @@ const SAMPLE = 0.5;      // seconds between watcher samples
 function play(targetLevel) {
   const level = levelById(targetLevel);
   const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-  const game = new Game(map, process.env.DIFF || 'normal', 'scott', null, targetLevel, 'campaign', { culture: process.env.CULTURE || 'european' });
+  const perks = process.env.PERKS ? normalizePerks(process.env.PERKS.split(',')) : [];
+  const game = new Game(map, process.env.DIFF || 'normal', 'scott', null, targetLevel, 'campaign', {
+    culture: process.env.CULTURE || 'european', ...(perks.length ? { perks } : {}),
+  });
   const targetSite = 0;
   let restoreSame = null;
   let plan = null, lastStance = null, route = [], routeGoal = '';

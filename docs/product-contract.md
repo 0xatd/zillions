@@ -103,6 +103,11 @@ sustained zombie flood. The run is won only by killing the final boss.
    number alone and continue without end. Campaign progress is server-owned
    for signed-in players.
 
+After each campaign clear the player picks one of three perks. The offer mixes
+economy, defense, hero, and culture. The stack stays for the rest of that
+campaign and is active on later campaign maps. Survival and Labyrinth do not
+use it. The pick is between maps. There is no day, night, or bell.
+
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.
 

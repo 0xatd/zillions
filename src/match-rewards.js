@@ -23,6 +23,7 @@ import { ITEM_BASES, hashString, parseItemKey, resolveItem, worldItemLevel } fro
 import { vendorSellPrice } from './vendor.js';
 
 import { MATCH_REPORT_VERSION } from './match-report.js';
+import { legalPerkList, perkBoundScale } from './perks.js';
 
 export { MATCH_REPORT_VERSION };
 export const MAX_CHARACTER_LEVEL = 100;
@@ -144,6 +145,19 @@ export function verifyLootKey(key, { levelId, difficulty = 'normal', lootTable =
 //     every flip) and perNestRazed per hive razed (stats.nests);
 //   - capped at THREAT.max.
 // Threat level is floor(threat) + 1, plus the shared slack for rounding.
+// Kill, coin and building ceilings for one report. Perk stacks widen the
+// counters they can actually raise; a run without perks keeps the base envelope.
+export function counterCeilings({ durationSeconds = 0, perks = [] } = {}) {
+  const d = Math.max(0, int(durationSeconds) || 0);
+  const scale = perkBoundScale(perks);
+  const L = MATCH_LIMITS;
+  return {
+    kills: Math.floor(d * L.killsPerSecond * scale.kills + L.killSlack * scale.kills),
+    coins: Math.floor(d * L.coinsPerSecond * scale.coins + L.coinSlack * scale.coins + scale.coinSlack),
+    built: Math.floor(d * L.builtPerSecond * scale.built + L.builtSlack * scale.built),
+  };
+}
+
 export function maxThreatLevel({ durationSeconds, levelId, difficulty = 'normal', nodes = 0, nests = 0 }) {
   const level = levelById(levelId);
   const mult = (DIFFICULTY[difficulty] || DIFFICULTY.normal).mult;
@@ -185,6 +199,17 @@ export function validateMatchReport(raw, { campaignCleared = 0, lootTable = null
   const L = MATCH_LIMITS;
   const durationSeconds = int(raw.durationSeconds);
   if (!(durationSeconds >= L.minDurationSeconds && durationSeconds <= L.maxDurationSeconds)) return fail('implausible_duration');
+  // Perks are match setup. A campaign list has to be a legal chain no longer
+  // than the maps already cleared. Other modes run with none.
+  let perks;
+  if (mode !== 'campaign') {
+    if (raw.perks != null && (!Array.isArray(raw.perks) || raw.perks.length > 0)) return fail('invalid_perks');
+    perks = [];
+  } else {
+    perks = legalPerkList(raw.perks == null ? [] : raw.perks, campaignCleared);
+    if (!perks) return fail('invalid_perks');
+  }
+  const caps = counterCeilings({ durationSeconds, perks });
   const n = (key, max) => {
     const value = int(raw[key] ?? 0);
     return Number.isInteger(value) && value >= 0 && value <= max ? value : null;
@@ -194,11 +219,11 @@ export function validateMatchReport(raw, { campaignCleared = 0, lootTable = null
     // Survival has no victory screen; it only ends when the line breaks.
     won: mode !== 'survival' && raw.won === true,
     threatLevel: null, // bounded below, once captures and razes are known
-    kills: n('kills', durationSeconds * L.killsPerSecond + L.killSlack),
-    coins: n('coins', durationSeconds * L.coinsPerSecond + L.coinSlack),
+    kills: n('kills', caps.kills),
+    coins: n('coins', caps.coins),
     nests: n('nests', Math.max(0, level.nests | 0)),
     nodes: n('nodes', L.maxNodes),
-    built: n('built', durationSeconds * L.builtPerSecond + L.builtSlack),
+    built: n('built', caps.built),
     bestHeld: n('bestHeld', L.maxHeld),
     heroDeaths: n('heroDeaths', durationSeconds),
     hqTier: n('hqTier', 3),
@@ -228,6 +253,7 @@ export function validateMatchReport(raw, { campaignCleared = 0, lootTable = null
     if (!verifyLootKey(key, { levelId, difficulty, lootTable })) return fail('unverifiable_loot', String(key).slice(0, 96));
   }
   report.pack = unique;
+  report.perks = perks;
   return { ok: true, report };
 }
 

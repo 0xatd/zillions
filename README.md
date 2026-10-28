@@ -62,7 +62,8 @@ their soft vision circles is almost black, including the minimap.
 - **Campaign** contains the five authored Earth missions. Once Earth is won,
   procedurally generated campaign maps continue without end; each one is
   derived from its level number alone, so every player and every co-op peer
-  gets the same map.
+  gets the same map. After each clear, pick one of three perks. The stack
+  stays for the rest of the campaign and is recorded on the match ticket.
 - **Survival** is an endless siege with a boss every fifth Threat level.
 - **Labyrinth** trials are hero gauntlets with no colony.
 - **Co-op** (Play Online) supports up to four players. Each player controls

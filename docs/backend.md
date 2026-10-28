@@ -233,9 +233,12 @@ token). The server:
    then calls match-start with `roomId + joinToken` and is seated
    (`seat_manual_coop_player()`). Lobby rooms use their existing seats.
 3. `issue_match_ticket()` records a single-use row in `match_tickets`
-   (user, level, mode, difficulty, seed, room, issue time; 6 per minute).
+   (user, level, mode, difficulty, seed, room, perk stack, issue time; 6 per minute).
+   Campaign perks have to be a legal chain no longer than `campaign_cleared`.
+   A room reuses its unused ticket only when the perk stack matches.
 4. The response carries an HMAC-SHA256 ticket signed with
    `MATCH_TICKET_SECRET`: `base64url(payload).base64url(sig)`, valid 48 hours.
+   The payload includes `perks`. The report has to repeat that list.
 
 The match seed comes from the ticket. Solo seeds are random per ticket; room
 seeds are HMAC(roomId) so every peer runs the same simulation. The client

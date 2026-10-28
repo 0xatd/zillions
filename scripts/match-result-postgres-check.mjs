@@ -55,6 +55,9 @@ try {
   // ticket migration must remove it again and be safe to re-run itself.
   await q(read('supabase/migrations/20261027000200_match_tickets_and_replays.sql'));
   eq((await q(`select count(*)::int n from pg_proc where proname = 'apply_match_result'`)).rows[0].n, 1, 'only the ticketed apply_match_result remains');
+  // The ticket migration recreates the 8-argument issuer. Re-apply the perk
+  // migration so that overload is gone and every call stores a perk stack.
+  await q(read('supabase/migrations/20261028000300_campaign_perks.sql'));
 
   const issue = (room = null, level = 1, actor = uid) =>
     q(`select public.issue_match_ticket($1, 'mmo_a', $2, 'campaign', 'normal', 7, $3, 3600) t`, [actor, level, room]).then((r) => r.rows[0].t);
@@ -142,7 +145,7 @@ try {
   eq((await q(`select replay_status, review_reasons, flagged, replay_log is null n from match_reports where request_id = 'req-00000009'`)).rows[0],
     { replay_status: 'none', review_reasons: [], flagged: true, n: true }, 'bad review fields are normalised; the flag is kept for moderation');
   eq((await q('select count(*)::int n from match_history')).rows[0].n, 4, 'match history written by the server only');
-  eq((await q(`select has_function_privilege('authenticated', 'public.issue_match_ticket(uuid,text,integer,text,text,bigint,uuid,integer)', 'EXECUTE') f`)).rows[0].f, false, 'ticket RPC not callable by clients');
+  eq((await q(`select has_function_privilege('authenticated', 'public.issue_match_ticket(uuid,text,integer,text,text,bigint,uuid,integer,jsonb)', 'EXECUTE') f`)).rows[0].f, false, 'ticket RPC not callable by clients');
   eq((await q(`select has_table_privilege('authenticated', 'public.match_tickets', 'INSERT') i`)).rows[0].i, false, 'clients cannot mint tickets');
 
   // Account upgrade tree: server-priced purchases, a one-time capped import,
@@ -190,6 +193,36 @@ try {
   eq((await q(`select has_table_privilege('authenticated', 'public.player_stats', 'UPDATE') u`)).rows[0].u, false, 'stats updates revoked');
   eq((await q(`select count(*)::int n from pg_tables where schemaname = 'public' and (tablename like 'world\\_%' or tablename like 'social\\_%')`)).rows[0].n, 0, 'living-world tables dropped');
   eq((await q(`select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and (proname like '%world%' or proname like 'social%')`)).rows[0].n, 0, 'living-world functions dropped');
+
+  // Campaign perks are stored on the ticket. The report has to repeat them.
+  await q(`update match_tickets set issued_at = now() - interval '30 minutes'`);
+  const perkRoom = (await q(`select public.create_manual_coop_room($1, 'Perks', 'scott', 1, 'campaign', 'normal') r`, [uid])).rows[0].r;
+  const perkTicket = (await q(
+    `select public.issue_match_ticket($1, 'mmo_a', 1, 'campaign', 'normal', 11, $2, 3600, '["war_chest"]'::jsonb) t`,
+    [uid, perkRoom],
+  )).rows[0].t;
+  eq(perkTicket.perks, ['war_chest'], 'the ticket row stores the perk stack');
+  await rejects(
+    q(`select public.issue_match_ticket($1, 'mmo_a', 1, 'campaign', 'normal', 11, $2, 3600, '["tithe"]'::jsonb)`, [uid, perkRoom]),
+    /ticket_mismatch/,
+    'a room cannot change its perk stack',
+  );
+  eq((await q(
+    `select public.issue_match_ticket($1, 'mmo_a', 1, 'campaign', 'normal', 11, $2, 3600, '["war_chest"]'::jsonb) t`,
+    [uid, perkRoom],
+  )).rows[0].t.id, perkTicket.id, 'the same perk stack reuses the room ticket');
+  await q(`update match_tickets set issued_at = now() - interval '30 minutes' where id = $1`, [perkTicket.id]);
+  await age();
+  const rev = (await q(`select progress_revision::int n from game_characters where client_character_id = 'mmo_a'`)).rows[0].n;
+  await rejects(
+    callWith(perkTicket.id, 'req-perk-mismatch', { ...result, report: { ...result.report, perks: [] } }, rev, perkRoom),
+    /ticket_mismatch/,
+    'a report whose perks differ from the ticket is refused',
+  );
+  const paid = await callWith(perkTicket.id, 'req-perk-ok', { ...result, report: { ...result.report, perks: ['war_chest'] } }, rev, perkRoom);
+  eq(paid.ok, true, 'a report that repeats the ticket perks is accepted');
+  eq((await q(`select report->'perks' p from match_reports where request_id = 'req-perk-ok'`)).rows[0].p, ['war_chest'], 'the stored report keeps the perk stack');
+  eq((await q(`select has_function_privilege('authenticated', 'public.issue_match_ticket(uuid,text,integer,text,text,bigint,uuid,integer,jsonb)', 'EXECUTE') f`)).rows[0].f, false, 'the perk ticket RPC is not callable by clients');
 } finally {
   await client.end().catch(() => {});
   try { execFileSync(join(bin, 'pg_ctl'), ['-D', data, '-m', 'immediate', 'stop'], quiet); } catch { /* already down */ }

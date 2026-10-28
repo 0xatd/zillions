@@ -100,6 +100,17 @@ differs('a different level', { ...base, level: 21 });
   ok(stateHash(a) !== stateHash(b), 'a hero position divergence produced the same hash');
 }
 
+// Campaign perks change the simulation. The hash has to move even when the
+// perk does not touch gold or position yet (Second Wind is regen only).
+{
+  const plain = new Game(fakeMap(), 'normal', 'scott', null, 1, 'campaign');
+  const perked = new Game(fakeMap(), 'normal', 'scott', null, 1, 'campaign', { perks: ['second_wind'] });
+  const again = new Game(fakeMap(), 'normal', 'scott', null, 1, 'campaign', { perks: ['second_wind'] });
+  ok(stateHash(plain) !== stateHash(perked), 'a perk stack did not reach the hash');
+  ok(stateHash(perked) === stateHash(again), 'the same perk stack hashed differently');
+  ok(plain.gold === perked.gold, 'the hash check used a perk that also moved the treasury');
+}
+
 
 // ---------- regression: the Lattice reaches the hash ----------
 // Hashing equipment keys and doctrine ids alone let two peers carry different

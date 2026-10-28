@@ -133,6 +133,8 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/meta.js`: guest (offline) Alloy ledger, meta-upgrade tree, and threat tiers.
 - `src/match-rewards.js`: pure, shared match-reward rules (validation, loot
   proofs, quests, XP, Alloy). Used by `api/match-result.js` and the client.
+- `src/perks.js`: between-map campaign perks. Offers, the legal chain, and the
+  modifiers the simulation and the match bounds read.
 - `src/match-outbox.js`: unconfirmed signed-in match reports, resent by requestId.
 - `src/map.js`: Three.js terrain rendering and set dressing.
 - `src/plots.js`: colony plans, gates, ramparts, and plots.
