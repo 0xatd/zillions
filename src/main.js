@@ -5506,25 +5506,30 @@ class App {
           break;
         case 'grenade': {
           // The charge is in the air. The blast waits for grenadeboom, which
-          // the sim emits when the same travel time runs out.
+          // the sim emits when the same travel time runs out. The orb is
+          // large on purpose: the diorama camera is high, and a speck does
+          // not read as a throw.
           this._spawnProjectile(e, {
-            kind: 'grenade', fy: 1.05, ty: 0.4, dur: e.travel || 0.48,
-            impact: { ring: false, burst: 8, life: 0.22, size: 0.4, speed: 1.6, up: 1.2, spread: 0.2 },
+            kind: 'grenade', fy: 1.25, ty: 0.55, dur: e.travel || 0.48,
+            size: 0.86, arc: 3.8, tail: 0.32,
+            impact: { ring: false, burst: 16, life: 0.28, size: 0.72, speed: 2.2, up: 1.8, spread: 0.35 },
           });
-          this.stream(e.fx, 1.0, e.fz, e.tx, 0.45, e.tz, { count: 8, color: 0xd8b45e, size: 0.4, life: 0.32 });
+          this.stream(e.fx, 1.3, e.fz, e.tx, 0.6, e.tz, { count: 14, color: 0xffe08a, size: 0.72, life: 0.45 });
           break;
         }
         case 'grenadeboom': {
           this.audio.cast('shrapnel');
-          this._spawnAbilityRing(e.x, e.z, { color: 0xfff2c0, radius: 0.25, to: (e.r || 4) * 0.7, life: 0.28, opacity: 0.95, width: 0.2 });
-          this._spawnAbilityRing(e.x, e.z, { color: 0xffc45e, radius: 0.4, to: e.r || 4, life: 0.46, opacity: 0.82, width: 0.3 });
-          this.burst(e.x, 0.45, e.z, { count: 28, color: 0xffb84d, speed: 3.2, life: 0.48, size: 0.55, up: 2.2, spread: 0.85 });
-          this.burst(e.x, 0.3, e.z, { count: 12, color: 0x6b5340, speed: 2.2, life: 0.4, size: 0.4, up: 1.2, spread: 0.5 });
+          this._spawnAbilityFx({ kind: 'pillar', x: e.x, z: e.z, color: 0xffe7b0, radius: 0.62, life: 0.42, opacity: 0.9, height: 7 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xfff2c0, radius: 0.3, to: (e.r || 4) * 0.72, life: 0.3, opacity: 0.95, width: 0.24 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xffc45e, radius: 0.45, to: e.r || 4, life: 0.5, opacity: 0.88, width: 0.36 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xff8a3a, radius: 0.2, to: (e.r || 4) * 1.15, life: 0.62, opacity: 0.55, width: 0.22, delay: 0.06 });
+          this.burst(e.x, 0.5, e.z, { count: 32, color: 0xffb84d, speed: 3.4, life: 0.5, size: 0.62, up: 2.4, spread: 0.9 });
+          this.burst(e.x, 0.35, e.z, { count: 14, color: 0x6b5340, speed: 2.2, life: 0.42, size: 0.45, up: 1.3, spread: 0.55 });
           if (e.heal) {
-            this._spawnAbilityRing(e.x, e.z, { color: 0x59c8b8, radius: 0.3, to: e.r || 4, life: 0.6, opacity: 0.7, width: 0.16, delay: 0.08 });
-            this.burst(e.x, 0.35, e.z, { count: 16, color: 0x7dffe0, speed: 1.1, life: 0.65, size: 0.42, up: 2.6 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x59c8b8, radius: 0.35, to: e.r || 4, life: 0.64, opacity: 0.75, width: 0.18, delay: 0.08 });
+            this.burst(e.x, 0.4, e.z, { count: 18, color: 0x7dffe0, speed: 1.2, life: 0.7, size: 0.48, up: 2.8 });
           }
-          this.shake = Math.max(this.shake, 0.48);
+          this.shake = Math.max(this.shake, 0.55);
           break;
         }
         case 'stealth':
