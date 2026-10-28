@@ -20,7 +20,7 @@ const GradeShader = {
     tDiffuse: { value: null },
     uSat: { value: 1.0 },
     uLift: { value: 0.0 },
-    uVignette: { value: 0.12 },
+    uVignette: { value: 0.15 },
     uShadowCol: { value: new THREE.Color(0x1d3557) },
     uShadowAmt: { value: 0.42 },
   },

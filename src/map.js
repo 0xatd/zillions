@@ -7,6 +7,7 @@ import { toyMat } from './toy-style.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
+import { buildLandDressing } from './land-dressing.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -313,9 +314,10 @@ export class GameMap extends TerrainField {
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = toyMat({ color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
-      transparent: true, opacity: 0.85,
-      ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
+    // Unlit, so water stays the brightest thing on the map even in shadow.
+    const waterMat = new THREE.MeshBasicMaterial({
+      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3fa9e0,
+      transparent: true, opacity: this.isLava() ? 0.94 : 0.9,
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
@@ -327,6 +329,7 @@ export class GameMap extends TerrainField {
     group.add(this._buildRocks());
     group.add(this._buildOre());
     group.add(this._buildDetail());
+    group.add(buildLandDressing(this));
     if (this.bridges && this.bridges.length) group.add(this._buildBridges());
     if (this.labyrinthLayout) group.add(this._buildLabyrinthLandmarks());
     return group;
@@ -457,7 +460,8 @@ export class GameMap extends TerrainField {
     }
     const geo = new THREE.PlaneGeometry(1, 0.1);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
+    const foam = this.theme?.palette?.foam ?? 0xe8f6ff;
+    const mat = new THREE.MeshBasicMaterial({ color: foam, transparent: true, opacity: 0.8, depthWrite: false });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     spots.forEach((s, i) => {
@@ -756,9 +760,14 @@ export class GameMap extends TerrainField {
           const clump = Math.max(0, m - 0.42) * 2.0;
           const bare = Math.max(0, 0.42 - m) * 1.6;
           const r = rng();
-          if (r < 0.3 * clump * clump) {
+          // The battle floor stays almost bare. Tufts belong to the country
+          // outside the city, with only a rare patch inside it.
+          const inPlay = nearSite(x, z, 22);
+          if (!inPlay && r < 0.22 * clump * clump) {
             tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.7 + rng() * 0.7, ry: rng() * Math.PI * 2 });
-          } else if (r < 0.3 * clump * clump + 0.06 * bare) {
+          } else if (inPlay && r < 0.008) {
+            tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.55 + rng() * 0.4, ry: rng() * Math.PI * 2 });
+          } else if (!inPlay && r < 0.22 * clump * clump + 0.04 * bare) {
             pebbles.push({ x: x + rng(), z: z + rng(), s: 0.55 + rng() * 0.8, ry: rng() * Math.PI * 2 });
           } else if (r > 0.9975 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
             boulders.push({ x: x + 0.5, z: z + 0.5, s: 0.7 + rng() * 1.1, ry: rng() * Math.PI * 2 });

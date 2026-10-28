@@ -17,6 +17,65 @@ import { toyMat } from './toy-style.js';
 import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } from './assets.js';
 import { culture, kitBuildingKey } from './cultures.js';
 
+// Visual only. A one-storey door is about the hero's height, a house is a
+// little over twice that, and towers and the keep stand well above both.
+export function buildingVisualScale(kind) {
+  if (kind === 'hq') return 2.4;
+  if (kind === 'tower' || kind === 'outpost') return 3.05;
+  if (typeof kind === 'string' && kind.startsWith('camp')) return 2.25;
+  if (kind === 'wall') return 1;
+  return 2.2;
+}
+
+// Drop a wide slab that sits under the whole footprint (the kit's hex plinth
+// or foundation pad). The building's own walls stay. Geometry is cloned so
+// the shared kit template is untouched.
+function stripGroundPad(root) {
+  root.traverse((o) => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const src = o.geometry;
+    const pos = src.attributes.position;
+    const index = src.index;
+    const triCount = index ? index.count / 3 : pos.count / 3;
+    const vert = (slot) => {
+      const vi = index ? index.getX(slot) : slot;
+      return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), vi];
+    };
+    const keep = [];
+    for (let t = 0; t < triCount; t++) {
+      const a = vert(t * 3), b = vert(t * 3 + 1), c = vert(t * 3 + 2);
+      const maxY = Math.max(a[1], b[1], c[1]);
+      const reach = Math.max(Math.hypot(a[0], a[2]), Math.hypot(b[0], b[2]), Math.hypot(c[0], c[2]));
+      if (maxY < 0.34 && reach > 0.9) continue;
+      keep.push(t);
+    }
+    if (!keep.length || keep.length === triCount) return;
+    const dst = new THREE.BufferGeometry();
+    const used = new Map();
+    const mapVert = (vi) => {
+      if (used.has(vi)) return used.get(vi);
+      const n = used.size;
+      used.set(vi, n);
+      return n;
+    };
+    const idx = [];
+    for (const t of keep) {
+      idx.push(mapVert(vert(t * 3)[3]), mapVert(vert(t * 3 + 1)[3]), mapVert(vert(t * 3 + 2)[3]));
+    }
+    for (const name of Object.keys(src.attributes)) {
+      const attr = src.attributes[name];
+      const item = attr.itemSize;
+      const arr = new Float32Array(used.size * item);
+      for (const [vi, ni] of used) {
+        for (let k = 0; k < item; k++) arr[ni * item + k] = attr.getComponent(vi, k);
+      }
+      dst.setAttribute(name, new THREE.BufferAttribute(arr, item));
+    }
+    dst.setIndex(idx);
+    o.geometry = dst;
+  });
+}
+
 // The art-slice GLBs predate the detailed procedural kit and read flatter
 // than it; the kit is now the primary look. Flip to true to restore the
 // authored models where they exist (hq, default towers, camps, mine).
@@ -309,7 +368,6 @@ function authoredBuildingMesh(b) {
   if (!model) return null;
   const g = new THREE.Group();
   g.add(model);
-  g.add(groundSkirt(b));
   g.userData.authored = true;
   g.userData.head = assetPart(model, 'part_turret');
   g.userData.rotor = assetPart(model, 'part_rotor');
@@ -330,9 +388,9 @@ function kitBuildingMesh(b) {
   const shared = kitMaterials();
   const body = shared.body.clone(), glow = shared.glow.clone();
   model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
+  stripGroundPad(model);
   const g = new THREE.Group();
   g.add(model);
-  g.add(groundSkirt(b));
   g.userData.kit = key;
   g.userData.head = assetPart(model, 'part_turret');
   g.userData.rotor = assetPart(model, 'part_rotor');
@@ -1099,6 +1157,5 @@ export function buildBuildingMesh(b, ctx = {}) {
   } else if (b.kind === 'mill') {
     dress('barrel', 0.5, 0.8, 0.6);
   }
-  if (b.kind !== 'wall') g.add(groundSkirt(b));
   return g;
 }

@@ -150,6 +150,12 @@ body::after {
 @keyframes slidein { from { transform: translateX(-16px); opacity: 0; } }
 @keyframes pulse { 50% { opacity: 0.55; } }
 
+/* Calm build: the map is the picture. Gold, threat and the surge timer stay. */
+#ui.hud-calm #actionbar,
+#ui.hud-calm #minimap-wrap,
+#ui.hud-calm #r-front,
+#ui.hud-calm #r-z { display: none; }
+
 /* ---------- command bar ---------- */
 #actionbar {
   position: absolute;

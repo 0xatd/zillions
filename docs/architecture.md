@@ -74,6 +74,8 @@ to snapshots when the state can affect later simulation.
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
+| `src/site-grade.js` | Presentation terrace heights for campaign sites and cultures. Does not write tiles |
+| `src/land-dressing.js` | Border forest, culture props, and per-map landmarks. Presentation only |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |

@@ -2635,6 +2635,10 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
+    const wave = !!game.finalStand
+      || !!(game.firstSiege && (game.firstSiege.stage === 'warning' || game.firstSiege.stage === 'defend'))
+      || (game.zombies || []).some((z) => z && !z.dead && z.wave);
+    this.root.classList.toggle('hud-calm', game.phase === 'live' && controlMode !== 'fight' && !wave);
     q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills

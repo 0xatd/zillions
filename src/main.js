@@ -5,7 +5,7 @@ import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
-import { setActiveCulture } from './cultures.js';
+import { activeCulture, setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
@@ -31,7 +31,8 @@ import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
-import { buildBuildingMesh } from './building-art.js';
+import { buildBuildingMesh, buildingVisualScale } from './building-art.js';
+import { hologramMaterial, makeSurveyStake } from './survey-stakes.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
@@ -129,7 +130,7 @@ class App {
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-    this.camDist = 46;           // high, narrow diorama camera (FOV 30)
+    this.camDist = 39;           // ~15% closer than the old 46, so cliffs fill the frame (FOV 30)
     this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
@@ -894,27 +895,31 @@ class App {
       mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0); mesh.scale.set(1, 1, 1);
       return mesh;
     };
-    const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
-      toyMat({ color: 0xa6a091 }),
-    );
+    // Irregular cobble in the path colour. No disc, no guide ring — the keep
+    // sits on the ground, and the streets are the only paving.
+    const pathHex = (this.map.theme && this.map.theme.palette && this.map.theme.palette.path) || 0xb07a4f;
+    const cobbleCol = new THREE.Color(pathHex);
+    const cobbleHsl = {};
+    cobbleCol.getHSL(cobbleHsl);
+    cobbleCol.setHSL(cobbleHsl.h, cobbleHsl.s, Math.max(0, Math.min(1, cobbleHsl.l * 0.9)));
+    const cobbleGeo = new THREE.CircleGeometry(squarePlaza ? 5.4 : 3.8, squarePlaza ? 4 : 9);
+    const cobblePos = cobbleGeo.attributes.position;
+    for (let i = 0; i < cobblePos.count; i++) {
+      const vx = cobblePos.getX(i), vy = cobblePos.getY(i);
+      if (vx * vx + vy * vy < 0.2) continue;
+      const wob = 0.82 + 0.22 * Math.sin(i * 1.7 + 0.4) + 0.08 * Math.cos(i * 0.9);
+      cobblePos.setXY(i, vx * wob, vy * wob);
+    }
+    cobbleGeo.computeVertexNormals();
+    const disc = new THREE.Mesh(cobbleGeo, toyMat({ color: cobbleCol }));
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
-    disc.position.set(cx, plazaY + 0.015, cz);
+    disc.position.set(cx, plazaY + 0.02, cz);
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
-    }));
-    ring.position.set(cx, plazaY + 0.03, cz);
-    drape(ring, 0.05);
-    g.add(ring);
-    const laneMat = toyMat({ color: 0xb3ad9e });
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
+    const laneMat = toyMat({ color: pathHex });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
     const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
     for (const a of lanes) {
@@ -923,13 +928,8 @@ class App {
       lane.rotation.z = -a;
       lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
       lane.receiveShadow = true;
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
-      stripe.rotation.copy(lane.rotation);
-      stripe.position.copy(lane.position);
-      stripe.position.y = plazaY + 0.022;
-      drape(lane, 0.025); drape(stripe, 0.04);
+      drape(lane, 0.025);
       g.add(lane);
-      g.add(stripe);
     }
     // Switchback roads down the cliff face below each gate: a paved ribbon
     // draped over the cut so the zig-zag reads from the game camera.
@@ -3165,7 +3165,7 @@ class App {
     // colour is the map's shadow colour — so every shadowed face on a map
     // shares one tint, like a painted diorama. Totals are tuned so a lit top
     // face shows its picked colour with tone mapping off.
-    this.sun = new THREE.DirectionalLight(0xffffff, 2.3);
+    this.sun = new THREE.DirectionalLight(0xfff3dc, 2.3);
     this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -3174,11 +3174,11 @@ class App {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x1d3557, 0.75);
+    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1d3557, 0.6);
     this.scene.add(this.hemi);
     this.amb = new THREE.AmbientLight(0x6a7fb0, 0.35);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.Fog(0xa8cfc4, 90, 240);
+    this.scene.fog = new THREE.Fog(0xa8cfc4, 70, 190);
     this.scene.background = new THREE.Color(0xa8cfc4);
   }
 
@@ -3882,47 +3882,77 @@ class App {
     pips.tex.needsUpdate = true;
   }
 
-  // The build pad: a glowing hex plate on the exact spot a piece will rise
-  // (fixed posts, Thronefall-style). An unlit cyan rim + faint fill reads at
-  // any zoom, and a small holo-gem floats above it. Cost + icon ride a tag
-  // sprite (see _syncPlots), so every free spot says what goes there and
-  // what it costs without opening a menu.
-  _makeBeacon(x, z, r = 1.15) {
-    const grp = new THREE.Group();
-    if (!this._padMats) {
-      this._padMats = {
-        rim: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.9, depthWrite: false }),
-        fill: new THREE.MeshBasicMaterial({ color: 0x8ff3ff, transparent: true, opacity: 0.16, depthWrite: false }),
-        plate: toyMat({ color: 0x5d6b80 }),
-        gem: new THREE.MeshBasicMaterial({ color: 0xbff8ff }),
-      };
+  // A survey stake on the empty spot. The keep gets four corner stakes so the
+  // footprint reads without a pad. Ankle-to-knee: about a third of a unit.
+  _makeBeacon(x, z, plot) {
+    const spread = plot && (plot.kind === 'hq' || (plot.size || 0) >= 3) ? 0.55 : 0;
+    const stake = makeSurveyStake(activeCulture(), spread);
+    stake.position.set(x, 0, z);
+    return stake;
+  }
+
+  _holo() {
+    if (!this._holoMat) this._holoMat = hologramMaterial();
+    return this._holoMat;
+  }
+
+  // Translucent preview of the tier that would rise here. Shared hologram
+  // material, so disposing the mesh must not free it.
+  _setGhost(group, ud, plot, tier, branch) {
+    const key = `${tier}:${branch || ''}`;
+    if (ud.ghost && ud.ghostKey === key) return ud.ghost;
+    if (ud.ghost) {
+      ud.ghost.traverse((o) => { if (o.isMesh && o.material === this._holoMat) o.material = null; });
+      group.remove(ud.ghost);
+      this._disposeObject3D(ud.ghost);
+      ud.ghost = null;
     }
-    const m = this._padMats;
-    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, 6), m.plate);
-    plate.position.set(x, 0.04, z);
-    plate.rotation.y = Math.PI / 6;
-    plate.receiveShadow = true;
-    grp.add(plate);
-    const fillGeo = new THREE.CircleGeometry(r * 0.86, 6);
-    fillGeo.rotateX(-Math.PI / 2);
-    const fill = new THREE.Mesh(fillGeo, m.fill);
-    fill.position.set(x, 0.09, z);
-    fill.rotation.y = Math.PI / 6;
-    fill.userData.noOutline = true;
-    grp.add(fill);
-    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
-    rimGeo.rotateX(-Math.PI / 2);
-    const rim = new THREE.Mesh(rimGeo, m.rim);
-    rim.position.set(x, 0.095, z);
-    rim.rotation.y = Math.PI / 6;
-    rim.userData.noOutline = true;
-    grp.add(rim);
-    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(Math.min(0.2, r * 0.22), 0), m.gem);
-    gem.position.set(x, 0.75, z);
-    grp.add(gem);
-    grp.userData.gem = gem;
-    grp.userData.rim = rim;
-    return grp;
+    if (plot.kind === 'wall' || tier < 1) return null;
+    const spec = PLOT_KINDS[plot.kind].tiers[tier - 1];
+    if (!spec || (spec.branch && !branch)) return null;
+    const preview = {
+      kind: plot.kind, branch: branch || null, plotTier: tier, gate: false,
+      size: plot.size, x: plot.x, z: plot.z, cx: plot.cx, cz: plot.cz, id: 0,
+    };
+    const ghost = this._makeBuildingMesh(preview);
+    const mat = this._holo();
+    ghost.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = mat;
+      o.castShadow = false;
+      o.receiveShadow = false;
+      o.userData.noOutline = true;
+    });
+    ghost.position.set(plot.cx, 0, plot.cz);
+    ghost.visible = false;
+    group.add(ghost);
+    ud.ghost = ghost;
+    ud.ghostKey = key;
+    return ghost;
+  }
+
+  // A wave is a muster that has left its hive, the first-siege defense, or
+  // the final counterattack. Ambient creeps and nest garrisons are not one.
+  _siegeWave() {
+    const g = this.game;
+    if (!g) return false;
+    if (g.finalStand) return true;
+    if (g.firstSiege && g.firstSiege.stage === 'defend') return true;
+    return (g.zombies || []).some((z) => z && !z.dead && z.wave);
+  }
+
+  // Opacity 0 hides the post and its glowing tip. Materials are per stake.
+  _fadeStake(root, opacity) {
+    if (!root) return;
+    const show = opacity > 0.02;
+    root.visible = show;
+    if (!show) return;
+    root.traverse((o) => {
+      if (!o.isMesh || !o.material || o.material.uniforms) return;
+      o.material.transparent = true;
+      o.material.opacity = opacity;
+      o.material.depthWrite = opacity > 0.85;
+    });
   }
 
   _makePlotGroup(plot) {
@@ -3930,59 +3960,16 @@ class App {
     const kind = PLOT_KINDS[plot.kind];
     const anchor = plot.anchor || plot.gate;
     const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
-    const padR = plot.kind === 'wall' ? 0.5 : plot.kind === 'hq' ? 2.3 : 1.2;
-    const beacon = this._makeBeacon(mx, mz, padR);
+    const beacon = this._makeBeacon(mx, mz, plot);
     g.add(beacon);
     g.userData.beacon = beacon;
     const label = this._makeLabelSprite(kind.icon, '');
     label.position.set(mx, 2.1, mz);
+    label.visible = false;
     g.add(label);
     g.userData.label = label;
     g.userData.labelPos = [mx, mz];
-
-    // Ghost preview: a translucent night-blue silhouette of the building that
-    // WILL rise here — you see what you're paying for (Thronefall's trick).
-    if (plot.kind !== 'wall' && plot.kind !== 'hq') {
-      const preview = {
-        kind: plot.kind, branch: null, plotTier: 1, gate: false,
-        size: plot.size, x: plot.x, z: plot.z, cx: plot.cx, cz: plot.cz, id: 0,
-      };
-      const ghost = this._makeBuildingMesh(preview);
-      if (!this._ghostMat) {
-        // Unlit night-blue: reads as a shadow of the future, never as stone.
-        this._ghostMat = new THREE.MeshBasicMaterial({ color: 0x1c2438, transparent: true, opacity: 0.45, depthWrite: false });
-      }
-      ghost.traverse((o) => { if (o.isMesh) { o.material = this._ghostMat; o.castShadow = false; o.receiveShadow = false; } });
-      ghost.position.set(plot.cx, 0, plot.cz);
-      g.add(ghost);
-      g.userData.ghost = ghost;
-    }
-
-    // Coin pips: the cost as a row of slots that FILL as your gold streams in.
-    const pips = this._makePipSprite();
-    const [lx0, lz0] = g.userData.labelPos;
-    pips.sprite.position.set(lx0, 3.0, lz0);
-    g.add(pips.sprite);
-    g.userData.pips = pips;
-
-    // Glow ring at the pay point + radial progress arc.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
-    ring.position.set(px, 0.05, pz);
-    g.add(ring);
-    g.userData.ring = ring;
-
-    const prog = new THREE.Mesh(
-      new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, 0.01),
-      new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    prog.rotation.x = -Math.PI / 2;
-    prog.position.set(px, 0.07, pz);
-    g.add(prog);
-    g.userData.prog = prog;
-    g.userData.progFrac = 0;
     g.userData.payPoint = [px, pz];
     // The whole plot group rides the ground once: every child (beacon, ghost,
     // rings, labels) keeps its old relative height.
@@ -3990,19 +3977,40 @@ class App {
     return g;
   }
 
-  _syncPlots(t) {
+  _syncPlots(t, dt = 1 / 60) {
     const g = this.game;
     const mh = this.myHero();
     const buildMode = this.controlMode !== 'fight';
-    if (this._ghostMat) this._ghostMat.opacity = 0.42 + Math.sin(t * 1.8) * 0.08;
-    // Pips belong to the exact plot that Build would fund. A second nearest-
-    // ring search can disagree with game.buildTargetFor() and highlight one
-    // building while paying another.
-    let pipPlotId = -1;
-    if (buildMode && g.buildTargetFor && mh && !mh.dead) {
-      const target = g.buildTargetFor(mh);
-      if (target) pipPlotId = target.plot.id;
+    const wave = this._siegeWave();
+    // Every build-spot mark — stake, tip, ghost, price — fades out for a wave
+    // and fades back when the calm returns.
+    const fadeStep = Math.min(1, dt / 0.28);
+    this._stakeFade = wave
+      ? Math.max(0, (this._stakeFade ?? 1) - fadeStep)
+      : Math.min(1, (this._stakeFade ?? 1) + fadeStep);
+    const stakeFade = this._stakeFade;
+    if (this._holoMat) this._holoMat.uniforms.uTime.value = t;
+    // The hologram and the coin cost belong to one spot: the plot Build would
+    // fund, and only when the hero is within 5 units and no wave is up.
+    const near2 = (plot) => {
+      const [px, pz] = g.payPoint(plot, mh);
+      return Math.min((mh.x - px) ** 2 + (mh.z - pz) ** 2, (mh.x - plot.cx) ** 2 + (mh.z - plot.cz) ** 2);
+    };
+    let nearId = -1;
+    if (buildMode && !wave && mh && !mh.dead) {
+      const target = g.buildTargetFor && g.buildTargetFor(mh);
+      if (target && near2(target.plot) <= 25) nearId = target.plot.id;
+      else {
+        let best = 25;
+        for (const plot of g.plots) {
+          if (!g.firstSiegePlotVisible(plot) || g.plotLocked(plot)) continue;
+          if (!g.plotAction(plot)) continue;
+          const d = near2(plot);
+          if (d < best) { best = d; nearId = plot.id; }
+        }
+      }
     }
+    const revealStep = Math.min(1, dt / 0.15);
     for (const plot of g.plots) {
       if (!g.firstSiegePlotVisible(plot)) {
         const hidden = this.plotMeshes.get(plot.id);
@@ -4030,103 +4038,48 @@ class App {
         : act.mode === 'branch' ? act.nt
         : { def: act.def || { name: act.label }, cost: act.cost, mode: act.mode };
       const built = plot.tier > 0 && !plot.ruined;
-      if (!buildMode && !built) {
-        rec.group.visible = false;
-        continue;
-      }
-      // Foundation scenery (pad, posts, rubble, ghost) hides once built.
-      rec.group.children.forEach((ch) => {
-        if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
-      });
+      // The stake is the empty spot. A raised building has no stake under it,
+      // and a wave fades every remaining stake out.
+      this._fadeStake(ud.beacon, built ? 0 : stakeFade);
+      if (ud.ring) ud.ring.visible = false;
+      if (ud.prog) ud.prog.visible = false;
+      if (ud.pips) ud.pips.sprite.visible = false;
 
-      if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
-        ud.label.visible = false;
+      const showGhost = !!(nt && buildMode && !wave && stakeFade > 0.02 && plot.id === nearId);
+      ud.reveal = showGhost ? Math.min(1, (ud.reveal || 0) + revealStep) : Math.max(0, (ud.reveal || 0) - revealStep);
+      const fade = (ud.reveal || 0) * stakeFade;
+      if (showGhost && fade > 0.02 && plot.kind !== 'wall') {
+        const tier = built ? plot.tier + 1 : 1;
+        this._setGhost(rec.group, ud, plot, tier, plot.branch || null);
+      }
+      if (ud.ghost) ud.ghost.visible = fade > 0.02 && (showGhost || (ud.reveal || 0) > 0.02);
+      if (this._holoMat && ud.ghost && ud.ghost.visible) this._holoMat.uniforms.uOpacity.value = 0.22 + 0.2 * fade;
+
+      if (!showGhost) {
+        ud.label.visible = fade > 0.02;
+        if (ud.label.visible) ud.label.material.opacity = fade;
         if (ud.tag) ud.tag.visible = false;
-        ud.ring.visible = false;
-        ud.prog.visible = false;
-        if (ud.pips) ud.pips.sprite.visible = false;
         continue;
       }
-
-      const activePayPoint = mh && !mh.dead ? g.payPoint(plot, mh) : ud.payPoint;
-      const heroNear = mh && !mh.dead &&
-        (mh.x - activePayPoint[0]) ** 2 + (mh.z - activePayPoint[1]) ** 2 < 100;
-      // Minimal at distance: only the beacon marks a plot. Icon, ghost and
-      // pips appear when this is the plot you'd actually fund.
-      const active = plot.id === pipPlotId || (nt.branch && heroNear);
-      if (active && activePayPoint) {
-        ud.ring.position.set(activePayPoint[0], 0.05, activePayPoint[1]);
-        ud.prog.position.set(activePayPoint[0], 0.07, activePayPoint[1]);
-      } else if (ud.payPoint) {
-        ud.ring.position.set(ud.payPoint[0], 0.05, ud.payPoint[1]);
-        ud.prog.position.set(ud.payPoint[0], 0.07, ud.payPoint[1]);
-      }
-      if (ud.ghost) ud.ghost.visible = !built && plot.id === pipPlotId;
-      if (ud.beacon.visible) {
-        const gem = ud.beacon.userData.gem;
-        gem.rotation.y = t * 2;
-        gem.position.y = 0.75 + Math.sin(t * 2.4 + plot.id) * 0.08;
-      }
-      // Pad tag: what goes here + what it costs, on every free spot.
-      if (!built && !nt.branch) {
-        const tagKey = PLOT_KINDS[plot.kind].icon + '|' + Math.ceil(nt.cost);
-        if (ud.tagKey !== tagKey) {
-          ud.tagKey = tagKey;
-          if (ud.tag) { rec.group.remove(ud.tag); ud.tag.material.map.dispose(); ud.tag.material.dispose(); }
-          ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].icon, `${Math.ceil(nt.cost)}`);
-          ud.tag.scale.set(2.0, 1.0, 1);
-          const [tx, tz] = ud.labelPos;
-          ud.tag.position.set(tx, 1.7, tz);
-          rec.group.add(ud.tag);
-        }
-      }
-      if (ud.tag) ud.tag.visible = !built && !nt.branch && plot.id !== pipPlotId;
-      const wantSub = nt.branch ? 'choose!'
+      const costText = nt.branch ? 'choose'
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
-        : this._plotRole(plot, nt, true);
-      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
-      ud.label.visible = active;
+        : `${Math.ceil(nt.cost)}`;
+      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + costText;
+      ud.label.visible = fade > 0.02;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
         rec.group.remove(ud.label);
-        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, wantSub);
-        ud.label.position.set(lx, built ? 3.1 : 2.1, lz);
+        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, costText);
+        ud.label.position.set(lx, built ? 3.4 : 1.6, lz);
         rec.group.add(ud.label);
       }
-      if (ud.label.visible) ud.label.position.y = (built ? 3.1 : 2.1) + Math.sin(t * 2 + plot.id) * 0.12;
-
-      // Coin pips: cost as slots, filling as gold streams in — shown only
-      // when you ride close (a city of floating rings is noise, not info).
-      if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
-        if (ud.pips.sprite.visible) {
-          const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
-          const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
-          this._drawPips(ud.pips, total, filled);
-          ud.pips.sprite.position.y = (built ? 4.1 : 3.0) + Math.sin(t * 2 + plot.id) * 0.12;
-        }
+      if (ud.label.visible) {
+        ud.label.position.y = (built ? 3.4 : 1.6) + Math.sin(t * 2 + plot.id) * 0.06;
+        ud.label.material.opacity = fade;
       }
-
-      // Ring: pulse when affordable, glow bright while paying.
-      ud.ring.visible = true;
-      const affordable = !nt.branch && g.gold + plot.paid >= 1;
-      const paying = (plot.payFx || 0) > 0;
-      if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
-      ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
-
-      // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
-      ud.prog.visible = frac > 0.002;
-      if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
-        ud.progFrac = frac;
-        ud.prog.geometry.dispose();
-        ud.prog.geometry = new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, Math.max(0.01, frac * Math.PI * 2));
-      }
-
-      // (Coin flight itself rides the 'paycoin' event — see _spawnPayCoins.)
+      if (ud.tag) ud.tag.visible = false;
     }
   }
 
@@ -4152,8 +4105,12 @@ class App {
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+    const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
       archTiles: this._archTiles, gateMain: this._gateMain, center });
+    const visual = buildingVisualScale(b.kind);
+    mesh.userData.visualScale = visual;
+    mesh.scale.setScalar(visual);
+    return mesh;
   }
 
   _syncBuildings() {
@@ -4260,7 +4217,6 @@ class App {
         // At the follow camera's distance a hero is only ~40px tall, so it is
         // drawn a size up from the troops and wears a dark ink outline that
         // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4298,32 +4254,31 @@ class App {
       halo.position.y = 0.03;
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
-      // (The whole hero group is scaled 1.18×, so compensate.)
+      // The hero group is drawn at HERO_DRAW so a one-storey door is about
+      // his height. Aura radii are in world units, so compensate.
       if (d.aura) {
-        const S = 1.18;
+        const S = 0.96;
         const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
-        auraFillGeo.rotateX(-Math.PI / 2);
-        const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
-        auraFill.position.y = 0.035;
-        g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
+        // Thin and faint, and hidden until a cast, an aim, or a modifier key.
+        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.07) / S, auraR / S, 64);
         auraGeo.rotateX(-Math.PI / 2);
-        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
+        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.22, depthWrite: false }));
         aura.position.y = 0.05;
+        aura.visible = false;
+        aura.userData.keepOpacity = true;
         g.add(aura);
-        const pulseGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.82) / S, Math.max(0.3, auraR - 0.62) / S, 72);
-        pulseGeo.rotateX(-Math.PI / 2);
-        const pulse = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.18, depthWrite: false }));
-        pulse.position.y = 0.065;
-        g.add(pulse);
         aura.userData.baseRadius = auraR;
-        auraFill.userData.baseRadius = auraR;
-        pulse.userData.baseRadius = auraR;
         g.userData.aura = aura;
-        g.userData.auraFill = auraFill;
-        g.userData.auraPulse = pulse;
       }
+      const rangeR = (u.weapon && u.weapon.range) || d.range || 4.5;
+      const rangeGeo = new THREE.RingGeometry(Math.max(0.2, (rangeR - 0.06) / 0.96), rangeR / 0.96, 48);
+      rangeGeo.rotateX(-Math.PI / 2);
+      const rangeRing = new THREE.Mesh(rangeGeo, new THREE.MeshBasicMaterial({ color: 0xf4f1e6, transparent: true, opacity: 0.22, depthWrite: false }));
+      rangeRing.position.y = 0.04;
+      rangeRing.visible = false;
+      rangeRing.userData.keepOpacity = true;
+      g.add(rangeRing);
+      g.userData.rangeRing = rangeRing;
       if (u.key === 'danny') {
         // The Weave must remain readable for its full duration. Three broken,
         // counter-rotating rings make a moving tear in the world instead of
@@ -4343,7 +4298,7 @@ class App {
         g.add(weave);
         g.userData.weave = weave;
       }
-      g.scale.setScalar(1.18);
+      g.scale.setScalar(0.96);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,
@@ -4354,6 +4309,7 @@ class App {
       const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
       if (kit) {
         // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
+        kit.node.scale.multiplyScalar(1.05);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
       } else if (authored) {
@@ -4390,7 +4346,16 @@ class App {
     return g;
   }
 
+  _auraWanted(u) {
+    if (!u || u.dead || u.stealth || u !== this.myHero()) return false;
+    if ((this._auraFlash || 0) > 0) return true;
+    if (this.keys && (isHeld(this.binds(), this.keys, 'ability1') || this.keys.has('shift') || this.keys.has('alt'))) return true;
+    const panel = this.ui && this.ui.root && this.ui.root.querySelector('#branchpanel');
+    return !!(panel && !panel.classList.contains('hidden'));
+  }
+
   _syncUnits(t, dt = 0) {
+    if (this._auraFlash > 0) this._auraFlash = Math.max(0, this._auraFlash - dt);
     const g = this.game;
     const seen = new Set();
     for (const u of g.units) {
@@ -4512,24 +4477,18 @@ class App {
           for (const o of rec.mesh.userData.outlines || []) o.visible = wantOp === 1;
         }
         const aura = rec.mesh.userData.aura;
+        const showRing = this._auraWanted(u);
         if (aura) {
-          const fill = rec.mesh.userData.auraFill;
-          const pulse = rec.mesh.userData.auraPulse;
-          const visible = !u.stealth; // veiled heroes hum nothing
-          const rank = u.auraRank || 0;
           const radius = u.auraRadius || aura.userData.baseRadius || 1;
-          for (const part of [aura, fill, pulse]) {
-            if (!part) continue;
-            part.visible = visible;
-            const base = part.userData.baseRadius || radius;
-            part.scale.setScalar(radius / base);
-          }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
-          if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
-          if (pulse) {
-            pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
-          }
+          const base = aura.userData.baseRadius || radius;
+          aura.visible = showRing;
+          aura.scale.setScalar(radius / base);
+          aura.material.opacity = showRing ? 0.18 + Math.sin(t * 2.2 + u.id) * 0.04 : 0;
+        }
+        const rangeRing = rec.mesh.userData.rangeRing;
+        if (rangeRing) {
+          rangeRing.visible = showRing;
+          rangeRing.material.opacity = showRing ? 0.22 : 0;
         }
         const weave = rec.mesh.userData.weave;
         if (weave) {
@@ -4616,21 +4575,9 @@ class App {
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
-    const h = this.myHero();
-    if (!this.game || !h || h.dead || this.game.phase !== 'live') {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const target = this.game.buildTargetFor(h);
-    if (!target) {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const building = [...this.buildingMeshes.values()].find((rec) => rec.b.plotId === target.plot.id);
-    const plot = this.plotMeshes.get(target.plot.id);
-    const color = target.act.mode === 'repair' || target.act.mode === 'rebuild' ? 0x75dfff
-      : target.act.mode === 'branch' ? 0xd49aff : 0xffdf72;
-    this.tacticalVisuals.setSelection([building ? building.mesh : plot?.group], color);
+    // The hologram is the preview. A selection outline reads as a ring around
+    // the building, which is the mark these spots are not allowed to have.
+    this.tacticalVisuals.setSelection([]);
   }
 
   // Lane nodes: a capture ring and a banner in your colour, the hive's, or
@@ -4903,6 +4850,7 @@ class App {
     const h = this.myHero();
     if (!h || h.dead) return;
     if (h.abilCd > 0) { this.audio.deny(); return; }
+    this._auraFlash = 0.65;
     if (Math.random() < 0.4) this.audio.bark(h.key, 'attack');
     this.issue({ t: 'cast', p: this.myPlayer });
   }
@@ -5004,7 +4952,9 @@ class App {
 
     // Diorama angle: steep enough to read the whole base like a board game,
     // steeper still as you pull back.
-    const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
+    // 50° at the play distance, opening to 60° when fully zoomed out.
+    const playDist = 39, farDist = 95;
+    const elev = lerp((50 * Math.PI) / 180, (60 * Math.PI) / 180, clamp((this.camDist - playDist) / (farDist - playDist), 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
     let sx = 0, sz = 0;
     if (this.shake > 0) {
@@ -5051,10 +5001,10 @@ class App {
     const top = _tmpColC.setHex(paletteSkyTop(pal));
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
-    this.sun.intensity = lerp(1.25, 2.3, b);
-    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
-    this.hemi.intensity = lerp(0.55, 0.75, b);
-    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.sun.intensity = lerp(1.15, 2.3, b);
+    this.sun.color.setHex(0xfff3dc).lerp(shadow, (1 - b) * 0.35);
+    this.hemi.intensity = lerp(0.32, 0.6, b);
+    this.hemi.color.setHex(0xcfe8ff).lerp(shadow, (1 - b) * 0.25);
     this.hemi.groundColor.copy(shadow);
     this.amb.intensity = 0.35;
     this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
@@ -5062,6 +5012,7 @@ class App {
     top.lerp(shadow, (1 - b) * 0.7);
     this.scene.background = this.sky.set(top, horizon) || horizon.clone();
     this.scene.fog.color.copy(horizon);
+    if (this.scene.fog.isFog) { this.scene.fog.near = 70; this.scene.fog.far = 190; }
     const b2 = b;
     // Windows glow when it's dark.
     const glow = lerp(0.85, 0, b2);
@@ -5631,7 +5582,7 @@ class App {
       this._syncUnits(t, dt);
       this._syncNests(t);
       this._syncLoot(t);
-      this._syncPlots(t);
+      this._syncPlots(t, dt);
       this._updateTacticalSelection();
 
       // Site flags ripple until the city is founded.
@@ -5657,11 +5608,12 @@ class App {
       for (const rec of this.buildingMeshes.values()) {
         const age = t - (rec.spawnT || 0);
         const art = buildingArtState(rec.b, age);
+        const vis = rec.mesh.userData.visualScale || 1;
         if (art.phase === 'constructing') {
           const k = clamp(age / 0.7, 0, 1);
           const eased = 1 - (1 - k) ** 3;
-          rec.mesh.scale.set(0.86 + eased * 0.14, 0.08 + eased * 0.92, 0.86 + eased * 0.14);
-        } else rec.mesh.scale.setScalar(1);
+          rec.mesh.scale.set(vis * (0.86 + eased * 0.14), vis * (0.08 + eased * 0.92), vis * (0.86 + eased * 0.14));
+        } else rec.mesh.scale.setScalar(vis);
         if (rec.impact) {
           rec.impact.t -= dt;
           const p = Math.sin(clamp(1 - rec.impact.t / rec.impact.dur, 0, 1) * Math.PI);

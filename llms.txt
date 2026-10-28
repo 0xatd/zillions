@@ -31,7 +31,7 @@ Default branch: main
 - src/game.js owns deterministic simulation state.
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
-- src/map.js renders terrain relief and set dressing.
+- src/map.js renders terrain relief and set dressing. src/site-grade.js sets presentation terrace heights. src/land-dressing.js adds border forest and culture props.
 - src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and
   authority-ready mutation proposals.
