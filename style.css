@@ -746,7 +746,7 @@ body::after {
 /* flex-wrap + a min-width keep this readable as the roster grows past a
    single row's worth of cards, instead of squeezing everyone paper-thin. */
 .herorow { display: flex; flex-wrap: wrap; gap: 10px; }
-.herolib-card {
+.herocard, .herolib-card {
   flex: 1 1 108px; min-width: 108px; display: flex; flex-direction: column; gap: 3px; align-items: center;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--panel-border); border-radius: 12px;
