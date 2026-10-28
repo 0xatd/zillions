@@ -292,7 +292,54 @@ body::after {
 .bigaction.build.ready:active { transform: translateY(0); background: rgba(255, 215, 94, 0.32); }
 .bigaction.cast.ready { border-color: rgba(89, 255, 156, 0.55); background: rgba(89, 255, 156, 0.1); }
 .bigaction.cast.ready:hover { background: rgba(89, 255, 156, 0.22); transform: translateY(-2px); }
+.bigaction.cast { overflow: hidden; }
+.bigaction.cast::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--cd, 0%);
+  background: rgba(0, 0, 0, 0.38); pointer-events: none;
+}
 .bigaction.cooling { opacity: 0.75; }
+.ability-btn {
+  position: absolute;
+  right: 16px;
+  bottom: calc(var(--command-height) + var(--command-gap) + 14px);
+  z-index: 12;
+  width: 74px; height: 74px;
+  border-radius: 50%;
+  border: 2px solid rgba(89, 255, 156, 0.75);
+  background: radial-gradient(circle at 50% 40%, rgba(48, 86, 68, 0.35), rgba(8, 14, 18, 0.82));
+  color: #e8fff3;
+  cursor: pointer;
+  display: grid; place-items: center;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+  font-family: inherit;
+}
+.ability-btn .asweep {
+  position: absolute; inset: -2px; border-radius: 50%;
+  background: conic-gradient(rgba(4, 8, 12, 0.78) var(--cd, 0%), transparent 0);
+  pointer-events: none;
+}
+.ability-btn .aicon { position: relative; z-index: 1; font-size: 28px; line-height: 1; }
+.ability-btn .akey {
+  position: absolute; left: 6px; top: 5px; z-index: 1;
+  max-width: 46px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.55); border-radius: 4px; padding: 1px 4px;
+}
+.ability-btn .acd {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800;
+  text-shadow: 0 2px 8px #000;
+}
+.ability-btn.ready {
+  border-color: rgba(89, 255, 156, 0.95);
+  box-shadow: 0 0 0 4px rgba(89, 255, 156, 0.16), 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+.ability-btn.cooling { border-color: rgba(180, 190, 200, 0.45); }
+.ability-btn:disabled { cursor: default; }
 .bigaction .bcd {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6); border-radius: 12px; font-size: 22px; font-weight: 800;
@@ -359,6 +406,8 @@ body::after {
   .uprow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bigaction .bicon { font-size: 22px; }
   .bigaction .btext small { font-size: 9px; letter-spacing: 0.4px; }
+  .ability-btn { width: 84px; height: 84px; right: 12px; }
+  .ability-btn .aicon { font-size: 32px; }
 }
 
 /* soft vignette over the battlefield (cel-look framing) */

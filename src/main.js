@@ -3489,17 +3489,47 @@ class App {
     }
   }
 
-  _spawnAbilityRing(x, z, { color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0 } = {}) {
-    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0, depthWrite: false,
-      blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, this.map.groundY(x, z) + 0.11, z);
+  _spawnAbilityRing(x, z, spec = {}) {
+    this._spawnAbilityFx({ ...spec, kind: 'ring', x, z });
+  }
+
+  _spawnAbilityFx({ kind = 'ring', x, z, tx, tz, color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0, height = 8 } = {}) {
+    let mesh;
+    const y = this.map.groundY(x, z);
+    if (kind === 'pillar') {
+      const geo = new THREE.CylinderGeometry(radius, radius * 1.45, 1, 18, 1, true);
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y + 0.2, z);
+      mesh.scale.y = 0.2;
+    } else if (kind === 'slash') {
+      const dx = (tx ?? x) - x, dz = (tz ?? z) - z;
+      const len = Math.max(0.4, Math.hypot(dx, dz));
+      const geo = new THREE.PlaneGeometry(Math.max(0.2, width), len);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      mesh = new THREE.Mesh(geo, mat);
+      const mx = (x + (tx ?? x)) / 2, mz = (z + (tz ?? z)) / 2;
+      mesh.position.set(mx, this.map.groundY(mx, mz) + 0.4, mz);
+      mesh.rotation.y = Math.atan2(dx, dz);
+    } else {
+      const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y + 0.11, z);
+    }
     this.scene.add(mesh);
-    this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
+    this.abilityFx.push({ mesh, kind, t: -delay, life, from: radius, to, opacity, height });
   }
 
   _updateAbilityFx(dt) {
@@ -3508,9 +3538,19 @@ class App {
       fx.t += dt;
       if (fx.t < 0) continue;
       const p = Math.min(1, fx.t / fx.life);
-      const scale = (fx.from + (fx.to - fx.from) * p) / fx.from;
-      fx.mesh.scale.setScalar(scale);
-      fx.mesh.material.opacity = fx.opacity * Math.sin(p * Math.PI);
+      if (fx.kind === 'pillar') {
+        const rise = 0.4 + p * (fx.height || 8);
+        fx.mesh.scale.y = rise;
+        fx.mesh.position.y = this.map.groundY(fx.mesh.position.x, fx.mesh.position.z) + rise * 0.5;
+        fx.mesh.material.opacity = fx.opacity * (1 - p);
+      } else if (fx.kind === 'slash') {
+        fx.mesh.material.opacity = fx.opacity * Math.sin(Math.min(1, p) * Math.PI);
+        fx.mesh.scale.x = 1 + p * 2.4;
+      } else {
+        const scale = (fx.from + (fx.to - fx.from) * p) / Math.max(0.05, fx.from);
+        fx.mesh.scale.setScalar(scale);
+        fx.mesh.material.opacity = fx.opacity * Math.sin(p * Math.PI);
+      }
       if (p >= 1) {
         this.scene.remove(fx.mesh);
         fx.mesh.geometry.dispose();
@@ -5409,18 +5449,32 @@ class App {
           }
           this.burst(e.x, 0.4, e.z, { count: 14, color: col, speed: R * 0.8, life: 0.4, size: 0.5, up: 1.2 });
           if (e.key === 'hammer') {
-            this._spawnAbilityRing(e.x, e.z, { color: 0xeaf2ff, radius: 0.45, to: R, life: 0.34, opacity: 0.95, width: 0.2 });
-            this._spawnAbilityRing(e.x, e.z, { color: 0x7a9cf0, radius: 0.7, to: R * 1.18, life: 0.48, opacity: 0.72, width: 0.28, delay: 0.06 });
+            this._spawnAbilityFx({ kind: 'pillar', x: e.x, z: e.z, color: 0xeaf6ff, radius: 0.42, life: 0.46, opacity: 0.9, height: 9 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x9ec0ff, radius: Math.max(0.8, R * 0.72), to: 0.28, life: 0.24, opacity: 0.85, width: 0.22 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0xeaf2ff, radius: 0.45, to: R * 0.62, life: 0.32, opacity: 0.95, width: 0.2 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x7a9cf0, radius: 0.7, to: R, life: 0.55, opacity: 0.78, width: 0.32, delay: 0.08 });
           } else if (e.key === 'weave') {
-            this._spawnAbilityRing(e.x, e.z, { color: 0x72cfff, radius: 0.5, to: 2.3, life: 0.38, opacity: 0.85, width: 0.16 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x72cfff, radius: 0.35, to: 2.6, life: 0.42, opacity: 0.9, width: 0.18 });
+            this._spawnAbilityRing(e.x, e.z, { color: 0x7dffb2, radius: 0.2, to: 1.4, life: 0.28, opacity: 0.75, width: 0.1, delay: 0.05 });
           } else if (e.key === 'fortify') {
             this._spawnAbilityRing(e.x, e.z, { color: 0x8fd0ff, radius: 0.4, to: R, life: 0.4, opacity: 0.9, width: 0.24 });
           } else if (e.key === 'brew') {
             this._spawnAbilityRing(e.x, e.z, { color: 0xffb347, radius: 0.4, to: R, life: 0.5, opacity: 0.6, width: 0.3 });
           }
-          this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.5 : e.key === 'fortify' ? 0.35 : 0.18);
+          this.shake = Math.max(this.shake, e.key === 'hammer' ? 0.85 : e.key === 'fortify' ? 0.35 : e.key === 'weave' ? 0.28 : 0.18);
           break;
         }
+        case 'hammer':
+          this._spawnAbilityRing(e.x, e.z, { color: 0xffffff, radius: 0.3, to: (e.r || 3.6) + (e.shock || 2), life: 0.48, opacity: 0.7, width: 0.36, delay: 0.05 });
+          this.burst(e.x, 0.2, e.z, { count: 22, color: 0xd6e6ff, speed: 0.4, life: 0.35, size: 0.45, spread: (e.r || 3.6) * 0.35, up: 3.2 });
+          break;
+        case 'thread':
+          this._spawnAbilityFx({ kind: 'slash', x: e.fx, z: e.fz, tx: e.tx, tz: e.tz, color: 0xe8fff6, width: 0.7, life: 0.42, opacity: 0.95 });
+          this._spawnAbilityFx({ kind: 'slash', x: e.fx, z: e.fz, tx: e.tx, tz: e.tz, color: 0x72cfff, width: 0.28, life: 0.55, opacity: 0.85, delay: 0.04 });
+          this.burst(e.fx, 0.7, e.fz, { count: 10, color: 0x72cfff, speed: 1.4, life: 0.35, size: 0.4, up: 1.6 });
+          this.burst(e.tx, 0.85, e.tz, { count: 16, color: 0x7dffb2, speed: 2.2, life: 0.4, size: 0.48, up: 2.1 });
+          this.shake = Math.max(this.shake, 0.22);
+          break;
         case 'evade':
           this.burst(e.x, 1.0, e.z, { count: 6, color: 0xdfe8ff, speed: 1.0, life: 0.3, size: 0.34, up: 1.4 });
           break;
@@ -5451,12 +5505,31 @@ class App {
           this.burst(e.x, 0.6, e.z, { count: 4, color: 0x9c1f1f, speed: 1.4, life: 0.3, size: 0.4, up: 1.2 });
           break;
         case 'grenade': {
-          // Lobbed concussion grenade: arc trail, then a dirty knockback blast.
-          this._spawnAbilityRing(e.tx, e.tz, { color: 0xffc45e, radius: e.r || 4, to: 0.35, life: 0.52, opacity: 0.68, width: 0.18 });
-          this._spawnProjectile(e, { kind: 'grenade', fy: 1.0, ty: 0.45, dur: 0.52,
-            impact: { kind: 'grenade', color: 0xffc45e, radius: e.r || 4, count: 30, burst: 22, speed: 3.0, life: 0.42, size: 0.54, up: 2.0, spread: 0.9 } });
-          this.stream(e.fx, 1.0, e.fz, e.tx, 0.3, e.tz, { count: 8, color: 0xd8b45e, size: 0.4, life: 0.3 });
-          this.shake = Math.max(this.shake, 0.3);
+          // The charge is in the air. The blast waits for grenadeboom, which
+          // the sim emits when the same travel time runs out. The orb is
+          // large on purpose: the diorama camera is high, and a speck does
+          // not read as a throw.
+          this._spawnProjectile(e, {
+            kind: 'grenade', fy: 1.25, ty: 0.55, dur: e.travel || 0.48,
+            size: 0.86, arc: 3.8, tail: 0.32,
+            impact: { ring: false, burst: 16, life: 0.28, size: 0.72, speed: 2.2, up: 1.8, spread: 0.35 },
+          });
+          this.stream(e.fx, 1.3, e.fz, e.tx, 0.6, e.tz, { count: 14, color: 0xffe08a, size: 0.72, life: 0.45 });
+          break;
+        }
+        case 'grenadeboom': {
+          this.audio.cast('shrapnel');
+          this._spawnAbilityFx({ kind: 'pillar', x: e.x, z: e.z, color: 0xffe7b0, radius: 0.62, life: 0.42, opacity: 0.9, height: 7 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xfff2c0, radius: 0.3, to: (e.r || 4) * 0.72, life: 0.3, opacity: 0.95, width: 0.24 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xffc45e, radius: 0.45, to: e.r || 4, life: 0.5, opacity: 0.88, width: 0.36 });
+          this._spawnAbilityRing(e.x, e.z, { color: 0xff8a3a, radius: 0.2, to: (e.r || 4) * 1.15, life: 0.62, opacity: 0.55, width: 0.22, delay: 0.06 });
+          this.burst(e.x, 0.5, e.z, { count: 32, color: 0xffb84d, speed: 3.4, life: 0.5, size: 0.62, up: 2.4, spread: 0.9 });
+          this.burst(e.x, 0.35, e.z, { count: 14, color: 0x6b5340, speed: 2.2, life: 0.42, size: 0.45, up: 1.3, spread: 0.55 });
+          if (e.heal) {
+            this._spawnAbilityRing(e.x, e.z, { color: 0x59c8b8, radius: 0.35, to: e.r || 4, life: 0.64, opacity: 0.75, width: 0.18, delay: 0.08 });
+            this.burst(e.x, 0.4, e.z, { count: 18, color: 0x7dffe0, speed: 1.2, life: 0.7, size: 0.48, up: 2.8 });
+          }
+          this.shake = Math.max(this.shake, 0.55);
           break;
         }
         case 'stealth':

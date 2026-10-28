@@ -508,8 +508,9 @@ export const HEROES = {
     },
     ability: {
       key: 'hammer', name: 'Gravity Hammer', icon: '🔨', cd: 13,
-      cast: 'aoeDmg', radius: 3.6, dmg: [350, 550, 800], stun: [0.8, 1.0, 1.3],
-      desc: 'Scott swings the gravity maul in a full circle — one cataclysmic blow, ten times the shotgun, everything close is paste.',
+      cast: 'hammer', radius: 3.6, shock: 2.2, pull: [1.8, 2.2, 2.6],
+      dmg: [350, 550, 800], stun: [0.8, 1.0, 1.3],
+      desc: 'Scott plants the gravity maul. The dead are dragged into the swing, then the slam and its shockwave leave them stunned in the crater.',
     },
     passives: [
       { key: 'scattercore', name: 'Scatter Core', icon: '🔩', mods: { dmg: 0.12, rof: 0.08 }, desc: 'Shotgun damage and reload speed.' },
@@ -527,9 +528,10 @@ export const HEROES = {
     },
     ability: {
       key: 'grenade', name: 'Concussion Grenade', icon: '💣', cd: 11,
-      cast: 'grenade', radius: 4, range: 4.5, hop: 3,
-      dmg: [60, 100, 150], knock: [2.0, 2.6, 3.2], stun: [0.6, 0.7, 0.8],
-      desc: 'Alexander lobs a concussion charge ahead and kicks himself backward — the blast flings the dead away and buys back the range he loves.',
+      cast: 'grenade', radius: 4.2, range: 7.2, hop: 3.4, travel: 0.48,
+      dmg: [80, 130, 190], knock: [2.4, 3.0, 3.6], stun: [0.7, 0.85, 1.0],
+      heal: [24, 40, 58],
+      desc: 'Alexander lobs a concussion charge downrange and kicks himself backward. The blast flings the dead away, and the nanites in the casing knit the troops still standing in it.',
     },
     passives: [
       { key: 'deadeye', name: 'Deadeye Optics', icon: '🎯', mods: { dmg: 0.10, range: 0.55 }, desc: 'Rifle damage and attack range.' },
@@ -548,7 +550,8 @@ export const HEROES = {
     ability: {
       key: 'weave', name: 'The Weave', icon: '🕸️', cd: 12,
       cast: 'weave', dur: [3, 4, 5], dmg: [50, 85, 130], speed: 1.6,
-      desc: 'Daniel slips between the threads of the world — invisible, untouchable, walking THROUGH the dead and cutting every one he passes.',
+      dash: [6, 7.5, 9], cut: 1.25,
+      desc: 'Daniel cuts a thread through the world — a blink that slices everything on the line — then walks unseen through the dead, cutting each one he passes.',
     },
     passives: [
       { key: 'ghostmotor', name: 'Ghost Motor', icon: '👟', mods: { speed: 0.08, rof: 0.08 }, desc: 'Move speed and fire rate.' },

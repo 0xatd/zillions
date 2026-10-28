@@ -223,6 +223,7 @@ does not — that freed 1 and 2 for a future consumable system. Alt switches the
 action context because founding and funding a colony is the half of this game
 an action-RPG layout has no opinion about. WASD remains shared. In Build mode,
 Space and B build. In Fight mode, Space dodges and Q uses the primary ability.
+A round button above the command bar uses that same cast, with the cooldown drawn across it.
 
 ## Local Development
 

@@ -138,6 +138,8 @@ grammar a player arriving from an action RPG already has in their hands.
 - Q, E and R are the Fight-mode ability slots. Only Q is used today, because a hero has
   one controlled ability; E and R are declared and shown as reserved rather
   than hidden, so the layout does not shift when a second ability lands.
+- Fight mode also shows a round ability button above the command bar. It issues
+  the same cast as Q, and the cooldown is drawn across the button.
 - X draws the other weapon set.
 - Alt toggles Build and Fight mode. Founding and funding a colony is the half of
   this game an action-RPG layout has no opinion about, and it keeps its key.

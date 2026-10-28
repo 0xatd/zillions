@@ -33,6 +33,10 @@ export const MATCH_MODES = ['campaign', 'survival', 'labyrinth'];
 export const MATCH_LIMITS = Object.freeze({
   minDurationSeconds: 20,
   maxDurationSeconds: 4 * 60 * 60,
+  // Hero actives are burst tools on 11–13s cooldowns. Scott's shockwave,
+  // Alexander's grenade and Daniel's thread kill the same trash a basic shot
+  // already kills, and none of them mints Threat. A packed cast still fits
+  // inside this envelope (tests/hero-actives.test.mjs).
   killsPerSecond: 25, killSlack: 50,
   coinsPerSecond: 60, coinSlack: 1000,
   builtPerSecond: 2, builtSlack: 40,

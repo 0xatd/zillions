@@ -57,7 +57,7 @@ export const ACTIONS = [
   },
   {
     id: 'ability1', name: 'Primary ability', scopes: ['battle'], context: 'combat', default: 'q',
-    desc: 'Your hero special.',
+    desc: 'Your hero special. The round button uses this same cast.',
   },
   {
     id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'e', reserved: true,
