@@ -24,6 +24,7 @@
 import { computeMatchRewards, itemPayload, matchScore, validateMatchReport } from '../src/match-rewards.js';
 import { socketComponentMods } from '../src/crafting.js';
 import { isFlagged, reviewReasons, validateReplayPayload, withServerCamp } from '../src/match-replay.js';
+import { currencyRateBonus, normalizeUpgradeIds } from '../src/meta.js';
 import { scatteredLootKeys } from '../src/loot-table.js';
 import { isRolledKey } from '../src/items.js';
 import { ticketSecret, verifyTicket } from './_lib/match-ticket.js';
@@ -147,7 +148,17 @@ export function reviewForReport({ report, ticket, body, context, serverElapsedSe
   const checked = validateReplayPayload(body.replay);
   const players = checked.ok && Array.isArray(checked.replay.heroes) ? checked.replay.heroes.length : 1;
   if (!checked.ok || (!ticket.rid && players !== 1)) return { reasons: [...reasons, 'invalid_log'], flagged, log: null };
-  return { reasons, flagged, log: withServerCamp(checked.replay, serverHero(context)) };
+  const log = withServerCamp(checked.replay, serverHero(context));
+  // Solo: the ticket's snapshot is what that match was allowed to play. A
+  // forged list in the log is replaced, so a later replay runs the same
+  // Supply Line the server signed. Co-op keeps the host's agreed list; the
+  // reporter's own ticket is a different account.
+  if (!ticket.rid) {
+    const upgrades = normalizeUpgradeIds(ticket.ups);
+    if (upgrades.length) log.upgrades = upgrades;
+    else delete log.upgrades;
+  }
+  return { reasons, flagged, log };
 }
 
 // The whole decision, separated from HTTP so tests can drive it with a fake
@@ -208,6 +219,7 @@ export async function processMatchResult({ userId, body, store, now = Date.now()
       character: { level: context.character.level, xp: context.character.xp },
       questsDone: context.stats.quests_done || {},
       relics: context.stats.relics || [],
+      currencyRate: currencyRateBonus(ticket.ups),
     });
     const items = rewards.items.map((item) => {
       const payload = itemPayload(item.key, {

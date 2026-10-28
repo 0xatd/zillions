@@ -3,12 +3,18 @@
 // replay payload sent with the report. Split out of src/main.js so they can be
 // tested without a browser.
 import { REPLAY_VERSION } from './match-replay.js';
+import { normalizeUpgradeIds } from './meta.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The match fields a host shares with its guests. Never the host's ticket.
 export function sharedMatchFields(match) {
-  return match ? { seed: match.seed ?? null, roomId: match.roomId || null, joinToken: match.joinToken || null } : null;
+  if (!match) return null;
+  const upgrades = normalizeUpgradeIds(match.upgrades);
+  return {
+    seed: match.seed ?? null, roomId: match.roomId || null, joinToken: match.joinToken || null,
+    ...(upgrades.length ? { upgrades } : {}),
+  };
 }
 
 // A guest's reading of the host's `start`/`resync` match fields. Anything
@@ -18,6 +24,7 @@ export function parseSharedMatch(raw) {
     seed: Number.isInteger(raw?.seed) ? raw.seed : null,
     roomId: typeof raw?.roomId === 'string' && UUID.test(raw.roomId) ? raw.roomId : null,
     joinToken: typeof raw?.joinToken === 'string' ? raw.joinToken.slice(0, 128) : null,
+    upgrades: normalizeUpgradeIds(raw?.upgrades),
   };
 }
 
@@ -29,5 +36,9 @@ export function matchReplayPayload(game, match, heroIndex) {
   // The base culture changes which army the camps muster; the replay must
   // run the same one. Omitted for the default so older payloads match.
   if (game.culture && game.culture !== 'european') out.culture = game.culture;
+  // The Supply Line the sim actually used. Omitted when empty so a log from
+  // before upgrades existed still replays against an unboosted treasury.
+  const upgrades = normalizeUpgradeIds(match.upgrades);
+  if (upgrades.length) out.upgrades = upgrades;
   return out;
 }

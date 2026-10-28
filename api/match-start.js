@@ -13,6 +13,7 @@
 // same seed; solo seeds are random.
 import { DIFFICULTY, levelById, isLabyrinthLevel } from '../src/config.js';
 import { MATCH_MODES } from '../src/match-rewards.js';
+import { normalizeUpgradeIds } from '../src/meta.js';
 import {
   TICKET_TTL_SECONDS, joinToken, roomSeed, signTicket, soloSeed, ticketSecret, verifyJoinToken,
 } from './_lib/match-ticket.js';
@@ -99,11 +100,13 @@ export async function processMatchStart({ userId, body, store, secret = ticketSe
   const exp = Math.floor(Date.parse(row.expires_at) / 1000);
   if (!Number.isFinite(iat) || !Number.isFinite(exp) || exp * 1000 <= now) throw httpError('match_start_failed', 503);
   const ticketSeed = Number(row.seed);
+  const upgrades = normalizeUpgradeIds(row.upgrades);
   const ticket = signTicket({
     tid: row.id, uid: userId, lvl: levelId, mode, diff: difficulty, seed: ticketSeed, rid: roomId || null, iat, exp,
+    ups: upgrades,
   }, secret);
   return {
-    ok: true, ticket, ticketId: row.id, seed: ticketSeed, roomId: roomId || null,
+    ok: true, ticket, ticketId: row.id, seed: ticketSeed, roomId: roomId || null, upgrades,
     ...(token ? { joinToken: token } : {}), expiresAt: row.expires_at,
   };
 }

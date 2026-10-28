@@ -352,9 +352,23 @@ Signed-in accounts own their upgrade tree on the server
 - Every request is idempotent through `economy_requests` and audited in
   `economy_audit_events`.
 
-The tree's node effects are not yet read by the simulation (neither the guest
-tree nor the account tree changes a match), and there is no tree screen yet;
-the account tree is the server-side ledger they will read from.
+The character-select Upgrades screen reads this ledger. Buy and Lattice rewire
+go through the route above. Nodes are not refundable; the server has no
+refund action.
+
+`issue_match_ticket()` copies the owned node ids onto `match_tickets.upgrades`
+(`supabase/migrations/20261028000100_match_ticket_upgrades.sql`).
+`/api/match-start` signs that list as `ups`. A purchase after issue does not
+change the ticket. The client applies Supply Line from that list (offline,
+from the browser tree; in co-op, from the host's list, shared before the
+first tick). The Labyrinth ignores it. `matchAlloy()` adds Salvage Ledger's
+rate from the same ticket. Warband and the other Command nodes stay on the
+account and do not change a match: the Lattice already sells hero stats, and
+the galaxy, save slots, and pack slots are not part of a siege.
+
+The replay log stores the list the sim used. A solo log is rewritten to the
+ticket's list before it is kept. An older log with no list replays with no
+bonus. The coin plausibility slack stays above the whole Supply Line.
 
 ## Known Limits
 

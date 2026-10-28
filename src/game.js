@@ -8,6 +8,7 @@
 // how hard the hives push.
 //
 // Pure logic — rendering/audio consume `game.events` each frame.
+import { SUPPLY_CAP, supplyBonus } from './meta.js';
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
@@ -96,6 +97,11 @@ export class Game {
     this.mode = snap ? snap.mode || 'campaign' : mode;
     this.level = levelById(this.levelId || 1);
     this.economy = { startGold: START_GOLD, income: 1, pressure: 1, ...(this.level.economy || {}) };
+    // Supply Line is agreed before the first tick: the match's node list on a
+    // fresh run, the snapshot on a restore. The Labyrinth has no economy.
+    // Applying it here, before gold is set and before loot is scattered, keeps
+    // the random sequence identical to a run with no upgrades.
+    if (!snap && this.mode !== 'labyrinth') this._applySupply(opts?.upgrades);
     this.boss = null;
     this.rngSeed = Number.isInteger(opts?.rngSeed) ? opts.rngSeed >>> 0 : 999;
     // The base culture: the castle's look and which army its camps muster
@@ -213,7 +219,7 @@ export class Game {
   // gate tower and looks like a corrupted city.
 
   snapshot() {
-    return {
+    const snap = {
       v: 5, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       culture: this.culture,
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
@@ -339,9 +345,37 @@ export class Game {
         spit: z._spitTarget ? z._spitTarget.id : null,
       }]),
     };
+    // Omitted when the match has no Supply Line, so an older snapshot — and
+    // its hash — stays byte-for-byte the same.
+    if (this.economy.supplyGold || this.economy.supplyIncome) {
+      snap.supply = { startGold: this.economy.supplyGold || 0, income: this.economy.supplyIncome || 0 };
+    }
+    return snap;
+  }
+
+  // Flat gold and a fractional income bonus, capped at the whole Supply Line.
+  // `raw` is a restored snapshot; otherwise `nodeIds` is the agreed list.
+  _applySupply(nodeIds, raw) {
+    let bonus;
+    if (raw && typeof raw === 'object') {
+      const gold = Math.round(Number(raw.startGold) || 0);
+      const income = Number(raw.income) || 0;
+      bonus = {
+        startGold: Math.max(0, Math.min(SUPPLY_CAP.startGold, gold)),
+        income: Math.max(0, Math.min(SUPPLY_CAP.income, income)),
+      };
+    } else {
+      bonus = supplyBonus(nodeIds);
+    }
+    if (!bonus.startGold && !bonus.income) return;
+    this.economy.startGold += bonus.startGold;
+    this.economy.income *= (1 + bonus.income);
+    this.economy.supplyGold = bonus.startGold;
+    this.economy.supplyIncome = bonus.income;
   }
 
   _restore(snap) {
+    if (this.mode !== 'labyrinth') this._applySupply(null, snap.supply);
     this.time = snap.time;
     this.threat = snap.threat || 0;
     this.threatLevel = snap.threatLevel || 1;

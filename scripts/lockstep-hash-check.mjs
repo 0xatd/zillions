@@ -131,6 +131,15 @@ differs('a different level', { ...base, level: 21 });
   ok(stateHash(docA) !== stateHash(docB), 'a per-set doctrine did not reach the hash');
 }
 
+// Supply Line is part of the match. A difference has to fail before the first
+// income tick, and a match with no upgrades has to hash as it always did.
+{
+  const supplied = (ids) => new Game(fakeMap(), 'normal', [{ k: 'scott', camp: base }], null, 1, 'campaign', { upgrades: ids });
+  ok(stateHash(supplied(['supply_cache'])) !== stateHash(peer(base)), 'Supply Line did not reach the hash');
+  ok(stateHash(supplied(['supply_cache'])) === stateHash(supplied(['supply_cache'])), 'the same Supply Line disagreed');
+  ok(stateHash(supplied([])) === stateHash(peer(base)), 'an empty Supply Line changed the hash');
+}
+
 if (failures) {
   console.error(`\nlockstep-hash-check: ${failures} failure(s)`);
   process.exit(1);

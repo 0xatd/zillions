@@ -33,7 +33,7 @@ import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
 import { MenuVignette } from './menu-vignette.js';
-import { loadMeta, awardRun } from './meta.js';
+import { loadMeta, awardRun, normalizeUpgradeIds } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
 import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
@@ -214,6 +214,8 @@ class App {
       onCraftAction: (character, action, itemId, revision, details) => this._craftMutation(character, (current) => craftAuthoritative(current, action, itemId, revision, details)),
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onLatticeRewire: (character) => this._rewireLatticeOnServer(character),
+      onAccountUpgrades: () => this._syncAccountUpgrades(),
+      onBuyUpgrade: (nodeId) => this._buyAccountUpgrade(nodeId),
       onKeybindChange: (binds) => this.setBinds(binds),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
@@ -689,12 +691,17 @@ class App {
         seed: ticket?.ok ? ticket.seed : null,
         roomId: ticket?.ok ? ticket.roomId : lobbyRoom,
         joinToken: ticket?.ok ? ticket.joinToken || null : null,
+        // The server's snapshot when a ticket exists. Offline, the browser's
+        // own tree — there is no ticket to disagree with.
+        upgrades: ticket?.ok
+          ? normalizeUpgradeIds(ticket.upgrades)
+          : (this.auth?.isSignedIn() ? [] : normalizeUpgradeIds(Object.keys(loadMeta().nodes || {}))),
         error: ticket && !ticket.ok ? ticket.error : null,
       };
       this.startExpectedGuests = this.peers.length;
       this.startReadyGuests.clear();
       this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
-      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      const shared = sharedMatchFields(match);
       const culture = cultureKey(this.ui.selectedCulture);
       this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
       await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
@@ -707,6 +714,16 @@ class App {
   _sharedMatchFields() { return sharedMatchFields(this._match); }
 
   _sharedMatch(raw) { return parseSharedMatch(raw); }
+
+  // Supply Line for this match. Co-op uses the host's agreed list. A signed-in
+  // solo run uses the ticket's snapshot. Offline solo uses this browser's tree.
+  // An in-progress save keeps the list it started with.
+  _matchUpgrades({ resumed, given, soloTicket, mp }) {
+    const explicit = resumed?.upgrades ?? given?.upgrades ?? (soloTicket?.ok ? soloTicket.upgrades : null);
+    if (explicit != null) return normalizeUpgradeIds(explicit);
+    if (!mp && !this.auth?.isSignedIn()) return normalizeUpgradeIds(Object.keys(loadMeta().nodes || {}));
+    return [];
+  }
 
   // What this peer needs at match end: ticket, room, the exact hero setups the
   // sim started from, and (for resumed runs) the input log so far.
@@ -723,6 +740,7 @@ class App {
       log: resumed?.log || null,
       error: given?.error || (soloTicket && !soloTicket.ok ? soloTicket.error : null),
       ticketPromise: null,
+      upgrades: this._matchUpgrades({ resumed, given, soloTicket, mp }),
     };
     // Guests (and resumed co-op peers) fetch their own ticket for the room in
     // the background; it is only needed when the match ends.
@@ -771,8 +789,12 @@ class App {
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
-      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
+    const gameOpts = { culture: cultureId };
+    if (Number.isInteger(this._match.seed)) gameOpts.rngSeed = this._match.seed;
+    // A restored match already carries its Supply Line inside the snapshot.
+    // Passing the list again would stack it.
+    if (!snap && this._match.upgrades?.length) gameOpts.upgrades = this._match.upgrades;
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode, gameOpts);
     // Record inputs for leaderboard verification. A resumed run continues the
     // log it saved; a resume without one cannot be verified (it still pays).
     if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
@@ -1787,6 +1809,7 @@ class App {
       const m = this._match;
       const match = m ? {
         ticket: m.ticket || null, seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null,
+        upgrades: m.upgrades || [],
         heroes: m.heroes, log: this.game.inputLog ? this.game.inputLog.slice() : null,
       } : null;
       const persist = () => {
@@ -2097,7 +2120,7 @@ class App {
           this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
           return;
         }
-        const shared = save.match ? { seed: save.match.seed ?? null, roomId: save.match.roomId || null, joinToken: save.match.joinToken || null } : null;
+        const shared = save.match ? sharedMatchFields(save.match) : null;
         this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1, match: shared }));
         this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);

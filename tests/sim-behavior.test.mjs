@@ -49,7 +49,8 @@ test('guests read only well-formed shared match fields, never a ticket', async (
   const { sharedMatchFields, parseSharedMatch, matchReplayPayload } = await import('../src/match-session.js');
   const shared = sharedMatchFields({ ticket: 'secret', seed: 5, roomId: '11111111-1111-1111-1111-111111111111', joinToken: 'jt' });
   assert.deepEqual(shared, { seed: 5, roomId: '11111111-1111-1111-1111-111111111111', joinToken: 'jt' });
-  assert.deepEqual(parseSharedMatch({ seed: '5', roomId: 'not-a-room', joinToken: 7 }), { seed: null, roomId: null, joinToken: null });
+  assert.deepEqual(parseSharedMatch({ seed: '5', roomId: 'not-a-room', joinToken: 7 }), { seed: null, roomId: null, joinToken: null, upgrades: [] });
+  assert.deepEqual(sharedMatchFields({ seed: 5, roomId: shared.roomId, joinToken: 'jt', upgrades: ['supply_cache', 'nope', 'supply_cache'] }).upgrades, ['supply_cache']);
   assert.equal(matchReplayPayload({ inputLog: null }, { heroes: [] }, 0), null);
   assert.deepEqual(matchReplayPayload({ inputLog: [[0, { t: 'found' }]], steps: 9 }, { heroes: ['a'] }, 0).frames, 9);
 });

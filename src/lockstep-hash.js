@@ -12,6 +12,11 @@ import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 export function stateHash(g) {
   let h = 7;
   h = (h * 31 + Math.round(g.gold)) | 0;
+  // Supply Line is agreed at match start. A zero bonus adds nothing, so a
+  // match with no upgrades hashes exactly as it did before the bonus existed.
+  // A difference is caught at window 0, before the first income tick moves gold.
+  if (g.economy?.supplyGold) h = (h * 31 + Math.round(g.economy.supplyGold)) | 0;
+  if (g.economy?.supplyIncome) h = (h * 31 + Math.round(g.economy.supplyIncome * 1000)) | 0;
   h = (h * 31 + g.coins.length) | 0;
   h = (h * 31 + g.zombies.length) | 0;
   h = (h * 31 + g.units.length) | 0;
