@@ -11,8 +11,11 @@ const CURRENT_RULES = 'survival-plots';
 // founding campaign run, a new lockstep `blessing` command they would drop,
 // and changed found-phase flow-field semantics.
 // v6: siege-only reward tickets, revised terrain and culture-specific armies.
+// v7: between-map campaign perks. They change the simulation and the lockstep
+// hash, and they ride in the match-start payload. A v6 client would ignore
+// them and desync.
 // v5 production clients cannot simulate this release in lockstep.
-export const LOBBY_PROTOCOL_VERSION = 6;
+export const LOBBY_PROTOCOL_VERSION = 7;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

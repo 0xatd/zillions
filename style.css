@@ -740,7 +740,43 @@ body::after {
 .endactions { position: sticky; bottom: 0; display: flex; gap: 8px; margin-top: auto; padding-top: 12px; background: var(--panel); }
 .endpanel .endactions .startbtn { position: static; flex: 1; margin: 0; box-shadow: none; }
 .endactions .startbtn.primary { background: var(--gold); color: #17120a; }
+.endpanel.has-perks { max-width: 920px; }
 .tagline { opacity: 0.85; margin-bottom: 18px; font-size: 15px; }
+
+/* Between-map perk cards. Three choices, one pick, then the campaign keeps it. */
+.perkstrip { margin: 8px 0 12px; }
+.perkpick { text-align: left; margin: 4px 0 12px; }
+.perkpick .tagline { margin: 0 0 10px; font-size: 13px; }
+.perkrow { display: flex; gap: 10px; align-items: stretch; }
+.perkcard {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: center;
+  padding: 12px 10px; text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border); border-radius: 12px;
+  color: #e8e6df; cursor: pointer; font-family: inherit;
+  transition: transform 0.12s, background 0.12s, border-color 0.12s;
+}
+.perkcard:hover { transform: translateY(-2px); background: rgba(255, 215, 94, 0.12); border-color: var(--gold); }
+.perkcard:disabled { cursor: default; opacity: 0.7; }
+.perkcard .perkicon { font-size: 28px; line-height: 1; }
+.perkcard b { font-size: 14px; }
+.perkcard small { font-size: 12px; line-height: 1.35; opacity: 0.78; }
+.perkcard .perkcat { letter-spacing: 0.14em; text-transform: uppercase; font-size: 10px; color: var(--gold); opacity: 1; }
+.perkcard.cat-defense { border-color: rgba(130, 186, 255, 0.45); }
+.perkcard.cat-hero { border-color: rgba(255, 150, 110, 0.5); }
+.perkcard.cat-culture { border-color: rgba(120, 210, 160, 0.5); }
+.perkowned { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; font-size: 12px; opacity: 0.9; }
+.perkowned b {
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(255, 215, 94, 0.1); border: 1px solid rgba(255, 215, 94, 0.28);
+  font-weight: 700;
+}
+#r-perks { display: flex; gap: 3px; align-items: center; }
+.perkchip { font-size: 15px; line-height: 1; }
+@media (max-width: 720px) {
+  .perkrow { flex-direction: column; }
+  .endpanel.has-perks { max-width: 560px; }
+}
 
 /* ---------- hero picker ---------- */
 /* flex-wrap + a min-width keep this readable as the roster grows past a

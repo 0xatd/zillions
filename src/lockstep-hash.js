@@ -8,6 +8,7 @@
 // headless — this is the highest-consequence function in the multiplayer path
 // and it must be testable without a browser.
 import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
+import { normalizePerks } from './perks.js';
 
 export function stateHash(g) {
   let h = 7;
@@ -17,6 +18,9 @@ export function stateHash(g) {
   h = (h * 31 + g.units.length) | 0;
   h = (h * 31 + g.buildings.length) | 0;
   h = (h * 31 + g.stats.kills) | 0;
+  // Campaign perks change income, combat and construction. Two peers that
+  // started with different stacks must disagree before the first order.
+  for (const key of normalizePerks(g.perks)) h = (h * 31 + hashString(key)) | 0;
   for (const hr of g.heroes) {
     h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;

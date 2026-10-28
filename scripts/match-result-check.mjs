@@ -63,6 +63,8 @@ eq(validateMatchReport(report({ threatLevel: 50 })).detail, 'threatLevel', 'thre
 eq(validateMatchReport(report({ bossKillT: 5000 })).detail, 'bossKillT', 'boss kill must be inside the match');
 eq(validateMatchReport(report({ difficulty: 'godmode' })).error, 'invalid_difficulty', 'unknown difficulty rejected');
 eq(valid({ mode: 'survival', won: true }).won, false, 'survival cannot be reported as a win');
+eq(validateMatchReport(report({ perks: ['war_chest'] })).error, 'invalid_perks', 'a perk that was not offered is rejected');
+eq(valid().perks, [], 'a report with no perk stack is an empty stack');
 
 // ---- loot proofs ------------------------------------------------------------
 const legit = [...table][0];

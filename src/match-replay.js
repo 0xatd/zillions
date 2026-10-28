@@ -30,10 +30,11 @@
 //     diverge. That is why a mismatch is not an accusation: a leaderboard
 //     verifier should hide the entry and queue it for human review.
 import { SIM_DT, HEROES, levelById, isLabyrinthLevel, normalizeHeroUpgrades, CULTURE_ARMIES, DEFAULT_CULTURE } from './config.js';
+import { PERKS } from './perks.js';
 import { Game } from './game.js';
 import { TerrainField } from './terrain.js';
 import { buildMatchReport } from './match-report.js';
-import { MATCH_LIMITS, matchScore } from './match-rewards.js';
+import { MATCH_LIMITS, counterCeilings, matchScore } from './match-rewards.js';
 import { characterCamp } from './mmo-characters.js';
 import { latticePoints } from './skilltree.js';
 
@@ -48,7 +49,7 @@ export const REPLAY_LIMITS = Object.freeze({
 // Fields of a report the replay must reproduce exactly.
 export const REPLAY_FIELDS = Object.freeze([
   'won', 'durationSeconds', 'threatLevel', 'kills', 'coins', 'nests', 'nodes', 'built', 'lost',
-  'bestHeld', 'heroDeaths', 'bossKillT', 'hqTier', 'standingBuildings', 'pack',
+  'bestHeld', 'heroDeaths', 'bossKillT', 'hqTier', 'standingBuildings', 'pack', 'perks',
 ]);
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -81,14 +82,31 @@ export function validateReplayPayload(raw) {
     if (!isObj(cmd) || typeof cmd.t !== 'string') return fail('invalid_replay', 'log_command');
     last = step;
   }
+  const perks = parseReplayPerks(raw.perks);
+  if (!perks) return fail('invalid_replay', 'perks');
   return {
     ok: true,
     replay: {
       v: REPLAY_VERSION, frames, heroIndex, heroes, log,
       character: isObj(raw.character) ? raw.character : null,
       culture: typeof raw.culture === 'string' && Object.hasOwn(CULTURE_ARMIES, raw.culture) ? raw.culture : DEFAULT_CULTURE,
+      perks,
     },
   };
+}
+
+// The perk stack the match started with. Omitted means none, so older logs
+// still validate. An unknown key is refused rather than silently dropped:
+// a replay that skips a perk would not be the match that was stored.
+function parseReplayPerks(raw) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw) || raw.length > Object.keys(PERKS).length) return null;
+  const out = [];
+  for (const key of raw) {
+    if (typeof key !== 'string' || !Object.hasOwn(PERKS, key) || out.includes(key)) return null;
+    out.push(key);
+  }
+  return out;
 }
 
 // The reporter's hero as the server knows it. `server` carries what the
@@ -155,7 +173,9 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
   let game;
   try {
     const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed, culture: replay.culture });
+    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, {
+      rngSeed: seed, culture: replay.culture, perks: replay.perks,
+    });
   } catch (error) {
     return { status: 'invalid', error: 'replay_setup_failed', detail: String(error?.message || error).slice(0, 120) };
   }
@@ -202,6 +222,10 @@ export function diffReports(claimed, replayed) {
       const sa = [...new Set(a || [])].sort().join(',');
       const sb = [...new Set(b || [])].sort().join(',');
       if (sa !== sb) out.push(key);
+    } else if (key === 'perks') {
+      const sa = [...(a || [])].join(',');
+      const sb = [...(b || [])].join(',');
+      if (sa !== sb) out.push(key);
     } else if (key === 'bossKillT') {
       if ((a == null) !== (b == null) || (a != null && Math.abs(Number(a) - Number(b)) > 0.15)) out.push(key);
     } else if (key === 'won') {
@@ -224,7 +248,6 @@ export const SUSPICION_SHARE = 0.5;
 
 export function reviewReasons(report, context = {}) {
   const reasons = [];
-  const L = MATCH_LIMITS;
   const d = Math.max(1, report.durationSeconds);
   const best = context.bestScore ?? null;
   const score = matchScore(report);
@@ -234,9 +257,10 @@ export function reviewReasons(report, context = {}) {
   if (report.mode === 'labyrinth' && report.won && !context.labyrinthClears?.[report.levelId]) reasons.push('first_clear');
 
   const share = SUSPICION_SHARE;
-  if (report.kills > (d * L.killsPerSecond + L.killSlack) * share) reasons.push('suspicious_kills');
-  if (report.coins > (d * L.coinsPerSecond + L.coinSlack) * share) reasons.push('suspicious_coins');
-  if (report.built > (d * L.builtPerSecond + L.builtSlack) * share) reasons.push('suspicious_built');
+  const caps = counterCeilings(report);
+  if (report.kills > caps.kills * share) reasons.push('suspicious_kills');
+  if (report.coins > caps.coins * share) reasons.push('suspicious_coins');
+  if (report.built > caps.built * share) reasons.push('suspicious_built');
   if (context.serverElapsedSeconds != null && report.durationSeconds > context.serverElapsedSeconds * 1.5 + 30) reasons.push('suspicious_speed');
   if (report.bossKillT != null && report.bossKillT < d * 0.1) reasons.push('suspicious_boss');
   return [...new Set(reasons)];

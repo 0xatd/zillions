@@ -13,6 +13,7 @@
 // same seed; solo seeds are random.
 import { DIFFICULTY, levelById, isLabyrinthLevel } from '../src/config.js';
 import { MATCH_MODES } from '../src/match-rewards.js';
+import { legalPerkList, samePerkList } from '../src/perks.js';
 import {
   TICKET_TTL_SECONDS, joinToken, roomSeed, signTicket, soloSeed, ticketSecret, verifyJoinToken,
 } from './_lib/match-ticket.js';
@@ -23,6 +24,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RPC_ERRORS = {
   rate_limited: 429, not_a_room_participant: 403, room_not_found: 404, room_not_started: 409,
   room_full: 409, profile_not_found: 404, invalid_ticket_request: 400, invalid_room_request: 400,
+  ticket_mismatch: 422,
 };
 
 const send = (res, status, body) => { res.writeHead(status, JSON_HEADERS); res.end(JSON.stringify(body)); };
@@ -56,7 +58,50 @@ export function supabaseTicketStore({ url, serviceKey, fetchImpl = fetch }) {
     createManualRoom: (args) => rpc('create_manual_coop_room', args),
     seatManualPlayer: (args) => rpc('seat_manual_coop_player', args),
     issueTicket: (args) => rpc('issue_match_ticket', args),
+    async campaignCleared(userId) {
+      const response = await fetchImpl(
+        `${url}/rest/v1/player_stats?select=campaign_cleared&user_id=eq.${userId}&limit=1`,
+        { headers },
+      );
+      if (!response.ok) throw httpError('match_start_failed', 503);
+      const rows = await response.json();
+      return Math.max(0, Number(rows?.[0]?.campaign_cleared) || 0);
+    },
+    async roomTicketPerks(roomId) {
+      const response = await fetchImpl(
+        `${url}/rest/v1/match_tickets?select=perks&room_id=eq.${roomId}&used_at=is.null&order=issued_at.asc&limit=1`,
+        { headers },
+      );
+      if (!response.ok) throw httpError('match_start_failed', 503);
+      const rows = await response.json();
+      if (!rows?.length) return null;
+      return Array.isArray(rows[0].perks) ? rows[0].perks : [];
+    },
   };
+}
+
+// The perk stack this match will run. Solo lists have to be a legal chain
+// no longer than the maps this account has cleared. A room that already has
+// an unused ticket keeps that ticket's stack, so a guest is not capped by
+// their own progress and cannot substitute a different one.
+async function resolveMatchPerks({ store, userId, mode, roomId, raw }) {
+  if (mode !== 'campaign') {
+    if (raw != null && (!Array.isArray(raw) || raw.length > 0)) throw httpError('invalid_perks', 400);
+    return [];
+  }
+  const requested = raw == null ? [] : raw;
+  if (!Array.isArray(requested) || requested.length > 16) throw httpError('invalid_perks', 400);
+  if (roomId && store.roomTicketPerks) {
+    const existing = await store.roomTicketPerks(roomId);
+    if (existing) {
+      if (!samePerkList(existing, requested)) throw httpError('ticket_mismatch', 422, { detail: 'perks' });
+      return [...existing];
+    }
+  }
+  const cleared = store.campaignCleared ? await store.campaignCleared(userId) : 0;
+  const legal = legalPerkList(requested, cleared);
+  if (!legal) throw httpError('invalid_perks', 400);
+  return legal;
 }
 
 export async function processMatchStart({ userId, body, store, secret = ticketSecret(), now = Date.now() }) {
@@ -90,9 +135,11 @@ export async function processMatchStart({ userId, body, store, secret = ticketSe
   }
 
   const seed = roomId ? roomSeed(roomId, secret) : soloSeed();
+  const perks = await resolveMatchPerks({ store, userId, mode, roomId, raw: body?.perks });
   const row = await store.issueTicket({
     p_actor: userId, p_client_character_id: characterId, p_level_id: levelId, p_mode: mode,
     p_difficulty: difficulty, p_seed: seed, p_room_id: roomId, p_ttl_seconds: TICKET_TTL_SECONDS,
+    p_perks: perks,
   });
   if (!row?.id) throw httpError('match_start_failed', 503);
   const iat = Math.floor(Date.parse(row.issued_at) / 1000);
@@ -100,10 +147,11 @@ export async function processMatchStart({ userId, body, store, secret = ticketSe
   if (!Number.isFinite(iat) || !Number.isFinite(exp) || exp * 1000 <= now) throw httpError('match_start_failed', 503);
   const ticketSeed = Number(row.seed);
   const ticket = signTicket({
-    tid: row.id, uid: userId, lvl: levelId, mode, diff: difficulty, seed: ticketSeed, rid: roomId || null, iat, exp,
+    tid: row.id, uid: userId, lvl: levelId, mode, diff: difficulty, seed: ticketSeed,
+    rid: roomId || null, perks, iat, exp,
   }, secret);
   return {
-    ok: true, ticket, ticketId: row.id, seed: ticketSeed, roomId: roomId || null,
+    ok: true, ticket, ticketId: row.id, seed: ticketSeed, perks, roomId: roomId || null,
     ...(token ? { joinToken: token } : {}), expiresAt: row.expires_at,
   };
 }

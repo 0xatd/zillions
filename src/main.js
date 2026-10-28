@@ -36,6 +36,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
+import { legalPerkList, normalizePerks, perkOffer } from './perks.js';
 import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
@@ -223,6 +224,8 @@ class App {
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
+      perkOffer: (ctx) => this._perkChoice(ctx),
+      onPerk: (key) => this._acceptCampaignPerk(key),
       onRetry: () => this._retryMission(),
       canRetry: (game) => {
         const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
@@ -656,13 +659,56 @@ class App {
   // carries the match seed every peer runs, the room the match is credited
   // to, and makes the end-of-match report single use. Signed-out play needs
   // no ticket and keeps the fixed seed it always had.
-  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
+  _campaignPerks() { return normalizePerks(this.profile?.campaignPerks); }
+
+  // One new perk after a campaign clear, while the stack is shorter than the
+  // maps already won. The three choices are perkOffer(owned); picking later
+  // is still the same three until the player takes one.
+  _perkChoice({ won = false, levelId = 0 } = {}) {
+    const owned = this._campaignPerks();
+    const cap = Math.max(this.profile?.campaign || 0, won ? (levelId | 0) : 0);
+    const pending = !!this.profile?.campaignPerkPending && owned.length < cap;
+    const offer = pending ? perkOffer(owned) : [];
+    if (!owned.length && !offer.length) return null;
+    return { owned, offer };
+  }
+
+  _noteCampaignPerkOffer(won) {
+    if (!won || this.game?.mode !== 'campaign' || this.mpRole === 'spectator') return;
+    const owned = this._campaignPerks();
+    const cap = Math.max(this.profile?.campaign || 0, this.game.levelId | 0);
+    if (owned.length >= cap) return;
+    if (this.profile.campaignPerkPending) return;
+    this.profile.campaignPerkPending = true;
+    this._saveProfile();
+  }
+
+  _acceptCampaignPerk(key) {
+    const owned = this._campaignPerks();
+    const cap = Math.max(
+      this.profile?.campaign || 0,
+      this.game?.won && this.game.mode === 'campaign' ? (this.game.levelId | 0) : 0,
+    );
+    if (!this.profile?.campaignPerkPending || owned.length >= cap) return false;
+    const offer = perkOffer(owned);
+    if (!offer.includes(key)) return false;
+    const next = [...owned, key];
+    if (!legalPerkList(next, cap)) return false;
+    this.profile.campaignPerks = next;
+    // A clear that was banked while a choice sat open still pays one perk.
+    // The next offer appears immediately, still one of three.
+    this.profile.campaignPerkPending = next.length < cap;
+    this._saveProfile();
+    return true;
+  }
+
+  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null, perks = [] }) {
     if (!this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
     const character = selectedMmoCharacter(this.profile);
     if (!character) return null;
     try {
       return await matchStartRequest({
-        characterId: character.id, levelId, mode, difficulty, roomId, joinToken,
+        characterId: character.id, levelId, mode, difficulty, roomId, joinToken, perks,
         ...(manualCoop ? { manualCoop: { displayName: this._publicName(), hero } } : {}),
       });
     } catch (error) {
@@ -683,18 +729,22 @@ class App {
       const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
       // The server only issues room tickets for a room that is in game.
       if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
-      const ticket = await this._requestMatchTicket({ levelId: level, mode, difficulty: d, roomId: lobbyRoom, manualCoop: !lobbyRoom, hero });
+      const requestedPerks = mode === 'campaign' ? this._campaignPerks() : [];
+      const ticket = await this._requestMatchTicket({
+        levelId: level, mode, difficulty: d, roomId: lobbyRoom, manualCoop: !lobbyRoom, hero, perks: requestedPerks,
+      });
       const match = {
         ticket: ticket?.ok ? ticket.ticket : null,
         seed: ticket?.ok ? ticket.seed : null,
         roomId: ticket?.ok ? ticket.roomId : lobbyRoom,
         joinToken: ticket?.ok ? ticket.joinToken || null : null,
+        perks: ticket?.ok && Array.isArray(ticket.perks) ? ticket.perks : requestedPerks,
         error: ticket && !ticket.ok ? ticket.error : null,
       };
       this.startExpectedGuests = this.peers.length;
       this.startReadyGuests.clear();
       this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
-      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      const shared = sharedMatchFields(match);
       const culture = cultureKey(this.ui.selectedCulture);
       this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
       await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
@@ -710,15 +760,17 @@ class App {
 
   // What this peer needs at match end: ticket, room, the exact hero setups the
   // sim started from, and (for resumed runs) the input log so far.
-  _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket }) {
+  _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket, perks = [] }) {
     const resumed = snap ? this._resumeMatch || null : null;
     this._resumeMatch = null;
     const given = mp?.match || null;
+    const signedPerks = soloTicket?.ok && Array.isArray(soloTicket.perks) ? soloTicket.perks : null;
     const match = {
       ticket: resumed?.ticket || given?.ticket || (soloTicket?.ok ? soloTicket.ticket : null),
       seed: resumed?.seed ?? given?.seed ?? (soloTicket?.ok ? soloTicket.seed : null),
       roomId: resumed?.roomId || given?.roomId || null,
       joinToken: resumed?.joinToken || given?.joinToken || null,
+      perks: normalizePerks(signedPerks || resumed?.perks || given?.perks || perks),
       heroes: JSON.parse(JSON.stringify(resumed?.heroes || heroKeys || null)),
       log: resumed?.log || null,
       error: given?.error || (soloTicket && !soloTicket.ok ? soloTicket.error : null),
@@ -728,7 +780,7 @@ class App {
     // the background; it is only needed when the match ends.
     if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
       match.ticketPromise = this._requestMatchTicket({
-        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
+        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken, perks: match.perks,
       }).then((ticket) => {
         if (ticket?.ok) {
           if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
@@ -765,14 +817,16 @@ class App {
     setActiveCulture(cultureId);
     await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
+    const requestedPerks = snap || mp || mode !== 'campaign' ? [] : this._campaignPerks();
     const soloTicket = !snap && !mp
-      ? await this._requestMatchTicket({ levelId, mode, difficulty })
+      ? await this._requestMatchTicket({ levelId, mode, difficulty, perks: requestedPerks })
       : null;
-    this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
+    this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket, perks: requestedPerks });
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
-      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
+    const gameOpts = { culture: cultureId, perks: this._match.perks };
+    if (Number.isInteger(this._match.seed)) gameOpts.rngSeed = this._match.seed;
+    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode, gameOpts);
     // Record inputs for leaderboard verification. A resumed run continues the
     // log it saved; a resume without one cannot be verified (it still pays).
     if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
@@ -1787,6 +1841,7 @@ class App {
       const m = this._match;
       const match = m ? {
         ticket: m.ticket || null, seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null,
+        perks: normalizePerks(m.perks),
         heroes: m.heroes, log: this.game.inputLog ? this.game.inputLog.slice() : null,
       } : null;
       const persist = () => {
@@ -1822,6 +1877,7 @@ class App {
       this._recordGuestGameEnd(won, h);
       this._saveProfile();
     }
+    this._noteCampaignPerkOffer(won);
     this._netPumpStop();
     if (this.lobby) this.lobby.setMatchActive(false);
     if (this.lobby && this.lobby.game && this.mpRole === 'host') this.lobby.endGame();
@@ -2097,7 +2153,7 @@ class App {
           this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
           return;
         }
-        const shared = save.match ? { seed: save.match.seed ?? null, roomId: save.match.roomId || null, joinToken: save.match.joinToken || null } : null;
+        const shared = save.match ? sharedMatchFields(save.match) : null;
         this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1, match: shared }));
         this._resumeMatch = save.match || null;
         await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);

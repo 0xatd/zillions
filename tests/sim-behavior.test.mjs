@@ -48,8 +48,8 @@ test('the match seed drives the simulation, and snapshots keep it', () => {
 test('guests read only well-formed shared match fields, never a ticket', async () => {
   const { sharedMatchFields, parseSharedMatch, matchReplayPayload } = await import('../src/match-session.js');
   const shared = sharedMatchFields({ ticket: 'secret', seed: 5, roomId: '11111111-1111-1111-1111-111111111111', joinToken: 'jt' });
-  assert.deepEqual(shared, { seed: 5, roomId: '11111111-1111-1111-1111-111111111111', joinToken: 'jt' });
-  assert.deepEqual(parseSharedMatch({ seed: '5', roomId: 'not-a-room', joinToken: 7 }), { seed: null, roomId: null, joinToken: null });
+  assert.deepEqual(shared, { seed: 5, roomId: '11111111-1111-1111-1111-111111111111', joinToken: 'jt', perks: [] });
+  assert.deepEqual(parseSharedMatch({ seed: '5', roomId: 'not-a-room', joinToken: 7 }), { seed: null, roomId: null, joinToken: null, perks: [] });
   assert.equal(matchReplayPayload({ inputLog: null }, { heroes: [] }, 0), null);
   assert.deepEqual(matchReplayPayload({ inputLog: [[0, { t: 'found' }]], steps: 9 }, { heroes: ['a'] }, 0).frames, 9);
 });

@@ -25,6 +25,7 @@ import {
   LABYRINTH_LIVES, BLESSING_KEYS,
   cultureKey, unitDefFor,
 } from './config.js';
+import { normalizePerks, resolvePerkMods } from './perks.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
 import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
@@ -101,9 +102,13 @@ export class Game {
     // The base culture: the castle's look and which army its camps muster
     // (config.js CULTURE_ARMIES). Part of the match like the difficulty.
     this.culture = cultureKey(snap ? snap.culture : opts?.culture);
+    // Campaign perks are match setup. A resumed run keeps the stack it started
+    // with; survival and labyrinth never carry them.
+    this.perks = this.mode === 'campaign' ? normalizePerks(snap ? snap.perks : opts?.perks) : [];
+    this.perkMods = resolvePerkMods(this.perks, this.culture);
     this.rng = makeRNG(this.rngSeed);
 
-    this.gold = this.economy.startGold;
+    this.gold = this.economy.startGold + (snap ? 0 : this.perkMods.startGold);
     this.coins = [];             // physical coins on the ground
     this.loot = [];              // items lying on the frontier, most of them hidden
     this._lootSerial = 0;        // per-game roll counter — see _scatterLoot()
@@ -216,6 +221,7 @@ export class Game {
     return {
       v: 5, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       culture: this.culture,
+      perks: [...this.perks],
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
       phase: this.phase, finalStand: this.finalStand ? 1 : 0,
       gold: snapNum(this.gold),
@@ -1065,12 +1071,21 @@ export class Game {
     if (t && t.branch && !plot.branch) {
       const options = {};
       for (const [key, opt] of Object.entries(t.options)) {
-        options[key] = { ...opt, cost: kind.perTile ? Math.ceil(opt.cost * plot.tiles.length) : opt.cost };
+        const raw = kind.perTile ? Math.ceil(opt.cost * plot.tiles.length) : opt.cost;
+        options[key] = { ...opt, cost: this._perkCost(raw) };
       }
       return { branch: true, options };
     }
     const def = this.tierDef(plot, idx);
-    return def ? { def, cost: def.cost } : null;
+    return def ? { def, cost: this._perkCost(def.cost) } : null;
+  }
+
+  // Mason's Rite and anything else that cheapens construction. A scale of 1
+  // returns the authored cost unchanged.
+  _perkCost(cost) {
+    const scale = this.perkMods?.buildCost || 1;
+    if (scale === 1) return cost;
+    return Math.max(1, Math.ceil(cost * scale));
   }
 
   // A Forward Camp only exists on ground you actually hold.
@@ -1138,7 +1153,7 @@ export class Game {
       if (!def) return null;
       const state = this.plotHpState(plot);
       const share = plot.kind === 'wall' ? Math.max(0, state.missing) / Math.max(1, state.total) : 1;
-      const cost = Math.max(1, Math.ceil(def.cost * SIEGE.rebuildDiscount * share));
+      const cost = this._perkCost(Math.max(1, Math.ceil(def.cost * SIEGE.rebuildDiscount * share)));
       return { mode: 'rebuild', cost, def, label: `Rebuild ${def.name}` };
     }
     const nt = this.nextTier(plot);
@@ -1337,7 +1352,7 @@ export class Game {
   }
 
   // Structure HP through the civilization's relics (Masonry Codex et al).
-  _bhp(def) { return Math.round(def.hp * (1 + this.relicMods.buildingHp)); }
+  _bhp(def) { return Math.round(def.hp * (1 + this.relicMods.buildingHp) * (this.perkMods?.buildingHp || 1)); }
 
   _addBuilding(plot, x, z, def, gate, id = null, hp = null) {
     const size = plot.kind === 'wall' ? 1 : plot.size;
@@ -1940,7 +1955,7 @@ export class Game {
   _updateIncome(dt) {
     let rate = 0;
     for (const b of this.buildings) if (b.alive && b.def.income) rate += b.def.income;
-    rate *= this.economy.income * (1 + this.relicMods.income);
+    rate *= this.economy.income * (1 + this.relicMods.income) * (this.perkMods?.income || 1);
     for (const n of this.nodes) {
       if (!n.offMap && n.owner === 'player') rate += SIEGE.nodeIncome * (n.def.income || 1);
     }
@@ -2581,7 +2596,19 @@ export class Game {
   // ---------- units ----------
 
   // The definition this match's culture musters for a trade.
-  unitDef(key) { return unitDefFor(this.culture, key); }
+  unitDef(key) {
+    const base = unitDefFor(this.culture, key);
+    const extra = base && this.perkMods?.units?.[key];
+    if (!extra) return base;
+    const def = { ...base };
+    if (extra.hp) def.hp = Math.round(base.hp * extra.hp);
+    if (extra.dmg) def.dmg = base.dmg * extra.dmg;
+    if (extra.rof) def.rof = base.rof * extra.rof;
+    if (extra.range) def.range = base.range + extra.range;
+    if (extra.armor) def.armor = (base.armor || 0) + extra.armor;
+    if (extra.thorns) def.thorns = (base.thorns || 0) + extra.thorns;
+    return def;
+  }
 
   _spawnUnit(key, x, z, camp = null) {
     const d = this.unitDef(key);
@@ -2750,9 +2777,11 @@ export class Game {
     }
     h.doctrines = latticeDoctrines(h.treeSets, h.activeSet || 0, h.doctrines);
     const forge = this._heroForgeMods();
-    mods.dmg = (mods.dmg || 0) + forge.dmg;
-    mods.hp = (mods.hp || 0) + forge.hp;
+    mods.dmg = (mods.dmg || 0) + forge.dmg + (this.perkMods?.heroDmg || 0);
+    mods.hp = (mods.hp || 0) + forge.hp + (this.perkMods?.heroHp || 0);
     mods.cdr = (mods.cdr || 0) + forge.cdr;
+    mods.speed = (mods.speed || 0) + (this.perkMods?.heroSpeed || 0);
+    mods.regen = (mods.regen || 0) + (this.perkMods?.heroRegen || 0);
     h.mods = mods;
     // Equipment can change between runs and, later, between weapon sets. The
     // resolved weapon is rebuilt here so every derived stat reads one source.
@@ -3755,6 +3784,7 @@ export class Game {
 
   _damageBuilding(b, dmg, source = null) {
     if (!b.alive) return;
+    dmg *= this.perkMods?.buildingTaken || 1;
     b.hp -= dmg;
     const sourceKey = source?.type || source?.key || 'horde';
     this.stats.damageTaken[sourceKey] = (this.stats.damageTaken[sourceKey] || 0) + dmg;
@@ -4691,7 +4721,7 @@ export class Game {
       const best = this._towerPick(b);
       if (best) {
         b.cooldown = 1 / b.def.rof;
-        const tdmg = b.def.dmg * (1 + this.relicMods.towerDmg);
+        const tdmg = b.def.dmg * (1 + this.relicMods.towerDmg) * (this.perkMods?.towerDmg || 1);
         const plot = this.plots.find((p) => p.id === b.plotId);
         const shotY = b.kind === 'outpost'
           ? 1.75 + (((plot && plot.tier) || 1) - 1) * 0.28

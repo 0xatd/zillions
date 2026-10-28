@@ -11,6 +11,7 @@ import { SIM_DT, levelById } from '../src/config.js';
 import { buildMatchReport } from '../src/match-report.js';
 import { MATCH_LIMITS } from '../src/match-rewards.js';
 import { REPLAY_VERSION, verifyReplay } from '../src/match-replay.js';
+import { perkOffer } from '../src/perks.js';
 import { makeRNG } from '../src/utils.js';
 
 const SECRET = 'unit-test-secret-unit-test-secret-0123';
@@ -59,6 +60,8 @@ function ticketStore() {
       calls.push(['ticket', args]);
       return { id: `4444444${calls.length}-4444-4444-8444-444444444444`, seed: args.p_seed, issued_at: issued, expires_at: expires };
     },
+    async campaignCleared() { return 3; },
+    async roomTicketPerks() { return null; },
   };
 }
 
@@ -83,6 +86,26 @@ test('match-start: solo, invite-code host, invite-code guest', async () => {
   await assert.rejects(processMatchStart({ userId: GUEST, body: { ...start, roomId: ROOM, joinToken: 'bad' }, store: ticketStore(), secret: SECRET, now: NOW }), /invalid_join_token/);
   await assert.rejects(processMatchStart({ userId: USER, body: { ...start, levelId: -5 }, store: ticketStore(), secret: SECRET, now: NOW }), /invalid_level/);
   await assert.rejects(processMatchStart({ userId: USER, body: start, store: ticketStore(), secret: null, now: NOW }), /match_tickets_not_configured/);
+
+  const perk = perkOffer([])[0];
+  const fresh = ticketStore();
+  fresh.campaignCleared = async () => 0;
+  await assert.rejects(processMatchStart({ userId: USER, body: { ...start, perks: [perk] }, store: fresh, secret: SECRET, now: NOW }), /invalid_perks/);
+  fresh.campaignCleared = async () => 1;
+  const signed = await processMatchStart({ userId: USER, body: { ...start, perks: [perk] }, store: fresh, secret: SECRET, now: NOW });
+  assert.deepEqual(verifyTicket(signed.ticket, SECRET, { userId: USER, now: NOW }).payload.perks, [perk]);
+  assert.deepEqual(fresh.calls.find((call) => call[0] === 'ticket')[1].p_perks, [perk]);
+
+  const roomStore = ticketStore();
+  roomStore.roomTicketPerks = async () => [perk];
+  roomStore.campaignCleared = async () => 0;
+  const echoed = await processMatchStart({
+    userId: GUEST, body: { ...start, roomId: ROOM, joinToken: joinToken(ROOM, SECRET), perks: [perk] }, store: roomStore, secret: SECRET, now: NOW,
+  });
+  assert.deepEqual(echoed.perks, [perk], 'a guest runs the room ticket stack even with no personal clears');
+  await assert.rejects(processMatchStart({
+    userId: GUEST, body: { ...start, roomId: ROOM, joinToken: joinToken(ROOM, SECRET), perks: [] }, store: roomStore, secret: SECRET, now: NOW,
+  }), /ticket_mismatch/);
 });
 
 // A short recorded match, played the way the browser plays it.

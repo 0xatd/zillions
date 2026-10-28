@@ -24,7 +24,9 @@ re-simulates every match on the server.
 
 Every match already gets the cheap checks: a signed single-use ticket, a
 duration measured from the server clock, plausibility bounds on every counter,
-and the loot table.
+and the loot table. Campaign perks are part of that ticket. The bounds widen
+only for the counters those perks can raise. `verifyReplay()` rebuilds the
+match with the perk stack stored on the replay log.
 
 1. **Server-only writes.** Only the server writes a leaderboard row, from
    `match_reports`. Clients never post scores, which is the same idea as

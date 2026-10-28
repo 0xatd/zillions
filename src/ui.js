@@ -37,6 +37,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
+import { PERKS } from './perks.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -70,6 +71,7 @@ export class UI {
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
         <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
         <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
+        <div class="res perks hidden" id="r-perks" title="Campaign perks active this map"></div>
         <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
         <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
@@ -319,6 +321,7 @@ export class UI {
             <h2 id="s-title">Choose your battle</h2>
             <div id="modeseg" class="modeseg hidden"></div>
           </div>
+          <div id="perkstrip" class="perkstrip hidden"></div>
           <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
           <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
@@ -914,6 +917,7 @@ export class UI {
     this._renderModeSeg(mode, !this.root.querySelector('#modeseg').classList.contains('hidden'));
     this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
     this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
+    this._renderCampaignPerks(mode);
   }
 
   setRoomSettings({ level = 1, difficulty = 'normal', isHost = false, mode = null } = {}) {
@@ -2372,6 +2376,7 @@ export class UI {
     this._renderModeSeg(mode, coop || !!online);
     this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
     this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
+    this._renderCampaignPerks(mode);
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
@@ -2636,6 +2641,7 @@ export class UI {
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
     q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
+    this._renderHudPerks(game);
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
@@ -3359,7 +3365,105 @@ export class UI {
     if (host) host.innerHTML = this._endRewardsHtml(extra);
   }
 
+  _renderHudPerks(game) {
+    const host = this.root.querySelector('#r-perks');
+    if (!host) return;
+    const keys = game?.mode === 'campaign' && Array.isArray(game.perks) ? game.perks : [];
+    const sig = keys.join(',');
+    if (!keys.length) {
+      host.classList.add('hidden');
+      host.textContent = '';
+      this._hudPerkSig = '';
+      return;
+    }
+    host.classList.remove('hidden');
+    if (this._hudPerkSig === sig) return;
+    this._hudPerkSig = sig;
+    host.textContent = '';
+    for (const key of keys) {
+      const perk = PERKS[key];
+      if (!perk) continue;
+      const chip = document.createElement('span');
+      chip.className = 'perkchip';
+      chip.title = `${perk.name} — ${perk.desc}`;
+      chip.textContent = perk.icon;
+      host.appendChild(chip);
+    }
+  }
+
+  _renderCampaignPerks(mode = this.selectedMode || 'campaign') {
+    const host = this.root.querySelector('#perkstrip');
+    if (!host) return;
+    const choice = mode === 'campaign' ? this.cb.perkOffer?.({ won: false, levelId: 0 }) : null;
+    host.classList.toggle('hidden', !choice);
+    host.textContent = '';
+    if (!choice) return;
+    host.appendChild(this._perkPicker(choice, { compact: true }));
+  }
+
+  _perkPicker(choice, { compact = false } = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = compact ? 'perkpick compact' : 'perkpick';
+    const owned = (choice.owned || []).map((key) => PERKS[key]).filter(Boolean);
+    if (owned.length) {
+      const row = document.createElement('div');
+      row.className = 'perkowned';
+      const label = document.createElement('span');
+      label.textContent = 'With this campaign';
+      row.appendChild(label);
+      for (const perk of owned) {
+        const chip = document.createElement('b');
+        chip.title = perk.desc;
+        chip.textContent = `${perk.icon} ${perk.name}`;
+        row.appendChild(chip);
+      }
+      wrap.appendChild(row);
+    }
+    const offer = (choice.offer || []).map((key) => PERKS[key]).filter(Boolean);
+    if (offer.length) {
+      const title = document.createElement('div');
+      title.className = 'steplabel';
+      title.textContent = 'Choose one perk';
+      wrap.appendChild(title);
+      const note = document.createElement('p');
+      note.className = 'tagline';
+      note.textContent = 'One perk. It stays on your campaign. Co-op uses the host\'s stack.';
+      wrap.appendChild(note);
+      const row = document.createElement('div');
+      row.className = 'perkrow';
+      for (const perk of offer) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `perkcard cat-${perk.category}`;
+        button.dataset.perk = perk.key;
+        const icon = document.createElement('span');
+        icon.className = 'perkicon';
+        icon.textContent = perk.icon;
+        const name = document.createElement('b');
+        name.textContent = perk.name;
+        const cat = document.createElement('small');
+        cat.className = 'perkcat';
+        cat.textContent = perk.category;
+        const desc = document.createElement('small');
+        desc.textContent = perk.desc;
+        button.append(icon, name, cat, desc);
+        button.onclick = () => {
+          if (button.disabled) return;
+          button.disabled = true;
+          if (this.cb.onPerk?.(perk.key)) {
+            if (this._endArgs) this.showEnd(...this._endArgs);
+            else this._renderCampaignPerks(this.selectedMode || 'campaign');
+          } else button.disabled = false;
+        };
+        row.appendChild(button);
+      }
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
+    this._endArgs = [won, stats, threat, levelId, mode, best, extra, game];
     this.pauseOpen = false;
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -3380,6 +3484,7 @@ export class UI {
           : won
           ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
+        <div id="perk-slot"></div>
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
@@ -3400,6 +3505,12 @@ export class UI {
           <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
       </div>`;
+    const perkChoice = mode === 'campaign' ? this.cb.perkOffer?.({ won, levelId: lv.id }) : null;
+    const perkSlot = ov.querySelector('#perk-slot');
+    if (perkSlot && perkChoice) {
+      perkSlot.appendChild(this._perkPicker(perkChoice));
+      ov.querySelector('.endpanel')?.classList.add('has-perks');
+    }
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
     const retry = ov.querySelector('#b-retry');
     if (retry) retry.onclick = () => {

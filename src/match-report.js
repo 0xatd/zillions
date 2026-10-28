@@ -30,5 +30,7 @@ export function buildMatchReport(game, { won = game?.won, heroIndex = 0, heroKey
     standingBuildings: standing,
     pack: [...new Set(h?.pack || [])].slice(0, PACK_SLOTS),
     hero: h?.key || heroKey || null,
+    // The perk stack this match actually ran with. Empty outside campaign.
+    perks: Array.isArray(g.perks) ? [...g.perks] : [],
   };
 }

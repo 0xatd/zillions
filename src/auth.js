@@ -1,5 +1,6 @@
 import { backendEnabled, setBackendSession } from './backend.js';
 import { THREAT_PERIOD } from './config.js';
+import { normalizePerks } from './perks.js';
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
 
 const USERNAME_MIN = 3;
@@ -221,6 +222,12 @@ export class AuthClient {
       bestDay: stats.best_day || 0,
       lastHero: profile.selected_hero || stats.favorite_hero || null,
       ...(campaign !== null ? { campaign } : {}),
+      ...(Array.isArray(this.user?.user_metadata?.campaign_perks)
+        ? { campaignPerks: normalizePerks(this.user.user_metadata.campaign_perks) }
+        : {}),
+      ...(typeof this.user?.user_metadata?.campaign_perk_pending === 'boolean'
+        ? { campaignPerkPending: this.user.user_metadata.campaign_perk_pending }
+        : {}),
       ...serverProgress(stats),
       ...(mmoCharacters ? {
         mmoCharacters: overlayServerProgress(mmoCharacters, bundle.characters),
@@ -336,6 +343,8 @@ export class AuthClient {
       }).eq('id', this.user.id),
       this.client.auth.updateUser({ data: {
         campaign,
+        campaign_perks: normalizePerks(localProfile.campaignPerks),
+        campaign_perk_pending: !!localProfile.campaignPerkPending,
         mmo_character_id: localProfile.mmoCharacterId || null,
         mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 8) : [],
       } }),
