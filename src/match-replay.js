@@ -36,6 +36,7 @@ import { buildMatchReport } from './match-report.js';
 import { MATCH_LIMITS, matchScore } from './match-rewards.js';
 import { characterCamp } from './mmo-characters.js';
 import { latticePoints } from './skilltree.js';
+import { normalizeUpgradeIds } from './meta.js';
 
 export const REPLAY_VERSION = 1;
 export const REPLAY_LIMITS = Object.freeze({
@@ -81,12 +82,14 @@ export function validateReplayPayload(raw) {
     if (!isObj(cmd) || typeof cmd.t !== 'string') return fail('invalid_replay', 'log_command');
     last = step;
   }
+  const upgrades = normalizeUpgradeIds(raw.upgrades);
   return {
     ok: true,
     replay: {
       v: REPLAY_VERSION, frames, heroIndex, heroes, log,
       character: isObj(raw.character) ? raw.character : null,
       culture: typeof raw.culture === 'string' && Object.hasOwn(CULTURE_ARMIES, raw.culture) ? raw.culture : DEFAULT_CULTURE,
+      ...(upgrades.length ? { upgrades } : {}),
     },
   };
 }
@@ -155,7 +158,9 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
   let game;
   try {
     const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed, culture: replay.culture });
+    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, {
+      rngSeed: seed, culture: replay.culture, upgrades: replay.upgrades,
+    });
   } catch (error) {
     return { status: 'invalid', error: 'replay_setup_failed', detail: String(error?.message || error).slice(0, 120) };
   }
@@ -177,6 +182,7 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
     over: !!game.over,
     steps: game.steps,
     report: buildMatchReport(game, { won: !!game.won, heroIndex: replay.heroIndex }),
+    gold: game.gold,
   };
 }
 

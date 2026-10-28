@@ -21,6 +21,7 @@ import {
 } from './config.js';
 import { ITEM_BASES, hashString, parseItemKey, resolveItem, worldItemLevel } from './items.js';
 import { vendorSellPrice } from './vendor.js';
+import { CURRENCY_RATE_CAP } from './meta.js';
 
 import { MATCH_REPORT_VERSION } from './match-report.js';
 
@@ -102,8 +103,9 @@ export function matchScore(report) {
   return Math.max(0, Math.round(raw * mult * (report.won ? W.win : W.loss)));
 }
 
-export function matchAlloy(report) {
-  return Math.min(MATCH_LIMITS.maxAlloyPerMatch, Math.max(0, Math.round(matchScore(report) * ALLOY_EARN_RATE)));
+export function matchAlloy(report, currencyRate = 0) {
+  const bonus = Math.max(0, Math.min(CURRENCY_RATE_CAP, Number(currencyRate) || 0));
+  return Math.min(MATCH_LIMITS.maxAlloyPerMatch, Math.max(0, Math.round(matchScore(report) * ALLOY_EARN_RATE * (1 + bonus))));
 }
 
 // ---------------------------------------------------------------- loot proofs
@@ -302,7 +304,7 @@ export function computeMatchRewards(report, context = {}) {
     relics,
     questsCompleted,
     quests,
-    alloy: matchAlloy(report),
+    alloy: matchAlloy(report, context.currencyRate),
     score: matchScore(report),
     stats: {
       gamesPlayed: 1,

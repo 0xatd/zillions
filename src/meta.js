@@ -4,10 +4,12 @@
 // every landing pays out Salvage Alloy against the run's score, and Alloy buys
 // permanent nodes off a small tree. The rules that make it safe to wire in:
 //
-//   * Effects are DATA. A node's payload is a bag of numbers the game reads
-//     once at run start (`metaBonuses()`); no node ever carries behaviour, so
-//     this module can never change what the simulation does mid-run and can
-//     never desync a lockstep peer.
+//   * Effects are DATA. A node's payload is a bag of numbers. The siege reads
+//     Supply Line once, from the match's agreed node list (`supplyBonus()`),
+//     and the reward formula reads Salvage Ledger (`currencyRateBonus()`).
+//     No node carries behaviour, so nothing here can change a match mid-run.
+//     Warband stats stay unwired: the Lattice already sells them. The other
+//     Command unlocks name systems this siege does not have.
 //   * Scoring lives in the simulation. `runScore(game)` in `src/game.js` folds
 //     a finished run into one number; this module only converts that number
 //     into currency. One score, one source.
@@ -407,6 +409,61 @@ export function nodeState(meta, nodeId) {
   if (state.nodes[node.id]) return 'owned';
   if (node.requires.some((r) => !state.nodes[r])) return 'locked';
   return state.currency >= node.cost ? 'available' : 'unaffordable';
+}
+
+// The node ids a match, a ticket, or a replay may carry. Unknown ids are
+// dropped and the rest are sorted, so every peer and the server agree.
+const UPGRADE_ID = /^[a-z_]{1,48}$/;
+export function normalizeUpgradeIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  const ids = [];
+  for (const id of raw) {
+    if (typeof id !== 'string' || !UPGRADE_ID.test(id) || !META_NODES_BY_ID.has(id) || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  ids.sort();
+  return ids;
+}
+
+function sumNodeEffect(nodeIds, read) {
+  let total = 0;
+  for (const id of normalizeUpgradeIds(nodeIds)) {
+    const value = read(META_NODES_BY_ID.get(id));
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) total += value;
+  }
+  return total;
+}
+
+// Supply Line, and nothing else. startGold is flat; income is a fraction
+// (0.06 = +6%) applied once to the level's income multiplier.
+export function supplyBonus(nodeIds) {
+  return {
+    startGold: sumNodeEffect(nodeIds, (node) => node?.effect?.economy?.startGold),
+    income: sumNodeEffect(nodeIds, (node) => node?.effect?.economy?.income),
+  };
+}
+
+// The whole Supply Line. A snapshot or a hostile list cannot grant more.
+export const SUPPLY_CAP = Object.freeze(supplyBonus(META_NODES.map((node) => node.id)));
+
+// Salvage Ledger. One node today; the cap is whatever the tree actually grants.
+export const CURRENCY_RATE_CAP = sumNodeEffect(META_NODES.map((node) => node.id), (node) => node?.effect?.unlock?.currencyRate);
+
+export function currencyRateBonus(nodeIds) {
+  return Math.min(CURRENCY_RATE_CAP, sumNodeEffect(nodeIds, (node) => node?.effect?.unlock?.currencyRate));
+}
+
+// True when owning the node changes a siege or the Alloy a confirmed match pays.
+export function nodeChangesMatch(node) {
+  return !!(node?.effect?.economy || (node?.effect?.unlock?.currencyRate > 0));
+}
+
+// The same tree view the guest ledger uses, built from an account balance and
+// the node ids the server says are owned.
+export function treeForAccount({ owned = [], balance = 0 } = {}) {
+  const nodes = {};
+  for (const id of normalizeUpgradeIds(owned)) nodes[id] = 1;
+  return metaTreeView({ currency: balance, nodes });
 }
 
 // Everything a meta screen needs in one call: the branches, their nodes in

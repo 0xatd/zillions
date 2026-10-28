@@ -620,6 +620,53 @@ body::after {
 }
 .setuphead { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .setuphead h2 { font-size: 20px; letter-spacing: 1px; color: var(--gold); }
+
+/* Account upgrades: three lines, one card per node, the cost on the card. */
+.setup.upgrades { width: min(1080px, calc(100vw - 32px)); }
+.up-balance { margin-left: auto; color: var(--gold); font-weight: 800; letter-spacing: 0.4px; }
+.up-lead, .up-summary { font-size: 13px; line-height: 1.45; opacity: 0.82; margin: 0 0 10px; }
+.up-summary { color: #ffe9a8; opacity: 1; }
+.up-tree { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.up-branch {
+  display: flex; flex-direction: column; gap: 8px;
+  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px;
+}
+.up-branch header { display: flex; gap: 8px; align-items: flex-start; }
+.up-branch header span { font-size: 20px; line-height: 1; }
+.up-branch header b { display: block; letter-spacing: 0.6px; }
+.up-branch header small { display: block; font-size: 11px; opacity: 0.7; line-height: 1.35; }
+.up-node {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; font-family: inherit; color: inherit;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--panel-border);
+}
+.up-node:hover:not(:disabled) { border-color: rgba(255, 215, 94, 0.55); }
+.up-node:disabled { cursor: default; }
+.up-node.owned { border-color: rgba(89, 255, 156, 0.45); background: rgba(89, 255, 156, 0.06); }
+.up-node.locked, .up-node.unaffordable { opacity: 0.62; }
+.up-node-top { display: flex; align-items: center; gap: 6px; }
+.up-node-top b { flex: 1; font-size: 13px; }
+.up-node-top em { font-style: normal; color: var(--gold); font-size: 12px; font-weight: 800; }
+.up-node small { font-size: 11px; line-height: 1.35; opacity: 0.78; }
+.up-state { font-size: 10px; letter-spacing: 0.8px; font-weight: 800; opacity: 0.8; }
+.up-node.owned .up-state { color: var(--good); }
+.up-rewire {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding: 12px; border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--panel-border);
+}
+.up-rewire b { display: block; letter-spacing: 0.4px; }
+.up-rewire small { display: block; margin-top: 3px; font-size: 11px; opacity: 0.75; line-height: 1.35; max-width: 62ch; }
+.up-rewire-action { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.up-rewire-action span { font-size: 12px; opacity: 0.85; }
+.up-status { min-height: 18px; margin-top: 8px; font-size: 13px; }
+.up-status.bad { color: #ffb3ad; }
+.up-loading { font-size: 13px; opacity: 0.75; padding: 12px; }
+@media (max-width: 860px) {
+  .up-tree { grid-template-columns: 1fr; }
+  .up-rewire { flex-direction: column; align-items: stretch; }
+  .up-rewire-action { justify-content: space-between; }
+}
 .steplabel { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.65; margin: 10px 0 7px; }
 .steplabel small { text-transform: none; letter-spacing: 0; opacity: 0.8; }
 
@@ -904,6 +951,36 @@ body::after {
 .roomconfirmcard h2 { margin: 7px 0 8px; color: #fff2bd; }
 .roomconfirmcard p { margin: 0 0 20px; color: #d8ecff; line-height: 1.5; }
 .roomconfirmactions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* In-game confirm. Same panel as Upgrades, so a destructive choice never
+   falls through to the browser's own dialog. */
+.gameconfirm {
+  position: fixed; inset: 0; z-index: 140;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(3, 5, 8, 0.76);
+  backdrop-filter: blur(8px);
+}
+.gameconfirmcard {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 22px 24px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
+}
+.gameconfirmcard h2 {
+  margin: 0 0 8px;
+  font-size: 20px; letter-spacing: 1px; color: var(--gold);
+}
+.gameconfirmcard p {
+  margin: 0 0 18px;
+  font-size: 14px; line-height: 1.45; color: #e8e6df;
+}
+.gameconfirmactions { display: flex; justify-content: flex-end; gap: 8px; }
+.gameconfirm button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
 .gateprompt {
   position: fixed; left: 50%; bottom: 26px; z-index: 42;
   width: min(520px, calc(100vw - 28px)); transform: translateX(-50%);

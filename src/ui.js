@@ -21,7 +21,10 @@ import {
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
-import { loadMeta, charge, META_CURRENCY } from './meta.js';
+import {
+  loadMeta, charge, spend, META_CURRENCY, META_NODES_BY_ID,
+  treeForAccount, nodeChangesMatch, supplyBonus, currencyRateBonus,
+} from './meta.js';
 import {
   ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, loadBinds, allConflicts, conflictsFor,
 } from './keybinds.js';
@@ -49,6 +52,27 @@ const recipeCost = (recipe) => [
 // A player-authored name is the only free text in this UI. Names are written
 // with textContent wherever possible; where markup has to be built, they go
 // through here.
+const UPGRADE_ERRORS = {
+  insufficient_funds: 'Not enough Salvage Alloy.',
+  upgrade_locked: 'Buy the earlier upgrades on this line first.',
+  already_owned: 'You already own that.',
+  unknown_upgrade: 'That upgrade is not for sale.',
+  sign_in_required: 'Sign in to spend Alloy from your account.',
+  account_upgrades_not_configured: 'Account upgrades are offline.',
+  account_upgrades_unavailable: 'Account upgrades are offline.',
+  account_upgrade_failed: 'The purchase could not be confirmed. Your Alloy is unchanged.',
+};
+const upgradeErrorText = (error) => {
+  const code = error?.result?.error || error?.message || '';
+  return UPGRADE_ERRORS[code] || 'The purchase could not be confirmed. Your Alloy is unchanged.';
+};
+const GUEST_BUY_ERRORS = {
+  poor: 'Not enough Salvage Alloy.',
+  locked: 'Buy the earlier upgrades on this line first.',
+  owned: 'You already own that.',
+  unknown: 'That upgrade is not for sale.',
+};
+
 const escapeHtml = (value) => String(value == null ? '' : value)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -186,7 +210,20 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-upgrades">UPGRADES</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+        </div>
+
+        <div id="screen-upgrades" class="setup upgrades hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="up-back">← Back</button>
+            <h2>Upgrades</h2>
+            <span id="up-balance" class="up-balance"></span>
+          </div>
+          <p id="up-lead" class="up-lead"></p>
+          <p id="up-summary" class="up-summary"></p>
+          <div id="up-tree" class="up-tree"></div>
+          <section id="up-rewire" class="up-rewire"></section>
+          <p id="up-status" class="up-status" role="status"></p>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -490,6 +527,16 @@ export class UI {
             </div>
           </div>
         </div>
+      </div>
+      <div id="game-confirm" class="gameconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="game-confirm-title">
+        <div class="gameconfirmcard">
+          <h2 id="game-confirm-title"></h2>
+          <p id="game-confirm-body"></p>
+          <div class="gameconfirmactions">
+            <button type="button" class="tbtn" id="game-confirm-cancel">CANCEL</button>
+            <button type="button" class="utilitybtn" id="game-confirm-ok">CONFIRM</button>
+          </div>
+        </div>
       </div>`;
 
     // ----- main menu -----
@@ -516,12 +563,30 @@ export class UI {
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
+    q('#m-upgrades').onclick = () => this.showUpgrades();
+    q('#up-back').onclick = () => this._backOverlay('main');
+    q('#up-tree').onclick = (event) => {
+      const button = event.target.closest('.up-node');
+      if (!button || button.disabled) return;
+      this._buyUpgrade(button.dataset.node);
+    };
+    q('#up-rewire').onclick = (event) => {
+      if (!event.target.closest('#up-rewire-btn')) return;
+      this._confirmRewire(this._sheetCharacter(), { surface: 'upgrades' });
+    };
     q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
-    q('#m-delete-character').onclick = () => {
+    q('#m-delete-character').onclick = async () => {
       const character = this._sheetCharacter();
       if (!character) return;
-      if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
+      const ok = await this.confirmDialog({
+        title: 'Delete character',
+        body: `Delete ${character.name}? This cannot be undone.`,
+        confirmLabel: 'DELETE',
+        danger: true,
+      });
+      if (ok) this.cb.onCharacterDelete?.(character.id);
     };
+    this._bindGameConfirm();
     q('#creator-cancel').onclick = () => {
       if (!(this._profile?.mmoCharacters || []).length) return;
       this._backOverlay('main');
@@ -954,7 +1019,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'upgrades', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -1411,6 +1476,172 @@ export class UI {
   // Both halves read and write the SAME character object the profile owns, and
   // every mutation goes through the model's own legality rules in
   // `mmo-characters.js` — the screen never decides what a legal build is.
+
+  async showUpgrades() {
+    const gen = (this._upgradeGen = (this._upgradeGen || 0) + 1);
+    this._upgradeNote = '';
+    this._upgradeError = '';
+    this._upgradeBusy = false;
+    this._upgradeState = null;
+    this._upgradeLoading = !!this.cb.useAuthoritativeEconomy?.();
+    this._showScreen('upgrades');
+    this._renderUpgrades();
+    if (!this._upgradeLoading) return;
+    try {
+      const state = await this.cb.onAccountUpgrades?.();
+      if (gen !== this._upgradeGen) return;
+      if (!state?.ok) throw new Error(state?.error || 'account_upgrade_failed');
+      this._upgradeState = state;
+    } catch (error) {
+      if (gen !== this._upgradeGen) return;
+      this._upgradeError = upgradeErrorText(error);
+    } finally {
+      if (gen === this._upgradeGen) {
+        this._upgradeLoading = false;
+        this._renderUpgrades();
+      }
+    }
+  }
+
+  _upgradeLedger() {
+    const signedIn = !!this.cb.useAuthoritativeEconomy?.();
+    if (signedIn) {
+      return {
+        signedIn,
+        loading: !!this._upgradeLoading,
+        ready: !!this._upgradeState,
+        balance: Number(this._upgradeState?.wallet?.balance ?? this._profile?.metaCurrency ?? 0),
+        owned: this._upgradeState?.owned || [],
+      };
+    }
+    return {
+      signedIn: false, loading: false, ready: true,
+      balance: loadMeta().currency,
+      owned: Object.keys(loadMeta().nodes || {}),
+    };
+  }
+
+  _renderUpgrades() {
+    const ledger = this._upgradeLedger();
+    const balance = Math.max(0, Math.floor(Number(ledger.balance) || 0));
+    const balanceEl = this.root.querySelector('#up-balance');
+    if (balanceEl) balanceEl.textContent = `${META_CURRENCY.icon} ${balance.toLocaleString()} ${META_CURRENCY.short}`;
+    const lead = this.root.querySelector('#up-lead');
+    if (lead) {
+      lead.textContent = ledger.signedIn
+        ? 'Bought with Salvage Alloy. A node stays once you own it. The server does not refund it. In co-op, the host\'s Supply Line is the one the siege uses. The Labyrinth ignores it.'
+        : 'This browser only. Sign in to keep upgrades on your account. A node stays once you buy it.';
+    }
+    const summary = this.root.querySelector('#up-summary');
+    if (summary) {
+      const supply = supplyBonus(ledger.owned);
+      const rate = currencyRateBonus(ledger.owned);
+      const parts = [];
+      if (supply.startGold) parts.push(`+${supply.startGold} starting gold`);
+      if (supply.income) parts.push(`+${Math.round(supply.income * 100)}% income`);
+      if (rate) parts.push(`+${Math.round(rate * 100)}% Alloy from a confirmed match`);
+      summary.textContent = parts.length
+        ? `Active: ${parts.join(', ')}. Warband and the other Command nodes stay on your account and do not change a match.`
+        : 'Nothing you own changes a siege yet. Supply Line adds gold and income. Salvage Ledger adds Alloy. The other nodes stay on your account and do not change a match.';
+    }
+    const tree = this.root.querySelector('#up-tree');
+    if (tree) {
+      if (ledger.loading) tree.innerHTML = '<p class="up-loading">Reading your account…</p>';
+      else if (ledger.signedIn && !ledger.ready) tree.innerHTML = '<p class="up-loading">The account tree could not be read. Your Alloy is unchanged.</p>';
+      else {
+        const view = treeForAccount({ owned: ledger.owned, balance });
+        tree.innerHTML = view.branches.map((branch) => `
+          <section class="up-branch">
+            <header><span>${branch.icon}</span><div><b>${escapeHtml(branch.name)}</b><small>${escapeHtml(branch.desc)}</small></div></header>
+            ${branch.nodes.map((node) => this._upgradeNodeHtml(node, balance)).join('')}
+          </section>`).join('');
+      }
+    }
+    this._renderUpgradeRewire(balance, ledger);
+    const status = this.root.querySelector('#up-status');
+    if (status) {
+      status.textContent = this._upgradeError || this._upgradeNote || '';
+      status.classList.toggle('bad', !!this._upgradeError);
+    }
+  }
+
+  _upgradeNodeHtml(node, balance) {
+    const live = nodeChangesMatch(node);
+    const short = Math.max(0, node.cost - balance);
+    const label = { owned: 'OWNED', available: 'BUY', unaffordable: `NEED ${short}`, locked: 'LOCKED' }[node.state] || 'LOCKED';
+    // ACTIVE only once it is owned. A locked siege node is not active yet.
+    // RECORDED marks a node the account keeps and a match does not read.
+    const tag = node.state === 'owned' ? (live ? 'ACTIVE' : 'RECORDED') : (live ? '' : 'RECORDED');
+    const disabled = node.state !== 'available' || this._upgradeBusy;
+    return `<button type="button" class="up-node ${escapeHtml(node.state)}${live ? ' live' : ''}" data-node="${escapeHtml(node.id)}" ${disabled ? 'disabled' : ''}>
+      <span class="up-node-top"><span class="up-ico">${node.icon}</span><b>${escapeHtml(node.name)}</b><em>${node.cost} ${META_CURRENCY.short}</em></span>
+      <small>${escapeHtml(node.desc)}</small>
+      <span class="up-state">${tag ? `${tag} · ${label}` : label}</span>
+    </button>`;
+  }
+
+  _renderUpgradeRewire(balance, ledger) {
+    const el = this.root.querySelector('#up-rewire');
+    if (!el) return;
+    const character = this._sheetCharacter();
+    const spent = (character?.lattice || []).length;
+    const cost = rewireCost(spent);
+    const canPay = !!character && spent > 0 && balance >= cost && !this._upgradeBusy && !ledger.loading;
+    const who = character ? escapeHtml(character.name) : 'No character selected';
+    el.innerHTML = `
+      <div>
+        <b>Rewire the Lattice</b>
+        <small>${rewireCost(1)} ${escapeHtml(META_CURRENCY.name)} per point. ${ledger.signedIn ? 'The server charges the points it holds and returns them all.' : 'Every point on this character comes back.'} Upgrade nodes stay.</small>
+      </div>
+      <div class="up-rewire-action">
+        <span>${who}${character ? ` · ${spent} point${spent === 1 ? '' : 's'} · ${cost} ${META_CURRENCY.short}` : ''}</span>
+        <button type="button" class="utilitybtn" id="up-rewire-btn" ${canPay ? '' : 'disabled'}>REWIRE</button>
+      </div>`;
+  }
+
+  async _buyUpgrade(nodeId) {
+    if (this._upgradeBusy || this._upgradeLoading) return;
+    const ledger = this._upgradeLedger();
+    if (ledger.signedIn && !ledger.ready) return;
+    this._upgradeBusy = true;
+    this._upgradeError = '';
+    this._upgradeNote = '';
+    this._renderUpgrades();
+    try {
+      if (ledger.signedIn) {
+        const result = await this.cb.onBuyUpgrade?.(nodeId);
+        if (!result?.ok) throw Object.assign(new Error(result?.error || 'account_upgrade_failed'), { result });
+        this._upgradeState = {
+          ...(this._upgradeState || {}),
+          ok: true,
+          owned: result.owned || [],
+          wallet: result.wallet || this._upgradeState?.wallet,
+          imported: this._upgradeState?.imported,
+        };
+        if (this._profile) {
+          if (result.wallet) this._profile.metaCurrency = result.wallet.balance;
+          if (result.owned) this._profile.accountUpgrades = [...result.owned];
+          this.setProfile(this._profile);
+        }
+        const name = META_NODES_BY_ID.get(nodeId)?.name || 'Upgrade';
+        this._upgradeNote = `${name} bought for ${result.cost} ${META_CURRENCY.name}.`;
+      } else {
+        const result = spend(nodeId);
+        if (!result.ok) this._upgradeError = GUEST_BUY_ERRORS[result.reason] || 'That purchase was refused.';
+        else {
+          if (this._profile) this._profile.metaCurrency = result.currency;
+          this.setProfile(this._profile);
+          this.cb.onProfileDirty?.();
+          this._upgradeNote = `${result.node.name} bought for ${result.node.cost} ${META_CURRENCY.name}.`;
+        }
+      }
+    } catch (error) {
+      this._upgradeError = upgradeErrorText(error);
+    } finally {
+      this._upgradeBusy = false;
+      if (this._lastScreen === 'upgrades') this._renderUpgrades();
+    }
+  }
 
   _sheetCharacter() {
     const characters = this._profile?.mmoCharacters || [];
@@ -2026,42 +2257,71 @@ export class UI {
       view.query = search.value.trim().toLowerCase();
       this._drawLattice(this._sheetCharacter());
     };
-    this.root.querySelector('#lattice-rewire').onclick = () => {
-      const character = this._sheetCharacter();
-      if (!character || !(character.lattice || []).length) return;
-      if (this.cb.useAuthoritativeEconomy?.()) {
-        // Signed in: the server prices it from the Lattice it holds and
-        // charges the account wallet; nothing changes locally until it has.
-        const cost = rewireCost((character.lattice || []).length);
-        if (!window.confirm(`Rewire the whole Lattice for about ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
-        Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
-          if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
-          this.showBanner(`⚡ Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
-          this._renderCharacterSheet();
-        }).catch((error) => {
-          const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
-            : 'The rewire could not be confirmed. Your Lattice is unchanged.';
-          this.showBanner(`✋ ${reason}`, 'bad', 3200);
-        });
-        return;
-      }
-      const cost = rewireCost((character.lattice || []).length);
-      const held = loadMeta().currency;
-      if (held < cost) {
-        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${held}.`, '', 3200);
-        return;
-      }
-      if (!window.confirm(`Rewire the whole Lattice for ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
-      // Charge first. A refused charge must not hand the points back.
-      const paid = charge(cost);
-      if (!paid.ok) {
-        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`, '', 3200);
-        return;
-      }
-      const returned = rewireLattice(character);
-      this.showBanner(`⚡ Rewired — ${returned} points returned for ${cost} ${META_CURRENCY.short}.`, '', 2800);
-      this._sheetChanged();
+    this.root.querySelector('#lattice-rewire').onclick = () => this._confirmRewire(this._sheetCharacter());
+  }
+
+  // Signed-in rewire is priced by the server from the Lattice it holds.
+  // Offline rewire charges the browser ledger first, and only then clears.
+  async _confirmRewire(character, { surface = 'sheet' } = {}) {
+    if (!character || !(character.lattice || []).length || this._upgradeBusy) return;
+    const spent = (character.lattice || []).length;
+    const cost = rewireCost(spent);
+    const signedIn = !!this.cb.useAuthoritativeEconomy?.();
+    const price = `${signedIn ? 'about ' : ''}${cost} ${META_CURRENCY.name}`;
+    const ok = await this.confirmDialog({
+      title: 'Rewire the Lattice',
+      body: `Rewire the whole Lattice for ${price}? Every point comes back. Upgrade nodes stay.`,
+      confirmLabel: 'REWIRE',
+    });
+    if (!ok) return;
+    const done = (returned, paid) => {
+      this.showBanner(`⚡ Rewired — ${returned} points returned for ${paid} ${META_CURRENCY.short}.`, '', 2800);
+      if (surface === 'upgrades') {
+        this._upgradeNote = `Lattice rewired. ${returned} points returned for ${paid} ${META_CURRENCY.short}.`;
+        this._upgradeError = '';
+        this._renderUpgrades();
+      } else if (signedIn) this._renderCharacterSheet();
+      else this._sheetChanged();
     };
+    const failed = (reason) => {
+      this.showBanner(`✋ ${reason}`, 'bad', 3200);
+      if (surface === 'upgrades') {
+        this._upgradeError = reason;
+        this._renderUpgrades();
+      }
+    };
+    if (signedIn) {
+      Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
+        if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
+        if (result.wallet) {
+          if (this._upgradeState) this._upgradeState = { ...this._upgradeState, wallet: result.wallet };
+          if (this._profile) this._profile.metaCurrency = result.wallet.balance;
+          this.setProfile(this._profile);
+        }
+        done(result.returned, result.cost);
+      }).catch((error) => {
+        failed(error?.message === 'insufficient_funds'
+          ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
+          : 'The rewire could not be confirmed. Your Lattice is unchanged.');
+      });
+      return;
+    }
+    if (loadMeta().currency < cost) {
+      failed(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${loadMeta().currency}.`);
+      return;
+    }
+    const paid = charge(cost);
+    if (!paid.ok) {
+      failed(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`);
+      return;
+    }
+    const returned = rewireLattice(character);
+    if (this._profile) this._profile.metaCurrency = loadMeta().currency;
+    if (surface === 'upgrades') {
+      this.setProfile(this._profile);
+      this.cb.onProfileDirty?.();
+    }
+    done(returned, cost);
   }
 
   // A click buys the node, or the whole path to it. Shift removes. Both go
@@ -2944,6 +3204,74 @@ export class UI {
     t.style.top = 'auto';
   }
   _hideTip() { this.tooltip.classList.add('hidden'); }
+
+  // One confirm for every destructive menu choice. Focus stays inside the
+  // panel; Enter confirms and Escape cancels.
+  confirmDialog({ title, body, confirmLabel = 'CONFIRM', cancelLabel = 'CANCEL', danger = false } = {}) {
+    if (this._confirmResolve) return Promise.resolve(false);
+    const modal = this.root.querySelector('#game-confirm');
+    const ok = modal.querySelector('#game-confirm-ok');
+    const cancel = modal.querySelector('#game-confirm-cancel');
+    modal.querySelector('#game-confirm-title').textContent = title || 'Confirm';
+    modal.querySelector('#game-confirm-body').textContent = body || '';
+    ok.textContent = confirmLabel;
+    cancel.textContent = cancelLabel;
+    ok.classList.toggle('danger', !!danger);
+    this._confirmReturnFocus = document.activeElement;
+    return new Promise((resolve) => {
+      this._confirmResolve = resolve;
+      modal.classList.remove('hidden');
+      ok.focus();
+    });
+  }
+
+  _bindGameConfirm() {
+    const modal = this.root.querySelector('#game-confirm');
+    const ok = modal.querySelector('#game-confirm-ok');
+    const cancel = modal.querySelector('#game-confirm-cancel');
+    const finish = (value) => {
+      if (!this._confirmResolve) return;
+      const resolve = this._confirmResolve;
+      this._confirmResolve = null;
+      modal.classList.add('hidden');
+      resolve(value);
+      const back = this._confirmReturnFocus;
+      this._confirmReturnFocus = null;
+      if (back && back.isConnected) back.focus();
+    };
+    ok.onclick = () => finish(true);
+    cancel.onclick = () => finish(false);
+    const buttons = () => [cancel, ok];
+    window.addEventListener('keydown', (event) => {
+      if (!this._confirmResolve) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(true);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nodes = buttons();
+      const index = nodes.indexOf(document.activeElement);
+      const next = event.shiftKey
+        ? (index <= 0 ? nodes.length - 1 : index - 1)
+        : (index < 0 || index === nodes.length - 1 ? 0 : index + 1);
+      nodes[next].focus();
+    }, true);
+    document.addEventListener('focusin', (event) => {
+      if (!this._confirmResolve || modal.contains(event.target)) return;
+      event.stopPropagation();
+      ok.focus();
+    }, true);
+  }
 
   showBanner(text, cls = '', dur = 3500) {
     this.banner.textContent = text;

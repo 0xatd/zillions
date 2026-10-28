@@ -183,6 +183,21 @@ try {
   eq((await q(`select has_function_privilege('authenticated', 'public.account_upgrade_mutate(uuid,text,text,jsonb)', 'EXECUTE') f`)).rows[0].f, false, 'upgrade RPC not callable by clients');
   eq((await q(`select has_table_privilege('authenticated', 'public.account_upgrades', 'INSERT') i`)).rows[0].i, false, 'clients cannot grant themselves upgrades');
 
+  // Ticket snapshot. Re-applying the ticket migration above restores the
+  // pre-snapshot issuer; this migration puts the owned nodes back on it.
+  await q(`update match_tickets set issued_at = now() - interval '2 minutes'`);
+  await q(read('supabase/migrations/20261028000100_match_ticket_upgrades.sql'));
+  const shot = await issue();
+  eq([...(shot.upgrades || [])], ['supply_cache', 'warband_edge', 'warband_vigor'], 'a ticket snapshots owned upgrades at issue');
+  await wallet(1000);
+  await upgrade('upg-ticket-01', 'buy', { node_id: 'command_slot' });
+  const roomB = (await q(`select public.create_manual_coop_room($1, 'Host', 'scott', 1, 'campaign', 'normal') r`, [uid])).rows[0].r;
+  const held = await issue(roomB);
+  const reused = await issue(roomB);
+  eq(reused.id, held.id, 'a room reconnect still reuses the ticket');
+  eq(reused.upgrades, held.upgrades, 'a reused ticket keeps the upgrades from issue time');
+  ok(held.upgrades.includes('command_slot') && !shot.upgrades.includes('command_slot'), 'a later purchase does not rewrite an older ticket');
+
   // Even if Supabase's default grants are re-applied, RLS has no write policy.
   const policies = (await q(`select policyname from pg_policies where tablename in ('player_stats','match_history') order by 1`)).rows.map((r) => r.policyname);
   eq(policies.filter((p) => /insert|update/.test(p)), [], 'no client write policies remain');
