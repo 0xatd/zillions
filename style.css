@@ -649,7 +649,6 @@ body::after {
 .up-node-top em { font-style: normal; color: var(--gold); font-size: 12px; font-weight: 800; }
 .up-node small { font-size: 11px; line-height: 1.35; opacity: 0.78; }
 .up-state { font-size: 10px; letter-spacing: 0.8px; font-weight: 800; opacity: 0.8; }
-.up-node.live .up-state { color: var(--good); }
 .up-node.owned .up-state { color: var(--good); }
 .up-rewire {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

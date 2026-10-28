@@ -1552,11 +1552,14 @@ export class UI {
     const live = nodeChangesMatch(node);
     const short = Math.max(0, node.cost - balance);
     const label = { owned: 'OWNED', available: 'BUY', unaffordable: `NEED ${short}`, locked: 'LOCKED' }[node.state] || 'LOCKED';
+    // ACTIVE only once it is owned. A locked siege node is not active yet.
+    // RECORDED marks a node the account keeps and a match does not read.
+    const tag = node.state === 'owned' ? (live ? 'ACTIVE' : 'RECORDED') : (live ? '' : 'RECORDED');
     const disabled = node.state !== 'available' || this._upgradeBusy;
     return `<button type="button" class="up-node ${escapeHtml(node.state)}${live ? ' live' : ''}" data-node="${escapeHtml(node.id)}" ${disabled ? 'disabled' : ''}>
       <span class="up-node-top"><span class="up-ico">${node.icon}</span><b>${escapeHtml(node.name)}</b><em>${node.cost} ${META_CURRENCY.short}</em></span>
       <small>${escapeHtml(node.desc)}</small>
-      <span class="up-state">${live ? 'ACTIVE' : 'RECORDED'} · ${label}</span>
+      <span class="up-state">${tag ? `${tag} · ${label}` : label}</span>
     </button>`;
   }
 
