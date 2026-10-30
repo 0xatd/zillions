@@ -9,6 +9,7 @@ import {
 } from './toy-props.js';
 import { propRecord } from './prop-pack.js';
 import { activeCulture } from './cultures.js';
+import { rimForm, rimMaxRadius, rimRadius } from './site-plan.js';
 
 const CHUNK = 32;
 
@@ -374,18 +375,71 @@ function colorRibbon(map, pts, halfWidth, rows, yAt) {
   return mesh;
 }
 
+function catmullRom(points, samples) {
+  if (points.length < 2) return points.map((p) => [p[0], p[1]]);
+  const src = [points[0], ...points, points[points.length - 1]];
+  const out = [];
+  for (let i = 1; i < src.length - 2; i++) {
+    const p0 = src[i - 1];
+    const p1 = src[i];
+    const p2 = src[i + 1];
+    const p3 = src[i + 2];
+    for (let s = 0; s < samples; s++) {
+      const t = s / samples;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push([
+        0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+        0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+      ]);
+    }
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+
+// A few open splines: each gate to the keep, and each war road onward to its hive.
+// No tile-graph loops.
+function roadSplines(map) {
+  const lines = [];
+  for (const site of map.sites || []) {
+    const keep = [site.x, site.z];
+    const form = site.rim ? rimForm(site.rim) : null;
+    const gates = form && form.gates && form.gates.length ? form.gates : [0, Math.PI];
+    const facing = site.rim ? site.rim.facing : 0;
+    for (const g of gates) {
+      const ang = g + facing;
+      const r = site.rim ? rimRadius(site.rim, g) + 1.5 : 18;
+      const gate = [site.x + Math.cos(ang) * r, site.z + Math.sin(ang) * r];
+      const mid = [
+        site.x + Math.cos(ang) * r * 0.45,
+        site.z + Math.sin(ang) * r * 0.45,
+      ];
+      lines.push([gate, mid, keep]);
+    }
+  }
+  for (const road of map.roadPaths || []) {
+    const pts = road.pts || [];
+    if (pts.length < 6) continue;
+    const step = Math.max(8, Math.floor(pts.length / 6));
+    const ctrl = [];
+    for (let i = 0; i < pts.length; i += step) ctrl.push([pts[i][0] + 0.5, pts[i][1] + 0.5]);
+    const last = pts[pts.length - 1];
+    const end = [last[0] + 0.5, last[1] + 0.5];
+    const prev = ctrl[ctrl.length - 1];
+    if (!prev || Math.hypot(prev[0] - end[0], prev[1] - end[1]) > 2) ctrl.push(end);
+    if (road.site) ctrl.push([road.site[0], road.site[1]]);
+    lines.push(ctrl);
+  }
+  for (const b of map.bridges || []) {
+    lines.push([[b.x0, b.z0], [(b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2], [b.x1, b.z1]]);
+  }
+  return lines;
+}
+
 export function buildRoadGroup(map) {
   const g = new THREE.Group();
   g.name = 'roads';
-  const N = map.size;
-  const isP = (x, z) => {
-    if (!map.inBounds(x, z)) return false;
-    const i = map.idx(x, z);
-    return map.tiles[i] === TILE.PATH || !!(map.swRoad && map.swRoad[i]);
-  };
-  const seen = new Uint8Array(N * N);
-  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-  const neighbours = (x, z) => dirs.filter(([dx, dz]) => isP(x + dx, z + dz));
   const STYLES = {
     european: { edge: 0x4e3422, bed: 0x8a5a34, center: 0xe0c48a, rut: 0x5c3a24 },
     asian: { edge: 0x6e6a62, bed: 0xc9c3b2, center: 0xf7f3ea, rut: 0x9a958a },
@@ -395,98 +449,55 @@ export function buildRoadGroup(map) {
   const style = STYLES[activeCulture()] || STYLES.european;
   const grass = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
   const grassLum = grass.r * 0.3 + grass.g * 0.59 + grass.b * 0.11;
-  const edge = new THREE.Color(style.edge);
-  const bed = new THREE.Color(style.bed);
-  const center = new THREE.Color(style.center);
-  const rut = new THREE.Color(style.rut);
-  // Bright ground swallows a pale road. Keep a dark trodden core and a lighter stripe.
-  if (grassLum > 0.5) {
-    edge.multiplyScalar(0.78);
-    rut.multiplyScalar(0.72);
-    bed.multiplyScalar(0.88);
-  }
+  const center = new THREE.Color(style.bed).lerp(new THREE.Color(style.center), 0.55);
+  const edge = center.clone().multiplyScalar(grassLum > 0.5 ? 0.62 : 0.78);
+  if (grassLum > 0.5) center.multiplyScalar(0.82);
   const rows = [
     { t: -1, c: edge },
-    { t: -0.72, c: bed },
-    { t: -0.4, c: rut },
-    { t: -0.16, c: center },
-    { t: 0.16, c: center },
-    { t: 0.4, c: rut },
-    { t: 0.72, c: bed },
+    { t: -0.35, c: center },
+    { t: 0.35, c: center },
     { t: 1, c: edge },
   ];
   const stones = [];
   const tufts = [];
-  for (let z = 0; z < N; z++) {
-    for (let x = 0; x < N; x++) {
-      if (!isP(x, z) || seen[map.idx(x, z)]) continue;
-      const raw = [];
-      let cx = x;
-      let cz = z;
-      let px = -999;
-      let pz = -999;
-      while (map.inBounds(cx, cz) && isP(cx, cz) && !seen[map.idx(cx, cz)]) {
-        seen[map.idx(cx, cz)] = 1;
-        raw.push([cx + 0.5, cz + 0.5]);
-        const opts = neighbours(cx, cz).filter(([dx, dz]) => cx + dx !== px || cz + dz !== pz);
-        if (!opts.length) break;
-        let pick = opts[0];
-        for (const o of opts) {
-          if (px > -100 && o[0] === cx - px && o[1] === cz - pz) pick = o;
+  const splines = roadSplines(map);
+  for (const ctrl of splines) {
+    if (ctrl.length < 2) continue;
+    const line = catmullRom(ctrl, 10);
+    if (line.length < 4) continue;
+    const mesh = colorRibbon(
+      map, line,
+      () => 0.42,
+      rows,
+      (vx, vz) => map.groundY(vx, vz) + 0.05,
+    );
+    if (mesh) g.add(mesh);
+    let arc = 0;
+    let nextStone = 3.2;
+    let nextTuft = 1.8;
+    for (let i = 1; i < line.length; i++) {
+      const p = line[i - 1];
+      const q = line[i];
+      let dx = q[0] - p[0];
+      let dz = q[1] - p[1];
+      const L = Math.hypot(dx, dz) || 1;
+      arc += L;
+      const nx = -dz / L;
+      const nz = dx / L;
+      if (arc >= nextStone) {
+        nextStone += 4.5;
+        for (const side of [-1, 1]) {
+          const ox = q[0] + nx * side * 0.55;
+          const oz = q[1] + nz * side * 0.55;
+          stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.12, ry: arc });
         }
-        px = cx;
-        pz = cz;
-        cx += pick[0];
-        cz += pick[1];
       }
-      if (raw.length < 2) continue;
-      const smooth = chaikin(raw, 4, false);
-      let arc = 0;
-      const wandered = smooth.map((p, i) => {
-        if (i) arc += Math.hypot(p[0] - smooth[i - 1][0], p[1] - smooth[i - 1][1]);
-        const prev = smooth[Math.max(0, i - 1)];
-        const next = smooth[Math.min(smooth.length - 1, i + 1)];
-        let dx = next[0] - prev[0];
-        let dz = next[1] - prev[1];
-        const L = Math.hypot(dx, dz) || 1;
-        const nx = -dz / L;
-        const nz = dx / L;
-        const wob = Math.sin(arc * 0.35 + raw[0][0] * 0.17) * 0.1;
-        return [p[0] + nx * wob, p[1] + nz * wob, arc];
-      });
-      const line = wandered.map((p) => [p[0], p[1]]);
-      const mesh = colorRibbon(
-        map, line,
-        (i) => 0.95 + 0.08 * Math.sin(i * 0.22 + raw[0][1]),
-        rows,
-        (vx, vz) => map.groundY(vx, vz) + 0.045,
-      );
-      if (mesh) g.add(mesh);
-      let nextStone = 1.6;
-      let nextTuft = 0.9;
-      for (let i = 1; i < wandered.length - 1; i++) {
-        const p = wandered[i];
-        const q = wandered[i + 1];
-        let dx = q[0] - p[0];
-        let dz = q[1] - p[1];
-        const L = Math.hypot(dx, dz) || 1;
-        const nx = -dz / L;
-        const nz = dx / L;
-        if (p[2] >= nextStone) {
-          nextStone += 2.4;
-          for (const side of [-1, 1]) {
-            const ox = p[0] + nx * side * 1.05;
-            const oz = p[1] + nz * side * 1.05;
-            stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.14 + (i % 3) * 0.03, ry: p[2] });
-          }
-        }
-        if (p[2] >= nextTuft) {
-          nextTuft += 1.3;
-          const side = (i & 1) ? 1 : -1;
-          const ox = p[0] + nx * side * 1.22;
-          const oz = p[1] + nz * side * 1.22;
-          tufts.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.3, ry: p[2] });
-        }
+      if (arc >= nextTuft) {
+        nextTuft += 2.2;
+        const side = nextTuft % 2 < 1 ? 1 : -1;
+        const ox = q[0] + nx * side * 0.62;
+        const oz = q[1] + nz * side * 0.62;
+        tufts.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.28, ry: arc });
       }
     }
   }
@@ -558,8 +569,15 @@ export function buildFoamGroup(map) {
     const closed = chain.length > 8
       && chain[0][0] === chain[chain.length - 1][0]
       && chain[0][1] === chain[chain.length - 1][1];
-    const smooth = chaikin(chain, 3, closed);
-    const ring = closed ? smooth.concat([smooth[0]]) : smooth;
+    const step = 4;
+    const ctrl = [];
+    for (let i = 0; i < chain.length; i += step) ctrl.push(chain[i]);
+    const tail = chain[chain.length - 1];
+    if (ctrl.length && (ctrl[ctrl.length - 1][0] !== tail[0] || ctrl[ctrl.length - 1][1] !== tail[1])) ctrl.push(tail);
+    if (ctrl.length < 4) continue;
+    let smooth = catmullRom(ctrl, 8);
+    if (closed && smooth.length > 2) smooth = smooth.concat([smooth[0]]);
+    const ring = smooth;
     const mesh = colorRibbon(map, ring, () => 1.15, rows, yAt);
     if (mesh) g.add(mesh);
   }
@@ -749,6 +767,11 @@ export function buildSmoothTerrain(map) {
   const dryM = blur((x, z) => (map.inBounds(x, z) && map.tiles[map.idx(x, z)] === TILE.FOREST ? 1 : 0));
   const noise = makeNoise(makeRNG((((map.seed | 0) * 13 + 7) >>> 0) || 1));
   const sites = map.sites || [];
+  const pads = sites.map((s) => ({
+    x: s.x, z: s.z,
+    r: s.rim ? rimMaxRadius(s.rim) + 6 : 28,
+  }));
+  const inCity = (x, z) => pads.some((p) => Math.hypot(x - p.x, z - p.z) < p.r);
   const nearest = (x, z) => {
     let best = 1e9;
     for (const s of sites) best = Math.min(best, Math.hypot(x - s.x, z - s.z));
@@ -775,10 +798,35 @@ export function buildSmoothTerrain(map) {
         hill = Math.max(-0.28, Math.min(1.45, n * 3.1)) * mask;
       }
       const land = map.groundY(x, z) + hill;
-      const shore = smoothstep(0.2, 0.62, w);
+      // The city pad, including its rampart, stays at the terrace height.
+      // Only the open coast sinks into the water, and it does so on a curve.
+      const shore = inCity(x, z) ? smoothstep(0.78, 0.95, w) * 0.2 : smoothstep(0.16, 0.55, w);
       heights[j * V + i] = land * (1 - shore) + (-0.4) * shore;
     }
   }
+  const rounded = new Float32Array(heights.length);
+  const BR = 5;
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const id = j * V + i;
+      if (heights[id] < -0.12) { rounded[id] = heights[id]; continue; }
+      let acc = 0;
+      let wt = 0;
+      for (let dz = -BR; dz <= BR; dz++) {
+        for (let dx = -BR; dx <= BR; dx++) {
+          const ii = Math.max(0, Math.min(G, i + dx));
+          const jj = Math.max(0, Math.min(G, j + dz));
+          const h = heights[jj * V + ii];
+          if (h < -0.2) continue;
+          const wgt = 1 / (1 + dx * dx + dz * dz);
+          acc += h * wgt;
+          wt += wgt;
+        }
+      }
+      rounded[id] = wt ? acc / wt : heights[id];
+    }
+  }
+  heights.set(rounded);
   map._visualH = { data: heights, sub: SUB, n: G };
   const meadow = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
   const dry = meadow.clone().lerp(new THREE.Color(map.theme?.palette?.sand ?? 0xcbb892), 0.42);

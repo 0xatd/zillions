@@ -3949,7 +3949,7 @@ class App {
       const tiles = p.tiles || [];
       const arch = new Set((p.arch || []).map(([x, z]) => `${x},${z}`));
       for (const [x, z] of tiles) {
-        const gy = this.map.groundY(x + 0.5, z + 0.5);
+        const gy = Math.max(0.42, this.map.groundY(x + 0.5, z + 0.5)) + 0.08;
         let nx = 1, nz = 0;
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           if (tiles.some(([tx, tz]) => tx === x + dx && tz === z + dz)) { nx = dx; nz = dz; break; }
@@ -3975,6 +3975,7 @@ class App {
       const mesh = new THREE.InstancedMesh(geo, toyMat({ color, flatShading: true }), items.length);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
       if (shared) geo.userData.kitShared = true;
       const m = new THREE.Matrix4();
       const q = new THREE.Quaternion();
@@ -3990,7 +3991,7 @@ class App {
     };
     if (wallPack && postPack) {
       const part = (rec) => rec.parts[0].geometry;
-      addInst(part(wallPack), curtains, stoneTint, 1.02 / wallPack.span, 1.85 / wallPack.height, 1.02 / wallPack.span, true);
+      addInst(part(wallPack), curtains, stoneTint, 1.02 / wallPack.span, 2.45 / wallPack.height, 1.02 / wallPack.span, true);
       addInst(part(postPack), towers, stoneTint, 0.9 / postPack.span, 2.35 / postPack.height, 0.9 / postPack.span, true);
       if (capPack) {
         addInst(part(capPack), towers.map((t) => ({ ...t, y: t.y + 2.15 })), roofTint, 1.05 / capPack.span, 0.7 / capPack.height, 1.05 / capPack.span, true);
