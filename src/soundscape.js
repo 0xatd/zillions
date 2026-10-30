@@ -3,12 +3,14 @@
 
 import {
   CUES, MUSIC_IDS, AMBIENT_IDS, STINGER_IDS,
-  distanceGain, pitchScale, clamp01,
+  stereoPlacement, pitchScale, clamp01,
 } from './audio-score.js';
 
-const BED = { master: 0.8, music: 0.42, sfx: 0.9, ambient: 0.5, ui: 0.65 };
-const POOL = 24;
-const MUSIC_FADE = 1.35;
+// Files are loudness-matched, so bus trims stay near unity. The limiter
+// catches stacked SFX. Ambient files sit at about -22 LUFS under the -16 bed.
+const BED = { master: 1, music: 1, sfx: 0.9, ambient: 0.8, ui: 1 };
+const POOL = 28;
+const MUSIC_FADE = 1.8;
 const AMBIENT_FADE = 1.6;
 
 export class Soundscape {
@@ -45,11 +47,25 @@ export class Soundscape {
     if (!AC) { this._finish(false); return false; }
     this.ctx = new AC();
     const master = this.ctx.createGain();
-    master.connect(this.ctx.destination);
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -2;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.002;
+    limiter.release.value = 0.18;
+    master.connect(limiter);
+    limiter.connect(this.ctx.destination);
     this.buses = { master };
+    this.duckGain = this.ctx.createGain();
+    this.duckGain.gain.value = 1;
     for (const name of ['music', 'sfx', 'ambient', 'ui']) {
       const g = this.ctx.createGain();
-      g.connect(master);
+      if (name === 'music') {
+        g.connect(this.duckGain);
+        this.duckGain.connect(master);
+      } else {
+        g.connect(master);
+      }
       this.buses[name] = g;
     }
     this.slots = {
@@ -101,7 +117,7 @@ export class Soundscape {
         this.cueCounts.set(id, n);
       }
       await Promise.all(jobs);
-      const hasBed = ['menu', 'build', 'combat'].every((id) => this.buffers.has('music:' + id));
+      const hasBed = ['menu', 'select', 'build', 'combat'].every((id) => this.buffers.has('music:' + id));
       this._finish(hasBed);
     } catch (err) {
       console.warn('soundscape load failed', err);
@@ -143,9 +159,24 @@ export class Soundscape {
     }
   }
 
-  setListener(x, z) {
+  setListener(x, z, yaw = 0) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
-    this.listener = { x, z };
+    this.listener = { x, z, yaw: Number.isFinite(yaw) ? yaw : 0 };
+  }
+
+  // Drop the music bed under a wave horn, a boss, or a keep hit, then ease back.
+  duck(hold = 1.2, floor = 0.34) {
+    const tLog = this.logTime || 0;
+    this._record({ t: tLog, type: 'duck', hold, floor });
+    if (!this.ctx || !this.duckGain) return;
+    const t = this.ctx.currentTime;
+    const g = this.duckGain.gain;
+    g.cancelScheduledValues(t);
+    const now = Math.max(0.0001, g.value);
+    g.setValueAtTime(now, t);
+    g.linearRampToValueAtTime(floor, t + 0.05);
+    g.setValueAtTime(floor, t + 0.05 + hold);
+    g.linearRampToValueAtTime(1, t + 0.05 + hold + 0.75);
   }
 
   setLogTime(t) { this.logTime = t; }
@@ -208,64 +239,102 @@ export class Soundscape {
     if (!spec) return false;
     const count = this.cueCounts.get(id) || 0;
     if (!count) return false;
-    const index = (Math.random() * count) | 0;
+    const stamp = this.recording ? (this.logTime || 0) : (this.ctx ? this.ctx.currentTime : 0);
+    if (spec.cooldown && stamp - (this._last[id] || -999) < spec.cooldown) return true;
+    let index = (Math.random() * count) | 0;
+    if (count > 1 && index === this._lastVar?.[id]) index = (index + 1 + ((Math.random() * (count - 1)) | 0)) % count;
+    this._lastVar = this._lastVar || {};
+    this._lastVar[id] = index;
     const key = `cue:${id}:${index}`;
     const buffer = this.buffers.get(key);
     if (!buffer) return false;
-    const stamp = this.recording ? (this.logTime || 0) : (this.ctx ? this.ctx.currentTime : 0);
-    if (spec.cooldown && stamp - (this._last[id] || -999) < spec.cooldown) return true;
-    this._last[id] = stamp;
     const jitter = opts.pitch != null ? opts.pitch : (spec.pitch || 0);
     const rate = Math.max(0.5, Math.min(2, (opts.rate || 1) * (jitter ? pitchScale(Math.random, jitter) : 1)));
+    const dur = buffer.duration / rate;
+    if (spec.voices && this._overlapping(id, stamp, dur) >= spec.voices) return true;
+    this._last[id] = stamp;
     let gain = spec.gain * (opts.gain || 1);
+    const volJ = spec.vol || 0;
+    if (volJ) gain *= 1 + (Math.random() * 2 - 1) * volJ;
     let cutoff = 0;
+    let pan = 0;
     const positional = spec.positional !== false && opts.x != null && opts.z != null && this.listener;
     if (positional) {
-      const d = Math.hypot(opts.x - this.listener.x, opts.z - this.listener.z);
-      gain *= distanceGain(d);
-      cutoff = Math.max(700, 9000 - d * 160);
+      const place = stereoPlacement(opts.x, opts.z, this.listener);
+      gain *= place.gain;
+      pan = place.pan;
+      cutoff = Math.max(650, 8800 - place.dist * 150);
     }
+    gain = Math.max(0.0001, gain);
     const delay = Math.max(0, opts.delay || 0);
     this._record({
-      t: (this.logTime || 0) + delay,
+      t: stamp + delay,
       type: 'cue',
       id,
       bus: spec.bus,
       gain,
       rate,
+      pan,
       cutoff,
+      dur,
       bufferKey: key,
     });
     if (!this.ctx || this.muted) return true;
-    this._voice(buffer, spec.bus, gain, rate, cutoff, delay);
+    this._voice(buffer, id, spec.bus, gain, rate, pan, cutoff, delay, dur);
     return true;
   }
 
-  _voice(buffer, bus, gain, rate, cutoff, delay) {
+  _overlapping(id, stamp, dur) {
+    if (this.recording) {
+      let n = 0;
+      for (const ev of this.recording.events) {
+        if (ev.type !== 'cue' || ev.id !== id) continue;
+        const end = ev.t + (ev.dur || 0.3);
+        if (ev.t <= stamp && end > stamp) n++;
+      }
+      return n;
+    }
     this._reap();
-    if (this.voices.length >= POOL) {
-      const old = this.voices.shift();
-      try { old.src.stop(); } catch { /* already ended */ }
+    let n = 0;
+    for (const v of this.voices) if (v.id === id) n++;
+    return n;
+  }
+
+  _voice(buffer, id, bus, gain, rate, pan, cutoff, delay, dur) {
+    this._reap();
+    const oneShots = this.voices.filter((v) => v.bus !== 'bed');
+    if (oneShots.length >= POOL) {
+      const old = this.voices.find((v) => v.bus !== 'bed');
+      if (old) {
+        try { old.src.stop(); } catch { /* already ended */ }
+        this.voices = this.voices.filter((v) => v !== old);
+      }
     }
     const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.playbackRate.setValueAtTime(rate, t);
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(Math.max(0.0001, gain), t);
+    g.gain.setValueAtTime(gain, t);
+    let node = src;
     if (cutoff) {
       const lp = this.ctx.createBiquadFilter();
       lp.type = 'lowpass';
       lp.frequency.setValueAtTime(cutoff, t);
-      src.connect(lp).connect(g);
-    } else {
-      src.connect(g);
+      node.connect(lp);
+      node = lp;
     }
+    if (pan && this.ctx.createStereoPanner) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime(pan, t);
+      node.connect(panner);
+      node = panner;
+    }
+    node.connect(g);
     g.connect(this.buses[bus] || this.buses.sfx);
     src.start(t);
-    const dur = buffer.duration / rate;
     src.stop(t + dur + 0.05);
-    this._track({ src, end: t + dur + 0.1, bus });
+    this.voices.push({ src, id, end: t + dur + 0.1, bus });
   }
 
   _track(voice) { this.voices.push(voice); }
@@ -287,15 +356,30 @@ export class Soundscape {
     const ctx = new OfflineAudioContext(2, length, rate);
     const master = ctx.createGain();
     master.gain.value = this.muted ? 0 : BED.master * this.volumes.master;
-    master.connect(ctx.destination);
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -2;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.002;
+    limiter.release.value = 0.18;
+    master.connect(limiter);
+    limiter.connect(ctx.destination);
     const buses = {};
+    const duck = ctx.createGain();
+    duck.gain.value = 1;
     for (const name of ['music', 'sfx', 'ambient', 'ui']) {
       const g = ctx.createGain();
       g.gain.value = BED[name] * this.volumes[name];
-      g.connect(master);
+      if (name === 'music') {
+        g.connect(duck);
+        duck.connect(master);
+      } else {
+        g.connect(master);
+      }
       buses[name] = g;
     }
     const events = (this.recording?.events || []).slice().sort((a, b) => a.t - b.t);
+    this._scheduleDucks(duck, events.filter((e) => e.type === 'duck'), duration);
     this._scheduleBed(ctx, buses.music, events.filter((e) => e.type === 'music'), duration, true);
     this._scheduleBed(ctx, buses.ambient, events.filter((e) => e.type === 'ambient'), duration, false);
     for (const ev of events) {
@@ -307,19 +391,45 @@ export class Soundscape {
       src.playbackRate.value = ev.rate || 1;
       const g = ctx.createGain();
       g.gain.setValueAtTime(Math.max(0.0001, ev.gain || 0.2), ev.t);
+      let node = src;
       if (ev.cutoff) {
         const lp = ctx.createBiquadFilter();
         lp.type = 'lowpass';
         lp.frequency.setValueAtTime(ev.cutoff, ev.t);
-        src.connect(lp).connect(g);
-      } else {
-        src.connect(g);
+        node.connect(lp);
+        node = lp;
       }
+      if (ev.pan && ctx.createStereoPanner) {
+        const panner = ctx.createStereoPanner();
+        panner.pan.setValueAtTime(ev.pan, ev.t);
+        node.connect(panner);
+        node = panner;
+      }
+      node.connect(g);
       g.connect(buses[ev.bus] || buses.sfx);
       src.start(ev.t);
       src.stop(Math.min(duration, ev.t + buffer.duration / (ev.rate || 1) + 0.02));
     }
     return ctx.startRendering();
+  }
+
+  _scheduleDucks(duck, events, duration) {
+    let cursor = 0;
+    for (const ev of events) {
+      const start = Math.max(ev.t, cursor);
+      if (start >= duration) break;
+      const floor = ev.floor ?? 0.34;
+      const hold = ev.hold ?? 1.2;
+      const down = start + 0.05;
+      const up = Math.min(duration, down + hold);
+      const done = Math.min(duration, up + 0.75);
+      if (down <= start || done <= up) continue;
+      duck.gain.setValueAtTime(1, start);
+      duck.gain.linearRampToValueAtTime(floor, down);
+      duck.gain.setValueAtTime(floor, up);
+      duck.gain.linearRampToValueAtTime(1, done);
+      cursor = done;
+    }
   }
 
   _scheduleBed(ctx, bus, events, duration, music) {

@@ -135,7 +135,7 @@ async function main() {
 
   const mp4 = path.join(OUT, 'gameplay.mp4');
   await new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
+    const ff = spawn('/usr/bin/ffmpeg', [
       '-y',
       '-framerate', '30',
       '-i', path.join(frameDir, '%04d.jpg'),

@@ -14,10 +14,10 @@ export function biomeAmbient(terrainKind) {
   return BIOME_AMBIENT[terrainKind] || 'meadow';
 }
 
-// Menu while no match is running. Build while founding or while the field is
-// quiet. Combat once the horde is engaged. Victory and defeat are stingers.
+// Menu on the title. Select on the planet / mission picker. Build while the
+// field is quiet. Combat once the horde is engaged. Victory and defeat sting.
 export function selectMusic(scene) {
-  if (!scene || !scene.inMatch) return 'menu';
+  if (!scene || !scene.inMatch) return scene?.screen === 'select' ? 'select' : 'menu';
   if (scene.over) return scene.won ? 'victory' : 'defeat';
   if (scene.phase === 'found') return 'build';
   return scene.combat ? 'combat' : 'build';
@@ -46,44 +46,67 @@ export function pitchScale(rand, amount = 0.06) {
   return 1 + (u * 2 - 1) * span;
 }
 
+// Camera-relative gain and stereo pan. yaw 0 looks toward -Z; +pan is screen right.
+// Sounds outside the view cone are quieter than sounds under the camera.
+export function stereoPlacement(sx, sz, cam, {
+  minDist = 7, maxDist = 48, minGain = 0.04, offscreen = 0.22,
+} = {}) {
+  if (!cam || !Number.isFinite(sx) || !Number.isFinite(sz)) return { gain: 1, pan: 0, dist: 0 };
+  const dx = sx - cam.x;
+  const dz = sz - cam.z;
+  const dist = Math.hypot(dx, dz);
+  let gain = distanceGain(dist, { minDist, maxDist, minGain });
+  const look = Math.atan2(-Math.sin(cam.yaw || 0), -Math.cos(cam.yaw || 0));
+  const bearing = Math.atan2(dx, dz);
+  const rel = Math.atan2(Math.sin(bearing - look), Math.cos(bearing - look));
+  const pan = Math.max(-1, Math.min(1, -Math.sin(rel)));
+  const abs = Math.abs(rel);
+  const edge = 0.42;
+  const full = 1.05;
+  if (abs >= full) gain *= offscreen;
+  else if (abs > edge) gain *= 1 - (1 - offscreen) * ((abs - edge) / (full - edge));
+  return { gain, pan, dist };
+}
+
 export function clamp01(v, fallback = 1) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(1, Math.max(0, n));
 }
 
-// bus, linear gain, pitch jitter (fraction), cooldown seconds, positional.
+// Files are already peak-normalized, so these gains are mix trims.
+// voices caps how many of that cue may overlap. vol is the loudness jitter.
 export const CUES = {
-  'ui.click': { bus: 'ui', gain: 0.42, pitch: 0.02, cooldown: 0.045, positional: false },
-  'ui.hover': { bus: 'ui', gain: 0.18, pitch: 0.03, cooldown: 0.04, positional: false },
-  'ui.deny': { bus: 'ui', gain: 0.34, pitch: 0, cooldown: 0.08, positional: false },
-  'build.place': { bus: 'sfx', gain: 0.55, pitch: 0.05, cooldown: 0.05, positional: true },
-  'build.upgrade': { bus: 'sfx', gain: 0.5, pitch: 0.03, cooldown: 0.08, positional: true },
-  'build.demolish': { bus: 'sfx', gain: 0.6, pitch: 0.04, cooldown: 0.08, positional: true },
-  'coin': { bus: 'sfx', gain: 0.32, pitch: 0.015, cooldown: 0.02, positional: true },
-  'hero.step': { bus: 'sfx', gain: 0.28, pitch: 0.07, cooldown: 0.16, positional: true },
-  'attack.melee': { bus: 'sfx', gain: 0.4, pitch: 0.06, cooldown: 0.05, positional: true },
-  'attack.hero': { bus: 'sfx', gain: 0.38, pitch: 0.05, cooldown: 0.04, positional: true },
-  'attack.shotgun': { bus: 'sfx', gain: 0.5, pitch: 0.04, cooldown: 0.06, positional: true },
-  'shot.ranger': { bus: 'sfx', gain: 0.32, pitch: 0.05, cooldown: 0.03, positional: true },
-  'shot.soldier': { bus: 'sfx', gain: 0.34, pitch: 0.05, cooldown: 0.03, positional: true },
-  'shot.sniper': { bus: 'sfx', gain: 0.46, pitch: 0.03, cooldown: 0.05, positional: true },
-  'shot.tower': { bus: 'sfx', gain: 0.36, pitch: 0.045, cooldown: 0.03, positional: true },
-  'shot.ballista': { bus: 'sfx', gain: 0.48, pitch: 0.03, cooldown: 0.05, positional: true },
-  'shot.flame': { bus: 'sfx', gain: 0.4, pitch: 0.04, cooldown: 0.04, positional: true },
-  'shot.outpost': { bus: 'sfx', gain: 0.36, pitch: 0.04, cooldown: 0.04, positional: true },
-  'shot.outpostSiege': { bus: 'sfx', gain: 0.5, pitch: 0.03, cooldown: 0.06, positional: true },
-  'impact.hit': { bus: 'sfx', gain: 0.3, pitch: 0.06, cooldown: 0.03, positional: true },
-  'impact.flame': { bus: 'sfx', gain: 0.42, pitch: 0.04, cooldown: 0.05, positional: true },
-  'keep.hit': { bus: 'sfx', gain: 0.46, pitch: 0.04, cooldown: 0.08, positional: true },
-  'zombie.groan': { bus: 'sfx', gain: 0.34, pitch: 0.08, cooldown: 1.15, positional: true },
-  'zombie.attack': { bus: 'sfx', gain: 0.4, pitch: 0.06, cooldown: 0.12, positional: true },
-  'zombie.death': { bus: 'sfx', gain: 0.4, pitch: 0.07, cooldown: 0.05, positional: true },
-  'wave.horn': { bus: 'sfx', gain: 0.62, pitch: 0.02, cooldown: 0.4, positional: false },
-  'ability.generic': { bus: 'sfx', gain: 0.48, pitch: 0.04, cooldown: 0.08, positional: true },
-  'ability.magic': { bus: 'sfx', gain: 0.46, pitch: 0.03, cooldown: 0.08, positional: true },
-  'ability.blast': { bus: 'sfx', gain: 0.58, pitch: 0.03, cooldown: 0.1, positional: true },
-  'ability.hook': { bus: 'sfx', gain: 0.44, pitch: 0.04, cooldown: 0.08, positional: true },
+  'ui.click': { bus: 'ui', gain: 0.7, pitch: 0.015, vol: 0.06, cooldown: 0.04, voices: 2, positional: false },
+  'ui.hover': { bus: 'ui', gain: 0.45, pitch: 0.02, vol: 0.08, cooldown: 0.035, voices: 1, positional: false },
+  'ui.deny': { bus: 'ui', gain: 0.6, pitch: 0, vol: 0, cooldown: 0.08, voices: 1, positional: false },
+  'build.place': { bus: 'sfx', gain: 0.95, pitch: 0.04, vol: 0.08, cooldown: 0.06, voices: 2, positional: true },
+  'build.upgrade': { bus: 'sfx', gain: 1, pitch: 0.03, vol: 0.06, cooldown: 0.08, voices: 2, positional: true },
+  'build.demolish': { bus: 'sfx', gain: 0.9, pitch: 0.04, vol: 0.08, cooldown: 0.08, voices: 2, positional: true },
+  'coin': { bus: 'sfx', gain: 0.55, pitch: 0.02, vol: 0.08, cooldown: 0.03, voices: 3, positional: true },
+  'hero.step': { bus: 'sfx', gain: 0.5, pitch: 0.07, vol: 0.12, cooldown: 0.18, voices: 2, positional: true },
+  'attack.melee': { bus: 'sfx', gain: 0.72, pitch: 0.06, vol: 0.1, cooldown: 0.04, voices: 3, positional: true },
+  'attack.hero': { bus: 'sfx', gain: 0.68, pitch: 0.05, vol: 0.1, cooldown: 0.04, voices: 3, positional: true },
+  'attack.shotgun': { bus: 'sfx', gain: 0.8, pitch: 0.04, vol: 0.08, cooldown: 0.06, voices: 2, positional: true },
+  'shot.ranger': { bus: 'sfx', gain: 0.55, pitch: 0.06, vol: 0.1, cooldown: 0.03, voices: 3, positional: true },
+  'shot.soldier': { bus: 'sfx', gain: 0.58, pitch: 0.06, vol: 0.1, cooldown: 0.03, voices: 3, positional: true },
+  'shot.sniper': { bus: 'sfx', gain: 0.75, pitch: 0.03, vol: 0.08, cooldown: 0.05, voices: 2, positional: true },
+  'shot.tower': { bus: 'sfx', gain: 0.6, pitch: 0.05, vol: 0.1, cooldown: 0.03, voices: 4, positional: true },
+  'shot.ballista': { bus: 'sfx', gain: 0.78, pitch: 0.03, vol: 0.08, cooldown: 0.05, voices: 2, positional: true },
+  'shot.flame': { bus: 'sfx', gain: 0.66, pitch: 0.05, vol: 0.1, cooldown: 0.04, voices: 3, positional: true },
+  'shot.outpost': { bus: 'sfx', gain: 0.6, pitch: 0.05, vol: 0.1, cooldown: 0.04, voices: 3, positional: true },
+  'shot.outpostSiege': { bus: 'sfx', gain: 0.8, pitch: 0.03, vol: 0.08, cooldown: 0.06, voices: 2, positional: true },
+  'impact.hit': { bus: 'sfx', gain: 0.5, pitch: 0.08, vol: 0.14, cooldown: 0.02, voices: 4, positional: true },
+  'impact.flame': { bus: 'sfx', gain: 0.62, pitch: 0.05, vol: 0.1, cooldown: 0.04, voices: 3, positional: true },
+  'keep.hit': { bus: 'sfx', gain: 0.85, pitch: 0.05, vol: 0.1, cooldown: 0.09, voices: 2, positional: true },
+  'zombie.groan': { bus: 'sfx', gain: 0.55, pitch: 0.09, vol: 0.12, cooldown: 0.45, voices: 3, positional: true },
+  'zombie.attack': { bus: 'sfx', gain: 0.62, pitch: 0.07, vol: 0.12, cooldown: 0.05, voices: 4, positional: true },
+  'zombie.death': { bus: 'sfx', gain: 0.62, pitch: 0.08, vol: 0.14, cooldown: 0.02, voices: 4, positional: true },
+  'wave.horn': { bus: 'sfx', gain: 0.9, pitch: 0.02, vol: 0.04, cooldown: 0.5, voices: 1, positional: false },
+  'ability.generic': { bus: 'sfx', gain: 0.75, pitch: 0.04, vol: 0.08, cooldown: 0.08, voices: 2, positional: true },
+  'ability.magic': { bus: 'sfx', gain: 0.72, pitch: 0.04, vol: 0.08, cooldown: 0.08, voices: 2, positional: true },
+  'ability.blast': { bus: 'sfx', gain: 0.85, pitch: 0.03, vol: 0.06, cooldown: 0.1, voices: 2, positional: true },
+  'ability.hook': { bus: 'sfx', gain: 0.7, pitch: 0.04, vol: 0.08, cooldown: 0.08, voices: 2, positional: true },
 };
 
 export const SHOT_CUES = {
@@ -151,6 +174,6 @@ export function abilityCue(key) {
   return ABILITY_CUES[key] || 'ability.generic';
 }
 
-export const MUSIC_IDS = ['menu', 'build', 'combat', 'victory', 'defeat'];
+export const MUSIC_IDS = ['menu', 'select', 'build', 'combat', 'victory', 'defeat'];
 export const AMBIENT_IDS = ['meadow', 'swamp', 'volcanic', 'snow', 'valley'];
 export const STINGER_IDS = new Set(['victory', 'defeat']);

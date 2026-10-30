@@ -234,6 +234,10 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openCampaignSelect(),
+      onScreen: (name) => {
+        this._audioScreen = (name === 'setup' || name === 'solo') ? 'select' : 'menu';
+        if (!this.game) this.audio.setScene({ inMatch: false, screen: this._audioScreen });
+      },
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -5286,8 +5290,7 @@ class App {
           this.spawnCorpse(e);
           this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
           this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
-          this.deathSfxT -= 1;
-          if (this.deathSfxT <= 0) { this.audio.zombieDeath(e.x, e.z); this.deathSfxT = 2; }
+          this.audio.zombieDeath(e.x, e.z);
           break;
         case 'bite':
           this.audio.zombieAttack(e.x, e.z);
@@ -5385,7 +5388,7 @@ class App {
           break;
         case 'spit':
           this.bhitSfxT -= 1;
-          if (this.bhitSfxT <= 0) { this.audio.hitBuilding(e.x, e.z); this.bhitSfxT = 4; }
+          this.audio.hitBuilding(e.x, e.z);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
           this._spawnProjectile(e, {
             kind: 'spit',
@@ -5429,7 +5432,7 @@ class App {
           break;
         case 'bhit':
           this.bhitSfxT -= 1;
-          if (this.bhitSfxT <= 0) { this.audio.hitBuilding(e.x, e.z); this.bhitSfxT = 4; }
+          this.audio.hitBuilding(e.x, e.z);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.75, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this._buildingHitCue(e.x, e.z);
@@ -5669,7 +5672,11 @@ class App {
       phase: g.phase,
       aggro: g.aggroCount?.() || 0,
       biome: this.map?.terrainKind,
-      listener: h ? { x: h.x, z: h.z } : null,
+      listener: {
+        x: this.camera.position.x,
+        z: this.camera.position.z,
+        yaw: this.camYaw || 0,
+      },
     });
   }
 
@@ -5688,7 +5695,7 @@ class App {
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
-    if (!this.game) this.audio.setScene({ inMatch: false });
+    if (!this.game) this.audio.setScene({ inMatch: false, screen: this._audioScreen || 'menu' });
 
     if (this.game) {
       this._updateHeroInput();

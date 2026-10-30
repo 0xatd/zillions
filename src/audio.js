@@ -141,6 +141,13 @@ export class AudioSys {
     return this.scape.recording ? (this.scape.logTime || 0) : performance.now() / 1000;
   }
 
+  duck(hold = 1.2, floor = 0.34) {
+    const t = this._nowSec();
+    if (t - (this._duckAt || -99) < 0.65) return;
+    this._duckAt = t;
+    this.scape.duck(hold, floor);
+  }
+
   forceCombat(seconds) {
     const hold = Math.max(0, seconds);
     if (this.scape.recording) this._combatUntilLog = (this.scape.logTime || 0) + hold;
@@ -156,7 +163,7 @@ export class AudioSys {
     this._combat = nextCombat(this._combat, aggro);
     const music = selectMusic({ ...scene, combat: this._combat });
     this._sceneMusic = music;
-    if (scene.listener) this.scape.setListener(scene.listener.x, scene.listener.z);
+    if (scene.listener) this.scape.setListener(scene.listener.x, scene.listener.z, scene.listener.yaw || 0);
     this._pendingAmbient = scene.inMatch ? biomeAmbient(scene.biome) : null;
     if (!this._samplesReady) return;
     this._stopPad();
@@ -272,6 +279,7 @@ export class AudioSys {
   }
 
   bossHorn() {
+    this.duck(2.1, 0.24);
     if (this._sample('wave.horn')) return;
     this._tone(1.2, { freq: 65, type: 'sawtooth', gain: 0.18, slide: -15, attack: 0.05 });
     this._tone(1.2, { freq: 98, type: 'sawtooth', gain: 0.12, slide: -20, attack: 0.08 });
@@ -379,7 +387,7 @@ export class AudioSys {
 
   groan(x, z) {
     const t = this._nowSec();
-    if (t - (this._groanSec || 0) < 1.4) return;
+    if (t - (this._groanSec || 0) < 0.32) return;
     this._groanSec = t;
     if (this._sample('zombie.groan', { x, z })) return;
     const f = 70 + Math.random() * 50;
@@ -405,6 +413,7 @@ export class AudioSys {
   }
 
   hitBuilding(x, z) {
+    this.duck(0.5, 0.5);
     if (this._sample('keep.hit', { x, z })) return;
     this._noise(0.09, { freq: 260, q: 1.4, gain: 0.08, type: 'lowpass' });
   }
@@ -453,6 +462,7 @@ export class AudioSys {
 
   alarm() {
     this.forceCombat(8);
+    this.duck(1.7, 0.28);
     if (this._sample('wave.horn')) return;
     for (let i = 0; i < 3; i++) {
       const t0 = i * 0.55;

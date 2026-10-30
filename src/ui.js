@@ -453,7 +453,7 @@ export class UI {
                   <b id="set-music-val">100%</b>
                 </label>
                 <label class="setrow">
-                  <span>Effects</span>
+                  <span>SFX</span>
                   <input type="range" id="set-sfx" min="0" max="100" value="100">
                   <b id="set-sfx-val">100%</b>
                 </label>
@@ -967,6 +967,7 @@ export class UI {
     for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
+    if (this.cb.onScreen) this.cb.onScreen(name);
   }
 
   _backOverlay(fallback = 'main') {

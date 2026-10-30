@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   BIOME_AMBIENT, CUES, MUSIC_IDS, AMBIENT_IDS,
-  biomeAmbient, selectMusic, nextCombat, distanceGain, pitchScale, clamp01,
+  biomeAmbient, selectMusic, nextCombat, distanceGain, pitchScale, clamp01, stereoPlacement,
   shotCue, proceduralShotKind, abilityCue,
 } from '../src/audio-score.js';
 import { Game } from '../src/game.js';
@@ -11,9 +11,10 @@ import { TerrainField } from '../src/terrain.js';
 import { SIM_DT, levelById } from '../src/config.js';
 import { stateHash } from '../src/lockstep-hash.js';
 
-test('music follows menu, build, combat, and the stingers', () => {
+test('music follows menu, planet select, build, combat, and the stingers', () => {
   assert.equal(selectMusic(null), 'menu');
   assert.equal(selectMusic({ inMatch: false }), 'menu');
+  assert.equal(selectMusic({ inMatch: false, screen: 'select' }), 'select');
   assert.equal(selectMusic({ inMatch: true, phase: 'found' }), 'build');
   assert.equal(selectMusic({ inMatch: true, phase: 'live', combat: false }), 'build');
   assert.equal(selectMusic({ inMatch: true, phase: 'live', combat: true }), 'combat');
@@ -42,6 +43,27 @@ test('pitch scale stays inside the jitter window', () => {
   assert.equal(pitchScale(1, 0.06), 1.06);
   assert.equal(pitchScale(0.5, 0.06), 1);
   assert.equal(pitchScale(() => 0.25, 0), 1);
+});
+
+test('stereo pan follows the camera and quiets off-screen sounds', () => {
+  const cam = { x: 0, z: 0, yaw: 0 };
+  const center = stereoPlacement(0, -8, cam);
+  assert.ok(Math.abs(center.pan) < 0.2, 'a sound in front stays near center');
+  assert.ok(center.gain > 0.8);
+  const right = stereoPlacement(12, -8, cam);
+  assert.ok(right.pan > 0.4, 'screen-right is positive pan');
+  const behind = stereoPlacement(0, 20, cam);
+  assert.ok(behind.gain < center.gain * 0.5, 'behind the camera is quieter');
+  const far = stereoPlacement(0, -80, cam);
+  assert.ok(far.gain <= 0.05);
+});
+
+test('hits, deaths and footsteps ship at least three variations', async () => {
+  const index = JSON.parse(await readFile(new URL('../assets/audio/cc0/index.json', import.meta.url), 'utf8'));
+  for (const id of ['impact.hit', 'zombie.death', 'hero.step', 'build.place']) {
+    assert.ok(index.cues[id].length >= 3, id);
+  }
+  assert.ok(index.music.select);
 });
 
 test('biome loops cover the five campaign landforms', () => {

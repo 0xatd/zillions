@@ -4,7 +4,8 @@
     "build": "music/build.ogg",
     "combat": "music/combat.ogg",
     "victory": "music/victory.ogg",
-    "defeat": "music/defeat.ogg"
+    "defeat": "music/defeat.ogg",
+    "select": "music/select.ogg"
   },
   "ambient": {
     "meadow": "ambient/meadow.ogg",
@@ -27,7 +28,8 @@
     ],
     "build.place": [
       "sfx/build-0.ogg",
-      "sfx/build-1.ogg"
+      "sfx/build-1.ogg",
+      "sfx/build-2.ogg"
     ],
     "build.upgrade": [
       "sfx/upgrade.ogg"
@@ -43,11 +45,13 @@
       "sfx/step-0.ogg",
       "sfx/step-1.ogg",
       "sfx/step-2.ogg",
-      "sfx/step-3.ogg"
+      "sfx/step-3.ogg",
+      "sfx/step-4.ogg"
     ],
     "attack.melee": [
       "sfx/melee-0.ogg",
-      "sfx/melee-1.ogg"
+      "sfx/melee-1.ogg",
+      "sfx/melee-2.ogg"
     ],
     "attack.hero": [
       "sfx/hero-0.ogg",
@@ -86,14 +90,18 @@
     ],
     "impact.hit": [
       "sfx/impact-0.ogg",
-      "sfx/impact-1.ogg"
+      "sfx/impact-1.ogg",
+      "sfx/impact-2.ogg",
+      "sfx/impact-3.ogg",
+      "sfx/impact-4.ogg"
     ],
     "impact.flame": [
       "sfx/impact-flame.ogg"
     ],
     "keep.hit": [
       "sfx/keep-0.ogg",
-      "sfx/keep-1.ogg"
+      "sfx/keep-1.ogg",
+      "sfx/keep-2.ogg"
     ],
     "zombie.groan": [
       "sfx/zombie-groan-0.ogg",
@@ -105,12 +113,16 @@
     "zombie.attack": [
       "sfx/zombie-attack-0.ogg",
       "sfx/zombie-attack-1.ogg",
-      "sfx/punch-0.ogg"
+      "sfx/zombie-attack-2.ogg",
+      "sfx/punch-0.ogg",
+      "sfx/punch-1.ogg"
     ],
     "zombie.death": [
       "sfx/zombie-death-0.ogg",
       "sfx/zombie-death-1.ogg",
-      "sfx/zombie-death-2.ogg"
+      "sfx/zombie-death-2.ogg",
+      "sfx/zombie-death-3.ogg",
+      "sfx/zombie-death-4.ogg"
     ],
     "wave.horn": [
       "sfx/horn-0.ogg",
