@@ -275,21 +275,14 @@ export class TacticalVisuals {
   }
 
   setSelection(objects, color = 0xffdf72) {
-    this.outline.selectedObjects = this.quality === 'high' ? objects.filter(Boolean) : [];
+    const list = this.quality === 'high' ? objects.filter(Boolean) : [];
+    this.outline.selectedObjects = list;
     this.outline.visibleEdgeColor.setHex(color);
+    this.outline.edgeStrength = list.length ? 4.2 : 0;
   }
 
-  pulse(x, z, { color = 0xff493d, radius = 4, life = 1.4, width = 0.42 } = {}) {
-    const geometry = new THREE.RingGeometry(Math.max(0.1, radius - width), radius, 56);
-    geometry.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.78, depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(x, 0.11, z);
-    this.scene.add(mesh);
-    this.pulses.push({ mesh, life, maxLife: life });
+  pulse() {
+    // Hive musters ping the minimap. No ground ring.
   }
 
   update(dt) {

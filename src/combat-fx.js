@@ -239,7 +239,7 @@ export class CombatFx {
     if (!view) return;
     const ctx = view.ctx;
     ctx.clearRect(0, 0, 128, 64);
-    ctx.font = crit ? '700 52px sans-serif' : '700 42px sans-serif';
+    ctx.font = '700 42px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 8;

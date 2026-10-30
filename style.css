@@ -6,7 +6,7 @@
   --gold: #ffd75e;
   --danger: #ff5d52;
   --good: #59ff9c;
-  --command-height: 124px;
+  --command-height: 93px;
   --command-gap: 12px;
   --minimap-size: 190px;
 }
@@ -223,7 +223,7 @@ body::after {
   grid-template-rows: 26px minmax(0, 1fr);
   gap: 4px;
   padding: 6px 8px;
-  background: rgba(12, 16, 22, 0.46);
+  background: rgba(12, 16, 22, 0.28);
   border: 1px solid rgba(201, 164, 74, 0.22);
   border-radius: 10px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
@@ -407,8 +407,8 @@ body::after {
 .uppips { font-size: 10.5px; color: #9fd6ff; letter-spacing: 1px; margin-top: 3px; }
 
 @media (max-width: 900px), (max-height: 650px) {
-  :root { --command-height: 132px; --command-gap: 8px; --minimap-size: 132px; }
-  #actionbar { padding: 7px; grid-template-rows: 28px minmax(0, 1fr); gap: 6px; }
+  :root { --command-height: 99px; --command-gap: 8px; --minimap-size: 132px; }
+  #actionbar { padding: 5px 7px; grid-template-rows: 22px minmax(0, 1fr); gap: 4px; background: rgba(12, 16, 22, 0.28); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22); }
   .commandtop { grid-template-columns: 1fr 112px; }
   .armystatus { display: none; }
   .actionmain,
@@ -1008,15 +1008,22 @@ body::after {
 }
 #boss-fill { height: 100%; background: linear-gradient(90deg, #7c1f1f, #e6493a); transition: width 0.2s; }
 .combat-alert {
-  position: absolute; top: 92px; right: 16px; z-index: 11; width: min(340px, calc(100vw - 32px));
-  display: flex; gap: 10px; align-items: center; padding: 10px 12px;
-  border: 1px solid rgba(255, 190, 92, .55); border-radius: 10px;
-  background: rgba(19, 15, 10, .88); box-shadow: 0 8px 26px rgba(0,0,0,.4); pointer-events: none;
+  position: absolute; top: 64px; right: 12px; z-index: 11; width: min(220px, calc(100vw - 24px));
+  display: flex; gap: 6px; align-items: center; padding: 5px 8px;
+  border: 1px solid rgba(255, 190, 92, .4); border-radius: 7px;
+  background: rgba(19, 15, 10, .55); box-shadow: none; pointer-events: none;
+  animation: tipFade 4s ease forwards;
 }
-.combat-alert > span { font-size: 24px; }
-.combat-alert div { display: flex; flex-direction: column; gap: 2px; }
-.combat-alert b { color: #ffd78a; font-size: 12px; letter-spacing: .12em; }
-.combat-alert small { color: #f0e6d3; font-size: 12px; line-height: 1.35; }
+.combat-alert > span { font-size: 14px; }
+.combat-alert div { display: flex; flex-direction: column; gap: 1px; }
+.combat-alert b { color: #ffd78a; font-size: 10px; letter-spacing: .08em; }
+.combat-alert small { color: #f0e6d3; font-size: 10px; line-height: 1.25; }
+@keyframes tipFade {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .combat-alert.critical { border-color: rgba(255,93,82,.75); background: rgba(35,10,9,.92); }
 .combat-alert.critical b { color: #ff8c82; }
 .combat-alert.boss { border-color: rgba(213,134,255,.7); background: rgba(25,10,33,.92); }
@@ -1891,15 +1898,15 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 #topbar .tbtn { transform: scale(0.88); }
 #minimap-wrap { border-width: 1px; border-color: rgba(255, 255, 255, 0.18); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
 @media (min-width: 901px) and (min-height: 651px) {
-  :root { --command-height: 118px; --command-gap: 10px; --minimap-size: 128px; }
+  :root { --command-height: 89px; --command-gap: 10px; --minimap-size: 128px; }
   #actionbar {
     right: auto;
     width: min(880px, calc(100vw - var(--command-gap) * 3 - var(--minimap-size)));
-    grid-template-rows: 26px minmax(0, 1fr);
-    gap: 5px; padding: 6px;
-    background: rgba(12, 16, 22, 0.62);
+    grid-template-rows: 22px minmax(0, 1fr);
+    gap: 4px; padding: 5px 6px;
+    background: rgba(12, 16, 22, 0.28);
     border-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
   }
   .commandtop { grid-template-columns: minmax(250px, 360px) 110px minmax(180px, 1fr); gap: 5px; }
   .rallyhints, .armystatus, .mode-toggle span { font-size: 11px; }

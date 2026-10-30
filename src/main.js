@@ -919,7 +919,7 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.CircleGeometry(terraced ? 4.4 : 7.2, 40),
       toyMat({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
@@ -1055,12 +1055,6 @@ class App {
     for (let i = 0; i < this.map.sites.length; i++) {
       const s = this.map.sites[i];
       const gr = new THREE.Group();
-      const ringGeo = new THREE.RingGeometry(5.4, 6.0, 48);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(s.x, 0.06, s.z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
@@ -3530,17 +3524,8 @@ class App {
     }
   }
 
-  _spawnAbilityRing(x, z, { color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0 } = {}) {
-    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0, depthWrite: false,
-      blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, this.map.groundY(x, z) + 0.11, z);
-    this.scene.add(mesh);
-    this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
+  _spawnAbilityRing() {
+    // Ability telegraphs stay on the particle burst. No ground ring.
   }
 
   _updateAbilityFx(dt) {
@@ -3984,18 +3969,10 @@ class App {
     fill.rotation.y = Math.PI / 6;
     fill.userData.noOutline = true;
     grp.add(fill);
-    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
-    rimGeo.rotateX(-Math.PI / 2);
-    const rim = new THREE.Mesh(rimGeo, m.rim);
-    rim.position.set(x, 0.095, z);
-    rim.rotation.y = Math.PI / 6;
-    rim.userData.noOutline = true;
-    grp.add(rim);
     const gem = new THREE.Mesh(new THREE.OctahedronGeometry(Math.min(0.2, r * 0.22), 0), m.gem);
     gem.position.set(x, 0.75, z);
     grp.add(gem);
     grp.userData.gem = gem;
-    grp.userData.rim = rim;
     return grp;
   }
 
@@ -4039,24 +4016,10 @@ class App {
     g.add(pips.sprite);
     g.userData.pips = pips;
 
-    // Glow ring at the pay point + radial progress arc.
+    // No ground rings. The pay point is kept for the build hint only.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
-    ring.position.set(px, 0.05, pz);
-    g.add(ring);
-    g.userData.ring = ring;
-
-    const prog = new THREE.Mesh(
-      new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, 0.01),
-      new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    prog.rotation.x = -Math.PI / 2;
-    prog.position.set(px, 0.07, pz);
-    g.add(prog);
-    g.userData.prog = prog;
-    g.userData.progFrac = 0;
+    g.userData.ring = null;
+    g.userData.prog = null;
     g.userData.payPoint = [px, pz];
     // The whole plot group rides the ground once: every child (beacon, ghost,
     // rings, labels) keeps its old relative height.
@@ -4116,8 +4079,6 @@ class App {
       if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
         if (ud.tag) ud.tag.visible = false;
-        ud.ring.visible = false;
-        ud.prog.visible = false;
         if (ud.pips) ud.pips.sprite.visible = false;
         continue;
       }
@@ -4125,16 +4086,9 @@ class App {
       const activePayPoint = mh && !mh.dead ? g.payPoint(plot, mh) : ud.payPoint;
       const heroNear = mh && !mh.dead &&
         (mh.x - activePayPoint[0]) ** 2 + (mh.z - activePayPoint[1]) ** 2 < 100;
-      // Minimal at distance: only the beacon marks a plot. Icon, ghost and
-      // pips appear when this is the plot you'd actually fund.
+      // Minimal at distance: only the beacon marks a plot. Icon and ghost
+      // appear when this is the plot you'd actually fund.
       const active = plot.id === pipPlotId || (nt.branch && heroNear);
-      if (active && activePayPoint) {
-        ud.ring.position.set(activePayPoint[0], 0.05, activePayPoint[1]);
-        ud.prog.position.set(activePayPoint[0], 0.07, activePayPoint[1]);
-      } else if (ud.payPoint) {
-        ud.ring.position.set(ud.payPoint[0], 0.05, ud.payPoint[1]);
-        ud.prog.position.set(ud.payPoint[0], 0.07, ud.payPoint[1]);
-      }
       if (ud.ghost) ud.ghost.visible = !built && plot.id === pipPlotId;
       if (ud.beacon.visible) {
         const gem = ud.beacon.userData.gem;
@@ -4183,22 +4137,8 @@ class App {
         }
       }
 
-      // Ring: pulse when affordable, glow bright while paying.
-      ud.ring.visible = false;
-      const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
-      ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
-
-      // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
-      ud.prog.visible = false;
-      if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
-        ud.progFrac = frac;
-        ud.prog.geometry.dispose();
-        ud.prog.geometry = new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, Math.max(0.01, frac * Math.PI * 2));
-      }
 
       // (Coin flight itself rides the 'paycoin' event — see _spawnPayCoins.)
     }
@@ -4376,46 +4316,10 @@ class App {
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
       // (The whole hero group is scaled 1.18×, so compensate.)
-      if (d.aura) {
-        const S = 1.18;
-        const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
-        auraFillGeo.rotateX(-Math.PI / 2);
-        const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
-        auraFill.position.y = 0.035;
-        g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
-        auraGeo.rotateX(-Math.PI / 2);
-        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
-        aura.position.y = 0.05;
-        g.add(aura);
-        const pulseGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.82) / S, Math.max(0.3, auraR - 0.62) / S, 72);
-        pulseGeo.rotateX(-Math.PI / 2);
-        const pulse = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.18, depthWrite: false }));
-        pulse.position.y = 0.065;
-        g.add(pulse);
-        aura.userData.baseRadius = auraR;
-        auraFill.userData.baseRadius = auraR;
-        pulse.userData.baseRadius = auraR;
-        g.userData.aura = aura;
-        g.userData.auraFill = auraFill;
-        g.userData.auraPulse = pulse;
-      }
+      // Aura range is not drawn. The foot disc below stays; another change owns it.
       if (u.key === 'danny') {
-        // The Weave must remain readable for its full duration. Three broken,
-        // counter-rotating rings make a moving tear in the world instead of
-        // relying on Daniel becoming faint and easy to lose in the horde.
+        // The Weave stays readable as a particle tear. No ground rings.
         const weave = new THREE.Group();
-        for (let i = 0; i < 3; i++) {
-          const geo = new THREE.RingGeometry(0.72 + i * 0.18, 0.82 + i * 0.18, 32, 1, i * 0.7, Math.PI * 1.35);
-          geo.rotateX(-Math.PI / 2);
-          const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-            color: i === 1 ? 0x72cfff : 0x7dffb2, transparent: true,
-            opacity: 0.82 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
-          }));
-          ring.position.y = 0.12 + i * 0.05;
-          weave.add(ring);
-        }
         weave.visible = false;
         g.add(weave);
         g.userData.weave = weave;
@@ -4456,13 +4360,6 @@ class App {
         for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
-    const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
-    affectedGeo.rotateX(-Math.PI / 2);
-    const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
-    affected.position.y = 0.085;
-    affected.visible = false;
-    g.add(affected);
-    g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
@@ -4610,10 +4507,6 @@ class App {
         if (weave) {
           weave.visible = u.weaveT > 0 && !u.dead;
           if (weave.visible) {
-            weave.children.forEach((ring, i) => {
-              ring.rotation.z = t * (i % 2 ? -4.8 : 4.2) + i * 1.7;
-              ring.material.opacity = 0.58 + Math.sin(t * 8 + i) * 0.22;
-            });
             const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
             last.t -= dt;
             if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
@@ -4654,12 +4547,6 @@ class App {
       );
       pillar.position.set(x, 7, z);
       gr.add(pillar);
-      const ringGeo = new THREE.RingGeometry(2.2, 2.7, 40);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff3c2e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(x, 0.06, z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       gr.position.y = this.map.groundY(x, z);
       this.scene.add(gr);
       this.waveMarkers.push(gr);
@@ -4691,21 +4578,8 @@ class App {
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
-    const h = this.myHero();
-    if (!this.game || !h || h.dead || this.game.phase !== 'live') {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const target = this.game.buildTargetFor(h);
-    if (!target) {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const building = [...this.buildingMeshes.values()].find((rec) => rec.b.plotId === target.plot.id);
-    const plot = this.plotMeshes.get(target.plot.id);
-    const color = target.act.mode === 'repair' || target.act.mode === 'rebuild' ? 0x75dfff
-      : target.act.mode === 'branch' ? 0xd49aff : 0xffdf72;
-    this.tacticalVisuals.setSelection([building ? building.mesh : plot?.group], color);
+    // A selected tower's round skirt outlines as a gold ring. Nothing is outlined.
+    this.tacticalVisuals.setSelection([]);
   }
 
   // Lane nodes: a capture ring and a banner in your colour, the hive's, or
@@ -4718,12 +4592,6 @@ class App {
       for (const node of g.nodes) {
         if (node.offMap) continue;
         const gr = new THREE.Group();
-        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
-        ringGeo.rotateX(-Math.PI / 2);
-        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
-        ring.position.set(node.x, 0.06, node.z);
-        ring.visible = false;
-        gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
         gr.add(pole);
@@ -4734,7 +4602,7 @@ class App {
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
-        gr.userData = { ring, flag, label, node };
+        gr.userData = { flag, label, node };
         gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
@@ -4745,12 +4613,7 @@ class App {
       // Grey until surveyed: the banner is there, but whose banner is not known.
       const col = !node.seen ? 0x76828d
         : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
-      gr.userData.ring.material.color.setHex(col);
       gr.userData.flag.material.color.setHex(col);
-      const contested = node.cap > 0.05;
-      gr.userData.ring.material.opacity = contested
-        ? 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(t * 9))
-        : (node.owner === 'player' ? 0.34 : 0.2);
       gr.userData.flag.rotation.y = Math.sin(t * 2.2 + node.id) * 0.28;
     }
   }
@@ -5992,9 +5855,6 @@ class App {
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
         m.userData.flag.rotation.y = Math.sin(t * 2.5) * 0.3;
-        const ph = (t * 0.8) % 1;
-        m.userData.ring.scale.setScalar(1 + ph * 0.25);
-        m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
       this._surveySites();
       this._updateBlockedHint(dt);
@@ -6089,10 +5949,10 @@ class App {
         this._setWaveMarkers(markerNest ? [[markerNest.x, markerNest.z]] : []);
       }
       for (const m of this.waveMarkers) {
-        const ring = m.userData.ring;
+        const pillar = m.children[0];
+        if (!pillar) continue;
         const ph = (t * 1.2) % 1;
-        ring.scale.setScalar(1 + ph * 1.6);
-        ring.material.opacity = 0.55 * (1 - ph);
+        pillar.material.opacity = 0.28 * (1 - ph * 0.45);
       }
 
       // Smoke from damaged buildings.

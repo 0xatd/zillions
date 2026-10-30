@@ -2724,6 +2724,7 @@ export class UI {
     const alertKey = alert?.key || '';
     if (alertKey !== this._combatAlertKey) {
       this._combatAlertKey = alertKey;
+      this._combatAlertAt = performance.now();
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
         alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}</small></div>`;
@@ -2731,6 +2732,8 @@ export class UI {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
       }
+    } else if (alert && this._combatAlertAt && performance.now() - this._combatAlertAt > 4000) {
+      alertBox.className = 'combat-alert hidden';
     }
 
     // Hero plate.
