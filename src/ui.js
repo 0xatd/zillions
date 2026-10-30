@@ -331,7 +331,7 @@ export class UI {
           <canvas id="fronts-canvas"></canvas>
           <div class="fronts-head">
             <button class="tbtn info-back" id="fronts-back" type="button">Back</button>
-            <div><h1>Choose a battlefield</h1><p>Five fronts. One of them is next.</p></div>
+            <div><h1>The system</h1><p>Three worlds. The next front is marked.</p></div>
           </div>
           <div id="fronts-tip" class="fronts-tip hidden"></div>
         </div>
@@ -542,7 +542,10 @@ export class UI {
     q('#title-upgrades').onclick = () => this.openUpgrades();
     q('#title-settings').onclick = () => { this._settingsFromPause = false; this._settingsReturn = 'account'; this._showScreen('settings'); };
     q('#title-credits').onclick = () => this._showScreen('credits');
-    q('#fronts-back').onclick = () => this._backOverlay('account');
+    q('#fronts-back').onclick = () => {
+      if (this._worldMap?.isZoomed()) this._worldMap.zoomOut();
+      else this._backOverlay('account');
+    };
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
@@ -2637,7 +2640,10 @@ export class UI {
 
   _continueOrPlay() {
     if (this._continueSnap && this.cb.onContinue) this.cb.onContinue();
-    else this.openFronts();
+    else {
+      const next = Math.min(LEVELS.length, (this._campaignCleared || 0) + 1);
+      if (!this.selectFront(next)) this.openFronts();
+    }
   }
 
   openFronts() {
@@ -2655,7 +2661,12 @@ export class UI {
       }
     }
     const meta = loadMeta();
-    this._worldMap?.setProgress({ cleared: this._campaignCleared || 0, clearedIds: meta.cleared || {} });
+    const tint = CULTURE_TINT[this.selectedCulture] || '#e0b45a';
+    this._worldMap?.setProgress({
+      cleared: this._campaignCleared || 0,
+      clearedIds: meta.cleared || {},
+      culture: Number.parseInt(tint.slice(1), 16),
+    });
     this._worldMap?.resize();
     this._worldMap?.start();
     const id = this._worldMap?.focusedId();
@@ -2666,8 +2677,12 @@ export class UI {
     const tip = this.root.querySelector('#fronts-tip');
     if (!tip) return;
     if (!info) { tip.classList.add('hidden'); return; }
-    const best = info.state === 'completed' ? 'Cleared' : info.state === 'locked' ? 'Locked' : 'No clear yet';
-    tip.innerHTML = `<b>${escapeHtml(info.name)}</b><small>${escapeHtml(info.pressure)} pressure</small><small>Best result: ${best}</small><span>${escapeHtml(info.blurb || '')}</span>`;
+    const best = info.state === 'completed' ? 'Cleared'
+      : info.state === 'soon' ? 'Coming soon'
+      : info.state === 'locked' ? 'Held by the hive'
+      : 'No clear yet';
+    const pressure = info.state === 'soon' ? 'Not playable' : `${info.pressure} pressure`;
+    tip.innerHTML = `<b>${escapeHtml(info.name)}</b><small>${escapeHtml(info.planet || '')}</small><small>${escapeHtml(pressure)}</small><small>Best result: ${best}</small><span>${escapeHtml(info.blurb || '')}</span>`;
     tip.classList.remove('hidden');
     if (info.x != null) {
       tip.style.left = `${Math.min(window.innerWidth - 260, info.x + 16)}px`;
@@ -2784,6 +2799,12 @@ export class UI {
     const screen = this._lastScreen;
     if (screen === 'pause' && (event.key === 'Escape' || event.key === 'Backspace')) return;
     const backKeys = event.key === 'Escape' || event.key === 'Backspace';
+    if (backKeys && screen === 'fronts' && this._worldMap?.isZoomed()) {
+      event.preventDefault();
+      event.stopPropagation();
+      this._worldMap.zoomOut();
+      return;
+    }
     if (backKeys && screen && screen !== 'account') {
       event.preventDefault();
       event.stopPropagation();
@@ -2840,7 +2861,8 @@ export class UI {
       if (this._lastScreen === 'fronts') this._worldMap?.confirmFocused();
       else this._activateNav();
     }
-    if (edge(1) && this._lastScreen && this._lastScreen !== 'account' && this._lastScreen !== 'pause') {
+    if (edge(1) && this._lastScreen === 'fronts' && this._worldMap?.isZoomed()) this._worldMap.zoomOut();
+    else if (edge(1) && this._lastScreen && this._lastScreen !== 'account' && this._lastScreen !== 'pause') {
       this._backOverlay(this.shell.base === 'account' ? 'account' : 'main');
     }
     if ((edge(14) || edge(15)) && this._lastScreen === 'fronts') {

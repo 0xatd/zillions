@@ -1,7 +1,7 @@
 // Menu shell: title, world map, deploy, and pause stay on the siege path.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { frontState, battlefieldPressure } from '../src/front-state.js';
+import { frontState, battlefieldPressure, planetForLevel, STAR_SYSTEM } from '../src/front-state.js';
 
 const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
@@ -28,5 +28,11 @@ assert.equal(frontState(3, 1, { 3: 1 }), 'locked');
 assert.equal(frontState(2, 0, { 2: 1 }), 'locked');
 assert.equal(battlefieldPressure(0.8), 'Gentle');
 assert.equal(battlefieldPressure(2), 'Final');
+assert.equal(planetForLevel(1)?.id, 'verdant');
+assert.equal(planetForLevel(4)?.id, 'verdant');
+assert.equal(planetForLevel(2)?.id, 'mire');
+assert.equal(planetForLevel(3)?.id, 'cinder');
+assert.equal(planetForLevel(5)?.id, 'cinder');
+assert.equal(STAR_SYSTEM.reduce((n, planet) => n + planet.sites.filter((site) => !site.levelId).length, 0) >= 6, true, 'each world keeps coming-soon sites');
 
 console.log('menu shell check passed');
