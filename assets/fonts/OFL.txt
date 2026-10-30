@@ -1,0 +1,6 @@
+Lilita One is copyright 2011 Juan Montoreano.
+Nunito is copyright 2011 The Nunito Project Authors.
+
+Both faces are licensed under the SIL Open Font License, Version 1.1.
+The license text is at https://openfontlicense.org.
+These files are the Latin subsets used by the menu shell.

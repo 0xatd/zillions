@@ -21,7 +21,8 @@ import {
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
-import { loadMeta, charge, META_CURRENCY } from './meta.js';
+import { loadMeta, charge, spend, metaTreeView, META_CURRENCY } from './meta.js';
+import { WorldMap, battlefieldPressure, frontState } from './world-map.js';
 import {
   ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, loadBinds, allConflicts, conflictsFor,
 } from './keybinds.js';
@@ -53,6 +54,16 @@ const escapeHtml = (value) => String(value == null ? '' : value)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+const ICON = {
+  coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3H15"/>',
+  threat: '<path d="M12 3l8 16H4z"/><path d="M12 10v4M12 16.5v.5"/>',
+  play: '<path d="M8 5l12 7-12 7z"/>',
+};
+const icon = (name) => `<span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24">${ICON[name] || ''}</svg></span>`;
+const CULTURE_TINT = {
+  european: '#d2b56a', asian: '#3fbf8a', south_american: '#e07a3d', middle_eastern: '#6aa0e0',
+};
+
 export class UI {
   constructor(root, cb) {
     this.root = root;
@@ -66,18 +77,18 @@ export class UI {
   _buildDOM() {
     this.root.innerHTML = `
       <div id="topbar" class="hidden">
-        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend">🪙 <b>0</b></div>
-        <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take">☠️ <b>Threat 1</b></div>
-        <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering">🚩 <b>0</b> · 🔥 <b>0</b></div>
-        <div class="res" id="r-z" title="Enemies remaining">🧟 0</div>
+        <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend"><b>0</b></div>
+        <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take"><b>Threat 1</b></div>
+        <div class="res hidden-meter" id="r-front" title="Lane nodes you hold · hive nests still mustering"><b>0</b></div>
+        <div class="res hidden-meter" id="r-z" title="Enemies remaining">0</div>
         <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
-        <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
+        <button class="tbtn" id="b-pause" title="Pause (P)">Pause</button>
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
-        <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
-        <button class="tbtn" id="b-quality" title="Toggle graphics quality">✨</button>
-        <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
+        <button class="tbtn" id="b-mute" title="Mute sound (M)">Sound</button>
+        <button class="tbtn" id="b-quality" title="Toggle graphics quality">Quality</button>
+        <button class="tbtn" id="b-menu" title="Menu (Esc)">Menu</button>
       </div>
 
       <div id="banner"></div>
@@ -94,10 +105,10 @@ export class UI {
         </div>
       </div>
 
-      <div id="actionbar" class="hidden">
+      <div id="actionbar" class="hidden hud-min">
         <div class="commandtop">
           <div class="rallyhints" id="stancebar">
-            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
+            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> Defend</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> Follow</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> Push</span>
           </div>
           <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
@@ -109,6 +120,7 @@ export class UI {
               <b id="a-name"></b> <span class="hplvl" id="a-lvl">Lv 1</span>
               <div class="hpbar herohp"><div class="hpfill" id="a-hp"></div></div>
               <div class="hpbar heroxp"><div class="xpfill" id="a-xp"></div></div>
+              <div class="hpvital" id="a-vital"></div>
               <div id="a-items"></div>
               <div id="a-pack" class="packrow" title="Field finds — walk over loot to pick it up, G to drop"></div>
             </div>
@@ -137,8 +149,16 @@ export class UI {
             <h1 class="gametitle">ZILLIONS</h1>
             <p class="gamesub">Every world is a battlefield.</p>
           </div>
-          <div class="accountcard title-login">
-            <div class="login-heading"><span>ACCOUNT LOGIN</span><h2>Welcome to Zillions</h2><p>Sign in to continue to your characters and worlds.</p></div>
+          <nav class="title-menu" id="title-menu" aria-label="Title menu">
+            <button class="menubtn primary hidden" id="title-continue" data-nav>Continue</button>
+            <button class="menubtn primary" id="title-play" data-nav>Play</button>
+            <button class="menubtn" id="title-upgrades" data-nav>Upgrades</button>
+            <button class="menubtn" id="title-settings" data-nav>Settings</button>
+            <button class="menubtn" id="title-credits" data-nav>Credits</button>
+          </nav>
+          <button class="account-chip" id="title-account" type="button">Account</button>
+          <div class="accountcard title-login hidden" id="title-login">
+            <div class="login-heading"><span>ACCOUNT</span><h2>Welcome to Zillions</h2><p>Sign in to keep characters and rewards. Play works either way.</p></div>
             <div class="accountstatus" id="account-status">Checking account…</div>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
             <div class="login-divider" id="a-login-divider"><span>OR</span></div>
@@ -159,12 +179,6 @@ export class UI {
               <small>Letters, numbers, and underscores. Other players see this.</small>
             </form>
           </div>
-          <nav class="title-utilities" aria-label="Title menu">
-            <button id="a-cinematics">CINEMATICS</button>
-            <button id="a-credits">CREDITS</button>
-            <button id="a-settings">SETTINGS</button>
-            <button id="a-quit">QUIT</button>
-          </nav>
           <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · STARSHIP ONLINE <small>BUILD 0.1</small></div>
         </div>
 
@@ -311,7 +325,25 @@ export class UI {
         </div>
 
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
-        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
+        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.<br><br>Lilita One by Juan Montoreano and Nunito by The Nunito Project Authors, both SIL Open Font License 1.1.</div></div>
+
+        <div id="screen-fronts" class="fronts-screen hidden">
+          <canvas id="fronts-canvas"></canvas>
+          <div class="fronts-head">
+            <button class="tbtn info-back" id="fronts-back" type="button">Back</button>
+            <div><h1>Choose a battlefield</h1><p>Five fronts. One of them is next.</p></div>
+          </div>
+          <div id="fronts-tip" class="fronts-tip hidden"></div>
+        </div>
+
+        <div id="screen-upgrades" class="upgrade-screen hidden">
+          <div class="upgrade-head">
+            <button class="tbtn info-back" type="button">Back</button>
+            <div><h1>Upgrades</h1><p>Permanent gains for the next landing. Bought with Salvage Alloy.</p></div>
+            <div class="upgrade-balance" id="upgrade-balance"></div>
+          </div>
+          <div class="upgrade-board" id="upgrade-board"></div>
+        </div>
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
@@ -319,16 +351,17 @@ export class UI {
             <h2 id="s-title">Choose your battle</h2>
             <div id="modeseg" class="modeseg hidden"></div>
           </div>
-          <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
+          <div class="steplabel field-label">Battlefield <span id="warstatus" class="warstatus"></span></div>
+          <p id="picked-front" class="hidden"></p>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
+          <div class="steplabel hero-label">Hero</div>
           <div class="herorow" id="herorow"></div>
-          <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
+          <div class="steplabel culture-label">Culture <small>the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
-          <div class="steplabel diff-label">4 · Difficulty</div>
+          <div class="steplabel diff-label">Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
-          <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
+          <button class="startbtn" id="s-start">Start</button>
         </div>
 
         <div id="screen-lobby" class="setup lobby hidden">
@@ -410,14 +443,13 @@ export class UI {
           </div>
         </div>
 
-        <div id="screen-pause" class="mainmenu hidden">
-          <h1 class="gametitle small">⚔️ PAUSED</h1>
+        <div id="screen-pause" class="mainmenu pause-menu hidden">
+          <h1 class="gametitle small">Paused</h1>
           <div class="menustack">
-            <button class="menubtn primary" id="p-resume">▶ &nbsp;Resume</button>
-            <button class="menubtn" id="p-help">📜 &nbsp;How to play</button>
-            <button class="menubtn" id="p-settings">⚙️ &nbsp;Settings</button>
-            <button class="menubtn" id="p-restart">🔄 &nbsp;Restart level</button>
-            <button class="menubtn" id="p-quit">🚪 &nbsp;Quit to menu</button>
+            <button class="menubtn primary" id="p-resume" data-nav>Resume</button>
+            <button class="menubtn" id="p-settings" data-nav>Settings</button>
+            <button class="menubtn" id="p-restart" data-nav>Restart</button>
+            <button class="menubtn" id="p-quit" data-nav>Quit to map</button>
           </div>
           <div id="p-note" class="gamesub"></div>
         </div>
@@ -432,13 +464,13 @@ export class UI {
         <div id="screen-settings" class="setup hidden">
           <div class="setuphead">
             <button class="tbtn" id="set-back">← Back</button>
-            <h2>⚙️ Settings</h2>
+            <h2>Settings</h2>
           </div>
           <div class="settingsgrid">
             <div class="settingstabs">
-              <button class="stab sel" data-tab="audio">🔊 Audio</button>
-              <button class="stab" data-tab="video">🖥️ Video</button>
-              <button class="stab" data-tab="controls">⌨️ Controls</button>
+              <button class="stab sel" data-tab="audio">Audio</button>
+              <button class="stab" data-tab="video">Video</button>
+              <button class="stab" data-tab="controls">Controls</button>
             </div>
             <div class="settingspane">
               <div id="set-pane-audio" class="setpane">
@@ -468,6 +500,7 @@ export class UI {
                   </div>
                 </div>
                 <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
+                <button class="menubtn" id="a-cinematics">CINEMATICS</button>
               </div>
               <div id="set-pane-controls" class="setpane hidden">
                 <div class="bindhead">
@@ -500,10 +533,14 @@ export class UI {
       if (this.cb.onEmailSignIn) this.cb.onEmailSignIn(q('#a-email').value);
     };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
+    q('#title-account').onclick = () => q('#title-login').classList.toggle('hidden');
+    q('#title-continue').onclick = () => this._continueOrPlay();
+    q('#title-play').onclick = () => this.openFronts();
+    q('#title-upgrades').onclick = () => this.openUpgrades();
+    q('#title-settings').onclick = () => { this._settingsFromPause = false; this._settingsReturn = 'account'; this._showScreen('settings'); };
+    q('#title-credits').onclick = () => this._showScreen('credits');
+    q('#fronts-back').onclick = () => this._backOverlay('account');
     q('#a-cinematics').onclick = () => this._showScreen('cinematics');
-    q('#a-credits').onclick = () => this._showScreen('credits');
-    q('#a-settings').onclick = () => { this._settingsReturn = 'account'; this._showScreen('settings'); };
-    q('#a-quit').onclick = () => this.showBanner('Close this browser tab to leave the frontier.', '', 3200);
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
       const input = q('#a-username');
@@ -520,7 +557,12 @@ export class UI {
     q('#m-delete-character').onclick = () => {
       const character = this._sheetCharacter();
       if (!character) return;
-      if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
+      this.askConfirm({
+        title: `Delete ${character.name}?`,
+        copy: 'This cannot be undone.',
+        confirm: 'Delete character',
+        cancel: 'Keep character',
+      }).then((ok) => { if (ok) this.cb.onCharacterDelete?.(character.id); });
     };
     q('#creator-cancel').onclick = () => {
       if (!(this._profile?.mmoCharacters || []).length) return;
@@ -583,11 +625,16 @@ export class UI {
     q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
       if (this._fromLobby) this._confirmRoomExit();
+      else if (this._setupFrom === 'fronts') this._backOverlay('account');
       else this._showScreen('main');
     };
-    q('#room-confirm-cancel').onclick = () => q('#room-confirm').classList.add('hidden');
+    q('#room-confirm-cancel').onclick = () => {
+      q('#room-confirm').classList.add('hidden');
+      if (this._confirmResolve) { const resolve = this._confirmResolve; this._confirmResolve = null; resolve(false); }
+    };
     q('#room-confirm-leave').onclick = () => {
       q('#room-confirm').classList.add('hidden');
+      if (this._confirmResolve) { const resolve = this._confirmResolve; this._confirmResolve = null; resolve(true); return; }
       if (this._confirmContext === 'match') {
         if (this.cb.onMatchLeave) this.cb.onMatchLeave();
       } else if (this.cb.onRoomLeave) this.cb.onRoomLeave();
@@ -663,9 +710,9 @@ export class UI {
 
     // ----- pause menu -----
     q('#p-resume').onclick = () => this.cb.onResume();
-    q('#p-help').onclick = () => this._showScreen('help');
     q('#p-restart').onclick = () => this.cb.onRestart();
     q('#p-quit').onclick = () => this._confirmMatchExit();
+    this._installNav();
 
     // ----- setup: hero cards -----
     this.selectedHero = 'alexander';
@@ -674,12 +721,15 @@ export class UI {
       const card = document.createElement('button');
       card.className = 'herocard' + (key === this.selectedHero ? ' sel' : '');
       card.dataset.key = key;
+      const tint = `#${(h.color || 0x888888).toString(16).padStart(6, '0')}`;
+      const initials = h.name.split(' ').map((part) => part[0]).slice(0, 2).join('');
       card.innerHTML = `
-        ${PORTRAITS[key] ? `<img class="hface" data-src="${PORTRAITS[key]}" loading="lazy" decoding="async" onerror="this.remove()" alt="">` : ''}
-        <span class="hicon">${h.icon}</span>
+        <span class="hfacewrap" style="background:${tint}">
+          <span class="hmono">${initials}</span>
+          ${PORTRAITS[key] ? `<img class="hface" alt="" src="${PORTRAITS[key]}" decoding="async" onerror="this.remove()">` : ''}
+        </span>
         <b>${h.name}</b>
-        <small>${h.tagline}</small>
-        <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
+        <small>${h.tagline}</small>`;
       card.onclick = () => {
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
@@ -718,7 +768,7 @@ export class UI {
       const b = document.createElement('button');
       b.className = 'diffbtn' + (key === this.selectedCulture ? ' sel' : '');
       b.dataset.culture = key;
-      b.innerHTML = `${c.name}<small>${c.banner}</small>`;
+      b.innerHTML = `<span class="culture-swatch" style="background:${CULTURE_TINT[key] || '#d2b56a'}"></span>${c.name}<small>${c.banner}</small>`;
       const troops = ['soldier', 'ranger', 'sniper'].map((u) => c.units[u]?.name).filter(Boolean);
       b.title = `${c.blurb}${troops.length ? `\n${troops.join(' · ')}` : ''}`;
       b.onclick = () => {
@@ -823,7 +873,7 @@ export class UI {
     this._matchExitRole = role;
     const button = this.root.querySelector('#p-quit');
     if (!button) return;
-    button.textContent = role === 'host' ? '⛔  END MATCH FOR EVERYONE' : role === 'guest' ? '🚪  LEAVE MATCH' : '🚪  QUIT TO MENU';
+    button.textContent = role === 'host' ? 'END MATCH FOR EVERYONE' : role === 'guest' ? 'LEAVE MATCH' : 'Quit to map';
   }
 
   _confirmMatchExit() {
@@ -898,11 +948,9 @@ export class UI {
   }
 
   _startCopyFor(mode) {
-    return mode === 'survival'
-      ? '▶  START — SURVIVE AS LONG AS YOU CAN'
-      : mode === 'labyrinth'
-      ? '▶  DESCEND — CLEAR THE TRIAL'
-      : '▶  START — TAKE THE PLANET';
+    return mode === 'survival' ? 'Start survival'
+      : mode === 'labyrinth' ? 'Enter the trial'
+      : 'Start';
   }
 
   // Switch the open setup screen to another war mode: reselect the chip,
@@ -954,9 +1002,20 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
-      this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'fronts', 'upgrades']) {
+      const el = this.root.querySelector('#screen-' + id);
+      const on = id === name;
+      el.classList.toggle('hidden', !on);
+      if (on) {
+        el.classList.remove('rise');
+        void el.offsetWidth;
+        el.classList.add('rise');
+      }
     }
+    if (name === 'fronts') { this._worldMap?.resize(); this._worldMap?.start(); }
+    else if (this._worldMap) this._worldMap.stop();
+    this._navIndex = 0;
+    this._moveNav(0);
   }
 
   _backOverlay(fallback = 'main') {
@@ -2029,38 +2088,40 @@ export class UI {
     this.root.querySelector('#lattice-rewire').onclick = () => {
       const character = this._sheetCharacter();
       if (!character || !(character.lattice || []).length) return;
-      if (this.cb.useAuthoritativeEconomy?.()) {
-        // Signed in: the server prices it from the Lattice it holds and
-        // charges the account wallet; nothing changes locally until it has.
-        const cost = rewireCost((character.lattice || []).length);
-        if (!window.confirm(`Rewire the whole Lattice for about ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
-        Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
-          if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
-          this.showBanner(`⚡ Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
-          this._renderCharacterSheet();
-        }).catch((error) => {
-          const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
-            : 'The rewire could not be confirmed. Your Lattice is unchanged.';
-          this.showBanner(`✋ ${reason}`, 'bad', 3200);
-        });
-        return;
-      }
       const cost = rewireCost((character.lattice || []).length);
-      const held = loadMeta().currency;
-      if (held < cost) {
-        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${held}.`, '', 3200);
+      const authoritative = !!this.cb.useAuthoritativeEconomy?.();
+      if (!authoritative && loadMeta().currency < cost) {
+        this.showBanner(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${loadMeta().currency}.`, '', 3200);
         return;
       }
-      if (!window.confirm(`Rewire the whole Lattice for ${cost} ${META_CURRENCY.name}? Every point comes back.`)) return;
-      // Charge first. A refused charge must not hand the points back.
-      const paid = charge(cost);
-      if (!paid.ok) {
-        this.showBanner(`✋ Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`, '', 3200);
-        return;
-      }
-      const returned = rewireLattice(character);
-      this.showBanner(`⚡ Rewired — ${returned} points returned for ${cost} ${META_CURRENCY.short}.`, '', 2800);
-      this._sheetChanged();
+      this.askConfirm({
+        title: 'Rewire the Lattice?',
+        copy: `This costs ${cost} ${META_CURRENCY.name}. Every point comes back.`,
+        confirm: 'Rewire',
+        cancel: 'Keep build',
+      }).then((ok) => {
+        if (!ok) return;
+        if (authoritative) {
+          Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
+            if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
+            this.showBanner(`Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
+            this._renderCharacterSheet();
+          }).catch((error) => {
+            const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
+              : 'The rewire could not be confirmed. Your Lattice is unchanged.';
+            this.showBanner(reason, 'bad', 3200);
+          });
+          return;
+        }
+        const paid = charge(cost);
+        if (!paid.ok) {
+          this.showBanner(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`, '', 3200);
+          return;
+        }
+        const returned = rewireLattice(character);
+        this.showBanner(`Rewired — ${returned} points returned for ${cost} ${META_CURRENCY.short}.`, '', 2800);
+        this._sheetChanged();
+      });
     };
   }
 
@@ -2346,27 +2407,38 @@ export class UI {
     }
   }
 
-  showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
+  showSetup({ coop = false, mode = 'campaign', online = null, from = null } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
+    this._setupFrom = from;
     this.selectedMode = mode;
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('deploy-panel', from === 'fronts' && !online);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
+    const picked = levelById(this.selectedLevel);
     const title = online
-      ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
+      ? `${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
       : coop ? 'Co-op — one city, one hero each'
-      : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
-      : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
-      : 'Choose your battle';
+      : mode === 'survival' ? 'Survival'
+      : mode === 'labyrinth' ? 'The Labyrinth'
+      : from === 'fronts' && picked ? picked.name : 'Deploy';
     this.root.querySelector('#s-title').textContent = title;
     const fieldLabel = setupScreen.querySelector('.field-label');
     const heroLabel = setupScreen.querySelector('.hero-label');
     const diffLabel = setupScreen.querySelector('.diff-label');
-    if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : '1 · Battlefield <span id="warstatus" class="warstatus"></span>';
-    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : '2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
-    if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : '3 · Difficulty';
+    const pickedLine = setupScreen.querySelector('#picked-front');
+    const fromMap = from === 'fronts' && !online && !coop && mode === 'campaign';
+    if (pickedLine) {
+      pickedLine.classList.toggle('hidden', !fromMap);
+      pickedLine.textContent = picked ? `${picked.blurb} Pressure ${battlefieldPressure(picked.mult)}.` : '';
+    }
+    setupScreen.querySelector('#levelrow')?.classList.toggle('hidden', fromMap);
+    fieldLabel?.classList.toggle('hidden', fromMap);
+    if (fieldLabel && !fromMap) fieldLabel.innerHTML = 'Battlefield <span id="warstatus" class="warstatus"></span>';
+    if (heroLabel) heroLabel.textContent = 'Hero';
+    if (diffLabel) diffLabel.textContent = online ? 'Room difficulty' : 'Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
     this._renderModeSeg(mode, coop || !!online);
@@ -2463,11 +2535,11 @@ export class UI {
       card.disabled = locked;
       card.innerHTML = `
         <canvas class="lvmap" width="80" height="80"></canvas>
-        <span class="lvnum">${done ? '✅' : locked ? '🔒' : lv.galaxy ? '🌌' : lv.id}</span>
+        <span class="lvnum">${done ? 'Won' : locked ? 'Locked' : lv.id}</span>
         <b>${lv.name}</b>
         <small>${lv.blurb}</small>
-        <span class="lvland">🗺️ ${land} · 🏰 ${city}</span>
-        <span class="lvboss">${lv.boss.icon} ${lv.boss.name}</span>`;
+        <span class="lvland">${land} · ${city}</span>
+        <span class="lvboss">${lv.boss.name}</span>`;
       if (!locked) {
         card.onclick = () => {
           this.selectedLevel = lv.id;
@@ -2546,18 +2618,246 @@ export class UI {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
-  setCampaign(cleared) { this._buildLevelRow(cleared || 0); }
+  setCampaign(cleared) {
+    this._buildLevelRow(cleared || 0);
+    this._syncTitleMenu();
+  }
+
+  _syncTitleMenu() {
+    const button = this.root.querySelector('#title-continue');
+    if (!button) return;
+    const progressed = !!this._continueSnap || (this._campaignCleared || 0) > 0;
+    button.classList.toggle('hidden', !progressed);
+    button.textContent = this._continueSnap ? 'Continue' : 'Continue';
+  }
+
+  _continueOrPlay() {
+    if (this._continueSnap && this.cb.onContinue) this.cb.onContinue();
+    else this.openFronts();
+  }
+
+  openFronts() {
+    this._showScreen('fronts');
+    const canvas = this.root.querySelector('#fronts-canvas');
+    if (!this._worldMap) {
+      try {
+        this._worldMap = new WorldMap(canvas, {
+          onHover: (info) => this._showFrontTip(info),
+          onSelect: (id) => this.selectFront(id),
+        });
+      } catch (error) {
+        console.warn('world map failed', error);
+        this._worldMap = null;
+      }
+    }
+    const meta = loadMeta();
+    this._worldMap?.setProgress({ cleared: this._campaignCleared || 0, clearedIds: meta.cleared || {} });
+    this._worldMap?.resize();
+    this._worldMap?.start();
+    const id = this._worldMap?.focusedId();
+    if (id) this._showFrontTip({ id, name: levelById(id).name, blurb: levelById(id).blurb, pressure: battlefieldPressure(levelById(id).mult), state: frontState(id, this._campaignCleared || 0, meta.cleared), x: null, y: null });
+  }
+
+  _showFrontTip(info) {
+    const tip = this.root.querySelector('#fronts-tip');
+    if (!tip) return;
+    if (!info) { tip.classList.add('hidden'); return; }
+    const best = info.state === 'completed' ? 'Cleared' : info.state === 'locked' ? 'Locked' : 'No clear yet';
+    tip.innerHTML = `<b>${escapeHtml(info.name)}</b><small>${escapeHtml(info.pressure)} pressure</small><small>Best result: ${best}</small><span>${escapeHtml(info.blurb || '')}</span>`;
+    tip.classList.remove('hidden');
+    if (info.x != null) {
+      tip.style.left = `${Math.min(window.innerWidth - 260, info.x + 16)}px`;
+      tip.style.top = `${Math.min(window.innerHeight - 120, info.y + 16)}px`;
+    } else {
+      tip.style.left = '28px';
+      tip.style.top = 'auto';
+      tip.style.bottom = '28px';
+    }
+  }
+
+  selectFront(id) {
+    const level = levelById(id);
+    const state = frontState(id, this._campaignCleared || 0, loadMeta().cleared);
+    if (!level || state === 'locked') return false;
+    this.selectedLevel = level.id;
+    this.selectedMode = 'campaign';
+    if (this.cb.onLevelPick) this.cb.onLevelPick(level.id);
+    this.showSetup({ mode: 'campaign', from: 'fronts' });
+    return true;
+  }
+
+  openUpgrades() {
+    this._showScreen('upgrades');
+    this._renderUpgrades();
+  }
+
+  _renderUpgrades() {
+    const view = metaTreeView();
+    const balance = this.root.querySelector('#upgrade-balance');
+    if (balance) balance.textContent = `${view.currency.toLocaleString()} ${view.currencyName}`;
+    const board = this.root.querySelector('#upgrade-board');
+    if (!board) return;
+    board.innerHTML = view.branches.map((branch) => `
+      <section class="upgrade-col">
+        <h2>${escapeHtml(branch.name)}</h2>
+        ${branch.nodes.map((node) => `
+          <button class="upgrade-card ${node.state}" data-node="${node.id}" ${node.state === 'available' ? '' : 'disabled'}>
+            <b>${escapeHtml(node.name)}</b>
+            <small>${escapeHtml(node.desc)}</small>
+            <span class="cost">${node.owned ? 'Owned' : `${node.cost} ${view.currencyName}`}</span>
+          </button>`).join('')}
+      </section>`).join('');
+    for (const card of board.querySelectorAll('.upgrade-card')) {
+      card.onclick = () => {
+        const result = spend(card.dataset.node);
+        if (!result.ok) {
+          const reason = result.reason === 'poor' ? 'Not enough Salvage Alloy.'
+            : result.reason === 'locked' ? 'Buy the earlier upgrade first.'
+            : result.reason === 'owned' ? 'Already owned.' : 'That upgrade is not available.';
+          this.showBanner(reason, '', 2200);
+          return;
+        }
+        this._renderUpgrades();
+      };
+    }
+  }
+
+  askConfirm({ title, copy, confirm, cancel }) {
+    const dialog = this.root.querySelector('#room-confirm');
+    dialog.querySelector('#room-confirm-title').textContent = title;
+    dialog.querySelector('#room-confirm-copy').textContent = copy || '';
+    dialog.querySelector('#room-confirm-leave').textContent = confirm || 'Confirm';
+    dialog.querySelector('#room-confirm-cancel').textContent = cancel || 'Cancel';
+    dialog.classList.remove('hidden');
+    return new Promise((resolve) => { this._confirmResolve = resolve; });
+  }
+
+  _installNav() {
+    this._navIndex = 0;
+    this._padWas = {};
+    window.addEventListener('keydown', (event) => this._onNavKey(event), true);
+    this._padTimer = setInterval(() => this._pollPad(), 90);
+  }
+
+  _focusables() {
+    const screen = this.root.querySelector(`#screen-${this._lastScreen || 'account'}`);
+    if (!screen || screen.classList.contains('hidden')) return [];
+    return [...screen.querySelectorAll('button, [data-nav]')].filter((el) => {
+      if (el.disabled || el.classList.contains('hidden')) return false;
+      if (el.closest('.hidden')) return false;
+      return el.offsetParent !== null || el.getClientRects().length > 0;
+    });
+  }
+
+  _moveNav(step) {
+    const items = this._focusables();
+    if (!items.length) return;
+    this._navIndex = ((this._navIndex || 0) + step + items.length) % items.length;
+    for (const el of items) el.classList.remove('navfocus');
+    const current = items[this._navIndex];
+    current.classList.add('navfocus');
+  }
+
+  _activateNav() {
+    const items = this._focusables();
+    const current = items[this._navIndex] || items[0];
+    current?.click();
+  }
+
+  _onNavKey(event) {
+    const typing = event.target && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable);
+    if (typing) {
+      if (event.key === 'Escape') event.target.blur();
+      return;
+    }
+    if (this.overlayHidden()) return;
+    const dialog = this.root.querySelector('#room-confirm');
+    if (dialog && !dialog.classList.contains('hidden')) {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dialog.querySelector('#room-confirm-cancel').click(); }
+      else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); dialog.querySelector('#room-confirm-leave').click(); }
+      return;
+    }
+    const screen = this._lastScreen;
+    if (screen === 'pause' && (event.key === 'Escape' || event.key === 'Backspace')) return;
+    const backKeys = event.key === 'Escape' || event.key === 'Backspace';
+    if (backKeys && screen && screen !== 'account') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (screen === 'setup' && this._setupFrom === 'fronts') this._backOverlay('account');
+      else if (screen === 'settings' && this._settingsFromPause) this._showScreen('pause');
+      else this._backOverlay(this.shell.base === 'account' ? 'account' : 'main');
+      return;
+    }
+    if (screen === 'fronts' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'a' || event.key === 'd')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = this._worldMap?.nudge(event.key === 'ArrowLeft' || event.key === 'a' ? -1 : 1);
+      if (id) {
+        const level = levelById(id);
+        this._showFrontTip({ id, name: level.name, blurb: level.blurb, pressure: battlefieldPressure(level.mult), state: frontState(id, this._campaignCleared || 0, loadMeta().cleared), x: null, y: null });
+      }
+      return;
+    }
+    if (screen === 'fronts' && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      event.stopPropagation();
+      this._worldMap?.confirmFocused();
+      return;
+    }
+    if (['ArrowUp', 'ArrowDown', 'w', 's'].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      this._moveNav(event.key === 'ArrowUp' || event.key === 'w' ? -1 : 1);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      const items = this._focusables();
+      if (!items.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this._activateNav();
+    }
+  }
+
+  _pollPad() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = [...pads].find((entry) => entry && entry.connected);
+    if (!pad || this.overlayHidden()) { this._padWas = {}; return; }
+    const was = this._padWas || {};
+    const edge = (index) => pad.buttons[index]?.pressed && !was[index];
+    this._padWas = Object.fromEntries(pad.buttons.map((button, index) => [index, !!button.pressed]));
+    const up = edge(12) || (pad.axes[1] < -0.6 && !this._axisUp);
+    const down = edge(13) || (pad.axes[1] > 0.6 && !this._axisDown);
+    this._axisUp = pad.axes[1] < -0.6;
+    this._axisDown = pad.axes[1] > 0.6;
+    if (up) this._moveNav(-1);
+    if (down) this._moveNav(1);
+    if (edge(0)) {
+      if (this._lastScreen === 'fronts') this._worldMap?.confirmFocused();
+      else this._activateNav();
+    }
+    if (edge(1) && this._lastScreen && this._lastScreen !== 'account' && this._lastScreen !== 'pause') {
+      this._backOverlay(this.shell.base === 'account' ? 'account' : 'main');
+    }
+    if ((edge(14) || edge(15)) && this._lastScreen === 'fronts') {
+      const id = this._worldMap?.nudge(edge(14) ? -1 : 1);
+      if (id) {
+        const level = levelById(id);
+        this._showFrontTip({ id, name: level.name, blurb: level.blurb, pressure: battlefieldPressure(level.mult), state: frontState(id, this._campaignCleared || 0, loadMeta().cleared), x: null, y: null });
+      }
+    }
+  }
 
   _heroTip(h) {
     const a = h.ability;
     const au = h.aura;
     const passives = (h.passives || [])
-      .map((p) => `<span class="tfx">${p.icon} <b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
+      .map((p) => `<span class="tfx"><b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
       .join('<br>');
-    return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
-      (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
+    return `<b>${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
+      (au ? `<span class="tfx"><b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       (passives ? `${passives}<br>` : '') +
-      `<span class="tfx">${a.icon} <b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
+      `<span class="tfx"><b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
       `<br><span class="tdesc">Level-ups grant upgrade points for Aura, Passive I, Passive II, or Ult Damage.</span>`;
   }
 
@@ -2567,7 +2867,6 @@ export class UI {
     this.msgSeen = 0;
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
-    this.root.querySelector('#minimap-wrap').classList.remove('hidden');
     for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
       chip.onclick = () => this.cb.onStance && this.cb.onStance(chip.dataset.st);
     }
@@ -2635,7 +2934,7 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
-    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
+    q('#r-gold').innerHTML = `${icon('coin')}<b>${Math.floor(game.gold)}</b>`;
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
@@ -2644,22 +2943,22 @@ export class UI {
     const nests = game.liveNests ? game.liveNests() : 0;
     const frac = Math.max(0, Math.min(1, (game.threat || 0) % 1));
     q('#r-day').innerHTML = game.phase === 'found'
-      ? '🏳️ <b>Claim your ground</b>'
+      ? '<b>Claim your ground</b>'
       : game.finalStand
-        ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
+        ? labyrinth ? '<b>The champion walks</b>' : '<b>Final counterattack</b>'
         : labyrinth
-          ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
-          : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+          ? `<b>${['Quiet', 'Something follows', 'The pursuit', 'The flood'][game.pursuitStage || 0]}</b><i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
+          : `${icon('threat')}<b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
     // In the labyrinth the front is chambers and lives, not nodes and camps.
     if (labyrinth) {
       const chambers = game.nests.filter((n) => !n.offMap).length;
-      q('#r-front').innerHTML = `🌀 <b>${chambers - nests}</b>/${chambers} · ❤️ <b>${game.lives}</b>`;
+      q('#r-front').innerHTML = `<b>${chambers - nests}</b>/${chambers} · <b>${game.lives}</b> lives`;
       q('#r-front').title = 'Brood chambers razed · shared lives left';
       q('#r-front').classList.toggle('danger', game.lives === 0);
     } else {
       const total = game.activeNodes ? game.activeNodes().length : game.nodes.length;
-      q('#r-front').innerHTML = `🚩 <b>${held}</b>/${total} · 🔥 <b>${nests}</b>`;
+      q('#r-front').innerHTML = `<b>${held}</b>/${total} nodes · <b>${nests}</b> hives`;
       q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
     }
 
@@ -2679,10 +2978,10 @@ export class UI {
       const def = active && game.map.labyrinthLayout?.encounters?.find((e) => e.key === active.key);
       const room = def && game.map.labyrinthLayout?.rooms?.[def.room];
       q('#army-status').innerHTML = active && room
-        ? `⚔️ <b>${room.label}</b> · wave ${Math.max(1, active.wave)}/${def.waves} · doors sealed during combat`
+        ? `<b>${room.label}</b> · wave ${Math.max(1, active.wave)}/${def.waves} · doors sealed during combat`
         : game.lives > 0
-          ? `❤️ <b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · choose a marked route and reach the Sunless Throne`
-          : '❤️ <b>No lives left</b> — the next fall is final.';
+          ? `<b>${game.lives}</b> ${game.lives === 1 ? 'life' : 'lives'} · choose a marked route and reach the Sunless Throne`
+          : '<b>No lives left</b> — the next fall is final.';
     } else {
       const firstSiege = game.firstSiegeStatus?.();
       const army = game.units.filter((u) => !u.hero && !u.dead).length;
@@ -2698,7 +2997,7 @@ export class UI {
         ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
-    q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
+    q('#r-z').textContent = String(game.zombies.length);
     const alert = combatAlert(game, p);
     const alertBox = q('#combat-alert');
     const alertKey = alert?.key || '';
@@ -2758,7 +3057,9 @@ export class UI {
           <span><b>${stats.speed.toFixed(1)}</b><small>SPD</small></span>
           <span><b>${stats.regen.toFixed(1)}</b><small>REG</small></span>
           <span class="aurastat"><b>${stats.auraRadius.toFixed(1)}</b><small>AURA</small></span>
-          <em>${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected</em>`;
+          <em>${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected</em>`;
+        const vital = q('#a-vital');
+        if (vital) vital.textContent = `${Math.round(stats.damage)} dmg · aura ${stats.auraAllies} allied, ${stats.auraEnemies} hostile`;
       }
 
       this._updateUpgradePanel(game, h);
@@ -2770,8 +3071,9 @@ export class UI {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
+        big.innerHTML = `<span class="btext">${near ? 'Found the city here' : 'Ride to a flagged site'}<small>${this._keyLabel('build')}</small></span>`;
         big.disabled = !near || h.dead;
+        big.classList.remove('hud-off');
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
         if (target) {
@@ -2782,12 +3084,13 @@ export class UI {
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
           big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`;
+          big.innerHTML = `<span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost} gold</small></span>`;
           big.disabled = h.dead;
+          big.classList.remove('hud-off');
         } else {
           this._bigMode = 'idle';
-          big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`;
+          big.className = 'bigaction build hud-off';
+          big.innerHTML = `<span class="btext">Build mode<small>Ride to a plot</small></span>`;
           big.disabled = true;
         }
       } else {
@@ -2795,10 +3098,14 @@ export class UI {
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
-        big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
+        big.className = 'bigaction cast hud-off' + (cd > 0 || h.dead ? ' cooling' : ' ready');
+        big.innerHTML = `<span class="btext">${ab.name} <small>Rank ${rank}/3 · Ult ${ultRank}/3 · ${this._keyLabel('ability1')}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
+        const vital = q('#a-vital');
+        if (vital && !vital.textContent.includes(ab.name)) {
+          vital.textContent = `${vital.textContent ? `${vital.textContent} · ` : ''}${ab.name} ${cd > 0 ? `${Math.ceil(cd)}s` : 'ready'}`;
+        }
       }
     }
 
@@ -2843,7 +3150,7 @@ export class UI {
         <span class="upicon">${choice.icon}</span>
         <b>${choice.name}</b>
         <small>${choice.desc}</small>
-        <span class="uppips">${'●'.repeat(choice.rank)}${'○'.repeat(choice.max - choice.rank)}</span>`;
+        <span class="uppips">Rank ${choice.rank}/${choice.max}</span>`;
       button.onclick = () => this.cb.onHeroUpgrade && this.cb.onHeroUpgrade(choice.key);
       row.appendChild(button);
     }
@@ -3030,21 +3337,21 @@ export class UI {
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    const chip = this.root.querySelector('#title-account');
+    if (chip) {
+      chip.textContent = state.signedIn
+        ? `@${state.username || state.name || 'Commander'}`
+        : 'Account';
+    }
     if (needsUsername) {
       this._accountAccepted = false;
+      this.root.querySelector('#title-login')?.classList.remove('hidden');
       this._showScreen('account');
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
-    if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
-      if (this._offlineAccepted && !this._accountAccepted) {
-        this._accountAccepted = true;
-        this._showScreen('main');
-      } else if (!this._accountAccepted) this._showScreen('account');
-      return;
-    }
-    this._accountAccepted = false;
-    this._showScreen('account');
+    if (!this._lastScreen || this._lastScreen === 'account') this._showScreen('account');
+    this._syncTitleMenu();
   }
 
   setProfile(p) {
@@ -3089,7 +3396,9 @@ export class UI {
   }
 
   setContinue(snap) {
+    this._continueSnap = snap || null;
     for (const row of this.root.querySelectorAll('.moderesume')) row.innerHTML = '';
+    this._syncTitleMenu();
     if (!snap) return;
     const mode = snap.mode === 'survival' ? 'survival' : snap.mode === 'labyrinth' ? 'labyrinth' : 'campaign';
     const row = this.root.querySelector(`#solo-${mode}-resume`);
@@ -3325,10 +3634,10 @@ export class UI {
     const note = this.root.querySelector('#p-note');
     const questHtml = (quests || []).map((q) => {
       const it = itemInfo(q.reward);
-      return `<div class="questrow ${q.claimed ? 'done' : q.done ? 'done' : ''}">${q.claimed ? '🏅' : q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}${it ? ` <span class="qreward">${it.icon} ${it.name}</span>` : ''}</div>`;
+      return `<div class="questrow ${q.claimed ? 'done' : q.done ? 'done' : ''}">${q.claimed ? 'Claimed' : q.done ? 'Done' : 'Open'} <b>${q.name}</b> — ${q.desc}${it ? ` <span class="qreward">${it.name}</span>` : ''}</div>`;
     }).join('');
-    note.innerHTML = (questHtml ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questHtml}</div>` : '')
-      + (netMode ? '⚠️ Co-op keeps running while this menu is open.' : '');
+    note.innerHTML = (questHtml ? `<div class="questbox"><div class="steplabel">Side quests</div>${questHtml}</div>` : '')
+      + (netMode ? 'Co-op keeps running while this menu is open.' : '');
   }
 
   hidePause() {

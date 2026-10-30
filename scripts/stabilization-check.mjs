@@ -27,8 +27,10 @@ assert.match(ui, /id="m-custom">CUSTOM GAMES</, 'Character Select must retain Cu
 assert.doesNotMatch(ui, /id="ow-|screen-world-menu/, 'the removed overworld HUD and Game Menu must not return');
 assert.match(main, /_openCampaignSelect\(\)[\s\S]*showSetup\(\{ mode: 'campaign' \}\)/,
   'Enter World must open the campaign mission select directly');
-assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,
-  'authenticated entry must open Character Select or character creation');
+assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('account'\)/,
+  'authenticated entry stays on the title screen');
+assert.match(ui, /id="screen-character-create"/, 'the character creator stays in the shell, off the title path');
+assert.match(ui, /id="title-play"/, 'Play is a title-screen action');
 assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
   'character creation must return to Character Select');
 assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an explicit logout action');

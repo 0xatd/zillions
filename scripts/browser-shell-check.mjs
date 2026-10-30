@@ -102,18 +102,19 @@ try {
   assert.equal(JSON.parse(entryDom).offline, true, `entry controls missing: ${entryDom}`);
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
-    const offline = document.querySelector('#a-offline');
-    const create = document.querySelector('#m-create-character');
-    const name = document.querySelector('#creator-name');
-    const form = document.querySelector('#character-create-form');
-    offline.click();
-    create.click();
-    name.value = 'Journey Test';
-    form.requestSubmit();
-    const selected = !document.querySelector('#screen-main').classList.contains('hidden');
-    document.querySelector('#m-enter-world').click();
-    return selected && !document.querySelector('#screen-setup').classList.contains('hidden') && !app.ow && !app.owMap;
-  })()`), true, 'new account must create a character, return to Character Select, and deploy straight to the siege missions');
+    const titleVisible = !document.querySelector('#screen-account').classList.contains('hidden');
+    document.querySelector('#title-play').click();
+    const onMap = !document.querySelector('#screen-fronts').classList.contains('hidden');
+    const selectedFront = app.ui.selectFront(1);
+    const onDeploy = !document.querySelector('#screen-setup').classList.contains('hidden');
+    const creatorWasHidden = document.querySelector('#screen-character-create').classList.contains('hidden');
+    app.ui._showCharacterCreator();
+    document.querySelector('#creator-name').value = 'Journey Test';
+    document.querySelector('#character-create-form').requestSubmit();
+    const roster = !document.querySelector('#screen-main').classList.contains('hidden');
+    const creatorKept = !!document.querySelector('#screen-character-create');
+    return titleVisible && onMap && selectedFront && onDeploy && creatorWasHidden && roster && creatorKept && !app.ow && !app.owMap;
+  })()`), true, 'title Play opens the world map and a deploy panel; the character creator stays in the shell and still returns to the roster');
   await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
