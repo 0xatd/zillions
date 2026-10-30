@@ -79,7 +79,7 @@ export class UI {
       <div id="topbar" class="hidden">
         <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend"><b>0</b></div>
         <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take"><b>Threat 1</b></div>
-        <div class="res hidden-meter" id="r-front" title="Lane nodes you hold · hive nests still mustering"><b>0</b></div>
+        <div class="res hidden-meter" id="r-front" title="Ground you hold, and hives still fighting"><b>0</b></div>
         <div class="res hidden-meter" id="r-z" title="Enemies remaining">0</div>
         <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
@@ -108,7 +108,7 @@ export class UI {
       <div id="actionbar" class="hidden hud-min">
         <div class="commandtop">
           <div class="rallyhints" id="stancebar">
-            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> Defend</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> Follow</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> Push</span>
+            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the city line"><b></b> Defend</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Stay with the hero"><b></b> Follow</span><span class="stance" data-st="attack" data-bind="stance_push" title="Advance, take ground, then attack the hives"><b></b> Push</span>
           </div>
           <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
@@ -213,7 +213,7 @@ export class UI {
               <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">MARKET</button>
               <button class="sheet-tab" id="sheet-tab-crafting" data-tab="crafting">FORGE</button>
               <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
-              <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
+              <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">UPGRADES</button>
             </div>
             <button class="utilitybtn" id="sheet-close">← BACK</button>
           </div>
@@ -246,8 +246,8 @@ export class UI {
               <canvas id="lattice-canvas"></canvas>
               <div class="lattice-hud">
                 <span id="lattice-points"></span>
-                <input id="lattice-search" placeholder="Search the Lattice" autocomplete="off">
-                <button class="utilitybtn" id="lattice-rewire">REWIRE</button>
+                <input id="lattice-search" placeholder="Search upgrades" autocomplete="off">
+                <button class="utilitybtn" id="lattice-rewire">Reset</button>
               </div>
             </div>
             <aside class="lattice-detail" id="lattice-detail"></aside>
@@ -331,7 +331,7 @@ export class UI {
           <canvas id="fronts-canvas"></canvas>
           <div class="fronts-head">
             <button class="tbtn info-back" id="fronts-back" type="button">Back</button>
-            <div><h1>The system</h1><p>Three worlds. The next front is marked.</p></div>
+            <div><h1>The system</h1><p>Three worlds. The next battle is marked.</p></div>
           </div>
           <div id="fronts-tip" class="fronts-tip hidden"></div>
         </div>
@@ -339,7 +339,7 @@ export class UI {
         <div id="screen-upgrades" class="upgrade-screen hidden">
           <div class="upgrade-head">
             <button class="tbtn info-back" type="button">Back</button>
-            <div><h1>Upgrades</h1><p>Permanent gains for the next landing. Bought with Salvage Alloy.</p></div>
+            <div><h1>Upgrades</h1><p>Permanent bonuses for the next battle. Bought with Salvage.</p></div>
             <div class="upgrade-balance" id="upgrade-balance"></div>
           </div>
           <div class="upgrade-board" id="upgrade-board"></div>
@@ -440,7 +440,7 @@ export class UI {
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
             <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> build, repair, or rebuild. Fight mode makes it dodge and enables <kbd data-bind-label="ability1"></kbd>. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
-            <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
+            <div><b>👑 Level up</b> from nearby kills. Spend points on your aura, your passives, or your ultimate.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
             <div><b>☠️ Threat is the clock.</b> It rises on its own, faster while hives stand, and every whole level makes every hive muster at once. If the Keep falls, all is lost.</div>
           </div>
@@ -2019,10 +2019,10 @@ export class UI {
     const budget = latticePoints(character.level, character.questPoints);
     const spent = (character.lattice || []).length;
     this.root.querySelector('#lattice-points').innerHTML =
-      `<b>${budget - spent}</b> unspent · ${spent}/${budget} allocated`;
+      `<b>${budget - spent}</b> points left`;
     const rewire = this.root.querySelector('#lattice-rewire');
     rewire.disabled = !spent;
-    rewire.textContent = spent ? `REWIRE · ${rewireCost(spent)} ${META_CURRENCY.short}` : 'REWIRE';
+    rewire.textContent = spent ? `Reset · ${rewireCost(spent)} Salvage` : 'Reset';
     this._drawLattice(character);
     this._renderLatticeDetail(character);
   }
@@ -2098,35 +2098,35 @@ export class UI {
       const cost = rewireCost((character.lattice || []).length);
       const authoritative = !!this.cb.useAuthoritativeEconomy?.();
       if (!authoritative && loadMeta().currency < cost) {
-        this.showBanner(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${loadMeta().currency}.`, '', 3200);
+        this.showBanner(`Resetting costs ${cost} Salvage. You have ${loadMeta().currency}.`, '', 3200);
         return;
       }
       this.askConfirm({
-        title: 'Rewire the Lattice?',
-        copy: `This costs ${cost} ${META_CURRENCY.name}. Every point comes back.`,
-        confirm: 'Rewire',
-        cancel: 'Keep build',
+        title: `Reset all upgrades for ${cost} Salvage?`,
+        copy: 'Every point comes back. The upgrades you bought are cleared.',
+        confirm: 'Reset',
+        cancel: 'Keep them',
       }).then((ok) => {
         if (!ok) return;
         if (authoritative) {
           Promise.resolve(this.cb.onLatticeRewire?.(character)).then((result) => {
             if (!result?.ok) throw new Error(result?.error || 'rewire_failed');
-            this.showBanner(`Rewired — ${result.returned} points returned for ${result.cost} ${META_CURRENCY.short}.`, '', 2800);
+            this.showBanner(`Reset. ${result.returned} points came back.`, '', 2800);
             this._renderCharacterSheet();
           }).catch((error) => {
-            const reason = error?.message === 'insufficient_funds' ? `Rewiring costs ${cost} ${META_CURRENCY.name}.`
-              : 'The rewire could not be confirmed. Your Lattice is unchanged.';
+            const reason = error?.message === 'insufficient_funds' ? `Resetting costs ${cost} Salvage.`
+              : 'The reset could not be confirmed. Your upgrades are unchanged.';
             this.showBanner(reason, 'bad', 3200);
           });
           return;
         }
         const paid = charge(cost);
         if (!paid.ok) {
-          this.showBanner(`Rewiring costs ${cost} ${META_CURRENCY.name}. You hold ${paid.meta.currency}.`, '', 3200);
+          this.showBanner(`Resetting costs ${cost} Salvage. You have ${paid.meta.currency}.`, '', 3200);
           return;
         }
         const returned = rewireLattice(character);
-        this.showBanner(`Rewired — ${returned} points returned for ${cost} ${META_CURRENCY.short}.`, '', 2800);
+        this.showBanner(`Reset. ${returned} points came back.`, '', 2800);
         this._sheetChanged();
       });
     };
@@ -2259,11 +2259,11 @@ export class UI {
     if (!node) {
       const tree = treeBonuses(character.lattice, character.classKey);
       const lines = itemLines({ mods: tree.mods, affixes: [] });
-      box.innerHTML = `<h3>THE LATTICE</h3>
-        <p class="lattice-blurb">One tree, thirteen doors into it. Your class decides where you start, not what you can become.</p>
-        <p class="lattice-blurb"><b>Click</b> a node to buy the whole route to it. <b>Shift-click</b> to sell one back. Drag to pan, scroll to zoom.</p>
-        <h4>THIS BUILD</h4>
-        ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : '<p class="empty-gear">Nothing allocated yet.</p>'}`;
+      box.innerHTML = `<h3>Upgrades</h3>
+        <p class="lattice-blurb">One tree. Your class decides where you start.</p>
+        <p class="lattice-blurb"><b>Click</b> a node to buy the path to it. <b>Shift-click</b> sells one back. Drag to pan, scroll to zoom.</p>
+        <h4>BOUGHT</h4>
+        ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : '<p class="empty-gear">Nothing bought yet.</p>'}`;
       return;
     }
     const owned = (character.lattice || []).includes(node.id);
@@ -2278,9 +2278,9 @@ export class UI {
       ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
       ${doctrine ? `<p class="lattice-doctrine">${doctrine.desc}</p><p class="lattice-cost">${doctrine.cost}</p>` : ''}
       ${sector ? `<p class="lattice-blurb">${sector.desc}</p>` : ''}
-      <p class="lattice-route">${owned ? 'ALLOCATED — shift-click to sell back'
+      <p class="lattice-route">${owned ? 'Bought. Shift-click to sell it back.'
         : path.length ? `${path.length} point${path.length === 1 ? '' : 's'} to reach`
-        : 'No route from your build'}</p>
+        : 'No path from what you have bought'}</p>
       ${owned ? `<div class="lattice-pin"><h4>ACTIVE WITH</h4>
         <button data-set="both" class="${pinned === undefined ? 'sel' : ''}">BOTH SETS</button>
         <button data-set="0" class="${pinned === 0 ? 'sel' : ''}">SET I</button>
@@ -2730,7 +2730,7 @@ export class UI {
       card.onclick = () => {
         const result = spend(card.dataset.node);
         if (!result.ok) {
-          const reason = result.reason === 'poor' ? 'Not enough Salvage Alloy.'
+          const reason = result.reason === 'poor' ? 'Not enough Salvage.'
             : result.reason === 'locked' ? 'Buy the earlier upgrade first.'
             : result.reason === 'owned' ? 'Already owned.' : 'That upgrade is not available.';
           this.showBanner(reason, '', 2200);
@@ -2946,7 +2946,7 @@ export class UI {
       (au ? `<span class="tfx"><b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       (passives ? `${passives}<br>` : '') +
       `<span class="tfx"><b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
-      `<br><span class="tdesc">Level-ups grant upgrade points for Aura, Passive I, Passive II, or Ult Damage.</span>`;
+      `<br><span class="tdesc">Level-ups grant points for your aura, your passives, or your ultimate.</span>`;
   }
 
   // ---------- in-game HUD ----------

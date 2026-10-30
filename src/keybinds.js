@@ -109,7 +109,7 @@ export const ACTIONS = [
     desc: 'Your gear, your stash, and what it all adds up to.',
   },
   {
-    id: 'lattice_panel', name: 'The Lattice', scopes: ['battle', 'hub'], context: 'interface', default: 'g',
+    id: 'lattice_panel', name: 'Upgrades', scopes: ['battle', 'hub'], context: 'interface', default: 'g',
     desc: 'The passive tree. Opens the same sheet on its Lattice tab.',
   },
   { id: 'pause', name: 'Pause', scopes: ['battle'], context: 'interface', default: 'p' },

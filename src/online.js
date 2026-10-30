@@ -853,7 +853,7 @@ export const LORE = [
 export const TIPS = [
   '🪙 Coins on the ground never expire — but uncollected coins are towers you don\'t have yet.',
   '🏰 Hive pressure is visible on the map. Spend where the front line is bending.',
-  '🌪️ Hero levels grant upgrade points — choose Aura, Passive I, Passive II, or Ult Damage from the hero panel.',
+  '🌪️ Hero levels grant points. Spend them on your aura, your passives, or your ultimate.',
   '🧱 Walls are not for stopping the horde. They are for choosing where it stands while your towers work.',
   '🎯 Ballista towers delete brutes and bosses; flame towers erase packed walkers. Mix them.',
   '⚔️ Press 1 when the Keep is under pressure — an army standing WITH you fights twice as well.',
