@@ -332,6 +332,8 @@ drops the living-world tables — review it and back up first.
 ## License and Assets
 
 Third-party model terms are in `assets/KAYKIT-LICENSE.txt`.
+CC0 music, ambience, and sound effects are in `assets/audio/cc0/`, with
+author, licence, and source URL in `assets/audio/LICENSES.md`.
 
 Three.js terms are in `vendor/THREE-LICENSE.md`.
 

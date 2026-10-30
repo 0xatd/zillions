@@ -453,11 +453,21 @@ export class UI {
                   <b id="set-music-val">100%</b>
                 </label>
                 <label class="setrow">
-                  <span>Sound effects</span>
-                  <input type="checkbox" id="set-sfx">
-                  <b id="set-sfx-val"></b>
+                  <span>Effects</span>
+                  <input type="range" id="set-sfx" min="0" max="100" value="100">
+                  <b id="set-sfx-val">100%</b>
                 </label>
-                <div class="sethint">Effects are procedural WebAudio; hero barks are pre-recorded. Mute anytime with <kbd>M</kbd>.</div>
+                <label class="setrow">
+                  <span>Ambient</span>
+                  <input type="range" id="set-ambient" min="0" max="100" value="85">
+                  <b id="set-ambient-val">85%</b>
+                </label>
+                <label class="setrow">
+                  <span>Interface</span>
+                  <input type="range" id="set-ui" min="0" max="100" value="90">
+                  <b id="set-ui-val">90%</b>
+                </label>
+                <div class="sethint">CC0 samples on Web Audio buses, with a procedural fallback. Mute anytime with <kbd>M</kbd>.</div>
               </div>
               <div id="set-pane-video" class="setpane hidden">
                 <div class="setrow">
@@ -642,18 +652,18 @@ export class UI {
       };
     }
     const vol = q('#set-vol'), mus = q('#set-music'), sfx = q('#set-sfx');
-    vol.oninput = () => {
-      q('#set-vol-val').textContent = vol.value + '%';
-      if (this.cb.onSettings) this.cb.onSettings({ volume: vol.value / 100 });
+    const amb = q('#set-ambient'), uiVol = q('#set-ui');
+    const bindRange = (input, label, key) => {
+      input.oninput = () => {
+        q(label).textContent = input.value + '%';
+        if (this.cb.onSettings) this.cb.onSettings({ [key]: input.value / 100 });
+      };
     };
-    mus.oninput = () => {
-      q('#set-music-val').textContent = mus.value + '%';
-      if (this.cb.onSettings) this.cb.onSettings({ music: mus.value / 100 });
-    };
-    sfx.onchange = () => {
-      q('#set-sfx-val').textContent = sfx.checked ? 'ON' : 'OFF';
-      if (this.cb.onSettings) this.cb.onSettings({ sfx: sfx.checked });
-    };
+    bindRange(vol, '#set-vol-val', 'volume');
+    bindRange(mus, '#set-music-val', 'music');
+    bindRange(sfx, '#set-sfx-val', 'sfx');
+    bindRange(amb, '#set-ambient-val', 'ambient');
+    bindRange(uiVol, '#set-ui-val', 'uiVolume');
     for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
       b.onclick = () => {
         if (this.cb.onSettings) this.cb.onSettings({ quality: b.dataset.q });
@@ -2991,9 +3001,20 @@ export class UI {
       this.root.querySelector('#set-music').value = v;
       this.root.querySelector('#set-music-val').textContent = v + '%';
     }
-    if (s.sfx !== undefined) {
-      this.root.querySelector('#set-sfx').checked = !!s.sfx;
-      this.root.querySelector('#set-sfx-val').textContent = s.sfx ? 'ON' : 'OFF';
+    const sfxPct = typeof s.sfx === 'number' ? Math.round(s.sfx * 100) : (s.sfx === false ? 0 : null);
+    if (sfxPct !== null) {
+      this.root.querySelector('#set-sfx').value = sfxPct;
+      this.root.querySelector('#set-sfx-val').textContent = sfxPct + '%';
+    }
+    if (typeof s.ambient === 'number') {
+      const v = Math.round(s.ambient * 100);
+      this.root.querySelector('#set-ambient').value = v;
+      this.root.querySelector('#set-ambient-val').textContent = v + '%';
+    }
+    if (typeof s.uiVolume === 'number') {
+      const v = Math.round(s.uiVolume * 100);
+      this.root.querySelector('#set-ui').value = v;
+      this.root.querySelector('#set-ui-val').textContent = v + '%';
     }
     if (s.quality !== undefined) this._reflectQuality(s.quality);
   }

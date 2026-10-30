@@ -79,7 +79,9 @@ to snapshots when the state can affect later simulation.
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
-| `src/audio.js` | Music, voice, and sound effect playback |
+| `src/audio.js` | Playback facade: CC0 cues, procedural fallback, hero barks |
+| `src/audio-score.js` | Pure music, biome, distance, and cue decisions |
+| `src/soundscape.js` | Web Audio buses, voice pool, crossfades, and sample loading |
 
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.

@@ -98,6 +98,7 @@ Validate audio metadata when audio changed:
 
 ```bash
 jq empty assets/audio/manifest.json
+jq empty assets/audio/cc0/index.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
