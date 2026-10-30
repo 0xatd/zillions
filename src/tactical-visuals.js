@@ -24,6 +24,8 @@ const GradeShader = {
     uVignette: { value: 0.15 },
     uShadowCol: { value: new THREE.Color(0x1d3557) },
     uShadowAmt: { value: 0.0 },
+    uTint: { value: new THREE.Color(0xa8cfc4) },
+    uTintAmt: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -38,6 +40,8 @@ const GradeShader = {
     uniform float uVignette;
     uniform vec3 uShadowCol;
     uniform float uShadowAmt;
+    uniform vec3 uTint;
+    uniform float uTintAmt;
     varying vec2 vUv;
     void main() {
       vec4 texel = texture2D(tDiffuse, vUv);
@@ -48,6 +52,7 @@ const GradeShader = {
       // Shadow split-tone: strongest in the darks, gone by the mids.
       float dark = 1.0 - smoothstep(0.02, 0.32, luma);
       c = mix(c, uShadowCol * (0.55 + luma * 1.6), dark * uShadowAmt);
+      c = mix(c, c * uTint, uTintAmt);
       vec2 d = vUv - 0.5;
       float v = smoothstep(0.85, 0.25, dot(d, d) * 2.0);
       c *= mix(1.0, v, uVignette);
@@ -398,7 +403,7 @@ export class TacticalVisuals {
     this.renderer.setPixelRatio(pixelRatio);
     this.composer.setPixelRatio(pixelRatio);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = high ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     const mapSize = high ? 4096 : 1024;
     this.scene.traverse((obj) => {
       if (!obj.isDirectionalLight || !obj.castShadow || !obj.shadow) return;
@@ -409,7 +414,17 @@ export class TacticalVisuals {
         obj.shadow.map = null;
       }
     });
-    if (this.ao) this.ao.enabled = high;
+    if (this.ao) {
+      this.ao.enabled = high;
+      this.ao.uniforms.uStrength.value = 0.9;
+      this.ao.uniforms.uRadius.value = 1.05;
+    }
+    if (this.bloom) {
+      this.bloom.enabled = high;
+      this.bloom.strength = 0.2;
+      this.bloom.radius = 0.42;
+      this.bloom.threshold = 0.76;
+    }
     if (persist) {
       try { localStorage.setItem(QUALITY_KEY, this.quality); } catch { /* storage can be blocked */ }
     }
@@ -422,6 +437,17 @@ export class TacticalVisuals {
     this.grade.uniforms.uShadowCol.value.setHex(hex);
     this.ink.uniforms.uInk.value.setHex(hex);
     setToyShadow(hex);
+  }
+
+  // A light per-map cast. Low quality skips the composer, so this grade,
+  // the contact AO and the bloom all stay off together.
+  setMapGrade(pal) {
+    const sky = pal && pal.sky !== undefined ? pal.sky : 0xa8cfc4;
+    this.grade.uniforms.uTint.value.setHex(sky);
+    this.grade.uniforms.uTintAmt.value = 0.08;
+    this.grade.uniforms.uSat.value = 1.05;
+    this.grade.uniforms.uLift.value = 0.018;
+    this.grade.uniforms.uVignette.value = 0.18;
   }
 
   toggleQuality() {

@@ -3002,10 +3002,11 @@ class App {
     this.sun.shadow.mapSize.set(high ? 4096 : 1024, high ? 4096 : 1024);
     const s = 40;
     Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 8, far: 280 });
-    this.sun.shadow.bias = -0.00035;
-    this.sun.shadow.normalBias = 0.04;
+    this.sun.shadow.bias = -0.00022;
+    this.sun.shadow.normalBias = 0.07;
+    this.sun.shadow.radius = 2;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xfff4e4, 0xc8d0c4, 0.95);
+    this.hemi = new THREE.HemisphereLight(0xfff4e4, 0xd7ddd4, 1.05);
     this.scene.add(this.hemi);
     this.amb = new THREE.AmbientLight(0xfff8ee, 0.85);
     this.scene.add(this.amb);
@@ -4808,7 +4809,7 @@ class App {
 
     // Fixed low sun, upper-left of the locked camera, so shadows fall down-right.
     // The frustum follows the hero. The angle does not.
-    const sunElev = (50 * Math.PI) / 180;
+    const sunElev = (36 * Math.PI) / 180;
     const horiz = Math.cos(sunElev);
     const dx = -horiz * 0.82;
     const dy = Math.sin(sunElev);
@@ -4843,6 +4844,7 @@ class App {
     if (shadowHex !== this._shadowHex) {
       this._shadowHex = shadowHex;
       this.tacticalVisuals.setShadowColor(shadowHex);
+      this.tacticalVisuals.setMapGrade(pal);
     }
     const shadow = _tmpColA.setHex(shadowHex);
     const horizon = _tmpColB.setHex(pal.sky !== undefined ? pal.sky : 0xa8cfc4);

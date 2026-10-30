@@ -105,7 +105,7 @@ try {
 
   const boot = await evaluate(`(async () => {
     const app = window.__app;
-    app.ui.selectedLevel = 1;
+    app.ui.selectedLevel = ${Number(process.env.SHOT_LEVEL) || 1};
     app.ui.selectedMode = 'campaign';
     app.ui.selectedCulture = 'european';
     app.tacticalVisuals.applyQuality('high', false);
@@ -154,7 +154,13 @@ try {
         app.issue({ t: 'hdir', p: app.myPlayer, x: dx, z: dz, s: false });
       }
     };
-    return { shadows: app.renderer.shadowMap.enabled, map: app.sun.shadow.mapSize.x, quality: app.tacticalVisuals.quality };
+    const frameMs = [];
+    for (let n = 0; n < 5; n++) {
+      const a = performance.now();
+      app.frame();
+      frameMs.push(Math.round(performance.now() - a));
+    }
+    return { shadows: app.renderer.shadowMap.enabled, map: app.sun.shadow.mapSize.x, quality: app.tacticalVisuals.quality, frameMs };
   })()`);
   console.log('boot', JSON.stringify(boot), 'frames', frames);
 
