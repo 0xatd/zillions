@@ -123,7 +123,7 @@ class App {
     this.renderer.shadowMap.enabled = true;
     // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
     // colour lands on screen as that colour.
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
@@ -872,179 +872,17 @@ class App {
   // city looks designed even before anything is built, and it looks like ITS
   // plan: a square fort gets a square plaza, a crescent gets two lanes, not
   // four. Falls back to a plain ring if the plan is not known yet.
-  _buildPlaza(cx, cz) {
-    // The colony's landing terrace: light poured-pad concrete with an amber
-    // guide ring, and paved walkways out to the gates a shade lighter than
-    // the ground — markings on a pad, not dark bars stamped across the city.
-    const g = new THREE.Group();
-    const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
-    const plan = hq && hq.plan;
-    const squarePlaza = plan && plan.key === 'fort';
-    // On a terraced site the pad and walkways are draped over the ground so
-    // they follow the steps instead of floating flat over the lower terraces.
-    const terraced = !!this.map._tileCH;
-    const drape = (mesh, lift) => {
-      if (!terraced) return mesh;
-      mesh.updateMatrix();
-      const geo = mesh.geometry.clone();
-      geo.applyMatrix4(mesh.matrix);
-      const pa = geo.attributes.position;
-      for (let k = 0; k < pa.count; k++) pa.setY(k, this.map.groundY(pa.getX(k), pa.getZ(k)) + lift);
-      geo.computeVertexNormals();
-      mesh.geometry = geo;
-      mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0); mesh.scale.set(1, 1, 1);
-      return mesh;
-    };
-    // Irregular cobble in the path colour. No disc, no guide ring — the keep
-    // sits on the ground, and the streets are the only paving.
-    const pathHex = (this.map.theme && this.map.theme.palette && this.map.theme.palette.path) || 0xb07a4f;
-    const cobbleCol = new THREE.Color(pathHex);
-    const cobbleHsl = {};
-    cobbleCol.getHSL(cobbleHsl);
-    cobbleCol.setHSL(cobbleHsl.h, cobbleHsl.s, Math.max(0, Math.min(1, cobbleHsl.l * 0.9)));
-    const cobbleGeo = new THREE.CircleGeometry(squarePlaza ? 5.4 : 3.8, squarePlaza ? 4 : 9);
-    const cobblePos = cobbleGeo.attributes.position;
-    for (let i = 0; i < cobblePos.count; i++) {
-      const vx = cobblePos.getX(i), vy = cobblePos.getY(i);
-      if (vx * vx + vy * vy < 0.2) continue;
-      const wob = 0.82 + 0.22 * Math.sin(i * 1.7 + 0.4) + 0.08 * Math.cos(i * 0.9);
-      cobblePos.setXY(i, vx * wob, vy * wob);
-    }
-    cobbleGeo.computeVertexNormals();
-    const disc = new THREE.Mesh(cobbleGeo, toyMat({ color: cobbleCol }));
-    disc.rotation.x = -Math.PI / 2;
-    if (squarePlaza) disc.rotation.z = -plan.facing;
-    const plazaY = this.map.groundY(cx, cz);
-    disc.position.set(cx, plazaY + 0.02, cz);
-    drape(disc, 0.03);
-    disc.receiveShadow = true;
-    g.add(disc);
-    const laneMat = toyMat({ color: pathHex });
-    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
-    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
-    for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
-      lane.rotation.x = -Math.PI / 2;
-      lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
-      lane.receiveShadow = true;
-      drape(lane, 0.025);
-      g.add(lane);
-    }
-    // Switchback roads down the cliff face below each gate: a paved ribbon
-    // draped over the cut so the zig-zag reads from the game camera.
-    const site = (this.map.sites || []).reduce((b, s) => (!b || Math.hypot(s.x - cx, s.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? s : b), null);
-    if (terraced && site && site.switchbacks) {
-      const ribbon = (pts, w, y, mat) => {
-        const P = [];
-        for (let q = 1; q < pts.length; q++) {
-          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
-          const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L * 3));
-          const nx = -(bz - az) / L * w / 2, nz = (bx - ax) / L * w / 2;
-          // Overrun each leg by half a width so the turns are filled.
-          const ex = (bx - ax) / L * w / 2, ez = (bz - az) / L * w / 2;
-          for (let k = 0; k < n; k++) {
-            const f0 = k / n, f1 = (k + 1) / n;
-            const x0 = ax + (bx - ax) * f0 - (k === 0 ? ex : 0), z0 = az + (bz - az) * f0 - (k === 0 ? ez : 0);
-            const x1 = ax + (bx - ax) * f1 + (k === n - 1 ? ex : 0), z1 = az + (bz - az) * f1 + (k === n - 1 ? ez : 0);
-            // The road's own grade, lifted onto the ground where the ground
-            // swells a little; never climbing onto the rock beside it.
-            const h0 = ah + (bh - ah) * f0, h1 = ah + (bh - ah) * f1;
-            const v = [[x0 + nx, z0 + nz, h0], [x0 - nx, z0 - nz, h0], [x1 - nx, z1 - nz, h1], [x1 + nx, z1 + nz, h1]];
-            for (const idx of [0, 1, 2, 0, 2, 3]) {
-              const [vx, vz, vh] = v[idx];
-              const gy = this.map.groundY(vx, vz);
-              P.push(vx, (gy > vh && gy - vh < 0.25 ? gy : vh) + y, vz);
-            }
-          }
-        }
-        // Round landing at every turn (and both ends): a fan of the same
-        // half-width, so a hairpin never leaves a wedge of the layer below
-        // showing on its outer side.
-        const lift = (vx, vz, vh) => { const gy = this.map.groundY(vx, vz); return (gy > vh && gy - vh < 0.25 ? gy : vh) + y; };
-        for (let q = 0; q < pts.length; q++) {
-          const [cx0, cz0, ch] = pts[q];
-          const seg = 14, r = w / 2;
-          for (let k = 0; k < seg; k++) {
-            const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2;
-            const p0x = cx0 + Math.cos(a0) * r, p0z = cz0 + Math.sin(a0) * r;
-            const p1x = cx0 + Math.cos(a1) * r, p1z = cz0 + Math.sin(a1) * r;
-            P.push(cx0, lift(cx0, cz0, ch), cz0, p1x, lift(p1x, p1z, ch), p1z, p0x, lift(p0x, p0z, ch), p0z);
-          }
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-        geo.computeVertexNormals();
-        const m = new THREE.Mesh(geo, mat);
-        // The road never takes the cliff's cast shadow: the cut sits in the
-        // lee of the rim on some maps and the zig-zag must still read.
-        m.receiveShadow = false;
-        return m;
-      };
-      // Pale packed roadbed between dark kerbs, so the zig-zag reads as a
-      // road against snow and violet moor alike; a lamp post at every turn
-      // and along the long legs marks the way up from the default camera.
-      // Stacked ribbons a few cm apart z-fight from the game camera; a
-      // polygon offset keeps the kerb strictly under the bed and the bed
-      // under the centre line.
-      const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
-      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
-      // meet and their kerbs overlap it reads as a paved apron, not a hole.
-      const edgeMat = layer(0x8a7658, -1);
-      const roadMat = layer(0xd8c49a, -3);
-      const centreMat = layer(0xf1e4c4, -5);
-      const posts = [];
-      for (const pts of site.switchbacks) {
-        g.add(ribbon(pts, 1.85, 0.04, edgeMat));
-        g.add(ribbon(pts, 1.55, 0.06, roadMat));
-        g.add(ribbon(pts, 0.22, 0.075, centreMat));
-        for (let q = 1; q < pts.length; q++) {
-          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
-          const L = Math.hypot(bx - ax, bz - az);
-          const nx = -(bz - az) / L, nz = (bx - ax) / L;
-          const n = Math.max(1, Math.round(L / 2.2));
-          for (let k = q === 1 ? 0 : 1; k <= n; k++) {
-            const f = k / n;
-            const px = ax + (bx - ax) * f, pz = az + (bz - az) * f, ph = ah + (bh - ah) * f;
-            for (const side of [-1, 1]) posts.push([px + nx * 1.15 * side, pz + nz * 1.15 * side, ph, k === n || k === 0]);
-          }
-        }
-      }
-      if (posts.length) {
-        const postGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.7, 5).translate(0, 0.35, 0);
-        const capGeo = new THREE.OctahedronGeometry(0.11, 0).translate(0, 0.78, 0);
-        const postMesh = new THREE.InstancedMesh(postGeo, toyMat({ color: 0x2f2a33 }), posts.length);
-        const capMesh = new THREE.InstancedMesh(capGeo, new THREE.MeshBasicMaterial({ color: 0xffc35a }), posts.length);
-        const M = new THREE.Matrix4();
-        posts.forEach(([px, pz, ph, turn], k) => {
-          const gy = this.map.groundY(px, pz);
-          const y = Math.abs(gy - ph) < 0.6 ? Math.max(gy, ph) : ph;
-          const sc = turn ? 1.3 : 1;
-          M.makeScale(sc, sc, sc).setPosition(px, y, pz);
-          postMesh.setMatrixAt(k, M);
-          capMesh.setMatrixAt(k, M);
-        });
-        postMesh.castShadow = true;
-        g.add(postMesh);
-        g.add(capMesh);
-      }
-    }
-    return g;
+  _buildPlaza() {
+    // The worn-road ribbon lives on the terrain mesh. A plaza disc, a guide
+    // ring and flat lane planks used to sit on top of it.
+    return new THREE.Group();
   }
-
-  // ---------------- city sites & hive nests ----------------
 
   _makeSiteMarkers() {
     this.siteMarkers = [];
     for (let i = 0; i < this.map.sites.length; i++) {
       const s = this.map.sites[i];
       const gr = new THREE.Group();
-      const ringGeo = new THREE.RingGeometry(5.4, 6.0, 48);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(s.x, 0.06, s.z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
@@ -1110,14 +948,6 @@ class App {
     const rot = (k) => ((vid >> k) % 628) / 100;
     const mat = (c, e = 0) => toyMat({ color: c, emissive: e ? c : 0x000000, emissiveIntensity: e });
     const HIDE = 0x3a2a4a, HIDE2 = 0x2c2038, VEIN = 0xb44dff, SAC = 0x8a5cc0, EARTH = 0x2e2433;
-
-    // Churned dead-earth ring.
-    const ringGeo = new THREE.CircleGeometry(3.1, 20);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, toyMat({ color: EARTH, transparent: true, opacity: 0.85, depthWrite: false }));
-    ring.position.y = 0.03;
-    ring.receiveShadow = true;
-    g.add(ring);
 
     const mound = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), mat(HIDE));
     mound.scale.y = 0.55;
@@ -3161,24 +2991,23 @@ class App {
   }
 
   _setupLights() {
-    // Toy lighting: one sun for crisp shape shadows, and a fill whose ground
-    // colour is the map's shadow colour — so every shadowed face on a map
-    // shares one tint, like a painted diorama. Totals are tuned so a lit top
-    // face shows its picked colour with tone mapping off.
-    this.sun = new THREE.DirectionalLight(0xfff3dc, 2.3);
-    this.sun.position.set(85, 52, 24);
+    // One low sun. Shadows are the shading. Fill is a whisper so a lit face
+    // stays the picked colour and a shadowed face falls to the map's shadow hue.
+    const high = this.tacticalVisuals.quality !== 'low';
+    this.sun = new THREE.DirectionalLight(0xfff3dc, 4.9);
+    this.sun.position.set(-70, 48, -46);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    const s = 62;
-    Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 320 });
-    this.sun.shadow.bias = -0.0006;
-    this.sun.shadow.normalBias = 0.02;
+    this.sun.shadow.mapSize.set(high ? 4096 : 1024, high ? 4096 : 1024);
+    const s = 40;
+    Object.assign(this.sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 8, far: 280 });
+    this.sun.shadow.bias = -0.00035;
+    this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1d3557, 0.6);
+    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1d3557, 0.08);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0x6a7fb0, 0.35);
+    this.amb = new THREE.AmbientLight(0xfff4e8, 0.07);
     this.scene.add(this.amb);
-    this.scene.fog = new THREE.Fog(0xa8cfc4, 70, 190);
+    this.scene.fog = new THREE.Fog(0xa8cfc4, 58, 155);
     this.scene.background = new THREE.Color(0xa8cfc4);
   }
 
@@ -3998,8 +3827,12 @@ class App {
     };
     let nearId = -1;
     if (buildMode && !wave && mh && !mh.dead) {
-      const target = g.buildTargetFor && g.buildTargetFor(mh);
-      if (target && near2(target.plot) <= 25) nearId = target.plot.id;
+      const target = g.buildTargetFor(mh);
+      let pipPlotId = -1;
+      if (target && near2(target.plot) <= 25) {
+        nearId = target.plot.id;
+        pipPlotId = target.plot.id;
+      }
       else {
         let best = 25;
         for (const plot of g.plots) {
@@ -4009,6 +3842,7 @@ class App {
           if (d < best) { best = d; nearId = plot.id; }
         }
       }
+      if (pipPlotId >= 0) nearId = pipPlotId;
     }
     const revealStep = Math.min(1, dt / 0.15);
     for (const plot of g.plots) {
@@ -4040,7 +3874,12 @@ class App {
       const built = plot.tier > 0 && !plot.ruined;
       // The stake is the empty spot. A raised building has no stake under it,
       // and a wave fades every remaining stake out.
-      this._fadeStake(ud.beacon, built ? 0 : stakeFade);
+      const viewer = mh && !mh.dead ? mh : this.focus;
+      const dist = Math.hypot((viewer.x || 0) - plot.cx, (viewer.z || 0) - plot.cz);
+      const near = plot.kind === 'wall' ? 7 : 14;
+      const far = plot.kind === 'wall' ? 12 : 26;
+      const distFade = dist <= near ? 1 : dist >= far ? 0 : 1 - (dist - near) / (far - near);
+      this._fadeStake(ud.beacon, built ? 0 : stakeFade * distFade);
       if (ud.ring) ud.ring.visible = false;
       if (ud.prog) ud.prog.visible = false;
       if (ud.pips) ud.pips.sprite.visible = false;
@@ -4209,14 +4048,11 @@ class App {
     };
 
     if (u.hero) {
-      const d = u.def;
       const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
-        // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
+        // Toy-kit hero on its hoverbike. Drawn about one storey tall, with an
+        // ink outline so the silhouette holds on same-coloured ground.
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4240,45 +4076,6 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      // Hero marker: a bright gold ring on a dark backing disc, so the hero
-      // reads against sand, grass and snow alike.
-      const backGeo = new THREE.RingGeometry(0.46, 0.8, 32);
-      backGeo.rotateX(-Math.PI / 2);
-      const back = new THREE.Mesh(backGeo, new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.42, depthWrite: false }));
-      back.position.y = 0.025;
-      back.userData.keepOpacity = true;
-      g.add(back);
-      const haloGeo = new THREE.RingGeometry(0.55, 0.7, 32);
-      haloGeo.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffcf4d, transparent: true, opacity: 0.9, depthWrite: false }));
-      halo.position.y = 0.03;
-      g.add(halo);
-      // Passive aura: a soft breathing ring at the aura's true radius.
-      // The hero group is drawn at HERO_DRAW so a one-storey door is about
-      // his height. Aura radii are in world units, so compensate.
-      if (d.aura) {
-        const S = 0.96;
-        const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        // Thin and faint, and hidden until a cast, an aim, or a modifier key.
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.07) / S, auraR / S, 64);
-        auraGeo.rotateX(-Math.PI / 2);
-        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.22, depthWrite: false }));
-        aura.position.y = 0.05;
-        aura.visible = false;
-        aura.userData.keepOpacity = true;
-        g.add(aura);
-        aura.userData.baseRadius = auraR;
-        g.userData.aura = aura;
-      }
-      const rangeR = (u.weapon && u.weapon.range) || d.range || 4.5;
-      const rangeGeo = new THREE.RingGeometry(Math.max(0.2, (rangeR - 0.06) / 0.96), rangeR / 0.96, 48);
-      rangeGeo.rotateX(-Math.PI / 2);
-      const rangeRing = new THREE.Mesh(rangeGeo, new THREE.MeshBasicMaterial({ color: 0xf4f1e6, transparent: true, opacity: 0.22, depthWrite: false }));
-      rangeRing.position.y = 0.04;
-      rangeRing.visible = false;
-      rangeRing.userData.keepOpacity = true;
-      g.add(rangeRing);
-      g.userData.rangeRing = rangeRing;
       if (u.key === 'danny') {
         // The Weave must remain readable for its full duration. Three broken,
         // counter-rotating rings make a moving tear in the world instead of
@@ -4298,7 +4095,7 @@ class App {
         g.add(weave);
         g.userData.weave = weave;
       }
-      g.scale.setScalar(0.96);
+      g.scale.setScalar(0.68);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,
@@ -4309,7 +4106,7 @@ class App {
       const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
       if (kit) {
         // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
-        kit.node.scale.multiplyScalar(1.05);
+        kit.node.scale.multiplyScalar(0.78);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
       } else if (authored) {
@@ -4335,13 +4132,6 @@ class App {
         for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
-    const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
-    affectedGeo.rotateX(-Math.PI / 2);
-    const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
-    affected.position.y = 0.085;
-    affected.visible = false;
-    g.add(affected);
-    g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
@@ -4538,12 +4328,6 @@ class App {
       );
       pillar.position.set(x, 7, z);
       gr.add(pillar);
-      const ringGeo = new THREE.RingGeometry(2.2, 2.7, 40);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff3c2e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(x, 0.06, z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       gr.position.y = this.map.groundY(x, z);
       this.scene.add(gr);
       this.waveMarkers.push(gr);
@@ -4597,7 +4381,7 @@ class App {
         // The home node sits on the keep: its capture circle would ring the
         // castle like a target — the walls already say whose ground it is.
         const hq = (g.plots || []).find((p) => p.kind === 'hq');
-        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
+        ring.visible = false;
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
@@ -4969,11 +4753,22 @@ class App {
     );
     this.camera.lookAt(this.focus.x + sx, this.focus.y, this.focus.z + sz);
 
-    // Sun high and over the camera's left shoulder: the faces you look at
-    // are lit, and shadows fall up-screen to the right like a lit tabletop.
-    this.sun.position.set(this.focus.x - 34, this.focus.y + 78, this.focus.z + 26);
+    // Fixed low sun, upper-left of the locked camera, so shadows fall down-right.
+    // The frustum follows the hero. The angle does not.
+    const sunElev = (35 * Math.PI) / 180;
+    const horiz = Math.cos(sunElev);
+    const dx = -horiz * 0.82;
+    const dy = Math.sin(sunElev);
+    const dz = -horiz * 0.57;
+    const len = Math.hypot(dx, dy, dz);
+    const dist = 130;
+    this.sun.position.set(
+      this.focus.x + (dx / len) * dist,
+      this.focus.y + (dy / len) * dist,
+      this.focus.z + (dz / len) * dist,
+    );
     this.sun.target.position.set(this.focus.x, this.focus.y, this.focus.z);
-    const shadowSpan = clamp(this.camDist * 0.85, 26, 74);
+    const shadowSpan = clamp(this.camDist * 1.0, 32, 48);
     if (Math.abs(shadowSpan - (this._shadowSpan || 0)) > 1) {
       this._shadowSpan = shadowSpan;
       Object.assign(this.sun.shadow.camera, { left: -shadowSpan, right: shadowSpan, top: shadowSpan, bottom: -shadowSpan });
@@ -5001,18 +4796,19 @@ class App {
     const top = _tmpColC.setHex(paletteSkyTop(pal));
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
-    this.sun.intensity = lerp(1.15, 2.3, b);
-    this.sun.color.setHex(0xfff3dc).lerp(shadow, (1 - b) * 0.35);
-    this.hemi.intensity = lerp(0.32, 0.6, b);
-    this.hemi.color.setHex(0xcfe8ff).lerp(shadow, (1 - b) * 0.25);
+    this.sun.intensity = lerp(2.5, 4.9, b);
+    this.sun.color.setHex(0xfff3dc).lerp(shadow, (1 - b) * 0.28);
+    this.hemi.intensity = 0.08;
+    this.hemi.color.setHex(0xcfe8ff).lerp(shadow, (1 - b) * 0.2);
     this.hemi.groundColor.copy(shadow);
-    this.amb.intensity = 0.35;
-    this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
+    this.amb.intensity = 0.07;
+    this.amb.color.setHex(0xfff4e8);
     horizon.lerp(shadow, (1 - b) * 0.6);
     top.lerp(shadow, (1 - b) * 0.7);
     this.scene.background = this.sky.set(top, horizon) || horizon.clone();
     this.scene.fog.color.copy(horizon);
-    if (this.scene.fog.isFog) { this.scene.fog.near = 70; this.scene.fog.far = 190; }
+    if (this.scene.fog.isFog) { this.scene.fog.near = 58; this.scene.fog.far = 155; }
+    if (this.fogOfWar) this.fogOfWar.material.uniforms.uTint.value.setHex(shadowHex);
     const b2 = b;
     // Windows glow when it's dark.
     const glow = lerp(0.85, 0, b2);
@@ -5045,6 +4841,7 @@ class App {
         uDarkness: { value: FOG_DARKNESS },
         uInnerVeil: { value: FOG_INNER_VEIL },
         uSoftness: { value: FOG_EDGE_SOFTNESS },
+        uTint: { value: new THREE.Color(0x1d3a5a) },
       },
       vertexShader: `
         varying vec2 vWorldXZ;
@@ -5061,6 +4858,7 @@ class App {
         uniform float uDarkness;
         uniform float uInnerVeil;
         uniform float uSoftness;
+        uniform vec3 uTint;
         varying vec2 vWorldXZ;
         void main() {
           float visible = 0.0;
@@ -5075,7 +4873,7 @@ class App {
             visible = max(visible, sourceVisibility);
           }
           float alpha = mix(uDarkness, uInnerVeil, visible);
-          gl_FragColor = vec4(0.006, 0.009, 0.018, alpha);
+          gl_FragColor = vec4(uTint, alpha);
         }
       `,
     });
@@ -5588,9 +5386,6 @@ class App {
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
         m.userData.flag.rotation.y = Math.sin(t * 2.5) * 0.3;
-        const ph = (t * 0.8) % 1;
-        m.userData.ring.scale.setScalar(1 + ph * 0.25);
-        m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
       this._surveySites();
       this._updateBlockedHint(dt);
@@ -5665,10 +5460,8 @@ class App {
         this._setWaveMarkers(markerNest ? [[markerNest.x, markerNest.z]] : []);
       }
       for (const m of this.waveMarkers) {
-        const ring = m.userData.ring;
-        const ph = (t * 1.2) % 1;
-        ring.scale.setScalar(1 + ph * 1.6);
-        ring.material.opacity = 0.55 * (1 - ph);
+        const pillar = m.children[0];
+        if (pillar && pillar.material) pillar.material.opacity = 0.16 + 0.18 * (0.5 + 0.5 * Math.sin(t * 3));
       }
 
       // Smoke from damaged buildings.

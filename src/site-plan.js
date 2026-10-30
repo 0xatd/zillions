@@ -24,7 +24,7 @@ const TAU = Math.PI * 2;
 // tiles, where cliffs are crag and ramps are the only walkable links between
 // tiers). Lowland valleys the horde climbs out of, the outer terrace the
 // rampart stands on, the district terrace, and the keep's crown.
-export const LEDGE = { low: 0.05, out: 2.1, mid: 2.65, top: 3.2, lip: 0.22 };
+export const LEDGE = { low: 0.05, out: 1.25, mid: 2.75, top: 4.25, lip: 0.28 };
 
 const ellipse = (a, b) => (t) => 1 / Math.sqrt((Math.cos(t) / a) ** 2 + (Math.sin(t) / b) ** 2);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));

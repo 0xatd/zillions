@@ -7,6 +7,7 @@ import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { Pass, FullScreenQuad } from '../vendor/jsm/postprocessing/Pass.js';
 import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
+import { setToyShadow } from './toy-style.js';
 
 const QUALITY_KEY = 'zillions_graphics_quality';
 
@@ -22,7 +23,7 @@ const GradeShader = {
     uLift: { value: 0.0 },
     uVignette: { value: 0.15 },
     uShadowCol: { value: new THREE.Color(0x1d3557) },
-    uShadowAmt: { value: 0.42 },
+    uShadowAmt: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -115,6 +116,12 @@ const OutlineEdgeShader = {
         dn = max(dn, 1.0 - dot(n0, nrm(vUv + offs[i])));
       }
       float edge = max(step(uDepthK * z0, dz), step(uNormalK, dn));
+      vec3 c0 = base.rgb;
+      float dc = 0.0;
+      for (int i = 0; i < 4; i++) {
+        dc = max(dc, distance(c0, texture2D(tDiffuse, vUv + offs[i]).rgb));
+      }
+      edge = max(edge, step(0.22, dc));
       if (z0 > uFar * 0.98) edge = 0.0;
       vec3 ink = mix(base.rgb * 0.35, uInk * 0.7, 0.5);
       gl_FragColor = vec4(mix(base.rgb, ink, edge * uStrength), base.a);
@@ -196,6 +203,137 @@ class ToyOutlinePass extends Pass {
   }
 }
 
+// Half-resolution contact occlusion. A short ring of depth samples darkens
+// the crease where a tree, rock or wall meets the ground. High quality only.
+const ContactAOShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    tDepth: { value: null },
+    uNear: { value: 0.5 },
+    uFar: { value: 600 },
+    uRadius: { value: 1.55 },
+    uFov: { value: 1 },
+    uAspect: { value: 1 },
+    uStrength: { value: 1.35 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    #include <packing>
+    uniform sampler2D tDiffuse;
+    uniform sampler2D tDepth;
+    uniform float uNear;
+    uniform float uFar;
+    uniform float uRadius;
+    uniform float uFov;
+    uniform float uAspect;
+    uniform float uStrength;
+    varying vec2 vUv;
+    float viewZ(vec2 uv) {
+      return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, uNear, uFar);
+    }
+    void main() {
+      vec4 base = texture2D(tDiffuse, vUv);
+      float d0 = texture2D(tDepth, vUv).x;
+      if (d0 > 0.999) { gl_FragColor = base; return; }
+      float z0 = viewZ(vUv);
+      vec2 disc[8];
+      disc[0] = vec2(0.95, 0.18);
+      disc[1] = vec2(-0.72, 0.55);
+      disc[2] = vec2(0.15, -0.92);
+      disc[3] = vec2(-0.28, -0.48);
+      disc[4] = vec2(0.55, 0.72);
+      disc[5] = vec2(-0.88, -0.22);
+      disc[6] = vec2(0.42, -0.18);
+      disc[7] = vec2(-0.12, 0.84);
+      float occ = 0.0;
+      float scale = uRadius * uFov / max(0.8, z0);
+      for (int i = 0; i < 8; i++) {
+        vec2 off = disc[i] * scale;
+        off.x /= max(0.5, uAspect);
+        float zs = viewZ(vUv + off);
+        float range = z0 - zs;
+        if (range > 0.04 && range < uRadius) occ += smoothstep(uRadius, 0.05, range);
+      }
+      float ao = clamp(1.0 - occ / 8.0 * uStrength, 0.42, 1.0);
+      gl_FragColor = vec4(base.rgb * ao, base.a);
+    }`,
+};
+
+class ContactAOPass extends Pass {
+  constructor(scene, camera) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.needsSwap = true;
+    this._hidden = [];
+    this.depthMat = new THREE.MeshDepthMaterial();
+    this.target = new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) });
+    this.target.depthTexture.type = THREE.UnsignedIntType;
+    this.uniforms = THREE.UniformsUtils.clone(ContactAOShader.uniforms);
+    this.material = new THREE.ShaderMaterial({
+      uniforms: this.uniforms,
+      vertexShader: ContactAOShader.vertexShader,
+      fragmentShader: ContactAOShader.fragmentShader,
+    });
+    this.fsQuad = new FullScreenQuad(this.material);
+  }
+
+  setSize(w, h) {
+    const rw = Math.max(1, w >> 1);
+    const rh = Math.max(1, h >> 1);
+    this.target.setSize(rw, rh);
+    this.uniforms.uAspect.value = Math.max(0.5, w / Math.max(1, h));
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const hidden = this._hidden;
+    hidden.length = 0;
+    this.scene.traverseVisible((o) => {
+      const m = o.material;
+      if (o.isPoints || o.isSprite || o.isLine
+        || (m && (Array.isArray(m) ? m.some((x) => x.transparent) : m.transparent))) hidden.push(o);
+    });
+    for (const o of hidden) o.visible = false;
+    const bg = this.scene.background;
+    const fog = this.scene.fog;
+    const ov = this.scene.overrideMaterial;
+    this.scene.background = null;
+    this.scene.fog = null;
+    this.scene.overrideMaterial = this.depthMat;
+    const shadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(this.target);
+    renderer.clear();
+    renderer.render(this.scene, this.camera);
+    renderer.shadowMap.autoUpdate = shadowAuto;
+    this.scene.overrideMaterial = ov;
+    this.scene.background = bg;
+    this.scene.fog = fog;
+    for (const o of hidden) o.visible = true;
+
+    const fov = this.camera.fov * Math.PI / 180;
+    this.uniforms.uFov.value = 0.5 / Math.tan(fov * 0.5);
+    this.uniforms.uNear.value = this.camera.near;
+    this.uniforms.uFar.value = this.camera.far;
+    this.uniforms.tDiffuse.value = readBuffer.texture;
+    this.uniforms.tDepth.value = this.target.depthTexture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.fsQuad.render(renderer);
+  }
+
+  dispose() {
+    this.target.dispose();
+    this.material.dispose();
+    this.depthMat.dispose();
+    this.fsQuad.dispose();
+  }
+}
+
 // Rim lighting was retired by the toy art pass (colour + outline do the job).
 export function applyRim(mat) {
   // The toy art pass reads by colour and outline, not by fresnel glow; the
@@ -223,6 +361,9 @@ export class TacticalVisuals {
 
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
+
+    this.ao = new ContactAOPass(scene, camera);
+    this.composer.addPass(this.ao);
 
     this.ink = new ToyOutlinePass(scene, camera);
     this.composer.addPass(this.ink);
@@ -256,7 +397,19 @@ export class TacticalVisuals {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, high ? 1.5 : 1);
     this.renderer.setPixelRatio(pixelRatio);
     this.composer.setPixelRatio(pixelRatio);
-    this.renderer.shadowMap.enabled = high;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const mapSize = high ? 4096 : 1024;
+    this.scene.traverse((obj) => {
+      if (!obj.isDirectionalLight || !obj.castShadow || !obj.shadow) return;
+      if (obj.shadow.mapSize.x === mapSize) return;
+      obj.shadow.mapSize.set(mapSize, mapSize);
+      if (obj.shadow.map) {
+        obj.shadow.map.dispose();
+        obj.shadow.map = null;
+      }
+    });
+    if (this.ao) this.ao.enabled = high;
     if (persist) {
       try { localStorage.setItem(QUALITY_KEY, this.quality); } catch { /* storage can be blocked */ }
     }
@@ -268,6 +421,7 @@ export class TacticalVisuals {
   setShadowColor(hex) {
     this.grade.uniforms.uShadowCol.value.setHex(hex);
     this.ink.uniforms.uInk.value.setHex(hex);
+    setToyShadow(hex);
   }
 
   toggleQuality() {

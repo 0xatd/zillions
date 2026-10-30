@@ -3762,7 +3762,7 @@ export class UI {
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     // Unexplored: the full shroud.
-    ctx.fillStyle = `rgba(1, 2, 5, ${FOG_DARKNESS})`;
+    ctx.fillStyle = `rgba(29, 58, 90, ${FOG_DARKNESS})`;
     ctx.fillRect(0, 0, N, N);
     // Explored: lift the shroud to a veil — half light, so remembered ground
     // is legible but obviously not live.

@@ -4,6 +4,8 @@
 import * as THREE from 'three';
 import { TILE } from './config.js';
 import { makeRNG } from './utils.js';
+import { makePineGeometry, makeTrunkGeometry } from './toy-props.js';
+import { toyMat } from './toy-style.js';
 import { activeCulture } from './cultures.js';
 import { angDiff, rimForm, rimRadius } from './site-plan.js';
 
@@ -20,9 +22,11 @@ function wallR(site) {
 
 function instanced(geo, mat, items, tint) {
   if (!items.length) return null;
-  if (tint) mat.vertexColors = true;
+  if (tint && geo.getAttribute('color')) mat.vertexColors = true;
   const mesh = new THREE.InstancedMesh(geo, mat, items.length);
   mesh.userData.noOutline = true;
+  mesh.castShadow = !mat.transparent;
+  mesh.receiveShadow = true;
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
@@ -91,7 +95,8 @@ export function buildLandDressing(map) {
     return nearSite(x, z, pad);
   };
 
-  const pines = [], trunks = [], rocks = [], crystals = [], pylons = [], pylonCaps = [];
+  const pines = [], trunks = [], rocks = [], crystals = [];
+  const blocks = [], posts = [];
   const band = N * 0.25;
   // Outer quarter: clumps of pines and faceted blocks. The inner floor stays
   // almost empty so the battle reads.
@@ -114,8 +119,8 @@ export function buildLandDressing(map) {
         if (tt === TILE.WATER) continue;
         const s = 0.85 + rng() * 1.35;
         const py = yAt(px, pz);
-        pines.push({ x: px, y: py + s * 1.15, z: pz, s, ry: rng() * 6.28, color: rng() < 0.5 ? pineTop : pineDark });
-        trunks.push({ x: px, y: py + s * 0.35, z: pz, sx: 0.18 * s, sy: 0.7 * s, sz: 0.18 * s, color: shadow });
+        pines.push({ x: px, y: py, z: pz, s: s * 1.15, ry: rng() * 6.28, color: rng() < 0.82 ? pineTop : pineDark });
+        trunks.push({ x: px, y: py + s * 0.32, z: pz, sx: 0.16 * s, sy: 0.64 * s, sz: 0.16 * s, color: 0x6a4a32 });
       }
       if (rocks.length < 420 && rng() < 0.55) {
         const h = 3 + rng() * 7;
@@ -123,14 +128,14 @@ export function buildLandDressing(map) {
         rocks.push({
           x: px, y: yAt(px, pz) + h * 0.45, z: pz,
           sx: 1.4 + rng() * 2.2, sy: h, sz: 1.2 + rng() * 2.4,
-          ry: rng() * 3, rx: (rng() - 0.5) * 0.15, color: rng() < 0.3 ? shadow : rockC,
+          ry: rng() * 3, rx: (rng() - 0.5) * 0.15, color: rockC,
         });
       }
     }
   }
 
-  // A few crystals and pylons — the sci-fi note, kept off the battle floor.
-  for (let n = 0; n < 36 && crystals.length < 36; n++) {
+  // A few crystals, off the battle floor. No dark pylons: those read as holes.
+  for (let n = 0; n < 8 && crystals.length < 8; n++) {
     const x = 4 + rng() * (N - 8), z = 4 + rng() * (N - 8);
     if (Math.min(x, z, N - x, N - z) > band + 8 && rng() < 0.7) continue;
     if (blocked(x, z, 14)) continue;
@@ -139,16 +144,6 @@ export function buildLandDressing(map) {
     const s = 0.5 + rng() * 1.1;
     crystals.push({ x, y: yAt(x, z) + s * 0.7, z, s, ry: rng() * 6, color: city === 'outpost' ? 0xffb15a : 0x9af6ff });
   }
-  for (let n = 0; n < 18; n++) {
-    const x = 6 + rng() * (N - 12), z = 6 + rng() * (N - 12);
-    if (Math.min(x, z, N - x, N - z) < 8) continue;
-    if (blocked(x, z, 16)) continue;
-    if (map.tiles[map.idx(x | 0, z | 0)] === TILE.WATER) continue;
-    const h = 3.2 + rng() * 2.4;
-    pylons.push({ x, y: yAt(x, z) + h * 0.5, z, sx: 0.18, sy: h, sz: 0.18, color: shadow });
-    pylonCaps.push({ x, y: yAt(x, z) + h + 0.25, z, s: 0.38, color: 0x8ff3ff });
-  }
-
   // Play floor: a handful of single trees and rock pairs, clear of the sites.
   for (let n = 0; n < 70; n++) {
     const x = 8 + rng() * (N - 16), z = 8 + rng() * (N - 16);
@@ -157,8 +152,8 @@ export function buildLandDressing(map) {
     const tt = map.tiles[map.idx(x | 0, z | 0)];
     if (tt !== TILE.GRASS && tt !== TILE.SAND) continue;
     const s = 0.7 + rng() * 0.5;
-    pines.push({ x, y: yAt(x, z) + s * 1.15, z, s: s * 0.85, ry: rng() * 6, color: pineDark });
-    trunks.push({ x, y: yAt(x, z) + s * 0.3, z, sx: 0.14, sy: 0.5, sz: 0.14, color: shadow });
+    pines.push({ x, y: yAt(x, z), z, s: s * 0.9, ry: rng() * 6, color: pineDark });
+    trunks.push({ x, y: yAt(x, z) + s * 0.28, z, sx: 0.12, sy: 0.5, sz: 0.12, color: 0x6a4a32 });
     if (rng() < 0.4) {
       rocks.push({
         x: x + 0.8, y: yAt(x + 0.8, z) + 0.35, z,
@@ -178,7 +173,7 @@ export function buildLandDressing(map) {
     const gateAngles = form && form.gates ? form.gates : [];
     // A pine belt just outside the walls. The camera sits on the base, so this
     // is the frame the player actually sees — the map-edge forest is the horizon.
-    for (let n = 0; n < 80; n++) {
+    for (let n = 0; n < 160; n++) {
       const a = rng() * Math.PI * 2;
       const local = a - facing;
       if (gateAngles.some((g) => angDiff(local, g) < 0.5)) continue;
@@ -187,11 +182,11 @@ export function buildLandDressing(map) {
       const z = site.z + Math.sin(a) * d;
       if (!map.inBounds(x | 0, z | 0)) continue;
       const tt = map.tiles[map.idx(x | 0, z | 0)];
-      if (tt === TILE.WATER || tt === TILE.PATH) continue;
+      if (tt === TILE.WATER || tt === TILE.PATH || tt === TILE.FOREST) continue;
       if (road[(z | 0) * N + (x | 0)]) continue;
       const s = 0.9 + rng() * 1.1;
-      pines.push({ x, y: yAt(x, z) + s * 1.15, z, s, ry: rng() * 6, color: rng() < 0.45 ? pineTop : pineDark });
-      trunks.push({ x, y: yAt(x, z) + s * 0.35, z, sx: 0.16 * s, sy: 0.65 * s, sz: 0.16 * s, color: shadow });
+      pines.push({ x, y: yAt(x, z), z, s: s * 1.2, ry: rng() * 6, color: rng() < 0.8 ? pineTop : pineDark });
+      trunks.push({ x, y: yAt(x, z) + s * 0.32, z, sx: 0.14 * s, sy: 0.62 * s, sz: 0.14 * s, color: 0x6a4a32 });
       if (rng() < 0.22 && rocks.length < 700) {
         const h = 1.4 + rng() * 2.6;
         rocks.push({ x: x + 0.6, y: yAt(x, z) + h * 0.45, z, sx: 0.9, sy: h, sz: 0.8, ry: a, color: rockC });
@@ -243,28 +238,6 @@ export function buildLandDressing(map) {
       }
     }
 
-    if (key === 'bastion') {
-      // Bright water ribbon on the woods that close the spur — the U-bend.
-      const x0 = Math.round(site.x), z0 = Math.round(site.z);
-      const R = Math.ceil(wr) + 4;
-      for (let dz = -R; dz <= R; dz++) {
-        for (let dx = -R; dx <= R; dx++) {
-          if (river.length > 500) break;
-          const x = x0 + dx, z = z0 + dz;
-          if (!map.inBounds(x, z)) continue;
-          if (map.tiles[map.idx(x, z)] !== TILE.FOREST) continue;
-          const d = Math.hypot(x + 0.5 - site.x, z + 0.5 - site.z);
-          if (d < wr * 0.7 || d > wr + 3.5) continue;
-          let grassN = false;
-          for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            if (map.inBounds(x + ox, z + oz) && map.tiles[map.idx(x + ox, z + oz)] === TILE.GRASS) grassN = true;
-          }
-          if (!grassN || rng() > 0.55) continue;
-          river.push({ x: x + 0.5, y: 0.2, z: z + 0.5, sx: 1.15, sy: 1, sz: 1.15, color: waterC });
-        }
-      }
-    }
-
     if (key === 'fort' || key === 'star') {
       // Star bastion tips shoved into the moat, plus reeds and dead trees.
       for (let k = 0; k < 5; k++) {
@@ -285,7 +258,7 @@ export function buildLandDressing(map) {
         if (tt === TILE.WATER && reeds.length < 200) {
           reeds.push({ x, y: yAt(x, z) + 0.45, z, sy: 0.7 + rng() * 0.6, sx: 0.08, sz: 0.08, ry: rng() * 3, color: pineDark });
         } else if (tt === TILE.GRASS && rng() < 0.35) {
-          trunks.push({ x, y: yAt(x, z) + 0.7, z, sx: 0.12, sy: 1.3, sz: 0.12, color: shadow });
+          trunks.push({ x, y: yAt(x, z) + 0.7, z, sx: 0.12, sy: 1.3, sz: 0.12, color: 0x6a4a32 });
         }
       }
     }
@@ -314,17 +287,63 @@ export function buildLandDressing(map) {
     }
   }
 
+  // One landmark outside the walls, plus a few lived-in props along the streets.
+  for (const site of map.sites || []) {
+    const wr = wallR(site);
+    const facing = site.rim ? site.rim.facing : 0;
+    const key = site.rim ? site.rim.key : city;
+    const place = (ang, dist) => {
+      const x = site.x + Math.cos(ang) * dist;
+      const z = site.z + Math.sin(ang) * dist;
+      return [x, yAt(x, z), z];
+    };
+    const [lx, ly, lz] = place(facing + 2.15, wr + 8);
+    if (key === 'bastion') {
+      blocks.push({ x: lx, y: ly + 0.4, z: lz, sx: 3.4, sy: 0.8, sz: 1.25, ry: facing, color: 0x8d623c });
+      blocks.push({ x: lx + Math.cos(facing) * 1.7, y: ly + 0.55, z: lz + Math.sin(facing) * 1.7, sx: 1.2, sy: 0.7, sz: 1.05, ry: facing + 0.4, color: 0x6e4630 });
+    } else if (key === 'fort' || key === 'star') {
+      blocks.push({ x: lx, y: ly + 0.35, z: lz, sx: 2.4, sy: 0.7, sz: 2.4, ry: 0.3, color: 0x6e8a78 });
+      posts.push({ x: lx, y: ly + 1.1, z: lz, sx: 0.7, sy: 0.55, sz: 0.7, color: 0x9fd0c0 });
+    } else if (key === 'outpost') {
+      blocks.push({ x: lx, y: ly + 0.7, z: lz, sx: 2.2, sy: 1.3, sz: 1.6, ry: facing, color: 0x8a6844 });
+      blocks.push({ x: lx, y: ly + 1.7, z: lz, sx: 0.9, sy: 0.7, sz: 0.8, ry: facing, color: 0xb08958 });
+    } else if (key === 'crescent') {
+      for (let k = 0; k < 7; k++) {
+        const [gx, gy, gz] = place(facing + 1.2 + k * 0.22, wr + 6 + (k % 2));
+        posts.push({ x: gx, y: gy + 0.8, z: gz, sx: 0.28, sy: 1.5, sz: 0.22, ry: k, color: rockC });
+      }
+    } else {
+      blocks.push({ x: lx, y: ly + 0.35, z: lz, sx: 5.5, sy: 0.45, sz: 0.7, ry: facing + 1.2, color: 0xc9b8e6 });
+      posts.push({ x: lx + 2.2, y: ly + 1.4, z: lz, sx: 0.2, sy: 2.6, sz: 0.2, color: 0xe7d7f5 });
+    }
+    const [wx, wy, wz] = place(facing + 0.7, wr * 0.42);
+    posts.push({ x: wx, y: wy + 0.28, z: wz, sx: 0.7, sy: 0.45, sz: 0.7, color: rockC });
+    for (let k = 0; k < 3; k++) {
+      const [cx, cy, cz] = place(facing + 1.4 + k * 0.35, wr * (0.35 + k * 0.08));
+      blocks.push({ x: cx, y: cy + 0.16, z: cz, sx: 0.38, sy: 0.28, sz: 0.32, ry: k, color: 0x8a6240 });
+    }
+    const [cartX, cartY, cartZ] = place(facing - 0.55, wr * 0.5);
+    blocks.push({ x: cartX, y: cartY + 0.28, z: cartZ, sx: 0.9, sy: 0.38, sz: 0.55, ry: facing, color: 0x7a5340 });
+    for (let k = 0; k < 4; k++) {
+      const [fx, fy, fz] = place(facing + Math.PI + k * 0.18, wr * 0.72);
+      blocks.push({ x: fx, y: fy + 0.18, z: fz, sx: 0.9, sy: 0.28, sz: 0.08, ry: facing, color: 0x6b5344 });
+    }
+    const [bx, by, bz] = place(facing + 0.25, wr * 0.55);
+    posts.push({ x: bx, y: by + 1.1, z: bz, sx: 0.06, sy: 2.2, sz: 0.06, color: 0x4a4038 });
+    blocks.push({ x: bx + 0.35, y: by + 1.7, z: bz, sx: 0.7, sy: 0.4, sz: 0.06, ry: facing, color: 0xc9a44a });
+  }
+
   const lambert = (fallback) => new THREE.MeshLambertMaterial({ color: fallback, flatShading: true });
   const basic = (color, opacity = 1) => new THREE.MeshBasicMaterial({
     color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1,
   });
 
-  add(group, instanced(new THREE.ConeGeometry(0.7, 2.2, 6), lambert(0xffffff), pines, pineTop));
-  add(group, instanced(new THREE.CylinderGeometry(0.12, 0.16, 1, 5), lambert(0xffffff), trunks, shadow));
-  add(group, instanced(new THREE.BoxGeometry(1, 1, 1), lambert(0xffffff), rocks, rockC));
-  add(group, instanced(new THREE.OctahedronGeometry(0.55, 0), new THREE.MeshBasicMaterial({ color: 0xffffff }), crystals, 0x9af6ff));
-  add(group, instanced(new THREE.CylinderGeometry(0.5, 0.5, 1, 6), lambert(0xffffff), pylons, shadow));
-  add(group, instanced(new THREE.OctahedronGeometry(0.45, 0), new THREE.MeshBasicMaterial({ color: 0xffffff }), pylonCaps, 0x8ff3ff));
+  add(group, instanced(makePineGeometry(), toyMat({ color: 0xffffff, vertexColors: true }), pines, pineTop));
+  add(group, instanced(makeTrunkGeometry(), toyMat({ color: 0x6a4a32 }), trunks, 0));
+  add(group, instanced(new THREE.BoxGeometry(1, 1, 1), toyMat({ color: 0xffffff }), rocks, rockC));
+  add(group, instanced(new THREE.OctahedronGeometry(0.55, 0), toyMat({ color: 0xffffff }), crystals, 0x9af6ff));
+  add(group, instanced(new THREE.BoxGeometry(1, 1, 1), toyMat({ color: 0xffffff }), blocks, 0x8a6240));
+  add(group, instanced(new THREE.CylinderGeometry(0.5, 0.5, 1, 6), toyMat({ color: 0xffffff }), posts, rockC));
   add(group, instanced(groundQuad(1, 1), basic(grass, 0.92), fields, grass));
   add(group, instanced(groundQuad(1, 1), basic(0xc6d86a, 0.9), crops, 0xc6d86a));
   add(group, instanced(new THREE.CylinderGeometry(0.5, 0.5, 1, 4), lambert(0xffffff), reeds, pineDark));

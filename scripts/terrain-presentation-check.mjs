@@ -5,6 +5,11 @@ import { LEVELS } from '../src/config.js';
 import { TerrainField } from '../src/terrain.js';
 import { setActiveCulture } from '../src/cultures.js';
 import { SITE_FLOOR } from '../src/site-grade.js';
+import { LEDGE } from '../src/site-plan.js';
+
+if (LEDGE.mid - LEDGE.out < 1.2 || LEDGE.top - LEDGE.mid < 1.2) {
+  throw new Error(`terrace steps are too short to read as cliffs (${LEDGE.out}, ${LEDGE.mid}, ${LEDGE.top})`);
+}
 
 const PALETTE = {
   1: { grass: 0x2f7d66, water: 0x3fa9e0, shadow: 0x1d3a5a, path: 0xb07a4f, canopy: 0x9ad35a },

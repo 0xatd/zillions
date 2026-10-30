@@ -20,11 +20,11 @@ import { culture, kitBuildingKey } from './cultures.js';
 // Visual only. A one-storey door is about the hero's height, a house is a
 // little over twice that, and towers and the keep stand well above both.
 export function buildingVisualScale(kind) {
-  if (kind === 'hq') return 2.4;
-  if (kind === 'tower' || kind === 'outpost') return 3.05;
-  if (typeof kind === 'string' && kind.startsWith('camp')) return 2.25;
-  if (kind === 'wall') return 1;
-  return 2.2;
+  if (kind === 'hq') return 2.85;
+  if (kind === 'tower' || kind === 'outpost') return 3.2;
+  if (typeof kind === 'string' && kind.startsWith('camp')) return 2.05;
+  if (kind === 'wall') return 1.05;
+  return 2.35;
 }
 
 // Drop a wide slab that sits under the whole footprint (the kit's hex plinth

@@ -7,7 +7,7 @@ import { SITE_FORMS, rimRadius } from './site-plan.js';
 import { activeCulture } from './cultures.js';
 
 const FLOOR = 0.12;
-const STEP = 1.0;
+const STEP = 1.45;
 
 function wallRadius(site) {
   const rim = site.rim;

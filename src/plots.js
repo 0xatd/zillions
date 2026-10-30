@@ -1286,27 +1286,14 @@ function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed })
       }
     }
   }
-  for (let pass = 0; pass < 4; pass++) {
-    const next = hgt.slice();
-    for (let k = 0; k < N * N; k++) {
-      if (tier[k] < 0 || cliff[k] || (foot[k] && pass > 1) || !map.isWalkable(k % N, (k / N) | 0)) continue;
-      const x = k % N, z = (k / N) | 0;
-      let sum = 0, n = 0, diff = false;
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nk = (z + dz) * N + x + dx;
-          if (tier[nk] < 0 || cliff[nk] || !map.isWalkable(x + dx, z + dz)) continue;
-          if (tier[nk] !== tier[k]) diff = true;
-          sum += hgt[nk]; n++;
-        }
-      }
-      if (diff && n) next[k] = sum / n;
-    }
-    hgt.set(next);
-  }
+  // Steps stay sheer. Smoothing them into banks turned a terrace into a
+  // one-pixel stair from the play camera. Walkability is still the tile.
   for (let k = 0; k < N * N; k++) {
     if (tier[k] < 0) continue;
-    map.ledgeH[k] = hgt[k];
+    const x = k % N, z = (k / N) | 0;
+    const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
+    const motte = Math.max(0, 1 - d / 7) * 0.5;
+    map.ledgeH[k] = hgt[k] + motte;
     map.ledgeW[k] = 1;
   }
   map.terraceCliff = cliff;

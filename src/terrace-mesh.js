@@ -6,6 +6,7 @@
 // corners stand, except where a corner touches a ledge tile.
 import * as THREE from 'three';
 import { TILE, TILE_INFO } from './config.js';
+import { toyMat } from './toy-style.js';
 
 const SAME_LEVEL = 0.8;
 const TILE_MOUNTAIN = TILE.MOUNTAIN;
@@ -171,56 +172,77 @@ export function tileTris(map, tileCH, x, z) {
   return [up([O, CX, MXu]), up([O, MXu, MZu]), up([O, MZu, CZ]), up([c0, MXl, MZl])];
 }
 
-// Strata skirt: a sheer rock face wherever two neighbouring tiles disagree on
-// the height of their shared edge, banded light/dark every 0.3 units so a
-// cliff reads as layered rock from the game camera, with a dark foot.
+// Thick lit cliff: a beveled slab with a pale rim wherever two tiles disagree
+// on height. Lambert so the low sun paints one face and shadows the other.
 export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
   if (!tileCH) return null;
   const N = map.size;
-  const pos = [], col = [];
-  // Rock tone: the map's own stone pushed into a deep, saturated mid-tone so
-  // a face reads as rock against both a snowfield and a violet moor (a pale
-  // stone tone washed the faces out to card). Hue comes from the palette;
-  // near-grey stone borrows the palette's shadow hue so it stays cool slate.
-  const base = new THREE.Color(rockHex);
-  const S = THREE.SRGBColorSpace;
-  const hsl = {}; base.getHSL(hsl, S);
-  if (hsl.s < 0.12 && shadowHex !== undefined) {
-    const sh = {}; new THREE.Color(shadowHex).getHSL(sh, S);
-    hsl.h = sh.h * 0.4 + 0.6 * 0.6; hsl.s = Math.max(hsl.s, 0.2);
+  const pos = [];
+  const col = [];
+  const side = new THREE.Color(rockHex);
+  const hsl = {};
+  side.getHSL(hsl);
+  if (hsl.s < 0.1 && shadowHex !== undefined) {
+    const sh = {};
+    new THREE.Color(shadowHex).getHSL(sh);
+    side.setHSL(sh.h, Math.max(0.16, hsl.s), Math.min(0.46, Math.max(0.28, hsl.l)));
   }
-  base.setHSL(hsl.h, Math.min(0.42, Math.max(0.22, hsl.s * 1.25)), Math.min(0.42, Math.max(0.3, hsl.l * 0.55)), S);
-  const bands = [1.2, 0.96, 1.1, 0.86, 1.04, 0.92].map((m) => base.clone().multiplyScalar(m));
-  const foot = base.clone().multiplyScalar(0.7);
-  const turf = new THREE.Color(grassHex || 0x5a8a3c).multiplyScalar(0.86);
-  const TURF = 0.14;
-  const STEP = 0.3;
-  // Unlit, with the light baked per face direction: a vertical face under a
-  // high sun is otherwise a black slot from the game camera.
-  let lit = 1;
-  const face = (ax, az, bx, bz, a0, a1, b0, b1) => {
-    const lo0 = Math.min(a0, b0), hi0 = Math.max(a0, b0);
-    const lo1 = Math.min(a1, b1), hi1 = Math.max(a1, b1);
-    if (hi0 - lo0 < 0.04 && hi1 - lo1 < 0.04) return;
-    const y0 = Math.min(lo0, lo1), y1 = Math.max(hi0, hi1);
-    const emit = (ya, yb, c) => {
-      const e0a = Math.min(Math.max(ya, lo0), hi0), e0b = Math.min(Math.max(yb, lo0), hi0);
-      const e1a = Math.min(Math.max(ya, lo1), hi1), e1b = Math.min(Math.max(yb, lo1), hi1);
-      if (e0b - e0a < 1e-4 && e1b - e1a < 1e-4) return;
-      const quad = [[ax, e0a, az], [bx, e1a, bz], [bx, e1b, bz], [ax, e0a, az], [bx, e1b, bz], [ax, e0b, az]];
-      for (const v of quad) { pos.push(v[0], v[1], v[2]); col.push(c.r * lit, c.g * lit, c.b * lit); }
-    };
-    // A tall face wears a turf lip at the top; the rock below is banded.
-    const top = y1 - y0 > 0.4 ? y1 - TURF : y1;
-    if (top < y1) emit(top, y1, turf);
-    for (let k = Math.floor(y0 / STEP); k * STEP < top; k++) {
-      const ya = k * STEP, yb = Math.min(top, ya + STEP);
-      emit(ya, yb, ya < y0 + 0.1 ? foot : bands[((k % 6) + 6) % 6]);
-    }
+  const pale = side.clone();
+  pale.offsetHSL(0, -0.06, 0.26);
+  const lip = pale.clone().lerp(new THREE.Color(grassHex || rockHex), 0.12);
+  const foot = side.clone().multiplyScalar(0.78);
+  const hash = (x, z) => {
+    let h = Math.imul((x * 8) | 0, 374761393) ^ Math.imul((z * 8) | 0, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h >>> 0) % 1000) / 1000;
   };
-  // One shared edge, A -> B: tile t runs corner c1 -> c2 along it, its
-  // neighbour nb runs d1 -> d2. A half chamfer splits an edge, so the face is
-  // emitted per piece between split points.
+  const push = (v, c) => { pos.push(v[0], v[1], v[2]); col.push(c.r, c.g, c.b); };
+  const quad = (a, b, c, d, color) => {
+    for (const v of [a, b, c, a, c, d]) push(v, color);
+  };
+  const face = (ax, az, bx, bz, a0, a1, b0, b1) => {
+    const y0 = Math.min(a0, b0, a1, b1);
+    const y1 = Math.max(a0, b0, a1, b1);
+    if (y1 - y0 < 0.45) return;
+    const dx = bx - ax, dz = bz - az;
+    const L = Math.hypot(dx, dz) || 1;
+    const nx = -dz / L, nz = dx / L;
+    const jitter = (hash(ax, az) - 0.5) * 0.1;
+    const T = 0.55;
+    const bevel = y1 - 0.14;
+    const segs = 3;
+    for (let s = 0; s < segs; s++) {
+      const u0 = s / segs, u1 = (s + 1) / segs;
+      const j0 = jitter * (s % 2 ? 1 : -0.55);
+      const j1 = jitter * ((s + 1) % 2 ? 0.55 : -1);
+      const x0 = ax + dx * u0 + nx * j0;
+      const z0 = az + dz * u0 + nz * j0;
+      const x1 = ax + dx * u1 + nx * j1;
+      const z1 = az + dz * u1 + nz * j1;
+      for (const sideN of [-1, 1]) {
+        const ox = nx * T * sideN, oz = nz * T * sideN;
+        const tone = sideN > 0 ? side : foot;
+        const a = [x0 + ox, y0, z0 + oz];
+        const b = [x1 + ox, y0, z1 + oz];
+        const c = [x1 + ox, bevel, z1 + oz];
+        const d = [x0 + ox, bevel, z0 + oz];
+        if (sideN > 0) quad(a, b, c, d, tone);
+        else quad(a, d, c, b, tone);
+        const e = [x1 + ox * 0.2, y1, z1 + oz * 0.2];
+        const f = [x0 + ox * 0.2, y1, z0 + oz * 0.2];
+        if (sideN > 0) quad(d, c, e, f, pale);
+        else quad(d, f, e, c, pale);
+      }
+    }
+    const rim = 0.48;
+    quad(
+      [ax + nx * rim, y1 + 0.04, az + nz * rim],
+      [bx + nx * rim, y1 + 0.04, bz + nz * rim],
+      [bx - nx * 0.05, y1 + 0.04, bz - nz * 0.05],
+      [ax - nx * 0.05, y1 + 0.04, az - nz * 0.05],
+      lip,
+    );
+  };
   const edge = (ax, az, bx, bz, t, c1, c2, nb, d1, d2) => {
     const us = [0, ...edgeSplits(tileCH, t, c1, c2), ...edgeSplits(tileCH, nb, d1, d2), 1].sort((a, b) => a - b);
     for (let q = 0; q + 1 < us.length; q++) {
@@ -236,14 +258,11 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
       const t = z * N + x;
       const full = map.ledgeW[t] >= 0.999;
       if (x + 1 < N && full && map.ledgeW[t + 1] >= 0.999) {
-        lit = 0.8;
         edge(x + 1, z, x + 1, z + 1, t, 1, 3, t + 1, 0, 2);
       }
       if (z + 1 < N && full && map.ledgeW[t + N] >= 0.999) {
-        lit = 0.94;
         edge(x, z + 1, x + 1, z + 1, t, 2, 3, t + N, 0, 1);
       }
-      // The chamfer face along the cut diagonal.
       const k = tileCH.cut ? tileCH.cut[t] : -1;
       if (k >= 0) {
         const cx = k & 1, cz = k >> 1;
@@ -252,7 +271,6 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
         const hC = tileCH[b + cx + 2 * cz];
         const hX = tileCH[b + (1 - cx) + 2 * cz], hZ = tileCH[b + cx + 2 * (1 - cz)];
         const ux = cx + (1 - 2 * cx) * S, uz = cz + (1 - 2 * cz) * S;
-        lit = 0.87;
         face(x + ux, z + cz, x + cx, z + uz,
           hC + (hX - hC) * S, hC + (hZ - hC) * S,
           H[j] + (H[j + 1] - H[j]) * S, H[j] + (H[j + 2] - H[j]) * S);
@@ -264,16 +282,13 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-  // Faces cast the drop shadow onto the terrace below; they do not receive
-  // (a sheer face self-shadows to black under the steep sun).
-  mesh.receiveShadow = false;
+  const mesh = new THREE.Mesh(geo, toyMat({ vertexColors: true, side: THREE.DoubleSide }));
+  mesh.receiveShadow = true;
   mesh.castShadow = true;
   mesh.name = 'cliff-strata';
   return mesh;
 }
 
-// Smooth ground height from per-tile corners (bilinear inside the tile).
 export function tileGroundY(map, tileCH, x, z) {
   const N = map.size;
   const tx = Math.min(N - 1, Math.max(0, Math.floor(x))), tz = Math.min(N - 1, Math.max(0, Math.floor(z)));

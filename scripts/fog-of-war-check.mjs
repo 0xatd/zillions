@@ -9,7 +9,7 @@ import {
   TROOP_VISION_RADIUS,
 } from '../src/fog-of-war.js';
 
-assert.ok(FOG_DARKNESS >= 0.8 && FOG_DARKNESS <= 0.86, 'fog must stay scary without becoming an opaque black sheet');
+assert.ok(FOG_DARKNESS >= 0.2 && FOG_DARKNESS <= 0.32, 'fog of war stays a light shadow-tinted veil');
 assert.ok(FOG_INNER_VEIL <= 0.02, 'visible ground must remain clear');
 assert.ok(FOG_EDGE_SOFTNESS >= 6, 'vision edges must blend into one coherent frontier');
 
