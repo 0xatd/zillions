@@ -1,7 +1,7 @@
 // Star-system level select. Three low-poly planets carry the five Earth
 // fronts plus coming-soon pins. Presentation only: no sim, no saves.
 import * as THREE from 'three';
-import { LEVELS, levelById } from './config.js';
+import { levelById } from './config.js';
 import { STAR_SYSTEM, battlefieldPressure, frontState } from './front-state.js';
 
 export { battlefieldPressure, frontState };
@@ -11,9 +11,9 @@ const INFESTED = 0x3a1848;
 const SOON = 0x8d97a6;
 
 const LAYOUT = {
-  verdant: { x: -3.7, y: 0.15, z: 0, radius: 1.15, spin: 0.18, moon: true },
-  mire: { x: 0, y: -0.05, z: -0.2, radius: 0.98, spin: 0.12, moon: false },
-  cinder: { x: 3.7, y: 0.05, z: 0.1, radius: 1.1, spin: 0.16, ring: true },
+  verdant: { x: -5.15, y: 0.45, z: 1.15, radius: 1.72, spin: 0.18, moon: true, glow: 0x7dffc0 },
+  mire: { x: 0.1, y: -0.55, z: -1.35, radius: 1.42, spin: 0.12, moon: false, glow: 0xc6e07a },
+  cinder: { x: 5.35, y: 0.2, z: 0.25, radius: 1.62, spin: 0.16, ring: true, glow: 0xff8a4a },
 };
 
 const PINS = {
@@ -40,33 +40,126 @@ const dirOf = (lat, lon) => new THREE.Vector3(
 
 function skyTexture() {
   const canvas = document.createElement('canvas');
-  canvas.width = 8;
+  canvas.width = 64;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#12182e');
-  grad.addColorStop(0.55, '#1c2c4e');
-  grad.addColorStop(1, '#0c1224');
+  grad.addColorStop(0, '#101628');
+  grad.addColorStop(0.5, '#1a2748');
+  grad.addColorStop(1, '#0c101c');
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 8, 256);
+  ctx.fillRect(0, 0, 64, 256);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
-function biomeColor(kind, lat, lon) {
-  const n = hash(Math.round((lat + 2) * 40) * 17 + Math.round((lon + 4) * 40));
+function nebulaTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const blobs = [[70, 90, 80, 'rgba(90,50,140,0.45)'], [160, 140, 90, 'rgba(40,90,120,0.35)'], [120, 60, 50, 'rgba(180,80,50,0.18)']];
+  for (const [x, y, r, color] of blobs) {
+    const g = ctx.createRadialGradient(x, y, 4, x, y, r);
+    g.addColorStop(0, color);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function ringTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 8;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  for (let y = 0; y < 128; y++) {
+    const band = Math.floor(y / 8);
+    const alpha = [0.15, 0.72, 0.28, 0.9, 0.08, 0.55, 0.2, 0.8][band % 8];
+    ctx.fillStyle = `rgba(232, 176, 112, ${alpha})`;
+    ctx.fillRect(0, y, 8, 1);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function relief(kind, dir) {
+  const { x, y, z } = dir;
+  const lat = Math.asin(Math.max(-1, Math.min(1, y)));
+  const cont = Math.sin(x * 2.6 + z * 1.8) * Math.cos(y * 2.1 + 0.4);
+  const ridge = Math.abs(Math.sin(x * 6.4 - y * 3.2 + z * 2.1));
+  const fine = Math.sin(x * 11 + z * 9) * Math.cos(y * 8);
   if (kind === 'verdant') {
-    if (Math.abs(lat) > 0.95) return 0xd7e6ee;
-    if (n < 0.18) return 0x2f7ea8;
-    return n > 0.72 ? 0x2f6b40 : 0x3f9a62;
+    const land = cont > -0.08;
+    const mountains = land ? Math.pow(Math.max(0, ridge - 0.35), 1.4) * 0.11 : 0;
+    const ocean = land ? 0 : (cont + 0.08) * 0.09;
+    const ice = Math.abs(lat) > 1.05 ? 0.035 : 0;
+    return (land ? 0.04 : 0) + mountains + ocean + ice;
   }
   if (kind === 'mire') {
-    if (n < 0.28) return 0x2a6a58;
-    return n > 0.8 ? 0x6a8f3a : 0x3d5c38;
+    const basin = -Math.pow(Math.abs(cont), 1.2) * 0.07;
+    const hummock = Math.max(0, fine) * 0.035;
+    return basin + hummock;
   }
-  if (Math.abs(lat) > 0.7 || n > 0.78) return 0x6a4a86;
-  return n < 0.22 ? 0xc45a28 : 0xe08a3a;
+  const crater = Math.exp(-ridge * ridge * 6) * -0.08;
+  const river = Math.abs(Math.sin(lat * 7 + x * 5)) < 0.12 ? -0.045 : 0;
+  const cone = Math.max(0, cont) * 0.1;
+  return 0.02 + crater + river + cone;
+}
+
+function fresnelMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      glow: { value: new THREE.Color(color) },
+    },
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.FrontSide,
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        vWorld = world.xyz;
+        vNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 glow;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        float fresnel = pow(1.0 - abs(dot(normalize(vNormal), viewDir)), 2.6);
+        gl_FragColor = vec4(glow, fresnel * 0.9);
+      }
+    `,
+  });
+}
+
+function biomeColor(kind, lat, lon, height) {
+  if (kind === 'verdant') {
+    if (Math.abs(lat) > 1.05 || height > 0.11) return 0xf2f7f4;
+    if (height < 0.01) return 0x1f78b4;
+    if (height > 0.075) return 0x8d9a78;
+    return hash(lat * 30 + lon) > 0.62 ? 0x2f7a45 : 0x3fae62;
+  }
+  if (kind === 'mire') {
+    if (height < -0.02) return 0x1f6a58;
+    if (height > 0.02) return 0x6e8f3a;
+    return 0x3c5a34;
+  }
+  if (height < -0.03) return 0xff5a22;
+  if (height > 0.07) return 0x6a4a86;
+  if (Math.abs(lat) > 0.9) return 0x4a2a58;
+  return 0xe07a2a;
 }
 
 function mixHex(a, b, t) {
@@ -76,55 +169,134 @@ function mixHex(a, b, t) {
   return (c(ar, br) << 16) | (c(ag, bg) << 8) | c(ab, bb);
 }
 
-function paintGlobe(geometry, kind, sites, culture) {
+function faceColor(kind, dir, sites, culture) {
+  const lat = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+  const lon = Math.atan2(dir.x, dir.z);
+  let nearest = sites[0];
+  let best = -2;
+  let second = -2;
+  for (const site of sites) {
+    const dot = dir.dot(site.dir);
+    if (dot > best) { second = best; best = dot; nearest = site; }
+    else if (dot > second) second = dot;
+  }
+  const height = relief(kind, dir);
+  let hex = biomeColor(kind, lat, lon, height);
+  if (nearest.placeholder) hex = mixHex(0x2c3544, hex, 0.35);
+  else if (nearest.state === 'completed') hex = mixHex(hex, culture, 0.88);
+  else if (nearest.state === 'locked') hex = hash(lat * 19 + lon * 7) > 0.55 ? 0x6e348c : 0x4a1868;
+  else hex = mixHex(hex, 0xfff4c8, 0.18);
+  if (best - second < 0.055) hex = 0xfff6d4;
+  return hex;
+}
+
+function buildGlobe(radius, kind, sites, culture) {
+  const source = new THREE.IcosahedronGeometry(1, 4);
+  const geometry = source.toNonIndexed();
+  source.dispose();
   const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const dir = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
+    const lift = 1 + relief(kind, dir);
+    pos.setXYZ(i, dir.x * radius * lift, dir.y * radius * lift, dir.z * radius * lift);
+  }
   const colors = new Float32Array(pos.count * 3);
   const color = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const lat = Math.asin(Math.max(-1, Math.min(1, y / Math.hypot(x, y, z))));
-    const lon = Math.atan2(x, z);
-    const here = dirOf(lat, lon);
-    let nearest = sites[0];
-    let best = -2;
-    let second = -2;
-    for (const site of sites) {
-      const dot = here.dot(site.dir);
-      if (dot > best) { second = best; best = dot; nearest = site; }
-      else if (dot > second) second = dot;
+  for (let i = 0; i < pos.count; i += 3) {
+    const dir = new THREE.Vector3(
+      pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2),
+      pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2),
+      pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2),
+    ).normalize();
+    color.setHex(faceColor(kind, dir, sites, culture));
+    for (let k = 0; k < 3; k++) {
+      colors[(i + k) * 3] = color.r;
+      colors[(i + k) * 3 + 1] = color.g;
+      colors[(i + k) * 3 + 2] = color.b;
     }
-    let hex = biomeColor(kind, lat, lon);
-    if (nearest.placeholder) hex = mixHex(hex, SOON, 0.28);
-    else if (nearest.state === 'completed') hex = mixHex(hex, culture, 0.78);
-    else if (nearest.state === 'locked') hex = mixHex(hex, INFESTED, 0.7);
-    if (best - second < 0.06) hex = mixHex(hex, 0x10141c, 0.55);
-    color.setHex(hex);
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function repaintGlobe(geometry, kind, sites, culture) {
+  const pos = geometry.attributes.position;
+  const colors = geometry.attributes.color;
+  const color = new THREE.Color();
+  for (let i = 0; i < pos.count; i += 3) {
+    const dir = new THREE.Vector3(
+      pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2),
+      pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2),
+      pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2),
+    ).normalize();
+    color.setHex(faceColor(kind, dir, sites, culture));
+    for (let k = 0; k < 3; k++) colors.setXYZ(i + k, color.r, color.g, color.b);
+  }
+  colors.needsUpdate = true;
+}
+
+function shortName(name) {
+  return String(name || '').replace(/^The /, '').split(' ')[0];
 }
 
 function makePin(site) {
   const group = new THREE.Group();
-  const marker = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.075, 0),
-    new THREE.MeshLambertMaterial({ color: 0xf4efe4 }),
+  const stone = new THREE.MeshLambertMaterial({ color: 0xd8c7a2 });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0xb32020 });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.05, 6), stone);
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.08), stone);
+  tower.position.y = 0.11;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.09, 4), roofMat);
+  roof.position.y = 0.2;
+  group.add(base, tower, roof);
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
-  marker.position.y = 0.08;
-  group.add(marker);
-  const flag = new THREE.Mesh(
-    new THREE.BoxGeometry(0.09, 0.05, 0.012),
-    new THREE.MeshLambertMaterial({ color: CULTURE }),
-  );
-  flag.position.set(0.05, 0.16, 0);
-  flag.visible = false;
-  group.add(flag);
-  group.userData.marker = marker;
-  group.userData.flag = flag;
+  glow.position.y = 0.26;
+  group.add(glow);
+  const lock = new THREE.Group();
+  lock.add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.07, 0.04), new THREE.MeshLambertMaterial({ color: 0xd5dbe6 })));
+  const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.01, 6, 8, Math.PI), new THREE.MeshLambertMaterial({ color: 0xf4f7fb }));
+  shackle.position.y = 0.05;
+  lock.add(shackle);
+  lock.position.y = 0.18;
+  lock.visible = false;
+  group.add(lock);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 4), new THREE.MeshLambertMaterial({ color: 0xf4efe4 }));
+  pole.position.set(0.1, 0.2, 0);
+  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.012), new THREE.MeshLambertMaterial({ color: CULTURE }));
+  cloth.position.set(0.15, 0.25, 0);
+  pole.visible = false;
+  cloth.visible = false;
+  group.add(pole, cloth);
+  const label = textSprite(shortName(site.name), 28);
+  label.position.y = 0.46;
+  group.add(label);
   group.userData.site = site;
+  group.userData.glow = glow;
+  group.userData.lock = lock;
+  group.userData.flag = cloth;
+  group.userData.pole = pole;
+  group.userData.keep = [base, tower, roof];
   return group;
+}
+
+function scatterCreep(site, radius) {
+  const motes = [];
+  for (let i = 0; i < 10; i++) {
+    const lat = site.lat + (hash(i + 2) - 0.5) * 0.45;
+    const lon = site.lon + (hash(i + 9) - 0.5) * 0.45;
+    const mote = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.035 + hash(i) * 0.03, 0),
+      new THREE.MeshLambertMaterial({ color: 0x4a1860, emissive: 0x2a0838, emissiveIntensity: 0.6 }),
+    );
+    mote.position.copy(dirOf(lat, lon).multiplyScalar(radius * 1.03));
+    mote.userData.phase = i;
+    motes.push(mote);
+  }
+  return motes;
 }
 
 function buildPlanet(def, layout) {
@@ -132,29 +304,6 @@ function buildPlanet(def, layout) {
   root.position.set(layout.x, layout.y, layout.z);
   const spin = new THREE.Group();
   root.add(spin);
-  const globe = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(layout.radius, 3),
-    new THREE.MeshLambertMaterial({ vertexColors: true }),
-  );
-  globe.castShadow = true;
-  globe.receiveShadow = true;
-  spin.add(globe);
-  const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(layout.radius * 1.08, 24, 16),
-    new THREE.MeshBasicMaterial({
-      color: def.id === 'cinder' ? 0xff7a3a : def.id === 'mire' ? 0x9ab85a : 0x7dffa8,
-      transparent: true, opacity: 0.18, side: THREE.BackSide, depthWrite: false,
-    }),
-  );
-  spin.add(glow);
-  if (layout.ring) {
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(layout.radius * 1.45, 0.035, 8, 40),
-      new THREE.MeshBasicMaterial({ color: 0xf0c14a, transparent: true, opacity: 0.75 }),
-    );
-    ring.rotation.x = Math.PI / 2.6;
-    spin.add(ring);
-  }
   const sites = def.sites.map((site, index) => {
     const [lat, lon] = PINS[def.id][index];
     const level = site.levelId ? levelById(site.levelId) : null;
@@ -169,46 +318,82 @@ function buildPlanet(def, layout) {
       state: site.levelId ? 'locked' : 'soon',
     };
   });
+  const globe = new THREE.Mesh(
+    buildGlobe(layout.radius, def.id, sites, CULTURE),
+    new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+  );
+  globe.userData.planetId = def.id;
+  spin.add(globe);
+  const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(layout.radius * 1.08, 32, 24), fresnelMaterial(layout.glow));
+  spin.add(atmosphere);
+  if (layout.ring) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(layout.radius * 1.32, layout.radius * 1.92, 80),
+      new THREE.MeshBasicMaterial({ map: ringTexture(), transparent: true, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    ring.rotation.x = Math.PI / 2.35;
+    spin.add(ring);
+  }
   const pins = sites.map((site) => {
     const pin = makePin(site);
-    const p = site.dir.clone().multiplyScalar(layout.radius * 1.02);
-    pin.position.copy(p);
+    pin.position.copy(site.dir.clone().multiplyScalar(layout.radius * 1.08));
     pin.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), site.dir);
+    pin.scale.setScalar(0.95);
     spin.add(pin);
     return pin;
   });
+  const creep = [];
+  for (const site of sites) {
+    if (site.placeholder) continue;
+    for (const mote of scatterCreep(site, layout.radius)) {
+      spin.add(mote);
+      mote.userData.site = site;
+      creep.push(mote);
+    }
+  }
   let moon = null;
   if (layout.moon) {
     moon = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.22, 1),
-      new THREE.MeshLambertMaterial({ color: 0xd5dde8 }),
+      new THREE.IcosahedronGeometry(0.28, 1),
+      new THREE.MeshLambertMaterial({ color: 0xd5dde8, flatShading: true }),
     );
     root.add(moon);
   }
-  const label = nameSprite(def.name);
-  label.position.y = layout.radius + 0.55;
+  const label = textSprite(`${def.name}\n0/${sites.length} sites`, 42);
+  label.position.y = layout.radius + 0.95;
   root.add(label);
-  globe.userData.planetId = def.id;
-  return { id: def.id, name: def.name, root, spin, globe, pins, sites, moon, radius: layout.radius, spinRate: layout.spin, userSpin: 0 };
+  return {
+    id: def.id, name: def.name, root, spin, globe, pins, sites, creep, moon, label,
+    radius: layout.radius, spinRate: layout.spin, userSpin: 0,
+  };
 }
 
-function nameSprite(text) {
+function textSprite(text, size) {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
-  canvas.height = 96;
+  canvas.height = 160;
   const ctx = canvas.getContext('2d');
-  ctx.font = '700 56px Nunito, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 8;
-  ctx.strokeStyle = 'rgba(6,10,18,0.8)';
-  ctx.strokeText(text, 256, 48);
-  ctx.fillStyle = '#f7f1e4';
-  ctx.fillText(text, 256, 48);
+  const texture = new THREE.CanvasTexture(canvas);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false,
+    map: texture, transparent: true, depthWrite: false, sizeAttenuation: false,
   }));
-  sprite.scale.set(1.8, 0.34, 1);
+  sprite.scale.set(size > 36 ? 0.28 : 0.16, size > 36 ? 0.09 : 0.05, 1);
+  sprite.userData.redraw = (value) => {
+    ctx.clearRect(0, 0, 512, 160);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(6,10,18,0.88)';
+    ctx.fillStyle = '#f7f1e4';
+    String(value).split('\n').forEach((line, index) => {
+      ctx.font = `700 ${index === 0 ? size : Math.round(size * 0.62)}px Nunito, sans-serif`;
+      const y = 58 + index * 52;
+      ctx.strokeText(line, 256, y);
+      ctx.fillText(line, 256, y);
+    });
+    texture.needsUpdate = true;
+  };
+  sprite.userData.redraw(text);
   return sprite;
 }
 
@@ -221,8 +406,7 @@ export class WorldMap {
     this.renderer.setPixelRatio(1);
     this.scene = new THREE.Scene();
     this.scene.background = skyTexture();
-    this.scene.fog = new THREE.Fog(0x12182e, 18, 36);
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.1, 80);
+    this.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 120);
     this.clock = new THREE.Clock();
     this.ray = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -236,10 +420,23 @@ export class WorldMap {
     this.running = false;
     this.hoverKey = null;
 
-    this.scene.add(new THREE.HemisphereLight(0xc9d7ee, 0x1a120e, 0.55));
-    const sun = new THREE.DirectionalLight(0xfff0d0, 1.7);
-    sun.position.set(-6, 8, 7);
+    this.scene.add(new THREE.HemisphereLight(0xc5d6f0, 0x3a3428, 0.72));
+    const sunPos = new THREE.Vector3(-3.4, 5.4, 7.2);
+    const sun = new THREE.DirectionalLight(0xfff1d4, 1.45);
+    sun.position.copy(sunPos);
     this.scene.add(sun);
+    const fill = new THREE.DirectionalLight(0x6f95d4, 0.55);
+    fill.position.set(12, -3, 8);
+    this.scene.add(fill);
+    const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff3c4 }));
+    sunMesh.position.copy(sunPos);
+    this.scene.add(sunMesh);
+    const nebula = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: nebulaTexture(), transparent: true, depthWrite: false, opacity: 0.85,
+    }));
+    nebula.position.set(1.5, 0.4, -7);
+    nebula.scale.set(16, 9, 1);
+    this.scene.add(nebula);
     const stars = new Float32Array(280 * 3);
     for (let i = 0; i < 280; i++) {
       const a = hash(i) * Math.PI * 2;
@@ -255,21 +452,37 @@ export class WorldMap {
     this.planets = STAR_SYSTEM.map((def) => buildPlanet(def, LAYOUT[def.id]));
     for (const planet of this.planets) this.scene.add(planet.root);
     this.routes = [];
+    const dashMat = new THREE.MeshBasicMaterial({ color: 0xfff6d2 });
     for (let i = 0; i < this.planets.length - 1; i++) {
       const a = this.planets[i].root.position.clone();
       const b = this.planets[i + 1].root.position.clone();
-      a.y += 0.15;
-      b.y += 0.15;
       const mid = a.clone().lerp(b, 0.5);
-      mid.y += 0.7;
+      mid.y += 1.15;
       const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
-      const route = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 28, 0.025, 5, false),
-        new THREE.MeshBasicMaterial({ color: 0xf0c14a, transparent: true, opacity: 0.8 }),
-      );
-      this.routes.push(route);
-      this.scene.add(route);
+      for (let s = 0.08; s < 0.95; s += 0.07) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 4), dashMat);
+        dot.position.copy(curve.getPoint(s));
+        this.routes.push(dot);
+        this.scene.add(dot);
+      }
     }
+    for (let i = 0; i < 7; i++) {
+      const rock = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.08 + hash(i) * 0.08, 0),
+        new THREE.MeshLambertMaterial({ color: 0x8a8074, flatShading: true }),
+      );
+      const a = hash(i + 4) * Math.PI * 2;
+      rock.position.set(Math.cos(a) * (7.2 + hash(i + 1)), (hash(i + 2) - 0.5) * 1.4, Math.sin(a) * 2.2 - 0.4);
+      this.scene.add(rock);
+    }
+    const ship = new THREE.Group();
+    ship.add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.1), new THREE.MeshLambertMaterial({ color: 0xd8dee8 })));
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.28), new THREE.MeshLambertMaterial({ color: 0x9aa6b8 }));
+    wing.position.x = -0.05;
+    ship.add(wing);
+    ship.position.set(1.8, 1.15, 1.6);
+    ship.lookAt(0, 0, 0);
+    this.scene.add(ship);
 
     this._down = (event) => this._pointerDown(event);
     this._move = (event) => this._pointerMove(event);
@@ -299,20 +512,11 @@ export class WorldMap {
         if (site.placeholder) site.state = 'soon';
         else site.state = frontState(site.levelId, cleared, this.clearedIds);
       }
-      paintGlobe(planet.globe.geometry, planet.id, planet.sites, this.culture);
-      planet.globe.geometry.attributes.color.needsUpdate = true;
-      planet.pins.forEach((pin, index) => {
-        const site = planet.sites[index];
-        const marker = pin.userData.marker;
-        const flag = pin.userData.flag;
-        const color = site.state === 'completed' ? this.culture
-          : site.state === 'open' ? 0xffe29a
-          : site.state === 'soon' ? SOON
-          : 0x6a3058;
-        marker.material.color.setHex(color);
-        flag.visible = site.state === 'completed';
-        flag.material.color.setHex(this.culture);
-      });
+      repaintGlobe(planet.globe.geometry, planet.id, planet.sites, this.culture);
+      const won = planet.sites.filter((site) => site.state === 'completed').length;
+      planet.label.userData.redraw(`${planet.name}\n${won}/${planet.sites.length} sites`);
+      planet.pins.forEach((pin) => this._stylePin(pin));
+      for (const mote of planet.creep) mote.visible = mote.userData.site.state === 'locked';
     }
     const next = this._nextSite();
     if (next) {
@@ -407,6 +611,20 @@ export class WorldMap {
     this.renderer.dispose();
   }
 
+  _stylePin(pin) {
+    const site = pin.userData.site;
+    const soon = site.state === 'soon';
+    const won = site.state === 'completed';
+    const open = site.state === 'open';
+    for (const mesh of pin.userData.keep) mesh.visible = !soon;
+    pin.userData.lock.visible = soon;
+    pin.userData.flag.visible = won;
+    pin.userData.pole.visible = won;
+    if (won) pin.userData.flag.material.color.setHex(this.culture);
+    pin.userData.keep[2].material.color.setHex(open ? 0xffe29a : won ? this.culture : 0x5a2848);
+    pin.userData.glow.material.opacity = open ? 0.45 : 0;
+  }
+
   _nextSite() {
     for (let planetIndex = 0; planetIndex < this.planets.length; planetIndex++) {
       const planet = this.planets[planetIndex];
@@ -428,12 +646,18 @@ export class WorldMap {
       }
       planet.pins.forEach((pin, index) => {
         const site = planet.sites[index];
-        const pulse = site.state === 'open' ? 1 + Math.sin(this._t * 3.2 + index) * 0.22 : 1;
-        pin.userData.marker.scale.setScalar(pulse);
+        const pulse = site.state === 'open' ? 0.45 + Math.sin(this._t * 3.4 + index) * 0.35 : 0;
+        pin.userData.glow.material.opacity = pulse;
+        pin.userData.glow.scale.setScalar(1);
       });
+      for (const mote of planet.creep) {
+        if (!mote.visible) continue;
+        const bob = 1 + Math.sin(this._t * 1.6 + mote.userData.phase) * 0.2;
+        mote.scale.setScalar(bob);
+      }
     }
-    const system = new THREE.Vector3(Math.sin(this._t * 0.05) * 0.25, 2.15, 11.6);
-    const close = focus.root.position.clone().add(new THREE.Vector3(0.2, focus.radius * 0.35, focus.radius * 2.7));
+    const system = new THREE.Vector3(Math.sin(this._t * 0.05) * 0.3, 2.5, 15.2);
+    const close = focus.root.position.clone().add(new THREE.Vector3(0.15, focus.radius * 0.28, focus.radius * 2.45));
     const lookFar = new THREE.Vector3(0, 0.1, 0);
     const lookNear = focus.root.position.clone();
     const k = ease(this.zoom);
