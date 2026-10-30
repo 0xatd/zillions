@@ -8,6 +8,7 @@ import {
   makePineGeometry, makeLollipopGeometry, makeBushGeometry, makeTrunkGeometry, makeBoulderGeometry,
 } from './toy-props.js';
 import { propRecord } from './prop-pack.js';
+import { activeCulture } from './cultures.js';
 
 const CHUNK = 32;
 
@@ -385,20 +386,37 @@ export function buildRoadGroup(map) {
   const seen = new Uint8Array(N * N);
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const neighbours = (x, z) => dirs.filter(([dx, dz]) => isP(x + dx, z + dz));
-  const path = new THREE.Color(map.theme?.palette?.path ?? 0xb07a4f);
+  const STYLES = {
+    european: { edge: 0x4e3422, bed: 0x8a5a34, center: 0xe0c48a, rut: 0x5c3a24 },
+    asian: { edge: 0x6e6a62, bed: 0xc9c3b2, center: 0xf7f3ea, rut: 0x9a958a },
+    south_american: { edge: 0x5c2410, bed: 0xb04a24, center: 0xe08048, rut: 0x7a3012 },
+    middle_eastern: { edge: 0x7a5a34, bed: 0xd4b07a, center: 0xf3e2bc, rut: 0xa8844e },
+  };
+  const style = STYLES[activeCulture()] || STYLES.european;
   const grass = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
   const grassLum = grass.r * 0.3 + grass.g * 0.59 + grass.b * 0.11;
-  // A worn track. On snow the authored path is a cold grey, so pull it up
-  // toward the ground until it reads as packed dirt, not a dark stamp.
-  const dirt = path.clone().lerp(new THREE.Color(0xb08968), 0.45);
-  if (grassLum > 0.62) dirt.lerp(grass, 0.55);
-  const mid = dirt.clone().lerp(grass, 0.45);
-  const edge = dirt.clone().lerp(grass, 0.82);
-  const center = dirt.clone().lerp(new THREE.Color(0xfff6ea), grassLum > 0.62 ? 0.22 : 0.1);
+  const edge = new THREE.Color(style.edge);
+  const bed = new THREE.Color(style.bed);
+  const center = new THREE.Color(style.center);
+  const rut = new THREE.Color(style.rut);
+  // Bright ground swallows a pale road. Keep a dark trodden core and a lighter stripe.
+  if (grassLum > 0.5) {
+    edge.multiplyScalar(0.78);
+    rut.multiplyScalar(0.72);
+    bed.multiplyScalar(0.88);
+  }
   const rows = [
-    { t: -1, c: edge }, { t: -0.55, c: mid }, { t: 0, c: center }, { t: 0.55, c: mid }, { t: 1, c: edge },
+    { t: -1, c: edge },
+    { t: -0.72, c: bed },
+    { t: -0.4, c: rut },
+    { t: -0.16, c: center },
+    { t: 0.16, c: center },
+    { t: 0.4, c: rut },
+    { t: 0.72, c: bed },
+    { t: 1, c: edge },
   ];
   const stones = [];
+  const tufts = [];
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       if (!isP(x, z) || seen[map.idx(x, z)]) continue;
@@ -422,7 +440,7 @@ export function buildRoadGroup(map) {
         cz += pick[1];
       }
       if (raw.length < 2) continue;
-      const smooth = chaikin(raw, 3, false);
+      const smooth = chaikin(raw, 4, false);
       let arc = 0;
       const wandered = smooth.map((p, i) => {
         if (i) arc += Math.hypot(p[0] - smooth[i - 1][0], p[1] - smooth[i - 1][1]);
@@ -433,33 +451,50 @@ export function buildRoadGroup(map) {
         const L = Math.hypot(dx, dz) || 1;
         const nx = -dz / L;
         const nz = dx / L;
-        const wob = Math.sin(arc * 0.55 + raw[0][0] * 0.2) * 0.16;
-        return [p[0] + nx * wob, p[1] + nz * wob];
+        const wob = Math.sin(arc * 0.35 + raw[0][0] * 0.17) * 0.1;
+        return [p[0] + nx * wob, p[1] + nz * wob, arc];
       });
+      const line = wandered.map((p) => [p[0], p[1]]);
       const mesh = colorRibbon(
-        map, wandered,
-        (i) => 0.72 + 0.16 * Math.sin(i * 0.35 + raw[0][1]),
+        map, line,
+        (i) => 0.95 + 0.08 * Math.sin(i * 0.22 + raw[0][1]),
         rows,
-        (vx, vz) => map.groundY(vx, vz) + 0.04,
+        (vx, vz) => map.groundY(vx, vz) + 0.045,
       );
       if (mesh) g.add(mesh);
-      for (let i = 2; i < wandered.length - 2; i += 7) {
+      let nextStone = 1.6;
+      let nextTuft = 0.9;
+      for (let i = 1; i < wandered.length - 1; i++) {
         const p = wandered[i];
-        const q = wandered[Math.min(wandered.length - 1, i + 1)];
+        const q = wandered[i + 1];
         let dx = q[0] - p[0];
         let dz = q[1] - p[1];
         const L = Math.hypot(dx, dz) || 1;
-        const side = (i & 1) ? 1 : -1;
-        const ox = p[0] + (-dz / L) * side * 0.78;
-        const oz = p[1] + (dx / L) * side * 0.78;
-        stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.16 + (i % 3) * 0.04, ry: i });
+        const nx = -dz / L;
+        const nz = dx / L;
+        if (p[2] >= nextStone) {
+          nextStone += 2.4;
+          for (const side of [-1, 1]) {
+            const ox = p[0] + nx * side * 1.05;
+            const oz = p[1] + nz * side * 1.05;
+            stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.14 + (i % 3) * 0.03, ry: p[2] });
+          }
+        }
+        if (p[2] >= nextTuft) {
+          nextTuft += 1.3;
+          const side = (i & 1) ? 1 : -1;
+          const ox = p[0] + nx * side * 1.22;
+          const oz = p[1] + nz * side * 1.22;
+          tufts.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.3, ry: p[2] });
+        }
       }
     }
   }
   const rock = propRecord('rock_smallA');
-  if (rock) {
-    placeProp(g, rock, stones, (role) => (role === 'foliage' ? grass : dirt), { cast: false });
-  }
+  const grassP = propRecord('grass');
+  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
+  if (rock) placeProp(g, rock, stones, (role) => (role === 'foliage' ? grassHex : edge), { cast: false });
+  if (grassP) placeProp(g, grassP, tufts, () => grassHex, { cast: false });
   return g;
 }
 
