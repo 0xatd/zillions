@@ -211,10 +211,10 @@ const ContactAOShader = {
     tDepth: { value: null },
     uNear: { value: 0.5 },
     uFar: { value: 600 },
-    uRadius: { value: 1.55 },
+    uRadius: { value: 0.85 },
     uFov: { value: 1 },
     uAspect: { value: 1 },
-    uStrength: { value: 1.35 },
+    uStrength: { value: 0.55 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -398,7 +398,7 @@ export class TacticalVisuals {
     this.renderer.setPixelRatio(pixelRatio);
     this.composer.setPixelRatio(pixelRatio);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     const mapSize = high ? 4096 : 1024;
     this.scene.traverse((obj) => {
       if (!obj.isDirectionalLight || !obj.castShadow || !obj.shadow) return;

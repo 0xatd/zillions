@@ -637,7 +637,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   };
   if (rim) {
     if (!interior) computeInterior();
-    layoutLandform(C);
+    layoutCampaign(C);
   } else plan.layout(C);
 
   // Major progression lives in-world. Place support after the plan districts
@@ -729,7 +729,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     // Terrace steps are spoken for before the districts move in, so the
     // town settles onto the terraces and the steps stay unbroken cliffs.
     if (!form.ring && map.ledgeW) {
-      const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
+      const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31, planKey: plan.key });
       for (const k of terraceSteps(map, cx, cz, reach, tierAt)) if (map.tiles[k] === TILE.GRASS) taken.add(k);
     }
     fillDistrict('house', 3);
@@ -853,7 +853,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
 
   if (rim && !form.ring && map.ledgeW) {
     computeInterior();
-    raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
+    raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31, planKey: plan.key });
   }
 
   return plots;
@@ -1031,6 +1031,60 @@ function layoutKeyhole(C) {
 // them — over the cliffs that flank the approach, on the spur tips, down the
 // valley mouth, at the outpost's corners. The rest of the town is clustered
 // by fillDistrict, so the plan only states what makes it this place.
+function layoutCampaign(C) {
+  const { addInside, spot, at, road, plan, radiusAt } = C;
+  const key = plan.key;
+  if (key === 'bastion') {
+    road(radiusAt(0) - 2, 0, 2.5, 0);
+    for (const u of [5.2, 8.2, 11]) {
+      addInside('house', ...at(u, 2.6), 2, {}, 3);
+      addInside('house', ...at(u, -2.6), 2, {}, 3);
+    }
+    for (const t of [1.15, -1.15, 2.1, -2.1]) addInside('farm', ...spot(radiusAt(t) * 0.7, t), 2, {}, 4);
+    addInside('mill', ...at(9, 5.5), 2, {}, 4);
+    addInside('tower', ...spot(radiusAt(0) - 3.4, 0.42), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(Math.PI) - 3.2, Math.PI), 2, {}, 3);
+    return;
+  }
+  if (key === 'star') {
+    for (let i = 0; i < 5; i++) {
+      const t = (i / 5) * Math.PI * 2;
+      addInside('tower', ...spot(radiusAt(t) - 3.4, t), 2, {}, 4);
+    }
+    for (let i = 0; i < 6; i++) addInside('house', ...spot(6.2, (i / 6) * Math.PI * 2 + 0.35), 2, {}, 3);
+    for (const t of [0.55, -0.55, Math.PI]) addInside('farm', ...spot(radiusAt(t) * 0.78, t), 2, {}, 4);
+    addInside('mill', ...spot(9, 1.4), 2, {}, 4);
+    return;
+  }
+  if (key === 'outpost') {
+    for (let i = 0; i < 5; i++) addInside('house', ...spot(5.4, (i / 5) * Math.PI * 2), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 3.2, 0.38), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(Math.PI) - 3.2, Math.PI + 0.28), 2, {}, 3);
+    for (const t of [1.3, -1.3, 2.4]) addInside('farm', ...spot(radiusAt(t) * 0.8, t), 2, {}, 4);
+    return;
+  }
+  if (key === 'crescent') {
+    for (let i = 0; i < 6; i++) addInside('house', ...spot(6.6, (i / 6) * Math.PI * 2 + 0.25), 2, {}, 3);
+    for (let i = 0; i < 8; i++) addInside('farm', ...spot(radiusAt((i / 8) * Math.PI * 2) * 0.76, (i / 8) * Math.PI * 2), 2, {}, 3);
+    addInside('mill', ...spot(10.5, 1.1), 2, {}, 4);
+    return;
+  }
+  if (key === 'keyhole') {
+    road(radiusAt(0) - 1.5, 0, 2, 0);
+    for (const u of [5, 9]) {
+      addInside('tower', ...at(u, 2.8), 2, {}, 3);
+      addInside('tower', ...at(u, -2.8), 2, {}, 3);
+    }
+    for (const u of [-2, -6]) {
+      addInside('house', ...at(u, 3.4), 2, {}, 3);
+      addInside('house', ...at(u, -3.4), 2, {}, 3);
+    }
+    for (const v of [-6, 0, 6]) addInside('farm', ...at(-9, v), 2, {}, 4);
+    return;
+  }
+  layoutLandform(C);
+}
+
 function layoutLandform(C) {
   const { addInside, spot, radiusAt, plan } = C;
   const SIG = {
@@ -1096,7 +1150,16 @@ function oreClusters(map, cx, cz) {
 // and they are the ONLY walkable links between tiers. A flood from the keep
 // re-opens a gap anywhere a cliff would seal ground off, so every walkable
 // tile inside stays reachable. Heights live in map.ledgeH (renderer only).
-function terraceTierFn({ cx, cz, facing, radiusAt, seed }) {
+function terraceTierFn({ cx, cz, facing, radiusAt, seed, planKey }) {
+  if (planKey === 'crescent') {
+    return (x, z) => {
+      const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
+      const reach = Math.max(8, radiusAt(0));
+      if (d < reach * 0.28) return 2;
+      if (d < reach * 0.58) return 1;
+      return 0;
+    };
+  }
   const ph1 = (seed % 97) * 0.37, ph2 = (seed % 89) * 0.53;
   return (x, z) => {
     const px = x + 0.5 - cx, pz = z + 0.5 - cz;
@@ -1132,14 +1195,14 @@ function terraceSteps(map, cx, cz, reach, tierAt) {
   return out;
 }
 
-function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed }) {
+function raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed, planKey }) {
   const N = map.size;
   const H = [LEDGE.out, LEDGE.mid, LEDGE.top];
   const tier = new Int8Array(N * N).fill(-1);
   const locked = new Uint8Array(N * N);
   const ext = Math.ceil(Math.max(...Array.from({ length: 32 }, (_, i) => radiusAt((i / 32) * TAU))) + 3);
   const sx = Math.round(cx), sz = Math.round(cz);
-  const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed });
+  const tierAt = terraceTierFn({ cx, cz, facing, radiusAt, seed, planKey });
   for (let z = sz - ext; z <= sz + ext; z++) {
     for (let x = sx - ext; x <= sx + ext; x++) {
       if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) continue;

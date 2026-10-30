@@ -234,14 +234,6 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
         else quad(d, f, e, c, pale);
       }
     }
-    const rim = 0.48;
-    quad(
-      [ax + nx * rim, y1 + 0.04, az + nz * rim],
-      [bx + nx * rim, y1 + 0.04, bz + nz * rim],
-      [bx - nx * 0.05, y1 + 0.04, bz - nz * 0.05],
-      [ax - nx * 0.05, y1 + 0.04, az - nz * 0.05],
-      lip,
-    );
   };
   const edge = (ax, az, bx, bz, t, c1, c2, nb, d1, d2) => {
     const us = [0, ...edgeSplits(tileCH, t, c1, c2), ...edgeSplits(tileCH, nb, d1, d2), 1].sort((a, b) => a - b);

@@ -10,7 +10,7 @@ import {
 
 const CHUNK = 32;
 
-function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff, cast = true } = {}) {
+function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff, cast = true, flat = false } = {}) {
   if (!items.length) return;
   const chunks = new Map();
   for (const it of items) {
@@ -26,7 +26,9 @@ function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff
   const e = new THREE.Euler();
   const c = new THREE.Color();
   for (const list of chunks.values()) {
-    const mat = toyMat(vertexColors ? { color: 0xffffff, vertexColors: true } : { color });
+    const mat = toyMat(vertexColors
+      ? { color: 0xffffff, vertexColors: true, flatShading: flat }
+      : { color, flatShading: flat });
     const mesh = new THREE.InstancedMesh(geometry, mat, list.length);
     mesh.castShadow = cast;
     mesh.receiveShadow = true;
@@ -82,8 +84,8 @@ export function buildForestGroup(map) {
     list.push({
       x, y: gy, z, s,
       ry: rng() * Math.PI * 2,
-      rx: (rng() - 0.5) * 0.12,
-      rz: (rng() - 0.5) * 0.12,
+      rx: (rng() - 0.5) * 0.04,
+      rz: (rng() - 0.5) * 0.04,
       color,
     });
     if (trunk) {
@@ -102,17 +104,17 @@ export function buildForestGroup(map) {
       if (t === TILE.FOREST) {
         const score = forestNeighbours(map, x, z);
         const near = dist < 48;
-        let count = score >= 5 ? 4 : score >= 3 ? 3 : 2;
-        if (!near) count = score >= 4 && rng() < 0.55 ? 1 : rng() < 0.22 ? 1 : 0;
+        let count = score >= 5 ? 3 : score >= 3 ? 2 : 1;
+        if (!near) count = score >= 4 && rng() < 0.4 ? 1 : 0;
+        const edge = score <= 2;
         for (let i = 0; i < count; i++) {
-          const px = x + 0.12 + rng() * 0.76;
-          const pz = z + 0.12 + rng() * 0.76;
-          const interior = score >= 5;
-          const tall = (interior ? 1.35 : 0.95) + rng() * (interior ? 0.85 : 0.45);
-          const tint = rng() < 0.16 ? accent : canopy;
-          const c = tint.clone().offsetHSL((rng() - 0.5) * 0.02, 0, (rng() - 0.5) * 0.05);
-          if (score <= 2 && rng() < 0.65) pushTree(bushes, px, pz, 0.7 + rng() * 0.55, c, false);
-          else if (rng() < 0.18) pushTree(lollis, px, pz, tall * 0.92, c, true);
+          const px = x + 0.28 + rng() * 0.44;
+          const pz = z + 0.28 + rng() * 0.44;
+          const tall = (score >= 5 ? 1.2 : 1.02) + rng() * 0.08;
+          const tint = rng() < 0.12 ? accent : canopy;
+          const c = tint.clone().offsetHSL(0, 0, (rng() - 0.5) * 0.03);
+          if (edge) pushTree(bushes, px, pz, 0.85, c, false);
+          else if (rng() < 0.22) pushTree(lollis, px, pz, tall, c, true);
           else pushTree(pines, px, pz, tall, c, true);
         }
       } else if ((t === TILE.GRASS || t === TILE.SAND) && dist > 14 && dist < 46 && rng() < 0.22) {

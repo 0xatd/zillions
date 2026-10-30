@@ -142,7 +142,7 @@ export function buildLandDressing(map) {
     const tt = map.tiles[map.idx(x | 0, z | 0)];
     if (tt === TILE.WATER) continue;
     const s = 0.5 + rng() * 1.1;
-    crystals.push({ x, y: yAt(x, z) + s * 0.7, z, s, ry: rng() * 6, color: city === 'outpost' ? 0xffb15a : 0x9af6ff });
+    crystals.push({ x, y: yAt(x, z) + s * 0.7, z, s, ry: rng() * 6, color: 0xb7c4b0 });
   }
   // Play floor: a handful of single trees and rock pairs, clear of the sites.
   for (let n = 0; n < 70; n++) {

@@ -1,4 +1,4 @@
-// Play-zoom, overview, scale, and a short Greenfall clip.
+// Play-zoom stills. Gameplay video is scripts/terrain-clip.mjs (fixed timestep).
 //   SHOT_OUT=/opt/cursor/artifacts/terrain-proof node scripts/terrain-proof.mjs
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -165,33 +165,15 @@ try {
     const h = app.myHero();
     const ax = house ? house.cx : hq.cx;
     const az = house ? house.cz : hq.cz;
-    h.x = ax + 2.4;
-    h.z = az + 0.3;
-    app.focus.set((ax + h.x) / 2, app.map.groundY(ax, az), (az + h.z) / 2);
-    app.camDist = 22;
+    h.x = ax + 3.2;
+    h.z = az + 1.4;
+    app.focus.set(ax + 1.2, app.map.groundY(ax, az), az + 0.6);
+    app.camDist = 39;
     return { house: house && [house.cx, house.cz], tower: !!tower, hero: [h.x, h.z] };
   })()`);
   console.log('scale', JSON.stringify(scale));
   await delay(800);
   await shot('greenfall-scale.png');
-
-  if (process.env.SHOT_VIDEO !== '0') {
-  await evaluate(`(() => {
-    const app = window.__app;
-    const hq = app.game.plots.find((p) => p.kind === 'hq');
-    app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz), hq.cz);
-    app.camDist = 36;
-    app.paused = false;
-    app.issue({ t: 'hdir', p: app.myPlayer, x: 0.7, z: 0.4, s: false });
-    return true;
-  })()`);
-  await mkdir(join(outDir, 'frames'), { recursive: true });
-  for (let i = 0; i < 36; i++) {
-    await delay(160);
-    await shot(`frames/f${String(i).padStart(3, '0')}.png`);
-  }
-  await evaluate(`(() => { window.__app.paused = true; return true; })()`);
-  }
   })();
 } finally {
   try { if (socket) socket.close(); } catch { /* already closed */ }

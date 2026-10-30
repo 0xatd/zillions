@@ -858,7 +858,7 @@ export const LEVELS = [
       { id: 'l2q3', name: 'Deep Pockets', desc: 'Collect 250 gold in one run', reward: 'magnet_gauntlet', check: (g) => g.stats.coins >= 250 },
     ],
     blurb: 'A drowned fen. Chokepoints everywhere — and so is the water.',
-    theme: { terrain: 'fen', city: 'fort', liquidName: 'Bog water',
+    theme: { terrain: 'fen', city: 'star', liquidName: 'Bog water',
       palette: { grass: 0x6f8f4e, forest: 0x4c6b3c, canopy: 0xb8c95e, water: 0x3f9c8c, mountain: 0xcfc7a6, sand: 0x7d9b58, path: 0x8a7048, foam: 0xd9efe6, sky: 0xd7e6c2, skyTop: 0x8aab78, shadow: 0x22383e } },
     boss: { name: 'Plague Mother', icon: '🪳', hp: 3100, dmg: 40, speed: 0.9, chase: 1.7, scale: 3.2,
       color: 0x6e8f3a, score: 80, spawn: { every: 10, count: 5, type: 'walker' },

@@ -16,7 +16,7 @@ export function setToyShadow(hex) {
   toyShadow.value.setHex(hex);
 }
 
-const TOY_CHUNK = 'toy-shadow-fog-1';
+const TOY_CHUNK = 'toy-shadow-fog-2';
 
 function toyBeforeCompile(shader) {
   shader.uniforms.uToyShadow = toyShadow;
@@ -30,8 +30,10 @@ function toyBeforeCompile(shader) {
       `vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;
 	float toyAlb = max(0.04, dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
 	float toyLuma = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
-	float toyShade = 1.0 - smoothstep(toyAlb * 0.2, toyAlb * 0.78, toyLuma);
-	outgoingLight = mix(outgoingLight, uToyShadow, toyShade * 0.72);`,
+	float toyShade = 1.0 - smoothstep(toyAlb * 0.22, toyAlb * 0.55, toyLuma);
+	float grey = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+	vec3 desat = mix(vec3(grey), diffuseColor.rgb, 0.82);
+	outgoingLight = mix(outgoingLight, desat * 0.62, toyShade);`,
     )
     .replace('#include <fog_fragment>', `#ifdef USE_FOG
 	float distFactor = smoothstep(fogNear, fogFar, vFogDepth);

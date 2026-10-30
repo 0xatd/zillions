@@ -23,7 +23,7 @@ export function buildingVisualScale(kind) {
   if (kind === 'hq') return 2.85;
   if (kind === 'tower' || kind === 'outpost') return 3.2;
   if (typeof kind === 'string' && kind.startsWith('camp')) return 2.05;
-  if (kind === 'wall') return 1.05;
+  if (kind === 'wall') return 1.65;
   return 2.35;
 }
 
@@ -418,7 +418,7 @@ function kitWall(b, ctx, tier, K, KG) {
   const arch = ctx.archTiles || new Set();
   const isArch = (x, z) => arch.has(z * N + x);
   const shock = b.branch === 'shock', bastion = b.branch === 'bastion';
-  const sy = bastion ? 1.18 : 1, sz = bastion ? 1.3 : 1;
+  const sy = bastion ? 1.85 : 1.7, sz = bastion ? 1.7 : 1.45;
   const tint = 1 + (((b.x * 7 + b.z * 13) % 5) - 2) * 0.025;
   const [cx, cz] = ctx.center || [N / 2, N / 2];
   const ox = b.x + 0.5 - cx, oz = b.z + 0.5 - cz;

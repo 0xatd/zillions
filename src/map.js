@@ -125,9 +125,9 @@ export class GameMap extends TerrainField {
         const h = cornerH[z * cw + x];
         const lift = Math.max(-0.045, Math.min(0.02, (h - 0.35) * 0.012));
         col.offsetHSL(0, 0, lift);
-        if (waterN > 0 && waterN < n) {
-          scratch.setHex(this.isLava() ? 0xffd27a : (this.theme?.palette?.foam ?? 0xe8f6ff));
-          col.lerp(scratch, 0.55);
+        if (waterN === n) {
+          scratch.setHex(this.isLava() ? 0x4a2a18 : (this.theme?.palette?.water ?? 0x3fa9e0));
+          col.copy(scratch).multiplyScalar(this.isLava() ? 0.55 : 0.82);
         }
         // A small blight stain so a hive still reads as a place.
         for (const [nx, nz] of this.nestSpots || []) {

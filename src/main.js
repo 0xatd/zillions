@@ -123,7 +123,7 @@ class App {
     this.renderer.shadowMap.enabled = true;
     // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
     // colour lands on screen as that colour.
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
@@ -2994,7 +2994,7 @@ class App {
     // One low sun. Shadows are the shading. Fill is a whisper so a lit face
     // stays the picked colour and a shadowed face falls to the map's shadow hue.
     const high = this.tacticalVisuals.quality !== 'low';
-    this.sun = new THREE.DirectionalLight(0xfff3dc, 4.9);
+    this.sun = new THREE.DirectionalLight(0xfff6e8, 1.85);
     this.sun.position.set(-70, 48, -46);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(high ? 4096 : 1024, high ? 4096 : 1024);
@@ -3003,9 +3003,9 @@ class App {
     this.sun.shadow.bias = -0.00035;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1d3557, 0.08);
+    this.hemi = new THREE.HemisphereLight(0xfff4e4, 0xc8d0c4, 0.95);
     this.scene.add(this.hemi);
-    this.amb = new THREE.AmbientLight(0xfff4e8, 0.07);
+    this.amb = new THREE.AmbientLight(0xfff8ee, 0.85);
     this.scene.add(this.amb);
     this.scene.fog = new THREE.Fog(0xa8cfc4, 58, 155);
     this.scene.background = new THREE.Color(0xa8cfc4);
@@ -3876,15 +3876,15 @@ class App {
       // and a wave fades every remaining stake out.
       const viewer = mh && !mh.dead ? mh : this.focus;
       const dist = Math.hypot((viewer.x || 0) - plot.cx, (viewer.z || 0) - plot.cz);
-      const near = plot.kind === 'wall' ? 7 : 14;
-      const far = plot.kind === 'wall' ? 12 : 26;
-      const distFade = dist <= near ? 1 : dist >= far ? 0 : 1 - (dist - near) / (far - near);
+      const near = 14;
+      const far = 26;
+      const distFade = plot.kind === 'wall' ? 0 : (dist <= near ? 1 : dist >= far ? 0 : 1 - (dist - near) / (far - near));
       this._fadeStake(ud.beacon, built ? 0 : stakeFade * distFade);
       if (ud.ring) ud.ring.visible = false;
       if (ud.prog) ud.prog.visible = false;
       if (ud.pips) ud.pips.sprite.visible = false;
 
-      const showGhost = !!(nt && buildMode && !wave && stakeFade > 0.02 && plot.id === nearId);
+      const showGhost = plot.kind !== 'hq' && !!(nt && buildMode && !wave && stakeFade > 0.02 && plot.id === nearId);
       ud.reveal = showGhost ? Math.min(1, (ud.reveal || 0) + revealStep) : Math.max(0, (ud.reveal || 0) - revealStep);
       const fade = (ud.reveal || 0) * stakeFade;
       if (showGhost && fade > 0.02 && plot.kind !== 'wall') {
@@ -3920,6 +3920,69 @@ class App {
       }
       if (ud.tag) ud.tag.visible = false;
     }
+    this._ensurePlanWalls();
+  }
+
+  // Unbought rampart as one chunky wall, with a tower at each gate. The
+  // bought wall replaces its own stretch. Presentation only.
+  _ensurePlanWalls() {
+    const g = this.game;
+    if (!g || !g.plots || !this.map) return;
+    const built = g.plots.filter((p) => p.kind === 'wall' && p.tier > 0).map((p) => p.id).join(',');
+    const key = `${g.plots.length}:${built}`;
+    if (this._planWallKey === key) return;
+    this._planWallKey = key;
+    if (this._planWalls) {
+      this.scene.remove(this._planWalls);
+      this._disposeObject3D(this._planWalls);
+      this._planWalls = null;
+    }
+    const curtains = [];
+    const towers = [];
+    const stone = 0xcbb892;
+    const roof = 0x3e5f86;
+    for (const p of g.plots) {
+      if (p.kind !== 'wall' || p.tier > 0 || p.role === 'outer') continue;
+      const tiles = p.tiles || [];
+      const arch = new Set((p.arch || []).map(([x, z]) => `${x},${z}`));
+      for (const [x, z] of tiles) {
+        const gy = this.map.groundY(x + 0.5, z + 0.5);
+        let nx = 1, nz = 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (tiles.some(([tx, tz]) => tx === x + dx && tz === z + dz)) { nx = dx; nz = dz; break; }
+        }
+        const yaw = Math.atan2(nz, nx);
+        if (arch.has(`${x},${z}`)) {
+          towers.push({ x: x + 0.5, y: gy + 1.18, z: z + 0.5, ry: yaw });
+        } else {
+          curtains.push({ x: x + 0.5, y: gy + 0.78, z: z + 0.5, ry: yaw });
+        }
+      }
+    }
+    const group = new THREE.Group();
+    group.name = 'plan-walls';
+    const addInst = (geo, items, color, sy = 1) => {
+      if (!items.length) return;
+      const mesh = new THREE.InstancedMesh(geo, toyMat({ color }), items.length);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const s = new THREE.Vector3(1, sy, 1);
+      const pos = new THREE.Vector3();
+      items.forEach((it, i) => {
+        q.setFromEuler(new THREE.Euler(0, it.ry || 0, 0));
+        pos.set(it.x, it.y, it.z);
+        m.compose(pos, q, s);
+        mesh.setMatrixAt(i, m);
+      });
+      group.add(mesh);
+    };
+    addInst(new THREE.BoxGeometry(1.05, 1.55, 0.72), curtains, stone);
+    addInst(new THREE.CylinderGeometry(0.38, 0.46, 2.35, 8), towers, stone);
+    addInst(new THREE.ConeGeometry(0.5, 0.7, 8), towers.map((t) => ({ ...t, y: t.y + 1.45 })), roof);
+    this.scene.add(group);
+    this._planWalls = group;
   }
 
   // ---------------- building meshes ----------------
@@ -4076,26 +4139,7 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      if (u.key === 'danny') {
-        // The Weave must remain readable for its full duration. Three broken,
-        // counter-rotating rings make a moving tear in the world instead of
-        // relying on Daniel becoming faint and easy to lose in the horde.
-        const weave = new THREE.Group();
-        for (let i = 0; i < 3; i++) {
-          const geo = new THREE.RingGeometry(0.72 + i * 0.18, 0.82 + i * 0.18, 32, 1, i * 0.7, Math.PI * 1.35);
-          geo.rotateX(-Math.PI / 2);
-          const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-            color: i === 1 ? 0x72cfff : 0x7dffb2, transparent: true,
-            opacity: 0.82 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
-          }));
-          ring.position.y = 0.12 + i * 0.05;
-          weave.add(ring);
-        }
-        weave.visible = false;
-        g.add(weave);
-        g.userData.weave = weave;
-      }
-      g.scale.setScalar(0.68);
+      g.scale.setScalar(1.45);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,
@@ -4280,26 +4324,16 @@ class App {
           rangeRing.visible = showRing;
           rangeRing.material.opacity = showRing ? 0.22 : 0;
         }
-        const weave = rec.mesh.userData.weave;
-        if (weave) {
-          weave.visible = u.weaveT > 0 && !u.dead;
-          if (weave.visible) {
-            weave.children.forEach((ring, i) => {
-              ring.rotation.z = t * (i % 2 ? -4.8 : 4.2) + i * 1.7;
-              ring.material.opacity = 0.58 + Math.sin(t * 8 + i) * 0.22;
-            });
-            const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
-            last.t -= dt;
-            if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
-              this.stream(last.x, 0.35, last.z, u.x, 0.35, u.z,
-                { count: 7, color: 0x72cfff, size: 0.55, life: 0.42 });
-              this.burst(u.x, 0.35, u.z,
-                { count: 5, color: 0x7dffb2, speed: 0.35, life: 0.48, size: 0.58, up: 0.35, spread: 0.55 });
-              last.x = u.x; last.z = u.z; last.t = 0.055;
-            }
-            rec.weaveTrail = last;
-          } else rec.weaveTrail = null;
-        }
+        if (u.weaveT > 0 && !u.dead) {
+          const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
+          last.t -= dt;
+          if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
+            this.stream(last.x, 0.55, last.z, u.x, 0.55, u.z,
+              { count: 5, color: 0x7dffb2, size: 0.4, life: 0.35 });
+            last.x = u.x; last.z = u.z; last.t = 0.07;
+          }
+          rec.weaveTrail = last;
+        } else rec.weaveTrail = null;
       }
       const affected = rec.mesh.userData.affected;
       if (affected) {
@@ -4755,7 +4789,7 @@ class App {
 
     // Fixed low sun, upper-left of the locked camera, so shadows fall down-right.
     // The frustum follows the hero. The angle does not.
-    const sunElev = (35 * Math.PI) / 180;
+    const sunElev = (50 * Math.PI) / 180;
     const horiz = Math.cos(sunElev);
     const dx = -horiz * 0.82;
     const dy = Math.sin(sunElev);
@@ -4796,13 +4830,13 @@ class App {
     const top = _tmpColC.setHex(paletteSkyTop(pal));
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
-    this.sun.intensity = lerp(2.5, 4.9, b);
-    this.sun.color.setHex(0xfff3dc).lerp(shadow, (1 - b) * 0.28);
-    this.hemi.intensity = 0.08;
-    this.hemi.color.setHex(0xcfe8ff).lerp(shadow, (1 - b) * 0.2);
-    this.hemi.groundColor.copy(shadow);
-    this.amb.intensity = 0.07;
-    this.amb.color.setHex(0xfff4e8);
+    this.sun.intensity = lerp(1.35, 1.85, b);
+    this.sun.color.setHex(0xfff6e8);
+    this.hemi.intensity = 0.95;
+    this.hemi.color.setHex(0xfff4e4);
+    this.hemi.groundColor.setHex(0xd5ddd4);
+    this.amb.intensity = 0.85;
+    this.amb.color.setHex(0xfff8ee);
     horizon.lerp(shadow, (1 - b) * 0.6);
     top.lerp(shadow, (1 - b) * 0.7);
     this.scene.background = this.sky.set(top, horizon) || horizon.clone();

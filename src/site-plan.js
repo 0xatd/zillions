@@ -38,13 +38,14 @@ export const SITE_FORMS = {
   // closes the rim; three rides cut through the trees, each walled across
   // with a gate. No cliffs: the ground rolls.
   bastion: {
-    label: 'forest clearing',
-    base: (t) => 1.0 + 0.1 * Math.cos(2 * t + 0.6),
-    open: [[0, 0.5], [2.05, 0.36], [-2.05, 0.36]],
-    gates: [0, 2.05, -2.05],
-    natural: () => 'forest',
-    roll: 0.42,
-    wobble: 0.13,
+    label: 'river bend',
+    base: (t) => 0.9 + 0.16 * Math.cos(t + 0.4),
+    open: [[0, 0.4], [Math.PI, 0.28]],
+    gates: [0, Math.PI],
+    natural: () => 'water',
+    river: { arms: [1.15, -1.15], fords: [0, Math.PI] },
+    roll: 0.16,
+    wobble: 0.08,
   },
   // Rotmire: a river bend. The river comes in on one flank, wraps the back
   // and leaves on the other; the neck of land facing the hives is walled with
@@ -85,25 +86,26 @@ export const SITE_FORMS = {
   // gully carries a postern.
   keyhole: {
     cliffs: true,
-    label: 'valley head',
+    label: 'saddle fortress',
     base: (t) => 0.92 + 0.3 * Math.exp(-((wrap(t) / 0.5) ** 2)),
-    open: [[0, 0.42], [2.35, 0.24]],
-    gates: [0, 2.35],
+    open: [[0, 0.34], [0.72, 0.22], [Math.PI, 0.26]],
+    gates: [0, 0.72, Math.PI],
     natural: () => 'cliff',
-    wobble: 0.12,
+    wobble: 0.08,
   },
   // The desert last stand: an octagonal fort on open badlands. No cliffs —
   // the whole ring is wall, and there is a gate on every quarter.
   outpost: {
-    label: 'badlands outpost',
+    cliffs: true,
     ring: true,
+    label: 'mesa citadel',
     base: (t) => {
       const k = TAU / 8;
       const a = ((t % k) + k) % k - k / 2;
-      return Math.cos(k / 2) / Math.cos(a);   // a regular octagon
+      return Math.cos(k / 2) / Math.cos(a);
     },
-    open: [[0, Math.PI + 0.01]],
-    gates: [Math.PI / 8, (5 * Math.PI) / 8, (-3 * Math.PI) / 8, (-7 * Math.PI) / 8],   // mid-edges
+    open: [[0, 0.4], [Math.PI, 0.34]],
+    gates: [0, Math.PI],
     natural: () => 'cliff',
     wobble: 0,
   },

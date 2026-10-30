@@ -13,14 +13,11 @@ function finish(geometry) {
 }
 
 function faceColor(normal, paleTop) {
-  const sun = Math.max(0, normal.dot(SUN));
   const up = Math.max(0, normal.y);
-  if (paleTop && up > 0.62) {
-    const t = 0.82 + sun * 0.18;
-    return [t, t * 0.98, t * 0.9];
-  }
-  const t = 0.34 + sun * 0.5 + up * 0.22;
-  return [t, t * 0.97, t * 0.9];
+  const sun = Math.max(0, normal.dot(SUN));
+  if (paleTop && up > 0.55) return [0.98, 0.96, 0.9];
+  const t = 0.78 + up * 0.22 + sun * 0.06;
+  return [t, t * 0.99, t * 0.94];
 }
 
 function paint(geometry, paleTop) {
@@ -64,9 +61,9 @@ const boulders = [];
 export function makePineGeometry() {
   if (pineGeo) return pineGeo;
   const parts = [
-    cone(0.62, 1.25, 0.42, 6),
-    cone(0.46, 1.15, 1.15, 6),
-    cone(0.28, 1.05, 1.9, 5),
+    cone(0.55, 0.85, 0.55, 7),
+    cone(0.4, 0.75, 1.2, 7),
+    cone(0.24, 0.62, 1.78, 7),
   ];
   pineGeo = paint(mergeParts(parts), false);
   return pineGeo;
@@ -74,17 +71,17 @@ export function makePineGeometry() {
 
 export function makeLollipopGeometry() {
   if (lollipopGeo) return lollipopGeo;
-  const g = new THREE.IcosahedronGeometry(0.58, 0);
-  g.scale(1, 1.22, 1);
-  g.translate(0, 1.35, 0);
+  const g = new THREE.SphereGeometry(0.52, 8, 6);
+  g.scale(1, 1.08, 1);
+  g.translate(0, 1.22, 0);
   lollipopGeo = paint(g, false);
   return lollipopGeo;
 }
 
 export function makeBushGeometry() {
   if (bushGeo) return bushGeo;
-  const g = new THREE.IcosahedronGeometry(0.42, 0);
-  g.scale(1.15, 0.62, 1.05);
+  const g = new THREE.SphereGeometry(0.36, 7, 5);
+  g.scale(1.2, 0.7, 1.1);
   g.translate(0, 0.28, 0);
   bushGeo = paint(g, false);
   return bushGeo;
@@ -92,7 +89,7 @@ export function makeBushGeometry() {
 
 export function makeTrunkGeometry() {
   if (trunkGeo) return trunkGeo;
-  trunkGeo = new THREE.CylinderGeometry(0.045, 0.07, 0.7, 5);
+  trunkGeo = new THREE.CylinderGeometry(0.055, 0.08, 0.62, 6);
   trunkGeo.translate(0, 0.35, 0);
   trunkGeo.userData.kitShared = true;
   return trunkGeo;
