@@ -7,6 +7,7 @@ import {
 } from './config.js';
 import { activeCulture, culture, setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
+import { waterClock } from './terrain-look.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
@@ -5401,6 +5402,7 @@ class App {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
+    waterClock.value = t;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);

@@ -8,7 +8,7 @@ import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
 import { buildLandDressing } from './land-dressing.js';
-import { buildForestGroup, buildRockGroup, buildRoadGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail } from './terrain-look.js';
+import { buildForestGroup, buildRockGroup, buildRoadGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail, buildWaterMesh } from './terrain-look.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -171,17 +171,7 @@ export class GameMap extends TerrainField {
     group.add(buildSmoothTerrain(this));
     group.add(buildGroundDetail(this));
 
-    // Water plane above sunken tiles.
-    const waterGeo = new THREE.PlaneGeometry(N, N);
-    // Unlit, so water stays the brightest thing on the map even in shadow.
-    const waterMat = new THREE.MeshBasicMaterial({
-      color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3fa9e0,
-      transparent: true, opacity: this.isLava() ? 0.94 : 0.9,
-    });
-    const water = new THREE.Mesh(waterGeo, waterMat);
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(N / 2, -0.22, N / 2);
-    group.add(water);
+    group.add(buildWaterMesh(this));
 
     group.add(buildFoamGroup(this));
     group.add(buildForestGroup(this));

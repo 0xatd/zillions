@@ -566,6 +566,129 @@ export function buildFoamGroup(map) {
   return g;
 }
 
+export const waterClock = { value: 0 };
+
+export function buildWaterMesh(map) {
+  const N = map.size;
+  const SUB = 2;
+  const G = N * SUB;
+  const V = G + 1;
+  const shore = new Float32Array(V * V);
+  const land = (x, z) => map.inBounds(x, z) && map.tiles[map.idx(x, z)] !== TILE.WATER;
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const x = i / SUB;
+      const z = j / SUB;
+      let acc = 0;
+      let w = 0;
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const wt = 1 / (1 + dx * dx + dz * dz);
+          acc += land((x + dx) | 0, (z + dz) | 0) ? wt : 0;
+          w += wt;
+        }
+      }
+      shore[j * V + i] = w ? acc / w : 0;
+    }
+  }
+  const pos = new Float32Array(V * V * 3);
+  const col = new Float32Array(V * V * 3);
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const o = (j * V + i) * 3;
+      pos[o] = i / SUB;
+      pos[o + 1] = 0;
+      pos[o + 2] = j / SUB;
+      const s = shore[j * V + i];
+      col[o] = s;
+      col[o + 1] = s;
+      col[o + 2] = s;
+    }
+  }
+  const idx = new Uint32Array(G * G * 6);
+  let k = 0;
+  for (let j = 0; j < G; j++) {
+    for (let i = 0; i < G; i++) {
+      const a = j * V + i;
+      idx[k++] = a;
+      idx[k++] = a + V;
+      idx[k++] = a + 1;
+      idx[k++] = a + 1;
+      idx[k++] = a + V;
+      idx[k++] = a + V + 1;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  const pal = map.theme?.palette || {};
+  const lava = !!(map.isLava && map.isLava());
+  const shallow = new THREE.Color(lava ? 0xffb15a : (pal.water ?? 0x3fa9e0)).lerp(new THREE.Color(0xd8fff4), lava ? 0.15 : 0.45);
+  const deep = new THREE.Color(lava ? 0xc43a12 : (pal.water ?? 0x1d6ea8));
+  if (!lava) deep.multiplyScalar(0.55);
+  const sky = new THREE.Color(pal.sky ?? 0xc7ebe0);
+  const foam = new THREE.Color(lava ? (pal.foam ?? 0xffd27a) : 0xf4fbff);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: waterClock,
+      uShallow: { value: shallow },
+      uDeep: { value: deep },
+      uSky: { value: sky },
+      uFoam: { value: foam },
+      uAmp: { value: lava ? 0.012 : 0.03 },
+    },
+    vertexShader: `
+      uniform float uTime;
+      uniform float uAmp;
+      attribute vec3 color;
+      varying float vShore;
+      varying vec3 vWorld;
+      varying vec3 vN;
+      void main() {
+        vShore = color.r;
+        vec3 p = position;
+        float w1 = sin(p.x * 0.33 + uTime * 0.75);
+        float w2 = sin(p.z * 0.21 - uTime * 0.55);
+        p.y += (w1 * 0.65 + w2 * 0.45) * uAmp * (1.0 - vShore);
+        vec4 w = modelMatrix * vec4(p, 1.0);
+        vWorld = w.xyz;
+        vN = normalize(vec3(-cos(p.x * 0.33 + uTime * 0.75) * uAmp, 1.0, -cos(p.z * 0.21 - uTime * 0.55) * uAmp));
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uShallow;
+      uniform vec3 uDeep;
+      uniform vec3 uSky;
+      uniform vec3 uFoam;
+      uniform float uTime;
+      varying float vShore;
+      varying vec3 vWorld;
+      varying vec3 vN;
+      void main() {
+        float deep = smoothstep(0.05, 0.72, 1.0 - vShore);
+        vec3 col = mix(uShallow, uDeep, deep);
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        float fres = pow(1.0 - clamp(dot(normalize(vN), viewDir), 0.0, 1.0), 3.0);
+        col = mix(col, uSky, fres * 0.38);
+        float band = smoothstep(0.28, 0.55, vShore) * (1.0 - smoothstep(0.55, 0.82, vShore));
+        float move = 0.5 + 0.5 * sin(vWorld.x * 1.6 + vWorld.z * 1.15 - uTime * 1.3);
+        col = mix(col, uFoam, band * (0.35 + 0.65 * move));
+        gl_FragColor = vec4(col, 0.9);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = -0.2;
+  mesh.name = 'water';
+  mesh.userData.noOutline = true;
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
 const smoothstep = (e0, e1, x) => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
