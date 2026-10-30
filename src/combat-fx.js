@@ -190,17 +190,17 @@ export class CombatFx {
   }
 
   death(x, y, z, big = false) {
-    const n = big ? 12 : 8;
+    const n = big ? 16 : 11;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
-      const puff = i % 2 === 0;
-      this._spawn(puff ? 'smoke' : 'dust', x, y + 0.3, z,
-        Math.cos(a) * (puff ? 0.6 : 1.3),
-        puff ? 1.5 : 0.8,
-        Math.sin(a) * (puff ? 0.6 : 1.3),
-        puff ? 0.55 : 0.4,
-        puff ? (big ? 1.15 : 0.8) : 0.42,
-        puff ? 0xd9c8ff : 0x8a6ab0);
+      const puff = i % 3 !== 2;
+      this._spawn(puff ? 'smoke' : 'magic', x, y + 0.35, z,
+        Math.cos(a) * (puff ? 0.85 : 1.6),
+        puff ? 1.8 : 1.1,
+        Math.sin(a) * (puff ? 0.85 : 1.6),
+        puff ? 0.62 : 0.4,
+        puff ? (big ? 1.45 : 1.05) : 0.55,
+        i % 2 ? 0xe4d4ff : 0xb44dff);
     }
   }
 

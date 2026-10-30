@@ -148,6 +148,8 @@ class App {
     this.camBeatAmp = 0;
     this.hitKnocks = new Map();
     this.flashSeen = new Map();
+    this.critFlash = new Map();
+    this._hitstop = 0;
     this._outcomeTimer = null;
     this._outcomeShown = false;
 
@@ -878,11 +880,12 @@ class App {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
     }
-    this.ui.showBanner(mode === 'survival'
-      ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
-      : mode === 'labyrinth'
-      ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
-      : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
+    this.ui.showTitleCard(
+      level.name,
+      mode === 'survival' ? 'The siege does not stop.'
+        : mode === 'labyrinth' ? 'Clear the chambers.'
+          : `${level.boss.icon} ${level.boss.name}`,
+    );
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
@@ -926,14 +929,6 @@ class App {
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
-    }));
-    ring.position.set(cx, plazaY + 0.03, cz);
-    drape(ring, 0.05);
-    g.add(ring);
     const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
@@ -3639,6 +3634,8 @@ class App {
       const zb = g.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
+      const critLeft = this.critFlash.get(zb.id) || 0;
+      if (critLeft > 0) this.critFlash.set(zb.id, Math.max(0, critLeft - dt));
       const prevFlash = this.flashSeen.get(zb.id) || 0;
       if (zb.hitFlash > prevFlash + 0.04) this._shove(zb, null, null);
       this.flashSeen.set(zb.id, zb.hitFlash);
@@ -3659,6 +3656,8 @@ class App {
       // Tint over the baked palette: white at rest, flushed in the lunge,
       // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
+      else if ((this.critFlash.get(zb.id) || 0) > 0) c.setRGB(1.7, 1.25, 0.28);
+      else if (this._inRange && this._inRange.has(zb.id)) c.setRGB(1.45, 1.28, 0.72);
       else if (hit > 0) c.setRGB(1 + hit * 1.7, 1 + hit * 1.55, 1 + hit * 1.4);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
@@ -4175,7 +4174,7 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = false;
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
           const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
@@ -4185,7 +4184,7 @@ class App {
       }
 
       // Ring: pulse when affordable, glow bright while paying.
-      ud.ring.visible = true;
+      ud.ring.visible = false;
       const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
@@ -4194,7 +4193,7 @@ class App {
 
       // Progress arc.
       const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
-      ud.prog.visible = frac > 0.002;
+      ud.prog.visible = false;
       if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
         ud.progFrac = frac;
         ud.prog.geometry.dispose();
@@ -4605,12 +4604,7 @@ class App {
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
-          if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
-          if (pulse) {
-            pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
-          }
+          for (const part of [aura, fill, pulse]) if (part) part.visible = false;
         }
         const weave = rec.mesh.userData.weave;
         if (weave) {
@@ -4728,10 +4722,7 @@ class App {
         ringGeo.rotateX(-Math.PI / 2);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
-        // The home node sits on the keep: its capture circle would ring the
-        // castle like a target — the walls already say whose ground it is.
-        const hq = (g.plots || []).find((p) => p.kind === 'hq');
-        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
+        ring.visible = false;
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
@@ -5672,10 +5663,57 @@ class App {
     g.events.length = 0;
   }
 
+  // While a tower is being placed or upgraded, enemies inside its range
+  // pick up a warm tint. No ring is drawn.
+  _markTowerRange() {
+    if (!this._inRange) this._inRange = new Set();
+    this._inRange.clear();
+    if (this.controlMode === 'fight' || !this.game) return;
+    const h = this.myHero();
+    if (!h || h.dead || !this.game.buildTargetFor) return;
+    const target = this.game.buildTargetFor(h);
+    if (!target) return;
+    const plot = target.plot;
+    if (plot.kind !== 'tower' && plot.kind !== 'outpost') return;
+    const def = target.act && (target.act.def || (target.nt && target.nt.def));
+    const range = def && def.range;
+    if (!range) return;
+    const r2 = range * range;
+    for (const zb of this.game.zombies) {
+      if (zb.dead) continue;
+      if ((zb.x - plot.cx) ** 2 + (zb.z - plot.cz) ** 2 <= r2) this._inRange.add(zb.id);
+    }
+  }
+
   _floatHit(e) {
+    if (e.crit) {
+      this._hitstop = 0.04;
+      this._markCrit(e);
+    } else if (e.heroKey) this._markCrit(e);
     if (!this.combatFx || !e.dmg) return;
     const y = (this.map ? this.map.groundY(e.tx ?? e.x, e.tz ?? e.z) : 0) + 2.35;
     this.combatFx.number(e.tx ?? e.x, y, e.tz ?? e.z, e.dmg, !!e.crit);
+  }
+
+  _markCrit(e) {
+    if (!this.game || e.tx == null) return;
+    let best = null;
+    let bestD = 2.25;
+    for (const zb of this.game.zombies) {
+      if (zb.dead) continue;
+      const d = (zb.x - e.tx) ** 2 + (zb.z - e.tz) ** 2;
+      if (d < bestD) { best = zb; bestD = d; }
+    }
+    if (!best) return;
+    this._shove(best, e.fx, e.fz);
+    const knock = this.hitKnocks.get(best.id);
+    if (knock) {
+      const len = Math.hypot(knock.x, knock.z) || 1;
+      const mag = e.crit ? 0.46 : 0.26;
+      knock.x = knock.x / len * mag;
+      knock.z = knock.z / len * mag;
+    }
+    if (e.crit) this.critFlash.set(best.id, 0.18);
   }
 
   _requestShake(amount) {
@@ -5862,7 +5900,7 @@ class App {
         const head = rec.mesh.userData.head;
         if (head) {
           head.rotation.y = Math.atan2(tx - fx, tz - fz);
-          rec.recoil = 0.16;
+          rec.recoil = 0.07;
         }
         return;
       }
@@ -5910,11 +5948,16 @@ class App {
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    // Crit hitstop freezes the picture for ~40ms. The sim still steps on dt,
+    // so the lockstep hash does not move.
+    const frozen = (this._hitstop || 0) > 0;
+    if (this._hitstop > 0) this._hitstop = Math.max(0, this._hitstop - dt);
+    const motion = frozen ? 0 : dt;
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
-    this._updateCamera(dt);
+    this._updateCamera(motion);
 
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
@@ -5940,7 +5983,7 @@ class App {
       this._consumeEvents();
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
-      this._syncUnits(t, dt);
+      this._syncUnits(t, motion);
       this._syncNests(t);
       this._syncLoot(t);
       this._syncPlots(t);
@@ -5957,7 +6000,8 @@ class App {
       this._updateBlockedHint(dt);
       this._updateBlockFx(dt);
       this._updateCoins(t);
-      this._updateZombieMeshes(t, dt);
+      this._markTowerRange();
+      this._updateZombieMeshes(t, motion);
       this._updateBars();
       this._updateNodeMarkers(t);
       this._updateDayNight(dt);
@@ -5973,7 +6017,7 @@ class App {
         if (pop.live) rec.mesh.scale.set(pop.x, pop.y, pop.z);
         else rec.mesh.scale.set(1, 1, 1);
         if (rec.impact) {
-          rec.impact.t -= dt;
+          rec.impact.t -= motion;
           const p = Math.sin(clamp(1 - rec.impact.t / rec.impact.dur, 0, 1) * Math.PI);
           rec.mesh.rotation.z = p * 0.045;
           rec.mesh.scale.x *= 1 + p * 0.04;
@@ -6009,9 +6053,9 @@ class App {
           }
         }
         if (rec.recoil > 0) {
-          rec.recoil -= dt;
+          rec.recoil -= motion;
           const head = rec.mesh.userData.head;
-          if (head) head.position.z = -Math.max(0, rec.recoil) * 0.8;
+          if (head) head.position.z = -Math.max(0, rec.recoil) * 3.2;
         }
         const headBeat = rec.mesh.userData.head;
         if (rec.beat > 0 && headBeat) {
@@ -6089,15 +6133,14 @@ class App {
             const cost = Math.max(1, Math.ceil(act.cost - paid));
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const [sx, sz] = this.game.payPoint(plot, mh);
+            const onSite = (mh.x - sx) ** 2 + (mh.z - sz) ** 2 < 2.6 * 2.6;
             const buildKey = keyLabel(this.binds().dodge);
-            const buildAltKey = keyLabel(this.binds().build);
-            const overlayKey = keyLabel(this.binds().build_mode);
-            hint = mh.payHold
-              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-              : buildMode
-                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
-                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+            hint = buildMode && onSite
+              ? (mh.payHold
+                ? (this.game.gold < 1 ? 'Purse empty' : `${cost} to go`)
+                : `Hold <kbd>${buildKey}</kbd> — ${verb} <b>${name}</b> (${cost})`)
+              : null;
           }
         }
       }
@@ -6126,13 +6169,13 @@ class App {
       if (living > (this._waveBase || 0) + 2) this._waveHot = true;
       if (waveCleared(living, this._waveBase || 0, this._waveHot)) this._waveEndVisual();
     }
-    if (this.combatFx) this.combatFx.update(dt);
-    this._updateParticles(dt);
-    this._updateCorpses(dt);
-    this._updatePayCoins(dt);
-    this._updateProjectiles(dt);
-    this._updateAbilityFx(dt);
-    this.tacticalVisuals.update(dt);
+    if (this.combatFx) this.combatFx.update(motion);
+    this._updateParticles(motion);
+    this._updateCorpses(motion);
+    this._updatePayCoins(motion);
+    this._updateProjectiles(motion);
+    this._updateAbilityFx(motion);
+    this.tacticalVisuals.update(motion);
     this.tacticalVisuals.render();
     this._renderCharacterPreview(t);
   }

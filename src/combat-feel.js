@@ -57,7 +57,7 @@ export function writeDigits(value, out) {
 }
 
 export function numberScale(crit) {
-  return crit ? 1.62 : 1;
+  return crit ? 2.15 : 1;
 }
 
 export function isTowerShot(kind) {

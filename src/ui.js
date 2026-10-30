@@ -97,7 +97,7 @@ export class UI {
       <div id="actionbar" class="hidden">
         <div class="commandtop">
           <div class="rallyhints" id="stancebar">
-            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
+            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> Defend</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> Follow</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> Push</span>
           </div>
           <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
@@ -2814,9 +2814,8 @@ export class UI {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
-        const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${this._keyLabel('ability1')}<small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead;
       }
@@ -2988,6 +2987,21 @@ export class UI {
     this.banner.className = `show moment ${tone}`;
     clearTimeout(this._bt);
     this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
+  }
+
+  // A small title at the top. It fades itself out in about 3 seconds.
+  showTitleCard(title, detail) {
+    this.banner.textContent = '';
+    const heading = document.createElement('strong');
+    heading.className = 'banner-title';
+    heading.textContent = title;
+    const description = document.createElement('span');
+    description.className = 'banner-detail';
+    description.textContent = detail || '';
+    this.banner.append(heading, description);
+    this.banner.className = 'show titlecard';
+    clearTimeout(this._bt);
+    this._bt = setTimeout(() => { this.banner.className = ''; }, 3000);
   }
 
   showLocationBanner(title, detail, dur = 5600) {
