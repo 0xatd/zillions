@@ -5,7 +5,7 @@ import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
-import { activeCulture, setActiveCulture } from './cultures.js';
+import { activeCulture, culture, setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore } from './game.js';
@@ -32,6 +32,7 @@ import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh, buildingVisualScale } from './building-art.js';
+import { propRecord } from './prop-pack.js';
 import { hologramMaterial, makeSurveyStake } from './survey-stakes.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
@@ -3953,22 +3954,29 @@ class App {
         }
         const yaw = Math.atan2(nz, nx);
         if (arch.has(`${x},${z}`)) {
-          towers.push({ x: x + 0.5, y: gy + 1.18, z: z + 0.5, ry: yaw });
+          towers.push({ x: x + 0.5, y: gy, z: z + 0.5, ry: yaw });
         } else {
-          curtains.push({ x: x + 0.5, y: gy + 0.78, z: z + 0.5, ry: yaw });
+          curtains.push({ x: x + 0.5, y: gy, z: z + 0.5, ry: yaw });
         }
       }
     }
     const group = new THREE.Group();
     group.name = 'plan-walls';
-    const addInst = (geo, items, color, sy = 1) => {
-      if (!items.length) return;
-      const mesh = new THREE.InstancedMesh(geo, toyMat({ color }), items.length);
+    const pal = culture().palette;
+    const stoneTint = pal?.stone || stone;
+    const roofTint = pal?.roof || roof;
+    const wallPack = propRecord('wall');
+    const postPack = propRecord('tower-square');
+    const capPack = propRecord('tower-square-top-roof');
+    const addInst = (geo, items, color, sx, sy, sz, shared = false) => {
+      if (!items.length || !geo) return;
+      const mesh = new THREE.InstancedMesh(geo, toyMat({ color, flatShading: true }), items.length);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      if (shared) geo.userData.kitShared = true;
       const m = new THREE.Matrix4();
       const q = new THREE.Quaternion();
-      const s = new THREE.Vector3(1, sy, 1);
+      const s = new THREE.Vector3(sx, sy, sz);
       const pos = new THREE.Vector3();
       items.forEach((it, i) => {
         q.setFromEuler(new THREE.Euler(0, it.ry || 0, 0));
@@ -3978,9 +3986,18 @@ class App {
       });
       group.add(mesh);
     };
-    addInst(new THREE.BoxGeometry(1.05, 1.55, 0.72), curtains, stone);
-    addInst(new THREE.CylinderGeometry(0.38, 0.46, 2.35, 8), towers, stone);
-    addInst(new THREE.ConeGeometry(0.5, 0.7, 8), towers.map((t) => ({ ...t, y: t.y + 1.45 })), roof);
+    if (wallPack && postPack) {
+      const part = (rec) => rec.parts[0].geometry;
+      addInst(part(wallPack), curtains, stoneTint, 1.02 / wallPack.span, 1.85 / wallPack.height, 1.02 / wallPack.span, true);
+      addInst(part(postPack), towers, stoneTint, 0.9 / postPack.span, 2.35 / postPack.height, 0.9 / postPack.span, true);
+      if (capPack) {
+        addInst(part(capPack), towers.map((t) => ({ ...t, y: t.y + 2.15 })), roofTint, 1.05 / capPack.span, 0.7 / capPack.height, 1.05 / capPack.span, true);
+      }
+    } else {
+      addInst(new THREE.BoxGeometry(1.05, 1.55, 0.72), curtains.map((t) => ({ ...t, y: t.y + 0.78 })), stone, 1, 1, 1);
+      addInst(new THREE.CylinderGeometry(0.38, 0.46, 2.35, 8), towers.map((t) => ({ ...t, y: t.y + 1.18 })), stone, 1, 1, 1);
+      addInst(new THREE.ConeGeometry(0.5, 0.7, 8), towers.map((t) => ({ ...t, y: t.y + 1.18 + 1.45 })), roof, 1, 1, 1);
+    }
     this.scene.add(group);
     this._planWalls = group;
   }

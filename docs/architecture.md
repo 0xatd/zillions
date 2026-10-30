@@ -81,6 +81,7 @@ to snapshots when the state can affect later simulation.
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
+| `src/prop-pack.js` | Kenney CC0 environment and castle meshes. Presentation only; procedural props stay as the fallback |
 | `src/audio.js` | Music, voice, and sound effect playback |
 
 Terrain walkability belongs to the simulation. Visual relief must not silently
@@ -90,6 +91,12 @@ Authored unit and building models live under `assets/art-slice/`. Their source
 and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.
+
+Environment trees, rocks, cliffs, grass, flowers, fences, and the colony
+buildings are Kenney CC0 meshes in `assets/props/kenney/`. `src/prop-pack.js`
+holds the shared geometries. Each map recolours them with that map's palette
+and the active culture palette. Licences are in `assets/props/LICENSES.md`.
+Heroes and zombies are unchanged. The props do not write tiles or combat state.
 
 ### Application and UI
 

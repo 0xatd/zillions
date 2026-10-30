@@ -6,6 +6,7 @@ import { TILE } from './config.js';
 import { makeRNG } from './utils.js';
 import { makePineGeometry, makeTrunkGeometry } from './toy-props.js';
 import { toyMat } from './toy-style.js';
+import { propRecord } from './prop-pack.js';
 import { activeCulture } from './cultures.js';
 import { angDiff, rimForm, rimRadius } from './site-plan.js';
 
@@ -53,6 +54,34 @@ function add(group, mesh) {
   if (mesh) group.add(mesh);
 }
 
+// One instanced mesh per pack role. `colors[role] === null` uses each item's
+// own color. Height is the world height; the pack mesh keeps its proportions.
+function scatterProp(group, name, items, colors, heightOf, cast = true) {
+  const rec = propRecord(name);
+  if (!rec || !items.length) return false;
+  let drew = false;
+  for (const part of rec.parts) {
+    if (!(part.role in colors)) continue;
+    const list = [];
+    for (const it of items) {
+      const target = heightOf(it);
+      const k = target / rec.height;
+      const chosen = colors[part.role];
+      list.push({
+        x: it.x, y: it.y, z: it.z,
+        sx: k, sy: k, sz: k,
+        rx: it.rx, ry: it.ry, rz: it.rz,
+        color: typeof chosen === 'number' ? chosen : (it.color || 0xffffff),
+      });
+    }
+    const mesh = instanced(part.geometry, toyMat({ color: 0xffffff, flatShading: true }), list, 0xffffff);
+    if (mesh && !cast) mesh.castShadow = false;
+    add(group, mesh);
+    drew = true;
+  }
+  return drew;
+}
+
 // A worn quad lying on the ground. Used for fields, ice, and the river ribbon.
 function groundQuad(w, d) {
   const g = new THREE.PlaneGeometry(w, d);
@@ -97,6 +126,7 @@ export function buildLandDressing(map) {
 
   const pines = [], trunks = [], rocks = [], crystals = [];
   const blocks = [], posts = [];
+  const wells = [], crates = [], carts = [], fences = [];
   const band = N * 0.25;
   // Outer quarter: clumps of pines and faceted blocks. The inner floor stays
   // almost empty so the battle reads.
@@ -258,7 +288,7 @@ export function buildLandDressing(map) {
         if (tt === TILE.WATER && reeds.length < 200) {
           reeds.push({ x, y: yAt(x, z) + 0.45, z, sy: 0.7 + rng() * 0.6, sx: 0.08, sz: 0.08, ry: rng() * 3, color: pineDark });
         } else if (tt === TILE.GRASS && rng() < 0.35) {
-          trunks.push({ x, y: yAt(x, z) + 0.7, z, sx: 0.12, sy: 1.3, sz: 0.12, color: 0x6a4a32 });
+          trunks.push({ x, y: yAt(x, z), z, sx: 0.12, sy: 1.3, sz: 0.12, color: 0x6a4a32, bare: true });
         }
       }
     }
@@ -317,16 +347,17 @@ export function buildLandDressing(map) {
       posts.push({ x: lx + 2.2, y: ly + 1.4, z: lz, sx: 0.2, sy: 2.6, sz: 0.2, color: 0xe7d7f5 });
     }
     const [wx, wy, wz] = place(facing + 0.7, wr * 0.42);
-    posts.push({ x: wx, y: wy + 0.28, z: wz, sx: 0.7, sy: 0.45, sz: 0.7, color: rockC });
+    wells.push({ x: wx, y: wy, z: wz, ry: facing, color: rockC });
+    crates.push({ x: wx + 0.7, y: wy, z: wz, h: 0.42, ry: facing, color: 0x8a6240 });
     for (let k = 0; k < 3; k++) {
       const [cx, cy, cz] = place(facing + 1.4 + k * 0.35, wr * (0.35 + k * 0.08));
-      blocks.push({ x: cx, y: cy + 0.16, z: cz, sx: 0.38, sy: 0.28, sz: 0.32, ry: k, color: 0x8a6240 });
+      crates.push({ x: cx, y: cy, z: cz, h: 0.48, ry: k, color: 0x8a6240 });
     }
     const [cartX, cartY, cartZ] = place(facing - 0.55, wr * 0.5);
-    blocks.push({ x: cartX, y: cartY + 0.28, z: cartZ, sx: 0.9, sy: 0.38, sz: 0.55, ry: facing, color: 0x7a5340 });
+    carts.push({ x: cartX, y: cartY, z: cartZ, h: 0.62, ry: facing, color: 0x7a5340 });
     for (let k = 0; k < 4; k++) {
       const [fx, fy, fz] = place(facing + Math.PI + k * 0.18, wr * 0.72);
-      blocks.push({ x: fx, y: fy + 0.18, z: fz, sx: 0.9, sy: 0.28, sz: 0.08, ry: facing, color: 0x6b5344 });
+      fences.push({ x: fx, y: fy, z: fz, h: 0.72, ry: facing, color: 0x6b5344 });
     }
     const [bx, by, bz] = place(facing + 0.25, wr * 0.55);
     posts.push({ x: bx, y: by + 1.1, z: bz, sx: 0.06, sy: 2.2, sz: 0.06, color: 0x4a4038 });
@@ -338,9 +369,29 @@ export function buildLandDressing(map) {
     color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1,
   });
 
-  add(group, instanced(makePineGeometry(), toyMat({ color: 0xffffff, vertexColors: true }), pines, pineTop));
-  add(group, instanced(makeTrunkGeometry(), toyMat({ color: 0x6a4a32 }), trunks, 0));
-  add(group, instanced(new THREE.BoxGeometry(1, 1, 1), toyMat({ color: 0xffffff }), rocks, rockC));
+  const packedPines = scatterProp(group, 'tree_cone', pines, { foliage: null, wood: 0x6a4a32 }, (it) => (it.s || 1) * 2.8);
+  if (!packedPines) {
+    add(group, instanced(makePineGeometry(), toyMat({ color: 0xffffff, vertexColors: true }), pines, pineTop));
+    add(group, instanced(makeTrunkGeometry(), toyMat({ color: 0x6a4a32 }), trunks, 0));
+  } else {
+    scatterProp(group, 'log', trunks.filter((t) => t.bare), { wood: 0x6a4a32 }, () => 1.15, true);
+  }
+  const packedRocks = scatterProp(group, 'rock_largeA', rocks, { stone: null, foliage: grass }, (it) => Math.min(Math.max((it.sy || 1) * 0.22, 0.35), 0.7));
+  if (!packedRocks) add(group, instanced(new THREE.BoxGeometry(1, 1, 1), toyMat({ color: 0xffffff }), rocks, rockC));
+  if (!scatterProp(group, 'tower-square-base', wells, { body: rockC }, () => 0.95)) {
+    for (const w of wells) posts.push({ x: w.x, y: w.y + 0.28, z: w.z, sx: 0.7, sy: 0.45, sz: 0.7, color: rockC });
+  } else {
+    scatterProp(group, 'log', wells.map((w) => ({ ...w, y: w.y + 0.85 })), { wood: 0x6a4a32 }, () => 0.28);
+  }
+  if (!scatterProp(group, 'log_stack', crates, { wood: 0x8a6240 }, (it) => it.h || 0.48)) {
+    for (const c of crates) blocks.push({ ...c, y: c.y + 0.16, sx: 0.38, sy: 0.28, sz: 0.32 });
+  }
+  if (!scatterProp(group, 'log_stack', carts, { wood: 0x7a5340 }, (it) => it.h || 0.62)) {
+    for (const c of carts) blocks.push({ ...c, y: c.y + 0.28, sx: 0.9, sy: 0.38, sz: 0.55 });
+  }
+  if (!scatterProp(group, 'fence_simple', fences, { wood: 0x6b5344 }, (it) => it.h || 0.72)) {
+    for (const f of fences) blocks.push({ ...f, y: f.y + 0.18, sx: 0.9, sy: 0.28, sz: 0.08 });
+  }
   add(group, instanced(new THREE.OctahedronGeometry(0.55, 0), toyMat({ color: 0xffffff }), crystals, 0x9af6ff));
   add(group, instanced(new THREE.BoxGeometry(1, 1, 1), toyMat({ color: 0xffffff }), blocks, 0x8a6240));
   add(group, instanced(new THREE.CylinderGeometry(0.5, 0.5, 1, 6), toyMat({ color: 0xffffff }), posts, rockC));

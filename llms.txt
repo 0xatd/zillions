@@ -59,6 +59,7 @@ Default branch: main
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.
+- src/prop-pack.js holds the Kenney CC0 environment and castle meshes. Presentation only.
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
 - src/building-art.js owns building meshes, walls and gates (presentation only).

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
+import { PROP_FILES, propUrl, ingestProp } from './prop-pack.js';
 
 const TEMPLATES = {};
 
@@ -141,10 +142,22 @@ export function kitGeometry(name, part) {
   return { geometry: mesh.geometry, pivot };
 }
 
+function loadPropPack(loader) {
+  return Promise.all(PROP_FILES.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(propUrl(name));
+      ingestProp(name, gltf.scene);
+    } catch (e) {
+      // Missing prop — terrain and buildings keep their procedural meshes.
+    }
+  }));
+}
+
 export function loadAssets() {
   const loader = new GLTFLoader();
   const kit = loadKit(loader);
-  return Promise.all([kit, ...Object.entries(MANIFEST).map(async ([key, url]) => {
+  const props = loadPropPack(loader);
+  return Promise.all([kit, props, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;

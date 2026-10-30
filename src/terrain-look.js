@@ -7,10 +7,11 @@ import { makeRNG } from './utils.js';
 import {
   makePineGeometry, makeLollipopGeometry, makeBushGeometry, makeTrunkGeometry, makeBoulderGeometry,
 } from './toy-props.js';
+import { propRecord } from './prop-pack.js';
 
 const CHUNK = 32;
 
-function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff, cast = true, flat = false } = {}) {
+function chunked(group, geometry, items, { vertexColors = true, instanceColor = false, color = 0xffffff, cast = true, flat = false } = {}) {
   if (!items.length) return;
   const chunks = new Map();
   for (const it of items) {
@@ -28,7 +29,7 @@ function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff
   for (const list of chunks.values()) {
     const mat = toyMat(vertexColors
       ? { color: 0xffffff, vertexColors: true, flatShading: flat }
-      : { color, flatShading: flat });
+      : { color: instanceColor ? 0xffffff : color, flatShading: flat });
     const mesh = new THREE.InstancedMesh(geometry, mat, list.length);
     mesh.castShadow = cast;
     mesh.receiveShadow = true;
@@ -40,12 +41,12 @@ function chunked(group, geometry, items, { vertexColors = true, color = 0xffffff
       p.set(it.x, it.y, it.z);
       m.compose(p, q, s);
       mesh.setMatrixAt(i, m);
-      if (vertexColors && it.color !== undefined) {
+      if ((vertexColors || instanceColor) && it.color !== undefined) {
         c.set(it.color);
         mesh.setColorAt(i, c);
       }
     });
-    if (vertexColors && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if ((vertexColors || instanceColor) && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     group.add(mesh);
   }
 }
@@ -66,6 +67,31 @@ function forestNeighbours(map, x, z) {
     }
   }
   return n;
+}
+
+// Shared pack geometry, scaled so `h` is the world height. Role colours come
+// from the map palette. Instance colour tints a flat Lambert material.
+function placeProp(group, rec, items, colorFor, { cast = true } = {}) {
+  if (!rec || !items.length) return false;
+  for (const part of rec.parts) {
+    const scaled = [];
+    for (const it of items) {
+      const tint = colorFor(part.role, it);
+      if (tint == null) continue;
+      const target = it.h != null ? it.h : (it.s || 1);
+      const k = target / rec.height;
+      scaled.push({
+        x: it.x, y: it.y - target * (it.sink || 0), z: it.z,
+        sx: (it.sx || 1) * k, sy: (it.sy || 1) * k, sz: (it.sz || 1) * k,
+        rx: it.rx, ry: it.ry, rz: it.rz,
+        color: tint,
+      });
+    }
+    if (scaled.length) {
+      chunked(group, part.geometry, scaled, { vertexColors: false, instanceColor: true, cast, flat: true });
+    }
+  }
+  return true;
 }
 
 export function buildForestGroup(map) {
@@ -130,10 +156,45 @@ export function buildForestGroup(map) {
       }
     }
   }
-  chunked(g, makePineGeometry(), pines);
-  chunked(g, makeLollipopGeometry(), lollis);
-  chunked(g, makeBushGeometry(), bushes, { cast: true });
-  chunked(g, makeTrunkGeometry(), trunks, { vertexColors: false, color: 0x6a4a32, cast: true });
+  const pine = propRecord('tree_cone');
+  const round = propRecord('tree_fat');
+  const shrub = propRecord('plant_bush');
+  const wood = 0x6b4a32;
+  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
+  const tintTree = (role, it) => (role === 'wood' ? wood : role === 'foliage' ? it.color : null);
+  if (pine && round && shrub) {
+    for (const it of pines) it.h = (it.s || 1) * 3.1;
+    for (const it of lollis) it.h = (it.s || 1) * 2.7;
+    for (const it of bushes) it.h = (it.s || 1) * 1.15;
+    placeProp(g, pine, pines, tintTree);
+    placeProp(g, round, lollis, tintTree);
+    placeProp(g, shrub, bushes, tintTree, { cast: false });
+    const tufts = [];
+    const blooms = [];
+    for (let i = 0; i < pines.length && tufts.length < 900; i += 2) {
+      const src = pines[i];
+      if (rng() > 0.55) continue;
+      tufts.push({
+        x: src.x + (rng() - 0.5) * 1.4, y: src.y, z: src.z + (rng() - 0.5) * 1.4,
+        h: 0.36 + rng() * 0.18, ry: rng() * 6,
+      });
+      if (rng() < 0.16 && blooms.length < 220) {
+        blooms.push({
+          x: src.x + (rng() - 0.5) * 1.6, y: src.y, z: src.z + (rng() - 0.5) * 1.6,
+          h: 0.48, ry: rng() * 6,
+        });
+      }
+    }
+    const grassRec = propRecord('grass');
+    const flower = propRecord('flower_yellowA');
+    if (grassRec) placeProp(g, grassRec, tufts, () => grassHex, { cast: false });
+    if (flower) placeProp(g, flower, blooms, (role) => (role === 'accent' ? 0xf2c14e : grassHex), { cast: false });
+  } else {
+    chunked(g, makePineGeometry(), pines);
+    chunked(g, makeLollipopGeometry(), lollis);
+    chunked(g, makeBushGeometry(), bushes, { cast: true });
+    chunked(g, makeTrunkGeometry(), trunks, { vertexColors: false, color: wood, cast: true });
+  }
   return g;
 }
 
@@ -178,7 +239,66 @@ export function buildRockGroup(map) {
       else if (!rim && rng() < (dist < 40 ? 0.12 : 0.04)) drop(x + rng(), z + rng(), 0.8 + rng() * 1.1, 0.3);
     }
   }
-  for (let v = 0; v < 4; v++) chunked(g, makeBoulderGeometry(v), lists[v]);
+  const variants = ['rock_largeA', 'rock_largeC', 'rock_smallA', 'rock_largeA'].map((name) => propRecord(name));
+  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
+  if (variants.every(Boolean)) {
+    for (let v = 0; v < 4; v++) {
+      const ratio = variants[v].span / variants[v].height;
+      for (const it of lists[v]) {
+        const want = v >= 2 ? 0.32 + (it.sy || 0.4) * 0.06 : 0.48 + Math.min(it.sy || 1, 3) * 0.08;
+        it.h = Math.min(want, 2.2 / ratio);
+        it.sink = 0.12;
+      }
+      placeProp(g, variants[v], lists[v], (role, it) => (role === 'foliage' ? grassHex : (it.color || stone)));
+    }
+  } else {
+    for (let v = 0; v < 4; v++) chunked(g, makeBoulderGeometry(v), lists[v]);
+  }
+  return g;
+}
+
+export function buildCliffGroup(map) {
+  const g = new THREE.Group();
+  g.name = 'cliffs';
+  const face = propRecord('cliff_large_stone');
+  const block = propRecord('cliff_block_stone');
+  if (!face && !block) return g;
+  const rng = makeRNG((((map.seed | 0) * 41 + 7) >>> 0) || 1);
+  const stone = new THREE.Color(map.theme?.palette?.mountain ?? 0xe3dcc2);
+  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
+  const faces = [];
+  const blocks = [];
+  let budget = 640;
+  const N = map.size;
+  for (let z = 1; z < N - 1 && budget > 0; z++) {
+    for (let x = 1; x < N - 1 && budget > 0; x++) {
+      if (map.tiles[map.idx(x, z)] === TILE.WATER) continue;
+      const px0 = x + 0.5, pz0 = z + 0.5;
+      // The play camera sits on +Z. Keep that foreground clear of cliff blocks.
+      if ((map.sites || []).some((s) => Math.hypot(px0 - s.x, pz0 - s.z) < 46 && pz0 > s.z - 8)) continue;
+      const y0 = map.groundY(px0, pz0);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (!map.inBounds(x + dx, z + dz)) continue;
+        const drop = y0 - map.groundY(x + dx + 0.5, z + dz + 0.5);
+        if (drop < 1.15 || rng() > 0.55) continue;
+        budget--;
+        const item = {
+          x: x + 0.5 + dx * 0.42,
+          y: map.groundY(x + dx + 0.5, z + dz + 0.5),
+          z: z + 0.5 + dz * 0.42,
+          h: Math.min(drop * 0.72, 1.8),
+          ry: Math.atan2(dx, dz),
+          color: stone,
+        };
+        if (drop > 2.2 && block && rng() < 0.4) blocks.push(item);
+        else faces.push(item);
+        break;
+      }
+    }
+  }
+  const tint = (role, it) => (role === 'foliage' ? grassHex : it.color);
+  if (face) placeProp(g, face, faces, tint);
+  if (block) placeProp(g, block, blocks, tint);
   return g;
 }
 

@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
 import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } from './assets.js';
 import { culture, kitBuildingKey } from './cultures.js';
+import { propGeometry, propRecord } from './prop-pack.js';
 
 // Visual only. A one-storey door is about the hero's height, a house is a
 // little over twice that, and towers and the keep stand well above both.
@@ -476,7 +477,161 @@ function kitWall(b, ctx, tier, K, KG) {
   return true;
 }
 
+// Kenney castle pieces, merged into one vertex-coloured mesh and tinted with
+// the culture palette. Plot positions stay with the caller. Missing pieces
+// fall through to the colony kit.
+function appendPack(buckets, geo, hex, x, y, z, ry, sx, sy, sz) {
+  const src = geo.index ? geo.toNonIndexed() : geo.clone();
+  _mat.makeRotationFromEuler(_euler.set(0, ry, 0, 'YXZ'));
+  _mat.scale(_vec.set(sx, sy, sz));
+  _mat.setPosition(x, y, z);
+  src.applyMatrix4(_mat);
+  const p = src.attributes.position;
+  const n = src.attributes.normal;
+  _col.setHex(hex);
+  for (let i = 0; i < p.count; i++) {
+    buckets.pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    if (n) buckets.nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+    else buckets.nrm.push(0, 1, 0);
+    buckets.col.push(_col.r, _col.g, _col.b);
+  }
+  src.dispose();
+}
+
+function putPack(buckets, name, hex, x, y, z, w, h, d, ry = 0) {
+  const geo = propGeometry(name);
+  const rec = propRecord(name);
+  if (!geo || !rec || h <= 0) return 0;
+  appendPack(buckets, geo, hex, x, y, z, ry, w / rec.span, h / rec.height, d / rec.span);
+  return h;
+}
+
+function packMesh(buckets) {
+  if (!buckets.pos.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(buckets.pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(buckets.nrm, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(buckets.col, 3));
+  const mesh = new THREE.Mesh(geo, toyMat({ color: 0xffffff, vertexColors: true, flatShading: true }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const g = new THREE.Group();
+  g.add(mesh);
+  g.userData.pack = true;
+  return g;
+}
+
+function packWall(b, ctx, pal, key) {
+  const buckets = { pos: [], nrm: [], col: [] };
+  const tier = Math.max(1, b.plotTier || 1);
+  const N = ctx.mapSize || 0;
+  const wallTiles = ctx.wallTiles || new Set();
+  const has = (x, z) => wallTiles.has(z * N + x);
+  const arch = ctx.archTiles || new Set();
+  const isArch = (x, z) => arch.has(z * N + x);
+  const bastion = b.branch === 'bastion';
+  const h = bastion ? 1.7 : 1.45 + Math.min(tier, 3) * 0.05;
+  const span = bastion ? 0.72 : 0.64;
+  const [cx, cz] = ctx.center || [N / 2, N / 2];
+  const ox = b.x + 0.5 - cx, oz = b.z + 0.5 - cz;
+  const faceOut = (ry) => (Math.sin(ry) * ox + Math.cos(ry) * oz < 0 ? ry + Math.PI : ry);
+  const stone = pal.stone;
+  const roof = key === 'middle_eastern' ? pal.roof : pal.roof;
+  if (b.gate) {
+    if (!(ctx.gateMain && ctx.gateMain.has(b.z * N + b.x))) return new THREE.Group();
+    let sxx = 0, szz = 0, sxz = 0, n = 0;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      if (!has(b.x + dx, b.z + dz)) continue;
+      sxx += dx * dx; szz += dz * dz; sxz += dx * dz; n++;
+    }
+    const th = n > 1 ? 0.5 * Math.atan2(2 * sxz, sxx - szz) : 0;
+    const ry = faceOut(-th);
+    putPack(buckets, 'gate', stone, 0, 0, 0, span * 1.15, h + 0.35, span * 1.15, ry);
+    putPack(buckets, 'tower-square-top-roof', roof, 0, h + 0.15, 0, span * 1.25, 0.42, span * 1.25, ry);
+    putPack(buckets, 'flag-banner-short', pal.banner, span * 0.7, h * 0.55, 0, 0.16, 0.55, 0.16, ry + Math.PI / 2);
+    return packMesh(buckets);
+  }
+  const nbs = [];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (has(b.x + dx, b.z + dz)) nbs.push([dx, dz]);
+  const straight = nbs.length === 2 && nbs[0][0] === -nbs[1][0] && nbs[0][1] === -nbs[1][1];
+  const run = nbs.length === 2 ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
+    : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
+  const ry = faceOut(-run);
+  const corner = nbs.length > 2 || (nbs.length === 2 && !straight);
+  if (nbs.length && !corner) {
+    putPack(buckets, 'wall', stone, 0, 0, 0, span, h, span, ry);
+    if (key === 'asian') putPack(buckets, 'wall-narrow-wood', pal.wood, 0, h * 0.62, 0, span * 1.15, 0.12, span * 1.15, ry);
+  }
+  const nearArch = nbs.some(([dx, dz]) => isArch(b.x + dx, b.z + dz));
+  const joint = nbs.length !== 2 || (((b.x * 3 + b.z * 5) % 4 + 4) % 4 === 0 && !(straight && ((b.x + b.z) & 1)));
+  if (!nbs.length || corner || (joint && !nearArch)) {
+    const cap = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
+    const piece = corner ? 'wall-corner' : 'tower-square';
+    putPack(buckets, piece, stone, 0, 0, 0, span * (corner ? 1.05 : 0.85), h + 0.2, span * (corner ? 1.05 : 0.85), ry);
+    putPack(buckets, cap, roof, 0, h + 0.05, 0, span * 1.05, 0.4, span * 1.05, ry);
+  }
+  return packMesh(buckets) || new THREE.Group();
+}
+
+function packBuildingMesh(b, ctx = {}) {
+  if (!propRecord('tower-square-base') || !propRecord('wall')) return null;
+  const c = culture();
+  const pal = c.palette;
+  const key = c.key;
+  if (b.kind === 'wall') return packWall(b, ctx, pal, key);
+  const buckets = { pos: [], nrm: [], col: [] };
+  const tier = Math.max(1, b.plotTier || 1);
+  const roofName = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
+  if (b.kind === 'hq') {
+    const s = 1.45;
+    let y = 0;
+    y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, s, 0.82, s * 0.9);
+    y += putPack(buckets, 'tower-square-mid-windows', pal.stone2, 0, y, 0, s * 0.86, 0.55 + tier * 0.08, s * 0.8);
+    if (key === 'european') putPack(buckets, 'tower-square', pal.stone3, s * 0.28, y, s * 0.22, 0.36, 0.7, 0.36);
+    y += putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? s * 1.2 : s, key === 'middle_eastern' ? 0.7 : 0.5, key === 'asian' ? s * 1.2 : s * 0.95);
+    if (key === 'asian') putPack(buckets, 'wall-narrow-wood', pal.wood, 0, y * 0.62, 0, s * 1.25, 0.16, s * 1.15);
+    if (key === 'south_american') putPack(buckets, 'stairs-stone', pal.stone2, 0, 0, s * 0.62, 0.85, 0.48, 0.55);
+    putPack(buckets, 'flag-banner-short', pal.banner, -s * 0.62, 0.55, 0, 0.22, 0.85, 0.22, Math.PI / 2);
+    putPack(buckets, 'flag-banner-short', pal.accent, s * 0.62, 0.55, 0, 0.22, 0.85, 0.22, -Math.PI / 2);
+    return packMesh(buckets);
+  }
+  if (b.kind === 'tower' || b.kind === 'outpost') {
+    const s = b.kind === 'outpost' ? 0.78 : 0.66;
+    let y = 0;
+    y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, s, 0.5, s);
+    const levels = Math.min(3, tier);
+    for (let i = 0; i < levels; i++) {
+      y += putPack(buckets, 'tower-square-mid-windows', i % 2 ? pal.stone2 : pal.stone, 0, y, 0, s * 0.88, 0.36, s * 0.88);
+    }
+    y += putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? s * 1.3 : s * 1.05, key === 'middle_eastern' ? 0.55 : 0.4, s * 1.05);
+    putPack(buckets, 'flag-banner-short', pal.banner, s * 0.72, y * 0.4, 0, 0.16, 0.5, 0.16, Math.PI / 2);
+    return packMesh(buckets);
+  }
+  const camp = typeof b.kind === 'string' && b.kind.startsWith('camp');
+  const wide = camp || b.kind === 'farm' ? 1.2 : b.kind === 'mine' ? 1.05 : 0.98;
+  const deep = wide * 0.84;
+  let y = 0;
+  y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, wide, b.kind === 'mine' ? 0.48 : 0.8, deep);
+  if (b.kind === 'mine') putPack(buckets, 'cliff_block_stone', pal.stone3, 0.5, 0, 0.1, 0.7, 0.95, 0.55);
+  if (b.kind === 'farm' || camp) {
+    putPack(buckets, 'fence_simple', pal.wood, 0, 0, deep * 0.7, wide * 1.25, 0.55, 0.12);
+    putPack(buckets, 'log_stack', pal.wood, -wide * 0.32, 0, -0.05, 0.5, 0.42, 0.36);
+  }
+  if (b.kind === 'mill') putPack(buckets, 'tower-square', pal.stone2, 0.32, y, 0, 0.32, 0.75, 0.32);
+  if (b.kind === 'workshop' || b.kind === 'hero_forge') {
+    putPack(buckets, 'wall-corner', pal.stone2, 0, 0, 0, wide * 0.72, 0.4, deep * 0.72);
+  }
+  if (key === 'south_american') putPack(buckets, 'stairs-stone', pal.stone2, 0, 0, deep * 0.7, 0.6, 0.4, 0.4);
+  if (key === 'asian') putPack(buckets, 'wall-narrow-wood', pal.wood, 0, y - 0.02, 0, wide * 1.3, 0.14, deep * 1.35);
+  putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? wide * 1.25 : wide * 1.08, key === 'middle_eastern' ? 0.6 : 0.46, key === 'asian' ? deep * 1.3 : deep * 1.12);
+  putPack(buckets, 'flag-banner-short', b.kind === 'hero_forge' ? pal.glow : pal.banner, wide * 0.55, y * 0.45, 0, 0.16, 0.55, 0.16, Math.PI / 2);
+  if (tier >= 2 && b.kind === 'house') putPack(buckets, 'log', pal.wood, wide * 0.28, 0, deep * 0.15, 0.4, 0.22, 0.22);
+  return packMesh(buckets);
+}
+
 export function buildBuildingMesh(b, ctx = {}) {
+  const packed = packBuildingMesh(b, ctx);
+  if (packed) return packed;
   const authored = authoredBuildingMesh(b) || kitBuildingMesh(b);
   if (authored) return authored;
 
