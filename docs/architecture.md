@@ -80,6 +80,9 @@ to snapshots when the state can affect later simulation.
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
 | `src/audio.js` | Music, voice, and sound effect playback |
+| `src/juice.js` | Presentation-only pops, hit recoil, wave cues, and end-of-match beats |
+| `src/combat-feel.js` | Pure combat-feel rules: shake cap, digits, damage-type tint |
+| `src/combat-fx.js` | Pooled combat sprites, damage numbers, and muzzle trails |
 
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.

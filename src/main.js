@@ -29,6 +29,9 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { buildPop, hitImpulse, isBigEnemy, outcomeCue, waveCue } from './juice.js';
+import { addShake, isArcherShot, isTowerShot, shakeAmplitude, waveCleared } from './combat-feel.js';
+import { CombatFx } from './combat-fx.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
@@ -61,6 +64,9 @@ const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // Scratch colours for the per-frame sky/light update (no per-frame allocs).
+const _flashWhite = new THREE.Color(0xfff4d2);
+const _knock = { x: 0, z: 0 };
+const _zeroKnock = { x: 0, z: 0 };
 const _tmpColA = new THREE.Color();
 const _tmpColB = new THREE.Color();
 const _tmpColC = new THREE.Color();
@@ -126,6 +132,9 @@ class App {
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
+    this.combatFx = new CombatFx(this.scene);
+    this.shakeOn = true;
+    this.numbersOn = true;
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
@@ -134,6 +143,15 @@ class App {
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
+    this.camBeat = 0;
+    this.camBeatDur = 1;
+    this.camBeatAmp = 0;
+    this.hitKnocks = new Map();
+    this.flashSeen = new Map();
+    this.critFlash = new Map();
+    this._hitstop = 0;
+    this._outcomeTimer = null;
+    this._outcomeShown = false;
 
     this.speed = 1;
     this.paused = true;        // starts paused behind the menu
@@ -191,7 +209,7 @@ class App {
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
-      onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onMute: () => this.toggleMute(),
       onSettings: (s) => this.applySettings(s),
       onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
@@ -349,6 +367,7 @@ class App {
     // Settings restore: volumes apply inside AudioSys before any sound;
     // UI controls sync to whatever was persisted.
     this.ui.setSettingsUI(this._restoreSettings());
+    this.ui.setMuteUI(this.audio.muted);
     this.ui.fillHeroGrid(HEROES);
     // Living hub: connect the lobby quietly in the background so the main
     // menu shows live presence/games/chat before the player clicks PLAY.
@@ -743,6 +762,10 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    if (this._outcomeTimer) { clearTimeout(this._outcomeTimer); this._outcomeTimer = null; }
+    this._outcomeShown = false;
+    this.hitKnocks?.clear();
+    this.flashSeen?.clear();
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -857,11 +880,12 @@ class App {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
     }
-    this.ui.showBanner(mode === 'survival'
-      ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
-      : mode === 'labyrinth'
-      ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
-      : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
+    this.ui.showTitleCard(
+      level.name,
+      mode === 'survival' ? 'The siege does not stop.'
+        : mode === 'labyrinth' ? 'Clear the chambers.'
+          : `${level.boss.icon} ${level.boss.name}`,
+    );
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
@@ -895,7 +919,7 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
+      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.CircleGeometry(terraced ? 4.4 : 7.2, 40),
       toyMat({ color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
@@ -905,14 +929,6 @@ class App {
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
-    }));
-    ring.position.set(cx, plazaY + 0.03, cz);
-    drape(ring, 0.05);
-    g.add(ring);
     const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
     const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
@@ -1039,12 +1055,6 @@ class App {
     for (let i = 0; i < this.map.sites.length; i++) {
       const s = this.map.sites[i];
       const gr = new THREE.Group();
-      const ringGeo = new THREE.RingGeometry(5.4, 6.0, 48);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(s.x, 0.06, s.z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
       pole.position.set(s.x, 2.5, s.z);
       gr.add(pole);
@@ -3329,7 +3339,9 @@ class App {
     const dx = (e.tx ?? e.x ?? e.fx) - e.fx;
     const dz = (e.tz ?? e.z ?? e.fz) - e.fz;
     const d = Math.hypot(dx, dz) || 1;
-    return { sx: dx / d, sz: dz / d, rx: dz / d, rz: -dx / d };
+    const v = this._aim || (this._aim = { sx: 0, sz: 0, rx: 0, rz: 0 });
+    v.sx = dx / d; v.sz = dz / d; v.rx = dz / d; v.rz = -dx / d;
+    return v;
   }
 
   _muzzlePoint(e, kind, extra = {}) {
@@ -3376,50 +3388,91 @@ class App {
     return { x: tx, y: y + this.map.groundY(tx, tz), z: tz };
   }
 
-  _spawnProjectile(e, extra = {}) {
-    if (this.projectiles.length >= 120) this._destroyProjectile(this.projectiles.shift());
-    if (!this._projCoreGeo) {
-      this._projCoreGeo = new THREE.SphereGeometry(1, 12, 8);
-      this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
-      this._projUp = new THREE.Vector3(0, 1, 0);
+  _buildProjPool() {
+    if (this._projPool) return;
+    this._projCoreGeo = new THREE.SphereGeometry(1, 8, 6);
+    this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 5);
+    this._projUp = new THREE.Vector3(0, 1, 0);
+    this._projHead = new THREE.Vector3();
+    this._projTail = new THREE.Vector3();
+    this._projMid = new THREE.Vector3();
+    this._projDir = new THREE.Vector3();
+    this._projPool = [];
+    this._projFree = [];
+    for (let i = 0; i < 48; i++) {
+      const core = new THREE.Mesh(this._projCoreGeo, new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 1, depthWrite: false,
+      }));
+      const trail = new THREE.Mesh(this._projTrailGeo, new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.64, depthWrite: false,
+      }));
+      core.visible = false;
+      trail.visible = false;
+      core.renderOrder = 30;
+      trail.renderOrder = 29;
+      core.frustumCulled = false;
+      trail.frustumCulled = false;
+      this.scene.add(core, trail);
+      this._projPool.push({
+        core, trail, from: new THREE.Vector3(), to: new THREE.Vector3(),
+        t: 0, dur: 0.3, alive: false, kind: 'soldier', dtype: 'kinetic',
+        dmg: 0, crit: false, arc: 0.2, tail: 0.14, size: 0.2, speed: 18,
+      });
+      this._projFree.push(i);
     }
+  }
+
+  _spawnProjectile(e, extra = {}) {
+    this._buildProjPool();
+    let slot = null;
+    if (this._projFree.length) slot = this._projPool[this._projFree.pop()];
+    else if (this.projectiles.length) slot = this.projectiles.shift();
+    if (!slot) return;
     const kind = extra.kind || e.kind || 'soldier';
-    const spec = { ...this._projectileSpec(kind), ...extra };
-    spec.kind = kind;
+    const base = this._projectileSpec(kind);
     const muzzle = this._muzzlePoint(e, kind, extra);
     const hit = this._targetPoint(e, kind, extra);
-    const from = new THREE.Vector3(muzzle.x, muzzle.y, muzzle.z);
-    const to = new THREE.Vector3(hit.x, hit.y, hit.z);
-    const dist = Math.hypot(to.x - from.x, to.z - from.z);
-    const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
-    const core = new THREE.Mesh(
-      this._projCoreGeo,
-      new THREE.MeshBasicMaterial({ color: spec.color, transparent: true, opacity: 1, depthWrite: false }),
-    );
-    core.scale.setScalar(spec.size);
-    const trail = new THREE.Mesh(
-      this._projTrailGeo,
-      new THREE.MeshBasicMaterial({ color: spec.trail, transparent: true, opacity: 0.64, depthWrite: false }),
-    );
-    trail.scale.set(spec.size * 0.26, 1, spec.size * 0.26);
-    core.renderOrder = 30;
-    trail.renderOrder = 29;
-    this.scene.add(trail, core);
-    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
+    slot.from.set(muzzle.x, muzzle.y, muzzle.z);
+    slot.to.set(hit.x, hit.y, hit.z);
+    slot.t = 0;
+    slot.kind = kind;
+    slot.dtype = e.dtype || extra.dtype || 'kinetic';
+    slot.dmg = extra.noNumber ? 0 : (e.dmg || extra.dmg || 0);
+    slot.crit = extra.noNumber ? false : !!(e.crit || extra.crit);
+    slot.arc = extra.arc ?? base.arc;
+    slot.tail = base.tail;
+    slot.size = extra.size || base.size;
+    slot.speed = base.speed;
+    const dist = Math.hypot(slot.to.x - slot.from.x, slot.to.z - slot.from.z);
+    slot.dur = extra.dur || clamp(dist / slot.speed, 0.18, kind === 'grenade' || kind === 'ballista' ? 0.7 : 0.42);
+    slot.core.material.color.setHex(extra.color || base.color);
+    slot.trail.material.color.setHex(base.trail);
+    slot.core.scale.setScalar(slot.size);
+    const showTrail = isArcherShot(kind) || kind === 'grenade' || kind === 'spit';
+    slot.trail.visible = showTrail;
+    slot.core.visible = true;
+    slot.alive = true;
+    this.projectiles.push(slot);
+    if (this.combatFx && (isTowerShot(kind) || isArcherShot(kind))) {
+      this.combatFx.muzzle(muzzle.x, muzzle.y, muzzle.z);
+      this.combatFx.streak(muzzle.x, muzzle.y, muzzle.z, hit.x, hit.y, hit.z, kind, slot.dtype);
+    }
   }
 
   _destroyProjectile(p) {
-    if (!p) return;
-    this.scene.remove(p.core, p.trail);
-    if (p.core.material) p.core.material.dispose();
-    if (p.trail.material) p.trail.material.dispose();
+    if (!p || !p.alive) return;
+    p.alive = false;
+    p.core.visible = false;
+    p.trail.visible = false;
+    const i = this._projPool.indexOf(p);
+    if (i >= 0) this._projFree.push(i);
   }
 
   _projectilePos(p, q, out) {
     const s = clamp(q, 0, 1);
     out.set(
       lerp(p.from.x, p.to.x, s),
-      lerp(p.from.y, p.to.y, s) + Math.sin(s * Math.PI) * p.spec.arc,
+      lerp(p.from.y, p.to.y, s) + Math.sin(s * Math.PI) * (p.arc || 0),
       lerp(p.from.z, p.to.z, s),
     );
     return out;
@@ -3427,28 +3480,25 @@ class App {
 
   _updateProjectiles(dt) {
     if (!this.projectiles.length) return;
-    const head = new THREE.Vector3();
-    const tail = new THREE.Vector3();
-    const mid = new THREE.Vector3();
-    const dir = new THREE.Vector3();
+    const head = this._projHead, tail = this._projTail, mid = this._projMid, dir = this._projDir;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.t += dt;
       const q = Math.min(1, p.t / p.dur);
       this._projectilePos(p, q, head);
-      this._projectilePos(p, q - p.spec.tail, tail);
+      this._projectilePos(p, q - p.tail, tail);
       p.core.position.copy(head);
-      const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.12;
-      p.core.scale.setScalar(p.spec.size * pulse);
+      const pulse = 1 + Math.sin(q * Math.PI * (isTowerShot(p.kind) ? 8 : 6)) * 0.1;
+      p.core.scale.setScalar(p.size * pulse);
       mid.copy(head).add(tail).multiplyScalar(0.5);
       dir.copy(head).sub(tail);
       const len = Math.max(0.04, dir.length());
       p.trail.position.copy(mid);
-      p.trail.scale.set(p.spec.size * 0.24, len, p.spec.size * 0.24);
+      p.trail.scale.set(p.size * 0.22, len, p.size * 0.22);
       p.trail.quaternion.setFromUnitVectors(this._projUp, dir.normalize());
       const fade = q > 0.82 ? (1 - q) / 0.18 : 1;
       p.core.material.opacity = Math.max(0, fade);
-      p.trail.material.opacity = Math.max(0, 0.64 * fade);
+      p.trail.material.opacity = Math.max(0, 0.55 * fade);
       if (q >= 1) {
         this._projectileImpact(p);
         this._destroyProjectile(p);
@@ -3458,27 +3508,12 @@ class App {
   }
 
   _projectileImpact(p) {
-    const kind = p.impact?.kind || p.spec.kind;
-    const color = p.impact?.color ?? p.spec.color;
     const x = p.to.x, y = p.to.y, z = p.to.z;
-    if (p.impact?.ring !== false) {
-      this._impactRing(x, z, {
-        color,
-        count: p.impact?.count || (kind === 'ballista' ? 18 : 12),
-        radius: p.impact?.radius || (kind === 'ballista' ? 1.35 : kind === 'flame' ? 1.25 : 0.9),
-        life: p.impact?.life || 0.22,
-        size: p.impact?.size || p.spec.size * 1.5,
-      });
+    const kind = p.kind || 'soldier';
+    if (this.combatFx) this.combatFx.impact(x, y, z, kind, p.dtype, !!p.crit);
+    if (p.crit || p.dmg >= 60 || kind === 'grenade' || kind === 'ballista') {
+      this._requestShake(kind === 'grenade' ? 0.2 : p.crit ? 0.14 : 0.11);
     }
-    this.burst(x, y, z, {
-      count: p.impact?.burst || (kind === 'flame' ? 16 : kind === 'shotgun' ? 8 : 5),
-      color,
-      speed: p.impact?.speed || (kind === 'flame' ? 2.4 : 1.4),
-      life: p.impact?.life || 0.32,
-      size: p.impact?.size || p.spec.size * 1.7,
-      up: p.impact?.up || 1.1,
-      spread: p.impact?.spread || 0.12,
-    });
   }
 
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
@@ -3489,17 +3524,8 @@ class App {
     }
   }
 
-  _spawnAbilityRing(x, z, { color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0 } = {}) {
-    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0, depthWrite: false,
-      blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, this.map.groundY(x, z) + 0.11, z);
-    this.scene.add(mesh);
-    this.abilityFx.push({ mesh, t: -delay, life, from: radius, to, opacity });
+  _spawnAbilityRing() {
+    // Ability telegraphs stay on the particle burst. No ground ring.
   }
 
   _updateAbilityFx(dt) {
@@ -3580,13 +3606,27 @@ class App {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
+    this._flashSweep = (this._flashSweep || 0) + 1;
+    if (this._flashSweep > 90 && (this.flashSeen.size > n + 12 || this.hitKnocks.size > n + 12)) {
+      this._flashSweep = 0;
+      const live = new Set();
+      for (let i = 0; i < g.zombies.length; i++) live.add(g.zombies[i].id);
+      for (const id of this.flashSeen.keys()) if (!live.has(id)) this.flashSeen.delete(id);
+      for (const id of this.hitKnocks.keys()) if (!live.has(id)) this.hitKnocks.delete(id);
+    }
     this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
-      // Hit pulse: a fast, meaty squash on damage.
-      const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
+      const critLeft = this.critFlash.get(zb.id) || 0;
+      if (critLeft > 0) this.critFlash.set(zb.id, Math.max(0, critLeft - dt));
+      const prevFlash = this.flashSeen.get(zb.id) || 0;
+      if (zb.hitFlash > prevFlash + 0.04) this._shove(zb, null, null);
+      this.flashSeen.set(zb.id, zb.hitFlash);
+      const knock = this._knockOffset(zb.id, dt);
+      // White flash plus a small squash. The sim position is not moved.
+      const hit = zb.hitFlash > 0 ? Math.min(1, zb.hitFlash / 0.15) : 0;
       const s = zb.def.scale;
       let lunge = 0;
       const attack = this.zombieAttacks.get(zb.id);
@@ -3601,7 +3641,9 @@ class App {
       // Tint over the baked palette: white at rest, flushed in the lunge,
       // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
-      else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
+      else if ((this.critFlash.get(zb.id) || 0) > 0) c.setRGB(1.7, 1.25, 0.28);
+      else if (this._inRange && this._inRange.has(zb.id)) c.setRGB(1.45, 1.28, 0.72);
+      else if (hit > 0) c.setRGB(1 + hit * 1.7, 1 + hit * 1.55, 1 + hit * 1.4);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
       else c.setRGB(1, 1, 1);
@@ -3609,9 +3651,9 @@ class App {
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
       this.horde.write(
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
-        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
+        zb.x + (ax / ad) * lunge + knock.x, bob, zb.z + (az / ad) * lunge + knock.z,
         (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
-        s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
+        s * (1 + hit * 0.18 + lunge * 0.12), s * (1 - hit * 0.2 - lunge * 0.05), s * (1 + hit * 0.18 + lunge * 0.12),
         t, zb.phase, lunge, c, eyeHex,
       );
     }
@@ -3641,10 +3683,27 @@ class App {
       if (i >= 400) break;
       if (!this.coinBorn.has(cn.id)) this.coinBorn.set(cn.id, t);
       const age = t - this.coinBorn.get(cn.id);
-      // Pop out of the building with a little bounce, then hover and spin.
+      // Pop out of the body, then drift toward the hero. The sim position
+      // stays put until the real pickup radius says the coin is collected.
       const bounce = age < 0.5 ? Math.abs(Math.sin(age * Math.PI * 2)) * (0.5 - age) * 2.2 : 0;
-      const big = cn.v >= 4 ? 1.5 : 1;
-      d.position.set(cn.x, this.map.groundY(cn.x, cn.z) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
+      let pop = 1;
+      if (age < 0.3) {
+        const k = age / 0.3;
+        pop = 0.35 + k * 0.75 + Math.sin(k * Math.PI) * 0.28;
+      }
+      const big = (cn.v >= 4 ? 1.5 : 1) * pop;
+      let cx = cn.x, cz = cn.z;
+      const hero = this.myHero();
+      if (hero && !hero.dead) {
+        const dx = hero.x - cn.x, dz = hero.z - cn.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 4.4 && dist > 0.04) {
+          const pull = (1 - dist / 4.4) ** 2;
+          cx += dx * pull * 0.72;
+          cz += dz * pull * 0.72;
+        }
+      }
+      d.position.set(cx, this.map.groundY(cx, cz) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cz);
       d.rotation.set(Math.PI / 2 + 0.35, 0, t * 2.2 + cn.id);
       d.scale.setScalar(big);
       d.updateMatrix();
@@ -3910,18 +3969,10 @@ class App {
     fill.rotation.y = Math.PI / 6;
     fill.userData.noOutline = true;
     grp.add(fill);
-    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
-    rimGeo.rotateX(-Math.PI / 2);
-    const rim = new THREE.Mesh(rimGeo, m.rim);
-    rim.position.set(x, 0.095, z);
-    rim.rotation.y = Math.PI / 6;
-    rim.userData.noOutline = true;
-    grp.add(rim);
     const gem = new THREE.Mesh(new THREE.OctahedronGeometry(Math.min(0.2, r * 0.22), 0), m.gem);
     gem.position.set(x, 0.75, z);
     grp.add(gem);
     grp.userData.gem = gem;
-    grp.userData.rim = rim;
     return grp;
   }
 
@@ -3965,24 +4016,10 @@ class App {
     g.add(pips.sprite);
     g.userData.pips = pips;
 
-    // Glow ring at the pay point + radial progress arc.
+    // No ground rings. The pay point is kept for the build hint only.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
-    ring.position.set(px, 0.05, pz);
-    g.add(ring);
-    g.userData.ring = ring;
-
-    const prog = new THREE.Mesh(
-      new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, 0.01),
-      new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    prog.rotation.x = -Math.PI / 2;
-    prog.position.set(px, 0.07, pz);
-    g.add(prog);
-    g.userData.prog = prog;
-    g.userData.progFrac = 0;
+    g.userData.ring = null;
+    g.userData.prog = null;
     g.userData.payPoint = [px, pz];
     // The whole plot group rides the ground once: every child (beacon, ghost,
     // rings, labels) keeps its old relative height.
@@ -4042,8 +4079,6 @@ class App {
       if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
         if (ud.tag) ud.tag.visible = false;
-        ud.ring.visible = false;
-        ud.prog.visible = false;
         if (ud.pips) ud.pips.sprite.visible = false;
         continue;
       }
@@ -4051,16 +4086,9 @@ class App {
       const activePayPoint = mh && !mh.dead ? g.payPoint(plot, mh) : ud.payPoint;
       const heroNear = mh && !mh.dead &&
         (mh.x - activePayPoint[0]) ** 2 + (mh.z - activePayPoint[1]) ** 2 < 100;
-      // Minimal at distance: only the beacon marks a plot. Icon, ghost and
-      // pips appear when this is the plot you'd actually fund.
+      // Minimal at distance: only the beacon marks a plot. Icon and ghost
+      // appear when this is the plot you'd actually fund.
       const active = plot.id === pipPlotId || (nt.branch && heroNear);
-      if (active && activePayPoint) {
-        ud.ring.position.set(activePayPoint[0], 0.05, activePayPoint[1]);
-        ud.prog.position.set(activePayPoint[0], 0.07, activePayPoint[1]);
-      } else if (ud.payPoint) {
-        ud.ring.position.set(ud.payPoint[0], 0.05, ud.payPoint[1]);
-        ud.prog.position.set(ud.payPoint[0], 0.07, ud.payPoint[1]);
-      }
       if (ud.ghost) ud.ghost.visible = !built && plot.id === pipPlotId;
       if (ud.beacon.visible) {
         const gem = ud.beacon.userData.gem;
@@ -4100,7 +4128,7 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = false;
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
           const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
@@ -4109,22 +4137,8 @@ class App {
         }
       }
 
-      // Ring: pulse when affordable, glow bright while paying.
-      ud.ring.visible = true;
-      const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
-      ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
-
-      // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
-      ud.prog.visible = frac > 0.002;
-      if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
-        ud.progFrac = frac;
-        ud.prog.geometry.dispose();
-        ud.prog.geometry = new THREE.RingGeometry(1.05, 1.32, 40, 1, -Math.PI / 2, Math.max(0.01, frac * Math.PI * 2));
-      }
 
       // (Coin flight itself rides the 'paycoin' event — see _spawnPayCoins.)
     }
@@ -4162,16 +4176,19 @@ class App {
     for (const b of g.buildings) {
       seen.add(b.id);
       const plot = g.plots.find((p) => p.id === b.plotId);
-      const tierKey = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const tierNum = plot ? plot.tier : 1;
+      const tierKey = tierNum + ':' + (plot ? plot.branch || '' : '');
       let rec = this.buildingMeshes.get(b.id);
+      let upgraded = false;
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
+        upgraded = tierNum > (rec.tierNum || 1);
         this.scene.remove(rec.mesh);
         this._disposeObject3D(rec.mesh);
         this.buildingMeshes.delete(b.id);
         rec = null;
       }
       if (!rec) {
-        b.plotTier = plot ? plot.tier : 1;
+        b.plotTier = tierNum;
         b.branch = plot ? plot.branch : null;
         const mesh = this._makeBuildingMesh(b);
         mesh.position.set(b.cx, this.map.groundY(b.cx, b.cz), b.cz);
@@ -4187,7 +4204,7 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
+        rec = { mesh, b, tierKey, tierNum, spawnT: this.clock.elapsedTime, materials, upgraded };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4299,46 +4316,10 @@ class App {
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
       // (The whole hero group is scaled 1.18×, so compensate.)
-      if (d.aura) {
-        const S = 1.18;
-        const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
-        auraFillGeo.rotateX(-Math.PI / 2);
-        const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
-        auraFill.position.y = 0.035;
-        g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
-        auraGeo.rotateX(-Math.PI / 2);
-        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
-        aura.position.y = 0.05;
-        g.add(aura);
-        const pulseGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.82) / S, Math.max(0.3, auraR - 0.62) / S, 72);
-        pulseGeo.rotateX(-Math.PI / 2);
-        const pulse = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.18, depthWrite: false }));
-        pulse.position.y = 0.065;
-        g.add(pulse);
-        aura.userData.baseRadius = auraR;
-        auraFill.userData.baseRadius = auraR;
-        pulse.userData.baseRadius = auraR;
-        g.userData.aura = aura;
-        g.userData.auraFill = auraFill;
-        g.userData.auraPulse = pulse;
-      }
+      // Aura range is not drawn. The foot disc below stays; another change owns it.
       if (u.key === 'danny') {
-        // The Weave must remain readable for its full duration. Three broken,
-        // counter-rotating rings make a moving tear in the world instead of
-        // relying on Daniel becoming faint and easy to lose in the horde.
+        // The Weave stays readable as a particle tear. No ground rings.
         const weave = new THREE.Group();
-        for (let i = 0; i < 3; i++) {
-          const geo = new THREE.RingGeometry(0.72 + i * 0.18, 0.82 + i * 0.18, 32, 1, i * 0.7, Math.PI * 1.35);
-          geo.rotateX(-Math.PI / 2);
-          const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-            color: i === 1 ? 0x72cfff : 0x7dffb2, transparent: true,
-            opacity: 0.82 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
-          }));
-          ring.position.y = 0.12 + i * 0.05;
-          weave.add(ring);
-        }
         weave.visible = false;
         g.add(weave);
         g.userData.weave = weave;
@@ -4379,13 +4360,6 @@ class App {
         for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
-    const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
-    affectedGeo.rotateX(-Math.PI / 2);
-    const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
-    affected.position.y = 0.085;
-    affected.visible = false;
-    g.add(affected);
-    g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
@@ -4458,6 +4432,7 @@ class App {
       const pose = unitPose(artState, t * (artState === 'run' ? 10 : 1.8) + u.id, {
         pulse: cuePulse, melee: attackKind === 'melee',
       });
+      this._flashUnit(rec, artState === 'hit' ? cuePulse : 0);
       const weaponParts = rec.mesh.userData.weaponParts || [];
       for (const part of weaponParts) {
         const rp = part.userData.restPos;
@@ -4474,6 +4449,8 @@ class App {
         body.position.z = pose.z;
         body.rotation.x = pose.pitch;
         body.rotation.z = pose.roll;
+        const squash = artState === 'hit' ? cuePulse : 0;
+        body.scale.set(1 + squash * 0.14, 1 - squash * 0.18, 1 + squash * 0.14);
       }
       const limbs = rec.mesh.userData.limbs;
       if (limbs) {
@@ -4524,21 +4501,12 @@ class App {
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
-          if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
-          if (pulse) {
-            pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
-          }
+          for (const part of [aura, fill, pulse]) if (part) part.visible = false;
         }
         const weave = rec.mesh.userData.weave;
         if (weave) {
           weave.visible = u.weaveT > 0 && !u.dead;
           if (weave.visible) {
-            weave.children.forEach((ring, i) => {
-              ring.rotation.z = t * (i % 2 ? -4.8 : 4.2) + i * 1.7;
-              ring.material.opacity = 0.58 + Math.sin(t * 8 + i) * 0.22;
-            });
             const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
             last.t -= dt;
             if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
@@ -4579,12 +4547,6 @@ class App {
       );
       pillar.position.set(x, 7, z);
       gr.add(pillar);
-      const ringGeo = new THREE.RingGeometry(2.2, 2.7, 40);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff3c2e, transparent: true, opacity: 0.5, depthWrite: false }));
-      ring.position.set(x, 0.06, z);
-      gr.add(ring);
-      gr.userData.ring = ring;
       gr.position.y = this.map.groundY(x, z);
       this.scene.add(gr);
       this.waveMarkers.push(gr);
@@ -4616,21 +4578,8 @@ class App {
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
-    const h = this.myHero();
-    if (!this.game || !h || h.dead || this.game.phase !== 'live') {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const target = this.game.buildTargetFor(h);
-    if (!target) {
-      this.tacticalVisuals.setSelection([]);
-      return;
-    }
-    const building = [...this.buildingMeshes.values()].find((rec) => rec.b.plotId === target.plot.id);
-    const plot = this.plotMeshes.get(target.plot.id);
-    const color = target.act.mode === 'repair' || target.act.mode === 'rebuild' ? 0x75dfff
-      : target.act.mode === 'branch' ? 0xd49aff : 0xffdf72;
-    this.tacticalVisuals.setSelection([building ? building.mesh : plot?.group], color);
+    // A selected tower's round skirt outlines as a gold ring. Nothing is outlined.
+    this.tacticalVisuals.setSelection([]);
   }
 
   // Lane nodes: a capture ring and a banner in your colour, the hive's, or
@@ -4643,15 +4592,6 @@ class App {
       for (const node of g.nodes) {
         if (node.offMap) continue;
         const gr = new THREE.Group();
-        const ringGeo = new THREE.RingGeometry(SIEGE.captureRadius - 0.6, SIEGE.captureRadius, 44);
-        ringGeo.rotateX(-Math.PI / 2);
-        const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
-        ring.position.set(node.x, 0.06, node.z);
-        // The home node sits on the keep: its capture circle would ring the
-        // castle like a target — the walls already say whose ground it is.
-        const hq = (g.plots || []).find((p) => p.kind === 'hq');
-        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
-        gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
         gr.add(pole);
@@ -4662,7 +4602,7 @@ class App {
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
-        gr.userData = { ring, flag, label, node };
+        gr.userData = { flag, label, node };
         gr.position.y = this.map.groundY(node.x, node.z);
         this.scene.add(gr);
         this.nodeMarkers.push(gr);
@@ -4673,12 +4613,7 @@ class App {
       // Grey until surveyed: the banner is there, but whose banner is not known.
       const col = !node.seen ? 0x76828d
         : node.owner === 'player' ? 0x59ff9c : node.owner === 'hive' ? 0xff3c2e : 0xd8c07a;
-      gr.userData.ring.material.color.setHex(col);
       gr.userData.flag.material.color.setHex(col);
-      const contested = node.cap > 0.05;
-      gr.userData.ring.material.opacity = contested
-        ? 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(t * 9))
-        : (node.owner === 'player' ? 0.34 : 0.2);
       gr.userData.flag.rotation.y = Math.sin(t * 2.2 + node.id) * 0.28;
     }
   }
@@ -4756,7 +4691,7 @@ class App {
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
-        case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
+        case 'mute': this.toggleMute(); break;
         case 'pause': this.setSpeed(0); break;
         case 'menu': this.togglePauseMenu(); break;
         default:
@@ -4940,6 +4875,13 @@ class App {
     this.ui.setSpeedUI(this.speed, this.paused);
   }
 
+  // The HUD mute button and the M key share the settings checkbox. Both write
+  // `sfx` so a mute survives a reload.
+  toggleMute() {
+    this.applySettings({ sfx: !!this.audio.muted });
+    this.ui.setSettingsUI({ sfx: !this.audio.muted });
+  }
+
   // Settings: apply immediately and persist to localStorage. Volume and mute
   // compose inside AudioSys (gain = base * volume, or 0 when muted); quality
   // routes through TacticalVisuals so lockstep sim state stays untouched.
@@ -4950,7 +4892,15 @@ class App {
     } catch { /* storage can be blocked */ }
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
-    if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
+    if (s.sfx !== undefined) {
+      this.audio.setMuted(!s.sfx);
+      this.ui.setMuteUI(!s.sfx);
+    }
+    if (s.shake !== undefined) this.shakeOn = !!s.shake;
+    if (s.numbers !== undefined) {
+      this.numbersOn = !!s.numbers;
+      if (this.combatFx) this.combatFx.numbersOn = this.numbersOn;
+    }
     if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
   }
 
@@ -4960,6 +4910,9 @@ class App {
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
     if (s.sfx === false) this.audio.setMuted(true);
+    this.shakeOn = s.shake !== false;
+    this.numbersOn = s.numbers !== false;
+    if (this.combatFx) this.combatFx.numbersOn = this.numbersOn;
     return s;
   }
 
@@ -5005,12 +4958,27 @@ class App {
     // Diorama angle: steep enough to read the whole base like a board game,
     // steeper still as you pull back.
     const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
-    const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
+    // A wave or an ending punches the distance, then gives it back. Yaw stays
+    // fixed — only the dolly moves.
+    let dist = this.camDist;
+    if (this.camBeat > 0) {
+      this.camBeat = Math.max(0, this.camBeat - dt);
+      const u = 1 - this.camBeat / (this.camBeatDur || 1);
+      const p = Math.sin(Math.min(1, Math.max(0, u)) * Math.PI);
+      dist += p * this.camBeatAmp;
+    }
+    dist = Math.max(18, dist);
+    const hx = Math.cos(elev) * dist, hy = Math.sin(elev) * dist;
     let sx = 0, sz = 0;
-    if (this.shake > 0) {
-      this.shake -= dt;
-      const s = Math.min(this.shake, 0.4);
-      sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
+    if (this.shakeOn === false) this.shake = 0;
+    else if (this.shake > 0) {
+      this.shake = Math.min(this.shake, 0.22);
+      const s = shakeAmplitude(this.shake, true);
+      this.shake -= dt * 0.85;
+      if (this.shake < 0) this.shake = 0;
+      // One reused offset, not a new vector. The jitter is presentation-only.
+      sx = (Math.random() - 0.5) * s;
+      sz = (Math.random() - 0.5) * s;
     }
     this.camera.position.set(
       this.focus.x + Math.sin(this.camYaw) * hx + sx,
@@ -5161,19 +5129,22 @@ class App {
     // hitch and an air-raid of sounds — keep only the freshest burst.
     if (g.events.length > 90) {
       // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
-      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded' || e.type === 'victory' || e.type === 'defeat');
       g.events.splice(0, g.events.length - 30, ...keep);
     }
     for (const e of g.events) {
       switch (e.type) {
         case 'shot': {
           this._unitAttackCue(e);
+          this._floatHit(e);
           if (e.kind === 'melee') {
             this.audio.melee();
-            this._impactRing(e.tx, e.tz, { color: 0xffd27a, count: 18, radius: 1.25, life: 0.26, size: 0.42 });
-            this.burst(e.tx, 0.7, e.tz, { count: 14, color: 0xffd27a, speed: 2.9, life: 0.3, size: 0.5, up: 1.6 });
-            this.burst(e.tx, 0.6, e.tz, { count: 9, color: 0x9c1f1f, speed: 1.9, life: 0.4, size: 0.48, up: 1.3 });
-            this.shake = Math.max(this.shake, 0.12);
+            const y = (this.map ? this.map.groundY(e.tx, e.tz) : 0) + 0.7;
+            if (this.combatFx) {
+              this.combatFx.impact(e.tx, y, e.tz, 'melee', e.dtype || 'kinetic', !!e.crit);
+              this.combatFx._spawn('slash', e.tx, y, e.tz, 0, 0.15, 0, 0.14, 0.85, 0xfff1cc);
+            }
+            if (e.crit) this._requestShake(0.12);
             break;
           }
           if (e.kind === 'shotgun') {
@@ -5181,29 +5152,28 @@ class App {
             // before the impact VFX fires, so the eye can track the shot.
             this.audio.shoot('shotgun');
             const muzzle = this._muzzlePoint(e, 'shotgun');
-            this.burst(muzzle.x, muzzle.y, muzzle.z, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
+            if (this.combatFx) this.combatFx.muzzle(muzzle.x, muzzle.y, muzzle.z);
             const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
             for (let p = 0; p < 9; p++) {
               const a = ang + (p - 4) * 0.13;
               const spread = 0.25 + Math.random() * 0.35;
               this._spawnProjectile(e, {
                 kind: 'shotgun',
+                noNumber: p !== 4,
                 tx: e.tx + Math.sin(a) * spread,
                 tz: e.tz + Math.cos(a) * spread,
                 ty: 0.6,
-                dur: 0.22 + Math.random() * 0.04,
-                impact: { kind: 'shotgun', color: 0xfff2b0, ring: p === 4, burst: p === 4 ? 12 : 2, radius: 1.1, speed: 2.2, life: 0.28, size: 0.38, up: 1.1 },
+                dur: 0.16 + (p % 3) * 0.02,
               });
             }
-            this.shake = Math.max(this.shake, 0.14);
+            this._requestShake(0.12);
             break;
           }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
-            const muzzle = this._muzzlePoint(e, 'flame');
-            this._spawnProjectile(e, { kind: 'flame', ty: 0.45, impact: { kind: 'flame', color: 0xff8a3c, count: 18, radius: 1.3, burst: 18, speed: 2.5, life: 0.34, size: 0.56, up: 1.6, spread: 1.2 } });
-            this.stream(muzzle.x, muzzle.y, muzzle.z, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
+            this._spawnProjectile(e, { kind: 'flame', ty: 0.45 });
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+            this._towerBeat(e.fx, e.fz);
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' || e.kind === 'outpostSiege' ? 'sniper' : e.kind === 'outpost' ? 'tower' : e.kind);
@@ -5230,17 +5200,28 @@ class App {
             this.burst(lerp(muzzle.x, hit.x, t), lerp(muzzle.y, hit.y, t), lerp(muzzle.z, hit.z, t),
               { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.14, size: 0.38, spread: 0.02, up: 0 });
           }
-          if (e.kind === 'tower' || e.kind === 'ballista' || e.kind === 'outpost' || e.kind === 'outpostSiege') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+          if (isTowerShot(e.kind)) {
+            this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+            this._towerBeat(e.fx, e.fz);
+          }
           break;
         }
         case 'zdeath':
           this.spawnCorpse(e);
-          this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
-          this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
-          this.deathSfxT -= 1;
-          if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
+          if (this.combatFx) {
+            const gy = this.map ? this.map.groundY(e.x, e.z) : 0;
+            this.combatFx.death(e.x, gy + 0.45, e.z, !!e.big);
+          }
+          if (e.big) {
+            this._requestShake(0.2);
+            this.audio.bigDeath();
+          } else {
+            this.deathSfxT -= 1;
+            if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
+          }
           break;
         case 'bite':
+          this._noteAttacker(e.fromId);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this.burst(e.x, 0.7, e.z, { count: 4, color: 0xffb070, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
@@ -5251,9 +5232,13 @@ class App {
           break;
         case 'build':
           if (!e.quiet) {
-            this.audio.build();
-            this.burst(e.x, 0.3, e.z, { count: 20, color: 0xc9b48a, speed: 2.4, life: 0.55, size: 0.65, up: 1.9, spread: 1.1 });
-            this.shake = Math.max(this.shake, 0.12);
+            const upgraded = (e.tier || 1) > 1;
+            if (upgraded) {
+              this.audio.upgrade();
+              this._sparkle(e.x, e.z, 18);
+            } else this.audio.build();
+            this.burst(e.x, 0.3, e.z, { count: upgraded ? 14 : 20, color: upgraded ? 0xfff2c0 : 0xc9b48a, speed: 2.4, life: 0.55, size: 0.65, up: 1.9, spread: 1.1 });
+            this.shake = Math.max(this.shake, upgraded ? 0.16 : 0.12);
           }
           break;
         case 'branch':
@@ -5304,9 +5289,7 @@ class App {
           this._pingHive(e.x, e.z);
           break;
         case 'surge':
-          this.audio.alarm();
-          this.shake = Math.max(this.shake, 0.7);
-          this.ui.showBanner(`☠️ THREAT ${e.level}`, 'Every hive musters at once', 2600);
+          this._presentWave('surge', { level: e.level });
           break;
         case 'nodeseen':
           this.audio.click();
@@ -5364,9 +5347,13 @@ class App {
         }
         case 'nestdown':
           this.audio.demolish();
-          this.shake = Math.max(this.shake, 0.4);
-          this.burst(e.x, 0.8, e.z, { count: 40, color: 0xb44dff, speed: 3.4, life: 0.9, size: 0.7, up: 3 });
-          this.burst(e.x, 0.5, e.z, { count: 24, color: 0x3a2a4a, speed: 2.6, life: 0.8, size: 0.7, up: 2.4 });
+          this._requestShake(0.2);
+          if (this.combatFx) this.combatFx.death(e.x, (this.map ? this.map.groundY(e.x, e.z) : 0) + 0.6, e.z, true);
+          this._waveEndVisual();
+          break;
+        case 'roomclear':
+        case 'firstsiege':
+          this._waveEndVisual();
           break;
         case 'rally':
           this.audio.train();
@@ -5376,6 +5363,14 @@ class App {
           this.audio.click();
           break;
         case 'bhit':
+          if (e.fromId) this._noteAttacker(e.fromId);
+          {
+            let keep = false;
+            for (const b of g.buildings) {
+              if (b.kind === 'hq' && (b.cx - e.x) ** 2 + (b.cz - e.z) ** 2 < 4) { keep = true; break; }
+            }
+            if (keep) this._requestShake(0.18);
+          }
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
@@ -5389,8 +5384,13 @@ class App {
           this.shake = Math.max(this.shake, 0.3);
           break;
         case 'horde':
-          this.audio.alarm();
-          this.shake = Math.max(this.shake, e.final ? 1.2 : 0.6);
+          this._presentWave('horde', { final: !!e.final });
+          break;
+        case 'roomwave':
+          this._presentWave('roomwave', { wave: e.wave });
+          break;
+        case 'pursuit':
+          this._presentWave('pursuit', { stage: e.stage });
           break;
 
         case 'deny': this.audio.deny(); break;
@@ -5471,7 +5471,7 @@ class App {
           break;
         case 'bossspawn':
           this.audio.bossHorn();
-          this.shake = Math.max(this.shake, 1.2);
+          this._presentWave('boss', { name: this.game.level?.boss?.name });
           this.burst(e.x, 0.5, e.z, { count: 30, color: 0xff3c2e, speed: 3, life: 1, size: 0.8, up: 3 });
           break;
         case 'bossdown':
@@ -5516,21 +5516,234 @@ class App {
           this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
           break;
         case 'victory':
-          this.audio.victory();
-          this.pause();
-          this._recordGameEnd(true);
-          this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          this._presentOutcome(true);
           break;
         case 'defeat':
-          this.audio.defeat();
-          this.shake = 1.5;
-          this.pause();
-          this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          this._presentOutcome(false);
           break;
       }
     }
     g.events.length = 0;
+  }
+
+  // While a tower is being placed or upgraded, enemies inside its range
+  // pick up a warm tint. No ring is drawn.
+  _markTowerRange() {
+    if (!this._inRange) this._inRange = new Set();
+    this._inRange.clear();
+    if (this.controlMode === 'fight' || !this.game) return;
+    const h = this.myHero();
+    if (!h || h.dead || !this.game.buildTargetFor) return;
+    const target = this.game.buildTargetFor(h);
+    if (!target) return;
+    const plot = target.plot;
+    if (plot.kind !== 'tower' && plot.kind !== 'outpost') return;
+    const def = target.act && (target.act.def || (target.nt && target.nt.def));
+    const range = def && def.range;
+    if (!range) return;
+    const r2 = range * range;
+    for (const zb of this.game.zombies) {
+      if (zb.dead) continue;
+      if ((zb.x - plot.cx) ** 2 + (zb.z - plot.cz) ** 2 <= r2) this._inRange.add(zb.id);
+    }
+  }
+
+  _floatHit(e) {
+    if (e.crit) {
+      this._hitstop = 0.04;
+      this._markCrit(e);
+    } else if (e.heroKey) this._markCrit(e);
+    if (!this.combatFx || !e.dmg) return;
+    const y = (this.map ? this.map.groundY(e.tx ?? e.x, e.tz ?? e.z) : 0) + 2.35;
+    this.combatFx.number(e.tx ?? e.x, y, e.tz ?? e.z, e.dmg, !!e.crit);
+  }
+
+  _markCrit(e) {
+    if (!this.game || e.tx == null) return;
+    let best = null;
+    let bestD = 2.25;
+    for (const zb of this.game.zombies) {
+      if (zb.dead) continue;
+      const d = (zb.x - e.tx) ** 2 + (zb.z - e.tz) ** 2;
+      if (d < bestD) { best = zb; bestD = d; }
+    }
+    if (!best) return;
+    this._shove(best, e.fx, e.fz);
+    const knock = this.hitKnocks.get(best.id);
+    if (knock) {
+      const len = Math.hypot(knock.x, knock.z) || 1;
+      const mag = e.crit ? 0.46 : 0.26;
+      knock.x = knock.x / len * mag;
+      knock.z = knock.z / len * mag;
+    }
+    if (e.crit) this.critFlash.set(best.id, 0.18);
+  }
+
+  _requestShake(amount) {
+    this.shake = addShake(this.shake, amount, this.shakeOn !== false);
+  }
+
+  _towerBeat(fx, fz) {
+    for (const rec of this.buildingMeshes.values()) {
+      if (!isTowerShot(rec.b.kind) && rec.b.kind !== 'tower' && rec.b.kind !== 'outpost') continue;
+      if (Math.abs(rec.b.cx - fx) < 0.8 && Math.abs(rec.b.cz - fz) < 0.8) {
+        rec.beat = 0.14;
+        return;
+      }
+    }
+  }
+
+  _noteWave() {
+    if (!this.game) return;
+    let n = 0;
+    for (const z of this.game.zombies) if (!z.dead) n++;
+    this._waveBase = n;
+    this._waveHot = false;
+    this._waveWatch = true;
+  }
+
+  _waveStartVisual() {
+    this._noteWave();
+    if (!this.combatFx || !this.game) return;
+    let shown = 0;
+    for (const nest of this.game.nests || []) {
+      if (!nest || nest.alive === false) continue;
+      const y = this.map ? this.map.groundY(nest.x, nest.z) + 0.4 : 0.4;
+      this.combatFx.waveColumn(nest.x, y, nest.z);
+      if (++shown >= 3) break;
+    }
+  }
+
+  _waveEndVisual() {
+    this._waveWatch = false;
+    if (this.combatFx) {
+      const y = this.map ? this.map.groundY(this.focus.x, this.focus.z) + 0.3 : 0.3;
+      this.combatFx.settle(this.focus.x, y, this.focus.z);
+    }
+    this.audio.waveEnd();
+    this._requestShake(0.08);
+  }
+
+  _punchCamera(duration, amp) {
+    this.camBeat = duration;
+    this.camBeatDur = Math.max(0.05, duration);
+    this.camBeatAmp = amp;
+  }
+
+  _presentWave(type, extra) {
+    const cue = waveCue(type, extra);
+    if (!cue) return;
+    // The champion already has its own horn. Other waves share one brass call.
+    if (type !== 'boss') this.audio.waveHorn();
+    this._requestShake(Math.min(0.2, cue.shake));
+    this._punchCamera(0.62, cue.punch);
+    this._waveStartVisual();
+    this.ui.showMoment(cue.eyebrow, cue.title, cue.detail, cue.tone, Math.round(cue.hold * 1000));
+  }
+
+  _presentOutcome(won) {
+    if (this._outcomeShown || !this.game) return;
+    this._outcomeShown = true;
+    const g = this.game;
+    const cue = outcomeCue(won, { mode: g.mode, threat: g.threatLevel, defeatCause: g.defeatCause });
+    if (won) this.audio.victory();
+    else this.audio.defeat();
+    this.shake = Math.max(this.shake, cue.shake);
+    this._punchCamera(cue.hold, cue.punch);
+    const h = this.myHero();
+    const x = h && !h.dead ? h.x : (g.hq?.cx ?? this.focus.x);
+    const z = h && !h.dead ? h.z : (g.hq?.cz ?? this.focus.z);
+    if (won) this._sparkle(x, z, 26);
+    else {
+      this.burst(x, 1.2, z, { count: 22, color: 0xff5d52, speed: 2.4, life: 0.7, size: 0.7, up: 2.2, spread: 1.4 });
+      this.burst(x, 0.4, z, { count: 16, color: 0x2a2420, speed: 1.6, life: 0.8, size: 0.8, up: 1.2, spread: 1.6 });
+    }
+    this.ui.showMoment(cue.eyebrow, cue.title, cue.detail, cue.tone, Math.round(cue.hold * 1000) + 500);
+    this.pause();
+    this._recordGameEnd(won);
+    this._outcomeTimer = setTimeout(() => {
+      this._outcomeTimer = null;
+      if (this.game !== g) return;
+      this.ui.showEnd(won, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+    }, Math.round(cue.hold * 1000));
+  }
+
+  _shove(zb, fx, fz) {
+    const big = isBigEnemy(zb);
+    const impulse = hitImpulse(big);
+    let dx = fx == null ? -(zb.dirX || 0) : zb.x - fx;
+    let dz = fz == null ? -(zb.dirZ || 0) : zb.z - fz;
+    if (Math.hypot(dx, dz) < 0.05) { dx = -(zb.dirX || 1); dz = -(zb.dirZ || 0); }
+    const len = Math.hypot(dx, dz) || 1;
+    this.hitKnocks.set(zb.id, {
+      x: (dx / len) * impulse.knock,
+      z: (dz / len) * impulse.knock,
+      t: 0.18,
+      dur: 0.18,
+    });
+    this.audio.hit();
+  }
+
+  // A big body landing a blow shakes the board. Small attackers do not.
+  _noteAttacker(fromId) {
+    if (!fromId || !this.game) return;
+    const zb = this.game.zombies.find((z) => z.id === fromId);
+    if (!zb || !isBigEnemy(zb)) return;
+    this.shake = Math.max(this.shake, zb.boss ? 0.5 : hitImpulse(true).shake);
+    this.audio.hit();
+  }
+
+  _knockOffset(id, dt) {
+    const k = this.hitKnocks.get(id);
+    if (!k) return _zeroKnock;
+    k.t -= dt;
+    if (k.t <= 0) { this.hitKnocks.delete(id); return _zeroKnock; }
+    const p = Math.sin(Math.min(1, k.t / k.dur) * Math.PI);
+    _knock.x = k.x * p;
+    _knock.z = k.z * p;
+    return _knock;
+  }
+
+  _sparkle(x, z, count = 16) {
+    const gy = this.map ? this.map.groundY(x, z) : 0;
+    this.burst(x, gy + 1.15, z, { count, color: 0xfff6d0, speed: 2.4, life: 0.72, size: 0.55, up: 3.4, spread: 1.15 });
+    this.burst(x, gy + 0.55, z, { count: Math.max(4, count >> 1), color: 0xffffff, speed: 1.3, life: 0.4, size: 0.38, up: 2.2, spread: 0.55 });
+    this._impactRing(x, z, { color: 0xffd75e, count: 10, radius: 1.35, life: 0.32, size: 0.36 });
+  }
+
+  _killBurst(e) {
+    const gy = this.map ? this.map.groundY(e.x, e.z) : 0;
+    const n = e.big ? 14 : 8;
+    const color = e.big ? 0xffe08a : 0xe7d6ff;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.burst(e.x + Math.cos(a) * (e.big ? 0.7 : 0.35), gy + 0.45, e.z + Math.sin(a) * (e.big ? 0.7 : 0.35),
+        { count: 1, color, speed: e.big ? 2.2 : 1.4, life: 0.38, size: e.big ? 0.62 : 0.4, spread: 0.05, up: e.big ? 2.8 : 1.8 });
+    }
+  }
+
+  _flashUnit(rec, pulse) {
+    const body = rec.mesh?.userData?.body;
+    if (!body) return;
+    if (pulse <= 0.02) {
+      if (!rec._lit) return;
+      rec._lit = false;
+    } else rec._lit = true;
+    body.traverse((o) => {
+      if (!o.isMesh || o.userData.ink || !o.material?.emissive) return;
+      const mat = o.material;
+      if (!mat.userData.flashBase) {
+        mat.userData.flashBase = mat.emissive.clone();
+        mat.userData.flashBaseI = mat.emissiveIntensity || 0;
+      }
+      if (pulse > 0.02) {
+        mat.emissive.copy(mat.userData.flashBase).lerp(_flashWhite, Math.min(1, pulse));
+        mat.emissiveIntensity = mat.userData.flashBaseI + pulse * 1.4;
+      } else {
+        mat.emissive.copy(mat.userData.flashBase);
+        mat.emissiveIntensity = mat.userData.flashBaseI;
+      }
+    });
   }
 
   // Kick a living unit into a visible attack pose on the exact shot event.
@@ -5550,7 +5763,7 @@ class App {
         const head = rec.mesh.userData.head;
         if (head) {
           head.rotation.y = Math.atan2(tx - fx, tz - fz);
-          rec.recoil = 0.16;
+          rec.recoil = 0.07;
         }
         return;
       }
@@ -5598,11 +5811,16 @@ class App {
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    // Crit hitstop freezes the picture for ~40ms. The sim still steps on dt,
+    // so the lockstep hash does not move.
+    const frozen = (this._hitstop || 0) > 0;
+    if (this._hitstop > 0) this._hitstop = Math.max(0, this._hitstop - dt);
+    const motion = frozen ? 0 : dt;
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
-    this._updateCamera(dt);
+    this._updateCamera(motion);
 
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
@@ -5628,7 +5846,7 @@ class App {
       this._consumeEvents();
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
-      this._syncUnits(t, dt);
+      this._syncUnits(t, motion);
       this._syncNests(t);
       this._syncLoot(t);
       this._syncPlots(t);
@@ -5637,15 +5855,13 @@ class App {
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
         m.userData.flag.rotation.y = Math.sin(t * 2.5) * 0.3;
-        const ph = (t * 0.8) % 1;
-        m.userData.ring.scale.setScalar(1 + ph * 0.25);
-        m.userData.ring.material.opacity = 0.55 * (1 - ph * 0.6);
       }
       this._surveySites();
       this._updateBlockedHint(dt);
       this._updateBlockFx(dt);
       this._updateCoins(t);
-      this._updateZombieMeshes(t, dt);
+      this._markTowerRange();
+      this._updateZombieMeshes(t, motion);
       this._updateBars();
       this._updateNodeMarkers(t);
       this._updateDayNight(dt);
@@ -5657,13 +5873,11 @@ class App {
       for (const rec of this.buildingMeshes.values()) {
         const age = t - (rec.spawnT || 0);
         const art = buildingArtState(rec.b, age);
-        if (art.phase === 'constructing') {
-          const k = clamp(age / 0.7, 0, 1);
-          const eased = 1 - (1 - k) ** 3;
-          rec.mesh.scale.set(0.86 + eased * 0.14, 0.08 + eased * 0.92, 0.86 + eased * 0.14);
-        } else rec.mesh.scale.setScalar(1);
+        const pop = buildPop(age, !!rec.upgraded);
+        if (pop.live) rec.mesh.scale.set(pop.x, pop.y, pop.z);
+        else rec.mesh.scale.set(1, 1, 1);
         if (rec.impact) {
-          rec.impact.t -= dt;
+          rec.impact.t -= motion;
           const p = Math.sin(clamp(1 - rec.impact.t / rec.impact.dur, 0, 1) * Math.PI);
           rec.mesh.rotation.z = p * 0.045;
           rec.mesh.scale.x *= 1 + p * 0.04;
@@ -5686,13 +5900,35 @@ class App {
           const flicker = art.phase === 'critical' ? (0.28 + Math.max(0, Math.sin(t * 17 + rec.b.id)) * 0.72) : 1;
           if (art.phase === 'critical' && material.emissive) material.emissive.lerp(new THREE.Color(0xff321f), 0.72);
           material.emissiveIntensity = art.phase === 'critical' ? Math.max(0.5, baseIntensity) * flicker : baseIntensity;
-          material.transparent = art.phase === 'constructing';
-          material.opacity = art.phase === 'constructing' ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
+          const rising = art.phase === 'constructing' && !rec.upgraded;
+          material.transparent = rising;
+          material.opacity = rising ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
+        }
+        if (rec.upgraded && age < 0.24) {
+          const f = 1 - age / 0.24;
+          for (const material of rec.materials || []) {
+            if (!material.emissive) continue;
+            material.emissive.lerp(_flashWhite, f * 0.75);
+            material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 0.4 + f);
+          }
         }
         if (rec.recoil > 0) {
-          rec.recoil -= dt;
+          rec.recoil -= motion;
           const head = rec.mesh.userData.head;
-          if (head) head.position.z = -Math.max(0, rec.recoil) * 0.8;
+          if (head) head.position.z = -Math.max(0, rec.recoil) * 3.2;
+        }
+        const headBeat = rec.mesh.userData.head;
+        if (rec.beat > 0 && headBeat) {
+          rec.beat -= dt;
+          if (headBeat.userData.restScale == null) headBeat.userData.restScale = headBeat.scale.x || 1;
+          const k = Math.max(0, rec.beat / 0.14);
+          const s = headBeat.userData.restScale * (1 + Math.sin(k * Math.PI) * 0.1);
+          headBeat.scale.set(s, s, headBeat.userData.restScale * (1 + k * 0.12));
+          rec._beatOn = true;
+        } else if (rec._beatOn && headBeat) {
+          rec._beatOn = false;
+          const rest = headBeat.userData.restScale || 1;
+          headBeat.scale.set(rest, rest, rest);
         }
         const ud = rec.mesh.userData;
         if (ud.rotor) ud.rotor.rotation.z = t * 1.5;
@@ -5713,10 +5949,10 @@ class App {
         this._setWaveMarkers(markerNest ? [[markerNest.x, markerNest.z]] : []);
       }
       for (const m of this.waveMarkers) {
-        const ring = m.userData.ring;
+        const pillar = m.children[0];
+        if (!pillar) continue;
         const ph = (t * 1.2) % 1;
-        ring.scale.setScalar(1 + ph * 1.6);
-        ring.material.opacity = 0.55 * (1 - ph);
+        pillar.material.opacity = 0.28 * (1 - ph * 0.45);
       }
 
       // Smoke from damaged buildings.
@@ -5757,15 +5993,14 @@ class App {
             const cost = Math.max(1, Math.ceil(act.cost - paid));
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const [sx, sz] = this.game.payPoint(plot, mh);
+            const onSite = (mh.x - sx) ** 2 + (mh.z - sz) ** 2 < 2.6 * 2.6;
             const buildKey = keyLabel(this.binds().dodge);
-            const buildAltKey = keyLabel(this.binds().build);
-            const overlayKey = keyLabel(this.binds().build_mode);
-            hint = mh.payHold
-              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
-              : buildMode
-                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
-                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+            hint = buildMode && onSite
+              ? (mh.payHold
+                ? (this.game.gold < 1 ? 'Purse empty' : `${cost} to go`)
+                : `Hold <kbd>${buildKey}</kbd> — ${verb} <b>${name}</b> (${cost})`)
+              : null;
           }
         }
       }
@@ -5788,12 +6023,19 @@ class App {
       }
     }
 
-    this._updateParticles(dt);
-    this._updateCorpses(dt);
-    this._updatePayCoins(dt);
-    this._updateProjectiles(dt);
-    this._updateAbilityFx(dt);
-    this.tacticalVisuals.update(dt);
+    if (this._waveWatch && this.game) {
+      let living = 0;
+      for (const z of this.game.zombies) if (!z.dead) living++;
+      if (living > (this._waveBase || 0) + 2) this._waveHot = true;
+      if (waveCleared(living, this._waveBase || 0, this._waveHot)) this._waveEndVisual();
+    }
+    if (this.combatFx) this.combatFx.update(motion);
+    this._updateParticles(motion);
+    this._updateCorpses(motion);
+    this._updatePayCoins(motion);
+    this._updateProjectiles(motion);
+    this._updateAbilityFx(motion);
+    this.tacticalVisuals.update(motion);
     this.tacticalVisuals.render();
     this._renderCharacterPreview(t);
   }

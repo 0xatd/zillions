@@ -21,7 +21,9 @@ export function unitPose(state, phase, cues = {}) {
     case 'cast':
       return { y: pulse * 0.16, z: -pulse * 0.06, pitch: -pulse * 0.2, roll: cycle * 0.035, stride: 0 };
     case 'hit':
-      return { y: 0.03, z: -pulse * 0.22, pitch: pulse * 0.34, roll: -pulse * 0.2, stride: 0 };
+      // A short shove back and a flinch. Presentation only — the sim position
+      // stays where the hit resolver put it.
+      return { y: 0.02, z: -pulse * 0.36, pitch: pulse * 0.42, roll: -pulse * 0.28, stride: 0 };
     case 'down':
       return { y: -0.12, z: 0, pitch: 0, roll: Math.PI * 0.48, stride: 0 };
     default:

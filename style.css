@@ -6,7 +6,7 @@
   --gold: #ffd75e;
   --danger: #ff5d52;
   --good: #59ff9c;
-  --command-height: 190px;
+  --command-height: 93px;
   --command-gap: 12px;
   --minimap-size: 190px;
 }
@@ -96,6 +96,36 @@ body::after {
   z-index: 12;
 }
 #banner.show { opacity: 1; transform: translateX(-50%) scale(1); }
+#banner.titlecard {
+  top: 56px;
+  width: min(360px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 12px 8px;
+  border-radius: 8px;
+  background: rgba(10, 12, 16, 0.5);
+  border: 1px solid rgba(255, 215, 94, 0.28);
+  animation: titleFade 3s ease forwards;
+  transition: none;
+}
+#banner.titlecard .banner-title {
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+}
+#banner.titlecard .banner-detail {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+@keyframes titleFade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  14% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  72% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+}
 #banner.bad { color: var(--danger); }
 #banner.location {
   top: 82px;
@@ -131,6 +161,38 @@ body::after {
   line-height: 1.45;
   font-weight: 500;
 }
+#banner.moment {
+  top: 16vh;
+  width: min(640px, calc(100vw - 28px));
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 22px 18px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(12, 14, 18, 0.9), rgba(12, 14, 18, 0.62));
+  border: 1px solid rgba(255, 215, 94, 0.5);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+#banner.moment .banner-title {
+  font-size: clamp(26px, 4.2vw, 46px);
+  letter-spacing: 0.06em;
+}
+#banner.moment.win { border-color: rgba(89, 255, 156, 0.62); }
+#banner.moment.win .banner-title { color: #9dffc4; }
+#banner.moment.lose { border-color: rgba(255, 93, 82, 0.66); }
+#banner.moment.lose .banner-title { color: #ffb2ab; }
+#banner.moment.wave .banner-eyebrow { color: #ffb15a; }
+@media (max-width: 720px) {
+  #banner.moment {
+    top: 64px;
+    width: calc(100vw - 16px);
+    padding: 12px 12px 14px;
+  }
+  #banner.moment .banner-title { font-size: 26px; letter-spacing: 0.04em; }
+  #banner.moment .banner-detail { font-size: 13px; }
+}
 
 #messages {
   position: absolute; left: 14px; top: 58px;
@@ -158,11 +220,11 @@ body::after {
   bottom: var(--command-gap);
   height: var(--command-height);
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
-  gap: 8px;
-  padding: 10px;
-  background: rgba(12, 16, 22, 0.9);
-  border: 1px solid rgba(201, 164, 74, 0.42);
+  grid-template-rows: 26px minmax(0, 1fr);
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(12, 16, 22, 0.28);
+  border: 1px solid rgba(201, 164, 74, 0.22);
   border-radius: 10px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
   z-index: 10;
@@ -181,8 +243,9 @@ body::after {
 }
 .rallyhints b { color: var(--gold); }
 .armystatus {
+  display: none;
   min-width: 0; text-align: center;
-  display: flex; align-items: center; justify-content: center;
+  align-items: center; justify-content: center;
   padding: 4px 10px; border-radius: 7px;
   color: #dfe8dd; font-size: 12px;
   background: rgba(10, 14, 20, 0.45);
@@ -300,7 +363,8 @@ body::after {
 
 /* army stance chips */
 #stancebar .stance {
-  cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
+  cursor: pointer; padding: 2px 7px; border-radius: 6px; border: 1px solid transparent;
+  font-size: 11px;
   transition: all 0.12s; white-space: nowrap;
 }
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
@@ -343,8 +407,8 @@ body::after {
 .uppips { font-size: 10.5px; color: #9fd6ff; letter-spacing: 1px; margin-top: 3px; }
 
 @media (max-width: 900px), (max-height: 650px) {
-  :root { --command-height: 132px; --command-gap: 8px; --minimap-size: 132px; }
-  #actionbar { padding: 7px; grid-template-rows: 28px minmax(0, 1fr); gap: 6px; }
+  :root { --command-height: 99px; --command-gap: 8px; --minimap-size: 132px; }
+  #actionbar { padding: 5px 7px; grid-template-rows: 22px minmax(0, 1fr); gap: 4px; background: rgba(12, 16, 22, 0.28); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22); }
   .commandtop { grid-template-columns: 1fr 112px; }
   .armystatus { display: none; }
   .actionmain,
@@ -388,11 +452,13 @@ body::after {
 
 /* hold-B build prompt */
 #buildhint {
-  position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px);
-  background: var(--panel); border: 1px solid rgba(255, 215, 94, 0.5);
-  border-radius: 10px; padding: 7px 14px;
-  font-size: 13px; color: #ffe9a8; text-align: center;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  position: absolute; left: 50%; bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: max-content; max-width: min(420px, 70vw);
+  background: rgba(12, 16, 22, 0.55); border: 1px solid rgba(255, 215, 94, 0.35);
+  border-radius: 8px; padding: 4px 10px;
+  font-size: 12px; color: #ffe9a8; text-align: center;
+  box-shadow: none;
 }
 #buildhint kbd {
   display: inline-block; padding: 1px 7px; margin: 0 2px;
@@ -723,7 +789,11 @@ body::after {
 .panel.lose h1 { color: var(--danger); text-shadow: 0 0 30px rgba(255, 93, 82, 0.3); }
 .panel.win h1 { color: var(--good); text-shadow: 0 0 30px rgba(89, 255, 156, 0.3); }
 /* Keep retry/continue reachable on short screens. */
-.endpanel { display: flex; flex-direction: column; }
+.endpanel { display: flex; flex-direction: column; animation: endMoment 0.48s cubic-bezier(.16, 1.15, .32, 1) both; }
+@keyframes endMoment {
+  from { opacity: 0; transform: translateY(22px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
 .endpanel .startbtn {
   position: sticky; bottom: 0; margin-top: auto; padding: 16px 22px;
   box-shadow: 0 -12px 18px -10px rgba(0, 0, 0, 0.7), 0 20px 60px rgba(0, 0, 0, 0.6);
@@ -938,15 +1008,22 @@ body::after {
 }
 #boss-fill { height: 100%; background: linear-gradient(90deg, #7c1f1f, #e6493a); transition: width 0.2s; }
 .combat-alert {
-  position: absolute; top: 92px; right: 16px; z-index: 11; width: min(340px, calc(100vw - 32px));
-  display: flex; gap: 10px; align-items: center; padding: 10px 12px;
-  border: 1px solid rgba(255, 190, 92, .55); border-radius: 10px;
-  background: rgba(19, 15, 10, .88); box-shadow: 0 8px 26px rgba(0,0,0,.4); pointer-events: none;
+  position: absolute; top: 64px; right: 12px; z-index: 11; width: min(220px, calc(100vw - 24px));
+  display: flex; gap: 6px; align-items: center; padding: 5px 8px;
+  border: 1px solid rgba(255, 190, 92, .4); border-radius: 7px;
+  background: rgba(19, 15, 10, .55); box-shadow: none; pointer-events: none;
+  animation: tipFade 4s ease forwards;
 }
-.combat-alert > span { font-size: 24px; }
-.combat-alert div { display: flex; flex-direction: column; gap: 2px; }
-.combat-alert b { color: #ffd78a; font-size: 12px; letter-spacing: .12em; }
-.combat-alert small { color: #f0e6d3; font-size: 12px; line-height: 1.35; }
+.combat-alert > span { font-size: 14px; }
+.combat-alert div { display: flex; flex-direction: column; gap: 1px; }
+.combat-alert b { color: #ffd78a; font-size: 10px; letter-spacing: .08em; }
+.combat-alert small { color: #f0e6d3; font-size: 10px; line-height: 1.25; }
+@keyframes tipFade {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .combat-alert.critical { border-color: rgba(255,93,82,.75); background: rgba(35,10,9,.92); }
 .combat-alert.critical b { color: #ff8c82; }
 .combat-alert.boss { border-color: rgba(213,134,255,.7); background: rgba(25,10,33,.92); }
@@ -1821,15 +1898,15 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 #topbar .tbtn { transform: scale(0.88); }
 #minimap-wrap { border-width: 1px; border-color: rgba(255, 255, 255, 0.18); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
 @media (min-width: 901px) and (min-height: 651px) {
-  :root { --command-height: 118px; --command-gap: 10px; --minimap-size: 128px; }
+  :root { --command-height: 89px; --command-gap: 10px; --minimap-size: 128px; }
   #actionbar {
     right: auto;
     width: min(880px, calc(100vw - var(--command-gap) * 3 - var(--minimap-size)));
-    grid-template-rows: 26px minmax(0, 1fr);
-    gap: 5px; padding: 6px;
-    background: rgba(12, 16, 22, 0.62);
+    grid-template-rows: 22px minmax(0, 1fr);
+    gap: 4px; padding: 5px 6px;
+    background: rgba(12, 16, 22, 0.28);
     border-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
   }
   .commandtop { grid-template-columns: minmax(250px, 360px) 110px minmax(180px, 1fr); gap: 5px; }
   .rallyhints, .armystatus, .mode-toggle span { font-size: 11px; }

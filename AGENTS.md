@@ -139,6 +139,7 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/lanes.js`: deterministic lane graph.
 - `src/flowfield.js`: pathfinding fields.
 - `src/main.js`: runtime composition, renderer, input, saves, and co-op.
+- `src/juice.js`: presentation-only pops, hit recoil, wave cues, and end beats.
 - `src/ui.js`: menus, room UI, HUD, and overlays.
 - `src/online.js`: Supabase lobby, rooms, seats, and signaling.
 - `src/net.js`: WebRTC transport and diagnostics.

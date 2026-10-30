@@ -4428,24 +4428,28 @@ export class Game {
       // regardless of how often each client's HUD happens to re-render.
       const hitDmg = () => {
         let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
+        let crit = false;
         const critChance = (u.hero ? (w.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
         if (critChance > 0 && this.rng() < critChance) {
           // Critical damage comes from the weapon AND from everything the hero
           // is carrying or has allocated. Reading only the weapon made every
           // relay and doctrine that grants critical damage do nothing.
+          crit = true;
           const critMult = u.hero
             ? (w.critMult || 1.75) + ((u.mods && u.mods.critMult) || 0)
             : 1.75;
           dmg *= critMult;
         }
-        return dmg;
+        // Same roll, same damage. `crit` is presentation-only.
+        return { dmg, crit };
       };
       if (u.target && !u.target.dead && u.cooldown <= 0) {
         const zb = u.target;
         if (dist2(u.x, u.z, zb.x, zb.z) <= attackRange * attackRange) {
           u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
-          const dmg = hitDmg();
+          const rolled = hitDmg();
+          const dmg = rolled.dmg;
           this.damageZombie(zb, dmg, u.x, u.z, w.types || null, u.hero ? u.mods : null);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (w.splash) {
@@ -4456,7 +4460,7 @@ export class Game {
             }
           }
           const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale, dmg, crit: rolled.crit, dtype: leadDamageType(w.types) });
           if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
@@ -4464,9 +4468,10 @@ export class Game {
         if (dist2(u.x, u.z, n.x, n.z) <= (attackRange + 2.5) ** 2) {
           u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(n.x - u.x, n.z - u.z);
-          this._damageNest(n, hitDmg());
+          const nestHit = hitDmg();
+          this._damageNest(n, nestHit.dmg);
           const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7, targetKind: 'nest' });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: n.x, tz: n.z, fy: u.hero ? 0.9 : 0.7, targetKind: 'nest', dmg: nestHit.dmg, crit: nestHit.crit, dtype: leadDamageType(w.types) });
           if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       }
@@ -4704,10 +4709,11 @@ export class Game {
           for (const zb of this.zombies) {
             if (!zb.dead && dist2(best.x, best.z, zb.x, zb.z) <= s2) this.damageZombie(zb, tdmg, b.cx, b.cz);
           }
-          this.emit({ type: 'shot', kind: b.kind === 'outpost' ? shotKind : 'flame', buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale });
+          const kind = b.kind === 'outpost' ? shotKind : 'flame';
+          this.emit({ type: 'shot', kind, buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale, dmg: tdmg, crit: false, dtype: kind === 'flame' ? 'thermal' : 'kinetic' });
         } else {
           this.damageZombie(best, tdmg, b.cx, b.cz);
-          this.emit({ type: 'shot', kind: shotKind, buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale });
+          this.emit({ type: 'shot', kind: shotKind, buildingId: b.id, fx: b.cx, fz: b.cz, tx: best.x, tz: best.z, fy: shotY, targetScale: best.def.scale, dmg: tdmg, crit: false, dtype: 'kinetic' });
         }
         b.lastTx = best.x; b.lastTz = best.z;
         this.wakeZombies(b.cx, b.cz, b.kind === 'outpost' ? 7 : 9);
@@ -4725,6 +4731,17 @@ export class Game {
     for (const zb of this.zombies) if (zb.state === AGGRO) n++;
     return n;
   }
+}
+
+// Dominant damage type for a cosmetic hit tint. Not consulted by combat math.
+function leadDamageType(types) {
+  if (!types) return 'kinetic';
+  let best = 'kinetic', share = -1;
+  for (const key of DAMAGE_TYPES) {
+    const s = types[key] || 0;
+    if (s > share) { share = s; best = key; }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
