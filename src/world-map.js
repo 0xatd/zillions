@@ -201,18 +201,20 @@ function territoryColor(biome, dir, sites, culture) {
     else if (dot > second) { second = dot; other = site; }
   }
   const fill = (site) => {
-    if (site.state === 'completed') return mixHex(biome, culture, 0.9);
-    if (site.state === 'locked') return hash(dir.x * 19 + dir.z * 7) > 0.62 ? 0x6c3488 : 0x431860;
-    if (site.placeholder || site.state === 'soon') return mixHex(0x24303e, biome, 0.22);
+    if (site.state === 'completed') return mixHex(biome, culture, 0.4);
+    if (site.state === 'locked') return mixHex(biome, 0x6a348c, 0.42);
+    if (site.placeholder || site.state === 'soon') return mixHex(biome, 0x1c2633, 0.38);
     return biome;
   };
   const a = fill(nearest);
-  const b = fill(other);
   const gap = best - second;
-  const band = 0.28;
-  if (gap >= band) return a;
-  const t = gap / band;
-  return mixHex(b, a, 0.42 + t * 0.58);
+  const meets = nearest.state !== other.state
+    && (nearest.state === 'completed' || nearest.state === 'locked' || other.state === 'completed' || other.state === 'locked');
+  if (meets && gap < 0.038) {
+    const glow = nearest.state === 'completed' ? 0xfff0a8 : nearest.state === 'locked' ? 0xe4b0ff : 0xfff6d0;
+    return mixHex(a, glow, 0.78);
+  }
+  return a;
 }
 
 function buildGlobe(radius, kind, sites, culture) {
@@ -282,17 +284,19 @@ function makePin(site) {
   roof.position.y = 0.2;
   group.add(base, tower, roof);
   const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(0.04, 8, 6),
+    new THREE.SphereGeometry(0.03, 8, 6),
     new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
-  glow.position.y = 0.26;
+  glow.position.y = 0.12;
+  glow.visible = false;
   group.add(glow);
   const lock = new THREE.Group();
   lock.add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.07, 0.04), new THREE.MeshLambertMaterial({ color: 0xd5dbe6 })));
   const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.01, 6, 8, Math.PI), new THREE.MeshLambertMaterial({ color: 0xf4f7fb }));
   shackle.position.y = 0.05;
   lock.add(shackle);
-  lock.position.y = 0.18;
+  lock.position.y = 0.02;
+  lock.scale.setScalar(0.72);
   lock.visible = false;
   group.add(lock);
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 4), new THREE.MeshLambertMaterial({ color: 0xf4efe4 }));
@@ -314,16 +318,21 @@ function makePin(site) {
   return group;
 }
 
-function scatterCreep(site, radius) {
+function seatOn(kind, dir, radius, lift = 0.01) {
+  const { height } = sampleSurface(kind, dir);
+  return dir.clone().multiplyScalar(radius * (1 + height) + lift);
+}
+
+function scatterCreep(kind, site, radius) {
   const motes = [];
-  for (let i = 0; i < 10; i++) {
-    const lat = site.lat + (hash(i + 2) - 0.5) * 0.45;
-    const lon = site.lon + (hash(i + 9) - 0.5) * 0.45;
+  for (let i = 0; i < 8; i++) {
+    const lat = site.lat + (hash(i + 2) - 0.5) * 0.28;
+    const lon = site.lon + (hash(i + 9) - 0.5) * 0.28;
     const mote = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.035 + hash(i) * 0.03, 0),
-      new THREE.MeshLambertMaterial({ color: 0x4a1860, emissive: 0x2a0838, emissiveIntensity: 0.6 }),
+      new THREE.IcosahedronGeometry(0.028 + hash(i) * 0.018, 0),
+      new THREE.MeshLambertMaterial({ color: 0x3a1450, emissive: 0x140418, emissiveIntensity: 0.2 }),
     );
-    mote.position.copy(dirOf(lat, lon).multiplyScalar(radius * 1.03));
+    mote.position.copy(seatOn(kind, dirOf(lat, lon), radius, 0.015));
     mote.userData.phase = i;
     motes.push(mote);
   }
@@ -367,12 +376,13 @@ function buildPlanet(def, layout) {
   }
   const pins = sites.map((site) => {
     const pin = makePin(site);
-    pin.position.copy(site.dir.clone().multiplyScalar(layout.radius * 1.08));
+    pin.position.copy(seatOn(def.id, site.dir, layout.radius, 0.008));
     pin.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), site.dir);
     pin.scale.setScalar(1);
     spin.add(pin);
     const plate = plateSprite(site.name, site.state);
-    plate.position.copy(site.dir.clone().multiplyScalar(layout.radius * 1.34));
+    plate.position.copy(seatOn(def.id, site.dir, layout.radius, layout.radius * 0.22));
+    plate.renderOrder = 12;
     spin.add(plate);
     pin.userData.plate = plate;
     return pin;
@@ -380,7 +390,7 @@ function buildPlanet(def, layout) {
   const creep = [];
   for (const site of sites) {
     if (site.placeholder) continue;
-    for (const mote of scatterCreep(site, layout.radius)) {
+    for (const mote of scatterCreep(def.id, site, layout.radius)) {
       spin.add(mote);
       mote.userData.site = site;
       creep.push(mote);
@@ -513,14 +523,16 @@ export class WorldMap {
     const stars = new Float32Array(280 * 3);
     for (let i = 0; i < 280; i++) {
       const a = hash(i) * Math.PI * 2;
-      const r = 12 + hash(i + 3) * 16;
-      stars[i * 3] = Math.cos(a) * r;
-      stars[i * 3 + 1] = (hash(i + 7) - 0.45) * 14;
-      stars[i * 3 + 2] = Math.sin(a) * r * 0.65 - 4;
+      const u = hash(i + 3);
+      stars[i * 3] = Math.cos(a) * (4 + u * 26);
+      stars[i * 3 + 1] = (hash(i + 7) - 0.5) * 18;
+      stars[i * 3 + 2] = -22 - hash(i + 11) * 18;
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3));
-    this.scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xe7eef8, size: 0.05, fog: false })));
+    this.scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+      color: 0xe7eef8, size: 0.16, sizeAttenuation: true, fog: false,
+    })));
 
     this.planets = STAR_SYSTEM.map((def) => buildPlanet(def, LAYOUT[def.id]));
     for (const planet of this.planets) this.scene.add(planet.root);
@@ -602,7 +614,7 @@ export class WorldMap {
         root.position.y -= fitted.min.y;
         return root;
       };
-      const hiveRoot = fit(hive, 0.34);
+      const hiveRoot = fit(hive, 0.13);
       hiveRoot.traverse((obj) => {
         if (!obj.isMesh) return;
         obj.material.color.setHex(0x7a3c96);
@@ -612,8 +624,8 @@ export class WorldMap {
       const meteorRoot = fit(meteor, 0.26);
       const rockRoot = fit(rock, 0.3);
       this._props = {
-        keep: fit(keep, 0.4),
-        dish: fit(dish, 0.34),
+        keep: fit(keep, 0.16),
+        dish: fit(dish, 0.15),
         hive: hiveRoot,
       };
       for (const planet of this.planets) planet.pins.forEach((pin) => this._stylePin(pin));
@@ -795,16 +807,12 @@ export class WorldMap {
       }
       planet.pins.forEach((pin, index) => {
         const site = planet.sites[index];
-        const pulse = site.state === 'open' ? 0.4 + Math.sin(this._t * 3.4 + index) * 0.28 : 0;
-        pin.userData.glow.material.opacity = pulse;
+        const pulse = site.state === 'open' ? 1 + Math.sin(this._t * 3.4 + index) * 0.06 : 1;
+        pin.scale.setScalar(pulse);
+        pin.userData.glow.visible = false;
         const hot = this.hoverKey === this._key(planet, site);
         const plate = pin.userData.plate;
-        if (plate) {
-          const outward = site.dir.clone().applyQuaternion(planet.spin.quaternion);
-          const view = new THREE.Vector3().subVectors(this.camera.position, planet.root.position).normalize();
-          plate.visible = outward.dot(view) > 0.12;
-          plate.scale.set(hot ? 0.26 : 0.2, hot ? 0.065 : 0.05, 1);
-        }
+        if (plate) plate.scale.set(hot ? 0.24 : 0.19, hot ? 0.06 : 0.048, 1);
       });
       for (const mote of planet.creep) {
         if (!mote.visible) continue;
@@ -813,17 +821,57 @@ export class WorldMap {
       }
     }
     const system = new THREE.Vector3(Math.sin(this._t * 0.05) * 0.3, 2.5, 15.2);
-    const close = focus.root.position.clone().add(new THREE.Vector3(0.15, focus.radius * 0.28, focus.radius * 2.45));
+    const close = focus.root.position.clone().add(new THREE.Vector3(0.05, focus.radius * 0.08, focus.radius * 3.05));
     const lookFar = new THREE.Vector3(0, 0.1, 0);
     const lookNear = focus.root.position.clone();
     const k = ease(this.zoom);
     for (const route of this.routes) route.visible = k < 0.35;
     this.camera.position.lerpVectors(system, close, k);
     this.camera.lookAt(lookFar.lerp(lookNear, k));
+    this._clampPlates();
     if (dt && this.hoverKey) {
       const planet = this.planets.find((entry) => entry.sites.some((site) => this._key(entry, site) === this.hoverKey));
       const site = planet?.sites.find((entry) => this._key(planet, entry) === this.hoverKey);
       if (site) this._emitSite(planet, site, this._hoverEvent || null);
+    }
+  }
+
+  _clampPlates() {
+    this.camera.updateMatrixWorld();
+    const cot = 1 / Math.tan((this.camera.fov * Math.PI / 180) / 2);
+    const aspect = this.camera.aspect || 1;
+    const margin = 0.05;
+    const outward = new THREE.Vector3();
+    const view = new THREE.Vector3();
+    const ndc = new THREE.Vector3();
+    const focus = this.planets[this.planetIndex];
+    for (const planet of this.planets) {
+      if (this.zoom > 0.4 && planet !== focus) {
+        for (const pin of planet.pins) if (pin.userData.plate) pin.userData.plate.visible = false;
+        continue;
+      }
+      planet.root.updateWorldMatrix(true, true);
+      view.subVectors(this.camera.position, planet.root.position).normalize();
+      for (const pin of planet.pins) {
+        const plate = pin.userData.plate;
+        const site = pin.userData.site;
+        if (!plate) continue;
+        outward.copy(site.dir).applyQuaternion(planet.spin.quaternion);
+        const facing = outward.dot(view) > 0.05;
+        plate.visible = facing;
+        if (!facing) continue;
+        ndc.copy(pin.getWorldPosition(ndc)).project(this.camera);
+        if (ndc.z < -1 || ndc.z > 1) { plate.visible = false; continue; }
+        const halfW = plate.scale.x * cot / (2 * aspect);
+        const halfH = plate.scale.y * cot / 2;
+        ndc.y += halfH + 0.03;
+        const maxX = Math.max(0, 1 - halfW - margin);
+        const maxY = Math.max(0, 1 - halfH - margin);
+        ndc.x = Math.max(-maxX, Math.min(maxX, ndc.x));
+        ndc.y = Math.max(-maxY, Math.min(maxY, ndc.y));
+        ndc.unproject(this.camera);
+        plate.position.copy(planet.spin.worldToLocal(ndc));
+      }
     }
   }
 
