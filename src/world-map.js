@@ -76,41 +76,95 @@ function sphereDir(u, v) {
   return new THREE.Vector3(-Math.cos(phi) * st, Math.cos(theta), Math.sin(phi) * st);
 }
 
+function cellHash(ix, iy, iz, salt) {
+  return hash(ix * 19.1 + iy * 47.3 + iz * 13.7 + salt);
+}
+
+function crackDistance(dir) {
+  const scale = 5.4;
+  const px = dir.x * scale;
+  const py = dir.y * scale;
+  const pz = dir.z * scale;
+  const ix = Math.floor(px);
+  const iy = Math.floor(py);
+  const iz = Math.floor(pz);
+  let best = 1e9;
+  let second = 1e9;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const jx = ix + dx;
+        const jy = iy + dy;
+        const jz = iz + dz;
+        const cx = jx + cellHash(jx, jy, jz, 1.3);
+        const cy = jy + cellHash(jx, jy, jz, 4.9);
+        const cz = jz + cellHash(jx, jy, jz, 8.2);
+        const d = (px - cx) ** 2 + (py - cy) ** 2 + (pz - cz) ** 2;
+        if (d < best) { second = best; best = d; }
+        else if (d < second) second = d;
+      }
+    }
+  }
+  return Math.sqrt(second) - Math.sqrt(best);
+}
+
 function sample(kind, dir) {
   const lat = Math.asin(Math.max(-1, Math.min(1, dir.y)));
   const n = fbm(dir.x * 1.55, dir.y * 1.45, dir.z * 1.55);
   const ridge = fbm(dir.x * 3.3 + 4.2, dir.y * 3.1, dir.z * 3.3 + 1.7);
   const fine = fbm(dir.x * 6.4 + 2, dir.y * 6.2, dir.z * 6.4);
   if (kind === 'verdant') {
-    const field = n * 0.78 + ridge * 0.22;
-    const coast = field - 0.5;
-    const ice = Math.abs(lat) > 1.05;
-    const mountain = coast > 0.08 && ridge > 0.62;
-    let color = coast < 0
-      ? lerpColor([18, 92, 168], [8, 48, 112], Math.min(1, -coast * 5))
-      : lerpColor([46, 150, 78], [24, 96, 52], fine);
-    if (mountain) color = lerpColor(color, [138, 146, 118], 0.65);
-    if (ice) color = lerpColor(color, [236, 244, 248], Math.min(1, (Math.abs(lat) - 1.02) * 6));
-    const height = (coast > 0 ? 0.01 + coast * 0.045 : coast * 0.02) + (mountain ? 0.02 : 0) + (ice ? 0.008 : 0);
-    return { height, color, rough: coast < 0 ? 0.16 : 0.86, emis: 0 };
+    const field = n * 0.72 + ridge * 0.28;
+    const coast = field - 0.48;
+    const elev = Math.max(0, coast);
+    const dry = fbm(dir.x * 1.15 + 11, dir.y * 1.05, dir.z * 1.15 + 6);
+    const polar = Math.max(0, Math.min(1, (Math.abs(lat) - 1.28) / 0.18));
+    let color;
+    let rough = 0.86;
+    if (coast < 0) {
+      color = lerpColor([24, 118, 184], [8, 46, 112], Math.min(1, -coast * 4));
+      rough = 0.12;
+    } else if (elev < 0.025) {
+      color = lerpColor([196, 170, 112], [64, 138, 68], elev / 0.025);
+      rough = 0.72;
+    } else if (elev > 0.1 && ridge > 0.68) {
+      const peak = Math.min(1, (elev - 0.1) / 0.07);
+      color = lerpColor([78, 64, 52], [150, 136, 118], peak * 0.75);
+      rough = 0.94;
+    } else if (dry > 0.63) {
+      color = lerpColor([176, 146, 84], [124, 108, 62], fine);
+      rough = 0.9;
+    } else if (fine < 0.42) {
+      color = lerpColor([16, 72, 36], [28, 92, 44], fine);
+      rough = 0.9;
+    } else {
+      color = lerpColor([34, 128, 58], [72, 158, 78], fine);
+    }
+    if (polar > 0) {
+      color = lerpColor(color, [228, 238, 244], polar);
+      rough = 0.4;
+    }
+    const height = (coast > 0 ? 0.006 + elev * 0.05 : coast * 0.016) + (elev > 0.1 && ridge > 0.68 ? 0.02 : 0);
+    return { height, color, rough, emis: 0 };
   }
   if (kind === 'mire') {
     const bog = n - 0.46;
     const color = bog < 0
-      ? lerpColor([18, 62, 54], [32, 78, 48], fine)
-      : lerpColor([58, 82, 40], [92, 104, 48], ridge);
+      ? lerpColor([22, 86, 74], [36, 92, 52], fine)
+      : lerpColor([52, 78, 36], [86, 98, 44], ridge);
     const height = bog * 0.03 + (ridge - 0.5) * 0.012;
-    return { height, color, rough: bog < 0 ? 0.42 : 0.9, emis: 0 };
+    return { height, color, rough: bog < 0 ? 0.14 : 0.88, emis: 0 };
   }
-  const crack = Math.abs(Math.sin(dir.x * 8.5 + dir.z * 6.2 + ridge * 4));
-  const lava = crack < 0.16 && n > 0.32;
-  let color = lerpColor([58, 36, 32], [92, 58, 46], ridge);
-  if (n > 0.72) color = lerpColor(color, [48, 32, 58], 0.45);
-  if (lava) color = [255, 92, 28];
+  const crack = crackDistance(dir);
+  const width = 0.035 + fine * 0.055;
+  const lava = crack < width;
+  const core = lava ? Math.max(0, 1 - crack / width) : 0;
+  let color = lerpColor([28, 20, 22], [52, 32, 30], ridge);
+  if (lava) color = lerpColor([140, 32, 12], [255, 150, 48], core);
   const dent = (ridge - 0.58) * 3.2;
   const crater = Math.exp(-(dent * dent));
-  const height = 0.012 + (n - 0.5) * 0.03 - crater * 0.035 + (lava ? -0.008 : 0);
-  return { height, color, rough: lava ? 0.35 : 0.88, emis: lava ? 1 : 0 };
+  const height = 0.01 + (n - 0.5) * 0.028 - crater * 0.03 - core * 0.01;
+  return { height, color, rough: lava ? 0.28 : 0.9, emis: core };
 }
 
 function lerpColor(a, b, t) {
@@ -174,30 +228,34 @@ function planetTextures(kind) {
 }
 
 function cloudTexture(kind) {
-  const W = 512;
-  const H = 256;
+  const W = 1024;
+  const H = 512;
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(W, H);
-  const bias = kind === 'mire' ? 0.42 : kind === 'cinder' ? 0.62 : 0.52;
-  const tint = kind === 'cinder' ? [120, 90, 80] : kind === 'mire' ? [186, 196, 170] : [255, 255, 255];
+  const bias = kind === 'mire' ? 0.4 : kind === 'cinder' ? 0.58 : 0.5;
+  const tint = kind === 'cinder' ? [140, 110, 96] : kind === 'mire' ? [196, 206, 184] : [255, 255, 255];
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const dir = sphereDir(x / W, y / H);
-      const n = fbm(dir.x * 2.2 + 9, dir.y * 2.2, dir.z * 2.2 + 3);
-      const band = Math.cos(Math.asin(Math.max(-1, Math.min(1, dir.y))) * 1.4);
-      const a = Math.max(0, n - bias) * (0.65 + band * 0.35) * (kind === 'cinder' ? 0.55 : 1);
+      const n = fbm(dir.x * 2.1 + 9, dir.y * 1.8, dir.z * 2.1 + 3);
+      const soft = ease((n - bias) / 0.22);
+      const band = 0.75 + 0.25 * Math.cos(Math.asin(Math.max(-1, Math.min(1, dir.y))) * 1.2);
+      const alpha = soft * band * (kind === 'cinder' ? 120 : 150);
       const i = (y * W + x) * 4;
       img.data[i] = tint[0];
       img.data[i + 1] = tint[1];
       img.data[i + 2] = tint[2];
-      img.data[i + 3] = Math.round(Math.min(1, a * 3.2) * 185);
+      img.data[i + 3] = Math.round(alpha);
     }
   }
   ctx.putImageData(img, 0, 0);
-  return canvasTexture(canvas, THREE.SRGBColorSpace);
+  const texture = canvasTexture(canvas, THREE.SRGBColorSpace);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
 }
 
 function territoryTexture() {
@@ -225,24 +283,18 @@ function territoryTexture() {
           else if (dot > second) { second = dot; other = site; }
         }
         const gap = best - second;
-        const edged = gap < 0.055
-          && nearest.state !== other.state
-          && (nearest.state === 'completed' || nearest.state === 'locked');
+        const inside = Math.min(1, gap / 0.09);
         let rgb = null;
         let alpha = 0;
-        if (edged) {
-          const glow = 1 - gap / 0.055;
-          rgb = nearest.state === 'completed' ? [255, 228, 150] : [214, 170, 245];
-          alpha = Math.round(70 + glow * 150);
-        } else if (nearest.state === 'completed') {
+        if (nearest.state === 'completed') {
           rgb = gold;
-          alpha = 78;
+          alpha = Math.round(48 * inside);
         } else if (nearest.state === 'locked') {
           rgb = hive;
-          alpha = 72;
+          alpha = Math.round(42 * inside);
         } else if (nearest.state === 'soon') {
-          rgb = [20, 28, 40];
-          alpha = 50;
+          rgb = [16, 22, 32];
+          alpha = Math.round(36 * inside);
         }
         const i = (y * W + x) * 4;
         if (rgb) {
@@ -282,8 +334,8 @@ function fresnelMaterial(color) {
       varying vec3 vWorld;
       void main() {
         vec3 viewDir = normalize(cameraPosition - vWorld);
-        float fresnel = pow(1.0 - abs(dot(normalize(vNormal), viewDir)), 3.1);
-        gl_FragColor = vec4(glow, fresnel * 0.72);
+        float fresnel = pow(1.0 - abs(dot(normalize(vNormal), viewDir)), 3.8);
+        gl_FragColor = vec4(glow, fresnel * 0.48);
       }
     `,
   });
@@ -315,18 +367,69 @@ function skyTexture() {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
-  for (let i = 0; i < 700; i++) {
-    const x = hash(i + 1) * 1024;
-    const y = hash(i + 9) * 512;
-    const s = hash(i + 4) > 0.92 ? 1.6 : 0.7;
-    ctx.fillStyle = `rgba(235, 242, 255, ${0.35 + hash(i + 6) * 0.65})`;
-    ctx.beginPath();
-    ctx.arc(x, y, s, 0, Math.PI * 2);
-    ctx.fill();
-  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
+}
+
+function starField() {
+  const count = 480;
+  const positions = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const phases = new Float32Array(count);
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const a = hash(i + 2) * Math.PI * 2;
+    const spread = 10 + hash(i + 5) * 42;
+    positions[i * 3] = Math.cos(a) * spread;
+    positions[i * 3 + 1] = (hash(i + 8) - 0.5) * 36;
+    positions[i * 3 + 2] = -26 - hash(i + 12) * 28;
+    sizes[i] = 1.4 + hash(i + 3) * 2.8;
+    phases[i] = hash(i + 15) * Math.PI * 2;
+    const tint = 0.82 + hash(i + 6) * 0.18;
+    colors[i * 3] = tint;
+    colors[i * 3 + 1] = tint * (0.94 + hash(i + 7) * 0.06);
+    colors[i * 3 + 2] = tint;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 } },
+    transparent: true,
+    depthWrite: false,
+    vertexColors: true,
+    vertexShader: `
+      attribute float size;
+      attribute float phase;
+      uniform float time;
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vColor = color;
+        vTwinkle = 0.7 + 0.3 * sin(time * 1.7 + phase);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = size * vTwinkle * (42.0 / max(1.0, -mv.z));
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vec2 p = gl_PointCoord - vec2(0.5);
+        float d = length(p);
+        if (d > 0.5) discard;
+        float core = smoothstep(0.5, 0.18, d);
+        gl_FragColor = vec4(vColor, core * vTwinkle);
+      }
+    `,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  return points;
 }
 
 function ignoreRaycast(mesh) {
@@ -610,6 +713,8 @@ export class WorldMap {
     ));
     this.sky = sky;
     this.scene.add(sky);
+    this.stars = starField();
+    this.scene.add(this.stars);
     this.scene.add(new THREE.HemisphereLight(0xc5d6f0, 0x2a241c, 0.55));
     const sun = new THREE.DirectionalLight(0xfff1d4, 1.65);
     sun.position.set(-8, 6, 10);
@@ -774,6 +879,7 @@ export class WorldMap {
   _applyMotion(dt) {
     const focus = this.planets[this.planetIndex];
     this.sky.rotation.y = this._t * 0.012;
+    this.stars.material.uniforms.time.value = this._t;
     for (const planet of this.planets) {
       planet.spin.rotation.y = this._t * planet.spinRate + planet.userSpin;
       planet.clouds.rotation.y = this._t * 0.045;
