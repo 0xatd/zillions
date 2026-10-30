@@ -33,7 +33,7 @@ import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh, buildingVisualScale } from './building-art.js';
-import { propRecord } from './prop-pack.js';
+import { buildRampartGroup, rampartReady } from './rampart-art.js';
 import { hologramMaterial, makeSurveyStake } from './survey-stakes.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
@@ -3926,13 +3926,20 @@ class App {
     this._ensurePlanWalls();
   }
 
-  // Unbought rampart as one chunky wall, with a tower at each gate. The
-  // bought wall replaces its own stretch. Presentation only.
+  // The rampart is one mesh per run: full wall where the stone stands, a low
+  // footing where it does not. Rebuilt only when that set changes.
   _ensurePlanWalls() {
     const g = this.game;
     if (!g || !g.plots || !this.map) return;
-    const built = g.plots.filter((p) => p.kind === 'wall' && p.tier > 0).map((p) => p.id).join(',');
-    const key = `${g.plots.length}:${built}`;
+    let alive = 0;
+    let sig = 0;
+    for (const b of g.buildings) {
+      if (!b.alive || b.kind !== 'wall') continue;
+      alive++;
+      sig = (sig + b.x * 13 + b.z * 29) | 0;
+    }
+    const tiers = g.plots.filter((p) => p.kind === 'wall').map((p) => `${p.id}:${p.tier}:${p.ruined ? 1 : 0}`).join(',');
+    const key = `${activeCulture()}:${rampartReady() ? 1 : 0}:${g.plots.length}:${tiers}:${alive}:${sig}`;
     if (this._planWallKey === key) return;
     this._planWallKey = key;
     if (this._planWalls) {
@@ -3940,67 +3947,7 @@ class App {
       this._disposeObject3D(this._planWalls);
       this._planWalls = null;
     }
-    const curtains = [];
-    const towers = [];
-    const stone = 0xcbb892;
-    const roof = 0x3e5f86;
-    for (const p of g.plots) {
-      if (p.kind !== 'wall' || p.tier > 0 || p.role === 'outer') continue;
-      const tiles = p.tiles || [];
-      const arch = new Set((p.arch || []).map(([x, z]) => `${x},${z}`));
-      for (const [x, z] of tiles) {
-        const gy = Math.max(0.42, this.map.groundY(x + 0.5, z + 0.5)) + 0.08;
-        let nx = 1, nz = 0;
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          if (tiles.some(([tx, tz]) => tx === x + dx && tz === z + dz)) { nx = dx; nz = dz; break; }
-        }
-        const yaw = Math.atan2(nz, nx);
-        if (arch.has(`${x},${z}`)) {
-          towers.push({ x: x + 0.5, y: gy, z: z + 0.5, ry: yaw });
-        } else {
-          curtains.push({ x: x + 0.5, y: gy, z: z + 0.5, ry: yaw });
-        }
-      }
-    }
-    const group = new THREE.Group();
-    group.name = 'plan-walls';
-    const pal = culture().palette;
-    const stoneTint = pal?.stone || stone;
-    const roofTint = pal?.roof || roof;
-    const wallPack = propRecord('wall');
-    const postPack = propRecord('tower-square');
-    const capPack = propRecord('tower-square-top-roof');
-    const addInst = (geo, items, color, sx, sy, sz, shared = false) => {
-      if (!items.length || !geo) return;
-      const mesh = new THREE.InstancedMesh(geo, toyMat({ color, flatShading: true }), items.length);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      if (shared) geo.userData.kitShared = true;
-      const m = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const s = new THREE.Vector3(sx, sy, sz);
-      const pos = new THREE.Vector3();
-      items.forEach((it, i) => {
-        q.setFromEuler(new THREE.Euler(0, it.ry || 0, 0));
-        pos.set(it.x, it.y, it.z);
-        m.compose(pos, q, s);
-        mesh.setMatrixAt(i, m);
-      });
-      group.add(mesh);
-    };
-    if (wallPack && postPack) {
-      const part = (rec) => rec.parts[0].geometry;
-      addInst(part(wallPack), curtains, stoneTint, 1.02 / wallPack.span, 2.45 / wallPack.height, 1.02 / wallPack.span, true);
-      addInst(part(postPack), towers, stoneTint, 0.9 / postPack.span, 2.35 / postPack.height, 0.9 / postPack.span, true);
-      if (capPack) {
-        addInst(part(capPack), towers.map((t) => ({ ...t, y: t.y + 2.15 })), roofTint, 1.05 / capPack.span, 0.7 / capPack.height, 1.05 / capPack.span, true);
-      }
-    } else {
-      addInst(new THREE.BoxGeometry(1.05, 1.55, 0.72), curtains.map((t) => ({ ...t, y: t.y + 0.78 })), stone, 1, 1, 1);
-      addInst(new THREE.CylinderGeometry(0.38, 0.46, 2.35, 8), towers.map((t) => ({ ...t, y: t.y + 1.18 })), stone, 1, 1, 1);
-      addInst(new THREE.ConeGeometry(0.5, 0.7, 8), towers.map((t) => ({ ...t, y: t.y + 1.18 + 1.45 })), roof, 1, 1, 1);
-    }
+    const group = buildRampartGroup(g, this.map);
     this.scene.add(group);
     this._planWalls = group;
   }

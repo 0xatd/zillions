@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { PROP_FILES, propUrl, ingestProp } from './prop-pack.js';
+import { RAMPART_FILES, rampartUrl, ingestRampart } from './rampart-art.js';
 
 const TEMPLATES = {};
 
@@ -153,11 +154,23 @@ function loadPropPack(loader) {
   }));
 }
 
+function loadRamparts(loader) {
+  return Promise.all(RAMPART_FILES.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(rampartUrl(name));
+      ingestRampart(name, gltf.scene);
+    } catch (e) {
+      // Missing module — the rampart group simply has no mesh for it.
+    }
+  }));
+}
+
 export function loadAssets() {
   const loader = new GLTFLoader();
   const kit = loadKit(loader);
   const props = loadPropPack(loader);
-  return Promise.all([kit, props, ...Object.entries(MANIFEST).map(async ([key, url]) => {
+  const ramparts = loadRamparts(loader);
+  return Promise.all([kit, props, ramparts, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;

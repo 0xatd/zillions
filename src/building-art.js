@@ -17,6 +17,7 @@ import { toyMat } from './toy-style.js';
 import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } from './assets.js';
 import { culture, kitBuildingKey } from './cultures.js';
 import { propGeometry, propRecord } from './prop-pack.js';
+import { rampartPlace } from './rampart-art.js';
 
 // Visual only. A one-storey door is about the hero's height, a house is a
 // little over twice that, and towers and the keep stand well above both.
@@ -546,61 +547,11 @@ function packMesh(buckets) {
   return g;
 }
 
-function packWall(b, ctx, pal, key) {
-  const buckets = { pos: [], nrm: [], col: [] };
-  const tier = Math.max(1, b.plotTier || 1);
-  const N = ctx.mapSize || 0;
-  const wallTiles = ctx.wallTiles || new Set();
-  const has = (x, z) => wallTiles.has(z * N + x);
-  const arch = ctx.archTiles || new Set();
-  const isArch = (x, z) => arch.has(z * N + x);
-  const bastion = b.branch === 'bastion';
-  const h = bastion ? 1.7 : 1.45 + Math.min(tier, 3) * 0.05;
-  const span = bastion ? 0.72 : 0.64;
-  const [cx, cz] = ctx.center || [N / 2, N / 2];
-  const ox = b.x + 0.5 - cx, oz = b.z + 0.5 - cz;
-  const faceOut = (ry) => (Math.sin(ry) * ox + Math.cos(ry) * oz < 0 ? ry + Math.PI : ry);
-  const stone = pal.stone;
-  const roof = key === 'middle_eastern' ? pal.roof : pal.roof;
-  if (b.gate) {
-    if (!(ctx.gateMain && ctx.gateMain.has(b.z * N + b.x))) return new THREE.Group();
-    let sxx = 0, szz = 0, sxz = 0, n = 0;
-    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
-      if (!has(b.x + dx, b.z + dz)) continue;
-      sxx += dx * dx; szz += dz * dz; sxz += dx * dz; n++;
-    }
-    const th = n > 1 ? 0.5 * Math.atan2(2 * sxz, sxx - szz) : 0;
-    const ry = faceOut(-th);
-    putPack(buckets, 'gate', stone, 0, 0, 0, span * 1.15, h + 0.35, span * 1.15, ry);
-    putPack(buckets, 'tower-square-top-roof', roof, 0, h + 0.15, 0, span * 1.25, 0.42, span * 1.25, ry);
-    putPack(buckets, 'flag-banner-short', pal.banner, span * 0.7, h * 0.55, 0, 0.16, 0.55, 0.16, ry + Math.PI / 2);
-    return packMesh(buckets);
-  }
-  const nbs = [];
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (has(b.x + dx, b.z + dz)) nbs.push([dx, dz]);
-  const straight = nbs.length === 2 && nbs[0][0] === -nbs[1][0] && nbs[0][1] === -nbs[1][1];
-  const run = nbs.length === 2 ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
-    : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
-  const ry = faceOut(-run);
-  const corner = nbs.length > 2 || (nbs.length === 2 && !straight);
-  if (nbs.length && !corner) {
-    putPack(buckets, 'wall', stone, 0, 0, 0, span, h, span, ry);
-    if (key === 'asian') putPack(buckets, 'wall-narrow-wood', pal.wood, 0, h * 0.62, 0, span * 1.15, 0.12, span * 1.15, ry);
-  }
-  const nearArch = nbs.some(([dx, dz]) => isArch(b.x + dx, b.z + dz));
-  const joint = nbs.length !== 2 || (((b.x * 3 + b.z * 5) % 4 + 4) % 4 === 0 && !(straight && ((b.x + b.z) & 1)));
-  if (!nbs.length || corner || (joint && !nearArch)) {
-    const cap = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
-    const piece = corner ? 'wall-corner' : 'tower-square';
-    putPack(buckets, piece, stone, 0, 0, 0, span * (corner ? 1.05 : 0.85), h + 0.2, span * (corner ? 1.05 : 0.85), ry);
-    putPack(buckets, cap, roof, 0, h + 0.05, 0, span * 1.05, 0.4, span * 1.05, ry);
-  }
-  return packMesh(buckets) || new THREE.Group();
-}
-
 // The keep is several castle-kit masses plus a door, windows, trim and a
 // crown, so it is not one tinted cube. Local units, before visual scale.
 function packKeep(pal, key, tier) {
+  const authored = rampartPlace(`${key}-keep`);
+  if (authored) return authored;
   const g = new THREE.Group();
   g.userData.pack = true;
   const stone = toyMat({ color: pal.stone, flatShading: true });
@@ -670,6 +621,8 @@ function packKeep(pal, key, tier) {
 }
 
 function packHouse(pal, key, tier) {
+  const authored = rampartPlace(`${key}-house`);
+  if (authored) return authored;
   const g = new THREE.Group();
   g.userData.pack = true;
   const stone = toyMat({ color: pal.stone, flatShading: true });
@@ -700,17 +653,20 @@ function packHouse(pal, key, tier) {
 }
 
 function packBuildingMesh(b, ctx = {}) {
+  // Ramparts are one continuous mesh in rampart-art.js, not a block per tile.
+  if (b.kind === 'wall') return new THREE.Group();
   if (!propRecord('tower-square-base') || !propRecord('wall')) return null;
   const c = culture();
   const pal = c.palette;
   const key = c.key;
-  if (b.kind === 'wall') return packWall(b, ctx, pal, key);
   const buckets = { pos: [], nrm: [], col: [] };
   const tier = Math.max(1, b.plotTier || 1);
   const roofName = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
   if (b.kind === 'hq') return packKeep(pal, key, tier);
   if (b.kind === 'house') return packHouse(pal, key, tier);
   if (b.kind === 'tower' || b.kind === 'outpost') {
+    const authored = rampartPlace(`${key}-spire`);
+    if (authored) return authored;
     const s = b.kind === 'outpost' ? 0.78 : 0.66;
     let y = 0;
     y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, s, 0.5, s);
