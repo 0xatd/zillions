@@ -1,0 +1,146 @@
+{
+  "music": {
+    "menu": "music/menu.ogg",
+    "build": "music/build.ogg",
+    "combat": "music/combat.ogg",
+    "victory": "music/victory.ogg",
+    "defeat": "music/defeat.ogg",
+    "select": "music/select.ogg"
+  },
+  "ambient": {
+    "meadow": "ambient/meadow.ogg",
+    "swamp": "ambient/swamp.ogg",
+    "volcanic": "ambient/volcanic.ogg",
+    "snow": "ambient/snow.ogg",
+    "valley": "ambient/valley.ogg"
+  },
+  "cues": {
+    "ui.click": [
+      "sfx/ui-click-0.ogg",
+      "sfx/ui-click-1.ogg"
+    ],
+    "ui.hover": [
+      "sfx/ui-hover-0.ogg",
+      "sfx/ui-hover-1.ogg"
+    ],
+    "ui.deny": [
+      "sfx/ui-deny.ogg"
+    ],
+    "build.place": [
+      "sfx/build-0.ogg",
+      "sfx/build-1.ogg",
+      "sfx/build-2.ogg"
+    ],
+    "build.upgrade": [
+      "sfx/upgrade.ogg"
+    ],
+    "build.demolish": [
+      "sfx/demolish.ogg"
+    ],
+    "coin": [
+      "sfx/coin-0.ogg",
+      "sfx/coin-1.ogg"
+    ],
+    "hero.step": [
+      "sfx/step-0.ogg",
+      "sfx/step-1.ogg",
+      "sfx/step-2.ogg",
+      "sfx/step-3.ogg",
+      "sfx/step-4.ogg"
+    ],
+    "attack.melee": [
+      "sfx/melee-0.ogg",
+      "sfx/melee-1.ogg",
+      "sfx/melee-2.ogg"
+    ],
+    "attack.hero": [
+      "sfx/hero-0.ogg",
+      "sfx/hero-1.ogg"
+    ],
+    "attack.shotgun": [
+      "sfx/shotgun.ogg"
+    ],
+    "shot.ranger": [
+      "sfx/ranger-0.ogg",
+      "sfx/ranger-1.ogg"
+    ],
+    "shot.soldier": [
+      "sfx/soldier-0.ogg",
+      "sfx/soldier-1.ogg"
+    ],
+    "shot.sniper": [
+      "sfx/sniper.ogg"
+    ],
+    "shot.tower": [
+      "sfx/tower-0.ogg",
+      "sfx/tower-1.ogg"
+    ],
+    "shot.ballista": [
+      "sfx/ballista.ogg"
+    ],
+    "shot.flame": [
+      "sfx/flame-0.ogg",
+      "sfx/flame-1.ogg"
+    ],
+    "shot.outpost": [
+      "sfx/outpost.ogg"
+    ],
+    "shot.outpostSiege": [
+      "sfx/outpost-siege.ogg"
+    ],
+    "impact.hit": [
+      "sfx/impact-0.ogg",
+      "sfx/impact-1.ogg",
+      "sfx/impact-2.ogg",
+      "sfx/impact-3.ogg",
+      "sfx/impact-4.ogg"
+    ],
+    "impact.flame": [
+      "sfx/impact-flame.ogg"
+    ],
+    "keep.hit": [
+      "sfx/keep-0.ogg",
+      "sfx/keep-1.ogg",
+      "sfx/keep-2.ogg"
+    ],
+    "zombie.groan": [
+      "sfx/zombie-groan-0.ogg",
+      "sfx/zombie-groan-1.ogg",
+      "sfx/zombie-groan-2.ogg",
+      "sfx/zombie-groan-3.ogg",
+      "sfx/zombie-groan-4.ogg"
+    ],
+    "zombie.attack": [
+      "sfx/zombie-attack-0.ogg",
+      "sfx/zombie-attack-1.ogg",
+      "sfx/zombie-attack-2.ogg",
+      "sfx/punch-0.ogg",
+      "sfx/punch-1.ogg"
+    ],
+    "zombie.death": [
+      "sfx/zombie-death-0.ogg",
+      "sfx/zombie-death-1.ogg",
+      "sfx/zombie-death-2.ogg",
+      "sfx/zombie-death-3.ogg",
+      "sfx/zombie-death-4.ogg"
+    ],
+    "wave.horn": [
+      "sfx/horn-0.ogg",
+      "sfx/horn-1.ogg"
+    ],
+    "ability.generic": [
+      "sfx/ability-0.ogg",
+      "sfx/ability-1.ogg"
+    ],
+    "ability.magic": [
+      "sfx/ability-2.ogg",
+      "sfx/ability-0.ogg"
+    ],
+    "ability.blast": [
+      "sfx/ability-blast.ogg"
+    ],
+    "ability.hook": [
+      "sfx/ability-1.ogg"
+    ]
+  }
+}

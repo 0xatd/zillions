@@ -3,8 +3,10 @@
 These are generated audio assets for Zillions with Warcraft, StarCraft, and
 grim sci-fi flavor.
 
-The game still uses procedural WebAudio for most runtime SFX. Some UI, alert,
-weapon, zombie, and town sounds are referenced by the runtime audio layer as
+Runtime music, ambience, and core SFX play from the CC0 pack in
+`assets/audio/cc0/` (see `assets/audio/LICENSES.md`). Procedural WebAudio
+remains the fallback when a sample is missing. Some UI, alert, weapon, zombie,
+and town sounds in this pack are referenced by the runtime audio layer as
 sweeteners. The robot and alien groups are manifest-ready for future factions.
 
 ## Faction Voices

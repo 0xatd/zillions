@@ -316,6 +316,7 @@ Run these before claiming a change is good:
 npm run check
 git diff --check
 jq empty assets/audio/manifest.json
+jq empty assets/audio/cc0/index.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json

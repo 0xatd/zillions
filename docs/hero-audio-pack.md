@@ -6,8 +6,8 @@ This pack covers Scott English, Alexander Thomas, and Daniel Donovan only.
 Turtle Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock currently use the
 shared procedural sound effects and do not have voice barks.
 
-The game still uses procedural WebAudio for core SFX and music fallback. Hero
-click barks are wired through `src/audio.js` and load from
+Core music and SFX play from the CC0 pack, with procedural WebAudio as the
+fallback. Hero click barks are wired through `src/audio.js` and load from
 `assets/audio/click-pack/index.json` after user interaction.
 
 ## Generated Click-Pack

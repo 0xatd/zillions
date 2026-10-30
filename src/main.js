@@ -191,7 +191,7 @@ class App {
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
-      onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
+      onMute: () => this._toggleMute(),
       onSettings: (s) => this.applySettings(s),
       onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
       onHost: () => this.hostGame(),
@@ -234,6 +234,10 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openCampaignSelect(),
+      onScreen: (name) => {
+        this._audioScreen = (name === 'setup' || name === 'solo') ? 'select' : 'menu';
+        if (!this.game) this.audio.setScene({ inMatch: false, screen: this._audioScreen });
+      },
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -384,6 +388,39 @@ class App {
     this.scene.fog.color.setHex(0x030711);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
+    const unlockAudio = () => this.audio.init();
+    window.addEventListener('pointerdown', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
+    this._bindUiAudio();
+    if (new URLSearchParams(location.search).has('audioProof')) {
+      this.renderer.setAnimationLoop(null);
+      import('./audio-proof.js').then((m) => m.bootAudioProof(this)).catch((err) => console.error(err));
+    }
+  }
+
+  _toggleMute() {
+    this.audio.init();
+    const muted = !this.audio.muted;
+    this.audio.setMuted(muted);
+    this.ui.setMuteUI(muted);
+    this.applySettings({ muted });
+  }
+
+  // Clicks and hovers on the existing shell. One listener, no menu rebuild.
+  _bindUiAudio() {
+    const root = document.getElementById('ui');
+    if (!root) return;
+    root.addEventListener('pointerover', (e) => {
+      const el = e.target.closest?.('button, a, .herocard, .stab');
+      if (!el || el === this._hoverEl) return;
+      this._hoverEl = el;
+      this.audio.hover();
+    });
+    root.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest?.('button, a, .herocard, .stab')) return;
+      this.audio.init();
+      this.audio.click();
+    });
   }
 
   // ---------------- title diorama ----------------
@@ -4756,7 +4793,7 @@ class App {
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
-        case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
+        case 'mute': this._toggleMute(); break;
         case 'pause': this.setSpeed(0); break;
         case 'menu': this.togglePauseMenu(); break;
         default:
@@ -4950,7 +4987,12 @@ class App {
     } catch { /* storage can be blocked */ }
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
-    if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
+    if (typeof s.sfx === 'number') this.audio.setSfxVolume(s.sfx);
+    else if (s.sfx === false) this.audio.setSfxVolume(0);
+    else if (s.sfx === true) this.audio.setSfxVolume(1);
+    if (typeof s.ambient === 'number') this.audio.setAmbientVolume(s.ambient);
+    if (typeof s.uiVolume === 'number') this.audio.setUiVolume(s.uiVolume);
+    if (s.muted !== undefined) this.audio.setMuted(!!s.muted);
     if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
   }
 
@@ -4959,7 +5001,14 @@ class App {
     try { s = JSON.parse(localStorage.getItem('zillions_settings') || '{}'); } catch { /* ignore */ }
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
-    if (s.sfx === false) this.audio.setMuted(true);
+    if (typeof s.sfx === 'number') this.audio.setSfxVolume(s.sfx);
+    else if (s.sfx === false) this.audio.setSfxVolume(0);
+    if (typeof s.ambient === 'number') this.audio.setAmbientVolume(s.ambient);
+    if (typeof s.uiVolume === 'number') this.audio.setUiVolume(s.uiVolume);
+    if (s.muted) {
+      this.audio.setMuted(true);
+      this.ui.setMuteUI(true);
+    }
     return s;
   }
 
@@ -5169,7 +5218,8 @@ class App {
         case 'shot': {
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
-            this.audio.melee();
+            this.audio.melee(e.fx, e.fz);
+            this.audio.impact('melee', e.tx, e.tz);
             this._impactRing(e.tx, e.tz, { color: 0xffd27a, count: 18, radius: 1.25, life: 0.26, size: 0.42 });
             this.burst(e.tx, 0.7, e.tz, { count: 14, color: 0xffd27a, speed: 2.9, life: 0.3, size: 0.5, up: 1.6 });
             this.burst(e.tx, 0.6, e.tz, { count: 9, color: 0x9c1f1f, speed: 1.9, life: 0.4, size: 0.48, up: 1.3 });
@@ -5179,7 +5229,8 @@ class App {
           if (e.kind === 'shotgun') {
             // Point-blank thunder: pellets now travel to the actual hit volume
             // before the impact VFX fires, so the eye can track the shot.
-            this.audio.shoot('shotgun');
+            this.audio.shoot('shotgun', e.fx, e.fz);
+            this.audio.impact('shotgun', e.tx, e.tz);
             const muzzle = this._muzzlePoint(e, 'shotgun');
             this.burst(muzzle.x, muzzle.y, muzzle.z, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
             const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
@@ -5199,14 +5250,16 @@ class App {
             break;
           }
           if (e.kind === 'flame') {
-            this.audio.shoot('tower');
+            this.audio.shoot('flame', e.fx, e.fz);
+            this.audio.impact('flame', e.tx, e.tz);
             const muzzle = this._muzzlePoint(e, 'flame');
             this._spawnProjectile(e, { kind: 'flame', ty: 0.45, impact: { kind: 'flame', color: 0xff8a3c, count: 18, radius: 1.3, burst: 18, speed: 2.5, life: 0.34, size: 0.56, up: 1.6, spread: 1.2 } });
             this.stream(muzzle.x, muzzle.y, muzzle.z, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
             break;
           }
-          this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' || e.kind === 'outpostSiege' ? 'sniper' : e.kind === 'outpost' ? 'tower' : e.kind);
+          this.audio.shoot(e.kind === 'hero' ? 'hero' : e.kind, e.fx, e.fz);
+          this.audio.impact(e.kind, e.tx, e.tz);
           this._spawnProjectile(e, {
             ty: e.kind === 'ballista' ? 0.8 : undefined,
             impact: {
@@ -5237,21 +5290,22 @@ class App {
           this.spawnCorpse(e);
           this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
           this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
-          this.deathSfxT -= 1;
-          if (this.deathSfxT <= 0) { this.audio.zombieDeath(); this.deathSfxT = 2; }
+          this.audio.zombieDeath(e.x, e.z);
           break;
         case 'bite':
+          this.audio.zombieAttack(e.x, e.z);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.34, dur: 0.34, tx: e.tx ?? e.x, tz: e.tz ?? e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.65, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this.burst(e.x, 0.7, e.z, { count: 4, color: 0xffb070, speed: 1.2, life: 0.3, size: 0.35, up: 1 });
           break;
         case 'udeath':
           this.burst(e.x, 0.5, e.z, { count: 20, color: 0xbfe0ff, speed: 2.5, life: 0.6, size: 0.55, up: 2 });
-          this.audio.zombieDeath();
+          this.audio.zombieDeath(e.x, e.z);
           break;
         case 'build':
           if (!e.quiet) {
-            this.audio.build();
+            if ((e.tier || 0) > 1) this.audio.upgrade(e.x, e.z);
+            else this.audio.build(e.x, e.z);
             this.burst(e.x, 0.3, e.z, { count: 20, color: 0xc9b48a, speed: 2.4, life: 0.55, size: 0.65, up: 1.9, spread: 1.1 });
             this.shake = Math.max(this.shake, 0.12);
           }
@@ -5302,6 +5356,7 @@ class App {
           break;
         case 'hivemuster':
           this._pingHive(e.x, e.z);
+          if (!this._heardMuster) { this._heardMuster = true; this.audio.alarm(); }
           break;
         case 'surge':
           this.audio.alarm();
@@ -5333,7 +5388,7 @@ class App {
           break;
         case 'spit':
           this.bhitSfxT -= 1;
-          if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
+          this.audio.hitBuilding(e.x, e.z);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
           this._spawnProjectile(e, {
             kind: 'spit',
@@ -5377,7 +5432,7 @@ class App {
           break;
         case 'bhit':
           this.bhitSfxT -= 1;
-          if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
+          this.audio.hitBuilding(e.x, e.z);
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
           if (e.fx !== undefined) this.stream(e.fx, 0.72, e.fz, e.x, 0.75, e.z, { count: 3, color: 0xff4636, size: 0.34, life: 0.18 });
           this._buildingHitCue(e.x, e.z);
@@ -5397,7 +5452,7 @@ class App {
         case 'cast': {
           const caster = this.unitMeshes.get(e.heroId);
           if (caster) caster.cast = { t: 0.52, dur: 0.52, kind: e.key };
-          this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
+          this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key, e.x, e.z);
           const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
           const R = e.radius;
@@ -5596,8 +5651,41 @@ class App {
     this.ui.showBanner('Graphics lowered for smoother play. Use ◐ to turn high graphics back on.', '', 5500);
   }
 
+  // Read-only presentation: music bed, biome loop, hero footsteps, listener.
+  _syncAudio(dt) {
+    const g = this.game;
+    if (!g) {
+      this.audio.setScene({ inMatch: false });
+      return;
+    }
+    const h = this.myHero();
+    const moving = h && !h.dead && (Math.abs(h.mx || 0) + Math.abs(h.mz || 0) > 0.15);
+    this._stepT = (this._stepT || 0) - dt;
+    if (moving && this._stepT <= 0) {
+      this.audio.footstep(h.x, h.z);
+      this._stepT = 0.36;
+    }
+    this.audio.setScene({
+      inMatch: true,
+      over: !!g.over,
+      won: !!g.won,
+      phase: g.phase,
+      aggro: g.aggroCount?.() || 0,
+      biome: this.map?.terrainKind,
+      listener: {
+        x: this.camera.position.x,
+        z: this.camera.position.z,
+        yaw: this.camYaw || 0,
+      },
+    });
+  }
+
   frame() {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    const dt = this._proofDt != null ? this._proofDt : Math.min(this.clock.getDelta(), 0.1);
+    if (this._proofDt != null) {
+      this._proofT = (this._proofT || 0) + dt;
+      this.audio.setLogTime(this._proofT);
+    }
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
@@ -5607,6 +5695,7 @@ class App {
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
+    if (!this.game) this.audio.setScene({ inMatch: false, screen: this._audioScreen || 'menu' });
 
     if (this.game) {
       this._updateHeroInput();
@@ -5702,7 +5791,10 @@ class App {
 
       // Ambient groans when the horde is active.
       const aggro = this.game.aggroCount();
-      if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
+      if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) {
+        const zb = this.game.zombies.find((z) => !z.dead);
+        this.audio.groan(zb?.x, zb?.z);
+      }
 
       // Wave marker pulse.
       const firstSiege = this.game.firstSiegeStatus?.();
@@ -5771,6 +5863,7 @@ class App {
       }
       this.ui.showBuildHint(hint);
 
+      this._syncAudio(dt);
       this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
       this.ui.updateBoss(this.game);
 

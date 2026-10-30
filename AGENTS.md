@@ -140,6 +140,9 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - `src/flowfield.js`: pathfinding fields.
 - `src/main.js`: runtime composition, renderer, input, saves, and co-op.
 - `src/ui.js`: menus, room UI, HUD, and overlays.
+- `src/audio.js`: playback facade — CC0 cues, procedural fallback, hero barks.
+- `src/audio-score.js`: pure music, biome, distance, and cue decisions.
+- `src/soundscape.js`: Web Audio buses, voice pool, crossfades, sample loading.
 - `src/online.js`: Supabase lobby, rooms, seats, and signaling.
 - `src/net.js`: WebRTC transport and diagnostics.
 - `src/auth.js`: authentication, profile sync, and server-progress hydration.
@@ -189,6 +192,7 @@ npm run check
 npm run check:postgres   # local throwaway Postgres; never a real project
 git diff --check
 jq empty assets/audio/manifest.json
+jq empty assets/audio/cc0/index.json
 jq empty assets/audio/click-pack/index.json
 jq empty assets/audio/faction-voice-pack/index.json
 jq empty assets/audio/sfx-pack/index.json
