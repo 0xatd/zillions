@@ -95,6 +95,8 @@ procedural renderer and must not stop a match from starting.
 | --- | --- |
 | `src/main.js` | Runtime composition, render loop, input, save flow, co-op sequencing, and Watch |
 | `src/ui.js` | Main menu, setup, lobby, room, HUD, and overlays |
+| `src/world-map.js` | Title-to-mission world map: five battlefield dioramas, presentation only |
+| `src/front-state.js` | Locked, open, and completed rules for those battlefields |
 | `src/shell-state.js` | Auth, character, mission, overlay, and return state |
 | `src/match-outbox.js` | Signed-in match reports the server has not confirmed yet, resent with the same requestId |
 | `src/runtime-guard.js` | Fatal frame-loop recovery |

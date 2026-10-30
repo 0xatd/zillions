@@ -229,7 +229,7 @@ class App {
         return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
           && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
       },
-      onQuit: () => location.reload(),
+      onQuit: () => this._quitToMap(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
@@ -372,6 +372,12 @@ class App {
     const save = this._loadSave();
     if (save) this.ui.setContinue(save.snap);
     this.showLoginBackdrop();
+    try {
+      if (sessionStorage.getItem('zillions-open-fronts') === '1') {
+        sessionStorage.removeItem('zillions-open-fronts');
+        setTimeout(() => this.ui.openFronts(), 0);
+      }
+    } catch { /* blocked storage */ }
     this._initAuth();
 
     window.addEventListener('resize', () => this.resize());
@@ -392,7 +398,8 @@ class App {
   showMenuBackdrop(levelId = 1) {
     if (this.game || this.menuTerrain) return;
     const level = levelById(levelId);
-    const map = new GameMap(level.seed, level.theme);
+    // A cropped landform is enough for the title pan. Match maps stay full size.
+    const map = new GameMap(level.seed, level.theme, { size: 64, nests: 2 });
     this.menuMap = map;
     this.menuTerrain = map.buildTerrain();
     this.scene.add(this.menuTerrain);
@@ -409,7 +416,28 @@ class App {
       project: (x, y, z) => this._menuProjV.set(x, y, z).project(this.camera),
       initialCount: Number.parseInt(localStorage.getItem('zillions-title-stands') || '0', 10) || 0,
     });
-    this._buildTitleSpace();
+    if (!this.titleSpace) this._buildTitleSpace();
+    const site = (map.sites && map.sites[0]) || { x: map.size / 2, z: map.size / 2 };
+    this.menuFocus = { x: site.x, z: site.z };
+    const keep = new THREE.Group();
+    const gy = map.groundY(site.x, site.z);
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.4, 1.15, 8), toyMat({ color: 0xd7c7a4 }));
+    wall.position.y = 0.55;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.6, 8), toyMat({ color: 0x8d3a32 }));
+    roof.position.y = 1.7;
+    const yard = new THREE.Mesh(new THREE.CircleGeometry(4.6, 20), toyMat({ color: 0xcbb892 }));
+    yard.rotation.x = -Math.PI / 2;
+    yard.position.y = 0.04;
+    keep.add(yard, wall, roof);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const tree = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.1, 6), toyMat({ color: 0x3f8f4a }));
+      tree.position.set(Math.cos(a) * 6.2, 1.05, Math.sin(a) * 6.2);
+      keep.add(tree);
+    }
+    keep.position.set(site.x, gy, site.z);
+    this.scene.add(keep);
+    this.menuKeep = keep;
   }
 
   showLoginBackdrop() {
@@ -418,6 +446,7 @@ class App {
     this.camera.position.set(MAP_SIZE / 2 + 22, 27, MAP_SIZE / 2 + 35);
     this.camera.lookAt(this.focus);
     this._buildTitleSpace();
+    this.showMenuBackdrop();
   }
 
   _buildTitleSpace() {
@@ -560,6 +589,13 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
+    if (this.menuMap && !this.game) {
+      const ang = t * 0.045;
+      const focus = this.menuFocus || { x: this.menuMap.size / 2, z: this.menuMap.size / 2 };
+      const dist = 16;
+      this.camera.position.set(focus.x + Math.sin(ang) * dist, 11, focus.z + Math.cos(ang) * dist * 0.78);
+      this.camera.lookAt(focus.x, 1.1, focus.z);
+    }
     const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
     const showTitleCharacter = !!selectedMmoCharacter(this.profile);
     titleHero.visible = showTitleCharacter;
@@ -596,7 +632,9 @@ class App {
 
   _clearMenuBackdrop() {
     if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
+    if (this.menuKeep) { this.scene.remove(this.menuKeep); this._disposeObject3D(this.menuKeep); this.menuKeep = null; }
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this._disposeObject3D(this.menuTerrain); this.menuTerrain = null; }
+    this.menuFocus = null;
     if (this.titleSpace) { this.scene.remove(this.titleSpace); this._disposeObject3D(this.titleSpace); this.titleSpace = null; }
     this.menuMap = null;
   }
@@ -912,6 +950,7 @@ class App {
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
+    ring.visible = false;
     g.add(ring);
     const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
@@ -1043,6 +1082,7 @@ class App {
       ringGeo.rotateX(-Math.PI / 2);
       const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.5, depthWrite: false }));
       ring.position.set(s.x, 0.06, s.z);
+      ring.visible = false;
       gr.add(ring);
       gr.userData.ring = ring;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
@@ -1052,7 +1092,7 @@ class App {
       flag.position.set(s.x + 0.85, 4.4, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
-      const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
+      const label = this._makeLabelSprite((s.name || `SITE ${i + 1}`).toUpperCase(), '');
       label.position.set(s.x, 6.3, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
@@ -1213,7 +1253,7 @@ class App {
         gem.castShadow = true;
         mesh.add(gem);
         mesh.userData.gem = gem;
-        const label = this._makeLabelSprite(it ? it.icon : '📦', '');
+        const label = this._makeLabelSprite(it ? it.name : 'Loot', '');
         label.position.y = 1.5;
         label.scale.set(2.2, 1.1, 1);
         mesh.add(label);
@@ -1359,21 +1399,23 @@ class App {
       // Returning from a finished run: straight back to mission select.
       // No character yet (created mid-session edge)? Land on the roster,
       // one click from making one — never a dead title screen.
-      const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
-      else setTimeout(() => this.ui.showCharacterCreator(), 0);
+      setTimeout(() => this.ui.openFronts(), 0);
       return;
     }
-    // WoW grammar: authentication ends at Character Select. The player chooses
-    // who enters; the generic signed-out title never doubles as account home.
+    // Authentication lands on the title. Play opens the world map; the
+    // character creator stays in the shell and off this path.
     if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (selectedMmoCharacter(this.profile)) setTimeout(() => this.ui._showScreen('main'), 0);
-      else setTimeout(() => this.ui.showCharacterCreator(), 0);
+      this.ui._showScreen('account');
     }
+  }
+
+  _quitToMap() {
+    try { sessionStorage.setItem('zillions-open-fronts', '1'); } catch { /* blocked storage */ }
+    location.reload();
   }
 
   _restartOrReturn() {
@@ -3796,23 +3838,31 @@ class App {
 
   _makeLabelSprite(text, sub = '') {
     const cnv = document.createElement('canvas');
-    cnv.width = 256; cnv.height = 128;
+    cnv.width = 512; cnv.height = 160;
     const ctx = cnv.getContext('2d');
     ctx.textAlign = 'center';
-    ctx.font = '64px serif';
-    ctx.fillText(text, 128, 62);
+    ctx.textBaseline = 'middle';
+    const fit = (str, max) => {
+      let size = max;
+      ctx.font = `700 ${size}px Nunito, sans-serif`;
+      while (size > 16 && ctx.measureText(str).width > 480) {
+        size -= 2;
+        ctx.font = `700 ${size}px Nunito, sans-serif`;
+      }
+      return size;
+    };
+    ctx.fillStyle = '#f4efe4';
+    ctx.font = `700 ${fit(String(text || ''), sub ? 48 : 56)}px Nunito, sans-serif`;
+    ctx.fillText(String(text || ''), 256, sub ? 52 : 80);
     if (sub) {
-      ctx.font = 'bold 34px system-ui, sans-serif';
       ctx.fillStyle = '#ffd75e';
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.lineWidth = 6;
-      ctx.strokeText(sub, 128, 108);
-      ctx.fillText(sub, 128, 108);
+      ctx.font = `700 ${fit(String(sub), 28)}px Nunito, sans-serif`;
+      ctx.fillText(String(sub), 256, 112);
     }
     const tex = new THREE.CanvasTexture(cnv);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
     const sp = new THREE.Sprite(mat);
-    sp.scale.set(2.4, 1.2, 1);
+    sp.scale.set(4.8, 1.5, 1);
     return sp;
   }
 
@@ -3922,6 +3972,7 @@ class App {
     grp.add(gem);
     grp.userData.gem = gem;
     grp.userData.rim = rim;
+    grp.visible = false;
     return grp;
   }
 
@@ -3934,7 +3985,7 @@ class App {
     const beacon = this._makeBeacon(mx, mz, padR);
     g.add(beacon);
     g.userData.beacon = beacon;
-    const label = this._makeLabelSprite(kind.icon, '');
+    const label = this._makeLabelSprite(kind.name, '');
     label.position.set(mx, 2.1, mz);
     g.add(label);
     g.userData.label = label;
@@ -4038,6 +4089,7 @@ class App {
       rec.group.children.forEach((ch) => {
         if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
       });
+      if (ud.beacon) ud.beacon.visible = false;
 
       if (!nt || !buildMode) { // fully built/maxed, or Fight mode hides build affordances.
         ud.label.visible = false;
@@ -4069,11 +4121,11 @@ class App {
       }
       // Pad tag: what goes here + what it costs, on every free spot.
       if (!built && !nt.branch) {
-        const tagKey = PLOT_KINDS[plot.kind].icon + '|' + Math.ceil(nt.cost);
+        const tagKey = PLOT_KINDS[plot.kind].name + '|' + Math.ceil(nt.cost);
         if (ud.tagKey !== tagKey) {
           ud.tagKey = tagKey;
           if (ud.tag) { rec.group.remove(ud.tag); ud.tag.material.map.dispose(); ud.tag.material.dispose(); }
-          ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].icon, `${Math.ceil(nt.cost)}`);
+          ud.tag = this._makeLabelSprite(PLOT_KINDS[plot.kind].name, `${Math.ceil(nt.cost)}`);
           ud.tag.scale.set(2.0, 1.0, 1);
           const [tx, tz] = ud.labelPos;
           ud.tag.position.set(tx, 1.7, tz);
@@ -4085,13 +4137,13 @@ class App {
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
         : this._plotRole(plot, nt, true);
-      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
+      const wantKey = (built ? 'Upgrade' : PLOT_KINDS[plot.kind].name) + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
         rec.group.remove(ud.label);
-        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, wantSub);
+        ud.label = this._makeLabelSprite(built ? 'Upgrade' : PLOT_KINDS[plot.kind].name, wantSub);
         ud.label.position.set(lx, built ? 3.1 : 2.1, lz);
         rec.group.add(ud.label);
       }
@@ -4100,7 +4152,7 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = false;
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
           const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
@@ -4109,8 +4161,8 @@ class App {
         }
       }
 
-      // Ring: pulse when affordable, glow bright while paying.
-      ud.ring.visible = true;
+      // World markers stay off the ground. Cost and progress live on the HUD card.
+      ud.ring.visible = false;
       const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
@@ -4119,7 +4171,7 @@ class App {
 
       // Progress arc.
       const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
-      ud.prog.visible = frac > 0.002;
+      ud.prog.visible = false;
       if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
         ud.progFrac = frac;
         ud.prog.geometry.dispose();
@@ -4291,11 +4343,13 @@ class App {
       const back = new THREE.Mesh(backGeo, new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.42, depthWrite: false }));
       back.position.y = 0.025;
       back.userData.keepOpacity = true;
+      back.visible = false;
       g.add(back);
       const haloGeo = new THREE.RingGeometry(0.55, 0.7, 32);
       haloGeo.rotateX(-Math.PI / 2);
       const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffcf4d, transparent: true, opacity: 0.9, depthWrite: false }));
       halo.position.y = 0.03;
+      halo.visible = false;
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
       // (The whole hero group is scaled 1.18×, so compensate.)
@@ -4515,12 +4569,11 @@ class App {
         if (aura) {
           const fill = rec.mesh.userData.auraFill;
           const pulse = rec.mesh.userData.auraPulse;
-          const visible = !u.stealth; // veiled heroes hum nothing
           const rank = u.auraRank || 0;
           const radius = u.auraRadius || aura.userData.baseRadius || 1;
           for (const part of [aura, fill, pulse]) {
             if (!part) continue;
-            part.visible = visible;
+            part.visible = false;
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
@@ -4554,7 +4607,7 @@ class App {
       }
       const affected = rec.mesh.userData.affected;
       if (affected) {
-        affected.visible = !!(u.auraSources && u.auraSources.length) && !u.dead;
+        affected.visible = false;
         affected.material.opacity = 0.34 + Math.sin(t * 4.6 + u.id) * 0.12;
       }
     }
@@ -4583,6 +4636,7 @@ class App {
       ringGeo.rotateX(-Math.PI / 2);
       const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff3c2e, transparent: true, opacity: 0.5, depthWrite: false }));
       ring.position.set(x, 0.06, z);
+      ring.visible = false;
       gr.add(ring);
       gr.userData.ring = ring;
       gr.position.y = this.map.groundY(x, z);
@@ -4647,10 +4701,7 @@ class App {
         ringGeo.rotateX(-Math.PI / 2);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xd8c07a, transparent: true, opacity: 0.35, depthWrite: false }));
         ring.position.set(node.x, 0.06, node.z);
-        // The home node sits on the keep: its capture circle would ring the
-        // castle like a target — the walls already say whose ground it is.
-        const hq = (g.plots || []).find((p) => p.kind === 'hq');
-        ring.visible = !(hq && Math.hypot(hq.cx - node.x, hq.cz - node.z) < SIEGE.captureRadius);
+        ring.visible = false;
         gr.add(ring);
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), toyMat({ color: 0x39332a }));
         pole.position.set(node.x, 2.2, node.z);
@@ -4658,7 +4709,7 @@ class App {
         const flag = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.05), toyMat({ color: 0xd8c07a }));
         flag.position.set(node.x + 0.75, 3.8, node.z);
         gr.add(flag);
-        const label = this._makeLabelSprite(node.def ? node.def.icon : '🚩', String(node.name || '').toUpperCase());
+        const label = this._makeLabelSprite(String(node.name || 'NODE').toUpperCase(), '');
         label.position.set(node.x, 5.4, node.z);
         label.scale.set(4.6, 2.3, 1);
         gr.add(label);
@@ -5604,6 +5655,17 @@ class App {
     this._refreshDiagnosticsUI(false);
     this._updateCamera(dt);
 
+    if (!this.game && this.menuShow && this.horde?.sets?.walker) {
+      // Art load replaces the horde pools. Keep the vignette on the live writer,
+      // and never let a presentation miss stop the frame loop.
+      this.menuShow.horde = this.horde;
+      try { this.menuShow.update(dt, t); }
+      catch (error) {
+        console.warn('menu vignette stopped', error);
+        try { this.menuShow.dispose(); } catch { /* already gone */ }
+        this.menuShow = null;
+      }
+    }
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }

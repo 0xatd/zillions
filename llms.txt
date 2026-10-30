@@ -54,6 +54,8 @@ Default branch: main
 - src/lanes.js creates the deterministic lane graph.
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
 - src/menu-vignette.js owns the menu attract show (presentation only, no sim).
+- src/world-map.js owns the five-front battlefield dioramas on the world map (presentation only, no sim).
+- src/front-state.js owns locked, open, and completed rules for those battlefields.
 - src/online.js owns Supabase room and signaling state.
 - src/net.js owns WebRTC transport and diagnostics.
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.

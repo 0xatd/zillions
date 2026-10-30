@@ -209,7 +209,7 @@ which reads the same table the game dispatches through.
 | T | Change the nearest tower target rule |
 | Z | Drop the newest field item |
 | C | Character and equipment screen |
-| G | The Lattice |
+| G | Upgrades |
 | Enter | Team chat |
 | P | Pause a solo game |
 | M | Mute audio |
