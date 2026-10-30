@@ -1890,20 +1890,40 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 }
 .title-screen::before { display: none; }
 .title-lockup .gametitle { color: #f0c14a; text-shadow: 0 10px 30px rgba(0, 0, 0, 0.65); }
+.title-screen {
+  background:
+    linear-gradient(90deg, rgba(3, 6, 12, 0.9) 0%, rgba(3, 6, 12, 0.78) 300px, rgba(3, 6, 12, 0.35) 520px, rgba(3, 6, 12, 0.05) 70%),
+    radial-gradient(ellipse at 16% 58%, rgba(0, 0, 0, 0.55), transparent 58%) !important;
+}
 .title-menu {
-  position: absolute; left: clamp(22px, 4vw, 72px); top: 46%;
-  display: flex; flex-direction: column; gap: 8px; width: min(280px, 78vw);
-  transform: translateY(-40%);
+  position: absolute; left: clamp(22px, 4vw, 72px); top: 48%;
+  display: flex; flex-direction: column; gap: 12px; width: min(380px, 88vw);
+  transform: translateY(-42%);
 }
 .title-menu .menubtn {
-  appearance: none; min-height: 52px; padding: 0 18px; justify-content: flex-start; align-items: center;
-  font-size: 26px; letter-spacing: 0.04em; color: #f4efe4;
-  background: rgba(10, 16, 26, 0.72); border: 0; border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  appearance: none; min-height: 72px; padding: 0 26px; justify-content: flex-start; align-items: center;
+  font-size: 36px; letter-spacing: 0.03em; color: #f4efe4;
+  background: rgba(8, 12, 20, 0.88); border: 0; border-radius: 12px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
 }
-.title-menu .menubtn:hover, .title-menu .menubtn.navfocus { transform: scale(1.03); color: #fff8e4; background: rgba(18, 28, 42, 0.88); }
+.title-menu .menubtn:hover, .title-menu .menubtn.navfocus, .title-menu .menubtn:focus-visible {
+  transform: scale(1.03); color: #fff8e4; background: rgba(22, 32, 48, 0.95);
+  outline: 3px solid #fff3c4; outline-offset: 4px;
+}
 .title-menu .menubtn.primary { color: #1a1406; background: #f0c14a; }
-.title-menu .menubtn.primary:hover { background: #ffd36a; }
+.title-menu .menubtn.primary:hover, .title-menu .menubtn.primary.navfocus { background: #ffd36a; color: #1a1406; }
+.hero-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 14px; align-items: start; }
+#herorow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+#herorow .herocard { min-width: 0; width: 100%; height: 100%; flex: none; }
+#herorow .hfacewrap { width: 100%; height: 108px; }
+.hero-detail { padding: 14px; color: #f4efe4; background: #101720; border-radius: 12px; min-height: 240px; }
+.hero-detail .eyebrow { color: #f0c14a; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+.hero-detail h3 { margin: 6px 0 4px; font-family: 'Lilita One', Nunito, sans-serif; font-size: 26px; font-weight: 400; }
+.hero-detail p, .hero-detail small { display: block; color: #c5d0dc; font-size: 13px; line-height: 1.4; }
+.hero-detail div { margin-top: 10px; }
+.setup.roommode .hero-detail { display: none; }
+.setup.roommode .hero-layout { display: block; grid-area: heroes; }
+.setup.roommode .herorow { grid-area: auto; }
 .account-chip {
   position: absolute; top: 22px; right: 22px; z-index: 3;
   padding: 8px 14px; color: #d7e2ee; cursor: pointer; font: 700 13px/1 Nunito, sans-serif;

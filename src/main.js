@@ -417,6 +417,27 @@ class App {
       initialCount: Number.parseInt(localStorage.getItem('zillions-title-stands') || '0', 10) || 0,
     });
     if (!this.titleSpace) this._buildTitleSpace();
+    const site = (map.sites && map.sites[0]) || { x: map.size / 2, z: map.size / 2 };
+    this.menuFocus = { x: site.x, z: site.z };
+    const keep = new THREE.Group();
+    const gy = map.groundY(site.x, site.z);
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.4, 1.15, 8), toyMat({ color: 0xd7c7a4 }));
+    wall.position.y = 0.55;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.6, 8), toyMat({ color: 0x8d3a32 }));
+    roof.position.y = 1.7;
+    const yard = new THREE.Mesh(new THREE.CircleGeometry(4.6, 20), toyMat({ color: 0xcbb892 }));
+    yard.rotation.x = -Math.PI / 2;
+    yard.position.y = 0.04;
+    keep.add(yard, wall, roof);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const tree = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.1, 6), toyMat({ color: 0x3f8f4a }));
+      tree.position.set(Math.cos(a) * 6.2, 1.05, Math.sin(a) * 6.2);
+      keep.add(tree);
+    }
+    keep.position.set(site.x, gy, site.z);
+    this.scene.add(keep);
+    this.menuKeep = keep;
   }
 
   showLoginBackdrop() {
@@ -570,11 +591,10 @@ class App {
     if (!this.titleSpace) return;
     if (this.menuMap && !this.game) {
       const ang = t * 0.045;
-      const cx = this.menuMap.size / 2;
-      const cz = this.menuMap.size / 2;
-      const dist = 42;
-      this.camera.position.set(cx + Math.sin(ang) * dist, 28, cz + Math.cos(ang) * dist * 0.62);
-      this.camera.lookAt(cx, 1.5, cz);
+      const focus = this.menuFocus || { x: this.menuMap.size / 2, z: this.menuMap.size / 2 };
+      const dist = 16;
+      this.camera.position.set(focus.x + Math.sin(ang) * dist, 11, focus.z + Math.cos(ang) * dist * 0.78);
+      this.camera.lookAt(focus.x, 1.1, focus.z);
     }
     const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
     const showTitleCharacter = !!selectedMmoCharacter(this.profile);
@@ -612,7 +632,9 @@ class App {
 
   _clearMenuBackdrop() {
     if (this.menuShow) { this.menuShow.dispose(); this.menuShow = null; }
+    if (this.menuKeep) { this.scene.remove(this.menuKeep); this._disposeObject3D(this.menuKeep); this.menuKeep = null; }
     if (this.menuTerrain) { this.scene.remove(this.menuTerrain); this._disposeObject3D(this.menuTerrain); this.menuTerrain = null; }
+    this.menuFocus = null;
     if (this.titleSpace) { this.scene.remove(this.titleSpace); this._disposeObject3D(this.titleSpace); this.titleSpace = null; }
     this.menuMap = null;
   }

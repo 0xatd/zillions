@@ -355,7 +355,10 @@ export class UI {
           <p id="picked-front" class="hidden"></p>
           <div class="levelrow" id="levelrow"></div>
           <div class="steplabel hero-label">Hero</div>
-          <div class="herorow" id="herorow"></div>
+          <div class="hero-layout">
+            <div class="herorow" id="herorow"></div>
+            <aside id="hero-detail" class="hero-detail"></aside>
+          </div>
           <div class="steplabel culture-label">Culture <small>the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
           <div class="steplabel diff-label">Difficulty</div>
@@ -730,16 +733,17 @@ export class UI {
         </span>
         <b>${h.name}</b>
         <small>${h.tagline}</small>`;
-      card.onclick = () => {
-        this.selectedHero = key;
-        for (const c of herorow.children) c.classList.toggle('sel', c === card);
-        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
-      };
-      card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
-      card.onmousemove = (e) => this._moveTip(e);
-      card.onmouseleave = () => this._hideTip();
+      card.onclick = () => this._selectHeroCard(key, card);
+      card.onmouseenter = () => this._showHeroDetail(h);
+      card.onfocus = () => this._showHeroDetail(h);
       herorow.appendChild(card);
     }
+    this._showHeroDetail(HEROES[this.selectedHero]);
+    this._paintHeroPortraits();
+    this.root.addEventListener('pointerover', (event) => {
+      const tipped = event.target?.closest?.('[title]');
+      if (tipped) tipped.removeAttribute('title');
+    }, true);
     this._buildCharacterCreator();
     this._buildCharacterSelect();
 
@@ -770,7 +774,7 @@ export class UI {
       b.dataset.culture = key;
       b.innerHTML = `<span class="culture-swatch" style="background:${CULTURE_TINT[key] || '#d2b56a'}"></span>${c.name}<small>${c.banner}</small>`;
       const troops = ['soldier', 'ranger', 'sniper'].map((u) => c.units[u]?.name).filter(Boolean);
-      b.title = `${c.blurb}${troops.length ? `\n${troops.join(' · ')}` : ''}`;
+      b.dataset.blurb = `${c.blurb}${troops.length ? ` ${troops.join(', ')}` : ''}`;
       b.onclick = () => {
         this.selectedCulture = key;
         try { localStorage.setItem('zillions.culture', key); } catch (e) { /* private mode */ }
@@ -2848,6 +2852,68 @@ export class UI {
     }
   }
 
+  _selectHeroCard(key, card) {
+    this.selectedHero = key;
+    const row = this.root.querySelector('#herorow');
+    for (const child of row.children) child.classList.toggle('sel', child === card);
+    this._showHeroDetail(HEROES[key]);
+    if (this.cb.onHeroPick) this.cb.onHeroPick(key);
+  }
+
+  _showHeroDetail(hero) {
+    const box = this.root.querySelector('#hero-detail');
+    if (!box || !hero) return;
+    const blocks = [
+      hero.aura ? { name: hero.aura.name, desc: hero.aura.desc } : null,
+      ...(hero.passives || []).map((passive) => ({ name: passive.name, desc: passive.desc })),
+      hero.ability ? { name: hero.ability.name, desc: hero.ability.desc } : null,
+    ].filter(Boolean);
+    box.innerHTML = `<span class="eyebrow">Selected hero</span><h3>${escapeHtml(hero.name)}</h3><p>${escapeHtml(hero.tagline)}</p>${
+      blocks.map((block) => `<div><b>${escapeHtml(block.name)}</b><small>${escapeHtml(block.desc)}</small></div>`).join('')
+    }`;
+  }
+
+  _paintHeroPortraits() {
+    const cards = [...this.root.querySelectorAll('.herocard')].filter((card) => !PORTRAITS[card.dataset.key] && !card.querySelector('.hface'));
+    if (!cards.length || this._paintingPortraits) return;
+    this._paintingPortraits = true;
+    Promise.all([import('three'), import('./unit-art.js')]).then(([THREE, art]) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 320;
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+      renderer.setSize(256, 320, false);
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight(0xd7e6f4, 0x1a140e, 1.1));
+      const keyLight = new THREE.DirectionalLight(0xfff0d2, 1.8);
+      keyLight.position.set(2, 3, 4);
+      scene.add(keyLight);
+      const camera = new THREE.PerspectiveCamera(28, 256 / 320, 0.05, 20);
+      for (const card of cards) {
+        const key = card.dataset.key;
+        const def = HEROES[key];
+        if (!def) continue;
+        const model = art.buildUnitModel({ hero: true, key, def }).node;
+        scene.add(model);
+        const bounds = new THREE.Box3().setFromObject(model);
+        const size = bounds.getSize(new THREE.Vector3());
+        const center = bounds.getCenter(new THREE.Vector3());
+        model.position.sub(center);
+        scene.background = new THREE.Color(def.color || 0x243044);
+        camera.position.set(size.y * 0.35, size.y * 0.08, size.y * 1.35);
+        camera.lookAt(0, size.y * 0.02, 0);
+        renderer.render(scene, camera);
+        const img = document.createElement('img');
+        img.className = 'hface';
+        img.alt = '';
+        img.src = canvas.toDataURL('image/png');
+        card.querySelector('.hfacewrap')?.appendChild(img);
+        scene.remove(model);
+      }
+      renderer.dispose();
+    }).catch(() => {}).finally(() => { this._paintingPortraits = false; });
+  }
+
   _heroTip(h) {
     const a = h.ability;
     const au = h.aura;
@@ -3392,6 +3458,7 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._showHeroDetail(HEROES[key]);
     this._renderSelectedCharacter();
   }
 
