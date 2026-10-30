@@ -33,12 +33,17 @@ for (const key of zombies) {
   const verts = buf.readUInt32LE(4);
   const frames = buf.readUInt32LE(8);
   const nclips = buf.readUInt32LE(12);
-  assert.ok(verts > 200 && verts < 2500, `${key} has ${verts} verts`);
+  assert.ok(verts > 200 && verts < 4000, `${key} has ${verts} verts`);
   assert.equal(frames, 36, `${key} frame count`);
   assert.equal(nclips, 4, `${key} clip count`);
 }
 
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
+const anim = fs.readFileSync(path.join(root, 'src/character-anim.js'), 'utf8');
 assert.ok(main.includes('g.scale.setScalar(0.82)'), 'hero group scale must stay 0.82');
 assert.ok(!main.includes('kit.node.scale.multiplyScalar(1.25)'), 'hero kit must not be scaled up past 0.82');
+assert.ok(main.includes('zb.def.scale * ZOMBIE_VISUAL'), 'zombie draw scale stays a visual multiplier');
+assert.ok(anim.includes('export const ZOMBIE_VISUAL'), 'zombie visual scale is presentation-only');
+const game = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8');
+assert.ok(!game.includes('ZOMBIE_VISUAL'), 'simulation must not read the visual zombie scale');
 console.log('character-anim-check: 7 heroes, 7 zombie clips, scale 0.82');

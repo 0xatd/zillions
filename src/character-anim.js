@@ -6,6 +6,10 @@ import { GLTFLoader } from '../vendor/GLTFLoader.js';
 
 const HERO_KEYS = ['scott', 'alexander', 'danny', 'turtle', 'john', 'tiger', 'aaron'];
 const ZOMBIE_KEYS = ['walker', 'runner', 'brute', 'spitter', 'burrower', 'sieger', 'caller'];
+
+// Drawn size on top of the simulation scale in config.js. Collision, hit
+// radius and the lockstep hash keep using that config scale alone.
+export const ZOMBIE_VISUAL = 2.35;
 const HERO_CLIP = { idle: 'idle', run: 'run', attack: 'attack', cast: 'ability', hit: 'hit', down: 'death' };
 
 const heroes = {};
@@ -63,16 +67,33 @@ function cloneSkinned(srcScene) {
 }
 
 function fitHero(node) {
-  // Pack figures are about 3.5 units tall. Fit to 1.35 before the group
-  // scale of 0.82, which is the terrain-pass hero size.
+  // Fit the body (feet to just above the head bone) to 1.35 before the
+  // group scale of 0.82. Weapons and props may stick past that box; they
+  // must not shrink the figure, and the feet stay on the ground.
   node.updateMatrixWorld(true);
+  const tmp = new THREE.Vector3();
+  let headY = null;
+  let footY = null;
+  node.traverse((o) => {
+    if (!o.isBone) return;
+    o.getWorldPosition(tmp);
+    if (o.name === 'Head') headY = tmp.y;
+    if (o.name === 'Foot.L' || o.name === 'Foot.R') footY = footY == null ? tmp.y : Math.min(footY, tmp.y);
+  });
   const box = new THREE.Box3().setFromObject(node);
-  const h = Math.max(0.001, box.max.y - box.min.y);
-  const s = 1.35 / h;
+  const base = footY == null ? box.min.y : footY;
+  const crown = headY == null ? box.max.y : headY + Math.max(0.12, (headY - base) * 0.2);
+  const s = 1.35 / Math.max(0.001, crown - base);
   node.scale.multiplyScalar(s);
   node.updateMatrixWorld(true);
-  const fitted = new THREE.Box3().setFromObject(node);
-  node.position.y -= fitted.min.y;
+  let planted = null;
+  node.traverse((o) => {
+    if (!o.isBone) return;
+    if (o.name !== 'Foot.L' && o.name !== 'Foot.R') return;
+    o.getWorldPosition(tmp);
+    planted = planted == null ? tmp.y : Math.min(planted, tmp.y);
+  });
+  node.position.y -= planted == null ? new THREE.Box3().setFromObject(node).min.y : planted;
 }
 
 function playClip(player, state) {

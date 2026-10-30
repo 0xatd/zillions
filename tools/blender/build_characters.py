@@ -18,6 +18,7 @@ Flat materials only: no textures, roughness 1, metal 0. Exported heroes are
 about 1.35 units tall so the in-game group scale of 0.82 reads at the same
 size as the terrain pass.
 """
+import math
 import os
 import struct
 import sys
@@ -26,7 +27,7 @@ import bpy
 from mathutils import Vector
 
 HERO_HEIGHT = 1.35
-ZOMBIE_HEIGHT = 0.98
+ZOMBIE_HEIGHT = 1.5
 
 # Material-slot colours. Unlisted slots fall back to a neutral so a new
 # slot cannot ship as an untextured white.
@@ -99,42 +100,42 @@ ZOMBIES = [
         },
     },
     {
-        'key': 'runner', 'wide': (0.78, 0.86, 1.12), 'shape': 'runner',
+        'key': 'runner', 'wide': (0.78, 0.72, 0.96), 'lean': 0.48, 'shape': 'runner',
         'colors': {
             'Skin': 0xd2c48a, 'Clothes': 0x2a261c, 'Guts': 0xffe27a, 'Pants': 0x1c1a14,
             'DarkClothes': 0x14120e, 'Bones': 0xf0e2b0, 'Brain': 0xfff0a0, 'Face': 0xfff3a8,
         },
     },
     {
-        'key': 'brute', 'wide': (1.15, 1.08, 1.05), 'shape': 'brute',
+        'key': 'brute', 'wide': (1.12, 1.08, 1.02), 'shape': 'brute',
         'colors': {
             'Skin': 0x5c4578, 'Clothes': 0x3a2a52, 'Guts': 0xd2b4ff, 'Pants': 0x241830,
             'DarkClothes': 0x1a1224, 'Bones': 0xe4d4ff, 'Brain': 0xff7ae0, 'Face': 0xff8ae8,
         },
     },
     {
-        'key': 'spitter', 'wide': (1.05, 1.0, 0.96), 'shape': 'spitter',
+        'key': 'spitter', 'wide': (1.05, 1.12, 0.98), 'shape': 'spitter',
         'colors': {
             'Skin': 0x6d7348, 'Clothes': 0x3a4024, 'Guts': 0xd6ff4a, 'Pants': 0x242814,
             'DarkClothes': 0x181c10, 'Bones': 0xe8f0b0, 'Brain': 0xeaff6a, 'Face': 0xf4ff80,
         },
     },
     {
-        'key': 'burrower', 'wide': (1.28, 1.15, 0.72), 'shape': 'burrower',
+        'key': 'burrower', 'wide': (1.55, 1.35, 0.48), 'shape': 'burrower',
         'colors': {
             'Skin': 0x4e446c, 'Clothes': 0x2e2844, 'Guts': 0xc8b6ff, 'Pants': 0x1c1830,
             'DarkClothes': 0x141022, 'Bones': 0xddd0ff, 'Brain': 0xff5ad0, 'Face': 0xff6ad8,
         },
     },
     {
-        'key': 'sieger', 'wide': (1.12, 1.08, 1.02), 'shape': 'sieger',
+        'key': 'sieger', 'wide': (1.18, 1.22, 1.04), 'shape': 'sieger',
         'colors': {
             'Skin': 0x6a5344, 'Clothes': 0x4a3428, 'Guts': 0xffb060, 'Pants': 0x2a1c14,
             'DarkClothes': 0x1c120c, 'Bones': 0xf0d0b0, 'Brain': 0xffc070, 'Face': 0xffc878,
         },
     },
     {
-        'key': 'caller', 'wide': (0.86, 0.86, 1.22), 'shape': 'caller',
+        'key': 'caller', 'wide': (0.62, 1.25, 1.18), 'shape': 'caller',
         'colors': {
             'Skin': 0x3e6460, 'Clothes': 0x243e3c, 'Guts': 0x7dfff0, 'Pants': 0x142826,
             'DarkClothes': 0x101c1c, 'Bones': 0xd8fff8, 'Brain': 0xb8fff4, 'Face': 0xd8fff8,
@@ -260,10 +261,34 @@ def add_cylinder(name, loc, radius, depth, hex_color, emit=0.0, verts=8):
     return obj
 
 
-def add_cone(name, loc, radius, depth, hex_color, emit=0.0):
+def add_cone(name, loc, radius, depth, hex_color, emit=0.0, rot=None):
+    """Cone with its base on `loc` and its tip at local +Z * depth, then rotated."""
     bpy.ops.mesh.primitive_cone_add(vertices=5, radius1=radius, depth=depth, location=loc)
     obj = bpy.context.active_object
     obj.name = name
+    for v in obj.data.vertices:
+        v.co.z += depth * 0.5
+    if rot is not None:
+        obj.rotation_euler = rot
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.transform_apply(rotation=True)
+    obj.data.materials.append(new_mat(name, hex_color, emit))
+    for p in obj.data.polygons:
+        p.use_smooth = False
+    return obj
+
+
+def add_blob(name, loc, radius, hex_color, emit=0.0, scale=(1, 1, 1)):
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=radius, location=loc)
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = scale
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(scale=True)
     obj.data.materials.append(new_mat(name, hex_color, emit))
     for p in obj.data.polygons:
         p.use_smooth = False
@@ -296,11 +321,11 @@ def parent_keep(obj, arm, bone_name):
     bpy.context.view_layer.update()
 
 
-def put(kind, loc, size, color, bone, emit=0.0, radius=0.05, depth=0.2):
+def put(kind, loc, size, color, bone, emit=0.0, radius=0.05, depth=0.2, rot=None):
     if kind == 'cube':
         obj = add_cube(bone + '_prop', loc, size, color, emit)
     elif kind == 'cone':
-        obj = add_cone(bone + '_prop', loc, radius, depth, color, emit)
+        obj = add_cone(bone + '_prop', loc, radius, depth, color, emit, rot=rot)
     else:
         obj = add_cylinder(bone + '_prop', loc, radius, depth, color, emit)
     weight_to(obj, bone)
@@ -325,73 +350,134 @@ def shade_flat(mesh):
 
 
 def hero_props(kind, arm, height):
-    """Props are parented to bones, not joined, so the glTF nodes follow the clip."""
+    """Big props, joined and weighted so they follow the clip and read at distance 46.
+
+    Placement is in the bind pose: out to the side or forward, not buried in
+    a hanging fist. The runtime fits the body, so these may stick past it.
+    """
     H = height
     parts = []
-    def at(bone, along):
-        tail, direction = bone_points(arm, bone)
-        return tail + direction * (along * H)
+    def outward(fist):
+        return -1 if fist.x < 0 else 1
     if kind == 'hammer':
-        parts.append(put('cyl', at('Fist.R', 0.06), None, 0x3a3228, 'Fist.R', radius=0.012 * H, depth=0.14 * H))
-        parts.append(put('cube', at('Fist.R', 0.14), (0.16 * H, 0.07 * H, 0.09 * H), 0xd5dbe0, 'Fist.R'))
+        fist = bone_tail(arm, 'Fist.R')
+        side = outward(fist)
+        handle = fist + Vector((side * 0.18 * H, -0.02 * H, 0.08 * H))
+        head = fist + Vector((side * 0.42 * H, -0.02 * H, 0.2 * H))
+        parts.append(put('cyl', handle, None, 0x3a3228, 'Fist.R', radius=0.055 * H, depth=0.28 * H))
+        parts.append(put('cube', head, (0.62 * H, 0.28 * H, 0.36 * H), 0xe7eef2, 'Fist.R'))
     elif kind == 'rifle':
-        parts.append(put('cube', at('Fist.R', 0.18), (0.025 * H, 0.36 * H, 0.025 * H), 0x232820, 'Fist.R'))
-        parts.append(put('cube', at('Fist.R', 0.1) + Vector((0, 0, 0.04 * H)), (0.02 * H, 0.08 * H, 0.02 * H), 0xf3c53d, 'Fist.R'))
+        fist = bone_tail(arm, 'Fist.R')
+        side = outward(fist)
+        gun = fist + Vector((side * 0.28 * H, -0.12 * H, 0.12 * H))
+        parts.append(put('cube', gun, (0.55 * H, 0.16 * H, 0.14 * H), 0x232820, 'Fist.R'))
+        parts.append(put('cube', gun + Vector((side * 0.22 * H, -0.02 * H, 0.08 * H)), (0.18 * H, 0.12 * H, 0.12 * H), 0xf3c53d, 'Fist.R'))
     elif kind == 'blades':
         for bone in ('Fist.L', 'Fist.R'):
-            parts.append(put('cube', at(bone, 0.12), (0.016 * H, 0.22 * H, 0.028 * H), 0xe7e1d4, bone))
+            fist = bone_tail(arm, bone)
+            side = outward(fist)
+            blade = fist + Vector((side * 0.28 * H, -0.08 * H, 0.06 * H))
+            parts.append(put('cube', blade, (0.42 * H, 0.12 * H, 0.1 * H), 0xe7e1d4, bone))
     elif kind == 'shield':
-        parts.append(put('cube', at('Fist.L', 0.04), (0.22 * H, 0.03 * H, 0.32 * H), 0xb8ae86, 'Fist.L'))
-        parts.append(put('cube', at('Fist.L', 0.06), (0.16 * H, 0.04 * H, 0.24 * H), 0x3f6b5e, 'Fist.L'))
-        parts.append(put('cube', at('Fist.L', 0.08), (0.06 * H, 0.05 * H, 0.06 * H), 0x8fd0ff, 'Fist.L', emit=0.9))
-        parts.append(put('cube', at('Fist.R', 0.08), (0.08 * H, 0.08 * H, 0.08 * H), 0xd5dbe0, 'Fist.R'))
+        fist = bone_tail(arm, 'Fist.L')
+        side = outward(fist)
+        board = fist + Vector((side * 0.38 * H, -0.04 * H, 0.22 * H))
+        parts.append(put('cube', board, (0.62 * H, 0.12 * H, 0.74 * H), 0xb8ae86, 'Fist.L'))
+        parts.append(put('cube', board + Vector((0, 0, 0.02 * H)), (0.46 * H, 0.14 * H, 0.54 * H), 0x3f6b5e, 'Fist.L'))
+        parts.append(put('cube', board + Vector((0, -0.02 * H, 0.04 * H)), (0.16 * H, 0.16 * H, 0.16 * H), 0x8fd0ff, 'Fist.L', emit=0.9))
+        mace = bone_tail(arm, 'Fist.R')
+        mside = outward(mace)
+        parts.append(put('cube', mace + Vector((mside * 0.32 * H, -0.04 * H, 0.1 * H)), (0.28 * H, 0.22 * H, 0.28 * H), 0xd5dbe0, 'Fist.R'))
     elif kind == 'keg':
         tail, _direction = bone_points(arm, 'Torso')
-        parts.append(put('cyl', tail + Vector((0.1 * H, 0.06 * H, 0.05 * H)), None, 0x6b5334, 'Torso', radius=0.055 * H, depth=0.12 * H))
+        parts.append(put('cyl', tail + Vector((0.28 * H, 0.04 * H, 0.04 * H)), None, 0x6b5334, 'Torso', radius=0.26 * H, depth=0.34 * H))
+        parts.append(put('cube', tail + Vector((0.28 * H, 0.04 * H, 0.04 * H)), (0.54 * H, 0.1 * H, 0.1 * H), 0xd23b32, 'Torso'))
     elif kind == 'ears':
         head, _direction = bone_points(arm, 'Head')
         for side in (-1, 1):
-            parts.append(put('cone', head + Vector((side * 0.06 * H, 0, 0.08 * H)), None, 0x1c1a18, 'Head', radius=0.025 * H, depth=0.09 * H))
+            parts.append(put(
+                'cone', head + Vector((side * 0.12 * H, 0.0, 0.1 * H)), None, 0x1c1a18, 'Head',
+                radius=0.1 * H, depth=0.36 * H, rot=(0.15, 0, side * 1.15),
+            ))
         for bone in ('Fist.L', 'Fist.R'):
-            parts.append(put('cube', at(bone, 0.12), (0.014 * H, 0.2 * H, 0.022 * H), 0xe7e1d4, bone))
+            fist = bone_tail(arm, bone)
+            side = outward(fist)
+            blade = fist + Vector((side * 0.26 * H, -0.06 * H, 0.06 * H))
+            parts.append(put('cube', blade, (0.38 * H, 0.11 * H, 0.09 * H), 0xe7e1d4, bone))
     elif kind == 'staff':
-        parts.append(put('cyl', at('Fist.R', 0.2), None, 0xf0d060, 'Fist.R', radius=0.012 * H, depth=0.5 * H))
-        parts.append(put('cone', at('Fist.R', 0.42), None, 0xf0d060, 'Fist.R', emit=0.85, radius=0.045 * H, depth=0.1 * H))
+        fist = bone_tail(arm, 'Fist.R')
+        side = outward(fist)
+        shaft = fist + Vector((side * 0.16 * H, -0.02 * H, 0.22 * H))
+        parts.append(put('cyl', shaft, None, 0xf0d060, 'Fist.R', radius=0.045 * H, depth=0.55 * H))
+        parts.append(put(
+            'cone', shaft + Vector((0, 0, 0.28 * H)), None, 0xf0d060, 'Fist.R',
+            emit=0.9, radius=0.18 * H, depth=0.26 * H,
+        ))
     return parts
 
 
-def zombie_props(shape, arm):
+def zombie_props(shape, arm, height):
+    """Kitbash a silhouette you can name at distance 46. Sizes are fractions of body height."""
+    H = height
     parts = []
     head = bone_head(arm, 'Head')
     torso = bone_head(arm, 'Torso')
     fist_r = bone_tail(arm, 'Fist.R')
     fist_l = bone_tail(arm, 'Fist.L')
+    # Character faces Blender -Y. Cones are base-at-loc, tip along local +Z before rot.
+    forward = (math.pi / 2, 0, 0)  # tip toward -Y
     if shape == 'brute':
         for side in (-1, 1):
-            pad = add_cube(f'pad_{side}', torso + Vector((side * 0.28, 0.0, 0.18)), (0.28, 0.22, 0.18), 0xd2b4ff)
+            pad = add_blob(
+                f'pad_{side}', torso + Vector((side * 0.16 * H, 0.0, 0.1 * H)),
+                0.08 * H, 0xd2b4ff, scale=(1.25, 0.85, 0.9),
+            )
             weight_to(pad, 'Torso')
             parts.append(pad)
+        hump = add_blob('hump', torso + Vector((0, 0.06 * H, 0.16 * H)), 0.1 * H, 0xb48cff, scale=(1.2, 0.85, 0.8))
+        weight_to(hump, 'Torso')
+        parts.append(hump)
     elif shape == 'spitter':
-        sac = add_cube('sac', torso + Vector((0.0, -0.22, 0.05)), (0.36, 0.28, 0.32), 0xd6ff4a, emit=0.45)
+        sac = add_blob(
+            'sac', torso + Vector((0.0, -0.14 * H, 0.02 * H)),
+            0.11 * H, 0xd6ff4a, emit=0.7, scale=(1.05, 1.25, 1.05),
+        )
         weight_to(sac, 'Torso')
         parts.append(sac)
     elif shape == 'burrower':
         for side, fist, bone in ((-1, fist_l, 'Fist.L'), (1, fist_r, 'Fist.R')):
-            claw = add_cone(f'claw_{side}', fist + Vector((0, -0.12, -0.02)), 0.08, 0.28, 0xc8b6ff)
+            claw = add_cone(
+                f'claw_{side}', fist + Vector((side * 0.04 * H, -0.02 * H, -0.04 * H)),
+                0.05 * H, 0.42 * H, 0xc8b6ff, rot=(math.pi / 2 + 0.45, 0, side * 0.35),
+            )
             weight_to(claw, bone)
             parts.append(claw)
     elif shape == 'sieger':
-        plate = add_cube('plate', torso + Vector((0, -0.12, 0.12)), (0.55, 0.12, 0.42), 0xffb060)
-        weight_to(plate, 'Torso')
-        parts.append(plate)
+        shell = add_blob(
+            'shell', torso + Vector((0, 0.04 * H, 0.1 * H)),
+            0.13 * H, 0xffb060, scale=(1.45, 0.75, 0.95),
+        )
+        ram = add_cone(
+            'ram', torso + Vector((0, -0.16 * H, 0.02 * H)),
+            0.09 * H, 0.28 * H, 0xf0d0b0, rot=forward,
+        )
+        weight_to(shell, 'Torso')
+        weight_to(ram, 'Torso')
+        parts += [shell, ram]
     elif shape == 'caller':
-        for i, side in enumerate((-0.12, 0.0, 0.12)):
-            spine = add_cone(f'spine_{i}', head + Vector((side, 0.02, 0.28)), 0.05, 0.42, 0xd8fff8, emit=0.7)
-            weight_to(spine, 'Head')
-            parts.append(spine)
+        # A sail: thin across the shoulders, long front-to-back, tall.
+        # From the high camera the length is what reads.
+        fin = add_cube(
+            'fin', head + Vector((0, -0.02 * H, 0.32 * H)),
+            (0.07 * H, 0.42 * H, 0.62 * H), 0xd8fff8, emit=0.75,
+        )
+        weight_to(fin, 'Head')
+        parts.append(fin)
     elif shape == 'runner':
-        # A long pale crest so the sprinter reads from above, not just by width.
-        crest = add_cube('crest', head + Vector((0, 0.02, 0.22)), (0.06, 0.16, 0.28), 0xfff3a8, emit=0.3)
+        crest = add_cone(
+            'crest', head + Vector((0, -0.04 * H, 0.06 * H)),
+            0.035 * H, 0.28 * H, 0xfff3a8, emit=0.4, rot=(0.9, 0, 0),
+        )
         weight_to(crest, 'Head')
         parts.append(crest)
     return parts
@@ -476,9 +562,17 @@ def bake_frames(arm, mesh, action, count, scale=1.0):
         me = ev.to_mesh()
         pos, nrm = [], []
         for v in me.vertices:
-            # Blender Z-up to glTF Y-up: (x, z, -y)
-            pos.append((v.co.x * scale, v.co.z * scale, -v.co.y * scale))
-            nrm.append((v.normal.x, v.normal.z, -v.normal.y))
+            # Blender Z-up to glTF Y-up: (x, z, -y). `lean` shears the body
+            # toward -Y (the pack's forward) so a runner reads hunched.
+            sx, sy, sz = getattr(bake_frames, 'squash', (1.0, 1.0, 1.0))
+            lean = getattr(bake_frames, 'lean', 0.0)
+            by = v.co.y - lean * max(0.0, v.co.z)
+            pos.append((v.co.x * sx * scale, v.co.z * sz * scale, -by * sy * scale))
+            nx = v.normal.x / max(sx, 1e-4)
+            ny = v.normal.y / max(sy, 1e-4)
+            nz = v.normal.z / max(sz, 1e-4)
+            length = (nx * nx + ny * ny + nz * nz) ** 0.5 or 1.0
+            nrm.append((nx / length, nz / length, -ny / length))
         ev.to_mesh_clear()
         frames_pos.append(pos)
         frames_nrm.append(nrm)
@@ -560,7 +654,8 @@ def build_zombie(spec, src_dir, out_dir):
     arm, mesh = import_fbx(os.path.join(src_dir, 'Zombie_Male.fbx'))
     paint(mesh, spec['colors'], emit_names=('Face', 'Brain', 'Guts'))
     # Same rule as the heroes: never apply a scale to this armature.
-    parts = zombie_props(spec['shape'], arm)
+    body_h = mesh.dimensions.z or 1.0
+    parts = zombie_props(spec['shape'], arm, body_h)
     mesh = join_into(mesh, parts)
     shade_flat(mesh)
     vertex_colors_from_materials(mesh)
@@ -575,11 +670,14 @@ def build_zombie(spec, src_dir, out_dir):
     mesh.data.materials.append(body)
     # Sample before renaming so the source ranges stay put, then rename.
     order = [('idle', 'Idle', 8), ('walk', 'Walk', 10), ('attack', 'Punch', 8), ('death', 'Defeat', 10)]
-    # Fit the baked crowd mesh to ZOMBIE_HEIGHT without touching the rig.
-    fit = ZOMBIE_HEIGHT / (mesh.dimensions.z or 1.0)
+    # Fit the body (measured before props) so a crest or ram can stick out
+    # without shrinking the figure into the prop.
+    fit = ZOMBIE_HEIGHT / body_h
     pos_all, nrm_all, clips = [], [], []
     for name, src, count in order:
         act = find_action(src)
+        bake_frames.squash = spec['wide']
+        bake_frames.lean = spec.get('lean', 0.0)
         pos, nrm = bake_frames(arm, mesh, act, count, scale=fit)
         clips.append((name, len(pos_all), count))
         pos_all.extend(pos)
