@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { TILE } from './config.js';
 import { toyMat } from './toy-style.js';
-import { makeRNG } from './utils.js';
+import { makeRNG, makeNoise } from './utils.js';
 import {
   makePineGeometry, makeLollipopGeometry, makeBushGeometry, makeTrunkGeometry, makeBoulderGeometry,
 } from './toy-props.js';
@@ -528,5 +528,209 @@ export function buildFoamGroup(map) {
     const mesh = colorRibbon(map, ring, () => 1.15, rows, yAt);
     if (mesh) g.add(mesh);
   }
+  return g;
+}
+
+const smoothstep = (e0, e1, x) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+// One heightmapped mesh. The play floor keeps the terrace heights the units
+// stand on. Hills and the rounded shore are presentation only.
+export function buildSmoothTerrain(map) {
+  const N = map.size;
+  const SUB = 2;
+  const G = N * SUB;
+  const V = G + 1;
+  const blur = (classify) => {
+    const src = new Float32Array(N * N);
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) src[z * N + x] = classify(x, z);
+    }
+    const dst = new Float32Array(N * N);
+    const R = 2;
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        let acc = 0;
+        let w = 0;
+        for (let dz = -R; dz <= R; dz++) {
+          for (let dx = -R; dx <= R; dx++) {
+            const tx = x + dx;
+            const tz = z + dz;
+            if (!map.inBounds(tx, tz)) continue;
+            const wt = 1 / (1 + dx * dx + dz * dz);
+            acc += src[tz * N + tx] * wt;
+            w += wt;
+          }
+        }
+        dst[z * N + x] = w ? acc / w : 0;
+      }
+    }
+    return dst;
+  };
+  const sample = (grid, x, z) => {
+    const fx = Math.max(0, Math.min(N - 1.001, x - 0.5));
+    const fz = Math.max(0, Math.min(N - 1.001, z - 0.5));
+    const x0 = fx | 0;
+    const z0 = fz | 0;
+    const tx = fx - x0;
+    const tz = fz - z0;
+    const i = z0 * N + x0;
+    return grid[i] * (1 - tx) * (1 - tz) + grid[i + 1] * tx * (1 - tz)
+      + grid[i + N] * (1 - tx) * tz + grid[i + N + 1] * tx * tz;
+  };
+  const isW = (x, z) => (map.inBounds(x, z) && map.tiles[map.idx(x, z)] === TILE.WATER ? 1 : 0);
+  const water = blur(isW);
+  const rockM = blur((x, z) => (map.inBounds(x, z) && map.tiles[map.idx(x, z)] === TILE.MOUNTAIN ? 1 : 0));
+  const sandM = blur((x, z) => {
+    if (!map.inBounds(x, z)) return 0;
+    const t = map.tiles[map.idx(x, z)];
+    return t === TILE.SAND || t === TILE.WATER ? 1 : 0;
+  });
+  const dryM = blur((x, z) => (map.inBounds(x, z) && map.tiles[map.idx(x, z)] === TILE.FOREST ? 1 : 0));
+  const noise = makeNoise(makeRNG((((map.seed | 0) * 13 + 7) >>> 0) || 1));
+  const sites = map.sites || [];
+  const nearest = (x, z) => {
+    let best = 1e9;
+    for (const s of sites) best = Math.min(best, Math.hypot(x - s.x, z - s.z));
+    return best;
+  };
+  const heights = new Float32Array(V * V);
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const x = i / SUB;
+      const z = j / SUB;
+      const w = sample(water, x, z);
+      let hill = 0;
+      if (w < 0.22) {
+        const dist = nearest(x, z);
+        let mask = smoothstep(30, 62, dist);
+        const tx = x | 0;
+        const tz = z | 0;
+        if (map.inBounds(tx, tz)) {
+          const id = map.idx(tx, tz);
+          const tile = map.tiles[id];
+          if (tile === TILE.PATH || tile === TILE.WATER || (map.swRoad && map.swRoad[id])) mask = 0;
+        }
+        const n = noise(x * 0.018, z * 0.018, 3) - 0.48;
+        hill = Math.max(-0.28, Math.min(1.45, n * 3.1)) * mask;
+      }
+      const land = map.groundY(x, z) + hill;
+      const shore = smoothstep(0.2, 0.62, w);
+      heights[j * V + i] = land * (1 - shore) + (-0.4) * shore;
+    }
+  }
+  map._visualH = { data: heights, sub: SUB, n: G };
+  const meadow = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
+  const dry = meadow.clone().lerp(new THREE.Color(map.theme?.palette?.sand ?? 0xcbb892), 0.42);
+  const dirt = new THREE.Color(map.theme?.palette?.path ?? 0xb07a4f).lerp(new THREE.Color(map.theme?.palette?.sand ?? 0xcbb892), 0.25);
+  const rock = new THREE.Color(map.theme?.palette?.mountain ?? 0xe3dcc2);
+  const sand = new THREE.Color(map.isLava && map.isLava() ? 0x4a2a18 : (map.theme?.palette?.sand ?? 0xcbb892));
+  const cols = new Float32Array(V * V * 3);
+  const tmp = new THREE.Color();
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const x = i / SUB;
+      const z = j / SUB;
+      const h = heights[j * V + i];
+      const i1 = Math.min(G, i + 1);
+      const j1 = Math.min(G, j + 1);
+      const slope = Math.max(
+        Math.abs(h - heights[j * V + i1]),
+        Math.abs(h - heights[j1 * V + i]),
+      ) * SUB;
+      const w = sample(water, x, z);
+      const speckle = noise(x * 0.07, z * 0.07, 2);
+      tmp.copy(meadow);
+      tmp.lerp(dry, Math.min(1, sample(dryM, x, z) + speckle * 0.35));
+      tmp.lerp(sand, Math.min(1, sample(sandM, x, z) * 0.85 + smoothstep(0.12, 0.4, w)));
+      tmp.lerp(dirt, sample(water, x, z) > 0.5 ? 0 : speckle * 0.08);
+      tmp.lerp(rock, Math.max(sample(rockM, x, z), smoothstep(0.45, 1.25, slope)));
+      if (h < -0.05) tmp.lerp(sand, 0.5);
+      const o = (j * V + i) * 3;
+      cols[o] = tmp.r;
+      cols[o + 1] = tmp.g;
+      cols[o + 2] = tmp.b;
+    }
+  }
+  const pos = new Float32Array(V * V * 3);
+  for (let j = 0; j < V; j++) {
+    for (let i = 0; i < V; i++) {
+      const o = (j * V + i) * 3;
+      pos[o] = i / SUB;
+      pos[o + 1] = heights[j * V + i];
+      pos[o + 2] = j / SUB;
+    }
+  }
+  const idx = new Uint32Array(G * G * 6);
+  let k = 0;
+  for (let j = 0; j < G; j++) {
+    for (let i = 0; i < G; i++) {
+      const a = j * V + i;
+      idx[k++] = a;
+      idx[k++] = a + V;
+      idx[k++] = a + 1;
+      idx[k++] = a + 1;
+      idx[k++] = a + V;
+      idx[k++] = a + V + 1;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  const nrm = geo.attributes.normal;
+  for (let i = 0; i < nrm.count; i++) {
+    const nx = nrm.getX(i);
+    const ny = nrm.getY(i) * 0.72 + 0.28;
+    const nz = nrm.getZ(i);
+    const L = Math.hypot(nx, ny, nz) || 1;
+    nrm.setXYZ(i, nx / L, ny / L, nz / L);
+  }
+  nrm.needsUpdate = true;
+  const mesh = new THREE.Mesh(geo, toyMat({ vertexColors: true, flatShading: false }));
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
+  mesh.name = 'terrain';
+  return mesh;
+}
+
+export function buildGroundDetail(map) {
+  const g = new THREE.Group();
+  g.name = 'ground-detail';
+  const grassP = propRecord('grass');
+  const flower = propRecord('flower_yellowA');
+  const pebble = propRecord('rock_smallA');
+  if (!grassP && !flower && !pebble) return g;
+  const rng = makeRNG((((map.seed | 0) * 19 + 5) >>> 0) || 1);
+  const N = map.size;
+  const tufts = [];
+  const blooms = [];
+  const pebs = [];
+  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
+  const rockHex = map.theme?.palette?.mountain ?? 0xcbb892;
+  for (let z = 2; z < N - 2; z += 2) {
+    for (let x = 2; x < N - 2; x += 2) {
+      const id = map.idx(x, z);
+      const t = map.tiles[id];
+      if (t === TILE.WATER || t === TILE.MOUNTAIN || t === TILE.PATH) continue;
+      if (map.swRoad && map.swRoad[id]) continue;
+      if (rng() > 0.2) continue;
+      const px = x + rng();
+      const pz = z + rng();
+      const y = map.groundY(px, pz);
+      if (y < 0.04) continue;
+      if (tufts.length < 1100 && rng() < 0.72) tufts.push({ x: px, y, z: pz, h: 0.26 + rng() * 0.14, ry: rng() * 6 });
+      else if (blooms.length < 260) blooms.push({ x: px, y, z: pz, h: 0.4, ry: rng() * 6 });
+      if (pebs.length < 380 && rng() < 0.16) {
+        pebs.push({ x: px + (rng() - 0.5), y, z: pz + (rng() - 0.5), h: 0.1 + rng() * 0.06, ry: rng() * 6 });
+      }
+    }
+  }
+  if (grassP) placeProp(g, grassP, tufts, () => grassHex, { cast: false });
+  if (flower) placeProp(g, flower, blooms, (role) => (role === 'accent' ? 0xf2c14e : grassHex), { cast: false });
+  if (pebble) placeProp(g, pebble, pebs, (role) => (role === 'foliage' ? grassHex : rockHex), { cast: false });
   return g;
 }

@@ -8,7 +8,7 @@ import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
 import { buildLandDressing } from './land-dressing.js';
-import { buildForestGroup, buildRockGroup, buildRoadGroup, buildFoamGroup, buildCliffGroup } from './terrain-look.js';
+import { buildForestGroup, buildRockGroup, buildRoadGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail } from './terrain-look.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -26,6 +26,26 @@ export class GameMap extends TerrainField {
   // Ground under a point. On the terraced landform the per-tile corners keep
   // a figure on its own terrace right up to the cliff edge.
   groundY(x, z) {
+    const grid = this._visualH;
+    if (grid) {
+      const s = grid.sub;
+      const n = grid.n;
+      const gx = Math.max(0, Math.min(n, x * s));
+      const gz = Math.max(0, Math.min(n, z * s));
+      const x0 = gx | 0;
+      const z0 = gz | 0;
+      const x1 = Math.min(n, x0 + 1);
+      const z1 = Math.min(n, z0 + 1);
+      const fx = gx - x0;
+      const fz = gz - z0;
+      const V = n + 1;
+      const h00 = grid.data[z0 * V + x0];
+      const h10 = grid.data[z0 * V + x1];
+      const h01 = grid.data[z1 * V + x0];
+      const h11 = grid.data[z1 * V + x1];
+      const g = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+      return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
+    }
     if (this._tileCH) {
       const g = tileGroundY(this, this._tileCH, x, z);
       return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
@@ -148,66 +168,8 @@ export class GameMap extends TerrainField {
     const tileCH = tileCorners(this, cornerH, cw);
     this._tileCH = tileCH;
 
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const ti4 = (z * N + x) * 4;
-        const h00 = tileCH ? tileCH[ti4] : cornerH[z * cw + x];
-        const h10 = tileCH ? tileCH[ti4 + 1] : cornerH[z * cw + (x + 1)];
-        const h01 = tileCH ? tileCH[ti4 + 2] : cornerH[(z + 1) * cw + x];
-        const h11 = tileCH ? tileCH[ti4 + 3] : cornerH[(z + 1) * cw + (x + 1)];
-
-        const verts = tileCH
-          ? tileTris(this, tileCH, x, z).flat().map(([vx, vz, vy]) => [vx, vy, vz])
-          : [
-            [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
-            [x + 1, h10, z], [x, h01, z + 1], [x + 1, h11, z + 1],
-          ];
-        if (p + verts.length * 3 > positions.length) {
-          const grow = (a, n) => { const b2 = new Float32Array(a.length * 2 > n ? a.length * 2 : n * 2); b2.set(a); return b2; };
-          positions = grow(positions, p + verts.length * 3);
-          colors = grow(colors, p + verts.length * 3);
-          uvs = grow(uvs, ((p + verts.length * 3) / 3) * 2);
-        }
-        for (const [vx, vy, vz] of verts) {
-          positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
-          // Corner colour; a chamfer's edge-midpoint vertex blends its tile's.
-          const fx = Math.min(1, vx - x), fz = Math.min(1, vz - z);
-          if ((fx === 0 || fx === 1) && (fz === 0 || fz === 1)) {
-            const o = (vz * cw + vx) * 3;
-            colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
-          } else {
-            const o00 = (z * cw + x) * 3, o10 = o00 + 3, o01 = o00 + cw * 3, o11 = o01 + 3;
-            for (let ch = 0; ch < 3; ch++) {
-              colors[p + ch] = (cornerCol[o00 + ch] * (1 - fx) + cornerCol[o10 + ch] * fx) * (1 - fz)
-                + (cornerCol[o01 + ch] * (1 - fx) + cornerCol[o11 + ch] * fx) * fz;
-            }
-          }
-          const up = (p / 3) * 2;
-          uvs[up] = vx * 0.21; uvs[up + 1] = vz * 0.21; // world-scale grain tiling
-          p += 3;
-        }
-      }
-    }
-
-    if (p < positions.length) {
-      positions = positions.slice(0, p); colors = colors.slice(0, p); uvs = uvs.slice(0, (p / 3) * 2);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geo.computeVertexNormals();
-    // The play floor is one colour. Face the normals straight up so the low
-    // sun does not facet-shade every triangle; cast shadows supply the shape.
-    const up = geo.attributes.normal;
-    for (let i = 0; i < up.count; i++) up.setXYZ(i, 0, 1, 0);
-    const mat = toyMat({ vertexColors: true, flatShading: false });
-    const terrain = new THREE.Mesh(geo, mat);
-    terrain.receiveShadow = true;
-    terrain.name = 'terrain';
-    group.add(terrain);
-    const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS), this.theme?.palette?.shadow);
-    if (strata) group.add(strata);
+    group.add(buildSmoothTerrain(this));
+    group.add(buildGroundDetail(this));
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
@@ -224,7 +186,6 @@ export class GameMap extends TerrainField {
     group.add(buildFoamGroup(this));
     group.add(buildForestGroup(this));
     group.add(buildRockGroup(this));
-    group.add(buildCliffGroup(this));
     group.add(buildRoadGroup(this));
     group.add(this._buildOre());
     group.add(this._buildDetail());
