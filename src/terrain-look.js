@@ -302,48 +302,74 @@ export function buildCliffGroup(map) {
   return g;
 }
 
-function ribbon(map, pts, widthAt, lift, color) {
+// Corner-cutting. Open polylines keep their ends. Closed rings (first point
+// repeated) lose the duplicate and wrap.
+function chaikin(pts, iters, closed) {
+  let cur = pts.map((p) => [p[0], p[1]]);
+  if (closed && cur.length > 2) cur.pop();
+  for (let k = 0; k < iters; k++) {
+    const n = cur.length;
+    if (n < 3) break;
+    const next = [];
+    const last = closed ? n : n - 1;
+    if (!closed) next.push(cur[0]);
+    for (let i = 0; i < last; i++) {
+      const a = cur[i];
+      const b = cur[(i + 1) % n];
+      next.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+      next.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+    }
+    if (!closed) next.push(cur[n - 1]);
+    cur = next;
+  }
+  return cur;
+}
+
+// A strip across `rows` (fractions of half-width, -1..1) with a colour at
+// each row. The centre can wander; edges fade to the outer colour.
+function colorRibbon(map, pts, halfWidth, rows, yAt) {
   if (pts.length < 2) return null;
   const pos = [];
-  const left = [];
-  const right = [];
-  for (let i = 0; i < pts.length; i++) {
+  const col = [];
+  const n = pts.length;
+  const samples = [];
+  for (let i = 0; i < n; i++) {
     const prev = pts[Math.max(0, i - 1)];
-    const next = pts[Math.min(pts.length - 1, i + 1)];
+    const next = pts[Math.min(n - 1, i + 1)];
     let dx = next[0] - prev[0];
     let dz = next[1] - prev[1];
     const L = Math.hypot(dx, dz) || 1;
     dx /= L; dz /= L;
     const nx = -dz;
     const nz = dx;
-    const w = widthAt(i) / 2;
-    const wob = Math.sin(i * 0.85 + pts[0][0] * 0.3) * 0.18;
-    const x = pts[i][0] + nx * wob;
-    const z = pts[i][1] + nz * wob;
-    left.push([x + nx * w, z + nz * w]);
-    right.push([x - nx * w, z - nz * w]);
+    const w = halfWidth(i);
+    samples.push(rows.map((row) => {
+      const x = pts[i][0] + nx * w * row.t;
+      const z = pts[i][1] + nz * w * row.t;
+      return [x, yAt(x, z), z, row.c];
+    }));
   }
-  for (let i = 0; i < pts.length - 1; i++) {
-    const quad = [left[i], right[i], right[i + 1], left[i + 1]];
-    const y = (vx, vz) => map.groundY(vx, vz) + lift;
-    const tri = [0, 1, 2, 0, 2, 3];
-    for (const k of tri) {
-      const [vx, vz] = quad[k];
-      pos.push(vx, y(vx, vz), vz);
+  const push = (a) => { pos.push(a[0], a[1], a[2]); col.push(a[3].r, a[3].g, a[3].b); };
+  for (let i = 0; i < n - 1; i++) {
+    for (let r = 0; r < rows.length - 1; r++) {
+      const a = samples[i][r], b = samples[i][r + 1], c = samples[i + 1][r + 1], d = samples[i + 1][r];
+      for (const v of [a, b, c, a, c, d]) push(v);
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
   const upN = geo.attributes.normal;
   for (let i = 0; i < upN.count; i++) upN.setXYZ(i, 0, 1, 0);
   const mat = toyMat({
-    color, side: THREE.DoubleSide, flatShading: false,
+    vertexColors: true, flatShading: false, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.castShadow = false;
+  mesh.userData.noOutline = true;
   return mesh;
 }
 
@@ -359,22 +385,31 @@ export function buildRoadGroup(map) {
   const seen = new Uint8Array(N * N);
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const neighbours = (x, z) => dirs.filter(([dx, dz]) => isP(x + dx, z + dz));
-  const pathHex = map.theme?.palette?.path ?? 0xb07a4f;
-  const grassHex = map.theme?.palette?.grass ?? 0x2f7d66;
-  const edge = new THREE.Color(pathHex).lerp(new THREE.Color(grassHex), 0.42).getHex();
+  const path = new THREE.Color(map.theme?.palette?.path ?? 0xb07a4f);
+  const grass = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
+  const grassLum = grass.r * 0.3 + grass.g * 0.59 + grass.b * 0.11;
+  // A worn track. On snow the authored path is a cold grey, so pull it up
+  // toward the ground until it reads as packed dirt, not a dark stamp.
+  const dirt = path.clone().lerp(new THREE.Color(0xb08968), 0.45);
+  if (grassLum > 0.62) dirt.lerp(grass, 0.55);
+  const mid = dirt.clone().lerp(grass, 0.45);
+  const edge = dirt.clone().lerp(grass, 0.82);
+  const center = dirt.clone().lerp(new THREE.Color(0xfff6ea), grassLum > 0.62 ? 0.22 : 0.1);
+  const rows = [
+    { t: -1, c: edge }, { t: -0.55, c: mid }, { t: 0, c: center }, { t: 0.55, c: mid }, { t: 1, c: edge },
+  ];
+  const stones = [];
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       if (!isP(x, z) || seen[map.idx(x, z)]) continue;
-      const pts = [];
-      const start = neighbours(x, z).find(([dx, dz]) => seen[map.idx(x + dx, z + dz)]);
-      if (start) pts.push([x + start[0] + 0.5, z + start[1] + 0.5]);
+      const raw = [];
       let cx = x;
       let cz = z;
       let px = -999;
       let pz = -999;
       while (map.inBounds(cx, cz) && isP(cx, cz) && !seen[map.idx(cx, cz)]) {
         seen[map.idx(cx, cz)] = 1;
-        pts.push([cx + 0.5, cz + 0.5]);
+        raw.push([cx + 0.5, cz + 0.5]);
         const opts = neighbours(cx, cz).filter(([dx, dz]) => cx + dx !== px || cz + dz !== pz);
         if (!opts.length) break;
         let pick = opts[0];
@@ -386,13 +421,44 @@ export function buildRoadGroup(map) {
         cx += pick[0];
         cz += pick[1];
       }
-      if (pts.length < 2) continue;
-      const widthAt = (i) => 1.35 + 0.45 * (0.5 + 0.5 * Math.sin(i * 0.7 + pts[0][0]));
-      const lip = ribbon(map, pts, (i) => widthAt(i) * 1.38, 0.02, edge);
-      const bed = ribbon(map, pts, widthAt, 0.045, pathHex);
-      if (lip) g.add(lip);
-      if (bed) g.add(bed);
+      if (raw.length < 2) continue;
+      const smooth = chaikin(raw, 3, false);
+      let arc = 0;
+      const wandered = smooth.map((p, i) => {
+        if (i) arc += Math.hypot(p[0] - smooth[i - 1][0], p[1] - smooth[i - 1][1]);
+        const prev = smooth[Math.max(0, i - 1)];
+        const next = smooth[Math.min(smooth.length - 1, i + 1)];
+        let dx = next[0] - prev[0];
+        let dz = next[1] - prev[1];
+        const L = Math.hypot(dx, dz) || 1;
+        const nx = -dz / L;
+        const nz = dx / L;
+        const wob = Math.sin(arc * 0.55 + raw[0][0] * 0.2) * 0.16;
+        return [p[0] + nx * wob, p[1] + nz * wob];
+      });
+      const mesh = colorRibbon(
+        map, wandered,
+        (i) => 0.72 + 0.16 * Math.sin(i * 0.35 + raw[0][1]),
+        rows,
+        (vx, vz) => map.groundY(vx, vz) + 0.04,
+      );
+      if (mesh) g.add(mesh);
+      for (let i = 2; i < wandered.length - 2; i += 7) {
+        const p = wandered[i];
+        const q = wandered[Math.min(wandered.length - 1, i + 1)];
+        let dx = q[0] - p[0];
+        let dz = q[1] - p[1];
+        const L = Math.hypot(dx, dz) || 1;
+        const side = (i & 1) ? 1 : -1;
+        const ox = p[0] + (-dz / L) * side * 0.78;
+        const oz = p[1] + (dx / L) * side * 0.78;
+        stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.16 + (i % 3) * 0.04, ry: i });
+      }
     }
+  }
+  const rock = propRecord('rock_smallA');
+  if (rock) {
+    placeProp(g, rock, stones, (role) => (role === 'foliage' ? grass : dirt), { cast: false });
   }
   return g;
 }
@@ -401,40 +467,66 @@ export function buildFoamGroup(map) {
   const g = new THREE.Group();
   g.name = 'foam';
   const N = map.size;
-  const pos = [];
-  const y = map.isLava && map.isLava() ? -0.02 : 0.03;
   const land = (x, z) => map.inBounds(x, z) && map.tiles[map.idx(x, z)] !== TILE.WATER;
-  const edge = (x0, z0, x1, z1) => {
-    const dx = x1 - x0;
-    const dz = z1 - z0;
-    const L = Math.hypot(dx, dz) || 1;
-    const nx = -dz / L * 0.16;
-    const nz = dx / L * 0.16;
-    const quad = [
-      [x0 + nx, z0 + nz], [x1 + nx, z1 + nz], [x1 - nx, z1 - nz], [x0 - nx, z0 - nz],
-    ];
-    for (const k of [0, 1, 2, 0, 2, 3]) pos.push(quad[k][0], y, quad[k][1]);
-  };
+  const water = (x, z) => map.inBounds(x, z) && map.tiles[map.idx(x, z)] === TILE.WATER;
+  // Directed edges, land on the right as we walk them.
+  const edges = [];
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
-      if (map.tiles[map.idx(x, z)] !== TILE.WATER) continue;
-      if (land(x + 1, z)) edge(x + 1, z, x + 1, z + 1);
-      if (land(x, z + 1)) edge(x, z + 1, x + 1, z + 1);
+      if (!water(x, z)) continue;
+      if (land(x + 1, z)) edges.push({ ax: x + 1, az: z, bx: x + 1, bz: z + 1 });
+      if (land(x - 1, z)) edges.push({ ax: x, az: z + 1, bx: x, bz: z });
+      if (land(x, z + 1)) edges.push({ ax: x + 1, az: z + 1, bx: x, bz: z + 1 });
+      if (land(x, z - 1)) edges.push({ ax: x, az: z, bx: x + 1, bz: z });
     }
   }
-  if (!pos.length) return g;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const mat = new THREE.MeshBasicMaterial({
-    color: map.theme?.palette?.foam ?? 0xffffff,
-    side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -3,
-    polygonOffsetUnits: -3,
+  if (!edges.length) return g;
+  const startAt = new Map();
+  edges.forEach((e, i) => {
+    const k = e.ax + ',' + e.az;
+    if (!startAt.has(k)) startAt.set(k, []);
+    startAt.get(k).push(i);
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.userData.noOutline = true;
-  mesh.receiveShadow = false;
-  g.add(mesh);
+  const used = new Uint8Array(edges.length);
+  const chains = [];
+  for (let i = 0; i < edges.length; i++) {
+    if (used[i]) continue;
+    const chain = [];
+    let cur = i;
+    while (cur != null && !used[cur]) {
+      used[cur] = 1;
+      const e = edges[cur];
+      if (!chain.length) chain.push([e.ax, e.az]);
+      chain.push([e.bx, e.bz]);
+      const nexts = startAt.get(e.bx + ',' + e.bz) || [];
+      cur = nexts.find((j) => !used[j]);
+    }
+    if (chain.length >= 3) chains.push(chain);
+  }
+  const lava = !!(map.isLava && map.isLava());
+  const grass = new THREE.Color(map.theme?.palette?.grass ?? 0x2f7d66);
+  const sand = new THREE.Color(lava ? 0x4a2a18 : (map.theme?.palette?.sand ?? 0xcbb892));
+  const foam = new THREE.Color(lava ? (map.theme?.palette?.foam ?? 0xffd27a) : (map.theme?.palette?.water ?? 0x3fa9e0));
+  if (!lava) foam.lerp(new THREE.Color(map.theme?.palette?.foam ?? 0xe8f6ff), 0.35);
+  const shore = sand.clone().lerp(grass, 0.35);
+  const lip = sand.clone().lerp(grass, 0.78);
+  const rows = [
+    { t: -0.55, c: foam }, { t: -0.05, c: foam.clone().lerp(sand, 0.45) },
+    { t: 0.35, c: shore }, { t: 1, c: lip },
+  ];
+  const yAt = (x, z) => {
+    const tx = x | 0, tz = z | 0;
+    if (!map.inBounds(tx, tz) || map.tiles[map.idx(tx, tz)] === TILE.WATER) return lava ? 0.0 : 0.03;
+    return map.groundY(x, z) + 0.05;
+  };
+  for (const chain of chains) {
+    const closed = chain.length > 8
+      && chain[0][0] === chain[chain.length - 1][0]
+      && chain[0][1] === chain[chain.length - 1][1];
+    const smooth = chaikin(chain, 3, closed);
+    const ring = closed ? smooth.concat([smooth[0]]) : smooth;
+    const mesh = colorRibbon(map, ring, () => 1.15, rows, yAt);
+    if (mesh) g.add(mesh);
+  }
   return g;
 }

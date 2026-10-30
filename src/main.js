@@ -4056,7 +4056,8 @@ class App {
         mesh.traverse((o) => {
           if (!o.isMesh || o.userData.skirt) return;
           for (const material of (Array.isArray(o.material) ? o.material : [o.material])) {
-            if (!material || materials.includes(material)) continue;
+            if (!material?.isMaterial || materials.includes(material)) continue;
+            if (!material.userData) material.userData = {};
             material.userData.artBaseColor = material.color?.clone() || null;
             material.userData.artBaseEmissive = material.emissive?.clone() || null;
             material.userData.artBaseEmissiveIntensity = material.emissiveIntensity || 0;
@@ -4131,7 +4132,7 @@ class App {
       const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
-        // Toy-kit hero on its hoverbike. Drawn about one storey tall, with an
+        // Toy-kit hero on its hoverbike. About a third of a house, with an
         // ink outline so the silhouette holds on same-coloured ground.
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
@@ -4156,7 +4157,7 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      g.scale.setScalar(1.45);
+      g.scale.setScalar(0.82);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,

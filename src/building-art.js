@@ -21,11 +21,11 @@ import { propGeometry, propRecord } from './prop-pack.js';
 // Visual only. A one-storey door is about the hero's height, a house is a
 // little over twice that, and towers and the keep stand well above both.
 export function buildingVisualScale(kind) {
-  if (kind === 'hq') return 2.85;
-  if (kind === 'tower' || kind === 'outpost') return 3.2;
+  if (kind === 'hq') return 3.15;
+  if (kind === 'tower' || kind === 'outpost') return 3.85;
   if (typeof kind === 'string' && kind.startsWith('camp')) return 2.05;
   if (kind === 'wall') return 1.65;
-  return 2.35;
+  return 2.55;
 }
 
 // Drop a wide slab that sits under the whole footprint (the kit's hex plinth
@@ -506,6 +506,31 @@ function putPack(buckets, name, hex, x, y, z, w, h, d, ry = 0) {
   return h;
 }
 
+function packPiece(group, name, mat, x, y, z, w, h, d, ry = 0) {
+  const geo = propGeometry(name);
+  const rec = propRecord(name);
+  if (!geo || !rec || h <= 0 || w <= 0) return 0;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = name;
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = ry;
+  mesh.scale.set(w / rec.span, h / rec.height, d / rec.span);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return h;
+}
+
+function packBox(group, mat, x, y, z, w, h, d, ry = 0) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = ry;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return mesh;
+}
+
 function packMesh(buckets) {
   if (!buckets.pos.length) return null;
   const geo = new THREE.BufferGeometry();
@@ -573,6 +598,107 @@ function packWall(b, ctx, pal, key) {
   return packMesh(buckets) || new THREE.Group();
 }
 
+// The keep is several castle-kit masses plus a door, windows, trim and a
+// crown, so it is not one tinted cube. Local units, before visual scale.
+function packKeep(pal, key, tier) {
+  const g = new THREE.Group();
+  g.userData.pack = true;
+  const stone = toyMat({ color: pal.stone, flatShading: true });
+  const stone2 = toyMat({ color: pal.stone2, flatShading: true });
+  const stone3 = toyMat({ color: pal.stone3, flatShading: true });
+  const roof = toyMat({ color: pal.roof, flatShading: true });
+  const wood = toyMat({ color: pal.wood, flatShading: true });
+  const dark = toyMat({ color: pal.dark, flatShading: true });
+  const trim = toyMat({ color: pal.trim, flatShading: true });
+  const banner = toyMat({ color: pal.banner, flatShading: true });
+  const warm = toyMat({ color: pal.warm, emissive: pal.warm, emissiveIntensity: 0.55, flatShading: true });
+  const s = 1.05;
+  let y = 0;
+  y += packPiece(g, 'tower-square-base', stone3, 0, 0, 0, s * 1.45, 0.26, s * 1.28);
+  const ground = key === 'middle_eastern' ? 0.86 : 0.74;
+  y += packPiece(g, 'tower-square-mid-windows', stone, 0, y, 0, s * 1.12, ground, s);
+  const doorY = 0.26 + ground * 0.42;
+  const face = s * 0.52;
+  packBox(g, dark, 0, doorY, face, 0.32, 0.48, 0.08);
+  packBox(g, wood, 0, doorY, face + 0.03, 0.24, 0.4, 0.05);
+  const windowAt = (x, wy, z, thin) => {
+    packBox(g, dark, x, wy, z, thin ? 0.08 : 0.2, 0.22, thin ? 0.2 : 0.08);
+    packBox(g, warm, x, wy, z + (thin ? 0 : 0.03), thin ? 0.04 : 0.13, 0.14, thin ? 0.13 : 0.04);
+  };
+  windowAt(-0.38, doorY + 0.06, face, false);
+  windowAt(0.38, doorY + 0.06, face, false);
+  windowAt(s * 0.58, doorY, 0.2, true);
+  windowAt(-s * 0.58, doorY, -0.15, true);
+  if (key === 'south_american') {
+    y += packPiece(g, 'tower-square-base', stone2, 0, y, 0, s * 0.92, 0.42, s * 0.82);
+    y += packPiece(g, 'tower-square-mid-windows', stone, 0, y, 0, s * 0.7, 0.48, s * 0.62);
+    packPiece(g, 'stairs-stone', stone2, 0, 0.02, s * 0.85, 0.7, 0.42, 0.48);
+  } else if (key === 'middle_eastern') {
+    y += packPiece(g, 'tower-square', stone2, 0, y, 0, s * 0.72, 0.7, s * 0.72);
+    windowAt(-0.22, y - 0.28, s * 0.38, false);
+    windowAt(0.22, y - 0.28, s * 0.38, false);
+  } else {
+    y += packPiece(g, 'tower-square-mid-windows', stone2, 0, y, 0, s * 0.82, 0.58 + tier * 0.04, s * 0.74);
+    windowAt(-0.22, y - 0.28, s * 0.4, false);
+    windowAt(0.22, y - 0.28, s * 0.4, false);
+  }
+  packBox(g, trim, 0, y, 0, s * (key === 'asian' ? 1.45 : 1.2), 0.07, s * (key === 'asian' ? 1.28 : 1.08));
+  if (key === 'asian') packPiece(g, 'wall-narrow-wood', wood, 0, y - 0.02, 0, s * 1.55, 0.16, s * 1.35);
+  const roofName = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
+  const roofH = key === 'middle_eastern' ? 0.78 : key === 'south_american' ? 0.36 : 0.52;
+  y += packPiece(g, roofName, roof, 0, y, 0, s * (key === 'asian' ? 1.35 : 1.12), roofH, s * (key === 'asian' ? 1.22 : 1.02));
+  if (key === 'european') {
+    packPiece(g, 'tower-square', stone3, s * 0.32, y - 0.08, s * 0.16, 0.22, 0.62, 0.22);
+    packBox(g, dark, s * 0.32, y + 0.28, s * 0.16, 0.1, 0.12, 0.1);
+  } else if (key === 'asian') {
+    const lantern = packBox(g, warm, 0, y + 0.15, 0, 0.16, 0.2, 0.16);
+    lantern.castShadow = false;
+    packPiece(g, 'tower-square-top-roof', roof, 0, y + 0.22, 0, 0.28, 0.16, 0.28);
+  } else if (key === 'south_american') {
+    packBox(g, trim, 0, y + 0.08, 0, 0.28, 0.1, 0.28);
+    packBox(g, warm, 0, y + 0.2, 0, 0.12, 0.16, 0.12);
+  } else {
+    packPiece(g, 'tower-square', stone2, s * 0.55, 0.3, -s * 0.15, 0.28, 1.35, 0.28);
+    packPiece(g, 'tower-hexagon-roof', roof, s * 0.55, 1.65, -s * 0.15, 0.34, 0.42, 0.34);
+    packBox(g, trim, 0, y + 0.02, 0, 0.08, 0.28, 0.08);
+  }
+  const flagL = packPiece(g, 'flag-banner-short', banner, -s * 0.78, 0.85, face * 0.2, 0.2, 0.85, 0.2, Math.PI / 2);
+  const flag = g.children[g.children.length - 1];
+  if (flagL) g.userData.flag = flag;
+  packPiece(g, 'flag-banner-short', key === 'european' ? pal.accent : banner, s * 0.78, 0.85, face * 0.2, 0.2, 0.85, 0.2, -Math.PI / 2);
+  return g;
+}
+
+function packHouse(pal, key, tier) {
+  const g = new THREE.Group();
+  g.userData.pack = true;
+  const stone = toyMat({ color: pal.stone, flatShading: true });
+  const stone2 = toyMat({ color: pal.stone2, flatShading: true });
+  const roof = toyMat({ color: pal.roof, flatShading: true });
+  const wood = toyMat({ color: pal.wood, flatShading: true });
+  const dark = toyMat({ color: pal.dark, flatShading: true });
+  const warm = toyMat({ color: pal.warm, emissive: pal.warm, emissiveIntensity: 0.4, flatShading: true });
+  const trim = toyMat({ color: pal.trim, flatShading: true });
+  const s = 0.92;
+  let y = 0;
+  y += packPiece(g, 'tower-square-base', stone2, 0, 0, 0, s * 1.15, 0.18, s);
+  y += packPiece(g, 'tower-square-mid-windows', stone, 0, y, 0, s, 0.78, s * 0.88);
+  const face = s * 0.46;
+  packBox(g, dark, 0, 0.42, face, 0.22, 0.36, 0.06);
+  packBox(g, wood, 0, 0.42, face + 0.025, 0.16, 0.3, 0.04);
+  packBox(g, dark, -0.28, 0.55, face, 0.14, 0.16, 0.05);
+  packBox(g, warm, -0.28, 0.55, face + 0.02, 0.09, 0.1, 0.03);
+  packBox(g, dark, 0.28, 0.55, face, 0.14, 0.16, 0.05);
+  packBox(g, warm, 0.28, 0.55, face + 0.02, 0.09, 0.1, 0.03);
+  if (key === 'asian') packPiece(g, 'wall-narrow-wood', wood, 0, y, 0, s * 1.35, 0.12, s * 1.2);
+  if (key === 'south_american') packPiece(g, 'stairs-stone', stone2, 0, 0, face + 0.15, 0.45, 0.28, 0.32);
+  packBox(g, trim, 0, y, 0, s * (key === 'asian' ? 1.28 : 1.08), 0.05, s * 0.98);
+  const roofName = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
+  packPiece(g, roofName, roof, 0, y, 0, s * (key === 'asian' ? 1.3 : 1.08), key === 'middle_eastern' ? 0.55 : 0.42, s * 1.02);
+  if (tier >= 2) packPiece(g, 'log', wood, s * 0.35, 0.02, s * 0.15, 0.32, 0.16, 0.18);
+  return g;
+}
+
 function packBuildingMesh(b, ctx = {}) {
   if (!propRecord('tower-square-base') || !propRecord('wall')) return null;
   const c = culture();
@@ -582,28 +708,19 @@ function packBuildingMesh(b, ctx = {}) {
   const buckets = { pos: [], nrm: [], col: [] };
   const tier = Math.max(1, b.plotTier || 1);
   const roofName = key === 'middle_eastern' ? 'tower-hexagon-roof' : 'tower-square-top-roof';
-  if (b.kind === 'hq') {
-    const s = 1.45;
-    let y = 0;
-    y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, s, 0.82, s * 0.9);
-    y += putPack(buckets, 'tower-square-mid-windows', pal.stone2, 0, y, 0, s * 0.86, 0.55 + tier * 0.08, s * 0.8);
-    if (key === 'european') putPack(buckets, 'tower-square', pal.stone3, s * 0.28, y, s * 0.22, 0.36, 0.7, 0.36);
-    y += putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? s * 1.2 : s, key === 'middle_eastern' ? 0.7 : 0.5, key === 'asian' ? s * 1.2 : s * 0.95);
-    if (key === 'asian') putPack(buckets, 'wall-narrow-wood', pal.wood, 0, y * 0.62, 0, s * 1.25, 0.16, s * 1.15);
-    if (key === 'south_american') putPack(buckets, 'stairs-stone', pal.stone2, 0, 0, s * 0.62, 0.85, 0.48, 0.55);
-    putPack(buckets, 'flag-banner-short', pal.banner, -s * 0.62, 0.55, 0, 0.22, 0.85, 0.22, Math.PI / 2);
-    putPack(buckets, 'flag-banner-short', pal.accent, s * 0.62, 0.55, 0, 0.22, 0.85, 0.22, -Math.PI / 2);
-    return packMesh(buckets);
-  }
+  if (b.kind === 'hq') return packKeep(pal, key, tier);
+  if (b.kind === 'house') return packHouse(pal, key, tier);
   if (b.kind === 'tower' || b.kind === 'outpost') {
     const s = b.kind === 'outpost' ? 0.78 : 0.66;
     let y = 0;
     y += putPack(buckets, 'tower-square-base', pal.stone, 0, 0, 0, s, 0.5, s);
-    const levels = Math.min(3, tier);
+    const levels = Math.min(3, tier) + 1;
     for (let i = 0; i < levels; i++) {
-      y += putPack(buckets, 'tower-square-mid-windows', i % 2 ? pal.stone2 : pal.stone, 0, y, 0, s * 0.88, 0.36, s * 0.88);
+      const shrink = 1 - i * 0.08;
+      y += putPack(buckets, 'tower-square-mid-windows', i % 2 ? pal.stone2 : pal.stone, 0, y, 0, s * 0.9 * shrink, 0.42, s * 0.9 * shrink);
     }
-    y += putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? s * 1.3 : s * 1.05, key === 'middle_eastern' ? 0.55 : 0.4, s * 1.05);
+    y += putPack(buckets, 'tower-square', pal.stone3, 0, y, 0, s * 0.42, 0.55, s * 0.42);
+    y += putPack(buckets, roofName, pal.roof, 0, y, 0, key === 'asian' ? s * 1.15 : s * 0.7, key === 'middle_eastern' ? 0.48 : 0.36, s * 0.7);
     putPack(buckets, 'flag-banner-short', pal.banner, s * 0.72, y * 0.4, 0, 0.16, 0.5, 0.16, Math.PI / 2);
     return packMesh(buckets);
   }

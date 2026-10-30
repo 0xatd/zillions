@@ -128,6 +128,9 @@ export class GameMap extends TerrainField {
         if (waterN === n) {
           scratch.setHex(this.isLava() ? 0x4a2a18 : (this.theme?.palette?.water ?? 0x3fa9e0));
           col.copy(scratch).multiplyScalar(this.isLava() ? 0.55 : 0.82);
+        } else if (waterN > 0 && !this.isLava()) {
+          scratch.setHex(this.theme?.palette?.sand ?? 0xcbb892);
+          col.lerp(scratch, 0.4 * (waterN / n));
         }
         // A small blight stain so a hive still reads as a place.
         for (const [nx, nz] of this.nestSpots || []) {
@@ -218,7 +221,6 @@ export class GameMap extends TerrainField {
     water.position.set(N / 2, -0.22, N / 2);
     group.add(water);
 
-    group.add(this._buildRipples());
     group.add(buildFoamGroup(this));
     group.add(buildForestGroup(this));
     group.add(buildRockGroup(this));
@@ -336,40 +338,6 @@ export class GameMap extends TerrainField {
       const state = game.labyrinthEncounters?.find((e) => e.key === mesh.userData.encounterKey);
       mesh.visible = state?.status === 'active' || state?.status === 'sealed';
     }
-  }
-
-  // White foam dashes: a bright ring hugging every shoreline plus sparse
-  // open-water ripples — the hand-inked water read from the reference.
-  _buildRipples() {
-    const N = this.size;
-    const rng = makeRNG(555);
-    const spots = [];
-    for (let z = 1; z < N - 1; z++) {
-      for (let x = 1; x < N - 1; x++) {
-        if (this.tiles[this.idx(x, z)] !== TILE.WATER) continue;
-        const shore = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
-          const t = this.tiles[this.idx(x + dx, z + dz)];
-          return t !== TILE.WATER;
-        });
-        if (shore) spots.push({ x: x + 0.5, z: z + 0.5, w: 0.55 + rng() * 0.25, r: 0 });
-        else if (rng() < 0.055) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
-      }
-    }
-    const geo = new THREE.PlaneGeometry(1, 0.1);
-    geo.rotateX(-Math.PI / 2);
-    const foam = this.theme?.palette?.foam ?? 0xe8f6ff;
-    const mat = new THREE.MeshBasicMaterial({ color: foam, transparent: true, opacity: 0.8, depthWrite: false });
-    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    spots.forEach((s, i) => {
-      q.identity();
-      sc.set(s.w, 1, 1);
-      pos.set(s.x, -0.16, s.z);
-      m.compose(pos, q, sc);
-      mesh.setMatrixAt(i, m);
-    });
-    mesh.count = spots.length;
-    return mesh;
   }
 
   _scatter(tile, perTile) {
