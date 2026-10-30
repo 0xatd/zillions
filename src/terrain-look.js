@@ -237,7 +237,8 @@ export function buildRockGroup(map) {
       if (map.tiles[map.idx(x, z)] !== TILE.MOUNTAIN) continue;
       const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => map.isWalkable(x + dx, z + dz));
       const dist = nearestSite(map, x, z);
-      if (rim && (dist < 56 ? rng() < 0.42 : rng() < 0.16)) cluster(x + rng(), z + rng(), rng() < 0.35);
+      const vale = map.theme?.terrain === 'vale';
+      if (rim && (dist < 56 ? rng() < (vale ? 0.72 : 0.42) : rng() < (vale ? 0.28 : 0.16))) cluster(x + rng(), z + rng(), vale || rng() < 0.35);
       else if (!rim && rng() < (dist < 40 ? 0.12 : 0.04)) drop(x + rng(), z + rng(), 0.8 + rng() * 1.1, 0.3);
     }
   }
@@ -279,21 +280,26 @@ export function buildCliffGroup(map) {
       // The play camera sits on +Z. Keep that foreground clear of cliff blocks.
       if ((map.sites || []).some((s) => Math.hypot(px0 - s.x, pz0 - s.z) < 46 && pz0 > s.z - 8)) continue;
       const y0 = map.groundY(px0, pz0);
+      const vale = map.theme?.terrain === 'vale' || map.theme?.terrain === 'hills';
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         if (!map.inBounds(x + dx, z + dz)) continue;
-        const drop = y0 - map.groundY(x + dx + 0.5, z + dz + 0.5);
-        if (drop < 1.15 || rng() > 0.55) continue;
-        budget--;
-        const item = {
-          x: x + 0.5 + dx * 0.42,
-          y: map.groundY(x + dx + 0.5, z + dz + 0.5),
-          z: z + 0.5 + dz * 0.42,
-          h: Math.min(drop * 0.72, 1.8),
-          ry: Math.atan2(dx, dz),
-          color: stone,
-        };
-        if (drop > 2.2 && block && rng() < 0.4) blocks.push(item);
-        else faces.push(item);
+        const baseY = map.groundY(x + dx + 0.5, z + dz + 0.5);
+        const drop = y0 - baseY;
+        if (drop < 1.15 || rng() > (vale ? 0.82 : 0.55)) continue;
+        const layers = vale ? Math.min(3, 1 + Math.floor(drop / 1.1)) : 1;
+        for (let layer = 0; layer < layers && budget > 0; layer++) {
+          budget--;
+          const item = {
+            x: x + 0.5 + dx * (0.28 + layer * 0.16),
+            y: baseY + layer * Math.min(drop / layers, 0.7),
+            z: z + 0.5 + dz * (0.28 + layer * 0.16),
+            h: Math.min((drop / layers) * 0.85, vale ? 1.15 : 1.8),
+            ry: Math.atan2(dx, dz) + (layer - 1) * 0.06,
+            color: stone.clone().offsetHSL(0, 0, -0.04 * layer),
+          };
+          if (drop > 2.2 && block && rng() < 0.35) blocks.push(item);
+          else faces.push(item);
+        }
         break;
       }
     }
@@ -400,41 +406,115 @@ function catmullRom(points, samples) {
 
 // A few open splines: each gate to the keep, and each war road onward to its hive.
 // No tile-graph loops.
+function angDelta(a, b) {
+  const d = Math.abs(a - b) % (Math.PI * 2);
+  return d > Math.PI ? Math.PI * 2 - d : d;
+}
+
+// One main street per city: the war gate, a keep courtyard, and the back gate.
+// Side gates are a single spur onto that street. War roads stop at the war
+// gate, so they do not draw a second path through the town.
 function roadSplines(map) {
   const lines = [];
+  const plazas = [];
+  const meets = new Map();
   for (const site of map.sites || []) {
-    const keep = [site.x, site.z];
     const form = site.rim ? rimForm(site.rim) : null;
     const gates = form && form.gates && form.gates.length ? form.gates : [0, Math.PI];
     const facing = site.rim ? site.rim.facing : 0;
-    for (const g of gates) {
+    const gatePt = (g) => {
       const ang = g + facing;
-      const r = site.rim ? rimRadius(site.rim, g) + 1.5 : 18;
-      const gate = [site.x + Math.cos(ang) * r, site.z + Math.sin(ang) * r];
-      const mid = [
-        site.x + Math.cos(ang) * r * 0.45,
-        site.z + Math.sin(ang) * r * 0.45,
+      const r = site.rim ? rimRadius(site.rim, g) + 1.2 : 16;
+      return [site.x + Math.cos(ang) * r, site.z + Math.sin(ang) * r];
+    };
+    let main = gates[0];
+    let back = null;
+    let mainD = Infinity;
+    let backD = Infinity;
+    for (const g of gates) {
+      const frontD = angDelta(g, 0);
+      const rearD = angDelta(g, Math.PI);
+      if (frontD < mainD) { mainD = frontD; main = g; }
+      if (rearD < backD && frontD > 0.45) { backD = rearD; back = g; }
+    }
+    const front = gatePt(main);
+    const ux = Math.cos(facing);
+    const uz = Math.sin(facing);
+    const plazaNear = [site.x + ux * 4.4, site.z + uz * 4.4];
+    const street = [front, plazaNear];
+    if (back != null && angDelta(back, main) > 0.7) {
+      street.push([site.x - ux * 4.4, site.z - uz * 4.4], gatePt(back));
+    }
+    lines.push(street);
+    plazas.push({ x: site.x, z: site.z });
+    meets.set(`${site.x},${site.z}`, front);
+    for (const g of gates) {
+      if (g === main || g === back) continue;
+      const spur = gatePt(g);
+      const join = [
+        front[0] * 0.42 + plazaNear[0] * 0.58,
+        front[1] * 0.42 + plazaNear[1] * 0.58,
       ];
-      lines.push([gate, mid, keep]);
+      lines.push([spur, join]);
     }
   }
   for (const road of map.roadPaths || []) {
     const pts = road.pts || [];
-    if (pts.length < 6) continue;
-    const step = Math.max(8, Math.floor(pts.length / 6));
-    const ctrl = [];
-    for (let i = 0; i < pts.length; i += step) ctrl.push([pts[i][0] + 0.5, pts[i][1] + 0.5]);
-    const last = pts[pts.length - 1];
-    const end = [last[0] + 0.5, last[1] + 0.5];
-    const prev = ctrl[ctrl.length - 1];
-    if (!prev || Math.hypot(prev[0] - end[0], prev[1] - end[1]) > 2) ctrl.push(end);
-    if (road.site) ctrl.push([road.site[0], road.site[1]]);
-    lines.push(ctrl);
+    if (pts.length < 6 || !road.site) continue;
+    const [sx, sz] = road.site;
+    const outer = [];
+    for (const p of pts) {
+      const x = p[0] + 0.5;
+      const z = p[1] + 0.5;
+      if (Math.hypot(x - sx, z - sz) < 20) continue;
+      if (!outer.length || Math.hypot(x - outer[outer.length - 1][0], z - outer[outer.length - 1][1]) > 3) {
+        outer.push([x, z]);
+      }
+    }
+    if (outer.length < 3) continue;
+    const meet = meets.get(`${sx},${sz}`);
+    if (meet) outer.push(meet);
+    lines.push(outer);
   }
   for (const b of map.bridges || []) {
     lines.push([[b.x0, b.z0], [(b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2], [b.x1, b.z1]]);
   }
-  return lines;
+  return { lines, plazas };
+}
+
+// A dirt courtyard in front of the keep. It is a patch of the same road colour,
+// broken into ground-following quads, not a ring or a build pad.
+function plazaMesh(map, x, z, color) {
+  const s = 6.4;
+  const n = 3;
+  const pos = [];
+  const col = [];
+  const c = color.clone();
+  const yAt = (px, pz) => map.groundY(px, pz) + 0.04;
+  for (let iz = 0; iz < n; iz++) {
+    for (let ix = 0; ix < n; ix++) {
+      const x0 = x - s / 2 + (ix / n) * s;
+      const x1 = x - s / 2 + ((ix + 1) / n) * s;
+      const z0 = z - s / 2 + (iz / n) * s;
+      const z1 = z - s / 2 + ((iz + 1) / n) * s;
+      for (const [vx, vz] of [[x0, z0], [x1, z0], [x1, z1], [x0, z0], [x1, z1], [x0, z1]]) {
+        pos.push(vx, yAt(vx, vz), vz);
+        col.push(c.r, c.g, c.b);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const mat = toyMat({
+    vertexColors: true, flatShading: false, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  mesh.userData.noOutline = true;
+  return mesh;
 }
 
 export function buildRoadGroup(map) {
@@ -461,9 +541,14 @@ export function buildRoadGroup(map) {
   const stones = [];
   const tufts = [];
   const splines = roadSplines(map);
-  for (const ctrl of splines) {
+  for (const plaza of splines.plazas) {
+    const mesh = plazaMesh(map, plaza.x, plaza.z, center);
+    if (mesh) g.add(mesh);
+  }
+  for (const ctrl of splines.lines) {
     if (ctrl.length < 2) continue;
-    const line = catmullRom(ctrl, 10);
+    const line = catmullRom(ctrl, 10).filter((p) =>
+      Number.isFinite(p[0]) && Number.isFinite(p[1]) && p[0] > -4 && p[1] > -4 && p[0] < map.size + 4 && p[1] < map.size + 4);
     if (line.length < 4) continue;
     const mesh = colorRibbon(
       map, line,
@@ -565,7 +650,31 @@ export function buildFoamGroup(map) {
     if (!map.inBounds(tx, tz) || map.tiles[map.idx(tx, tz)] === TILE.WATER) return lava ? 0.0 : 0.03;
     return map.groundY(x, z) + 0.05;
   };
+  const pieces = [];
   for (const chain of chains) {
+    // A coastline that doubles back makes the spline loop into a kink. Split
+    // there and draw each stretch on its own.
+    let cur = [chain[0]];
+    for (let i = 1; i < chain.length - 1; i++) {
+      cur.push(chain[i]);
+      const a = chain[i - 1];
+      const b = chain[i];
+      const c = chain[i + 1];
+      const abx = b[0] - a[0];
+      const abz = b[1] - a[1];
+      const bcx = c[0] - b[0];
+      const bcz = c[1] - b[1];
+      const la = Math.hypot(abx, abz) || 1;
+      const lb = Math.hypot(bcx, bcz) || 1;
+      if ((abx * bcx + abz * bcz) / (la * lb) < -0.15) {
+        if (cur.length >= 4) pieces.push(cur);
+        cur = [chain[i]];
+      }
+    }
+    cur.push(chain[chain.length - 1]);
+    if (cur.length >= 4) pieces.push(cur);
+  }
+  for (const chain of pieces) {
     const closed = chain.length > 8
       && chain[0][0] === chain[chain.length - 1][0]
       && chain[0][1] === chain[chain.length - 1][1];
@@ -577,8 +686,7 @@ export function buildFoamGroup(map) {
     if (ctrl.length < 4) continue;
     let smooth = catmullRom(ctrl, 8);
     if (closed && smooth.length > 2) smooth = smooth.concat([smooth[0]]);
-    const ring = smooth;
-    const mesh = colorRibbon(map, ring, () => 1.15, rows, yAt);
+    const mesh = colorRibbon(map, smooth, () => 1.15, rows, yAt);
     if (mesh) g.add(mesh);
   }
   return g;

@@ -183,6 +183,21 @@ try {
     const file = join(outDir, `wall-${culture}.png`);
     await writeFile(file, Buffer.from(data, 'base64'));
     console.log('wrote', file);
+    await evaluate(`(() => {
+      const app = window.__app;
+      const hq = app.game.plots.find((p) => p.kind === 'hq');
+      const h = app.myHero();
+      h.x = hq.cx + 2.2;
+      h.z = hq.cz + 3.2;
+      app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz), hq.cz);
+      app.camDist = 18;
+      return true;
+    })()`);
+    await delay(700);
+    const keepShot = await command('Page.captureScreenshot', { format: 'png' });
+    const keepFile = join(outDir, `keep-${culture}.png`);
+    await writeFile(keepFile, Buffer.from(keepShot.data, 'base64'));
+    console.log('wrote', keepFile);
   }
 } finally {
   try { if (socket) socket.close(); } catch { /* already closed */ }

@@ -8,7 +8,7 @@ import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
 import { buildLandDressing } from './land-dressing.js';
-import { buildForestGroup, buildRockGroup, buildRoadGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail, buildWaterMesh } from './terrain-look.js';
+import { buildForestGroup, buildRockGroup, buildRoadGroup, buildCliffGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail, buildWaterMesh } from './terrain-look.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -176,6 +176,7 @@ export class GameMap extends TerrainField {
     group.add(buildFoamGroup(this));
     group.add(buildForestGroup(this));
     group.add(buildRockGroup(this));
+    group.add(buildCliffGroup(this));
     group.add(buildRoadGroup(this));
     group.add(this._buildOre());
     group.add(this._buildDetail());

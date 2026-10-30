@@ -355,6 +355,24 @@ export function buildLandDressing(map) {
     }
     const [cartX, cartY, cartZ] = place(facing - 0.55, wr * 0.5);
     carts.push({ x: cartX, y: cartY, z: cartZ, h: 0.62, ry: facing, color: 0x7a5340 });
+    // A short market row on the street, and a plank dock where the water comes in.
+    for (let k = 0; k < 4; k++) {
+      const [mx, my, mz] = place(facing + 0.4, wr * (0.26 + k * 0.07));
+      blocks.push({ x: mx, y: my + 0.32, z: mz, sx: 1.05, sy: 0.5, sz: 0.62, ry: facing, color: 0x8a6240 });
+      blocks.push({ x: mx, y: my + 0.78, z: mz, sx: 1.3, sy: 0.08, sz: 0.85, ry: facing + 0.04, color: 0xc45a3a });
+    }
+    for (let step = 10; step <= 22; step += 2) {
+      const wx = site.x + Math.cos(facing + 1.15) * step;
+      const wz = site.z + Math.sin(facing + 1.15) * step;
+      if (!map.inBounds(wx | 0, wz | 0) || map.tiles[map.idx(wx | 0, wz | 0)] !== TILE.WATER) continue;
+      for (let k = 0; k < 4; k++) {
+        const t = 0.62 + k * 0.08;
+        const x = site.x + (wx - site.x) * t;
+        const z = site.z + (wz - site.z) * t;
+        blocks.push({ x, y: yAt(x, z) + 0.1, z, sx: 0.55, sy: 0.1, sz: 1.35, ry: facing + 1.15, color: 0x6b5344 });
+      }
+      break;
+    }
     for (let k = 0; k < 4; k++) {
       const [fx, fy, fz] = place(facing + Math.PI + k * 0.18, wr * 0.72);
       fences.push({ x: fx, y: fy, z: fz, h: 0.72, ry: facing, color: 0x6b5344 });

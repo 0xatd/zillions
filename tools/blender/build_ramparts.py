@@ -249,18 +249,24 @@ def asian_wall(pal):
 
 
 def south_wall(pal):
+    # Fine ashlar courses with a small setback each time, so the wall reads as
+    # dressed stone rather than a stack of crates. Gold is a thin inlay.
     bm, layer = new_bm()
-    steps = (
-        (0.0, 0.52, 1.18, pal['stone3']),
-        (0.46, 1.08, 0.96, pal['stone']),
-        (1.02, 1.66, 0.74, pal['stone2']),
-        (1.58, 2.2, 0.52, pal['stone']),
+    bands = (
+        (0.40, 0.96, pal['stone3']),
+        (0.36, 0.90, pal['stone']),
+        (0.34, 0.84, pal['stone2']),
+        (0.32, 0.78, pal['stone']),
+        (0.30, 0.72, pal['stone2']),
+        (0.28, 0.66, pal['stone']),
     )
-    for z0, z1, depth, color in steps:
-        box(bm, layer, 0, 0, (z0 + z1) / 2, 1.0, depth, z1 - z0 + 0.02, color)
-    box(bm, layer, 0, -0.34, 1.08, 1.0, 0.08, 0.1, pal['roof'])
-    box(bm, layer, 0, 0.34, 1.08, 1.0, 0.08, 0.1, pal['roof'])
-    box(bm, layer, 0, 0, 2.28, 1.0, 0.4, 0.08, pal['trim'])
+    z = 0.0
+    for height, depth, color in bands:
+        box(bm, layer, 0, 0, z + height / 2, 1.0, depth, height + 0.012, color)
+        z += height * 0.9
+    box(bm, layer, 0, 0, z + 0.05, 1.0, 0.74, 0.1, pal['stone2'])
+    box(bm, layer, 0, -0.40, 0.72, 1.0, 0.035, 0.055, pal['roof'])
+    box(bm, layer, 0, -0.36, z - 0.08, 0.72, 0.03, 0.045, pal['trim'])
     return bm_object(bm, 'body', material())
 
 
@@ -331,13 +337,21 @@ def asian_post(pal):
 
 def south_post(pal):
     bm, layer = new_bm()
-    tiers = ((1.5, 0.7, pal['stone3']), (1.2, 0.65, pal['stone']), (0.9, 0.6, pal['stone2']), (0.62, 0.55, pal['stone']))
+    tiers = (
+        (1.28, 0.42, pal['stone3']),
+        (1.14, 0.38, pal['stone']),
+        (1.0, 0.36, pal['stone2']),
+        (0.86, 0.34, pal['stone']),
+        (0.72, 0.32, pal['stone2']),
+    )
     z = 0.0
     for width, height, color in tiers:
         box(bm, layer, 0, 0, z + height / 2, width, width, height, color)
-        z += height * 0.92
-    box(bm, layer, 0, 0, z + 0.06, 0.7, 0.7, 0.1, pal['trim'])
-    box(bm, layer, 0, -0.48, 0.85, 1.15, 0.08, 0.1, pal['roof'])
+        z += height * 0.88
+    box(bm, layer, 0, 0, z + 0.06, 0.86, 0.86, 0.1, pal['stone'])
+    box(bm, layer, 0, 0, z + 0.22, 0.48, 0.42, 0.28, pal['stone2'])
+    box(bm, layer, 0, 0, z + 0.4, 0.62, 0.55, 0.08, pal['stone3'])
+    box(bm, layer, 0, -0.24, z + 0.28, 0.14, 0.04, 0.14, pal['trim'])
     return bm_object(bm, 'body', material())
 
 
@@ -407,16 +421,27 @@ def gate(pal, kind):
     glow_bm, glow_layer = new_bm()
     span = 1.32
     if kind == 'south_american':
-        # Stepped corbel over a wide door, terraced piers.
+        # Dressed piers, a trapezoid doorway, and a corbelled temple top.
         for sign in (-1, 1):
-            box(bm, layer, sign * 1.45, 0, 0.45, 1.15, 1.25, 0.9, pal['stone3'])
-            box(bm, layer, sign * 1.45, 0, 1.25, 0.95, 1.05, 0.75, pal['stone'])
-            box(bm, layer, sign * 1.45, 0, 1.9, 0.75, 0.85, 0.6, pal['stone2'])
-        box(bm, layer, 0, 0, 2.35, 2.3, 1.15, 0.28, pal['stone'])
-        box(bm, layer, 0, 0, 2.05, 1.7, 1.05, 0.22, pal['stone2'])
-        box(bm, layer, 0, 0, 2.55, 2.5, 1.2, 0.12, pal['trim'])
-        box(bm, layer, 0, -0.55, 1.15, 1.5, 0.08, 0.1, pal['roof'])
-        door_pair(bm, layer, pal, 0.72, 1.7)
+            pier = (
+                (1.05, 0.48, pal['stone3']),
+                (0.92, 0.42, pal['stone']),
+                (0.78, 0.4, pal['stone2']),
+            )
+            pz = 0.0
+            for width, height, color in pier:
+                box(bm, layer, sign * 1.32, 0, pz + height / 2, width, 1.08, height, color)
+                pz += height * 0.9
+        # Jambs lean in, so the opening is wider at the road than at the lintel.
+        for sign in (-1, 1):
+            box(bm, layer, sign * 0.72, 0, 0.85, 0.28, 0.9, 1.7, pal['stone'], rot=(0, 0, sign * 0.08))
+        box(bm, layer, 0, 0, 1.78, 2.15, 1.12, 0.22, pal['stone2'])
+        box(bm, layer, 0, 0, 2.02, 2.45, 1.28, 0.14, pal['stone'])
+        box(bm, layer, 0, 0, 2.2, 2.05, 1.08, 0.12, pal['stone2'])
+        box(bm, layer, 0, 0, 2.36, 1.45, 0.78, 0.12, pal['stone'])
+        box(bm, layer, 0, -0.58, 2.08, 0.2, 0.05, 0.2, pal['trim'])
+        box(bm, layer, 0, -0.56, 1.55, 1.35, 0.04, 0.05, pal['roof'])
+        door_pair(bm, layer, pal, 0.62, 1.55)
     elif kind == 'asian':
         for sign in (-1, 1):
             box(bm, layer, sign * 1.4, 0, 1.15, 1.0, 1.15, 2.3, pal['stone'])
@@ -540,6 +565,10 @@ def european_keep(pal):
     bm, layer = new_bm()
     box(bm, layer, 0, -0.56, 0.38, 0.28, 0.08, 0.48, pal['dark'])
     box(bm, layer, 0, -0.6, 0.38, 0.2, 0.06, 0.4, pal['wood'])
+    box(bm, layer, 0, -0.1, 2.05, 1.45, 0.85, 0.1, pal['roof'], rot=(0.5, 0, 0))
+    box(bm, layer, 0, 0.1, 2.05, 1.45, 0.85, 0.1, pal['roof'], rot=(-0.5, 0, 0))
+    box(bm, layer, 0.62, 0.15, 1.45, 0.24, 0.24, 0.9, pal['stone3'])
+    box(bm, layer, 0.62, 0.15, 2.1, 0.32, 0.32, 0.24, pal['roof'])
     extra = bm_object(bm, 'door', material())
     body = join([body, extra], 'body')
     return body, glow
@@ -573,20 +602,21 @@ def asian_keep(pal):
 
 def south_keep(pal):
     parts = [
-        put('tower-square-base', 0, 0, 0, (1.85, 1.6, 0.32), pal['stone3']),
-        put('tower-square-base', 0, 0, 0.28, (1.4, 1.2, 0.3), pal['stone']),
-        put('tower-square-base', 0, 0, 0.54, (1.0, 0.85, 0.28), pal['stone2']),
-        put('stairs-stone', 0, -0.95, 0, (1.3, 0.7, 0.55), pal['stone2']),
-        put('tower-square', 0, 0, 0.8, (0.55, 0.5, 0.4), pal['stone']),
+        put('tower-square-base', 0, 0, 0, (1.9, 1.65, 0.28), pal['stone3']),
+        put('tower-square-base', 0, 0, 0.24, (1.5, 1.28, 0.26), pal['stone']),
+        put('tower-square-base', 0, 0, 0.46, (1.12, 0.96, 0.24), pal['stone2']),
+        put('stairs-stone', 0, -1.05, 0, (1.4, 0.75, 0.6), pal['stone2']),
+        put('tower-square', 0, 0, 0.68, (0.62, 0.52, 0.42), pal['stone']),
     ]
     body = join(parts, 'body')
     bm, layer = new_bm()
-    box(bm, layer, 0, 0, 1.22, 0.7, 0.62, 0.1, pal['trim'])
-    box(bm, layer, 0, -0.55, 0.7, 1.15, 0.08, 0.1, pal['roof'])
-    box(bm, layer, 0, 0, 1.4, 0.16, 0.16, 0.22, pal['trim'])
+    box(bm, layer, 0, 0, 1.16, 0.78, 0.66, 0.1, pal['stone'])
+    box(bm, layer, 0, 0, 1.32, 0.5, 0.42, 0.22, pal['stone2'])
+    box(bm, layer, 0, -0.24, 1.28, 0.14, 0.05, 0.14, pal['trim'])
+    box(bm, layer, 0, -0.52, 0.62, 1.2, 0.045, 0.06, pal['roof'])
     extra = bm_object(bm, 'top', material())
     body = join([body, extra], 'body')
-    glow = glow_boxes([(0, -0.28, 1.05, 0.14, 0.08, 0.16)], pal['warm'])
+    glow = glow_boxes([(0, -0.3, 0.92, 0.12, 0.06, 0.14)], pal['warm'])
     return body, glow
 
 
@@ -656,13 +686,18 @@ def asian_house(pal):
 
 def south_house(pal):
     parts = [
-        put('tower-square-base', 0, 0, 0, (1.3, 1.1, 0.22), pal['stone3']),
-        put('tower-square-base', 0, 0, 0.18, (1.0, 0.85, 0.28), pal['stone']),
-        put('tower-square', 0, 0, 0.44, (0.6, 0.5, 0.32), pal['stone2']),
-        put('stairs-stone', 0, -0.7, 0, (0.8, 0.45, 0.4), pal['stone2']),
+        put('tower-square-base', 0, 0, 0, (1.35, 1.15, 0.2), pal['stone3']),
+        put('tower-square-base', 0, 0, 0.16, (1.05, 0.9, 0.22), pal['stone']),
+        put('tower-square', 0, 0, 0.36, (0.62, 0.52, 0.36), pal['stone2']),
+        put('stairs-stone', 0, -0.72, 0, (0.85, 0.48, 0.42), pal['stone2']),
     ]
     body = join(parts, 'body')
-    glow = glow_boxes([(0, -0.28, 0.55, 0.1, 0.06, 0.12)], pal['warm'])
+    bm, layer = new_bm()
+    box(bm, layer, 0, 0, 0.78, 0.7, 0.58, 0.08, pal['stone'])
+    box(bm, layer, 0, -0.28, 0.74, 0.12, 0.04, 0.12, pal['trim'])
+    extra = bm_object(bm, 'top', material())
+    body = join([body, extra], 'body')
+    glow = glow_boxes([(0, -0.3, 0.52, 0.1, 0.05, 0.1)], pal['warm'])
     return body, glow
 
 
@@ -746,10 +781,14 @@ SPIRES = {
 
 
 def main():
-    reset()
-    body = rubble()
-    finish(body, None, 'rubble.glb', do_bevel=True)
-    for key, pal in PALS.items():
+    only = os.environ.get('RAMPART_ONLY', '')
+    keys = [k for k in PALS if not only or k == only]
+    if not only:
+        reset()
+        body = rubble()
+        finish(body, None, 'rubble.glb', do_bevel=True)
+    for key in keys:
+        pal = PALS[key]
         reset()
         finish(WALLS[key](pal), None, f'{key}-wall.glb')
         reset()
