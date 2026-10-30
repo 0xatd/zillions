@@ -1,19 +1,10 @@
-# Menu props
+# Star-system art
 
-These models are used only on the star-system level select. They do not
-affect the battlefield, collision, or saves.
+The level-select planets, clouds, atmosphere, and sky are drawn in the page.
+Territory tint is painted when progress changes, so a downloaded globe would
+go stale. No third-party planet texture is used.
 
-| File | Source | Licence |
-| --- | --- | --- |
-| `satelliteDish.glb` | [Kenney Space Kit](https://kenney.nl/assets/space-kit) | CC0 1.0 |
-| `turret_single.glb` | Kenney Space Kit | CC0 1.0 |
-| `meteor.glb` | Kenney Space Kit | CC0 1.0 |
-| `rock_largeA.glb` | Kenney Space Kit | CC0 1.0 |
-| `rock_crystals.glb` | Kenney Space Kit | CC0 1.0 |
-| `craft_speederA.glb` | Kenney Space Kit | CC0 1.0 |
-
-Kenney does not require credit. It is recorded here anyway.
-
-Planet surfaces stay procedural. Won and hive colours are painted when
-progress changes, so a baked globe would go stale. A displaced icosphere
-in the page is the mesh those colours need.
+Kenney Space Kit models were tried for site markers and rocks. The turret read
+as a floating plank and the rocks read as lumps, so they are not used. Won
+sites use a small outpost and banner built in the page, seated on the surface,
+so the cloth can take the culture colour.
