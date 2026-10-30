@@ -12,6 +12,7 @@ import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadCharacters, cloneHero, zombieAnim, zombieAnimReady } from './character-anim.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -3556,12 +3557,12 @@ class App {
   // rebuild the horde pools on kit geometry. Presentation only.
   _loadArt() {
     if (!this._artLoading) {
-      this._artLoading = loadAssets().then(() => {
+      this._artLoading = loadAssets().then(() => loadCharacters()).then(() => {
         this.assetsLoaded = true;
         setMapKit(kitGeometry);
-        if (hasKit('enemy_walker') && this.horde) {
-          this.horde.dispose();
-          this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+        if (this.horde) {
+          const anim = zombieAnimReady() ? zombieAnim : null;
+          if (anim || hasKit('enemy_walker')) this.horde.reload(kitGeometry, anim);
         }
       });
     }
@@ -3580,11 +3581,17 @@ class App {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
-    this.horde.begin();
+    this.horde.begin(dt);
+    if (!this._zSeen) this._zSeen = new Map();
+    const live = new Set(g.zombies.map((zb) => zb.id));
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
-      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
+      const bobAmp = this.horde.hasAnim ? 0.012 : 0.05;
+      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * bobAmp;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
+      this._zSeen.set(zb.id, {
+        type: zb.boss ? 'brute' : zb.type, x: zb.x, y: bob, z: zb.z, yaw, s: zb.def.scale,
+      });
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
       const s = zb.def.scale;
@@ -3607,14 +3614,21 @@ class App {
       else c.setRGB(1, 1, 1);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
+      const step = this.horde.hasAnim ? lunge * 0.12 : lunge;
       this.horde.write(
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
-        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
+        zb.x + (ax / ad) * step, bob, zb.z + (az / ad) * step,
         (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
         s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
         t, zb.phase, lunge, c, eyeHex,
       );
     }
+    for (const [id, last] of this._zSeen) {
+      if (live.has(id)) continue;
+      this.horde.noteDeath(last);
+      this._zSeen.delete(id);
+    }
+    this.horde.writeDeaths();
     this.horde.commit();
   }
 
@@ -4211,7 +4225,7 @@ class App {
     if (!obj) return;
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
-      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData.kitShared && !o.geometry.userData.charShared) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
@@ -4253,13 +4267,16 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
-      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (kit) {
-        // Toy-kit hero figurine. At the follow camera's distance a hero is
-        // only ~40px tall, so it is drawn a size up from the troops and wears
-        // a dark ink outline that keeps its silhouette off same-coloured ground.
-        kit.node.scale.multiplyScalar(1.25);
+      const animated = !u.characterStyle ? cloneHero(u.key) : null;
+      const kit = !animated && !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !animated && !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (animated) {
+        // Skinned figurine. Group scale matches the terrain pass (0.82):
+        // about a third of a house, with the clip's own motion.
+        body.add(animated.node);
+        g.userData.mixer = animated.mixer;
+        g.userData.anim = animated;
+      } else if (kit) {
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4297,9 +4314,9 @@ class App {
       halo.position.y = 0.03;
       g.add(halo);
       // Passive aura: a soft breathing ring at the aura's true radius.
-      // (The whole hero group is scaled 1.18×, so compensate.)
+      // The hero group is scaled 0.82×, so compensate.
       if (d.aura) {
-        const S = 1.18;
+        const S = 0.82;
         const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
         const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
         auraFillGeo.rotateX(-Math.PI / 2);
@@ -4342,7 +4359,7 @@ class App {
         g.add(weave);
         g.userData.weave = weave;
       }
-      g.scale.setScalar(1.18);
+      g.scale.setScalar(0.82);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,
@@ -4467,7 +4484,14 @@ class App {
       // The renderer owns this pose state machine. Simulation state remains
       // untouched, so animation can never affect multiplayer determinism.
       const body = rec.mesh.userData.body;
-      if (body) {
+      if (rec.mixer) {
+        rec.anim.play(artState);
+        rec.mixer.update(dt || 0);
+        if (body) {
+          body.position.set(0, 0, 0);
+          body.rotation.set(0, 0, 0);
+        }
+      } else if (body) {
         body.position.x = 0;
         body.position.y = pose.y;
         body.position.z = pose.z;
@@ -4475,7 +4499,7 @@ class App {
         body.rotation.z = pose.roll;
       }
       const limbs = rec.mesh.userData.limbs;
-      if (limbs) {
+      if (!rec.mixer && limbs) {
         const stride = pose.stride;
         if (limbs.legL) limbs.legL.rotation.x = stride;
         if (limbs.legR) limbs.legR.rotation.x = -stride;

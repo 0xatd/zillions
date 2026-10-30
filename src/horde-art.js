@@ -372,49 +372,163 @@ function kitParts(kit, type) {
   };
 }
 
+const VAT_RATE = {
+  walker: 7.2, runner: 13.5, brute: 5.0, spitter: 6.4,
+  burrower: 8.2, sieger: 4.6, caller: 6.8,
+};
+
+// Instanced clip playback. anim is a vec4: frame, clip start, clip end, loop.
+function vatMaterial(posTex, nrmTex, width, height) {
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: false });
+  mat.userData.vatPos = posTex;
+  mat.userData.vatNrm = nrmTex;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.vatPos = { value: mat.userData.vatPos };
+    shader.uniforms.vatNrm = { value: mat.userData.vatNrm };
+    shader.uniforms.vatSize = { value: new THREE.Vector2(width, height) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec4 anim;
+attribute float vatId;
+uniform sampler2D vatPos;
+uniform sampler2D vatNrm;
+uniform vec2 vatSize;
+vec3 vatSample(sampler2D tex, float frame) {
+  vec2 uv = vec2((vatId + 0.5) / vatSize.x, (frame + 0.5) / vatSize.y);
+  return texture2D(tex, uv).xyz;
+}
+`)
+      .replace('#include <beginnormal_vertex>', `
+float vatF = clamp(anim.x, anim.y, anim.z);
+float vat0 = floor(vatF);
+float vat1 = vat0 + 1.0;
+if (vat1 > anim.z) vat1 = anim.w > 0.5 ? anim.y : anim.z;
+float vatT = vatF - vat0;
+vec3 objectNormal = normalize(mix(vatSample(vatNrm, vat0), vatSample(vatNrm, vat1), vatT));
+`)
+      .replace('#include <begin_vertex>', `
+vec3 transformed = mix(vatSample(vatPos, vat0), vatSample(vatPos, vat1), vatT);
+`);
+  };
+  return mat;
+}
+
 export class HordeArt {
   // `kit` (optional): (assetName, partName) => {geometry, pivot} | null — the
   // toy-kit provider from assets.js. When it has `enemy_<type>`, the hive
   // drone from the Blender kit replaces the procedural silhouette.
-  constructor(scene, max, kit = null) {
+  // `anim` (optional): type -> baked vertex clip from character-anim.js.
+  // Baked clips win, and the horde stays instanced either way.
+  constructor(scene, max, kit = null, anim = null) {
     this.scene = scene;
     this.max = max;
+    this.kit = kit;
+    this.anim = anim;
+    this.deaths = [];
+    this.hasAnim = false;
     this.sets = {};
+    this._build();
+  }
+
+  _meshes(set) {
+    return [set.body, set.arms, set.eyes].filter(Boolean);
+  }
+
+  _drop() {
+    for (const set of Object.values(this.sets)) {
+      for (const m of this._meshes(set)) {
+        this.scene.remove(m);
+        if (!m.geometry.userData.kitShared && !m.geometry.userData.charShared) m.geometry.dispose();
+        m.material.dispose();
+        m.dispose();
+      }
+    }
+    this.sets = {};
+  }
+
+  _build() {
+    this.hasAnim = false;
     for (const [type, buildParts] of Object.entries(BUILDERS)) {
-      const parts = (kit && kitParts(kit, type)) || buildParts();
+      const baked = this.anim && this.anim(type);
+      if (baked) {
+        const geo = baked.geometry;
+        if (!geo.getAttribute('anim')) {
+          geo.setAttribute('anim', new THREE.InstancedBufferAttribute(new Float32Array(this.max * 4), 4));
+        }
+        const mat = vatMaterial(baked.pos, baked.nrm, baked.vert, baked.frames);
+        const body = new THREE.InstancedMesh(geo, mat, this.max);
+        body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        body.castShadow = true;
+        body.frustumCulled = false;
+        body.count = 0;
+        this.scene.add(body);
+        this.sets[type] = {
+          body, arms: null, eyes: null, cursor: 0, vat: true,
+          clips: baked.clips, rate: VAT_RATE[type] || 7,
+          anim: geo.getAttribute('anim'),
+        };
+        this.hasAnim = true;
+        continue;
+      }
+      const parts = (this.kit && kitParts(this.kit, type)) || buildParts();
       const bodyMat = applyRim(
         toyMat({ vertexColors: true }),
         { color: 0x9fb4de, power: 2.0, strength: 0.58 },
       );
-      // body and arms share one rimmed material (clone() would drop the
-      // onBeforeCompile rim hook); both meshes are instanced+colored, so the
-      // compiled program is identical for the pair.
-      const body = new THREE.InstancedMesh(parts.body, bodyMat, max);
-      const arms = new THREE.InstancedMesh(parts.arms, bodyMat, max);
+      const body = new THREE.InstancedMesh(parts.body, bodyMat, this.max);
+      const arms = new THREE.InstancedMesh(parts.arms, bodyMat, this.max);
       let eyeGeom = parts.eyeGeometry;
       if (!eyeGeom) {
         const eyeGeo = merger();
         for (const [x, y, z] of parts.eyes) eyeGeo.box(0xffffff, 0.055, 0.045, 0.045, x, y, z);
         eyeGeom = eyeGeo.build();
       }
-      const eyes = new THREE.InstancedMesh(eyeGeom, new THREE.MeshBasicMaterial({ vertexColors: true }), max);
+      const eyes = new THREE.InstancedMesh(eyeGeom, new THREE.MeshBasicMaterial({ vertexColors: true }), this.max);
       for (const m of [body, arms, eyes]) {
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         m.castShadow = m !== eyes;
         m.frustumCulled = false;
         m.count = 0;
-        scene.add(m);
+        this.scene.add(m);
       }
       this.sets[type] = {
-        body, arms, eyes, cursor: 0,
+        body, arms, eyes, cursor: 0, vat: false,
         pivot: new THREE.Matrix4().makeTranslation(parts.pivot[0], parts.pivot[1], parts.pivot[2]),
         swingAmp: parts.swingAmp, swingRate: parts.swingRate,
       };
     }
   }
 
-  begin() {
+  // Swap silhouettes without replacing this object, so the menu vignette
+  // keeps the same writer it was given.
+  reload(kit = this.kit, anim = this.anim) {
+    this.kit = kit;
+    this.anim = anim;
+    this._drop();
+    this._build();
+  }
+
+  noteDeath(info) {
+    this.deaths.push({ ...info, age: 0, life: 1.05 });
+    if (this.deaths.length > 28) this.deaths.shift();
+  }
+
+  begin(dt = 0) {
     for (const set of Object.values(this.sets)) set.cursor = 0;
+    if (dt > 0 && this.deaths.length) {
+      for (const d of this.deaths) d.age += dt;
+      this.deaths = this.deaths.filter((d) => d.age < d.life);
+    }
+  }
+
+  _stamp(set, i, x, y, z, pitch, yaw, roll, sx, sy, sz, tint) {
+    _d.position.set(x, y, z);
+    _d.rotation.set(pitch, yaw, roll);
+    _d.scale.set(sx, sy, sz);
+    _d.updateMatrix();
+    set.body.setMatrixAt(i, _d.matrix);
+    _c.setRGB(tint.r, tint.g, tint.b);
+    set.body.setColorAt(i, _c);
   }
 
   // One zombie, one call. Transform grammar matches the old shared-pool
@@ -425,13 +539,22 @@ export class HordeArt {
     const i = set.cursor;
     if (i >= this.max) return;
     set.cursor = i + 1;
+    if (set.vat) {
+      const clipName = lunge > 0.08 ? 'attack' : Math.abs(pitch) > 0.12 ? 'walk' : 'idle';
+      const clip = set.clips[clipName] || set.clips.walk || set.clips.idle;
+      let frame = clip.start;
+      if (clipName === 'attack') frame = clip.start + Math.min(1, lunge / 0.42) * (clip.length - 1);
+      else frame = clip.start + ((t * set.rate + phase * 2.3) % clip.length);
+      set.anim.setXYZW(i, frame, clip.start, clip.start + clip.length - 1, clipName === 'attack' ? 0 : 1);
+      this._stamp(set, i, x, y, z, pitch * 0.35, yaw, roll, sx, sy, sz, tint);
+      return;
+    }
     _d.position.set(x, y, z);
     _d.rotation.set(pitch, yaw, roll);
     _d.scale.set(sx, sy, sz);
     _d.updateMatrix();
     set.body.setMatrixAt(i, _d.matrix);
     set.eyes.setMatrixAt(i, _d.matrix);
-    // Arms swing at the type's own cadence, and haul up into the lunge.
     const swing = Math.sin(t * set.swingRate + phase * 1.7) * set.swingAmp - lunge * 0.9;
     _m1.makeRotationX(swing);
     _m2.copy(_d.matrix).multiply(set.pivot).multiply(_m1);
@@ -443,20 +566,35 @@ export class HordeArt {
     set.eyes.setColorAt(i, _c);
   }
 
+  writeDeaths() {
+    for (const d of this.deaths) {
+      const set = this.sets[d.type] || this.sets.walker;
+      if (!set.vat || !set.clips.death) continue;
+      const i = set.cursor;
+      if (i >= this.max) return;
+      set.cursor = i + 1;
+      const clip = set.clips.death;
+      const frame = clip.start + Math.min(1, d.age / d.life) * (clip.length - 1);
+      set.anim.setXYZW(i, frame, clip.start, clip.start + clip.length - 1, 0);
+      this._stamp(set, i, d.x, d.y, d.z, 0, d.yaw, 0, d.s, d.s, d.s, { r: 1, g: 1, b: 1 });
+    }
+  }
+
   commit() {
     for (const set of Object.values(this.sets)) {
-      for (const m of [set.body, set.arms, set.eyes]) {
+      for (const m of this._meshes(set)) {
         m.count = set.cursor;
         m.instanceMatrix.needsUpdate = true;
         if (m.instanceColor) m.instanceColor.needsUpdate = true;
       }
+      if (set.anim) set.anim.needsUpdate = true;
     }
   }
 
   clear() {
     for (const set of Object.values(this.sets)) {
       set.cursor = 0;
-      for (const m of [set.body, set.arms, set.eyes]) {
+      for (const m of this._meshes(set)) {
         m.count = 0;
         m.instanceMatrix.needsUpdate = true;
       }
@@ -464,14 +602,7 @@ export class HordeArt {
   }
 
   dispose() {
-    for (const set of Object.values(this.sets)) {
-      for (const m of [set.body, set.arms, set.eyes]) {
-        this.scene.remove(m);
-        if (!m.geometry.userData.kitShared) m.geometry.dispose();
-        m.material.dispose();
-        m.dispose();
-      }
-    }
-    this.sets = {};
+    this._drop();
+    this.deaths = [];
   }
 }
