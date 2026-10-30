@@ -409,6 +409,12 @@ vec3 objectNormal = normalize(mix(vatSample(vatNrm, vat0), vatSample(vatNrm, vat
       .replace('#include <begin_vertex>', `
 vec3 transformed = mix(vatSample(vatPos, vat0), vatSample(vatPos, vat1), vatT);
 `);
+    // Only the brightest verts (the eyes) emit. The body stays dark Lambert.
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      totalEmissiveRadiance += vColor * smoothstep(0.62, 0.92, max(vColor.r, max(vColor.g, vColor.b)));`,
+    );
   };
   return mat;
 }

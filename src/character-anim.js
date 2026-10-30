@@ -9,7 +9,10 @@ const ZOMBIE_KEYS = ['walker', 'runner', 'brute', 'spitter', 'burrower', 'sieger
 
 // Drawn size on top of the simulation scale in config.js. Collision, hit
 // radius and the lockstep hash keep using that config scale alone.
-export const ZOMBIE_VISUAL = 2.35;
+// 0.82 matches the hero group scale, so a walker baked at hero height
+// stands about as tall as the hero. Brutes and siegers stay larger only
+// through their config scale and a modest baked silhouette.
+export const ZOMBIE_VISUAL = 0.82;
 const HERO_CLIP = { idle: 'idle', run: 'run', attack: 'attack', cast: 'ability', hit: 'hit', down: 'death' };
 
 const heroes = {};

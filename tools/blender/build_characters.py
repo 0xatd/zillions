@@ -24,10 +24,10 @@ import struct
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 HERO_HEIGHT = 1.35
-ZOMBIE_HEIGHT = 1.5
+ZOMBIE_HEIGHT = 1.35
 
 # Material-slot colours. Unlisted slots fall back to a neutral so a new
 # slot cannot ship as an untextured white.
@@ -89,56 +89,57 @@ HEROES = [
     },
 ]
 
-# Hive bodies stay dark so they hold on grass, sand and snow. The accent is
-# the part you name the type by, and it is the brightest thing on the mesh.
+# Dark hive bodies. The accent is a ragged part or the eyes, not a candy color.
+# wide.z is chosen so config scale * this height lands near the hero:
+# walker ~1x, runner a bit under, brute and sieger ~1.5x.
 ZOMBIES = [
     {
-        'key': 'walker', 'wide': (1.0, 1.0, 1.0), 'shape': 'shambler',
+        'key': 'walker', 'wide': (1.0, 1.0, 1.0), 'lean': 0.22, 'shape': 'shambler',
         'colors': {
-            'Skin': 0x6e5c7c, 'Clothes': 0x3c3348, 'Guts': 0xe45aaa, 'Pants': 0x2a2433,
-            'DarkClothes': 0x241e2c, 'Bones': 0xd7c2bf, 'Brain': 0xff4ad4, 'Face': 0xff5ad8,
+            'Skin': 0x3c3834, 'Clothes': 0x241f1c, 'Guts': 0x5a2824, 'Pants': 0x1a1614,
+            'DarkClothes': 0x12100e, 'Bones': 0x8a8074, 'Brain': 0x4a242c, 'Face': 0x2a221c,
         },
     },
     {
-        'key': 'runner', 'wide': (0.78, 0.72, 0.96), 'lean': 0.48, 'shape': 'runner',
+        'key': 'runner', 'wide': (0.7, 0.74, 0.94), 'lean': 0.5, 'shape': 'runner',
         'colors': {
-            'Skin': 0xd2c48a, 'Clothes': 0x2a261c, 'Guts': 0xffe27a, 'Pants': 0x1c1a14,
-            'DarkClothes': 0x14120e, 'Bones': 0xf0e2b0, 'Brain': 0xfff0a0, 'Face': 0xfff3a8,
+            'Skin': 0x3a3828, 'Clothes': 0x1c1a12, 'Guts': 0x5c4020, 'Pants': 0x14120c,
+            'DarkClothes': 0x100e0a, 'Bones': 0x9a8c68, 'Brain': 0x4a3818, 'Face': 0x241e12,
         },
     },
     {
-        'key': 'brute', 'wide': (1.12, 1.08, 1.02), 'shape': 'brute',
+        'key': 'brute', 'wide': (1.34, 1.16, 0.86), 'lean': 0.12, 'shape': 'brute',
         'colors': {
-            'Skin': 0x5c4578, 'Clothes': 0x3a2a52, 'Guts': 0xd2b4ff, 'Pants': 0x241830,
-            'DarkClothes': 0x1a1224, 'Bones': 0xe4d4ff, 'Brain': 0xff7ae0, 'Face': 0xff8ae8,
+            'Skin': 0x342838, 'Clothes': 0x221820, 'Guts': 0x4a2838, 'Pants': 0x140e16,
+            'DarkClothes': 0x100c12, 'Bones': 0x7a6c80, 'Brain': 0x3a2030, 'Face': 0x1c141c,
         },
     },
     {
-        'key': 'spitter', 'wide': (1.05, 1.12, 0.98), 'shape': 'spitter',
+        'key': 'spitter', 'wide': (1.02, 1.08, 0.98), 'lean': 0.2, 'shape': 'spitter',
         'colors': {
-            'Skin': 0x6d7348, 'Clothes': 0x3a4024, 'Guts': 0xd6ff4a, 'Pants': 0x242814,
-            'DarkClothes': 0x181c10, 'Bones': 0xe8f0b0, 'Brain': 0xeaff6a, 'Face': 0xf4ff80,
+            'Skin': 0x343428, 'Clothes': 0x1c1e14, 'Guts': 0x6a7428, 'Pants': 0x12140c,
+            'DarkClothes': 0x0e100a, 'Bones': 0x8a8860, 'Brain': 0x3a3c18, 'Face': 0x1a1c10,
         },
     },
     {
-        'key': 'burrower', 'wide': (1.55, 1.35, 0.48), 'shape': 'burrower',
+        'key': 'burrower', 'wide': (1.28, 1.18, 0.62), 'lean': 0.34, 'shape': 'burrower',
         'colors': {
-            'Skin': 0x4e446c, 'Clothes': 0x2e2844, 'Guts': 0xc8b6ff, 'Pants': 0x1c1830,
-            'DarkClothes': 0x141022, 'Bones': 0xddd0ff, 'Brain': 0xff5ad0, 'Face': 0xff6ad8,
+            'Skin': 0x2c2834, 'Clothes': 0x18161e, 'Guts': 0x3a2848, 'Pants': 0x100e14,
+            'DarkClothes': 0x0c0a10, 'Bones': 0xb0a4c4, 'Brain': 0x2a2030, 'Face': 0x16121a,
         },
     },
     {
-        'key': 'sieger', 'wide': (1.18, 1.22, 1.04), 'shape': 'sieger',
+        'key': 'sieger', 'wide': (1.2, 1.16, 0.94), 'lean': 0.1, 'shape': 'sieger',
         'colors': {
-            'Skin': 0x6a5344, 'Clothes': 0x4a3428, 'Guts': 0xffb060, 'Pants': 0x2a1c14,
-            'DarkClothes': 0x1c120c, 'Bones': 0xf0d0b0, 'Brain': 0xffc070, 'Face': 0xffc878,
+            'Skin': 0x3a2c24, 'Clothes': 0x241812, 'Guts': 0x6a3a22, 'Pants': 0x140e0a,
+            'DarkClothes': 0x100c08, 'Bones': 0xc4b09a, 'Brain': 0x3a2418, 'Face': 0x1c1410,
         },
     },
     {
-        'key': 'caller', 'wide': (0.62, 1.25, 1.18), 'shape': 'caller',
+        'key': 'caller', 'wide': (0.78, 0.88, 1.0), 'lean': 0.22, 'shape': 'caller',
         'colors': {
-            'Skin': 0x3e6460, 'Clothes': 0x243e3c, 'Guts': 0x7dfff0, 'Pants': 0x142826,
-            'DarkClothes': 0x101c1c, 'Bones': 0xd8fff8, 'Brain': 0xb8fff4, 'Face': 0xd8fff8,
+            'Skin': 0x243430, 'Clothes': 0x142220, 'Guts': 0x2a5048, 'Pants': 0x0e1614,
+            'DarkClothes': 0x0a1010, 'Bones': 0x8ec8c0, 'Brain': 0x1a3030, 'Face': 0x101816,
         },
     },
 ]
@@ -321,6 +322,39 @@ def parent_keep(obj, arm, bone_name):
     bpy.context.view_layer.update()
 
 
+def pose_action(arm, name):
+    act = None
+    for candidate in bpy.data.actions:
+        if candidate.name == name or candidate.name.split('|')[-1] == name:
+            act = candidate
+            break
+    if act is None:
+        return
+    if arm.animation_data is None:
+        arm.animation_data_create()
+    arm.animation_data.action = act
+    bpy.context.scene.frame_set(int(act.frame_range[0]) + 10)
+    bpy.context.view_layer.update()
+
+
+def posed_tail(arm, name):
+    bpy.context.view_layer.update()
+    return arm.matrix_world @ arm.pose.bones[name].tail
+
+
+def into_bind(obj, arm, bone_name):
+    """`obj` is where it should sit in the current pose. Store bind-space verts
+    so skinning puts it back there when that pose plays."""
+    bpy.context.view_layer.update()
+    pose_world = arm.matrix_world @ arm.pose.bones[bone_name].matrix
+    rest_world = arm.matrix_world @ arm.data.bones[bone_name].matrix_local
+    correction = rest_world @ pose_world.inverted()
+    world = obj.matrix_world.copy()
+    for vert in obj.data.vertices:
+        vert.co = correction @ (world @ vert.co)
+    obj.matrix_world = Matrix.Identity(4)
+
+
 def put(kind, loc, size, color, bone, emit=0.0, radius=0.05, depth=0.2, rot=None):
     if kind == 'cube':
         obj = add_cube(bone + '_prop', loc, size, color, emit)
@@ -328,6 +362,9 @@ def put(kind, loc, size, color, bone, emit=0.0, radius=0.05, depth=0.2, rot=None
         obj = add_cone(bone + '_prop', loc, radius, depth, color, emit, rot=rot)
     else:
         obj = add_cylinder(bone + '_prop', loc, radius, depth, color, emit)
+    arm = getattr(put, 'arm', None)
+    if arm is not None:
+        into_bind(obj, arm, bone)
     weight_to(obj, bone)
     return obj
 
@@ -349,137 +386,229 @@ def shade_flat(mesh):
         p.use_smooth = False
 
 
-def hero_props(kind, arm, height):
-    """Big props, joined and weighted so they follow the clip and read at distance 46.
+def aim(obj, direction, axis):
+    """Rotate so a local axis follows `direction`, then bake it into the verts."""
+    direction = direction.normalized()
+    up = 'X' if axis == 'Z' else 'Z'
+    obj.rotation_mode = 'QUATERNION'
+    obj.rotation_quaternion = direction.to_track_quat(axis, up)
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(rotation=True)
 
-    Placement is in the bind pose: out to the side or forward, not buried in
-    a hanging fist. The runtime fits the body, so these may stick past it.
+
+def grip_forward(lift=0.0):
+    """Pack faces Blender -Y. The fist bone points sideways, so a prop along it
+    floats off the hand as a bar."""
+    return Vector((0.0, -1.0, 0.15 + lift)).normalized()
+
+
+def grip_up():
+    """Forward and up from the fist. Purely sideways follows the T-pose hand and
+    reads as a floating bar. Purely up clears the house. This keeps the weapon
+    in the hand, about 0.6–0.8 of body height, under a hab roof."""
+    return Vector((0.0, -0.85, 0.7)).normalized()
+
+
+def held(kind, fist, bone, length, color, thick, emit=0.0, direction=None):
+    """A prop gripped at the fist. The near end sits on the hand."""
+    forward = (direction or grip_up()).normalized()
+    center = fist + forward * (length * 0.5)
+    if kind == 'cube':
+        obj = add_cube(bone + '_w', center, (thick, length, thick * 1.35), color, emit)
+        aim(obj, forward, 'Y')
+    else:
+        obj = add_cylinder(bone + '_w', center, thick, length, color, emit)
+        aim(obj, forward, 'Z')
+    arm = getattr(held, 'arm', None)
+    if arm is not None:
+        into_bind(obj, arm, bone)
+    weight_to(obj, bone)
+    return obj, forward
+
+
+def hero_props(kind, arm, height):
+    """Props weighted to the fist. Melee length is 0.6–0.8 of the body. Guns stay compact.
+
+    Placement is in the idle pose. into_bind stores that grip in the bind pose
+    so the hanging arm does not swing the weapon out to the side.
     """
+    pose_action(arm, 'Idle')
+    put.arm = arm
+    held.arm = arm
     H = height
     parts = []
-    def outward(fist):
-        return -1 if fist.x < 0 else 1
     if kind == 'hammer':
-        fist = bone_tail(arm, 'Fist.R')
-        side = outward(fist)
-        handle = fist + Vector((side * 0.18 * H, -0.02 * H, 0.08 * H))
-        head = fist + Vector((side * 0.42 * H, -0.02 * H, 0.2 * H))
-        parts.append(put('cyl', handle, None, 0x3a3228, 'Fist.R', radius=0.055 * H, depth=0.28 * H))
-        parts.append(put('cube', head, (0.62 * H, 0.28 * H, 0.36 * H), 0xe7eef2, 'Fist.R'))
+        fist = posed_tail(arm, 'Fist.R')
+        length = 0.68 * H
+        _handle, forward = held('cyl', fist, 'Fist.R', length, 0x3a3228, 0.05 * H)
+        parts.append(_handle)
+        head = add_cube('hammer_head', fist + forward * (length * 0.92), (0.2 * H, 0.14 * H, 0.2 * H), 0xd5dbe0)
+        into_bind(head, arm, 'Fist.R')
+        weight_to(head, 'Fist.R')
+        parts.append(head)
     elif kind == 'rifle':
-        fist = bone_tail(arm, 'Fist.R')
-        side = outward(fist)
-        gun = fist + Vector((side * 0.28 * H, -0.12 * H, 0.12 * H))
-        parts.append(put('cube', gun, (0.55 * H, 0.16 * H, 0.14 * H), 0x232820, 'Fist.R'))
-        parts.append(put('cube', gun + Vector((side * 0.22 * H, -0.02 * H, 0.08 * H)), (0.18 * H, 0.12 * H, 0.12 * H), 0xf3c53d, 'Fist.R'))
+        fist = posed_tail(arm, 'Fist.R')
+        length = 0.42 * H
+        gun, forward = held('cube', fist, 'Fist.R', length, 0x232820, 0.11 * H)
+        parts.append(gun)
+        muzzle = add_cube('muzzle', fist + forward * (length * 0.72), (0.12 * H, 0.1 * H, 0.1 * H), 0xf3c53d)
+        into_bind(muzzle, arm, 'Fist.R')
+        weight_to(muzzle, 'Fist.R')
+        parts.append(muzzle)
     elif kind == 'blades':
         for bone in ('Fist.L', 'Fist.R'):
-            fist = bone_tail(arm, bone)
-            side = outward(fist)
-            blade = fist + Vector((side * 0.28 * H, -0.08 * H, 0.06 * H))
-            parts.append(put('cube', blade, (0.42 * H, 0.12 * H, 0.1 * H), 0xe7e1d4, bone))
+            fist = posed_tail(arm, bone)
+            blade, _forward = held('cube', fist, bone, 0.7 * H, 0xe7e1d4, 0.055 * H)
+            parts.append(blade)
     elif kind == 'shield':
-        fist = bone_tail(arm, 'Fist.L')
-        side = outward(fist)
-        board = fist + Vector((side * 0.38 * H, -0.04 * H, 0.22 * H))
-        parts.append(put('cube', board, (0.62 * H, 0.12 * H, 0.74 * H), 0xb8ae86, 'Fist.L'))
-        parts.append(put('cube', board + Vector((0, 0, 0.02 * H)), (0.46 * H, 0.14 * H, 0.54 * H), 0x3f6b5e, 'Fist.L'))
-        parts.append(put('cube', board + Vector((0, -0.02 * H, 0.04 * H)), (0.16 * H, 0.16 * H, 0.16 * H), 0x8fd0ff, 'Fist.L', emit=0.9))
-        mace = bone_tail(arm, 'Fist.R')
-        mside = outward(mace)
-        parts.append(put('cube', mace + Vector((mside * 0.32 * H, -0.04 * H, 0.1 * H)), (0.28 * H, 0.22 * H, 0.28 * H), 0xd5dbe0, 'Fist.R'))
+        fist = posed_tail(arm, 'Fist.L')
+        forward = grip_forward(0)
+        board = fist + forward * (0.05 * H) + Vector((0, 0, 0.12 * H))
+        parts.append(put('cube', board, (0.4 * H, 0.07 * H, 0.52 * H), 0xb8ae86, 'Fist.L'))
+        parts.append(put('cube', board + forward * (0.04 * H), (0.28 * H, 0.05 * H, 0.36 * H), 0x3f6b5e, 'Fist.L'))
+        parts.append(put('cube', board + forward * (0.06 * H), (0.1 * H, 0.04 * H, 0.1 * H), 0x8fd0ff, 'Fist.L', emit=0.6))
+        mace, _fwd = held('cube', posed_tail(arm, 'Fist.R'), 'Fist.R', 0.48 * H, 0xd5dbe0, 0.08 * H)
+        parts.append(mace)
     elif kind == 'keg':
         tail, _direction = bone_points(arm, 'Torso')
-        parts.append(put('cyl', tail + Vector((0.28 * H, 0.04 * H, 0.04 * H)), None, 0x6b5334, 'Torso', radius=0.26 * H, depth=0.34 * H))
-        parts.append(put('cube', tail + Vector((0.28 * H, 0.04 * H, 0.04 * H)), (0.54 * H, 0.1 * H, 0.1 * H), 0xd23b32, 'Torso'))
+        parts.append(put('cyl', tail + Vector((0.16 * H, 0.02 * H, -0.02 * H)), None, 0x6b5334, 'Torso', radius=0.12 * H, depth=0.2 * H))
     elif kind == 'ears':
         head, _direction = bone_points(arm, 'Head')
         for side in (-1, 1):
             parts.append(put(
-                'cone', head + Vector((side * 0.12 * H, 0.0, 0.1 * H)), None, 0x1c1a18, 'Head',
-                radius=0.1 * H, depth=0.36 * H, rot=(0.15, 0, side * 1.15),
+                'cone', head + Vector((side * 0.08 * H, 0.0, 0.06 * H)), None, 0x1c1a18, 'Head',
+                radius=0.05 * H, depth=0.18 * H, rot=(0.2, 0, side * 1.2),
             ))
         for bone in ('Fist.L', 'Fist.R'):
-            fist = bone_tail(arm, bone)
-            side = outward(fist)
-            blade = fist + Vector((side * 0.26 * H, -0.06 * H, 0.06 * H))
-            parts.append(put('cube', blade, (0.38 * H, 0.11 * H, 0.09 * H), 0xe7e1d4, bone))
+            blade, _forward = held('cube', posed_tail(arm, bone), bone, 0.66 * H, 0xe7e1d4, 0.05 * H)
+            parts.append(blade)
     elif kind == 'staff':
-        fist = bone_tail(arm, 'Fist.R')
-        side = outward(fist)
-        shaft = fist + Vector((side * 0.16 * H, -0.02 * H, 0.22 * H))
-        parts.append(put('cyl', shaft, None, 0xf0d060, 'Fist.R', radius=0.045 * H, depth=0.55 * H))
-        parts.append(put(
-            'cone', shaft + Vector((0, 0, 0.28 * H)), None, 0xf0d060, 'Fist.R',
-            emit=0.9, radius=0.18 * H, depth=0.26 * H,
-        ))
+        fist = posed_tail(arm, 'Fist.R')
+        length = 0.62 * H
+        shaft, forward = held('cyl', fist, 'Fist.R', length, 0xf0d060, 0.045 * H)
+        parts.append(shaft)
+        crystal = add_cone('crystal', fist + forward * length, 0.07 * H, 0.14 * H, 0xf0d060, emit=0.85)
+        into_bind(crystal, arm, 'Fist.R')
+        weight_to(crystal, 'Fist.R')
+        parts.append(crystal)
+    put.arm = None
+    held.arm = None
     return parts
 
 
+def crush_brain(mesh, arm):
+    """The pack head is an exposed brain. Shrink that shell into the skull."""
+    idx = next((i for i, mat in enumerate(mesh.data.materials) if mat and mat.name == 'Brain'), None)
+    if idx is None:
+        return
+    ids = set()
+    for poly in mesh.data.polygons:
+        if poly.material_index == idx:
+            ids.update(int(v) for v in poly.vertices)
+    if not ids:
+        return
+    inv = mesh.matrix_world.inverted()
+    center = inv @ bone_head(arm, 'Head')
+    center.z += 0.15
+    for i in ids:
+        v = mesh.data.vertices[i]
+        v.co = center + (v.co - center) * 0.4
+    mesh.data.update()
+
+
+def hive_eyes(parts, arm, height):
+    """Two hot pits on the face. The crowd shader emits only these bright verts."""
+    H = height
+    head = bone_head(arm, 'Head')
+    for side in (-1, 1):
+        eye = add_blob(
+            f'eye_{side}',
+            head + Vector((side * 0.05 * H, -0.1 * H, 0.08 * H)),
+            0.032 * H, 0xff3a12, scale=(1.0, 0.6, 0.7),
+        )
+        weight_to(eye, 'Head')
+        parts.append(eye)
+
+
+def rags(parts, arm, height, color):
+    H = height
+    torso = bone_head(arm, 'Torso')
+    for side in (-1, 1):
+        rag = add_cube(
+            f'rag_{side}',
+            torso + Vector((side * 0.14 * H, -0.02 * H, 0.02 * H)),
+            (0.035 * H, 0.06 * H, 0.14 * H),
+            color,
+        )
+        weight_to(rag, 'Torso')
+        parts.append(rag)
+
+
 def zombie_props(shape, arm, height):
-    """Kitbash a silhouette you can name at distance 46. Sizes are fractions of body height."""
+    """Small ragged parts. They name the type without outgrowing the body."""
     H = height
     parts = []
+    hive_eyes(parts, arm, H)
+    rags(parts, arm, H, 0x1a1612)
     head = bone_head(arm, 'Head')
     torso = bone_head(arm, 'Torso')
     fist_r = bone_tail(arm, 'Fist.R')
     fist_l = bone_tail(arm, 'Fist.L')
-    # Character faces Blender -Y. Cones are base-at-loc, tip along local +Z before rot.
-    forward = (math.pi / 2, 0, 0)  # tip toward -Y
+    forward = (math.pi / 2, 0, 0)
     if shape == 'brute':
         for side in (-1, 1):
             pad = add_blob(
-                f'pad_{side}', torso + Vector((side * 0.16 * H, 0.0, 0.1 * H)),
-                0.08 * H, 0xd2b4ff, scale=(1.25, 0.85, 0.9),
+                f'pad_{side}', torso + Vector((side * 0.14 * H, 0.0, 0.06 * H)),
+                0.07 * H, 0x3a3044, scale=(1.35, 0.8, 0.85),
             )
             weight_to(pad, 'Torso')
             parts.append(pad)
-        hump = add_blob('hump', torso + Vector((0, 0.06 * H, 0.16 * H)), 0.1 * H, 0xb48cff, scale=(1.2, 0.85, 0.8))
+        hump = add_blob('hump', torso + Vector((0, 0.05 * H, 0.12 * H)), 0.08 * H, 0x2a2030, scale=(1.15, 0.8, 0.7))
         weight_to(hump, 'Torso')
         parts.append(hump)
     elif shape == 'spitter':
         sac = add_blob(
-            'sac', torso + Vector((0.0, -0.14 * H, 0.02 * H)),
-            0.11 * H, 0xd6ff4a, emit=0.7, scale=(1.05, 1.25, 1.05),
+            'sac', torso + Vector((0.0, -0.12 * H, -0.02 * H)),
+            0.08 * H, 0x8aaa32, scale=(0.9, 1.15, 0.85),
         )
         weight_to(sac, 'Torso')
         parts.append(sac)
     elif shape == 'burrower':
         for side, fist, bone in ((-1, fist_l, 'Fist.L'), (1, fist_r, 'Fist.R')):
             claw = add_cone(
-                f'claw_{side}', fist + Vector((side * 0.04 * H, -0.02 * H, -0.04 * H)),
-                0.05 * H, 0.42 * H, 0xc8b6ff, rot=(math.pi / 2 + 0.45, 0, side * 0.35),
+                f'claw_{side}', fist + Vector((side * 0.02 * H, -0.02 * H, -0.02 * H)),
+                0.035 * H, 0.28 * H, 0xc8bdd4, rot=(math.pi / 2 + 0.5, 0, side * 0.3),
             )
             weight_to(claw, bone)
             parts.append(claw)
     elif shape == 'sieger':
         shell = add_blob(
-            'shell', torso + Vector((0, 0.04 * H, 0.1 * H)),
-            0.13 * H, 0xffb060, scale=(1.45, 0.75, 0.95),
+            'shell', torso + Vector((0, 0.02 * H, 0.08 * H)),
+            0.1 * H, 0x6a4030, scale=(1.35, 0.7, 0.85),
         )
         ram = add_cone(
-            'ram', torso + Vector((0, -0.16 * H, 0.02 * H)),
-            0.09 * H, 0.28 * H, 0xf0d0b0, rot=forward,
+            'ram', torso + Vector((0, -0.14 * H, 0.0)),
+            0.06 * H, 0.2 * H, 0xc4b09a, rot=forward,
         )
         weight_to(shell, 'Torso')
         weight_to(ram, 'Torso')
         parts += [shell, ram]
     elif shape == 'caller':
-        # A sail: thin across the shoulders, long front-to-back, tall.
-        # From the high camera the length is what reads.
         fin = add_cube(
-            'fin', head + Vector((0, -0.02 * H, 0.32 * H)),
-            (0.07 * H, 0.42 * H, 0.62 * H), 0xd8fff8, emit=0.75,
+            'fin', head + Vector((0, -0.02 * H, 0.16 * H)),
+            (0.04 * H, 0.16 * H, 0.22 * H), 0x7ec8c0,
         )
         weight_to(fin, 'Head')
         parts.append(fin)
     elif shape == 'runner':
-        crest = add_cone(
-            'crest', head + Vector((0, -0.04 * H, 0.06 * H)),
-            0.035 * H, 0.28 * H, 0xfff3a8, emit=0.4, rot=(0.9, 0, 0),
+        spine = add_cube(
+            'spine', torso + Vector((0, 0.04 * H, 0.1 * H)),
+            (0.03 * H, 0.05 * H, 0.16 * H), 0x9a8c68,
         )
-        weight_to(crest, 'Head')
-        parts.append(crest)
+        weight_to(spine, 'Torso')
+        parts.append(spine)
     return parts
 
 
@@ -652,7 +781,8 @@ def build_hero(spec, src_dir, out_dir):
 
 def build_zombie(spec, src_dir, out_dir):
     arm, mesh = import_fbx(os.path.join(src_dir, 'Zombie_Male.fbx'))
-    paint(mesh, spec['colors'], emit_names=('Face', 'Brain', 'Guts'))
+    paint(mesh, spec['colors'])
+    crush_brain(mesh, arm)
     # Same rule as the heroes: never apply a scale to this armature.
     body_h = mesh.dimensions.z or 1.0
     parts = zombie_props(spec['shape'], arm, body_h)
