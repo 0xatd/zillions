@@ -467,6 +467,17 @@ export class UI {
                     <button class="diffbtn" data-q="high">Quality</button>
                   </div>
                 </div>
+                <label class="setrow">
+                  <span>Screen shake</span>
+                  <input type="checkbox" id="set-shake" checked>
+                  <b id="set-shake-val">ON</b>
+                </label>
+                <label class="setrow">
+                  <span>Damage numbers</span>
+                  <input type="checkbox" id="set-numbers" checked>
+                  <b id="set-numbers-val">ON</b>
+                </label>
+                <div class="sethint">Shake stays light. Turn it off if motion bothers you. Damage numbers can be hidden. Both choices are remembered on this browser.</div>
                 <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
               </div>
               <div id="set-pane-controls" class="setpane hidden">
@@ -653,6 +664,15 @@ export class UI {
     sfx.onchange = () => {
       q('#set-sfx-val').textContent = sfx.checked ? 'ON' : 'OFF';
       if (this.cb.onSettings) this.cb.onSettings({ sfx: sfx.checked });
+    };
+    const shake = q('#set-shake'), numbers = q('#set-numbers');
+    shake.onchange = () => {
+      q('#set-shake-val').textContent = shake.checked ? 'ON' : 'OFF';
+      if (this.cb.onSettings) this.cb.onSettings({ shake: shake.checked });
+    };
+    numbers.onchange = () => {
+      q('#set-numbers-val').textContent = numbers.checked ? 'ON' : 'OFF';
+      if (this.cb.onSettings) this.cb.onSettings({ numbers: numbers.checked });
     };
     for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
       b.onclick = () => {
@@ -3012,6 +3032,14 @@ export class UI {
     if (s.sfx !== undefined) {
       this.root.querySelector('#set-sfx').checked = !!s.sfx;
       this.root.querySelector('#set-sfx-val').textContent = s.sfx ? 'ON' : 'OFF';
+    }
+    if (s.shake !== undefined) {
+      this.root.querySelector('#set-shake').checked = !!s.shake;
+      this.root.querySelector('#set-shake-val').textContent = s.shake ? 'ON' : 'OFF';
+    }
+    if (s.numbers !== undefined) {
+      this.root.querySelector('#set-numbers').checked = !!s.numbers;
+      this.root.querySelector('#set-numbers-val').textContent = s.numbers ? 'ON' : 'OFF';
     }
     if (s.quality !== undefined) this._reflectQuality(s.quality);
   }

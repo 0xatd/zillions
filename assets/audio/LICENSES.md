@@ -1,5 +1,7 @@
 # Audio licenses
 
+Combat sprites live in `assets/vfx/` and are recorded in `assets/vfx/LICENSES.md` (Kenney Particle Pack, CC0).
+
 ## Runtime sound effects
 
 The match sounds — hits, kills, building upgrades, the wave horn, and the

@@ -291,6 +291,14 @@ export class AudioSys {
     this._tone(0.04, { freq: 180, type: 'square', gain: 0.03, slide: -80 });
   }
 
+  // A short lift when a surge's extra bodies are gone. Original synthesis.
+  waveEnd() {
+    this.init();
+    [494, 659, 784].forEach((f, i) => {
+      setTimeout(() => this._tone(0.2, { freq: f, type: 'triangle', gain: 0.07, slide: 20 }), i * 80);
+    });
+  }
+
   // Two-note brass for a wave. Original synthesis, not a sample.
   waveHorn() {
     this.init();

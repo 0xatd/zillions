@@ -29,6 +29,7 @@ Default branch: main
 
 - src/main.js composes the browser runtime.
 - src/juice.js is presentation-only game feel (pops, recoil, wave cues). It is not part of the simulation hash.
+- src/combat-fx.js and src/combat-feel.js are pooled combat presentation (sprites, numbers, shake). They are not part of the simulation hash.
 - src/game.js owns deterministic simulation state.
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.

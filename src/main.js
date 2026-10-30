@@ -30,6 +30,8 @@ import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffe
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { buildPop, hitImpulse, isBigEnemy, outcomeCue, waveCue } from './juice.js';
+import { addShake, isArcherShot, isTowerShot, shakeAmplitude, waveCleared } from './combat-feel.js';
+import { CombatFx } from './combat-fx.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
@@ -130,6 +132,9 @@ class App {
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene = new THREE.Scene();
+    this.combatFx = new CombatFx(this.scene);
+    this.shakeOn = true;
+    this.numbersOn = true;
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
@@ -3345,7 +3350,9 @@ class App {
     const dx = (e.tx ?? e.x ?? e.fx) - e.fx;
     const dz = (e.tz ?? e.z ?? e.fz) - e.fz;
     const d = Math.hypot(dx, dz) || 1;
-    return { sx: dx / d, sz: dz / d, rx: dz / d, rz: -dx / d };
+    const v = this._aim || (this._aim = { sx: 0, sz: 0, rx: 0, rz: 0 });
+    v.sx = dx / d; v.sz = dz / d; v.rx = dz / d; v.rz = -dx / d;
+    return v;
   }
 
   _muzzlePoint(e, kind, extra = {}) {
@@ -3392,50 +3399,91 @@ class App {
     return { x: tx, y: y + this.map.groundY(tx, tz), z: tz };
   }
 
-  _spawnProjectile(e, extra = {}) {
-    if (this.projectiles.length >= 120) this._destroyProjectile(this.projectiles.shift());
-    if (!this._projCoreGeo) {
-      this._projCoreGeo = new THREE.SphereGeometry(1, 12, 8);
-      this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
-      this._projUp = new THREE.Vector3(0, 1, 0);
+  _buildProjPool() {
+    if (this._projPool) return;
+    this._projCoreGeo = new THREE.SphereGeometry(1, 8, 6);
+    this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 5);
+    this._projUp = new THREE.Vector3(0, 1, 0);
+    this._projHead = new THREE.Vector3();
+    this._projTail = new THREE.Vector3();
+    this._projMid = new THREE.Vector3();
+    this._projDir = new THREE.Vector3();
+    this._projPool = [];
+    this._projFree = [];
+    for (let i = 0; i < 48; i++) {
+      const core = new THREE.Mesh(this._projCoreGeo, new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 1, depthWrite: false,
+      }));
+      const trail = new THREE.Mesh(this._projTrailGeo, new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.64, depthWrite: false,
+      }));
+      core.visible = false;
+      trail.visible = false;
+      core.renderOrder = 30;
+      trail.renderOrder = 29;
+      core.frustumCulled = false;
+      trail.frustumCulled = false;
+      this.scene.add(core, trail);
+      this._projPool.push({
+        core, trail, from: new THREE.Vector3(), to: new THREE.Vector3(),
+        t: 0, dur: 0.3, alive: false, kind: 'soldier', dtype: 'kinetic',
+        dmg: 0, crit: false, arc: 0.2, tail: 0.14, size: 0.2, speed: 18,
+      });
+      this._projFree.push(i);
     }
+  }
+
+  _spawnProjectile(e, extra = {}) {
+    this._buildProjPool();
+    let slot = null;
+    if (this._projFree.length) slot = this._projPool[this._projFree.pop()];
+    else if (this.projectiles.length) slot = this.projectiles.shift();
+    if (!slot) return;
     const kind = extra.kind || e.kind || 'soldier';
-    const spec = { ...this._projectileSpec(kind), ...extra };
-    spec.kind = kind;
+    const base = this._projectileSpec(kind);
     const muzzle = this._muzzlePoint(e, kind, extra);
     const hit = this._targetPoint(e, kind, extra);
-    const from = new THREE.Vector3(muzzle.x, muzzle.y, muzzle.z);
-    const to = new THREE.Vector3(hit.x, hit.y, hit.z);
-    const dist = Math.hypot(to.x - from.x, to.z - from.z);
-    const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
-    const core = new THREE.Mesh(
-      this._projCoreGeo,
-      new THREE.MeshBasicMaterial({ color: spec.color, transparent: true, opacity: 1, depthWrite: false }),
-    );
-    core.scale.setScalar(spec.size);
-    const trail = new THREE.Mesh(
-      this._projTrailGeo,
-      new THREE.MeshBasicMaterial({ color: spec.trail, transparent: true, opacity: 0.64, depthWrite: false }),
-    );
-    trail.scale.set(spec.size * 0.26, 1, spec.size * 0.26);
-    core.renderOrder = 30;
-    trail.renderOrder = 29;
-    this.scene.add(trail, core);
-    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
+    slot.from.set(muzzle.x, muzzle.y, muzzle.z);
+    slot.to.set(hit.x, hit.y, hit.z);
+    slot.t = 0;
+    slot.kind = kind;
+    slot.dtype = e.dtype || extra.dtype || 'kinetic';
+    slot.dmg = extra.noNumber ? 0 : (e.dmg || extra.dmg || 0);
+    slot.crit = extra.noNumber ? false : !!(e.crit || extra.crit);
+    slot.arc = extra.arc ?? base.arc;
+    slot.tail = base.tail;
+    slot.size = extra.size || base.size;
+    slot.speed = base.speed;
+    const dist = Math.hypot(slot.to.x - slot.from.x, slot.to.z - slot.from.z);
+    slot.dur = extra.dur || clamp(dist / slot.speed, 0.18, kind === 'grenade' || kind === 'ballista' ? 0.7 : 0.42);
+    slot.core.material.color.setHex(extra.color || base.color);
+    slot.trail.material.color.setHex(base.trail);
+    slot.core.scale.setScalar(slot.size);
+    const showTrail = isArcherShot(kind) || kind === 'grenade' || kind === 'spit';
+    slot.trail.visible = showTrail;
+    slot.core.visible = true;
+    slot.alive = true;
+    this.projectiles.push(slot);
+    if (this.combatFx && (isTowerShot(kind) || isArcherShot(kind))) {
+      this.combatFx.muzzle(muzzle.x, muzzle.y, muzzle.z);
+      this.combatFx.streak(muzzle.x, muzzle.y, muzzle.z, hit.x, hit.y, hit.z, kind, slot.dtype);
+    }
   }
 
   _destroyProjectile(p) {
-    if (!p) return;
-    this.scene.remove(p.core, p.trail);
-    if (p.core.material) p.core.material.dispose();
-    if (p.trail.material) p.trail.material.dispose();
+    if (!p || !p.alive) return;
+    p.alive = false;
+    p.core.visible = false;
+    p.trail.visible = false;
+    const i = this._projPool.indexOf(p);
+    if (i >= 0) this._projFree.push(i);
   }
 
   _projectilePos(p, q, out) {
     const s = clamp(q, 0, 1);
     out.set(
       lerp(p.from.x, p.to.x, s),
-      lerp(p.from.y, p.to.y, s) + Math.sin(s * Math.PI) * p.spec.arc,
+      lerp(p.from.y, p.to.y, s) + Math.sin(s * Math.PI) * (p.arc || 0),
       lerp(p.from.z, p.to.z, s),
     );
     return out;
@@ -3443,28 +3491,25 @@ class App {
 
   _updateProjectiles(dt) {
     if (!this.projectiles.length) return;
-    const head = new THREE.Vector3();
-    const tail = new THREE.Vector3();
-    const mid = new THREE.Vector3();
-    const dir = new THREE.Vector3();
+    const head = this._projHead, tail = this._projTail, mid = this._projMid, dir = this._projDir;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.t += dt;
       const q = Math.min(1, p.t / p.dur);
       this._projectilePos(p, q, head);
-      this._projectilePos(p, q - p.spec.tail, tail);
+      this._projectilePos(p, q - p.tail, tail);
       p.core.position.copy(head);
-      const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.12;
-      p.core.scale.setScalar(p.spec.size * pulse);
+      const pulse = 1 + Math.sin(q * Math.PI * (isTowerShot(p.kind) ? 8 : 6)) * 0.1;
+      p.core.scale.setScalar(p.size * pulse);
       mid.copy(head).add(tail).multiplyScalar(0.5);
       dir.copy(head).sub(tail);
       const len = Math.max(0.04, dir.length());
       p.trail.position.copy(mid);
-      p.trail.scale.set(p.spec.size * 0.24, len, p.spec.size * 0.24);
+      p.trail.scale.set(p.size * 0.22, len, p.size * 0.22);
       p.trail.quaternion.setFromUnitVectors(this._projUp, dir.normalize());
       const fade = q > 0.82 ? (1 - q) / 0.18 : 1;
       p.core.material.opacity = Math.max(0, fade);
-      p.trail.material.opacity = Math.max(0, 0.64 * fade);
+      p.trail.material.opacity = Math.max(0, 0.55 * fade);
       if (q >= 1) {
         this._projectileImpact(p);
         this._destroyProjectile(p);
@@ -3474,27 +3519,12 @@ class App {
   }
 
   _projectileImpact(p) {
-    const kind = p.impact?.kind || p.spec.kind;
-    const color = p.impact?.color ?? p.spec.color;
     const x = p.to.x, y = p.to.y, z = p.to.z;
-    if (p.impact?.ring !== false) {
-      this._impactRing(x, z, {
-        color,
-        count: p.impact?.count || (kind === 'ballista' ? 18 : 12),
-        radius: p.impact?.radius || (kind === 'ballista' ? 1.35 : kind === 'flame' ? 1.25 : 0.9),
-        life: p.impact?.life || 0.22,
-        size: p.impact?.size || p.spec.size * 1.5,
-      });
+    const kind = p.kind || 'soldier';
+    if (this.combatFx) this.combatFx.impact(x, y, z, kind, p.dtype, !!p.crit);
+    if (p.crit || p.dmg >= 60 || kind === 'grenade' || kind === 'ballista') {
+      this._requestShake(kind === 'grenade' ? 0.2 : p.crit ? 0.14 : 0.11);
     }
-    this.burst(x, y, z, {
-      count: p.impact?.burst || (kind === 'flame' ? 16 : kind === 'shotgun' ? 8 : 5),
-      color,
-      speed: p.impact?.speed || (kind === 'flame' ? 2.4 : 1.4),
-      life: p.impact?.life || 0.32,
-      size: p.impact?.size || p.spec.size * 1.7,
-      up: p.impact?.up || 1.1,
-      spread: p.impact?.spread || 0.12,
-    });
   }
 
   _impactRing(x, z, { color = 0xffd75e, count = 14, radius = 1.1, life = 0.22, size = 0.36 } = {}) {
@@ -3613,8 +3643,8 @@ class App {
       if (zb.hitFlash > prevFlash + 0.04) this._shove(zb, null, null);
       this.flashSeen.set(zb.id, zb.hitFlash);
       const knock = this._knockOffset(zb.id, dt);
-      // Hit pulse: a fast, meaty squash on damage, plus a shove off the hit.
-      const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
+      // White flash plus a small squash. The sim position is not moved.
+      const hit = zb.hitFlash > 0 ? Math.min(1, zb.hitFlash / 0.15) : 0;
       const s = zb.def.scale;
       let lunge = 0;
       const attack = this.zombieAttacks.get(zb.id);
@@ -3629,7 +3659,7 @@ class App {
       // Tint over the baked palette: white at rest, flushed in the lunge,
       // washed on the hit, doused blue under a hero's aura.
       if (lunge > 0.01) c.setRGB(1.7, 0.65, 0.55);
-      else if (zb.hitFlash > 0) c.setRGB(2.15, 1.9, 1.6);
+      else if (hit > 0) c.setRGB(1 + hit * 1.7, 1 + hit * 1.55, 1 + hit * 1.4);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
       else c.setRGB(1, 1, 1);
@@ -3639,7 +3669,7 @@ class App {
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
         zb.x + (ax / ad) * lunge + knock.x, bob, zb.z + (az / ad) * lunge + knock.z,
         (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
-        s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
+        s * (1 + hit * 0.18 + lunge * 0.12), s * (1 - hit * 0.2 - lunge * 0.05), s * (1 + hit * 0.18 + lunge * 0.12),
         t, zb.phase, lunge, c, eyeHex,
       );
     }
@@ -3669,10 +3699,27 @@ class App {
       if (i >= 400) break;
       if (!this.coinBorn.has(cn.id)) this.coinBorn.set(cn.id, t);
       const age = t - this.coinBorn.get(cn.id);
-      // Pop out of the building with a little bounce, then hover and spin.
+      // Pop out of the body, then drift toward the hero. The sim position
+      // stays put until the real pickup radius says the coin is collected.
       const bounce = age < 0.5 ? Math.abs(Math.sin(age * Math.PI * 2)) * (0.5 - age) * 2.2 : 0;
-      const big = cn.v >= 4 ? 1.5 : 1;
-      d.position.set(cn.x, this.map.groundY(cn.x, cn.z) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cn.z);
+      let pop = 1;
+      if (age < 0.3) {
+        const k = age / 0.3;
+        pop = 0.35 + k * 0.75 + Math.sin(k * Math.PI) * 0.28;
+      }
+      const big = (cn.v >= 4 ? 1.5 : 1) * pop;
+      let cx = cn.x, cz = cn.z;
+      const hero = this.myHero();
+      if (hero && !hero.dead) {
+        const dx = hero.x - cn.x, dz = hero.z - cn.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 4.4 && dist > 0.04) {
+          const pull = (1 - dist / 4.4) ** 2;
+          cx += dx * pull * 0.72;
+          cz += dz * pull * 0.72;
+        }
+      }
+      d.position.set(cx, this.map.groundY(cx, cz) + 0.32 + bounce + Math.sin(t * 2.5 + cn.id) * 0.07, cz);
       d.rotation.set(Math.PI / 2 + 0.35, 0, t * 2.2 + cn.id);
       d.scale.setScalar(big);
       d.updateMatrix();
@@ -4506,6 +4553,8 @@ class App {
         body.position.z = pose.z;
         body.rotation.x = pose.pitch;
         body.rotation.z = pose.roll;
+        const squash = artState === 'hit' ? cuePulse : 0;
+        body.scale.set(1 + squash * 0.14, 1 - squash * 0.18, 1 + squash * 0.14);
       }
       const limbs = rec.mesh.userData.limbs;
       if (limbs) {
@@ -4993,6 +5042,11 @@ class App {
       this.audio.setMuted(!s.sfx);
       this.ui.setMuteUI(!s.sfx);
     }
+    if (s.shake !== undefined) this.shakeOn = !!s.shake;
+    if (s.numbers !== undefined) {
+      this.numbersOn = !!s.numbers;
+      if (this.combatFx) this.combatFx.numbersOn = this.numbersOn;
+    }
     if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
   }
 
@@ -5002,6 +5056,9 @@ class App {
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
     if (s.sfx === false) this.audio.setMuted(true);
+    this.shakeOn = s.shake !== false;
+    this.numbersOn = s.numbers !== false;
+    if (this.combatFx) this.combatFx.numbersOn = this.numbersOn;
     return s;
   }
 
@@ -5059,10 +5116,15 @@ class App {
     dist = Math.max(18, dist);
     const hx = Math.cos(elev) * dist, hy = Math.sin(elev) * dist;
     let sx = 0, sz = 0;
-    if (this.shake > 0) {
-      this.shake -= dt;
-      const s = Math.min(this.shake, 0.4);
-      sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
+    if (this.shakeOn === false) this.shake = 0;
+    else if (this.shake > 0) {
+      this.shake = Math.min(this.shake, 0.22);
+      const s = shakeAmplitude(this.shake, true);
+      this.shake -= dt * 0.85;
+      if (this.shake < 0) this.shake = 0;
+      // One reused offset, not a new vector. The jitter is presentation-only.
+      sx = (Math.random() - 0.5) * s;
+      sz = (Math.random() - 0.5) * s;
     }
     this.camera.position.set(
       this.focus.x + Math.sin(this.camYaw) * hx + sx,
@@ -5220,12 +5282,15 @@ class App {
       switch (e.type) {
         case 'shot': {
           this._unitAttackCue(e);
+          this._floatHit(e);
           if (e.kind === 'melee') {
             this.audio.melee();
-            this._impactRing(e.tx, e.tz, { color: 0xffd27a, count: 18, radius: 1.25, life: 0.26, size: 0.42 });
-            this.burst(e.tx, 0.7, e.tz, { count: 14, color: 0xffd27a, speed: 2.9, life: 0.3, size: 0.5, up: 1.6 });
-            this.burst(e.tx, 0.6, e.tz, { count: 9, color: 0x9c1f1f, speed: 1.9, life: 0.4, size: 0.48, up: 1.3 });
-            this.shake = Math.max(this.shake, 0.12);
+            const y = (this.map ? this.map.groundY(e.tx, e.tz) : 0) + 0.7;
+            if (this.combatFx) {
+              this.combatFx.impact(e.tx, y, e.tz, 'melee', e.dtype || 'kinetic', !!e.crit);
+              this.combatFx._spawn('slash', e.tx, y, e.tz, 0, 0.15, 0, 0.14, 0.85, 0xfff1cc);
+            }
+            if (e.crit) this._requestShake(0.12);
             break;
           }
           if (e.kind === 'shotgun') {
@@ -5233,29 +5298,28 @@ class App {
             // before the impact VFX fires, so the eye can track the shot.
             this.audio.shoot('shotgun');
             const muzzle = this._muzzlePoint(e, 'shotgun');
-            this.burst(muzzle.x, muzzle.y, muzzle.z, { count: 14, color: 0xffe08a, speed: 2.0, life: 0.16, size: 0.78, spread: 0.3, up: 0.5 });
+            if (this.combatFx) this.combatFx.muzzle(muzzle.x, muzzle.y, muzzle.z);
             const ang = Math.atan2(e.tx - e.fx, e.tz - e.fz);
             for (let p = 0; p < 9; p++) {
               const a = ang + (p - 4) * 0.13;
               const spread = 0.25 + Math.random() * 0.35;
               this._spawnProjectile(e, {
                 kind: 'shotgun',
+                noNumber: p !== 4,
                 tx: e.tx + Math.sin(a) * spread,
                 tz: e.tz + Math.cos(a) * spread,
                 ty: 0.6,
-                dur: 0.22 + Math.random() * 0.04,
-                impact: { kind: 'shotgun', color: 0xfff2b0, ring: p === 4, burst: p === 4 ? 12 : 2, radius: 1.1, speed: 2.2, life: 0.28, size: 0.38, up: 1.1 },
+                dur: 0.16 + (p % 3) * 0.02,
               });
             }
-            this.shake = Math.max(this.shake, 0.14);
+            this._requestShake(0.12);
             break;
           }
           if (e.kind === 'flame') {
             this.audio.shoot('tower');
-            const muzzle = this._muzzlePoint(e, 'flame');
-            this._spawnProjectile(e, { kind: 'flame', ty: 0.45, impact: { kind: 'flame', color: 0xff8a3c, count: 18, radius: 1.3, burst: 18, speed: 2.5, life: 0.34, size: 0.56, up: 1.6, spread: 1.2 } });
-            this.stream(muzzle.x, muzzle.y, muzzle.z, e.tx, 0.5, e.tz, { count: 9, color: 0xff8a3c, size: 0.62, life: 0.34 });
+            this._spawnProjectile(e, { kind: 'flame', ty: 0.45 });
             this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+            this._towerBeat(e.fx, e.fz);
             break;
           }
           this.audio.shoot(e.kind === 'hero' ? 'soldier' : e.kind === 'ballista' || e.kind === 'outpostSiege' ? 'sniper' : e.kind === 'outpost' ? 'tower' : e.kind);
@@ -5282,16 +5346,20 @@ class App {
             this.burst(lerp(muzzle.x, hit.x, t), lerp(muzzle.y, hit.y, t), lerp(muzzle.z, hit.z, t),
               { count: 1, color: 0xfff2b0, speed: 0.1, life: 0.14, size: 0.38, spread: 0.02, up: 0 });
           }
-          if (e.kind === 'tower' || e.kind === 'ballista' || e.kind === 'outpost' || e.kind === 'outpostSiege') this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+          if (isTowerShot(e.kind)) {
+            this._towerRecoil(e.fx, e.fz, e.tx, e.tz);
+            this._towerBeat(e.fx, e.fz);
+          }
           break;
         }
         case 'zdeath':
           this.spawnCorpse(e);
-          this._killBurst(e);
-          this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
-          this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
+          if (this.combatFx) {
+            const gy = this.map ? this.map.groundY(e.x, e.z) : 0;
+            this.combatFx.death(e.x, gy + 0.45, e.z, !!e.big);
+          }
           if (e.big) {
-            this.shake = Math.max(this.shake, 0.48);
+            this._requestShake(0.2);
             this.audio.bigDeath();
           } else {
             this.deathSfxT -= 1;
@@ -5425,9 +5493,13 @@ class App {
         }
         case 'nestdown':
           this.audio.demolish();
-          this.shake = Math.max(this.shake, 0.4);
-          this.burst(e.x, 0.8, e.z, { count: 40, color: 0xb44dff, speed: 3.4, life: 0.9, size: 0.7, up: 3 });
-          this.burst(e.x, 0.5, e.z, { count: 24, color: 0x3a2a4a, speed: 2.6, life: 0.8, size: 0.7, up: 2.4 });
+          this._requestShake(0.2);
+          if (this.combatFx) this.combatFx.death(e.x, (this.map ? this.map.groundY(e.x, e.z) : 0) + 0.6, e.z, true);
+          this._waveEndVisual();
+          break;
+        case 'roomclear':
+        case 'firstsiege':
+          this._waveEndVisual();
           break;
         case 'rally':
           this.audio.train();
@@ -5438,6 +5510,13 @@ class App {
           break;
         case 'bhit':
           if (e.fromId) this._noteAttacker(e.fromId);
+          {
+            let keep = false;
+            for (const b of g.buildings) {
+              if (b.kind === 'hq' && (b.cx - e.x) ** 2 + (b.cz - e.z) ** 2 < 4) { keep = true; break; }
+            }
+            if (keep) this._requestShake(0.18);
+          }
           this.bhitSfxT -= 1;
           if (this.bhitSfxT <= 0) { this.audio.hitBuilding(); this.bhitSfxT = 4; }
           if (e.fromId) this.zombieAttacks.set(e.fromId, { t: 0.36, dur: 0.36, tx: e.x, tz: e.z });
@@ -5593,6 +5672,57 @@ class App {
     g.events.length = 0;
   }
 
+  _floatHit(e) {
+    if (!this.combatFx || !e.dmg) return;
+    const y = (this.map ? this.map.groundY(e.tx ?? e.x, e.tz ?? e.z) : 0) + 2.35;
+    this.combatFx.number(e.tx ?? e.x, y, e.tz ?? e.z, e.dmg, !!e.crit);
+  }
+
+  _requestShake(amount) {
+    this.shake = addShake(this.shake, amount, this.shakeOn !== false);
+  }
+
+  _towerBeat(fx, fz) {
+    for (const rec of this.buildingMeshes.values()) {
+      if (!isTowerShot(rec.b.kind) && rec.b.kind !== 'tower' && rec.b.kind !== 'outpost') continue;
+      if (Math.abs(rec.b.cx - fx) < 0.8 && Math.abs(rec.b.cz - fz) < 0.8) {
+        rec.beat = 0.14;
+        return;
+      }
+    }
+  }
+
+  _noteWave() {
+    if (!this.game) return;
+    let n = 0;
+    for (const z of this.game.zombies) if (!z.dead) n++;
+    this._waveBase = n;
+    this._waveHot = false;
+    this._waveWatch = true;
+  }
+
+  _waveStartVisual() {
+    this._noteWave();
+    if (!this.combatFx || !this.game) return;
+    let shown = 0;
+    for (const nest of this.game.nests || []) {
+      if (!nest || nest.alive === false) continue;
+      const y = this.map ? this.map.groundY(nest.x, nest.z) + 0.4 : 0.4;
+      this.combatFx.waveColumn(nest.x, y, nest.z);
+      if (++shown >= 3) break;
+    }
+  }
+
+  _waveEndVisual() {
+    this._waveWatch = false;
+    if (this.combatFx) {
+      const y = this.map ? this.map.groundY(this.focus.x, this.focus.z) + 0.3 : 0.3;
+      this.combatFx.settle(this.focus.x, y, this.focus.z);
+    }
+    this.audio.waveEnd();
+    this._requestShake(0.08);
+  }
+
   _punchCamera(duration, amp) {
     this.camBeat = duration;
     this.camBeatDur = Math.max(0.05, duration);
@@ -5604,8 +5734,9 @@ class App {
     if (!cue) return;
     // The champion already has its own horn. Other waves share one brass call.
     if (type !== 'boss') this.audio.waveHorn();
-    this.shake = Math.max(this.shake, cue.shake);
+    this._requestShake(Math.min(0.2, cue.shake));
     this._punchCamera(0.62, cue.punch);
+    this._waveStartVisual();
     this.ui.showMoment(cue.eyebrow, cue.title, cue.detail, cue.tone, Math.round(cue.hold * 1000));
   }
 
@@ -5882,6 +6013,19 @@ class App {
           const head = rec.mesh.userData.head;
           if (head) head.position.z = -Math.max(0, rec.recoil) * 0.8;
         }
+        const headBeat = rec.mesh.userData.head;
+        if (rec.beat > 0 && headBeat) {
+          rec.beat -= dt;
+          if (headBeat.userData.restScale == null) headBeat.userData.restScale = headBeat.scale.x || 1;
+          const k = Math.max(0, rec.beat / 0.14);
+          const s = headBeat.userData.restScale * (1 + Math.sin(k * Math.PI) * 0.1);
+          headBeat.scale.set(s, s, headBeat.userData.restScale * (1 + k * 0.12));
+          rec._beatOn = true;
+        } else if (rec._beatOn && headBeat) {
+          rec._beatOn = false;
+          const rest = headBeat.userData.restScale || 1;
+          headBeat.scale.set(rest, rest, rest);
+        }
         const ud = rec.mesh.userData;
         if (ud.rotor) ud.rotor.rotation.z = t * 1.5;
         if (ud.flag) ud.flag.rotation.y = Math.sin(t * 3) * 0.25;
@@ -5976,6 +6120,13 @@ class App {
       }
     }
 
+    if (this._waveWatch && this.game) {
+      let living = 0;
+      for (const z of this.game.zombies) if (!z.dead) living++;
+      if (living > (this._waveBase || 0) + 2) this._waveHot = true;
+      if (waveCleared(living, this._waveBase || 0, this._waveHot)) this._waveEndVisual();
+    }
+    if (this.combatFx) this.combatFx.update(dt);
     this._updateParticles(dt);
     this._updateCorpses(dt);
     this._updatePayCoins(dt);
