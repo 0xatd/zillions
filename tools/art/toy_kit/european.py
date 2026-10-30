@@ -665,9 +665,17 @@ def marksman(k, pal):
 
 # ---------------------------------------------------------------- heroes
 #
-# Each hero rides a hoverbike. Scott: a heavy brawler bike and gravity maul.
-# Alexander: a long, sleek lancer bike with a slung rail rifle and banner.
-# Daniel: a low, finned stealth bike with twin blades.
+# Each hero is a chibi rider with a big readable face. Scott, Alexander and
+# Daniel ride hoverbikes. Turtle, John and Tiger do too. Aaron rides a disc.
+# Colours are each hero's config armour and trim. Props are the kit they
+# already fight with, drawn big enough to name from the game camera.
+# Scott: heavy bike, round helm, gravity maul.
+# Alexander: long lancer, crown, rail rifle, banner.
+# Daniel: low finned bike, hood, visor, crossed blades.
+# Turtle: widest sled, bone shell, tower shield, mace.
+# John: short sled, ivory plate, powerfists, keg, crest.
+# Tiger: longest low bike, ear fins, stripes, twin blades.
+# Aaron: gold-rimmed disc, open hood, robe, crystal staff.
 
 HERO_LOOK = {
     'scott': {'main': 0xb32020, 'trim': 0xf4f1e8, 'bike': 0x3a3f4c, 'glow': 0xff8a5c,
@@ -678,6 +686,14 @@ HERO_LOOK = {
     # leathers and a silver hood rim so he reads at game zoom (v5).
     'danny': {'main': 0x3a8ef0, 'trim': 0x3a4866, 'bike': 0x5a6c90, 'glow': 0x7dffb2,
               'cape': 0x2a66c8, 'hair': 0x3a4866, 'rim': 0xdce8f8},
+    'turtle': {'main': 0x3f6b5e, 'trim': 0xb8ae86, 'bike': 0x2a4038, 'glow': 0x8fd0ff,
+               'cape': 0x2c4a40, 'hair': 0x3a2e24},
+    'john': {'main': 0x3a3a3f, 'trim': 0xf0ece0, 'bike': 0x2c2c30, 'glow': 0xffb347,
+             'cape': 0x2a2a2e, 'hair': 0xd23b32},
+    'tiger': {'main': 0xd8721f, 'trim': 0x1c1a18, 'bike': 0x3a2a18, 'glow': 0xffa64d,
+              'cape': 0x1c1a18, 'hair': 0x1c1a18},
+    'aaron': {'main': 0x6a4fae, 'trim': 0xf0d060, 'bike': 0x3a3058, 'glow': 0x8fd6ff,
+              'cape': 0x4a3488, 'hair': 0xd9d3c8},
 }
 
 
@@ -728,11 +744,21 @@ def _bike(B, G, look, length, width, height, nose, style):
         # long nose spike and a gold fin
         B.prism(look['trim'], 4, 0.04, 0, 0.36, 0, y0 + height * 0.5, hl + nose * 0.5, rx=math.pi / 2, phase=math.pi / 4)
         B.box(look['trim'], 0.03, 0.16, 0.32, 0, y0 + height, -hl + 0.2, 0.3, 0, 0)
-    else:
+    elif style == 'stealth':
         # swept stealth fins and blade vanes
         for sx in (-1, 1):
             B.box(look['main'], 0.03, 0.24, 0.32, sx * width * 0.36, y0 + height * 0.8, -hl + 0.16, 0.5, 0, sx * 0.45)
             B.box(look['trim'], 0.2, 0.02, 0.36, sx * (width / 2 + 0.12), y0 + 0.04, 0.1, 0, sx * 0.3, 0)
+    elif style == 'shell':
+        # blunt armoured skirts. No bull bar — that silhouette is Scott's.
+        for sx in (-1, 1):
+            B.box(shade(look['main'], 0.75), 0.07, height * 0.85, length * 0.62,
+                  sx * (width / 2 + 0.02), y0, 0.0)
+        B.box(look['trim'], width * 0.55, 0.05, 0.08, 0, y0 + 0.01, hl + 0.02)
+    elif style == 'brawler':
+        # short pub sled: an ivory centre stripe, no bull bar
+        B.box(look['trim'], 0.045, height * 0.95, length * 0.58, 0, y0, 0.02)
+        B.box(look['trim'], width + 0.04, 0.035, length * 0.42, 0, y0 + height * 0.2, 0.06)
 
 
 def _rider(B, G, pal, look, seat, wide=1.0, boot=None):
@@ -785,6 +811,7 @@ def hero(k, key, pal):
     look = HERO_LOOK[key]
     dk = pal_dark()
     hz = -0.1                                       # head z (over the torso)
+    fist_c, fist_r = look['trim'], None
     if key == 'scott':
         # The brawler: a broad red knight on a heavy armoured bike. A round
         # red great-helm with an open face, white crest, bushy beard, big
@@ -844,7 +871,7 @@ def hero(k, key, pal):
         G.box(look['glow'], 0.03, 0.03, 0.4, -0.22, seat + 0.22, -0.17, 0.5, 0, 0)
         banner(B, pal, 0.19, -0.64, 0.4, 1.15, color=look['main'])
         arm_w, arm_c, sh = 0.11, look['main'], 0.23
-    else:
+    elif key == 'danny':
         # The shadow: low finned stealth bike; a deep blue hood framing a
         # dark face mask with a glowing green visor slit, scarf streaming,
         # twin blades crossed on his back.
@@ -872,10 +899,122 @@ def hero(k, key, pal):
             G.box(look['glow'], 0.02, 0.44, 0.02, sx * 0.08, seat + 0.14, -0.31, -0.25, 0, sx * 0.55)
             B.box(look['trim'], 0.12, 0.03, 0.06, sx * 0.08, seat + 0.0, -0.3, -0.25, 0, sx * 0.55)
         arm_w, arm_c, sh = 0.1, look['trim'], 0.21
+        fist_c = look['main']
+    elif key == 'turtle':
+        # The wall: the widest sled, a bone carapace behind a bare face, a
+        # tower shield on the left and a mace on the right. The shell brim
+        # sits behind the eyes so the face stays the readable part.
+        _bike(B, G, look, 0.9, 0.62, 0.2, 0.22, 'shell')
+        seat = 0.5
+        neck = _rider(B, G, pal, look, seat, wide=1.42)
+        for sx in (-1, 1):
+            _pauldron(B, look['trim'], sx * 0.3, neck - 0.04, -0.08, 0.11)
+        top, fz = _head(B, pal, neck, hz, r=0.18)
+        ph = math.pi / 8
+        B.prism(look['trim'], 8, 0.3, 0.3, 0.05, 0, neck + 0.2, hz - 0.07, phase=ph, sz=0.6)  # shell brim
+        B.prism(look['main'], 8, 0.16, 0.07, 0.12, 0, neck + 0.24, hz - 0.05, phase=ph)       # cap
+        B.prism(look['trim'], 8, 0.2, 0.22, 0.06, 0, neck - 0.08, hz - 0.02, phase=ph)        # gorget
+        # Carapace sits behind the face and rises beside the head, so the
+        # dome reads from the high follow camera.
+        B.ico(look['trim'], 0.42, 0, seat + 0.34, -0.42, sx=1.35, sy=0.7, sz=0.75, sub=1)
+        B.box(shade(look['trim'], 0.7), 0.07, 0.09, 0.5, 0, seat + 0.58, -0.42)              # scutes
+        B.box(shade(look['trim'], 0.7), 0.72, 0.09, 0.07, 0, seat + 0.58, -0.42)
+        B.box(shade(look['trim'], 0.78), 0.1, 0.22, 0.16, -0.5, seat + 0.28, -0.42)
+        B.box(shade(look['trim'], 0.78), 0.1, 0.22, 0.16, 0.5, seat + 0.28, -0.42)
+        # tower shield: bone rim, lighter teal face, cyan ward core
+        B.box(look['trim'], 0.54, 0.88, 0.05, -0.4, seat - 0.38, 0.14)
+        B.box(shade(look['main'], 1.35), 0.42, 0.72, 0.06, -0.4, seat - 0.28, 0.18)
+        B.box(look['trim'], 0.08, 0.66, 0.075, -0.4, seat - 0.24, 0.2)
+        G.box(look['glow'], 0.12, 0.12, 0.03, -0.4, seat + 0.02, 0.24)
+        B.box(0x4a4034, 0.05, 0.05, 0.4, 0.34, seat + 0.12, 0.02)                            # mace haft
+        B.ico(0xc5ccd0, 0.11, 0.34, seat + 0.16, 0.28, sub=1)
+        arm_w, arm_c, sh = 0.15, look['main'], 0.34
+    elif key == 'john':
+        # The brawler: charcoal plate, an ivory chest, a red crest, powerfists
+        # and the keg he cracks for Last Call. No beard — that read is Scott's.
+        _bike(B, G, look, 0.78, 0.46, 0.24, 0.2, 'brawler')
+        seat = 0.48
+        neck = _rider(B, G, pal, look, seat, wide=1.16)
+        top, fz = _head(B, pal, neck, hz, r=0.18)
+        B.box(look['trim'], 0.26, 0.2, 0.05, 0, seat + 0.02, 0.1)                           # ivory chest
+        for sx in (-1, 1):
+            B.box(look['trim'], 0.14, 0.05, 0.16, sx * 0.16, neck - 0.06, -0.02)            # white yokes
+        B.box(look['hair'], 0.055, 0.24, 0.36, 0, neck + 0.24, hz - 0.02)                   # crest
+        # Keg rides the right shoulder, beside the head, where the follow
+        # camera can see it. A keg centred on the back disappears behind him.
+        B.prism(0x6b5334, 8, 0.15, 0.14, 0.38, 0.36, seat + 0.18, -0.08)
+        B.prism(0x3a3d42, 8, 0.16, 0.16, 0.045, 0.36, seat + 0.18, -0.08)
+        B.prism(0x3a3d42, 8, 0.16, 0.16, 0.045, 0.36, seat + 0.52, -0.08)
+        G.box(look['glow'], 0.08, 0.045, 0.08, 0.36, seat + 0.57, -0.08)                    # bung
+        arm_w, arm_c, sh = 0.13, look['main'], 0.28
+        fist_c, fist_r = 0xd8d4cc, 0.13
+    elif key == 'tiger':
+        # The pack leader: the longest, lowest bike, black stripes over
+        # orange, ear fins, and two blades rising in a V. The face stays
+        # bare so he is not Daniel's hood.
+        _bike(B, G, look, 1.4, 0.32, 0.15, 0.34, 'stealth')
+        seat = 0.38
+        neck = _rider(B, G, pal, look, seat, wide=0.9)
+        top, fz = _head(B, pal, neck, hz)
+        ph = math.pi / 8
+        # Hair stays on the crown, behind the eyes, so the face stays the
+        # bright part. Ears are the silhouette, with an orange inner.
+        B.prism(look['hair'], 8, HEAD_R * 0.92, HEAD_R * 0.5, 0.07, 0, neck + 0.26, hz - 0.08, phase=ph, sz=0.7)
+        for sx in (-1, 1):
+            B.prism(look['trim'], 3, 0.07, 0.0, 0.2, sx * 0.13, neck + 0.3, hz - 0.02, rz=sx * -0.42)
+            B.prism(look['main'], 3, 0.035, 0.0, 0.12, sx * 0.13, neck + 0.34, hz - 0.01, rz=sx * -0.42)
+            B.box(look['trim'], 0.018, 0.055, 0.016, sx * 0.09, neck + 0.08, fz + 0.014)   # cheek stripes
+        B.box(look['trim'], 0.3, 0.045, 0.06, 0, seat + 0.16, 0.07)                         # chest stripes
+        B.box(look['trim'], 0.22, 0.04, 0.05, 0, seat + 0.08, 0.06)
+        B.box(look['trim'], 0.07, 0.03, 0.55, 0.05, seat + 0.18, -0.48, 0.45, 0.2, 0)      # scarf tail
+        for sx in (-1, 1):
+            B.box(0xe7e1d4, 0.045, 0.78, 0.04, sx * 0.15, seat + 0.14, -0.16, -0.42, 0, sx * -0.2)
+            G.box(look['glow'], 0.016, 0.52, 0.016, sx * 0.15, seat + 0.28, -0.14, -0.42, 0, sx * -0.2)
+            B.box(look['trim'], 0.11, 0.05, 0.08, sx * 0.14, seat + 0.1, -0.12)
+        arm_w, arm_c, sh = 0.1, look['main'], 0.2
+    elif key == 'aaron':
+        # The warlock: a gold-rimmed disc instead of a hull, an open violet
+        # hood (the face stays skin, unlike Daniel's mask), a short white
+        # beard, and a staff whose crystal clears the head.
+        _disc_seat = 0.36
+        dk = pal_dark()
+        B.prism(look['trim'], 12, 0.5, 0.5, 0.04, 0, 0.08, 0)                               # gold rim
+        B.prism(look['main'], 12, 0.42, 0.42, 0.07, 0, 0.12, 0)                             # disc
+        B.prism(shade(look['main'], 0.72), 12, 0.2, 0.2, 0.05, 0, 0.19, -0.02)
+        G.prism(look['glow'], 12, 0.55, 0.55, 0.02, 0, 0.05, 0)                             # ward ring
+        G.box(look['glow'], 0.62, 0.02, 0.62, 0, 0.07, 0)
+        B.box(dk, 0.22, 0.05, 0.26, 0, 0.28, -0.04)                                         # saddle
+        B.box(dk, 0.34, 0.04, 0.04, 0, 0.46, 0.2)                                           # tiller
+        for sx in (-1, 1):
+            B.box(look['trim'], 0.04, 0.1, 0.04, sx * 0.15, 0.4, 0.2)
+        seat = _disc_seat
+        neck = _rider(B, G, pal, look, seat, wide=0.96)
+        B.prism(look['cape'], 8, 0.34, 0.16, 0.3, 0, seat - 0.2, -0.06, phase=math.pi / 8)  # robe
+        top, fz = _head(B, pal, neck, hz)
+        ph = math.pi / 8
+        r = HEAD_R * 1.12
+        B.prism(look['main'], 8, r, r, 0.16, 0, neck + 0.02, hz - 0.07, phase=ph, sz=0.82)
+        B.prism(look['main'], 8, r * 0.95, r * 0.4, 0.16, 0, neck + 0.16, hz - 0.09, phase=ph)
+        B.box(look['main'], 0.3, 0.34, 0.08, 0, neck - 0.02, hz - 0.16)                     # hood back
+        B.prism(look['trim'], 8, r * 1.04, r * 1.04, 0.03, 0, neck + 0.15, hz - 0.06, phase=ph, sz=0.88)
+        B.box(look['hair'], 0.11, 0.07, 0.045, 0, neck + 0.005, fz - 0.005)                 # goatee
+        B.box(look['hair'], 0.16, 0.02, 0.016, 0, neck + 0.17, fz + 0.01)                   # brows
+        for sx in (-1, 1):
+            G.octa(look['trim'], 0.04, 0.055, sx * 0.18, neck - 0.02, 0.0)
+        B.prism(0x3a3040, 6, 0.04, 0.045, 0.7, 0.34, 0.15, 0.08)                             # staff shaft
+        B.prism(look['trim'], 6, 0.045, 0.05, 0.55, 0.34, 0.82, 0.08)                        # gold upper staff
+        G.octa(look['trim'], 0.14, 0.2, 0.34, 1.45, 0.08)                                    # crystal above the hood
+        arm_w, arm_c, sh = 0.1, look['cape'], 0.22
+    else:
+        raise KeyError(key)
     for name, sx in (('arm_l', -1), ('arm_r', 1)):
         A = k.part(name, origin=(sx * sh, seat + 0.28, -0.08))
         A.prism(arm_c, 6, arm_w * 0.55, arm_w * 0.5, 0.36, sx * sh, seat + 0.24, -0.06, rx=math.pi / 2 + 0.35)
-        A.ico(look['trim'] if key != 'danny' else look['main'], arm_w * 0.6, sx * sh, seat + 0.12, 0.3, sub=1)  # fist
+        A.ico(fist_c, fist_r if fist_r else arm_w * 0.6, sx * sh, seat + 0.12, 0.3, sub=1)
+        if key == 'john':
+            A.box(look['trim'], 0.2, 0.04, 0.06, sx * sh, seat + 0.14, 0.4)                 # knuckle bar
+        if key == 'tiger':
+            A.box(look['trim'], 0.11, 0.03, 0.12, sx * sh, seat + 0.26, 0.0)
 
 
 # ---------------------------------------------------------------- enemies

@@ -12,6 +12,7 @@ import { Game, runScore } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadCharacters, cloneHero, zombieAnim, zombieAnimReady, ZOMBIE_VISUAL } from './character-anim.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -130,6 +131,7 @@ class App {
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camDist = 46;           // high, narrow diorama camera (FOV 30)
+    this.zombieVisual = ZOMBIE_VISUAL;
     this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
@@ -3556,12 +3558,12 @@ class App {
   // rebuild the horde pools on kit geometry. Presentation only.
   _loadArt() {
     if (!this._artLoading) {
-      this._artLoading = loadAssets().then(() => {
+      this._artLoading = loadAssets().then(() => loadCharacters()).then(() => {
         this.assetsLoaded = true;
         setMapKit(kitGeometry);
-        if (hasKit('enemy_walker') && this.horde) {
-          this.horde.dispose();
-          this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+        if (this.horde) {
+          const anim = zombieAnimReady() ? zombieAnim : null;
+          if (anim || hasKit('enemy_walker')) this.horde.reload(kitGeometry, anim);
         }
       });
     }
@@ -3580,14 +3582,23 @@ class App {
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
-    this.horde.begin();
+    this.horde.begin(dt);
+    if (!this._zSeen) this._zSeen = new Map();
+    const live = new Set(g.zombies.map((zb) => zb.id));
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
-      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
+      const bobAmp = this.horde.hasAnim ? 0.012 : 0.05;
+      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * bobAmp;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
+      // Visual only. zb.def.scale still drives sim size; ZOMBIE_VISUAL
+      // does not. It is what makes a walker readable at distance 46.
+      const draw = zb.def.scale * ZOMBIE_VISUAL;
+      this._zSeen.set(zb.id, {
+        type: zb.boss ? 'brute' : zb.type, x: zb.x, y: bob, z: zb.z, yaw, s: draw,
+      });
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
-      const s = zb.def.scale;
+      const s = draw;
       let lunge = 0;
       const attack = this.zombieAttacks.get(zb.id);
       if (attack) {
@@ -3607,14 +3618,22 @@ class App {
       else c.setRGB(1, 1, 1);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
+      const step = this.horde.hasAnim ? lunge * 0.12 : lunge;
       this.horde.write(
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
-        zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
-        (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
+        zb.x + (ax / ad) * step, bob, zb.z + (az / ad) * step,
+        (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8 + (zb.type === 'runner' ? 0.45 : zb.type === 'burrower' ? 0.22 : 0),
+        yaw, Math.sin(t * 5 + zb.phase) * 0.06,
         s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
         t, zb.phase, lunge, c, eyeHex,
       );
     }
+    for (const [id, last] of this._zSeen) {
+      if (live.has(id)) continue;
+      this.horde.noteDeath(last);
+      this._zSeen.delete(id);
+    }
+    this.horde.writeDeaths();
     this.horde.commit();
   }
 
@@ -4211,7 +4230,11 @@ class App {
     if (!obj) return;
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
-      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.userData.contact) {
+        if (o.geometry) o.geometry.dispose();
+        return;
+      }
+      if (o.geometry && !o.geometry.userData.kitShared && !o.geometry.userData.charShared) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
@@ -4238,6 +4261,30 @@ class App {
     };
   }
 
+  _contactShadow() {
+    if (!this._contactMat) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      const shade = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+      shade.addColorStop(0, 'rgba(10, 8, 6, 0.5)');
+      shade.addColorStop(0.45, 'rgba(10, 8, 6, 0.22)');
+      shade.addColorStop(1, 'rgba(10, 8, 6, 0)');
+      ctx.fillStyle = shade;
+      ctx.fillRect(0, 0, 64, 64);
+      const tex = new THREE.CanvasTexture(canvas);
+      this._contactMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+    }
+    const geo = new THREE.CircleGeometry(0.78, 20);
+    geo.rotateX(-Math.PI / 2);
+    const shadow = new THREE.Mesh(geo, this._contactMat);
+    shadow.position.y = 0.02;
+    shadow.userData.keepOpacity = true;
+    shadow.userData.contact = true;
+    return shadow;
+  }
+
   _makeUnitMesh(u) {
     const g = new THREE.Group();
     const body = new THREE.Group();
@@ -4252,15 +4299,16 @@ class App {
     };
 
     if (u.hero) {
-      const d = u.def;
-      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
-      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (kit) {
-        // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
+      const animated = !u.characterStyle ? cloneHero(u.key) : null;
+      const kit = !animated && !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !animated && !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (animated) {
+        // Skinned figurine. Group scale matches the terrain pass (0.82):
+        // about a third of a house, with the clip's own motion.
+        body.add(animated.node);
+        g.userData.mixer = animated.mixer;
+        g.userData.anim = animated;
+      } else if (kit) {
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4284,66 +4332,10 @@ class App {
         g.userData.limbs = model.limbs;
         for (const part of model.weaponParts) weaponParts.push(part);
       }
-      // Hero marker: a bright gold ring on a dark backing disc, so the hero
-      // reads against sand, grass and snow alike.
-      const backGeo = new THREE.RingGeometry(0.46, 0.8, 32);
-      backGeo.rotateX(-Math.PI / 2);
-      const back = new THREE.Mesh(backGeo, new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.42, depthWrite: false }));
-      back.position.y = 0.025;
-      back.userData.keepOpacity = true;
-      g.add(back);
-      const haloGeo = new THREE.RingGeometry(0.55, 0.7, 32);
-      haloGeo.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0xffcf4d, transparent: true, opacity: 0.9, depthWrite: false }));
-      halo.position.y = 0.03;
-      g.add(halo);
-      // Passive aura: a soft breathing ring at the aura's true radius.
-      // (The whole hero group is scaled 1.18×, so compensate.)
-      if (d.aura) {
-        const S = 1.18;
-        const auraR = u.auraRadius || d.aura.radius * (1 + ((u.mods && u.mods.auraR) || 0));
-        const auraFillGeo = new THREE.CircleGeometry(auraR / S, 56);
-        auraFillGeo.rotateX(-Math.PI / 2);
-        const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
-        auraFill.position.y = 0.035;
-        g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
-        auraGeo.rotateX(-Math.PI / 2);
-        const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
-        aura.position.y = 0.05;
-        g.add(aura);
-        const pulseGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.82) / S, Math.max(0.3, auraR - 0.62) / S, 72);
-        pulseGeo.rotateX(-Math.PI / 2);
-        const pulse = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.18, depthWrite: false }));
-        pulse.position.y = 0.065;
-        g.add(pulse);
-        aura.userData.baseRadius = auraR;
-        auraFill.userData.baseRadius = auraR;
-        pulse.userData.baseRadius = auraR;
-        g.userData.aura = aura;
-        g.userData.auraFill = auraFill;
-        g.userData.auraPulse = pulse;
-      }
-      if (u.key === 'danny') {
-        // The Weave must remain readable for its full duration. Three broken,
-        // counter-rotating rings make a moving tear in the world instead of
-        // relying on Daniel becoming faint and easy to lose in the horde.
-        const weave = new THREE.Group();
-        for (let i = 0; i < 3; i++) {
-          const geo = new THREE.RingGeometry(0.72 + i * 0.18, 0.82 + i * 0.18, 32, 1, i * 0.7, Math.PI * 1.35);
-          geo.rotateX(-Math.PI / 2);
-          const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-            color: i === 1 ? 0x72cfff : 0x7dffb2, transparent: true,
-            opacity: 0.82 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
-          }));
-          ring.position.y = 0.12 + i * 0.05;
-          weave.add(ring);
-        }
-        weave.visible = false;
-        g.add(weave);
-        g.userData.weave = weave;
-      }
-      g.scale.setScalar(1.18);
+      // No ring, disc, or pip under the hero. A soft contact shadow is the
+      // only ground mark. Aura radius stays in the simulation.
+      g.add(this._contactShadow());
+      g.scale.setScalar(0.82);
     } else {
       // Colony troops: one corps, three trades. The authored art-slice
       // rifleman stays on for the line trooper it was modeled as; rangers,
@@ -4379,13 +4371,6 @@ class App {
         for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
-    const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
-    affectedGeo.rotateX(-Math.PI / 2);
-    const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
-    affected.position.y = 0.085;
-    affected.visible = false;
-    g.add(affected);
-    g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
     return g;
   }
@@ -4468,7 +4453,14 @@ class App {
       // The renderer owns this pose state machine. Simulation state remains
       // untouched, so animation can never affect multiplayer determinism.
       const body = rec.mesh.userData.body;
-      if (body) {
+      if (rec.mixer) {
+        rec.anim.play(artState);
+        rec.mixer.update(dt || 0);
+        if (body) {
+          body.position.set(0, 0, 0);
+          body.rotation.set(0, 0, 0);
+        }
+      } else if (body) {
         body.position.x = 0;
         body.position.y = pose.y;
         body.position.z = pose.z;
@@ -4476,7 +4468,7 @@ class App {
         body.rotation.z = pose.roll;
       }
       const limbs = rec.mesh.userData.limbs;
-      if (limbs) {
+      if (!rec.mixer && limbs) {
         const stride = pose.stride;
         if (limbs.legL) limbs.legL.rotation.x = stride;
         if (limbs.legR) limbs.legR.rotation.x = -stride;
@@ -4511,51 +4503,18 @@ class App {
           });
           for (const o of rec.mesh.userData.outlines || []) o.visible = wantOp === 1;
         }
-        const aura = rec.mesh.userData.aura;
-        if (aura) {
-          const fill = rec.mesh.userData.auraFill;
-          const pulse = rec.mesh.userData.auraPulse;
-          const visible = !u.stealth; // veiled heroes hum nothing
-          const rank = u.auraRank || 0;
-          const radius = u.auraRadius || aura.userData.baseRadius || 1;
-          for (const part of [aura, fill, pulse]) {
-            if (!part) continue;
-            part.visible = visible;
-            const base = part.userData.baseRadius || radius;
-            part.scale.setScalar(radius / base);
+        if (u.key === 'danny' && u.weaveT > 0 && !u.dead) {
+          const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
+          last.t -= dt;
+          if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
+            this.stream(last.x, 0.35, last.z, u.x, 0.35, u.z,
+              { count: 7, color: 0x72cfff, size: 0.55, life: 0.42 });
+            this.burst(u.x, 0.35, u.z,
+              { count: 5, color: 0x7dffb2, speed: 0.35, life: 0.48, size: 0.58, up: 0.35, spread: 0.55 });
+            last.x = u.x; last.z = u.z; last.t = 0.055;
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
-          if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
-          if (pulse) {
-            pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
-          }
-        }
-        const weave = rec.mesh.userData.weave;
-        if (weave) {
-          weave.visible = u.weaveT > 0 && !u.dead;
-          if (weave.visible) {
-            weave.children.forEach((ring, i) => {
-              ring.rotation.z = t * (i % 2 ? -4.8 : 4.2) + i * 1.7;
-              ring.material.opacity = 0.58 + Math.sin(t * 8 + i) * 0.22;
-            });
-            const last = rec.weaveTrail || { x: u.x, z: u.z, t: 0 };
-            last.t -= dt;
-            if (last.t <= 0 && ((u.x - last.x) ** 2 + (u.z - last.z) ** 2) > 0.04) {
-              this.stream(last.x, 0.35, last.z, u.x, 0.35, u.z,
-                { count: 7, color: 0x72cfff, size: 0.55, life: 0.42 });
-              this.burst(u.x, 0.35, u.z,
-                { count: 5, color: 0x7dffb2, speed: 0.35, life: 0.48, size: 0.58, up: 0.35, spread: 0.55 });
-              last.x = u.x; last.z = u.z; last.t = 0.055;
-            }
-            rec.weaveTrail = last;
-          } else rec.weaveTrail = null;
-        }
-      }
-      const affected = rec.mesh.userData.affected;
-      if (affected) {
-        affected.visible = !!(u.auraSources && u.auraSources.length) && !u.dead;
-        affected.material.opacity = 0.34 + Math.sin(t * 4.6 + u.id) * 0.12;
+          rec.weaveTrail = last;
+        } else if (u.key === 'danny') rec.weaveTrail = null;
       }
     }
     for (const [id, rec] of this.unitMeshes) {
