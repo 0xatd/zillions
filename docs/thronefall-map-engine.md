@@ -166,6 +166,12 @@ What made the maps feel not up to snuff was almost entirely presentation:
 
 Rules covered: 3 (partially — chokes now visible), 4–5 (already had), 13, 14.
 
+The diorama look sits on top of that landform and does not enter the sim.
+A low fixed sun, soft fog-of-war veil, and contact occlusion carry the shading.
+Forest is packed cones and lollipops. Cliffs are thick lit slabs with a pale
+rim. Roads are one worn ribbon. Terrace steps are about 1.5 units, so the face
+reads from the play camera. Hero, house, tower and keep scales are visual only.
+
 ### Roadmap (next phases, in impact order)
 
 1. **Telegraph the war (rule 10).** Hives already muster on timers — surface

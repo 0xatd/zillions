@@ -13,6 +13,7 @@
 // matter how the noise landed.
 import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R, CITY_WALL_R } from './config.js';
 import { SITE_FORMS, LEDGE, makeRim, rimRadius, rimOpen, rimMaxRadius, cityFacing, angDiff } from './site-plan.js';
+import { applySiteGrade } from './site-grade.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -228,6 +229,8 @@ export class TerrainField {
     this._connectPockets();
     this.chokeSpots = this._findChokepoints();
     this._nameSites();
+    // Heights only. Tiles, gates and walkability are already final.
+    applySiteGrade(this);
   }
 
   // The Labyrinth is one authored level. It does not mirror, roll rooms, or

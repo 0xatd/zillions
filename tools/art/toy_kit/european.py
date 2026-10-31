@@ -967,31 +967,33 @@ def enemy(k, key, accent):
 # ---------------------------------------------------------------- props
 
 def tree_round(k, pal):
-    k.part('trunk').prism(0x9a6b44, 5, 0.09, 0.06, 0.5, 0, 0, 0)
+    # Lollipop: a thin trunk and one low-poly crown (subdivision 0).
+    k.part('trunk').prism(0x6a4a32, 5, 0.06, 0.045, 0.7, 0, 0, 0)
     c = k.part('canopy')
-    c.ico(0xffffff, 0.42, 0, 0.75, 0, 1, 1.05, 1, sub=1)
-    c.ico(0xe3e3e3, 0.26, 0.24, 0.55, 0.1, 1, 1, 1, sub=1)
+    c.ico(0xffffff, 0.58, 0, 1.35, 0, 1, 1.22, 1, sub=0)
 
 
 def tree_pine(k, pal):
-    k.part('trunk').prism(0x9a6b44, 5, 0.08, 0.06, 0.35, 0, 0, 0)
+    # Tall stacked cones. The crown is several times taller than it is wide.
+    k.part('trunk').prism(0x6a4a32, 5, 0.07, 0.045, 0.55, 0, 0, 0)
     c = k.part('canopy')
-    c.prism(0xe6e6e6, 6, 0.48, 0.0, 0.65, 0, 0.28, 0)
-    c.prism(0xffffff, 6, 0.38, 0.0, 0.6, 0, 0.62, 0)
-    c.prism(0xffffff, 6, 0.26, 0.0, 0.5, 0, 0.95, 0)
+    c.prism(0xd8d8d8, 6, 0.62, 0.0, 1.25, 0, 0.42, 0)
+    c.prism(0xeeeeee, 6, 0.46, 0.0, 1.15, 0, 1.15, 0)
+    c.prism(0xffffff, 5, 0.28, 0.0, 1.05, 0, 1.9, 0)
 
 
 def rock(k, pal, variant=0):
+    # Chunky convex lumps. Pale tops are the vertex colour; the map tints them.
     r = k.part('rock')
     if variant == 0:
-        r.ico(0xffffff, 0.45, 0, 0.12, 0, 1.2, 0.8, 1.0, sub=0, ry=0.3)
-        r.ico(0xdedede, 0.28, 0.32, 0.05, 0.18, 1, 0.8, 1, sub=0)
+        r.ico(0xffffff, 0.85, 0, 0.35, 0, 1.25, 0.85, 1.1, sub=0, ry=0.4)
+        r.ico(0xe4e4e4, 0.55, 0.5, 0.15, 0.2, 1.1, 0.7, 0.9, sub=0)
     else:
-        r.prism(0xffffff, 5, 0.42, 0.18, 0.9, 0, 0, 0, phase=0.4)
-        r.prism(0xe0e0e0, 4, 0.22, 0.08, 0.5, 0.32, 0, 0.12, phase=0.2)
+        r.prism(0xffffff, 6, 0.9, 0.55, 1.15, 0, 0, 0, phase=0.3)
+        r.prism(0xf4f4f4, 5, 0.55, 0.2, 0.55, 0.15, 1.05, -0.1, phase=0.5)
 
 
 def cliff(k, pal):
     r = k.part('rock')
-    r.prism(0xffffff, 6, 0.62, 0.48, 1.0, 0, 0, 0, phase=0.25)
-    r.prism(0xe6e6e6, 6, 0.48, 0.3, 0.45, 0.05, 1.0, -0.05, phase=0.6)
+    r.prism(0xd0d0d0, 5, 1.15, 0.95, 1.6, 0, 0, 0, phase=0.2)
+    r.prism(0xffffff, 5, 1.05, 0.85, 0.16, 0, 1.6, 0, phase=0.35)

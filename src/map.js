@@ -7,6 +7,8 @@ import { toyMat } from './toy-style.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
+import { buildLandDressing } from './land-dressing.js';
+import { buildForestGroup, buildRockGroup, buildRoadGroup, buildCliffGroup, buildFoamGroup, buildSmoothTerrain, buildGroundDetail, buildWaterMesh } from './terrain-look.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -24,6 +26,26 @@ export class GameMap extends TerrainField {
   // Ground under a point. On the terraced landform the per-tile corners keep
   // a figure on its own terrace right up to the cliff edge.
   groundY(x, z) {
+    const grid = this._visualH;
+    if (grid) {
+      const s = grid.sub;
+      const n = grid.n;
+      const gx = Math.max(0, Math.min(n, x * s));
+      const gz = Math.max(0, Math.min(n, z * s));
+      const x0 = gx | 0;
+      const z0 = gz | 0;
+      const x1 = Math.min(n, x0 + 1);
+      const z1 = Math.min(n, z0 + 1);
+      const fx = gx - x0;
+      const fz = gz - z0;
+      const V = n + 1;
+      const h00 = grid.data[z0 * V + x0];
+      const h10 = grid.data[z0 * V + x1];
+      const h01 = grid.data[z1 * V + x0];
+      const h11 = grid.data[z1 * V + x1];
+      const g = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+      return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
+    }
     if (this._tileCH) {
       const g = tileGroundY(this, this._tileCH, x, z);
       return this.bridges ? Math.max(g, this.deckY(x, z)) : g;
@@ -87,36 +109,7 @@ export class GameMap extends TerrainField {
     const col = new THREE.Color();
     const scratch = new THREE.Color();
     const blightCol = new THREE.Color(0x3c2547);
-    const varNoise = makeNoise(makeRNG(1234));
-    // Painterly ground: a second, broader noise drifts hue and saturation in
-    // big warm/cool patches (the hand-painted mottling that makes reference
-    // ground feel alive), independent of the fine lightness grain.
-    const patchNoise = makeNoise(makeRNG(4321));
     let p = 0;
-
-    // Tile adjacency masks for the color pass: moisture creeps out of water,
-    // shade pools under treelines, and cliff feet sit in their own shadow.
-    // Cheap box scans at build time; corners average the 4 meeting tiles.
-    const nearWater = new Float32Array(N * N);
-    const nearForest = new Uint8Array(N * N);
-    const nearCrag = new Uint8Array(N * N);
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const i = this.idx(x, z);
-        let dw = 9;
-        for (let dz = -2; dz <= 2; dz++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            if (!this.inBounds(x + dx, z + dz)) continue;
-            const t = this.tiles[this.idx(x + dx, z + dz)];
-            const d = Math.max(Math.abs(dx), Math.abs(dz));
-            if (t === TILE.WATER) dw = Math.min(dw, d);
-            if (t === TILE.FOREST && d <= 1) nearForest[i] = 1;
-            if (t === TILE.MOUNTAIN && d <= 1 && !this.isLedgeRock(this.idx(x + dx, z + dz))) nearCrag[i] = 1;
-          }
-        }
-        nearWater[i] = dw <= 2 ? 1 - dw / 3 : 0;
-      }
-    }
 
     // Corner colors and heights are shared by up to four tiles; cache them
     // once. Heights first, then colors — the color pass reads the finished
@@ -131,115 +124,38 @@ export class GameMap extends TerrainField {
     }
     for (let z = 0; z <= N; z++) {
       for (let x = 0; x <= N; x++) {
-        let r = 0, g = 0, b = 0, n = 0;
-        let wet = 0, shadeF = 0, shadeC = 0, waterN = 0;
+        let r = 0, g = 0, b = 0, n = 0, waterN = 0;
         for (let dz = -1; dz <= 0; dz++) {
           for (let dx = -1; dx <= 0; dx++) {
             const tx = x + dx, tz = z + dz;
             if (!this.inBounds(tx, tz)) continue;
             const ti = this.idx(tx, tz);
             const t = this.tiles[ti];
-            // Terrace steps are grassy shelves: the rock shows on the face.
+            // One flat ground colour. Paths and switchbacks are a ribbon mesh,
+            // not a second colour stamped into the field. Rock shows on the cliff.
             const tc = this.isLedgeRock(ti);
-            col.setHex(this.colorOf(tc ? TILE.GRASS : t));
-            // The switchback bed is a darker shelf; the paved ribbon on top
-            // carries the road colour, so the zig-zag stands out.
-            if (this.swRoad && this.swRoad[ti]) col.setHex(this.colorOf(TILE.GRASS)).multiplyScalar(0.8);
+            const show = (t === TILE.PATH || (this.swRoad && this.swRoad[ti])) ? TILE.GRASS : t;
+            col.setHex(this.colorOf(tc ? TILE.GRASS : show));
             r += col.r; g += col.g; b += col.b; n++;
-            wet += nearWater[ti];
-            shadeF += nearForest[ti];
-            shadeC += nearCrag[ti];
             if (t === TILE.WATER) waterN++;
           }
         }
         col.setRGB(r / Math.max(1, n), g / Math.max(1, n), b / Math.max(1, n));
-        const nn = Math.max(1, n);
-        wet /= nn; shadeF /= nn; shadeC /= nn;
-        // Sunlit relief, baked in: high ground lifts toward light, hollows and
-        // basins sink — so the landform reads even under flat Lambert shading.
+        // A whisper of height only: valley floors sit a few percent darker.
         const h = cornerH[z * cw + x];
-        let lift = h >= 0 ? Math.min(0.035, h * 0.025) : Math.max(-0.04, h * 0.06);
-        // Terraced landform: the valleys the horde climbs out of sink into a
-        // darker, cooler green; the terraces lift toward the light by tier.
-        if (this.ledgeW && h >= 0) lift = Math.max(-0.09, Math.min(0.05, (h - 3.0) * 0.045));
-        const v = (varNoise(x * 0.03, z * 0.03, 2) - 0.5) * 0.012;
-        col.offsetHSL(0, 0, v + lift);
-        // Toy art pass: open ground is ONE flat colour per map (Thronefall-
-        // style two-tone), with only a whisper of broad drift left.
-        const patch = patchNoise(x * 0.016, z * 0.016, 2) - 0.5;
-        col.offsetHSL(patch * 0.006, patch * 0.03, patch * 0.008);
-        if (waterN === 0) {
-          // Moisture gradient: ground within a couple tiles of water darkens
-          // and saturates — banks read as damp earth, not the same meadow.
-          if (wet > 0) {
-            scratch.copy(col).offsetHSL(0.01, 0.08, -0.06);
-            col.lerp(scratch, wet * 0.6);
-          }
-          // Under-canopy shade: the ground at a treeline pools dark, so
-          // forests sit IN the ground instead of standing on clean grass.
-          if (shadeF > 0) col.offsetHSL(0.004, 0.05, -0.045 * shadeF);
-          // Cliff-foot shadow: crag boundaries carry their own occlusion.
-          if (shadeC > 0) col.offsetHSL(0, 0.02, -0.05 * shadeC);
-        } else if (waterN < n) {
-          // Shoreline shallows: the drowned rim of the basin glows lighter
-          // and greener under the water plane, giving the water visible depth.
-          scratch.setHex(this.isLava() ? 0xd8742e : 0x74c8b8);
-          col.lerp(scratch, 0.4);
+        const lift = Math.max(-0.045, Math.min(0.02, (h - 0.35) * 0.012));
+        col.offsetHSL(0, 0, lift);
+        if (waterN === n) {
+          scratch.setHex(this.isLava() ? 0x4a2a18 : (this.theme?.palette?.water ?? 0x3fa9e0));
+          col.copy(scratch).multiplyScalar(this.isLava() ? 0.55 : 0.82);
+        } else if (waterN > 0 && !this.isLava()) {
+          scratch.setHex(this.theme?.palette?.sand ?? 0xcbb892);
+          col.lerp(scratch, 0.4 * (waterN / n));
         }
-        // Cliff shading: steep faces darken hard, so the crag boundary reads
-        // as a wall you cannot walk up, while gentle walkable rolls (small
-        // corner-to-corner drops) stay untouched.
-        let drop = 0;
-        if (x > 0) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x - 1)]));
-        if (x < N) drop = Math.max(drop, Math.abs(h - cornerH[z * cw + (x + 1)]));
-        if (z > 0) drop = Math.max(drop, Math.abs(h - cornerH[(z - 1) * cw + x]));
-        if (z < N) drop = Math.max(drop, Math.abs(h - cornerH[(z + 1) * cw + x]));
-        // On the terraced landform the strata skirt draws every real face, so
-        // the corner tint would only smear dark wedges onto the terrace tops
-        // and the valley floor along the rim, the gate shelf and the
-        // switchback cuts. Keep it only where the land still rolls.
-        let skirted = false;
-        if (this.ledgeW) {
-          skirted = true;
-          for (let dz = -1; dz <= 0 && skirted; dz++) {
-            for (let dx = -1; dx <= 0; dx++) {
-              if (this.inBounds(x + dx, z + dz) && this.ledgeW[this.idx(x + dx, z + dz)] < 0.999) { skirted = false; break; }
-            }
-          }
-        }
-        const cliff = skirted ? 0 : Math.min(0.42, Math.max(0, drop - 0.32) * 0.5);
-        if (cliff > 0) col.multiplyScalar(1 - cliff);
-        // Interior tiers (v5): inside the walls the district and crown
-        // terraces sit only ~0.55 above the outer one and blend into a soft
-        // walkable bank, which read as a smudge. Paint that bank as a stone
-        // revetment (paving tone, a touch darker) so each tier has an edge.
-        if (skirted) {
-          let lo = Infinity, hi = -Infinity;
-          for (let dz = -1; dz <= 0; dz++) {
-            for (let dx = -1; dx <= 0; dx++) {
-              const tx = x + dx, tz = z + dz;
-              if (!this.inBounds(tx, tz)) continue;
-              const ti = this.idx(tx, tz);
-              if (!TILE_INFO[this.tiles[ti]].walk) continue;
-              const th = this.heightAt(tx, tz);
-              lo = Math.min(lo, th); hi = Math.max(hi, th);
-            }
-          }
-          const step = hi - lo;
-          if (step > 0.3 && step < 0.8 && lo > 1) {
-            // Paving stone, pulled toward the theme's shadow so it reads on
-            // pale snow and dark moor alike.
-            scratch.setHex(this.theme?.palette?.path ?? 0x9a8a70);
-            col.lerp(scratch, 0.7);
-            scratch.setHex(this.theme?.palette?.shadow ?? 0x2a2a3a);
-            col.lerp(scratch, 0.35);
-          }
-        }
-        // Blighted ground around every hive lair: the stain reads from across
-        // the map, so a lair is a place, not a prop dropped on clean grass.
+        // A small blight stain so a hive still reads as a place.
         for (const [nx, nz] of this.nestSpots || []) {
           const nd = Math.hypot(x - nx, z - nz);
-          if (nd < 5.5) col.lerp(blightCol, (1 - nd / 5.5) * 0.55);
+          if (nd < 4.2) col.lerp(blightCol, (1 - nd / 4.2) * 0.28);
         }
         const o = (z * cw + x) * 3;
         cornerCol[o] = col.r; cornerCol[o + 1] = col.g; cornerCol[o + 2] = col.b;
@@ -252,81 +168,19 @@ export class GameMap extends TerrainField {
     const tileCH = tileCorners(this, cornerH, cw);
     this._tileCH = tileCH;
 
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        const ti4 = (z * N + x) * 4;
-        const h00 = tileCH ? tileCH[ti4] : cornerH[z * cw + x];
-        const h10 = tileCH ? tileCH[ti4 + 1] : cornerH[z * cw + (x + 1)];
-        const h01 = tileCH ? tileCH[ti4 + 2] : cornerH[(z + 1) * cw + x];
-        const h11 = tileCH ? tileCH[ti4 + 3] : cornerH[(z + 1) * cw + (x + 1)];
+    group.add(buildSmoothTerrain(this));
+    group.add(buildGroundDetail(this));
 
-        const verts = tileCH
-          ? tileTris(this, tileCH, x, z).flat().map(([vx, vz, vy]) => [vx, vy, vz])
-          : [
-            [x, h00, z], [x, h01, z + 1], [x + 1, h10, z],
-            [x + 1, h10, z], [x, h01, z + 1], [x + 1, h11, z + 1],
-          ];
-        if (p + verts.length * 3 > positions.length) {
-          const grow = (a, n) => { const b2 = new Float32Array(a.length * 2 > n ? a.length * 2 : n * 2); b2.set(a); return b2; };
-          positions = grow(positions, p + verts.length * 3);
-          colors = grow(colors, p + verts.length * 3);
-          uvs = grow(uvs, ((p + verts.length * 3) / 3) * 2);
-        }
-        for (const [vx, vy, vz] of verts) {
-          positions[p] = vx; positions[p + 1] = vy; positions[p + 2] = vz;
-          // Corner colour; a chamfer's edge-midpoint vertex blends its tile's.
-          const fx = Math.min(1, vx - x), fz = Math.min(1, vz - z);
-          if ((fx === 0 || fx === 1) && (fz === 0 || fz === 1)) {
-            const o = (vz * cw + vx) * 3;
-            colors[p] = cornerCol[o]; colors[p + 1] = cornerCol[o + 1]; colors[p + 2] = cornerCol[o + 2];
-          } else {
-            const o00 = (z * cw + x) * 3, o10 = o00 + 3, o01 = o00 + cw * 3, o11 = o01 + 3;
-            for (let ch = 0; ch < 3; ch++) {
-              colors[p + ch] = (cornerCol[o00 + ch] * (1 - fx) + cornerCol[o10 + ch] * fx) * (1 - fz)
-                + (cornerCol[o01 + ch] * (1 - fx) + cornerCol[o11 + ch] * fx) * fz;
-            }
-          }
-          const up = (p / 3) * 2;
-          uvs[up] = vx * 0.21; uvs[up + 1] = vz * 0.21; // world-scale grain tiling
-          p += 3;
-        }
-      }
-    }
+    group.add(buildWaterMesh(this));
 
-    if (p < positions.length) {
-      positions = positions.slice(0, p); colors = colors.slice(0, p); uvs = uvs.slice(0, (p / 3) * 2);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geo.computeVertexNormals();
-    // Flat matte ground: no grain texture, colour comes only from the
-    // per-map palette baked into the vertex colours.
-    const mat = toyMat({ vertexColors: true });
-    const terrain = new THREE.Mesh(geo, mat);
-    terrain.receiveShadow = true;
-    terrain.name = 'terrain';
-    group.add(terrain);
-    const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS), this.theme?.palette?.shadow);
-    if (strata) group.add(strata);
-
-    // Water plane above sunken tiles.
-    const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = toyMat({ color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
-      transparent: true, opacity: 0.85,
-      ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
-    });
-    const water = new THREE.Mesh(waterGeo, waterMat);
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(N / 2, -0.22, N / 2);
-    group.add(water);
-
-    group.add(this._buildRipples());
-    group.add(this._buildTrees());
-    group.add(this._buildRocks());
+    group.add(buildFoamGroup(this));
+    group.add(buildForestGroup(this));
+    group.add(buildRockGroup(this));
+    group.add(buildCliffGroup(this));
+    group.add(buildRoadGroup(this));
     group.add(this._buildOre());
     group.add(this._buildDetail());
+    group.add(buildLandDressing(this));
     if (this.bridges && this.bridges.length) group.add(this._buildBridges());
     if (this.labyrinthLayout) group.add(this._buildLabyrinthLandmarks());
     return group;
@@ -438,39 +292,6 @@ export class GameMap extends TerrainField {
     }
   }
 
-  // White foam dashes: a bright ring hugging every shoreline plus sparse
-  // open-water ripples — the hand-inked water read from the reference.
-  _buildRipples() {
-    const N = this.size;
-    const rng = makeRNG(555);
-    const spots = [];
-    for (let z = 1; z < N - 1; z++) {
-      for (let x = 1; x < N - 1; x++) {
-        if (this.tiles[this.idx(x, z)] !== TILE.WATER) continue;
-        const shore = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
-          const t = this.tiles[this.idx(x + dx, z + dz)];
-          return t !== TILE.WATER;
-        });
-        if (shore) spots.push({ x: x + 0.5, z: z + 0.5, w: 0.55 + rng() * 0.25, r: 0 });
-        else if (rng() < 0.055) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
-      }
-    }
-    const geo = new THREE.PlaneGeometry(1, 0.1);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
-    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    spots.forEach((s, i) => {
-      q.identity();
-      sc.set(s.w, 1, 1);
-      pos.set(s.x, -0.16, s.z);
-      m.compose(pos, q, sc);
-      mesh.setMatrixAt(i, m);
-    });
-    mesh.count = spots.length;
-    return mesh;
-  }
-
   _scatter(tile, perTile) {
     const spots = [];
     const rng = makeRNG(777);
@@ -486,209 +307,10 @@ export class GameMap extends TerrainField {
     return spots;
   }
 
-  _buildTrees() {
-    // Alien deepwood: leaning trunks under lobed, layered canopies — a tall
-    // crown cone with an offset understory lobe, so the treeline is a mass of
-    // overlapping rounded silhouettes instead of a picket of identical cones.
-    // A few trees carry bioluminescent spore pods that burn through the dark.
-    const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
-    const g = new THREE.Group();
-    // Toy kit: round crowns with a small pine beside each (the "lobe").
-    const kTrunk = kitGeo('prop_tree_round', 'trunk');
-    const kCanopy = kitGeo('prop_tree_round', 'canopy');
-    const kPine = kitGeo('prop_tree_pine', 'canopy');
-    const useKit = !!(kTrunk && kCanopy && kPine);
-    const trunkGeo = useKit ? kTrunk : new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
-    const trunkMat = useKit ? toyMat({ color: 0xffffff, vertexColors: true }) : toyMat({ color: 0xcbbfa0 });
-    const canopyGeo = useKit ? kCanopy : new THREE.ConeGeometry(0.52, 1.3, 7);
-    const canopyMat = toyMat({ color: 0xffffff, vertexColors: useKit });
-    const lobeGeo = useKit ? kPine : new THREE.SphereGeometry(0.42, 7, 5);
-    const lobeMat = canopyMat; // same program: instance color does the varying
-
-    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
-    const canopies = new THREE.InstancedMesh(canopyGeo, canopyMat, spots.length);
-    const lobes = new THREE.InstancedMesh(lobeGeo, lobeMat, spots.length);
-    trunks.castShadow = canopies.castShadow = true;
-    lobes.castShadow = false; // the crown already shadows the stand
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    const eul = new THREE.Euler();
-    const c = new THREE.Color();
-    const rng = makeRNG(31);
-    const spores = [];
-    for (let i = 0; i < spots.length; i++) {
-      const s = spots[i];
-      const leanX = (rng() - 0.5) * 0.16, leanZ = (rng() - 0.5) * 0.16;
-      eul.set(leanX, s.r, leanZ);
-      q.setFromEuler(eul);
-      sc.set(s.s, s.s * (0.9 + rng() * 0.35), s.s);
-      const gy = this.groundY(s.x, s.z);
-      pos.set(s.x, gy + (useKit ? 0 : 0.32 * s.s), s.z);
-      m.compose(pos, q, sc);
-      trunks.setMatrixAt(i, m);
-      const ch = (0.62 + 0.55) * s.s * (0.95 + rng() * 0.2);
-      pos.set(s.x + leanX * 0.5, useKit ? gy : gy + ch, s.z + leanZ * 0.5);
-      if (useKit) sc.set(s.s * 1.25, s.s * 1.3, s.s * 1.25);
-      m.compose(pos, q, sc);
-      canopies.setMatrixAt(i, m);
-      // Understory lobe: offset to one side and lower, a second rounded mass.
-      const la = rng() * Math.PI * 2, lr = (useKit ? 0.5 : 0.28) + rng() * 0.2;
-      const ly = (0.55 + rng() * 0.25) * s.s;
-      pos.set(s.x + Math.cos(la) * lr * s.s, useKit ? gy : gy + ly, s.z + Math.sin(la) * lr * s.s);
-      sc.set(s.s * (0.8 + rng() * 0.4), s.s * (0.65 + rng() * 0.3), s.s * (0.8 + rng() * 0.4));
-      if (useKit) sc.multiplyScalar(0.8);
-      m.compose(pos, q, sc);
-      lobes.setMatrixAt(i, m);
-      // Canopies key off the map's forest color — one hue family per map
-      // (position-aware so a stitched map can vary palette by region).
-      const canopyHex = this.theme?.palette?.canopy;
-      c.setHex(canopyHex !== undefined ? canopyHex : this.colorOf(TILE.FOREST, s.x, s.z));
-      c.offsetHSL((rng() - 0.5) * 0.015, 0, (rng() - 0.5) * 0.05);
-      canopies.setColorAt(i, c);
-      c.offsetHSL(0.006, 0.06, -0.03); // understory sits in its own shade
-      lobes.setColorAt(i, c);
-      if (rng() < 0.16) spores.push({ x: s.x + (rng() - 0.5) * 0.5, z: s.z + (rng() - 0.5) * 0.5, y: gy + (0.5 + rng() * 0.5) * s.s, s: 0.5 + rng() * 0.5 });
-    }
-    g.add(trunks, canopies, lobes);
-    // Spore pods: teal pinpricks hanging in the deepwood (the biome's own
-    // bioluminescence — the sci-fi answer to ember-lit fantasy forests).
-    if (spores.length) {
-      const pods = new THREE.InstancedMesh(
-        new THREE.OctahedronGeometry(0.07, 0),
-        toyMat({ color: 0x5fd8c8, emissive: 0x3fb8a8, emissiveIntensity: 0.9 }),
-        spores.length,
-      );
-      q.identity();
-      spores.forEach((s, i) => {
-        sc.setScalar(s.s);
-        pos.set(s.x, s.y, s.z);
-        m.compose(pos, q, sc);
-        pods.setMatrixAt(i, m);
-      });
-      g.add(pods);
-    }
-    return g;
-  }
-
-  // Rock of a cliff-bound landform (its rim, the switchback cuts, any terrace
-  // step): drawn as a turf top over a strata face, not as crag.
+  // Rock of a cliff-bound landform: drawn as a turf top over a strata face.
   isLedgeRock(i) {
     if (this.terraceCliff && this.terraceCliff[i]) return true;
     return !!(this.ledgeW && this.ledgeW[i] >= 0.999 && this.tiles[i] === TILE.MOUNTAIN);
-  }
-
-  _buildRocks() {
-    // Crag dressing exists to say "you cannot walk here". Jagged rock teeth
-    // crowd the RIM — every crag tile that touches walkable ground grows a
-    // spike or two, so the boundary reads as a fence of stone — while the
-    // interior plateaus get sparser boulders.
-    const N = this.size;
-    const g = new THREE.Group();
-    const rng = makeRNG(888);
-    const teeth = [], boulders = [], scree = [];
-    for (let z = 0; z < N; z++) {
-      for (let x = 0; x < N; x++) {
-        if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) {
-          // Rubble apron: walkable ground that touches crag catches the
-          // rockfall — the cliff foot reads weathered, not laser-cut.
-          if (this.isWalkable(x, z)
-            && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => this.inBounds(x + dx, z + dz) && this.tiles[this.idx(x + dx, z + dz)] === TILE.MOUNTAIN)
-            && rng() < (this.ledgeW && this.ledgeW[this.idx(x, z)] >= 0.999 ? 0.12 : 0.5)) {
-            const n = 1 + (rng() < 0.4 ? 1 : 0);
-            for (let i = 0; i < n; i++) {
-              scree.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.6 + rng() * 0.9, r: rng() * Math.PI * 2 });
-            }
-          }
-          continue;
-        }
-        const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) =>
-          this.isWalkable(x + dx, z + dz));
-        // Terrace steps inside the city are drawn by the strata face; only an
-        // odd boulder sits on their lip so the streets stay readable.
-        if (this.isLedgeRock(this.idx(x, z))) {
-          if (rim && rng() < 0.08) boulders.push({ x: x + 0.3 + rng() * 0.4, z: z + 0.3 + rng() * 0.4, s: 0.45 + rng() * 0.3, r: rng() * Math.PI * 2 });
-          continue;
-        }
-        if (rim) {
-          const n = 1 + (rng() < 0.55 ? 1 : 0);
-          for (let i = 0; i < n; i++) {
-            teeth.push({
-              x: x + 0.2 + rng() * 0.6, z: z + 0.2 + rng() * 0.6,
-              s: 0.8 + rng() * 0.8, r: rng() * Math.PI * 2, tilt: (rng() - 0.5) * 0.3,
-              shade: 0.72 + rng() * 0.34,
-            });
-          }
-        } else if (rng() < 0.35) {
-          boulders.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.75 + rng() * 0.55, r: rng() * Math.PI * 2 });
-        }
-      }
-    }
-    const cragCol = this.colorOf(TILE.MOUNTAIN);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    const eul = new THREE.Euler();
-    const c = new THREE.Color();
-    if (teeth.length) {
-      const kCliff = kitGeo('prop_cliff', 'rock');
-      const mesh = new THREE.InstancedMesh(
-        kCliff || new THREE.ConeGeometry(0.4, 1.5, 5),
-        toyMat({ color: 0xffffff, vertexColors: !!kCliff }),
-        teeth.length,
-      );
-      mesh.userData.kit = !!kCliff;
-      mesh.castShadow = true;
-      const toothBase = new THREE.Color(cragCol).multiplyScalar(0.82);
-      teeth.forEach((s, i) => {
-        eul.set(s.tilt, s.r, s.tilt * 0.7);
-        q.setFromEuler(eul);
-        sc.set(s.s, s.s * (0.9 + (i % 3) * 0.25), s.s);
-        if (mesh.userData.kit) sc.multiplyScalar(0.85);
-        pos.set(s.x, this.groundY(s.x, s.z) + (mesh.userData.kit ? -0.05 : 0.55 * s.s), s.z);
-        m.compose(pos, q, sc);
-        mesh.setMatrixAt(i, m);
-        // Strata: neighbouring teeth vary light-to-dark, so the rim reads as
-        // layered rock faces instead of one repeated prop.
-        c.copy(toothBase).multiplyScalar(s.shade);
-        mesh.setColorAt(i, c);
-      });
-      g.add(mesh);
-    }
-    if (scree.length) {
-      const kScree = kitGeo('prop_rock_a', 'rock');
-      if (kScree) kScree.scale(0.32, 0.32, 0.32);
-      const mesh = new THREE.InstancedMesh(
-        kScree || new THREE.DodecahedronGeometry(0.13, 0),
-        toyMat({ color: new THREE.Color(cragCol).multiplyScalar(0.9).getHex(), vertexColors: !!kScree }),
-        scree.length,
-      );
-      scree.forEach((s, i) => {
-        eul.set(0, s.r, 0);
-        q.setFromEuler(eul);
-        sc.set(s.s, s.s * 0.65, s.s);
-        pos.set(s.x, this.groundY(s.x, s.z) + 0.05, s.z);
-        m.compose(pos, q, sc);
-        mesh.setMatrixAt(i, m);
-      });
-      g.add(mesh);
-    }
-    if (boulders.length) {
-      const kBoulder = kitGeo('prop_rock_b', 'rock') || null;
-      const mesh = new THREE.InstancedMesh(
-        kBoulder || new THREE.DodecahedronGeometry(0.4, 0),
-        toyMat({ color: cragCol, vertexColors: !!kBoulder }),
-        boulders.length,
-      );
-      if (kBoulder) mesh.userData.kit = true;
-      mesh.castShadow = true;
-      boulders.forEach((s, i) => {
-        eul.set(0, s.r, 0);
-        q.setFromEuler(eul);
-        sc.set(s.s, s.s * 0.8, s.s);
-        pos.set(s.x, this.groundY(s.x, s.z) + (mesh.userData.kit ? -0.02 : 0.15), s.z);
-        m.compose(pos, q, sc);
-        mesh.setMatrixAt(i, m);
-      });
-      g.add(mesh);
-    }
-    return g;
   }
 
   _buildOre() {
@@ -756,9 +378,14 @@ export class GameMap extends TerrainField {
           const clump = Math.max(0, m - 0.42) * 2.0;
           const bare = Math.max(0, 0.42 - m) * 1.6;
           const r = rng();
-          if (r < 0.3 * clump * clump) {
+          // The battle floor stays almost bare. Tufts belong to the country
+          // outside the city, with only a rare patch inside it.
+          const inPlay = nearSite(x, z, 22);
+          if (!inPlay && r < 0.22 * clump * clump) {
             tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.7 + rng() * 0.7, ry: rng() * Math.PI * 2 });
-          } else if (r < 0.3 * clump * clump + 0.06 * bare) {
+          } else if (inPlay && r < 0.008) {
+            tufts.push({ x: x + 0.15 + rng() * 0.7, z: z + 0.15 + rng() * 0.7, s: 0.55 + rng() * 0.4, ry: rng() * Math.PI * 2 });
+          } else if (!inPlay && r < 0.22 * clump * clump + 0.04 * bare) {
             pebbles.push({ x: x + rng(), z: z + rng(), s: 0.55 + rng() * 0.8, ry: rng() * Math.PI * 2 });
           } else if (r > 0.9975 && !nearSite(x, z, 24) && !nearNest(x, z, 8)) {
             boulders.push({ x: x + 0.5, z: z + 0.5, s: 0.7 + rng() * 1.1, ry: rng() * Math.PI * 2 });

@@ -31,7 +31,7 @@ Default branch: main
 - src/game.js owns deterministic simulation state.
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
-- src/map.js renders terrain relief and set dressing.
+- src/map.js renders terrain relief and set dressing. src/site-grade.js sets presentation terrace heights. src/land-dressing.js adds border forest and culture props.
 - src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and
   authority-ready mutation proposals.
@@ -59,9 +59,14 @@ Default branch: main
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.
+- src/prop-pack.js holds the Kenney CC0 environment and castle meshes. Presentation only.
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
-- src/building-art.js owns building meshes, walls and gates (presentation only).
+- src/building-art.js owns building meshes (presentation only).
+- src/rampart-art.js owns continuous culture walls, gatehouses, and the
+  Blender rampart modules in assets/ramparts/ (presentation only).
+- src/town-kit.js places Fantasy Town keeps, Quaternius cottages, and the
+  founded neighbourhoods (presentation only).
 - api/ contains Vercel server routes. api/match-result.js is the only grant path
   for signed-in XP, levels, loot, Alloy, and stats (through the service-role
   apply_match_result() RPC). api/economy.js is the authenticated,

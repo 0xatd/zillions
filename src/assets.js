@@ -4,6 +4,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
+import { PROP_FILES, propUrl, ingestProp } from './prop-pack.js';
+import { RAMPART_FILES, rampartUrl, ingestRampart } from './rampart-art.js';
+import { TOWN_PROPS, KEEP_FILES, VILLAGE_FILES, loadTownFile } from './town-kit.js';
 
 const TEMPLATES = {};
 
@@ -141,10 +144,42 @@ export function kitGeometry(name, part) {
   return { geometry: mesh.geometry, pivot };
 }
 
+function loadPropPack(loader) {
+  return Promise.all(PROP_FILES.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(propUrl(name));
+      ingestProp(name, gltf.scene);
+    } catch (e) {
+      // Missing prop — terrain and buildings keep their procedural meshes.
+    }
+  }));
+}
+
+function loadTownKit(loader) {
+  const props = TOWN_PROPS.map((name) => loadTownFile(loader, `assets/town/kenney/${name}.glb`, name));
+  const keeps = KEEP_FILES.map((name) => loadTownFile(loader, `assets/keeps/${name}.glb`, name));
+  const village = VILLAGE_FILES.map((name) => loadTownFile(loader, `assets/town/village/${name}.glb`, name));
+  return Promise.all([...props, ...keeps, ...village]);
+}
+
+function loadRamparts(loader) {
+  return Promise.all(RAMPART_FILES.map(async (name) => {
+    try {
+      const gltf = await loader.loadAsync(rampartUrl(name));
+      ingestRampart(name, gltf.scene);
+    } catch (e) {
+      // Missing module — the rampart group simply has no mesh for it.
+    }
+  }));
+}
+
 export function loadAssets() {
   const loader = new GLTFLoader();
   const kit = loadKit(loader);
-  return Promise.all([kit, ...Object.entries(MANIFEST).map(async ([key, url]) => {
+  const props = loadPropPack(loader);
+  const ramparts = loadRamparts(loader);
+  const town = loadTownKit(loader);
+  return Promise.all([kit, props, ramparts, town, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;

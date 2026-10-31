@@ -184,6 +184,14 @@ bright crowns — hand-painted value structure) plus positional grime noise
 into the vertex colors. If you add a material family, add a tile and a hex
 mapping — do not hand-UV individual parts.
 
+### Environment props
+
+Trees, bushes, rocks, cliff blocks, grass, flowers, fences, and the colony
+buildings are Kenney CC0 meshes (`assets/props/kenney/`, see
+`assets/props/LICENSES.md`). They are instanced, flat Lambert, and recoloured
+per map and culture. Heroes and zombies stay on their existing meshes. A
+missing file falls back to the procedural prop.
+
 ### Authored GLBs
 
 `USE_AUTHORED_BUILDINGS` in `building-art.js` is off: the textured
