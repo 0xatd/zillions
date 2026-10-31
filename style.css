@@ -1057,6 +1057,19 @@ body::after {
 .loreentry { margin-bottom: 14px; line-height: 1.6; font-size: 13.5px; }
 .loreentry b { color: var(--gold); display: block; margin-bottom: 3px; font-size: 15px; }
 .loreentry p { opacity: 0.85; }
+#revivehint {
+  position: absolute; left: 50%; bottom: calc(var(--command-height) + 18px);
+  transform: translateX(-50%);
+  background: rgba(12, 14, 18, 0.82);
+  color: #ffd2a8;
+  border: 1px solid rgba(255, 180, 120, 0.35);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  pointer-events: none;
+}
+#revivehint.hidden { display: none; }
+
 #invitetoast {
   position: absolute; top: 60px; right: 14px; z-index: 55;
   background: var(--panel); border: 1px solid rgba(255,215,94,0.55);
@@ -1847,3 +1860,40 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
   .bigaction .bicon { font-size: 20px; }
   .bigaction .btext small { font-size: 9px; }
 }
+
+.party-lead { margin: 0 0 12px; }
+.partygrid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.1fr) minmax(240px, 0.9fr) 240px;
+  gap: 14px;
+  min-height: 420px;
+}
+.party-roster, .party-side, .party-invite, .party-chat {
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 10px;
+  padding: 12px;
+}
+.party-side { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.party-chat { display: flex; flex-direction: column; min-height: 180px; flex: 1; }
+.party-code { display: flex; align-items: baseline; gap: 10px; }
+.party-code b { font-family: ui-monospace, monospace; font-size: 28px; letter-spacing: 0.18em; color: var(--gold); }
+.party-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.party-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.party-choices .diffbtn { font-size: 12px; }
+.chatwho.js-profile, .js-profile { cursor: pointer; }
+.profilecard {
+  position: fixed; right: 18px; bottom: 18px; z-index: 80;
+  width: min(380px, calc(100vw - 36px));
+  background: var(--panel);
+  border: 1px solid rgba(255, 215, 94, 0.4);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.profilecard.hidden { display: none; }
+.profilecard-body { display: flex; gap: 12px; align-items: flex-start; }
+.profile-face { width: 72px; height: 72px; display: grid; place-items: center; font-size: 36px; }
+.profile-face img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; }
+.profile-name { display: block; font-size: 18px; margin-bottom: 4px; }
+.profile-close { position: absolute; top: 8px; right: 8px; }
+.profilecard p { font-size: 13px; opacity: 0.85; margin-top: 2px; }

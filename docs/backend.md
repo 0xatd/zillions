@@ -172,6 +172,19 @@ RLS policy intent:
 10. The host waits for each guest to connect and load before window 0 starts.
 11. In-game team chat writes to `room_chat` with `channel = 'game'`.
 12. The match simulation is peer-to-peer. Watch mode is read-only.
+13. Parties (`parties`, `party_members`, `party_chat`, `player_mutes`) are
+    the persistent friend group. The migration
+    `supabase/migrations/20261031040000_parties.sql` is in the repo and has
+    not been applied to the live project. Do not apply it from a client.
+    Until it is applied, party calls fail with a clear message and the
+    existing room lobby still works. Party chat is the only new chat
+    channel. Global lobby chat is unchanged and is not extended. A global
+    channel is named in `src/social-chat.js` and left unwired. Chat is
+    length-capped, rate-limited, and masked for profanity, on the client
+    and in `mask_profanity()`. Mute and block are per player. Block also
+    refuses a party join and a friend request. `public_commander()` is the
+    only public profile read: username, chosen hero, server level, planets
+    cleared, and matches. It does not open character, gear, or wallet rows.
 
 ## Agent Rules
 

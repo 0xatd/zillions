@@ -107,6 +107,10 @@ procedural renderer and must not stop a match from starting.
 | `src/supabase.js` | One shared Supabase client and write timeout |
 | `src/auth.js` | Google sign-in, username, profile, cloud saves, and read-only hydration of server stats and character progress |
 | `src/online.js` | Rooms, seats, roster refresh, chat, presence, and signaling |
+| `src/party.js` | Pure party rules: roster, ready, kick, leadership, invite codes |
+| `src/party-client.js` | Supabase party session, party chat, and public profile cards |
+| `src/social-chat.js` | Chat length, rate limit, profanity mask, and channel list |
+| `src/coop.js` | Shared horde pressure, ally revive, and friend name markers |
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
@@ -118,7 +122,13 @@ procedural renderer and must not stop a match from starting.
 `supabase/schema.sql` defines the durable schema.
 
 Co-op rooms support one to four players. The first player hosts the room.
-The mission uses WebRTC lockstep.
+The mission uses WebRTC lockstep. A party is the group that outlives the
+room: one leader, a short code and link, ready checks, and party chat.
+Starting a party opens a private room. Gold and the colony stay shared.
+The horde grows by 40% for each extra hero. A downed hero can be pulled
+up by a friend standing close, or returns at the Keep. The party tables
+are in `supabase/migrations/20261031040000_parties.sql` and are not applied
+to the live database from this change.
 
 ## Deterministic Simulation
 

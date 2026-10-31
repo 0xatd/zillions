@@ -19,6 +19,7 @@ export function stateHash(g) {
   h = (h * 31 + g.stats.kills) | 0;
   for (const hr of g.heroes) {
     h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
+    h = (h * 31 + (hr.dead ? 1 : 0) + Math.round((hr.reviveHelp || 0) * 8)) | 0;
     for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;
     // Gear and the Lattice reach the hash too. Two peers holding different
     // weapons or different builds must fail the check before window 0
