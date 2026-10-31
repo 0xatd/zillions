@@ -93,8 +93,8 @@ export async function runPartyPreview(app) {
         mode: 'campaign',
         culture: 'crown',
       });
-      app.paused = true;
       app._captureHold = true;
+      app.paused = false;
       app._scriptHeroes = true;
       app.controlMode = 'fight';
       app.ui.setControlMode('fight');
