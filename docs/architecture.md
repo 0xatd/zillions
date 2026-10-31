@@ -67,6 +67,12 @@ module already owns that rule.
 Simulation code must produce the same result on every peer. Add all new state
 to snapshots when the state can affect later simulation.
 
+Zombies that stall on a wall, a gate, or a packed rank climb the bodies in
+front of them. Layer, support, and a vault across a buried wall are snapshot
+fields. Only the ground rank chews the wall. Killing a supporting body drops
+the climbers. A living-horde cap in `hordeCap()` bounds late Threat musters.
+The renderer lifts the same instanced meshes; it does not own the pile.
+
 ### World Generation and Rendering
 
 | File | Ownership |

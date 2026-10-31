@@ -150,8 +150,9 @@ what was learned shipping the current look.
   cadence) + unlit glow `eyes`. Both the game renderer and the menu vignette
   write through the same `HordeArt` writer, so the menu horde IS the game's.
   Budget: keep massed types near 1,200–1,600 triangles — these instance up to
-  `ZMAX` (1,700) times, and smooth vertex normals keep low-segment capsules
-  looking round at gameplay zoom.
+  `ZMAX` (6,400) times, and smooth vertex normals keep low-segment capsules
+  looking round at gameplay zoom. Past a few hundred bodies the horde stops
+  casting shadows, and arms only swing near the camera.
 - `src/unit-art.js` — troops and heroes share one articulated rig: leg and
   arm groups pivot at hip/shoulder with rest rotation 0, registered in
   `userData.limbs`, which is exactly what `_syncUnits`' stride animation
