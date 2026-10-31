@@ -412,8 +412,8 @@ function angDelta(a, b) {
 }
 
 // One main street per city: the war gate, a keep courtyard, and the back gate.
-// Side gates are a single spur onto that street. War roads stop at the war
-// gate, so they do not draw a second path through the town.
+// Side gates are a single spur onto that street. Hive roads merge into one
+// approach track outside the front gate, then that track enters the town.
 function roadSplines(map) {
   const lines = [];
   const plazas = [];
@@ -445,9 +445,23 @@ function roadSplines(map) {
     if (back != null && angDelta(back, main) > 0.7) {
       street.push([site.x - ux * 4.4, site.z - uz * 4.4], gatePt(back));
     }
+    // Hive roads join one approach track outside the front gate, then that
+    // single track runs in through the gate. They do not fan across the grass
+    // and meet on the threshold.
+    let approach = [front[0] + ux * 14, front[1] + uz * 14];
+    for (let d = 18; d >= 9; d -= 1) {
+      const x = front[0] + ux * d;
+      const z = front[1] + uz * d;
+      if (!map.inBounds(x | 0, z | 0)) continue;
+      const tile = map.tiles[map.idx(x | 0, z | 0)];
+      if (tile === TILE.WATER || tile === TILE.MOUNTAIN || tile === TILE.FOREST) continue;
+      approach = [x, z];
+      break;
+    }
+    street.unshift(approach);
     lines.push(street);
     plazas.push({ x: site.x, z: site.z });
-    meets.set(`${site.x},${site.z}`, front);
+    meets.set(`${site.x},${site.z}`, approach);
     for (const g of gates) {
       if (g === main || g === back) continue;
       const spur = gatePt(g);

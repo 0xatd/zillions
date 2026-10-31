@@ -4067,7 +4067,7 @@ class App {
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
-        if (mat.map) mat.map.dispose();
+        if (mat.map && !mat.map.userData?.kitShared) mat.map.dispose();
         mat.dispose();
       }
     });

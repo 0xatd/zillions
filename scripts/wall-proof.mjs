@@ -187,10 +187,11 @@ try {
       const app = window.__app;
       const hq = app.game.plots.find((p) => p.kind === 'hq');
       const h = app.myHero();
-      h.x = hq.cx + 2.2;
-      h.z = hq.cz + 3.2;
-      app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz), hq.cz);
-      app.camDist = 36;
+      h.x = hq.cx;
+      h.z = hq.cz;
+      app.camYaw = 0.78;
+      app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz) + 1.5, hq.cz);
+      app.camDist = 34;
       return true;
     })()`);
     await delay(700);

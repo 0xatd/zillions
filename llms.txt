@@ -65,6 +65,8 @@ Default branch: main
 - src/building-art.js owns building meshes (presentation only).
 - src/rampart-art.js owns continuous culture walls, gatehouses, and the
   Blender rampart modules in assets/ramparts/ (presentation only).
+- src/town-kit.js places Fantasy Town keeps, Quaternius cottages, and the
+  founded neighbourhoods (presentation only).
 - api/ contains Vercel server routes. api/match-result.js is the only grant path
   for signed-in XP, levels, loot, Alloy, and stats (through the service-role
   apply_match_result() RPC). api/economy.js is the authenticated,

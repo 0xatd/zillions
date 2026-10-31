@@ -6,7 +6,7 @@ import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { PROP_FILES, propUrl, ingestProp } from './prop-pack.js';
 import { RAMPART_FILES, rampartUrl, ingestRampart } from './rampart-art.js';
-import { TOWN_PROPS, KEEP_FILES, loadTownFile } from './town-kit.js';
+import { TOWN_PROPS, KEEP_FILES, VILLAGE_FILES, loadTownFile } from './town-kit.js';
 
 const TEMPLATES = {};
 
@@ -158,7 +158,8 @@ function loadPropPack(loader) {
 function loadTownKit(loader) {
   const props = TOWN_PROPS.map((name) => loadTownFile(loader, `assets/town/kenney/${name}.glb`, name));
   const keeps = KEEP_FILES.map((name) => loadTownFile(loader, `assets/keeps/${name}.glb`, name));
-  return Promise.all([...props, ...keeps]);
+  const village = VILLAGE_FILES.map((name) => loadTownFile(loader, `assets/town/village/${name}.glb`, name));
+  return Promise.all([...props, ...keeps, ...village]);
 }
 
 function loadRamparts(loader) {

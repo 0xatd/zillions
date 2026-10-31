@@ -125,10 +125,13 @@ try {
         shadows: app.renderer.shadowMap.enabled,
         map: app.renderer.shadowMap.mapSize?.x || app.sun.shadow.mapSize.x,
         quality: app.tacticalVisuals.quality,
+        town: app.scene.getObjectByName('town-life')?.children.length || 0,
       };
     })()`);
     console.log(names[level - 1], 'boot', JSON.stringify(info));
     await delay(900);
+    const town = await evaluate('window.__townDebug || null');
+    console.log(names[level - 1], 'town', JSON.stringify(town));
     return info;
   }
 

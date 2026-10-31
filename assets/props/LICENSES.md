@@ -55,3 +55,15 @@ above (CC0) and add a culture roof, door, and lamps. Those outputs are also CC0.
 - Downloaded copy: OpenGameArt, https://opengameart.org/content/fantasy-town-kit
 - Props: `assets/town/kenney/` (fence, hedge, stall, lantern, tree, cart, banner, rock, colormap)
 - Keeps and houses kitbashed from the same pack: `assets/keeps/`, via `tools/blender/build_keeps.py`
+
+## Quaternius Medieval Village MegaKit (standard)
+
+- Author: Quaternius (@Quaternius)
+- Licence: CC0 1.0 Universal
+- https://creativecommons.org/publicdomain/zero/1.0/
+- Pack page: https://quaternius.com/packs/medievalvillagemegakit.html
+- Downloaded copy: OpenGameArt, https://opengameart.org/content/medieval-village-megakit
+- Cottages kitbashed from the standard (free) pack: `assets/town/village/cottage-plaster.glb`, `cottage-brick.glb`, `cottage-timber.glb`, via `tools/blender/build_village.py`
+- `assets/town/village/hay.glb` and `well.glb` are original low-poly meshes from that same script
+
+The full pack is not committed. Regenerate the cottages with the glTF folder on `QUATERNIUS_KIT`.
