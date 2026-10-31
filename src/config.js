@@ -419,8 +419,50 @@ export function hiveInterval(threat) {
   return Math.max(5, 9 - threat * 0.18);
 }
 
+// How the dead stack when a chokepoint stops them. The mound is simulation
+// state (who stands on whom); the renderer only lifts the existing meshes.
+// A cheap fence spills early. A bastion has to be buried. Killing a body
+// drops everyone standing on it, so a tower that shoots the base buys time.
+export const HORDE_PILE = {
+  pack: 3,            // grounded bodies on one tile before the next rank climbs
+  tileCap: 16,        // every layer, hard cap sharing one tile
+  riders: 2,          // climbers one body can hold
+  step: 0.56,         // world units of height per layer
+  climbDelay: 0.42,   // seconds pressed against the blocker before a new layer
+  maxLayer: 6,
+  fallStun: 0.55,     // the mound comes apart, then they have to climb again
+  fallCd: 0.7,
+  vaultDur: 0.62,     // time to spill across a wall that the mound has buried
+  landCd: 1.1,        // after spilling, stay on the ground and fight
+  spillTicks: 12,     // one body per wall tile per this many sim ticks
+  surgeCap: 1.25,     // a Threat surge may overshoot the living cap by this
+};
+
+// Layers of bodies required before a zombie can spill over this blocker.
+// Anything that is not a wall wears a mound and never lets them through.
+export function pileCrest(kind, tier = 1, gate = false, branch = null) {
+  if (kind !== 'wall') return { layers: HORDE_PILE.maxLayer, spill: false };
+  const t = Math.max(1, tier | 0);
+  if (gate) return { layers: t >= 3 ? 5 : t >= 2 ? 4 : 3, spill: true };
+  if (branch === 'bastion') return { layers: 5, spill: true };
+  return { layers: t >= 3 ? 4 : t >= 2 ? 3 : 2, spill: true };
+}
+
+// Living horde ceiling. Later Threat sends bigger musters; this keeps a
+// surge from allocating without bound while the dead are already at the walls.
+export function hordeCap(threat) {
+  const t = Math.max(0, Number(threat) || 0);
+  return Math.round(1100 + t * 160);
+}
+
 export function hiveSquad(threat, mult) {
-  const size = Math.max(3, Math.round((5 + threat * 0.72) * mult));
+  const t = Math.max(0, threat);
+  // The opening curve is the old line, so the first minutes of a siege muster
+  // the same squads they always did. Past Threat 4 the dead stop arriving as
+  // a squad and start arriving as a crowd.
+  const early = 5 + t * 0.72;
+  const crowd = t <= 4 ? 0 : (t - 4) * (t - 4) * 1.15;
+  const size = Math.max(3, Math.round((early + crowd) * mult));
   const runner   = threat >= 2 ? Math.min(0.26, 0.060 * (threat - 1)) : 0;
   const spitter  = threat >= 3 ? Math.min(0.15, 0.035 * (threat - 2)) : 0;
   const caller   = threat >= 4 ? Math.min(0.06, 0.015 * (threat - 3)) : 0;

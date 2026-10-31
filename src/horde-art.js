@@ -420,7 +420,7 @@ export class HordeArt {
   // One zombie, one call. Transform grammar matches the old shared-pool
   // writer: position (bob/lunge already applied by the caller), pitch/yaw/roll,
   // per-axis squash scale. `tint` is any {r,g,b}; `eyeHex` a packed color.
-  write(type, x, y, z, pitch, yaw, roll, sx, sy, sz, t, phase, lunge, tint, eyeHex) {
+  write(type, x, y, z, pitch, yaw, roll, sx, sy, sz, t, phase, lunge, tint, eyeHex, animate = true) {
     const set = this.sets[type] || this.sets.walker;
     const i = set.cursor;
     if (i >= this.max) return;
@@ -432,7 +432,11 @@ export class HordeArt {
     set.body.setMatrixAt(i, _d.matrix);
     set.eyes.setMatrixAt(i, _d.matrix);
     // Arms swing at the type's own cadence, and haul up into the lunge.
-    const swing = Math.sin(t * set.swingRate + phase * 1.7) * set.swingAmp - lunge * 0.9;
+    // Distant bodies keep the rest pose: a full horde does not need every
+    // shoulder solved to read as a crowd.
+    const swing = animate
+      ? Math.sin(t * set.swingRate + phase * 1.7) * set.swingAmp - lunge * 0.9
+      : 0;
     _m1.makeRotationX(swing);
     _m2.copy(_d.matrix).multiply(set.pivot).multiply(_m1);
     set.arms.setMatrixAt(i, _m2);
@@ -444,7 +448,14 @@ export class HordeArt {
   }
 
   commit() {
+    let total = 0;
+    for (const set of Object.values(this.sets)) total += set.cursor;
+    // A few hundred bodies can throw shadows. A wall of them cannot — the
+    // shadow pass is the frame, and the mound still reads without it.
+    const shadows = total > 0 && total <= 800;
     for (const set of Object.values(this.sets)) {
+      set.body.castShadow = shadows;
+      set.arms.castShadow = shadows;
       for (const m of [set.body, set.arms, set.eyes]) {
         m.count = set.cursor;
         m.instanceMatrix.needsUpdate = true;

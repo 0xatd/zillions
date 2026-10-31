@@ -11,6 +11,7 @@
 import {
   PLOT_KINDS, UNITS, ZOMBIES, TILE, DIFFICULTY, LEVELS,
   SIEGE, THREAT, SURGE_MULT, TOWER_PRIORITY, NODE_KINDS, hiveInterval, hiveSquad,
+  HORDE_PILE, pileCrest, hordeCap,
   DAMAGE_TYPES, RESIST_CAP, VOID_ARMOR_SHARE,
   DODGE_CD, DODGE_TIME, DODGE_IFRAMES, DODGE_SPEED,
   START_GOLD, COIN_CAP, COIN_RADIUS, PAY_RADIUS, PAY_RATE, UPGRADE_PAY_RATE,
@@ -335,6 +336,13 @@ export class Game {
         frenzy: snapNum(z.frenzy || 0), speedMul: snapNum(z.speedMul || 1), raider: !!z.raider,
         armor: snapNum(z.armor || 0), maxHp: snapNum(z.maxHp || 0),
         spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0), bossPhase: z.bossPhase || 0,
+        // The mound. layer 0 is the ground rank; support is the body under this
+        // one. A vault is a spill already in the air — peers must resume it.
+        layer: z.layer || 0, support: z.support || 0, climb: snapNum(z.climbT || 0),
+        pileCd: snapNum(z.pileCd || 0),
+        vault: snapNum(z.vaultT || 0), vaultL: z.vaultLayer || 0,
+        vx: snapNum(z.vaultX || 0), vz: snapNum(z.vaultZ || 0),
+        vfx: snapNum(z.vaultFromX || 0), vfz: snapNum(z.vaultFromZ || 0),
         // A spitter mid-volley holds still while _spitTarget is set.
         spit: z._spitTarget ? z._spitTarget.id : null,
       }]),
@@ -568,6 +576,11 @@ export class Game {
       zb.route = meta.route || null; zb.routeI = meta.routeI || 0;
       zb.routeStuck = meta.routeStuck || 0; zb.routeBest = meta.routeBest == null ? Infinity : meta.routeBest; zb.repathT = meta.repathT || 0;
       zb.frenzy = meta.frenzy || 0; zb.speedMul = meta.speedMul || 1; zb.raider = !!meta.raider;
+      zb.layer = meta.layer || 0; zb.support = meta.support || 0;
+      zb.climbT = meta.climb || 0; zb.pileCd = meta.pileCd || 0;
+      zb.vaultT = meta.vault || 0; zb.vaultLayer = meta.vaultL || 0;
+      zb.vaultX = meta.vx || 0; zb.vaultZ = meta.vz || 0;
+      zb.vaultFromX = meta.vfx || 0; zb.vaultFromZ = meta.vfz || 0;
       if (meta.armor) zb.armor = meta.armor;
       if (meta.spawnT != null) zb.spawnT = meta.spawnT;
       if (meta.roarT != null) zb.roarT = meta.roarT;
@@ -1742,7 +1755,7 @@ export class Game {
         this._spawnBoss(last ? last.id : null);
         if (last && last.id != null) {
           const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
-          this._spawnHorde(Math.round(18 * this.diff.mult * this.level.mult), [last.id], w.types);
+          this._spawnHorde(Math.round(18 * this.diff.mult * this.level.mult), [last.id], w.types, this._hordeRoom(false));
         }
       } else {
         this.msg('🔥 Every hive lies in ashes — but something enormous is already walking. Hold the Keep!', 'bad');
@@ -1857,7 +1870,8 @@ export class Game {
           : kind === 'holdout' ? ['walker', 'runner', 'brute']
             : ['walker', 'runner', 'spitter'];
     let spawned = 0, guard = 0;
-    while (spawned < count && guard++ < count * 20) {
+    const slots = this._hordeRoom(false);
+    while (spawned < count && spawned < slots && guard++ < count * 20) {
       const a = this.rng() * Math.PI * 2, r = 5 + this.rng() * 4;
       const x = room.x + Math.cos(a) * r, z = room.z + Math.sin(a) * r;
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
@@ -1897,7 +1911,8 @@ export class Game {
       ? ['walker', 'walker', 'runner'] : ['walker', 'runner', 'brute'];
     let spawned = 0, guard = 0;
     const target = Math.round(sizes[stage] * this.diff.mult);
-    while (spawned < target && guard++ < target * 20) {
+    const room = this._hordeRoom(false);
+    while (spawned < target && spawned < room && guard++ < target * 20) {
       const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 5;
       const x = start.x + Math.cos(a) * r, z = start.z + Math.sin(a) * r;
       if (!this.map.isWalkable(x | 0, z | 0)) continue;
@@ -2008,20 +2023,25 @@ export class Game {
     const staging = this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
     let fromNest = w.size;
     let spawned = 0;
-    if (staging.length) {
-      const forward = Math.floor(w.size * 0.4);
-      fromNest -= forward;
+    let room = this._hordeRoom(mult > 1.01);
+    if (staging.length && room > 0) {
+      const forward = Math.min(room, Math.floor(w.size * 0.4));
+      fromNest -= Math.floor(w.size * 0.4);
       for (let i = 0; i < forward; i++) {
         const node = staging[(this.rng() * staging.length) | 0];
         const a = this.rng() * Math.PI * 2, r = 1 + this.rng() * 4;
         const x = node.x + Math.cos(a) * r, z = node.z + Math.sin(a) * r;
         if (!this.map.isWalkable(x | 0, z | 0)) continue;
         const zombie = this._spawnZombie(this._pickHiveType(w.types), x, z, true, true);
-        if (zombie) { spawned++; if (firstSiege) this.firstSiege.waveIds.push(zombie.id); }
+        if (zombie) {
+          spawned++;
+          room--;
+          if (firstSiege) this.firstSiege.waveIds.push(zombie.id);
+        }
       }
     }
     const before = new Set(this.zombies.map((z) => z.id));
-    spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
+    spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types, Math.max(0, room));
     if (firstSiege) {
       for (const zombie of this.zombies) if (!before.has(zombie.id)) this.firstSiege.waveIds.push(zombie.id);
       this.firstSiege.stage = 'defend';
@@ -2039,7 +2059,7 @@ export class Game {
   // The final counterattack, once no hive is left to march from.
   _edgeAssault(size) {
     const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure);
-    this._spawnHorde(size, [], w.types);
+    this._spawnHorde(size, [], w.types, this._hordeRoom(true));
     this.emit({ type: 'horde', final: true });
   }
 
@@ -3455,6 +3475,8 @@ export class Game {
       dirX: 0, dirZ: 0, timer: this.rng() * 4,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
       wave, hitFlash: 0, route: null, routeI: 0, frenzy: 0,
+      layer: 0, support: 0, climbT: 0, pileCd: 0, anchor: false,
+      vaultT: 0, vaultX: 0, vaultZ: 0, vaultFromX: 0, vaultFromZ: 0, vaultLayer: 0,
     };
     this.zombies.push(zb);
     return zb;
@@ -3486,6 +3508,8 @@ export class Game {
       state: AGGRO, dirX: 0, dirZ: 0, timer: 0,
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
       wave: true, hitFlash: 0, boss: true, cfg: B, route: null, routeI: 0, frenzy: 0,
+      layer: 0, support: 0, climbT: 0, pileCd: 0, anchor: false,
+      vaultT: 0, vaultX: 0, vaultZ: 0, vaultFromX: 0, vaultFromZ: 0, vaultLayer: 0,
       armor: B.armor || 0, spawnT: B.spawn ? B.spawn.every : 0, roarT: B.roar ? B.roar.every : 0,
     };
     this.zombies.push(zb);
@@ -3598,7 +3622,17 @@ export class Game {
     return [1 + depth, along];
   }
 
-  _spawnHorde(size, nestIds, types) {
+  // How many more living dead this Threat level still has room for.
+  // Surges may overshoot so the drumbeat still lands on a full field.
+  _hordeRoom(surge = false) {
+    let living = 0;
+    for (const z of this.zombies) if (!z.dead) living++;
+    const cap = hordeCap(this.threat) * (surge ? HORDE_PILE.surgeCap : 1);
+    return Math.max(0, Math.floor(cap - living));
+  }
+
+  _spawnHorde(size, nestIds, types, room = Infinity) {
+    const limit = Math.max(0, Math.min(size, room));
     let spawned = 0, guard = 0;
     const pickType = () => {
       let roll = this.rng(), acc = 0;
@@ -3607,7 +3641,7 @@ export class Game {
     };
     // Raiders peel off to hit the ground you hold; the rest march on the Keep.
     const playerNodes = this.nodes.filter((n) => !n.offMap && n.owner === 'player');
-    while (spawned < size && guard++ < size * 30) {
+    while (spawned < limit && guard++ < Math.max(1, limit) * 30) {
       let x, z;
       if (nestIds.length) {
         const n = this.nests[nestIds[(this.rng() * nestIds.length) | 0]];
@@ -3996,8 +4030,16 @@ export class Game {
 
   _updateZombies(dt) {
     const N = this.map.size;
+    this._indexZombies();
+    // Last frame's tiles and blocked flags: a packed rank in front of a wall
+    // stops the next body on the tile behind it, which is what grows the ramp.
+    this._rebuildPileTiles();
+    if (!this._enterCount) this._enterCount = new Map();
+    this._enterCount.clear();
 
     // Cheap separation: shove apart zombies sharing a tile.
+    // Climbers and anyone already holding a rider stay put — the mound is
+    // the point, and shoving it apart used to ferry bodies through the wall.
     if (!this._sepMap) this._sepMap = new Map();
     const sep = this._sepMap;
     sep.clear();
@@ -4011,6 +4053,9 @@ export class Game {
       if (arr.length < 2) continue;
       for (let i = 1; i < arr.length; i++) {
         const a = arr[i - 1], b = arr[i];
+        // Climbers and the body holding them stay. Shoving the mound apart
+        // is how a pile used to walk through the wall.
+        if (a.layer > 0 || a.anchor || b.layer > 0 || b.anchor) continue;
         let dx = b.x - a.x, dz = b.z - a.z;
         const d = Math.hypot(dx, dz) || 0.01;
         if (d < 0.42) {
@@ -4040,6 +4085,10 @@ export class Game {
 
     for (const zb of this.zombies) {
       if (zb.dead) continue;
+      zb.blocked = false;
+      zb.blockId = 0;
+      if (zb.pileCd > 0) zb.pileCd -= dt;
+      if (zb.vaultT > 0) { this._stepVault(zb, dt); continue; }
       if (zb.hitFlash > 0) zb.hitFlash -= dt;
       zb.timer -= dt;
       zb.atkT -= dt;
@@ -4100,7 +4149,9 @@ export class Game {
           }
           continue;
         }
-        if (moved < 0.25 && zb.atkT <= -1) { // not moving and not attacking
+        // A body in the mound is clawing, not lost. Only a grounded zombie
+        // that isn't already spilling gets the shake-loose wander.
+        if (moved < 0.25 && zb.atkT <= -1 && !(zb.layer > 0)) { // not moving and not attacking
           zb.state = WANDER;
           zb.burst = true;
           const a = this.rng() * Math.PI * 2;
@@ -4194,6 +4245,8 @@ export class Game {
         }
       }
     }
+    this._rebuildPileTiles();
+    this._resolvePiles(dt);
   }
 
   // Spitter: hits structures from outside their reach, so turtling is not a
@@ -4255,20 +4308,37 @@ export class Game {
   }
 
   _moveZombie(zb, dx, dz, speed, dt, canAttack) {
+    // Ground steps keep the caller's vector untouched. Renormalizing it
+    // drifts every open-field march and the siege stops agreeing with a
+    // build that has no mounds yet.
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len, uz = dz / len;
+    if ((zb.layer || 0) > 0) { this._moveClimber(zb, ux, uz, speed, dt); return; }
+    const N = this.map.size;
     const nx = zb.x + dx * speed * dt;
     const nz = zb.z + dz * speed * dt;
     const tx = nx | 0, tz = nz | 0;
-    const occId = this.occ[tz * this.map.size + tx];
+    let occId = 0;
+    if (tx >= 0 && tz >= 0 && tx < N && tz < N) occId = this.occ[tz * N + tx];
+    else { zb.blocked = true; zb.dirX = ux; zb.dirZ = uz; }
     // Burrowers tunnel: barriers simply are not there for them.
     if (occId > 0 && zb.def.burrow) {
-      if (this.map.isWalkable(tx, tz)) { zb.x = nx; zb.z = nz; zb.dirX = dx; zb.dirZ = dz; }
+      if (this.map.isWalkable(tx, tz)) { zb.x = nx; zb.z = nz; }
       return;
     }
     if (occId > 0 && canAttack) {
-      // Chew on whatever is in the way (gates included).
+      // Chew on whatever is in the way (gates included). Climbers do not add
+      // bites — a mound is pressure you can break, not a hundred extra DPS.
+      zb.blocked = true;
+      zb.blockId = occId;
+      zb.dirX = ux; zb.dirZ = uz;
+      if ((zb.layer || 0) > 0) {
+        if (zb.atkT < 0) zb.atkT = 0.4;
+        return;
+      }
       if (zb.atkT <= 0) {
         zb.atkT = 0.85;
-        const b = this.buildings.find((o) => o.id === occId);
+        const b = (this._bldg && this._bldg.get(occId)) || this.buildings.find((o) => o.id === occId);
         if (b) {
           this._damageBuilding(b, zb.def.dmg, zb);
           // Shock fence: every bite bites back.
@@ -4282,7 +4352,16 @@ export class Game {
       }
       return;
     }
+    const leaving = (zb.x | 0) !== tx || (zb.z | 0) !== tz;
+    if (canAttack && leaving && this._crowdBlocks(zb, tx, tz)) {
+      zb.blocked = true;
+      return;
+    }
     if (this.map.isWalkable(tx, tz) && occId === 0) {
+      if (leaving && this._canClimb(zb)) {
+        const key = tz * N + tx;
+        this._enterCount.set(key, (this._enterCount.get(key) || 0) + 1);
+      }
       zb.x = nx; zb.z = nz;
       zb.dirX = dx; zb.dirZ = dz;
     } else if (!canAttack) {
@@ -4292,8 +4371,14 @@ export class Game {
     } else {
       // Aggro but blocked by terrain: slide along axes, and if both are shut
       // (a cliff notch) plan a short way round over open ground.
-      const N = this.map.size, st = speed * dt;
-      const free = (x, z) => this.map.isWalkable(x | 0, z | 0) && this.occ[(z | 0) * N + (x | 0)] === 0;
+      const st = speed * dt;
+      const px = zb.x, pz = zb.z;
+      zb.dirX = ux; zb.dirZ = uz;
+      const free = (x, z) => {
+        const ix = x | 0, iz = z | 0;
+        return ix >= 0 && iz >= 0 && ix < N && iz < N
+          && this.map.isWalkable(ix, iz) && this.occ[iz * N + ix] === 0;
+      };
       if (Math.abs(dx) > 0.2 && free(zb.x + dx * st, zb.z)) {
         zb.x += dx * st;
       } else if (Math.abs(dz) > 0.2 && free(zb.x, zb.z + dz * st)) {
@@ -4302,16 +4387,349 @@ export class Game {
         const det = this._detour(zb.x, zb.z, dx, dz, (x, z) => this.map.isWalkable(x, z));
         if (det && this.map.isWalkable((zb.x + det[0] * st) | 0, (zb.z + det[1] * st) | 0)) {
           const nx2 = zb.x + det[0] * st, nz2 = zb.z + det[1] * st;
-          const occ2 = this.occ[(nz2 | 0) * N + (nx2 | 0)];
-          if (occ2 === 0) { zb.x = nx2; zb.z = nz2; }
-          else if (zb.atkT <= 0) {
-            zb.atkT = 0.85;
-            const b = this.buildings.find((o) => o.id === occ2);
-            if (b) this._damageBuilding(b, zb.def.dmg, zb);
+          const ix = nz2 | 0, iz = nx2 | 0;
+          if (iz >= 0 && ix >= 0 && iz < N && ix < N) {
+            const occ2 = this.occ[ix * N + iz];
+            if (occ2 === 0) { zb.x = nx2; zb.z = nz2; }
+            else if (zb.atkT <= 0) {
+              zb.blocked = true;
+              zb.blockId = occ2;
+              zb.atkT = 0.85;
+              const b = (this._bldg && this._bldg.get(occ2)) || this.buildings.find((o) => o.id === occ2);
+              if (b) this._damageBuilding(b, zb.def.dmg, zb);
+            }
           }
         }
       }
+      if (zb.x === px && zb.z === pz) zb.blocked = true;
     }
+  }
+
+  // Open ground under a body. Buildings are not footing — spilling is the
+  // only way onto the far side of a wall.
+  _pileFooting(x, z) {
+    const N = this.map.size;
+    const ix = x | 0, iz = z | 0;
+    return ix >= 0 && iz >= 0 && ix < N && iz < N
+      && this.map.isWalkable(ix, iz) && this.occ[iz * N + ix] === 0;
+  }
+
+  _indexZombies() {
+    if (!this._zbById) this._zbById = new Map();
+    const byId = this._zbById;
+    byId.clear();
+    for (const zb of this.zombies) if (!zb.dead) byId.set(zb.id, zb);
+  }
+
+  _indexBuildings() {
+    if (!this._bldg) this._bldg = new Map();
+    this._bldg.clear();
+    for (const b of this.buildings) if (b.alive) this._bldg.set(b.id, b);
+    if (!this._plotById) this._plotById = new Map();
+    this._plotById.clear();
+    for (const p of this.plots) this._plotById.set(p.id, p);
+  }
+
+  _rebuildPileTiles() {
+    if (!this._pileTiles) this._pileTiles = new Map();
+    const tiles = this._pileTiles;
+    for (const arr of tiles.values()) arr.length = 0;
+    const N = this.map.size;
+    for (const zb of this.zombies) {
+      if (zb.dead || zb.vaultT > 0) continue;
+      const k = (zb.z | 0) * N + (zb.x | 0);
+      let arr = tiles.get(k);
+      if (!arr) tiles.set(k, arr = []);
+      arr.push(zb);
+    }
+  }
+
+  // Walkers, runners and callers stack. Brutes stay the foundation. Spitters,
+  // siegers and burrowers keep their own jobs and walk through the press.
+  _canClimb(zb) {
+    if (!zb || zb.boss || zb.state !== AGGRO) return false;
+    if (zb.def.burrow || zb.def.ranged || zb.def.siege) return false;
+    if ((zb.def.scale || 1) >= 1.5) return false;
+    return true;
+  }
+
+  _crowdBlocks(zb, tx, tz) {
+    if (!this._canClimb(zb) || !this._pileTiles) return false;
+    const N = this.map.size;
+    const key = tz * N + tx;
+    let nearStructure = false;
+    for (let k = 0; k < 4; k++) {
+      const x = tx + DIR4[k][0], z = tz + DIR4[k][1];
+      if (x < 0 || z < 0 || x >= N || z >= N) continue;
+      if (this.occ[z * N + x] > 0) nearStructure = true;
+    }
+    // Only the tiles touching a wall, gate, or building stack. A jam in the
+    // open — a cliff notch, a ford — still walks through, or the horde never
+    // reaches the city.
+    if (!nearStructure) return false;
+    const crowd = this._pileTiles.get(key);
+    const entered = this._enterCount ? (this._enterCount.get(key) || 0) : 0;
+    if ((crowd ? crowd.length : 0) + entered >= HORDE_PILE.tileCap) {
+      if (crowd) for (let i = 0; i < crowd.length; i++) if (crowd[i] === zb) return false;
+      return true;
+    }
+    // The contact rank is a handful of bodies. Everyone else climbs them
+    // instead of adding another set of teeth to the wall.
+    let packed = entered;
+    if (crowd) {
+      for (let i = 0; i < crowd.length; i++) {
+        const o = crowd[i];
+        if (o === zb || o.layer > 0 || !this._canClimb(o)) continue;
+        packed++;
+      }
+    }
+    return packed >= HORDE_PILE.pack;
+  }
+
+  // The first structure along the facing, and how many tiles back this body is.
+  // Terrain in the way means "go around", not "pile up on the cliff".
+  _pileAhead(zb, dx, dz) {
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len, uz = dz / len;
+    const N = this.map.size;
+    for (let s = 1; s <= 6; s++) {
+      const x = (zb.x + ux * s) | 0;
+      const z = (zb.z + uz * s) | 0;
+      if (x < 0 || z < 0 || x >= N || z >= N) return null;
+      const id = this.occ[z * N + x];
+      if (id > 0) {
+        const b = this._bldg && this._bldg.get(id);
+        if (!b || !b.alive) continue;
+        return { building: b, dist: s - 1, crest: this._pileCrest(b) };
+      }
+      if (!this.map.isWalkable(x, z)) return null;
+    }
+    return null;
+  }
+
+  _pileCrest(b) {
+    let tier = 1, branch = null;
+    if (b.plotId != null && b.plotId >= 0 && this._plotById) {
+      const plot = this._plotById.get(b.plotId);
+      if (plot) { tier = plot.tier || 1; branch = plot.branch || null; }
+    }
+    return pileCrest(b.kind, tier, !!b.gate, branch);
+  }
+
+  _moveClimber(zb, dx, dz, speed, dt) {
+    zb.dirX = dx; zb.dirZ = dz;
+    const support = zb.support ? this._zbById.get(zb.support) : null;
+    let tx, tz;
+    if (support && !support.dead && !support.vaultT) {
+      const side = ((zb.id & 1) ? 1 : -1) * 0.16;
+      const ax = support.x - dx * 0.06 - dz * side;
+      const az = support.z - dz * 0.06 + dx * side;
+      const k = Math.min(1, dt * 5);
+      tx = zb.x + (ax - zb.x) * k;
+      tz = zb.z + (az - zb.z) * k;
+    } else {
+      const step = speed * 0.4 * dt;
+      tx = zb.x + dx * step;
+      tz = zb.z + dz * step;
+    }
+    if (this._pileFooting(tx, tz)) { zb.x = tx; zb.z = tz; }
+    const N = this.map.size;
+    const fx = (zb.x + dx * 0.85) | 0, fz = (zb.z + dz * 0.85) | 0;
+    if (fx >= 0 && fz >= 0 && fx < N && fz < N && this.occ[fz * N + fx] > 0) {
+      zb.blocked = true;
+      zb.blockId = this.occ[fz * N + fx];
+    } else zb.blocked = true;
+    if (zb.atkT < 0) zb.atkT = 0.4;
+  }
+
+  _stepVault(zb, dt) {
+    const dur = HORDE_PILE.vaultDur;
+    zb.vaultT -= dt;
+    const t = Math.max(0, Math.min(1, 1 - Math.max(0, zb.vaultT) / dur));
+    zb.x = zb.vaultFromX + (zb.vaultX - zb.vaultFromX) * t;
+    zb.z = zb.vaultFromZ + (zb.vaultZ - zb.vaultFromZ) * t;
+    zb.dirX = zb.vaultX - zb.vaultFromX;
+    zb.dirZ = zb.vaultZ - zb.vaultFromZ;
+    if (zb.vaultT <= 0) {
+      zb.x = zb.vaultX;
+      zb.z = zb.vaultZ;
+      zb.layer = 0;
+      zb.support = 0;
+      zb.climbT = 0;
+      zb.pileCd = HORDE_PILE.landCd;
+      zb.vaultLayer = 0;
+      zb.vaultT = 0;
+    }
+  }
+
+  // A dead or missing support drops everyone standing on that body, then
+  // everyone standing on them. One clean collapse, then a short stun.
+  _collapsePiles() {
+    const byId = this._zbById;
+    const falling = new Set();
+    for (const zb of this.zombies) {
+      if (zb.dead || zb.layer <= 0 || zb.vaultT > 0) continue;
+      const s = byId.get(zb.support);
+      if (!s || s.dead || s.vaultT > 0 || s.layer !== zb.layer - 1) falling.add(zb.id);
+      else if ((s.x - zb.x) ** 2 + (s.z - zb.z) ** 2 > 2.56) falling.add(zb.id);
+    }
+    for (let pass = 0; pass < HORDE_PILE.maxLayer; pass++) {
+      let grew = false;
+      for (const zb of this.zombies) {
+        if (zb.dead || zb.layer <= 0 || falling.has(zb.id)) continue;
+        if (falling.has(zb.support)) { falling.add(zb.id); grew = true; }
+      }
+      if (!grew) break;
+    }
+    if (!falling.size) return;
+    for (const zb of this.zombies) {
+      if (!falling.has(zb.id)) continue;
+      zb.layer = 0;
+      zb.support = 0;
+      zb.climbT = 0;
+      zb.anchor = false;
+      zb.pileCd = HORDE_PILE.fallCd;
+      zb.stunT = Math.max(zb.stunT || 0, HORDE_PILE.fallStun);
+    }
+  }
+
+  _tryClimb(zb, ahead) {
+    if (!ahead) return;
+    const cap = Math.min(HORDE_PILE.maxLayer, Math.max(0, ahead.crest.layers - ahead.dist));
+    if (zb.layer >= cap) {
+      if (zb.atkT < 0) zb.atkT = 0.35;
+      return;
+    }
+    const dx = zb.dirX || 0, dz = zb.dirZ || 0;
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len, uz = dz / len;
+    const N = this.map.size;
+    const keys = [(zb.z | 0) * N + (zb.x | 0)];
+    const fx = (zb.x + ux) | 0, fz = (zb.z + uz) | 0;
+    if (fx >= 0 && fz >= 0 && fx < N && fz < N) keys.push(fz * N + fx);
+    let best = null, bestRiders = 99, bestId = Infinity;
+    for (let ki = 0; ki < keys.length; ki++) {
+      const arr = this._pileTiles.get(keys[ki]);
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const s = arr[i];
+        if (s === zb || s.dead || s.vaultT > 0 || s.boss || s.def.burrow) continue;
+        if (s.layer !== zb.layer) continue;
+        if ((s.riders || 0) >= HORDE_PILE.riders) continue;
+        if (s.layer === 0 && !s.blocked && (s.atkT || 0) < -0.2) continue;
+        const along = (s.x - zb.x) * ux + (s.z - zb.z) * uz;
+        if (along < -0.05) continue;
+        if ((s.x - zb.x) ** 2 + (s.z - zb.z) ** 2 > 1.7) continue;
+        const riders = s.riders || 0;
+        if (riders < bestRiders || (riders === bestRiders && s.id < bestId)) {
+          best = s; bestRiders = riders; bestId = s.id;
+        }
+      }
+    }
+    if (!best) {
+      if (zb.layer > 0 && zb.atkT < 0) zb.atkT = 0.35;
+      return;
+    }
+    const next = best.layer + 1;
+    if (next > cap) {
+      if (zb.atkT < 0) zb.atkT = 0.35;
+      return;
+    }
+    zb.layer = next;
+    zb.support = best.id;
+    best.riders = (best.riders || 0) + 1;
+    best.anchor = true;
+    zb.climbT = 0;
+    const slot = best.riders;
+    const side = (slot % 2 === 0 ? 1 : -1) * (0.16 + (slot > 2 ? 0.1 : 0));
+    const back = ahead.dist === 0 ? 0.02 : 0.18;
+    let nx = best.x - ux * back - uz * side;
+    let nz = best.z - uz * back + ux * side;
+    if (!this._pileFooting(nx, nz)) { nx = best.x; nz = best.z; }
+    if (this._pileFooting(nx, nz)) { zb.x = nx; zb.z = nz; }
+    if (zb.atkT < 0) zb.atkT = 0.35;
+  }
+
+  _beginVault(zb) {
+    const dx = zb.dirX || 0, dz = zb.dirZ || 0;
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len, uz = dz / len;
+    const N = this.map.size;
+    for (let s = 1; s <= 6; s++) {
+      const tx = (zb.x + ux * s) | 0, tz = (zb.z + uz * s) | 0;
+      if (tx < 0 || tz < 0 || tx >= N || tz >= N) return;
+      if (this.occ[tz * N + tx] > 0) continue;
+      if (!this.map.isWalkable(tx, tz)) return;
+      let landX = tx + 0.5 + ((zb.id % 3) - 1) * 0.15;
+      let landZ = tz + 0.5 + (((zb.id >> 2) % 3) - 1) * 0.15;
+      if (!this._pileFooting(landX, landZ)) { landX = tx + 0.5; landZ = tz + 0.5; }
+      zb.vaultFromX = zb.x;
+      zb.vaultFromZ = zb.z;
+      zb.vaultX = landX;
+      zb.vaultZ = landZ;
+      zb.vaultT = HORDE_PILE.vaultDur;
+      zb.vaultLayer = zb.layer;
+      zb.support = 0;
+      return;
+    }
+  }
+
+  // One body per wall tile per spill window. The lowest id at the lip goes,
+  // so peers agree without an extra cooldown in the snapshot.
+  _spillPiles() {
+    if (this.steps % HORDE_PILE.spillTicks !== 0) return;
+    const winners = new Map();
+    for (const zb of this.zombies) {
+      if (zb.dead || zb.vaultT > 0 || zb.pileCd > 0 || zb.layer <= 0) continue;
+      if (!zb.blocked || !zb.blockId) continue;
+      const b = this._bldg.get(zb.blockId);
+      if (!b || !b.alive) continue;
+      const crest = this._pileCrest(b);
+      if (!crest.spill || zb.layer < crest.layers) continue;
+      const prev = winners.get(b.id);
+      if (!prev || zb.id < prev.id) winners.set(b.id, zb);
+    }
+    for (const zb of winners.values()) this._beginVault(zb);
+  }
+
+  _resolvePiles(dt) {
+    this._indexBuildings();
+    for (const zb of this.zombies) { zb.anchor = false; zb.riders = 0; }
+    this._collapsePiles();
+    const byId = this._zbById;
+    for (const zb of this.zombies) {
+      if (zb.dead || zb.layer <= 0 || !zb.support) continue;
+      const s = byId.get(zb.support);
+      if (s && !s.dead) s.riders = (s.riders || 0) + 1;
+    }
+    // Newer bodies climb first, so the ones who arrived earlier stay the base.
+    for (let i = this.zombies.length - 1; i >= 0; i--) {
+      const zb = this.zombies[i];
+      if (zb.dead || zb.vaultT > 0 || zb.pileCd > 0 || !this._canClimb(zb)) continue;
+      const dx = zb.dirX || 0, dz = zb.dirZ || 0;
+      if (!dx && !dz) continue;
+      const ahead = this._pileAhead(zb, dx, dz);
+      if (zb.layer > 0 && !ahead) {
+        zb.layer = 0;
+        zb.support = 0;
+        zb.climbT = 0;
+        zb.pileCd = HORDE_PILE.fallCd;
+        zb.stunT = Math.max(zb.stunT || 0, HORDE_PILE.fallStun);
+        continue;
+      }
+      if ((zb.riders || 0) > 0) {
+        if (zb.atkT < 0) zb.atkT = 0.35;
+        continue;
+      }
+      if (zb.blocked && ahead) zb.climbT = (zb.climbT || 0) + dt;
+      else zb.climbT = Math.max(0, (zb.climbT || 0) - dt * 0.5);
+      if ((zb.climbT || 0) < HORDE_PILE.climbDelay) {
+        if (zb.layer > 0 && zb.atkT < 0) zb.atkT = 0.35;
+        continue;
+      }
+      this._tryClimb(zb, ahead);
+    }
+    this._spillPiles();
   }
 
   _updateUnits(dt) {
@@ -4388,7 +4806,10 @@ export class Game {
         let best = null, bd = seek * seek;
         for (const zb of nearbyBuckets(this._zombieBuckets, this.zombies, u.x, u.z, seek)) {
           if (zb.dead) continue;
-          const d = dist2(u.x, u.z, zb.x, zb.z);
+          // A body standing on the mound is a worse shot than the one under it.
+          // Same footprint, so this picks the base without pulling fire off a
+          // zombie that is actually in front of the squad.
+          const d = dist2(u.x, u.z, zb.x, zb.z) + (zb.layer || 0) * 0.45;
           if (d < bd) { bd = d; best = zb; }
         }
         // Hunting troops do not acquire contacts through stone: a squad
@@ -4626,7 +5047,7 @@ export class Game {
     if ((n.defendT || 0) <= this.time) {
       n.defendT = this.time + 9;
       const w = hiveSquad(this.threat, this.diff.mult * this.level.mult);
-      this._spawnHorde(Math.max(4, Math.round(w.size * 0.8)), [n.id], w.types);
+      this._spawnHorde(Math.max(4, Math.round(w.size * 0.8)), [n.id], w.types, this._hordeRoom(false));
       this.emit({ type: 'hivemuster', x: n.x, z: n.z });
     }
     if (n.hp <= 0) {
@@ -4667,16 +5088,20 @@ export class Game {
       if (zb.dead) continue;
       const d = dist2(b.cx, b.cz, zb.x, zb.z);
       if (d > r2) continue;
+      // A body on the mound is a worse shot than the one it stands on.
+      // With everyone on the ground this is the old nearest/score test.
+      const layer = zb.layer || 0;
       if (mode === 'nearest') {
-        if (d < bd) { bd = d; best = zb; }
+        const reach = d + layer * 6;
+        if (reach < bd) { bd = reach; best = zb; }
         continue;
       }
       let score;
       if (mode === 'strongest') score = zb.hp;
       else if (mode === 'siege') score = (zb.def.siege || zb.boss ? 1e6 : 0) - d;
       else score = (zb.def.ranged || zb.def.call ? 1e6 : 0) - d;
-      // Ties (and "nothing matches") fall back to nearest.
       score -= d * 1e-3;
+      score -= layer;
       if (score > bestScore) { bestScore = score; best = zb; }
     }
     return best;

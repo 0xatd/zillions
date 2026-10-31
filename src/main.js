@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
+  HORDE_PILE,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
 import { setActiveCulture } from './cultures.js';
@@ -53,7 +54,7 @@ import {
   MAX_VISION_SOURCES,
 } from './fog-of-war.js';
 
-const ZMAX = 1700;
+const ZMAX = 6400;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
@@ -3583,8 +3584,19 @@ class App {
     this.horde.begin();
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
-      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
+      const layer = zb.vaultT > 0 ? (zb.vaultLayer || zb.layer || 0) : (zb.layer || 0);
+      let pileY = layer * HORDE_PILE.step;
+      if (zb.vaultT > 0) {
+        const u = 1 - zb.vaultT / HORDE_PILE.vaultDur;
+        pileY += Math.sin(Math.max(0, Math.min(1, u)) * Math.PI) * 0.35;
+      }
+      if (!this._pileShown) this._pileShown = new Map();
+      const shown = this._pileShown.get(zb.id);
+      const nextY = shown == null ? pileY : shown + (pileY - shown) * Math.min(1, dt * 8);
+      this._pileShown.set(zb.id, nextY);
+      const bob = this.map.groundY(zb.x, zb.z) + nextY + Math.sin(t * 7 + zb.phase) * (layer > 0 ? 0.02 : 0.05);
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
+      const climb = layer > 0 || zb.vaultT > 0;
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
       const s = zb.def.scale;
@@ -3607,13 +3619,22 @@ class App {
       else c.setRGB(1, 1, 1);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
+      const cam = this.camera.position;
+      const far = (zb.x - cam.x) ** 2 + (zb.z - cam.z) ** 2 > 42 * 42;
       this.horde.write(
         zb.boss ? 'brute' : zb.type, // bosses ride the hulk silhouette
         zb.x + (ax / ad) * lunge, bob, zb.z + (az / ad) * lunge,
-        (zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * 0.06,
+        (climb ? 0.62 : zb.state === 2 ? 0.22 : 0.05) + lunge * 0.8, yaw, Math.sin(t * 5 + zb.phase) * (climb ? 0.02 : 0.06),
         s * (pulse + lunge * 0.25), s * (2 - pulse - lunge * 0.2), s * (pulse + lunge * 0.25),
-        t, zb.phase, lunge, c, eyeHex,
+        t, zb.phase, lunge, c, eyeHex, !far,
       );
+    }
+    this._pilePrune = (this._pilePrune || 0) + dt;
+    if (this._pilePrune > 2 && this._pileShown && this._pileShown.size > g.zombies.length + 32) {
+      this._pilePrune = 0;
+      const live = new Set();
+      for (let i = 0; i < g.zombies.length; i++) live.add(g.zombies[i].id);
+      for (const id of this._pileShown.keys()) if (!live.has(id)) this._pileShown.delete(id);
     }
     this.horde.commit();
   }
