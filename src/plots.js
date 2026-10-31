@@ -1043,6 +1043,8 @@ function layoutCampaign(C) {
     for (const t of [1.15, -1.15, 2.1, -2.1]) addInside('farm', ...spot(radiusAt(t) * 0.7, t), 2, {}, 4);
     addInside('mill', ...at(9, 5.5), 2, {}, 4);
     addInside('tower', ...spot(radiusAt(0) - 3.4, 0.42), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 6.2, 0.18), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 6.2, -0.18), 2, {}, 3);
     addInside('tower', ...spot(radiusAt(Math.PI) - 3.2, Math.PI), 2, {}, 3);
     return;
   }
@@ -1058,23 +1060,28 @@ function layoutCampaign(C) {
   }
   if (key === 'outpost') {
     for (let i = 0; i < 5; i++) addInside('house', ...spot(5.4, (i / 5) * Math.PI * 2), 2, {}, 3);
-    addInside('tower', ...spot(radiusAt(0) - 3.2, 0.38), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 3.2, 0.28), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 6.0, -0.28), 2, {}, 3);
     addInside('tower', ...spot(radiusAt(Math.PI) - 3.2, Math.PI + 0.28), 2, {}, 3);
     for (const t of [1.3, -1.3, 2.4]) addInside('farm', ...spot(radiusAt(t) * 0.8, t), 2, {}, 4);
     return;
   }
   if (key === 'crescent') {
     for (let i = 0; i < 6; i++) addInside('house', ...spot(6.6, (i / 6) * Math.PI * 2 + 0.25), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 3.4, 0.22), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 3.4, -0.22), 2, {}, 3);
+    addInside('tower', ...spot(radiusAt(0) - 6.5, 0), 2, {}, 3);
     for (let i = 0; i < 8; i++) addInside('farm', ...spot(radiusAt((i / 8) * Math.PI * 2) * 0.76, (i / 8) * Math.PI * 2), 2, {}, 3);
     addInside('mill', ...spot(10.5, 1.1), 2, {}, 4);
     return;
   }
   if (key === 'keyhole') {
     road(radiusAt(0) - 1.5, 0, 2, 0);
-    for (const u of [5, 9]) {
-      addInside('tower', ...at(u, 2.8), 2, {}, 3);
-      addInside('tower', ...at(u, -2.8), 2, {}, 3);
+    for (const u of [4.2, 8.4]) {
+      addInside('tower', ...at(u, 2.2), 2, {}, 3);
+      addInside('tower', ...at(u, -2.2), 2, {}, 3);
     }
+    addInside('tower', ...at(radiusAt(0) - 3.2, 0), 2, {}, 3);
     for (const u of [-2, -6]) {
       addInside('house', ...at(u, 3.4), 2, {}, 3);
       addInside('house', ...at(u, -3.4), 2, {}, 3);

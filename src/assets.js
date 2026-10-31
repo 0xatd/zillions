@@ -6,6 +6,7 @@ import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { PROP_FILES, propUrl, ingestProp } from './prop-pack.js';
 import { RAMPART_FILES, rampartUrl, ingestRampart } from './rampart-art.js';
+import { TOWN_PROPS, KEEP_FILES, loadTownFile } from './town-kit.js';
 
 const TEMPLATES = {};
 
@@ -154,6 +155,12 @@ function loadPropPack(loader) {
   }));
 }
 
+function loadTownKit(loader) {
+  const props = TOWN_PROPS.map((name) => loadTownFile(loader, `assets/town/kenney/${name}.glb`, name));
+  const keeps = KEEP_FILES.map((name) => loadTownFile(loader, `assets/keeps/${name}.glb`, name));
+  return Promise.all([...props, ...keeps]);
+}
+
 function loadRamparts(loader) {
   return Promise.all(RAMPART_FILES.map(async (name) => {
     try {
@@ -170,7 +177,8 @@ export function loadAssets() {
   const kit = loadKit(loader);
   const props = loadPropPack(loader);
   const ramparts = loadRamparts(loader);
-  return Promise.all([kit, props, ramparts, ...Object.entries(MANIFEST).map(async ([key, url]) => {
+  const town = loadTownKit(loader);
+  return Promise.all([kit, props, ramparts, town, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
       const gltf = await loader.loadAsync(url);
       const root = gltf.scene;

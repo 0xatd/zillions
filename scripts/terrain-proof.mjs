@@ -116,7 +116,7 @@ try {
       }
       const hq = app.game.plots.find((p) => p.kind === 'hq');
       app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz), hq.cz);
-      app.camDist = 39;
+      app.camDist = 56;
       const h = app.myHero();
       return {
         plots: app.game.plots.length,

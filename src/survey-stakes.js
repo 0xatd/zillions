@@ -21,28 +21,17 @@ function tip(g, geo, mat, y) {
   return m;
 }
 
-// One short marker. `spread` > 0 plants a pair of corner stakes (the keep).
+// A cut stump. Empty plots read as a bit of wood, not a glass marker.
 export function makeSurveyStake(culture = 'european', spread = 0) {
   const g = new THREE.Group();
   g.name = 'survey-stake';
+  const wood = culture === 'south_american' ? 0x8a6240 : culture === 'middle_eastern' ? 0xa07848 : 0x6b4e32;
+  const cut = culture === 'asian' ? 0xc4a574 : 0x8a6848;
   const spots = spread > 0 ? [[-spread, -spread], [spread, -spread], [-spread, spread], [spread, spread]] : [[0, 0]];
   for (const [x, z] of spots) {
-    if (culture === 'asian') {
-      post(g, 0x8a5a32, 0.03, 0.16, x, z);
-      tip(g, new THREE.BoxGeometry(0.05, 0.04, 0.05), toyMat({ color: 0xc4844a }), 0.18).position.set(x, 0.18, z);
-    } else if (culture === 'south_american') {
-      post(g, 0xc4b48a, 0.04, 0.14, x, z, 4);
-      const cap = tip(g, new THREE.BoxGeometry(0.06, 0.03, 0.06), toyMat({ color: 0xd9c7a2 }), 0.16);
-      cap.position.set(x, 0.16, z);
-    } else if (culture === 'middle_eastern') {
-      post(g, 0xc9a15b, 0.022, 0.16, x, z, 6);
-      const pin = tip(g, new THREE.OctahedronGeometry(0.025, 0), toyMat({ color: 0xd8b56a }), 0.18);
-      pin.position.set(x, 0.18, z);
-    } else {
-      post(g, 0x5c5348, 0.022, 0.15, x, z, 5);
-      const light = tip(g, new THREE.BoxGeometry(0.04, 0.03, 0.04), toyMat({ color: 0x8a8172 }), 0.17);
-      light.position.set(x, 0.17, z);
-    }
+    post(g, wood, 0.12, 0.18, x, z, 7);
+    const top = tip(g, new THREE.CylinderGeometry(0.1, 0.11, 0.04, 7), toyMat({ color: cut }), 0.2);
+    top.position.set(x, 0.2, z);
   }
   return g;
 }

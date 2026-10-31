@@ -18,6 +18,7 @@ import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } fr
 import { culture, kitBuildingKey } from './cultures.js';
 import { propGeometry, propRecord } from './prop-pack.js';
 import { rampartPlace } from './rampart-art.js';
+import { cloneTown } from './town-kit.js';
 
 // Visual only. A one-storey door is about the hero's height, a house is a
 // little over twice that, and towers and the keep stand well above both.
@@ -550,6 +551,8 @@ function packMesh(buckets) {
 // The keep is several castle-kit masses plus a door, windows, trim and a
 // crown, so it is not one tinted cube. Local units, before visual scale.
 function packKeep(pal, key, tier) {
+  const kit = cloneTown(`${key}-keep`);
+  if (kit) return kit;
   const authored = rampartPlace(`${key}-keep`);
   if (authored) return authored;
   const g = new THREE.Group();
@@ -621,6 +624,8 @@ function packKeep(pal, key, tier) {
 }
 
 function packHouse(pal, key, tier) {
+  const kit = cloneTown(`${key}-house`);
+  if (kit) return kit;
   const authored = rampartPlace(`${key}-house`);
   if (authored) return authored;
   const g = new THREE.Group();

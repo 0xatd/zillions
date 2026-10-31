@@ -45,3 +45,13 @@ into a parapet, so those pieces are modelled in the script.
 
 Keeps, houses, and plot towers kitbash the Kenney Castle Kit meshes listed
 above (CC0) and add a culture roof, door, and lamps. Those outputs are also CC0.
+
+## Kenney Fantasy Town Kit
+
+- Author: Kenney (www.kenney.nl)
+- Licence: CC0 1.0 Universal
+- https://creativecommons.org/publicdomain/zero/1.0/
+- Pack page: https://kenney.nl/assets/fantasy-town-kit
+- Downloaded copy: OpenGameArt, https://opengameart.org/content/fantasy-town-kit
+- Props: `assets/town/kenney/` (fence, hedge, stall, lantern, tree, cart, banner, rock, colormap)
+- Keeps and houses kitbashed from the same pack: `assets/keeps/`, via `tools/blender/build_keeps.py`

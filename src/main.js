@@ -34,6 +34,7 @@ import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh, buildingVisualScale } from './building-art.js';
 import { buildRampartGroup, rampartReady } from './rampart-art.js';
+import { buildTownLife } from './town-kit.js';
 import { hologramMaterial, makeSurveyStake } from './survey-stakes.js';
 import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
@@ -132,7 +133,7 @@ class App {
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-    this.camDist = 39;           // ~15% closer than the old 46, so cliffs fill the frame (FOV 30)
+    this.camDist = 56;           // wide enough that the wall ring and the near gate sit in frame
     this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
@@ -826,6 +827,7 @@ class App {
     this._blockWarned = {};
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
+    this._setTownLife();
     this._setupFogOfWar();
     // The plaza and city appear where (and when) the city is founded.
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
@@ -874,6 +876,19 @@ class App {
   // city looks designed even before anything is built, and it looks like ITS
   // plan: a square fort gets a square plaza, a crescent gets two lanes, not
   // four. Falls back to a plain ring if the plan is not known yet.
+  _setTownLife() {
+    if (this._townLife) {
+      this.scene.remove(this._townLife);
+      this._disposeObject3D(this._townLife);
+      this._townLife = null;
+    }
+    if (!this.game?.plots?.length || !this.map) return;
+    const group = buildTownLife(this.map, this.game.plots);
+    if (!group) return;
+    this.scene.add(group);
+    this._townLife = group;
+  }
+
   _buildPlaza() {
     // The worn-road ribbon lives on the terrain mesh. A plaza disc, a guide
     // ring and flat lane planks used to sit on top of it.
@@ -3848,6 +3863,14 @@ class App {
       if (pipPlotId >= 0) nearId = pipPlotId;
     }
     const revealStep = Math.min(1, dt / 0.15);
+    const heroOnPlot = (hero, plot) => {
+      if (plot.kind === 'wall') {
+        return (plot.tiles || []).some(([x, z]) => Math.abs(hero.x - (x + 0.5)) < 0.65 && Math.abs(hero.z - (z + 0.5)) < 0.65);
+      }
+      const size = plot.size || 1;
+      return hero.x >= plot.x - 0.05 && hero.x <= plot.x + size + 0.05
+        && hero.z >= plot.z - 0.05 && hero.z <= plot.z + size + 0.05;
+    };
     for (const plot of g.plots) {
       if (!g.firstSiegePlotVisible(plot)) {
         const hidden = this.plotMeshes.get(plot.id);
@@ -3887,7 +3910,9 @@ class App {
       if (ud.prog) ud.prog.visible = false;
       if (ud.pips) ud.pips.sprite.visible = false;
 
-      const showGhost = plot.kind !== 'hq' && !!(nt && buildMode && !wave && stakeFade > 0.02 && plot.id === nearId);
+      const standing = !!(mh && !mh.dead && heroOnPlot(mh, plot));
+      const showGhost = plot.kind !== 'hq' && plot.kind !== 'wall'
+        && !!(nt && buildMode && !wave && stakeFade > 0.02 && standing);
       ud.reveal = showGhost ? Math.min(1, (ud.reveal || 0) + revealStep) : Math.max(0, (ud.reveal || 0) - revealStep);
       const fade = (ud.reveal || 0) * stakeFade;
       if (showGhost && fade > 0.02 && plot.kind !== 'wall') {
@@ -4739,7 +4764,7 @@ class App {
     // Diorama angle: steep enough to read the whole base like a board game,
     // steeper still as you pull back.
     // 50° at the play distance, opening to 60° when fully zoomed out.
-    const playDist = 39, farDist = 95;
+    const playDist = 56, farDist = 95;
     const elev = lerp((50 * Math.PI) / 180, (60 * Math.PI) / 180, clamp((this.camDist - playDist) / (farDist - playDist), 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
     let sx = 0, sz = 0;
@@ -5104,6 +5129,7 @@ class App {
           this.scene.remove(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
+          this._setTownLife();
           if (this.plaza) this.scene.remove(this.plaza);
           this.plaza = this._buildPlaza(e.x, e.z);
           this.scene.add(this.plaza);

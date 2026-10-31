@@ -532,11 +532,18 @@ export function buildRoadGroup(map) {
   const center = new THREE.Color(style.bed).lerp(new THREE.Color(style.center), 0.55);
   const edge = center.clone().multiplyScalar(grassLum > 0.5 ? 0.62 : 0.78);
   if (grassLum > 0.5) center.multiplyScalar(0.82);
+  const grassC = grass.clone();
+  const wear = center.clone().multiplyScalar(0.86);
+  const fade = edge.clone().lerp(grassC, 0.62);
   const rows = [
-    { t: -1, c: edge },
-    { t: -0.35, c: center },
-    { t: 0.35, c: center },
-    { t: 1, c: edge },
+    { t: -1, c: grassC },
+    { t: -0.78, c: fade },
+    { t: -0.46, c: edge },
+    { t: -0.16, c: center },
+    { t: 0.16, c: wear },
+    { t: 0.46, c: edge },
+    { t: 0.78, c: fade.clone() },
+    { t: 1, c: grassC.clone() },
   ];
   const stones = [];
   const tufts = [];
@@ -547,17 +554,36 @@ export function buildRoadGroup(map) {
   }
   for (const ctrl of splines.lines) {
     if (ctrl.length < 2) continue;
-    const line = catmullRom(ctrl, 10).filter((p) =>
+    let line = catmullRom(ctrl, 10).filter((p) =>
       Number.isFinite(p[0]) && Number.isFinite(p[1]) && p[0] > -4 && p[1] > -4 && p[0] < map.size + 4 && p[1] < map.size + 4);
     if (line.length < 4) continue;
+    let arc = 0;
+    line = line.map((p, i) => {
+      if (i) arc += Math.hypot(p[0] - line[i - 1][0], p[1] - line[i - 1][1]);
+      const prev = line[Math.max(0, i - 1)];
+      const next = line[Math.min(line.length - 1, i + 1)];
+      let dx = next[0] - prev[0];
+      let dz = next[1] - prev[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const wob = Math.sin(arc * 0.42) * 0.28;
+      return [p[0] + (-dz / len) * wob, p[1] + (dx / len) * wob];
+    });
     const mesh = colorRibbon(
       map, line,
-      () => 0.42,
+      (i) => {
+        const p = line[Math.min(i, line.length - 1)];
+        let width = 0.62;
+        for (const plaza of splines.plazas) {
+          const d = Math.hypot(p[0] - plaza.x, p[1] - plaza.z);
+          if (d < 9) width = Math.max(width, 0.62 + (1 - d / 9) * 1.7);
+        }
+        return width;
+      },
       rows,
-      (vx, vz) => map.groundY(vx, vz) + 0.05,
+      (vx, vz) => map.groundY(vx, vz) + 0.045,
     );
     if (mesh) g.add(mesh);
-    let arc = 0;
+    let walk = 0;
     let nextStone = 3.2;
     let nextTuft = 1.8;
     for (let i = 1; i < line.length; i++) {
@@ -566,23 +592,23 @@ export function buildRoadGroup(map) {
       let dx = q[0] - p[0];
       let dz = q[1] - p[1];
       const L = Math.hypot(dx, dz) || 1;
-      arc += L;
+      walk += L;
       const nx = -dz / L;
       const nz = dx / L;
-      if (arc >= nextStone) {
+      if (walk >= nextStone) {
         nextStone += 4.5;
         for (const side of [-1, 1]) {
           const ox = q[0] + nx * side * 0.55;
           const oz = q[1] + nz * side * 0.55;
-          stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.12, ry: arc });
+          stones.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.12, ry: walk });
         }
       }
-      if (arc >= nextTuft) {
+      if (walk >= nextTuft) {
         nextTuft += 2.2;
         const side = nextTuft % 2 < 1 ? 1 : -1;
         const ox = q[0] + nx * side * 0.62;
         const oz = q[1] + nz * side * 0.62;
-        tufts.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.28, ry: arc });
+        tufts.push({ x: ox, y: map.groundY(ox, oz), z: oz, h: 0.28, ry: walk });
       }
     }
   }

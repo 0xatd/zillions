@@ -190,7 +190,7 @@ try {
       h.x = hq.cx + 2.2;
       h.z = hq.cz + 3.2;
       app.focus.set(hq.cx, app.map.groundY(hq.cx, hq.cz), hq.cz);
-      app.camDist = 18;
+      app.camDist = 36;
       return true;
     })()`);
     await delay(700);

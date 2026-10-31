@@ -293,7 +293,7 @@ function hash01(x, z) {
   return n - Math.floor(n);
 }
 
-function stamp(geo, buckets, p0, p1, groundY, keep, mirrorAware = true) {
+function stamp(geo, buckets, p0, p1, groundY, keep, mirrorAware = true, yScale = 1) {
   const pos = geo.attributes.position;
   const nrm = geo.attributes.normal;
   const col = geo.attributes.color;
@@ -322,7 +322,7 @@ function stamp(geo, buckets, p0, p1, groundY, keep, mirrorAware = true) {
     const lz = pos.getZ(i);
     buckets.pos.push(
       p0.x + tx * u * len + rx * lz,
-      y0 + (y1 - y0) * u + ly,
+      y0 + (y1 - y0) * u + ly * yScale,
       p0.z + tz * u * len + rz * lz,
     );
     if (nrm) {
@@ -400,6 +400,18 @@ export function buildRampartGroup(game, map) {
 
   const { chains, posts } = chainsOf(tiles);
   for (const post of posts) postSpots.push({ x: post.x + 0.5, z: post.z + 0.5 });
+  for (const plot of game.plots) {
+    if (plot.kind !== 'wall' || !plot.gate || alive.has(keyOf(plot.gate[0], plot.gate[1]))) continue;
+    const gx = plot.gate[0] + 0.5;
+    const gz = plot.gate[1] + 0.5;
+    const ox = gx - keep.x;
+    const oz = gz - keep.z;
+    const ol = Math.hypot(ox, oz) || 1;
+    const tx = -oz / ol;
+    const tz = ox / ol;
+    postSpots.push({ x: gx + tx * 1.35, z: gz + tz * 1.35, s: 0.46 });
+    postSpots.push({ x: gx - tx * 1.35, z: gz - tz * 1.35, s: 0.46 });
+  }
 
   for (const chain of chains) {
     const { parts, posts: corners } = splitCorners(chain);
@@ -422,7 +434,8 @@ export function buildRampartGroup(game, map) {
         continue;
       }
       const count = closed ? points.length : points.length - 1;
-      for (let i = 0; i < count; i++) stamp(geo, buckets, points[i], points[(i + 1) % points.length], ground, keep);
+      const yScale = part.tiles[0].built ? 1 : 2.15;
+      for (let i = 0; i < count; i++) stamp(geo, buckets, points[i], points[(i + 1) % points.length], ground, keep, true, yScale);
     }
   }
 
@@ -441,7 +454,7 @@ export function buildRampartGroup(game, map) {
     postSpots.forEach((spot, index) => {
       dummy.position.set(spot.x, ground(spot.x, spot.z), spot.z);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1, 1, 1);
+      dummy.scale.set(spot.s || 1, spot.s || 1, spot.s || 1);
       dummy.updateMatrix();
       postsMesh.setMatrixAt(index, dummy.matrix);
     });
