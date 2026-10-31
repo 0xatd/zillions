@@ -55,6 +55,8 @@ Default branch: main
 - src/ui.js owns menus, lobby UI, HUD, and overlays.
 - src/menu-vignette.js owns the menu attract show (presentation only, no sim).
 - src/online.js owns Supabase room and signaling state.
+- src/party.js and src/party-client.js own the persistent friend party. The
+  match is still a room. Party tables are an unapplied migration.
 - src/net.js owns WebRTC transport and diagnostics.
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.

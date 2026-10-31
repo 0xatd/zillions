@@ -26,6 +26,7 @@ import {
   cultureKey, unitDefFor,
 } from './config.js';
 import { FlowField } from './flowfield.js';
+import { ALLY_REVIVE_CHANNEL, ALLY_REVIVE_RANGE, coopPressure } from './coop.js';
 import { generatePlots } from './plots.js';
 import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
 import { clamp, dist2, makeRNG } from './utils.js';
@@ -296,7 +297,7 @@ export class Game {
       heroes: this.heroes.map((h) => ({
         id: h.id, k: h.key, x: snapNum(h.x), z: snapNum(h.z), hp: snapNum(h.hp),
         order: this.units.indexOf(h),
-        dead: !!h.dead, reviveT: snapNum(h.reviveT || 0),
+        dead: !!h.dead, reviveT: snapNum(h.reviveT || 0), help: snapNum(h.reviveHelp || 0),
         level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd),
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
         mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
@@ -543,7 +544,10 @@ export class Game {
       if (hs.dead) {
         h.dead = true;
         h.reviveT = hs.reviveT;
-        this.units = this.units.filter((u) => u !== h);
+        h.reviveHelp = hs.help || 0;
+        // The body stays in the unit list so a reconnect still shows where
+        // to stand. Combat skips dead units; a friend or the Keep timer
+        // clears the flag.
       }
     }
     for (const [type, x, z, hp, state, wave, boss, enraged, meta = {}] of snap.zombies) {
@@ -1999,7 +2003,7 @@ export class Game {
   }
 
   _hiveMuster(nest, mult, firstSiege = false) {
-    const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
+    const coopMult = coopPressure(this.heroKeys.length);
     const share = 3 / Math.max(3, this.nests.length);
     const w = hiveSquad(this.threat, this.diff.mult * this.level.mult * this.economy.pressure * coopMult * mult * share);
     // Ground the hive holds is where part of its muster ACTUALLY appears. This
@@ -2707,7 +2711,7 @@ export class Game {
       equipment, weapon, treeMods, doctrines, treeSets, activeSet, swapCd: 0,
       characterStyle: camp?.characterStyle ? structuredClone(camp.characterStyle) : null,
       dodgeT: 0, dodgeIT: 0, dodgeCd: 0, dodgeX: 0, dodgeZ: 0,
-      reviveT: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
+      reviveT: 0, reviveHelp: 0, hasteT: 0, hasteMult: 1, shieldHp: 0,
       fortifyT: 0, fortifyArmor: 0, fortifyThorns: 0, _summonId: null, _procT: {},
     };
     this._refreshHeroDerived(h, false);
@@ -3049,6 +3053,41 @@ export class Game {
 
   _updateHero(dt) {
     for (const h of this.heroes) this._updateHeroOne(h, dt);
+    this._updateAllyRevives(dt);
+  }
+
+  // A friend standing on the body channels a pull-up. The Keep timer still
+  // runs, so an unattended fall comes back at the colony. Both paths share
+  // one raise so peers and a restore agree.
+  _updateAllyRevives(dt) {
+    const r2 = ALLY_REVIVE_RANGE * ALLY_REVIVE_RANGE;
+    for (const down of this.heroes) {
+      if (!down.dead || down.fallen) {
+        down.reviveHelp = 0;
+        continue;
+      }
+      let near = false;
+      for (const ally of this.heroes) {
+        if (ally === down || ally.dead) continue;
+        if (dist2(ally.x, ally.z, down.x, down.z) <= r2) { near = true; break; }
+      }
+      if (!near) { down.reviveHelp = 0; continue; }
+      down.reviveHelp = (down.reviveHelp || 0) + dt;
+      if (down.reviveHelp >= ALLY_REVIVE_CHANNEL) {
+        this._raiseHero(down, 0.4);
+        this.msg(`${down.def.icon} ${down.def.name} is pulled back into the fight.`, 'info');
+      }
+    }
+  }
+
+  _raiseHero(h, frac) {
+    h.dead = false;
+    h.fallen = false;
+    h.reviveT = 0;
+    h.reviveHelp = 0;
+    h.hp = Math.max(1, h.maxHp * frac);
+    if (!this.units.includes(h)) this.units.push(h);
+    this.emit({ type: 'revive', x: h.x, z: h.z });
   }
 
   // Generic auto-cast proc infrastructure: any hero passive can carry a
@@ -3120,8 +3159,6 @@ export class Game {
       if (h.fallen) return; // out of lives — this fall is final
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
-        h.dead = false;
-        h.hp = h.maxHp;
         // Revive on guaranteed ground: first free ring tile around the Keep
         // or at the latest Labyrinth checkpoint. Never use an unchecked fixed
         // offset that can land inside crag, water, or a fresh wall.
@@ -3133,8 +3170,7 @@ export class Game {
         } else {
           const [sx, sz] = this._frontierSpawnPoints(1)[0]; h.x = sx; h.z = sz;
         }
-        this.units.push(h);
-        this.emit({ type: 'revive', x: h.x, z: h.z });
+        this._raiseHero(h, 1);
         this.msg(`${h.def.icon} ${h.def.name} has returned to the fight!`, 'info');
       }
       return;
@@ -4717,7 +4753,8 @@ export class Game {
 
   _cleanup() {
     if (this.zombies.some((z) => z.dead)) this.zombies = this.zombies.filter((z) => !z.dead);
-    if (this.units.some((u) => u.dead)) this.units = this.units.filter((u) => !u.dead);
+    // Downed heroes stay so friends can see the body and stand on it.
+    if (this.units.some((u) => u.dead && !u.hero)) this.units = this.units.filter((u) => !u.dead || u.hero);
   }
 
   aggroCount() {

@@ -212,6 +212,14 @@ History worth keeping, so old mistakes are not repeated:
   device frame time. Use it to separate network catch-up from device stalls.
 - Mid-game Rejoin is only for a previously seated guest. A stranger cannot
   create a seat after the match starts. A watcher never creates a seat.
+- A party is not a second simulation. The leader's Start opens the existing
+  private room. The party itself (code, link, roster, ready, kick, leadership,
+  party chat) persists after the match. Tables live in the unapplied
+  migration `supabase/migrations/20261031040000_parties.sql`.
+- One gold pile and one colony. Hive musters use `coopPressure(heroCount)`
+  (40% more per extra hero, capped at four). A living hero within 2.4 tiles
+  of a downed friend pulls them up after 1.6 seconds. Otherwise the fallen
+  hero still respawns at the Keep. Name labels are presentation only.
 
 Key multiplayer files:
 

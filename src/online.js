@@ -288,6 +288,7 @@ export class OnlineLobby {
     }
 
     const fresh = Date.now() - FRESH_MS;
+    const playing = await this._inMatch(ids);
     const friends = (data || []).map((f) => {
       const userId = f.requester_id === this.me.id ? f.addressee_id : f.requester_id;
       const p = profiles.get(userId);
@@ -298,11 +299,36 @@ export class OnlineLobby {
         name: profileName(p, userId.slice(0, 6)),
         status: f.status,
         direction: f.requester_id === this.me.id ? 'outgoing' : 'incoming',
-        online,
+        online: online || playing.has(userId),
+        presence: playing.has(userId) ? 'in_match' : (online ? 'online' : 'offline'),
       };
     });
     if (this.cb.onFriends) this.cb.onFriends(friends);
     return friends;
+  }
+
+  // Who among these accounts is in a live room or a party match. A missing
+  // party table (migration not applied yet) leaves the room check in place.
+  async _inMatch(ids) {
+    const playing = new Set();
+    if (!ids.length) return playing;
+    const { data: seats } = await this.sb.from('room_players')
+      .select('user_id, rooms(status)')
+      .in('user_id', ids);
+    for (const seat of seats || []) {
+      const status = seat.rooms?.status;
+      if (status === 'in_game' || status === 'starting') playing.add(seat.user_id);
+    }
+    const { data: members, error } = await this.sb.from('party_members')
+      .select('user_id, parties(status)')
+      .in('user_id', ids);
+    if (!error) {
+      for (const member of members || []) {
+        const status = member.parties?.status;
+        if (status === 'in_match' || status === 'staging') playing.add(member.user_id);
+      }
+    }
+    return playing;
   }
 
   async addFriend(handle) {
@@ -340,15 +366,16 @@ export class OnlineLobby {
     return this.loadFriends();
   }
 
-  async inviteFriend(userId) {
-    if (!this.game) throw new Error('create or join a room first');
+  async inviteFriend(userId, extra = {}) {
     const payload = {
       fromId: this.me.id,
       fromName: this.me.name,
-      joinCode: this.game.join_code,
-      mode: this.game.mode,
-      roomId: this.game.id,
+      joinCode: extra.joinCode || this.game?.join_code,
+      mode: extra.mode || this.game?.mode,
+      roomId: extra.roomId || this.game?.id || null,
+      kind: extra.kind || 'room',
     };
+    if (!payload.joinCode) throw new Error('create or join a party first');
     const channel = this.sb.channel('zl-user-' + userId);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('invite channel timeout')), 2500);
@@ -741,6 +768,13 @@ export class OnlineLobby {
     } finally {
       this._clearRoomState();
     }
+  }
+
+  async findById(id) {
+    if (!id) return null;
+    const { data, error } = await this.sb.from('rooms').select(ROOM_SELECT).eq('id', id).maybeSingle();
+    if (error || !data) return null;
+    return roomToGame(data);
   }
 
   async findByCode(code) {

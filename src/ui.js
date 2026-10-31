@@ -82,6 +82,7 @@ export class UI {
 
       <div id="banner"></div>
       <div id="invitetoast" class="hidden"></div>
+      <div id="revivehint" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
@@ -186,7 +187,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -479,6 +480,36 @@ export class UI {
             </div>
           </div>
         </div>
+        <div id="screen-party" class="setup party-screen hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="party-back">← Back</button>
+            <h2>Play with friends</h2>
+            <span class="lobbyme" id="party-me"></span>
+          </div>
+          <p class="gamesub party-lead">One colony, one gold pile, up to four heroes. The leader picks the planet. Everyone else readies up.</p>
+          <div class="partygrid">
+            <section id="party-roster" class="party-roster"></section>
+            <section class="party-side">
+              <div id="party-invite" class="party-invite"></div>
+              <div class="party-chat">
+                <div id="party-chatlog" class="lobbychatlog"></div>
+                <div class="lobbychatrow">
+                  <input id="party-chatinput" maxlength="160" placeholder="Party chat">
+                  <button class="tbtn" id="party-chatsend">Send</button>
+                </div>
+              </div>
+            </section>
+            <aside class="lobbyfriends">
+              <div class="friendshead"><b>Friends</b><span id="party-friend-count"></span></div>
+              <div class="friendadd">
+                <input id="party-friendcode" maxlength="32" placeholder="@username">
+                <button class="tbtn" id="party-friendadd">Add</button>
+              </div>
+              <div id="party-friends" class="friendlist"></div>
+            </aside>
+          </div>
+        </div>
+
         <div id="room-confirm" class="roomconfirm hidden" role="dialog" aria-modal="true" aria-labelledby="room-confirm-title">
           <div class="roomconfirmcard">
             <span class="roomeyebrow">Multiplayer room</span>
@@ -490,7 +521,8 @@ export class UI {
             </div>
           </div>
         </div>
-      </div>`;
+      </div>
+      <div id="profile-card" class="profilecard hidden" role="dialog" aria-modal="true"></div>`;
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
@@ -517,6 +549,33 @@ export class UI {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
     q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
+    q('#m-party').onclick = () => { if (this.cb.onPartyOpen) this.cb.onPartyOpen(); };
+    q('#party-back').onclick = () => this._showScreen('main');
+    const sendPartyChat = () => {
+      const input = q('#party-chatinput');
+      const text = input.value;
+      input.value = '';
+      if (text.trim() && this.cb.onPartyChat) this.cb.onPartyChat(text);
+    };
+    q('#party-chatsend').onclick = sendPartyChat;
+    q('#party-chatinput').onkeydown = (event) => {
+      if (event.key === 'Enter') sendPartyChat();
+    };
+    const addPartyFriend = () => {
+      const input = q('#party-friendcode');
+      if (input.value.trim() && this.cb.onAddFriend) this.cb.onAddFriend(input.value);
+      input.value = '';
+    };
+    q('#party-friendadd').onclick = addPartyFriend;
+    q('#party-friendcode').onkeydown = (event) => {
+      if (event.key === 'Enter') addPartyFriend();
+    };
+    this.root.addEventListener('click', (event) => {
+      const who = event.target.closest('.js-profile');
+      if (!who || !who.dataset.user || !this.cb.onProfile) return;
+      event.preventDefault();
+      this.cb.onProfile(who.dataset.user);
+    });
     q('#m-delete-character').onclick = () => {
       const character = this._sheetCharacter();
       if (!character) return;
@@ -681,9 +740,9 @@ export class UI {
         <small>${h.tagline}</small>
         <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
+        if (this.cb.onHeroPick && this.cb.onHeroPick(key) === false) return;
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
-        if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
       card.onmousemove = (e) => this._moveTip(e);
@@ -954,7 +1013,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'party']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -3030,6 +3089,7 @@ export class UI {
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (window.__partyPreviewLock) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
@@ -3464,13 +3524,189 @@ export class UI {
     log.scrollTop = log.scrollHeight;
   }
 
+  setReviveHint(text) {
+    const el = this.root.querySelector('#revivehint');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+  }
+
+  showParty(view = {}, { open = true } = {}) {
+    if (open) this._showScreen('party');
+    else if (this._lastScreen !== 'party') return;
+    const me = this.root.querySelector('#party-me');
+    if (me) me.textContent = view.meName ? `@${view.meName}` : '';
+    const invite = this.root.querySelector('#party-invite');
+    const roster = this.root.querySelector('#party-roster');
+    if (!invite || !roster) return;
+    if (!view.signedIn) {
+      invite.innerHTML = '<div class="mphint">Sign in to invite friends. Offline play can still trade a manual code from Custom Games.</div>';
+      roster.innerHTML = '';
+      const quiet = this.root.querySelector('#party-chatlog');
+      if (quiet) quiet.innerHTML = '';
+      return;
+    }
+    if (view.empty) {
+      invite.innerHTML = `
+        <b>Start a party</b>
+        <p class="mphint">You get a short code and a link. Friends join from this screen, from the link, or from your friends list.</p>
+        <div class="party-actions">
+          <button class="menubtn primary" id="party-create">Create party</button>
+          <input id="party-join-code" maxlength="6" placeholder="CODE" autocomplete="off" spellcheck="false">
+          <button class="tbtn" id="party-join">Join</button>
+        </div>`;
+      roster.innerHTML = '<div class="mphint">No party yet. Create one, or paste a friend\'s code.</div>';
+      invite.querySelector('#party-create').onclick = () => this.cb.onPartyCreate && this.cb.onPartyCreate();
+      invite.querySelector('#party-join').onclick = () => {
+        const code = invite.querySelector('#party-join-code').value;
+        if (this.cb.onPartyJoin) this.cb.onPartyJoin(code);
+      };
+      return;
+    }
+    const levels = view.mode === 'labyrinth' ? LABYRINTH_LEVELS : LEVELS;
+    const levelButtons = levels.map((level) =>
+      `<button class="diffbtn ${level.id === view.levelId ? 'sel' : ''}" data-level="${level.id}" ${view.leader ? '' : 'disabled'}>${escapeHtml(level.name)}</button>`).join('');
+    const modeButtons = ['campaign', 'survival', 'labyrinth'].map((mode) =>
+      `<button class="diffbtn ${mode === view.mode ? 'sel' : ''}" data-mode="${mode}" ${view.leader ? '' : 'disabled'}>${mode}</button>`).join('');
+    const diffButtons = Object.entries(DIFFICULTY).map(([key, def]) =>
+      `<button class="diffbtn ${key === view.difficulty ? 'sel' : ''}" data-diff="${key}" ${view.leader ? '' : 'disabled'}>${def.label}</button>`).join('');
+    invite.innerHTML = `
+      <div class="party-code"><span>Party code</span><b>${escapeHtml(view.code || '')}</b></div>
+      <div class="party-actions">
+        <button class="tbtn" id="party-copy-code">Copy code</button>
+        <button class="tbtn" id="party-copy-link">Copy link</button>
+        <button class="tbtn" id="party-leave">Leave party</button>
+      </div>
+      <p class="mphint">${escapeHtml(view.link || '')}</p>
+      <div class="steplabel">Planet</div>
+      <div class="party-choices" id="party-levels">${levelButtons}</div>
+      <div class="steplabel">Mode</div>
+      <div class="party-choices">${modeButtons}</div>
+      <div class="steplabel">Difficulty</div>
+      <div class="party-choices">${diffButtons}</div>
+      <p class="mphint">Shared colony and shared gold. ${escapeHtml(view.pressure || '')}. A downed hero can be pulled up by a friend, or returns at the Keep.</p>`;
+    const copy = (value) => {
+      if (navigator.clipboard) navigator.clipboard.writeText(value).catch(() => {});
+      this.showBanner('Copied.', '', 1600);
+    };
+    invite.querySelector('#party-copy-code').onclick = () => copy(view.code || '');
+    invite.querySelector('#party-copy-link').onclick = () => copy(view.link || '');
+    invite.querySelector('#party-leave').onclick = () => this.cb.onPartyLeave && this.cb.onPartyLeave();
+    for (const button of invite.querySelectorAll('[data-level]')) {
+      button.onclick = () => this.cb.onPartySetup && this.cb.onPartySetup({ levelId: Number(button.dataset.level) });
+    }
+    for (const button of invite.querySelectorAll('[data-mode]')) {
+      button.onclick = () => this.cb.onPartySetup && this.cb.onPartySetup({ mode: button.dataset.mode });
+    }
+    for (const button of invite.querySelectorAll('[data-diff]')) {
+      button.onclick = () => this.cb.onPartySetup && this.cb.onPartySetup({ difficulty: button.dataset.diff });
+    }
+    const heroButtons = Object.entries(HEROES).map(([key, hero]) => {
+      const mine = view.myHero === key;
+      const taken = !mine && (view.taken || []).includes(key);
+      return `<button class="diffbtn ${mine ? 'sel' : ''}" data-hero="${key}" ${taken ? 'disabled' : ''}>${hero.icon} ${escapeHtml(hero.name.split(' ')[0])}${taken ? ' · taken' : ''}</button>`;
+    }).join('');
+    const slots = (view.members || []).map((member) => `
+      <div class="roomslot ${member.leader ? 'host' : ''} ${member.you ? 'you' : ''}">
+        <span class="roomseat">${member.leader ? 'LEADER' : 'MEMBER'}</span>
+        <b class="js-profile" data-user="${member.userId}"></b>
+        <small>${escapeHtml(this._heroName(member.hero))} · ${member.leader ? 'leader' : member.ready ? 'ready' : 'not ready'}</small>
+        ${view.leader && !member.you ? `<span class="roomslotactions"><button class="tbtn" data-hand="${member.userId}">Lead</button><button class="tbtn room-remove" data-kick="${member.userId}">Kick</button></span>` : ''}
+      </div>`).join('');
+    const start = view.canStart?.ok
+      ? '▶ Start match'
+      : view.canStart?.reason === 'need_ready' ? 'Waiting for ready'
+      : view.canStart?.reason === 'labyrinth_cap' ? 'Labyrinth holds 3'
+      : view.canStart?.reason === 'busy' ? 'Match already open'
+      : view.leader ? 'Start match' : 'Waiting for the leader';
+    roster.innerHTML = `
+      <div class="roomslots">${slots}</div>
+      <div class="steplabel">Your hero</div>
+      <div class="party-choices">${heroButtons}</div>
+      <div class="party-actions">
+        ${view.leader ? '' : `<button class="tbtn" id="party-ready">${view.myReady ? 'Ready ✓' : 'Ready up'}</button>`}
+        ${view.leader ? `<button class="menubtn primary" id="party-start" ${view.canStart?.ok ? '' : 'disabled'}>${start}</button>` : `<span class="mphint">${start}</span>`}
+      </div>`;
+    for (const name of roster.querySelectorAll('.roomslot b')) {
+      const member = (view.members || []).find((m) => m.userId === name.dataset.user);
+      if (member) name.textContent = member.you ? `${member.name} (you)` : member.name;
+    }
+    for (const button of roster.querySelectorAll('[data-hero]')) {
+      button.onclick = () => this.cb.onPartyHero && this.cb.onPartyHero(button.dataset.hero);
+    }
+    const ready = roster.querySelector('#party-ready');
+    if (ready) ready.onclick = () => this.cb.onPartyReady && this.cb.onPartyReady(!view.myReady);
+    const startBtn = roster.querySelector('#party-start');
+    if (startBtn) startBtn.onclick = () => this.cb.onPartyStart && this.cb.onPartyStart();
+    for (const button of roster.querySelectorAll('[data-kick]')) {
+      button.onclick = () => this.cb.onPartyKick && this.cb.onPartyKick(button.dataset.kick);
+    }
+    for (const button of roster.querySelectorAll('[data-hand]')) {
+      button.onclick = () => this.cb.onPartyHandoff && this.cb.onPartyHandoff(button.dataset.hand);
+    }
+  }
+
+  partyChatFill(msgs = []) {
+    const log = this.root.querySelector('#party-chatlog');
+    if (!log) return;
+    log.innerHTML = '';
+    for (const message of msgs) this.partyChatAdd(message);
+  }
+
+  partyChatAdd(message) {
+    const log = this.root.querySelector('#party-chatlog');
+    if (!log) return;
+    this._appendChatLine(log, message, 40);
+  }
+
+  showProfile(card, { muted = false, blocked = false, self = false } = {}) {
+    const el = this.root.querySelector('#profile-card');
+    if (!el) return;
+    if (!card) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      return;
+    }
+    const hero = HEROES[card.hero] || HEROES.scott;
+    const favorite = card.favorite && HEROES[card.favorite] ? HEROES[card.favorite] : null;
+    const face = PORTRAITS[card.hero]
+      ? `<img class="hface" src="${PORTRAITS[card.hero]}" alt="">`
+      : `<span class="hicon">${hero.icon}</span>`;
+    el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="profilecard-body">
+        <button class="tbtn profile-close" id="profile-close">✕</button>
+        <div class="profile-face">${face}</div>
+        <div>
+          <b class="profile-name"></b>
+          <p>${hero.icon} ${escapeHtml(hero.name)} · level ${card.level}</p>
+          <p>${card.planets} planets cleared · ${card.matches} matches · ${card.wins} wins</p>
+          ${favorite && favorite.key !== hero.key ? `<p>Most played ${favorite.icon} ${escapeHtml(favorite.name)}</p>` : ''}
+          ${self ? '' : `<div class="party-actions">
+            <button class="tbtn" id="profile-mute">${muted ? 'Unmute' : 'Mute'}</button>
+            <button class="tbtn" id="profile-block">${blocked ? 'Unblock' : 'Block'}</button>
+          </div>`}
+        </div>
+      </div>`;
+    el.querySelector('.profile-name').textContent = `@${card.name}`;
+    el.querySelector('#profile-close').onclick = () => this.showProfile(null);
+    const mute = el.querySelector('#profile-mute');
+    const block = el.querySelector('#profile-block');
+    if (mute) mute.onclick = () => this.cb.onMutePlayer && this.cb.onMutePlayer(card.id, !muted);
+    if (block) block.onclick = () => this.cb.onBlockPlayer && this.cb.onBlockPlayer(card.id, !blocked);
+  }
+
   lobbyFriends(friends = []) {
-    const box = this.root.querySelector('#l-friends');
-    const count = this.root.querySelector('#l-friend-count');
+    this._friendRows = friends;
+    this._fillFriendList(this.root.querySelector('#l-friends'), this.root.querySelector('#l-friend-count'), friends);
+    this._fillFriendList(this.root.querySelector('#party-friends'), this.root.querySelector('#party-friend-count'), friends);
+  }
+
+  _fillFriendList(box, count, friends) {
     if (!box) return;
     if (count) count.textContent = friends.length ? `${friends.length}` : '';
     if (!friends.length) {
-      box.innerHTML = '<div class="mphint">Add players by username, then invite them to your room.</div>';
+      box.innerHTML = '<div class="mphint">Add a commander by their @username.</div>';
       return;
     }
     box.innerHTML = '';
@@ -3478,10 +3714,10 @@ export class UI {
       const row = document.createElement('div');
       row.className = `friendrow ${f.status}`;
       const status = f.status === 'accepted'
-        ? (f.online ? 'online' : 'offline')
+        ? (f.presence === 'in_match' ? 'in a match' : f.online ? 'online' : 'offline')
         : f.direction === 'incoming' ? 'request' : 'pending';
       row.innerHTML = `
-        <div class="friendmeta"><b></b><small>${status}</small></div>
+        <div class="friendmeta"><b class="js-profile" data-user="${f.userId || ''}"></b><small>${status}</small></div>
         <div class="friendactions"></div>`;
       row.querySelector('b').textContent = `@${f.name}`;
       const actions = row.querySelector('.friendactions');
@@ -3497,7 +3733,10 @@ export class UI {
         makeButton('✓', 'Accept friend request', () => this.cb.onAcceptFriend && this.cb.onAcceptFriend(f.id));
         makeButton('✕', 'Ignore friend request', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
       } else if (f.status === 'accepted') {
-        makeButton('⚔️', 'Invite to current room', () => this.cb.onInviteFriend && this.cb.onInviteFriend(f.userId));
+        makeButton('⚔️', 'Invite to your party', () => {
+          if (this.cb.onPartyInvite) this.cb.onPartyInvite(f.userId);
+          else if (this.cb.onInviteFriend) this.cb.onInviteFriend(f.userId);
+        });
         makeButton('✕', 'Remove friend', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
       } else {
         makeButton('✕', 'Cancel friend request', () => this.cb.onRemoveFriend && this.cb.onRemoveFriend(f.id));
@@ -3563,7 +3802,12 @@ export class UI {
     div.className = 'chatmsg';
     const when = new Date(m.created_at || Date.now());
     div.innerHTML = `<span class="chatwho"></span> <span class="chattext"></span><span class="chatwhen">${when.getHours()}:${String(when.getMinutes()).padStart(2, '0')}</span>`;
-    div.querySelector('.chatwho').textContent = m.name || 'Commander';
+    const who = div.querySelector('.chatwho');
+    who.textContent = m.name || 'Commander';
+    if (m.user_id) {
+      who.classList.add('js-profile');
+      who.dataset.user = m.user_id;
+    }
     div.querySelector('.chattext').textContent = m.text || '';
     log.appendChild(div);
     while (log.children.length > max) log.removeChild(log.firstChild);
@@ -3626,7 +3870,10 @@ export class UI {
   showInviteToast(inv, onAccept) {
     const el = this.root.querySelector('#invitetoast');
     el.classList.remove('hidden');
-    el.innerHTML = `<b></b> invites you to their ${inv.mode === 'survival' ? 'Survival' : inv.mode === 'labyrinth' ? 'Labyrinth' : 'Campaign'} war! <button class="tbtn" id="inv-yes">⚔️ Join</button> <button class="tbtn" id="inv-no">✕</button>`;
+    const where = inv.kind === 'party'
+      ? 'party'
+      : `${inv.mode === 'survival' ? 'Survival' : inv.mode === 'labyrinth' ? 'Labyrinth' : 'Campaign'} war`;
+    el.innerHTML = `<b></b> invites you to their ${where}! <button class="tbtn" id="inv-yes">⚔️ Join</button> <button class="tbtn" id="inv-no">✕</button>`;
     el.querySelector('b').textContent = inv.fromName;
     el.querySelector('#inv-yes').onclick = () => { el.classList.add('hidden'); onAccept(); };
     el.querySelector('#inv-no').onclick = () => el.classList.add('hidden');
