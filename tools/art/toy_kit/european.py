@@ -9,7 +9,7 @@ space (metres = tiles, +z = front, origin at ground centre).
 """
 import math
 
-from kit import shade
+from kit import shade, xform
 
 PALETTE = {
     'stone': 0xe9d8b4, 'stone2': 0xd2bc92, 'stone3': 0xa88f6c, 'roof': 0x3a66c4,
@@ -203,6 +203,20 @@ def castle(k, t, pal):
     B, G = k.B, k.G
     r = 2.0 + min(t, 3) * 0.1
     base = hex_plinth(B, G, pal, r, steps=2 if t < 3 else 3, lamps=False)
+    # Corner buttresses and inset masonry establish weight at gameplay zoom.
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            for course in range(4):
+                B.box(pal['stone2'] if course % 2 else pal['stone3'],
+                      .26, .24, .26, sx*.83, base+course*.27, sz*.78)
+    if t == 1:
+        round_tower(B, G, pal, -.96, -.48, .32, 2.5, crest=True)
+        # A framed porch, not just a colored rectangle on a wall.
+        for sx in (-.33, .33):
+            B.box(pal['stone2'], .16, .9, .34, sx, base, .93)
+        B.gable(pal['roof'], .8, .35, .55, 0, base+.9, .99, overhang=.1)
+        for i in range(3):
+            B.box(pal['stone2'], .7+i*.12, .08, .22, 0, base-.08*i, 1.2+i*.18)
     if t == 1:
         keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=0)
         door(B, pal, 0.4, 0.6, 0, 0.81, base)
@@ -297,6 +311,39 @@ def tower(k, t, pal):
     turret_head(head, pal, s, twin=t >= 3, coil=t >= 4, oy=top)
 
 
+def painted_roof(B, pal, w, h, d, x=0, y=0, z=0, ry=0, overhang=0.14):
+    """Curved slate courses and dimensional eaves in the shared body mesh."""
+    hw, hd = w / 2 + overhang, d / 2 + overhang
+    c, sn = math.cos(ry), math.sin(ry)
+    def point(px, py, pz):
+        return (x + px*c + pz*sn, y + py, z - px*sn + pz*c)
+    def height(t):
+        return h * (t ** 1.3)
+    def strip(a, ya, b, yb, z0, z1, color, thickness=.055):
+        verts = [point(a,ya,z0),point(b,yb,z0),point(b,yb,z1),point(a,ya,z1),
+                 point(a,ya-thickness,z0),point(b,yb-thickness,z0),
+                 point(b,yb-thickness,z1),point(a,ya-thickness,z1)]
+        B.emit(verts,[(0,1,2,3),(7,6,5,4),(0,4,5,1),(1,5,6,2),
+                      (2,6,7,3),(3,7,4,0)],color,xform())
+    for side in (-1,1):
+        for row in range(5):
+            t0,t1=row/5,min(1,(row+1)/5+.018)
+            a,b=side*hw*(1-t0),side*hw*(1-t1)
+            for col in range(5):
+                z0=-hd+col*2*hd/5
+                # Continuous coverage; seams come from relief, not holes.
+                strip(a,height(t0)+.02,b,height(t1)+.02,z0,z0+2*hd/5,
+                      shade(pal['roof'],.88+((row*7+col*3)%5)*.035))
+            for pz in (-hd,hd):
+                strip(a,height(t0)+.05,b,height(t1)+.05,pz-.035,pz+.035,
+                      shade(pal['wood'],1.12),.09)
+        for pz in (-hd+.01,hd-.01):
+            vs=[point(side*hw,0,pz),point(0,0,pz)]
+            vs += [point(side*hw*(1-i/5),height(i/5),pz) for i in range(5,0,-1)]
+            B.emit(vs,[tuple(range(len(vs)))],pal['wood'],xform())
+    B.box(pal['trim'],.09,.065,2*hd+.08,x,y+h,z,0,ry,0)
+
+
 # ---------------------------------------------------------------- houses
 
 def house(k, t, pal):
@@ -309,7 +356,7 @@ def house(k, t, pal):
         B.box(pal['stone'], 1.0, 0.55, 0.85, 0, 0.24, 0)
         for sx in (-1, 1):
             B.box(pal['wood'], 0.06, 0.55, 0.06, sx * 0.48, 0.24, 0.41)      # corner posts
-        B.gable(pal['roof'], 1.0, 0.52, 0.85, 0, 0.79, 0, ry=math.pi / 2, overhang=0.14)
+        painted_roof(B, pal, 1.0, 0.52, 0.85, 0, 0.79, 0, ry=math.pi / 2, overhang=0.14)
         ridge(B, pal, 1.0, 1.29, ry=math.pi / 2, length=1.2)
         chimney(B, pal, -0.3, 0.95, -0.2, h=0.42)
         door(B, pal, 0.2, 0.36, 0.2, 0.43, 0.24)
@@ -323,7 +370,7 @@ def house(k, t, pal):
         B.box(pal['stone2'], 1.15, 0.6, 0.95, 0, 0.22, 0)                    # stone ground floor
         B.box(pal['stone'], 1.25, 0.62, 1.05, 0, 0.82, 0)                    # jettied upper floor
         timber_front(B, pal, 1.25, 0.82, 1.44, 0.53, posts=4)
-        B.gable(pal['roof'], 1.25, 0.62, 1.05, 0, 1.44, 0, ry=math.pi / 2, overhang=0.15)
+        painted_roof(B, pal, 1.25, 0.62, 1.05, 0, 1.44, 0, ry=math.pi / 2, overhang=0.15)
         ridge(B, pal, 1.25, 2.06, ry=math.pi / 2, length=1.45)
         chimney(B, pal, 0.38, 1.6, -0.25, h=0.62)
         door(B, pal, 0.22, 0.4, 0, 0.48, 0.22)
@@ -337,10 +384,10 @@ def house(k, t, pal):
         B.box(pal['stone3'], 1.26, 0.12, 0.86, -0.1, 0.1, -0.25)
         B.box(pal['stone'], 1.2, 1.2, 0.8, -0.1, 0.2, -0.25)
         timber_front(B, pal, 1.2, 0.78, 1.4, 0.16, posts=3)
-        B.gable(pal['roof'], 1.2, 0.6, 0.8, -0.1, 1.4, -0.25, ry=math.pi / 2, overhang=0.14)
+        painted_roof(B, pal, 1.2, 0.6, 0.8, -0.1, 1.4, -0.25, ry=math.pi / 2, overhang=0.14)
         ridge(B, pal, 1.2, 2.0, z=-0.25, ry=math.pi / 2, length=1.4)
         B.box(pal['stone'], 0.6, 0.9, 0.7, 0.35, 0.2, 0.35)
-        B.gable(pal['roof2'], 0.6, 0.45, 0.7, 0.35, 1.1, 0.35, overhang=0.12)
+        painted_roof(B, pal, 0.6, 0.45, 0.7, 0.35, 1.1, 0.35, overhang=0.12)
         chimney(B, pal, -0.5, 1.55, -0.45, h=0.55)
         round_tower(B, G, pal, -0.6, 0.35, 0.22, 1.6)
         door(B, pal, 0.22, 0.4, 0.35, 0.71, 0.2)
@@ -362,10 +409,10 @@ def house(k, t, pal):
         window(B, G, pal, x, 1.9, 0.565, shutters=False)
     for x in (-0.36, 0.36):
         window(B, G, pal, x, 0.5, 0.53, shutters=False)
-    B.gable(pal['roof'], 1.3, 0.66, 1.12, 0, 2.39, 0, ry=math.pi / 2, overhang=0.16)
+    painted_roof(B, pal, 1.3, 0.66, 1.12, 0, 2.39, 0, ry=math.pi / 2, overhang=0.16)
     ridge(B, pal, 1.3, 3.05, ry=math.pi / 2, length=1.5)
     B.box(pal['stone'], 0.34, 0.3, 0.3, 0, 2.45, 0.42)                     # dormer
-    B.gable(pal['roof2'], 0.34, 0.2, 0.34, 0, 2.75, 0.42, overhang=0.06)
+    painted_roof(B, pal, 0.34, 0.2, 0.34, 0, 2.75, 0.42, overhang=0.06)
     window(B, G, pal, 0, 2.52, 0.575, w=0.12, h=0.14, shutters=False, sill=False)
     chimney(B, pal, 0.42, 2.55, -0.3, h=0.7)
     chimney(B, pal, -0.42, 2.55, -0.3, h=0.55)
@@ -382,7 +429,14 @@ def farm(k, t, pal):
     for i in range(rows):
         z = -0.75 + i * (1.5 / (rows - 1))
         c = pal['crop'] if (i + t) % 2 else pal['crop2']
-        B.box(c, 1.1 if t < 3 else 0.9, 0.16, 0.2, -0.3 if t < 3 else -0.45, 0.08, z)
+        row_w = 1.1 if t < 3 else 0.9
+        cx = -0.3 if t < 3 else -0.45
+        B.box(shade(pal['field'], .8), row_w, .06, .22, cx, .08, z)
+        for stalk in range(7):
+            px = cx-row_w/2+(stalk+.5)*row_w/7
+            ht = .18 + ((stalk*3+i*5)%4)*.035
+            B.prism(shade(c,.8), 4, .035, .014, ht, px, .14, z)
+            B.ico(c,.075,px,.14+ht,z,sx=.7,sy=1.3,sz=.7,sub=1)
     # split-rail fence on three sides
     for x in (-0.88, 0.88):
         for z in (-0.88, 0, 0.88):
