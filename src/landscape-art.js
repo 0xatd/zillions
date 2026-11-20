@@ -22,7 +22,7 @@ function joined(parts) {
   g.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));return g;
 }
 function ellipsoid(x,y,z,sx,sy,sz,color,seed=0) {
-  const geo=new THREE.SphereGeometry(1,8,6),p=geo.attributes.position;
+  const geo=new THREE.SphereGeometry(1,7,5),p=geo.attributes.position;
   for(let i=0;i<p.count;i++){
     const a=p.getX(i),b=p.getY(i),c=p.getZ(i);
     const l=1+.13*Math.sin(a*5+c*4+seed)*Math.cos(b*4-c*3);
@@ -32,7 +32,7 @@ function ellipsoid(x,y,z,sx,sy,sz,color,seed=0) {
 }
 function branch(a,b,r0,r1,color) {
   const from=new THREE.Vector3(...a),to=new THREE.Vector3(...b),dir=to.clone().sub(from);
-  const geo=new THREE.CylinderGeometry(r1,r0,dir.length(),6);
+  const geo=new THREE.CylinderGeometry(r1,r0,dir.length(),5);
   geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize()));
   geo.translate(...from.add(to).multiplyScalar(.5).toArray());return {geo,color};
 }
@@ -49,7 +49,7 @@ function pine(){
   const parts=[];
   for(let k=0;k<4;k++){
     const y=.95+k*.62,r=.86-k*.17,h=1.25-k*.12;
-    const geo=new THREE.ConeGeometry(r,h,9,2),p=geo.attributes.position;
+    const geo=new THREE.ConeGeometry(r,h,7,2),p=geo.attributes.position;
     for(let i=0;i<p.count;i++){
       const a=p.getX(i),b=p.getY(i),c=p.getZ(i),wave=1+.14*Math.sin(Math.atan2(c,a)*5+k);
       p.setXYZ(i,a*wave,b+y+.06*Math.sin(a*8+c*7),c*wave);
