@@ -203,6 +203,9 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // always opened through whatever the land put there, so a site can never be
   // sealed in with no way to sortie — everything else is left to the ground.
   const cutApproach = (t) => {
+    // Cliff sites already have graded switchbacks. Never bulldoze a second,
+    // straight route through their retaining rock when founding the colony.
+    if (form?.cliffs && anchor?.switchbacks?.length) return;
     const world = t + facing;
     for (let d = -3; d <= 5; d += 0.5) {
       const r = radiusAt(t) + d;
@@ -232,7 +235,9 @@ export function generatePlots(map, anchor = null, opts = {}) {
     if (map.tiles[k] === TILE.GRASS || map.tiles[k] === TILE.PATH) map.tiles[k] = TILE.PATH;
     taken.add(k);
   };
+  const streets = [];
   const markPathLine = (x0, z0, x1, z1) => {
+    streets.push([[x0 + 0.5, z0 + 0.5], [x1 + 0.5, z1 + 0.5]]);
     const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) * 2));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -430,6 +435,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
     }
     for (const g of gates) {
+      if (form?.cliffs && anchor?.switchbacks?.length) continue;
       const gx = g.gate[0] + 0.5, gz = g.gate[1] + 0.5;
       const len = Math.hypot(gx - cx, gz - cz) || 1;
       const ux = (gx - cx) / len, uz = (gz - cz) / len;
@@ -810,6 +816,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     hq.plan = {
       key: plan.key, label: plan.label, blurb: plan.blurb,
       facing, reach, gates: gates.map((g) => g.ang),
+      streets,
       entrances: gates.length,
       natural: rampart.natural,
       naturalShare: rampart.length ? rampart.natural / rampart.length : 0,

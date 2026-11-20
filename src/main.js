@@ -915,13 +915,18 @@ class App {
     g.add(ring);
     const laneMat = toyMat({ color: 0xb3ad9e });
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
-    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
-    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
-    for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
+    // Render the reserved streets, including bent approaches through an inner
+    // ward, rather than guessing radial strips from a generic city radius.
+    const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
+      [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
+    for (const [[ax, az], [bx, bz]] of streets) {
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.1) continue;
+      const a = Math.atan2(bz - az, bx - ax);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 2, terraced ? Math.ceil(len * 3) : 1), laneMat);
       lane.rotation.x = -Math.PI / 2;
-      lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.rotation.z = Math.PI / 2 - a;
+      lane.position.set((ax + bx) / 2, plazaY + 0.012, (az + bz) / 2);
       lane.receiveShadow = true;
       const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
       stripe.rotation.copy(lane.rotation);
@@ -988,16 +993,27 @@ class App {
       // polygon offset keeps the kerb strictly under the bed and the bed
       // under the centre line.
       const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
-      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
-      // meet and their kerbs overlap it reads as a paved apron, not a hole.
-      const edgeMat = layer(0x8a7658, -1);
-      const roadMat = layer(0xd8c49a, -3);
-      const centreMat = layer(0xf1e4c4, -5);
+      // Graphite edges separate the pale roadbed from both snow and moor;
+      // amber tread bands identify the graded route at normal play zoom.
+      const edgeMat = layer(0x514c55, -1);
+      const roadMat = layer(0xd8c9ae, -3);
+      const centreMat = layer(0xffba58, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
-        g.add(ribbon(pts, 0.22, 0.075, centreMat));
+        // Broad transverse tread bands make the grade and each turn readable
+        // at play zoom. These are paint, not extra collision obstacles.
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az);
+          if (L < 0.1) continue;
+          const nx = -(bz - az) / L, nz = (bx - ax) / L;
+          for (let d = 0.65; d < L - 0.3; d += 1.65) {
+            const f = d / L, x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = ah + (bh - ah) * f;
+            g.add(ribbon([[x - nx * 0.55, z - nz * 0.55, h], [x + nx * 0.55, z + nz * 0.55, h]], 0.16, 0.08, centreMat));
+          }
+        }
         for (let q = 1; q < pts.length; q++) {
           const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
           const L = Math.hypot(bx - ax, bz - az);
