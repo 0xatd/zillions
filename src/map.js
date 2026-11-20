@@ -590,7 +590,7 @@ export class GameMap extends TerrainField {
         if (this.tiles[this.idx(x, z)] !== TILE.MOUNTAIN) {
           // Rubble apron: walkable ground that touches crag catches the
           // rockfall — the cliff foot reads weathered, not laser-cut.
-          if (this.isWalkable(x, z)
+          if (this.isWalkable(x, z) && !this.swRoad?.[this.idx(x, z)]
             && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => this.inBounds(x + dx, z + dz) && this.tiles[this.idx(x + dx, z + dz)] === TILE.MOUNTAIN)
             && rng() < (this.ledgeW && this.ledgeW[this.idx(x, z)] >= 0.999 ? 0.12 : 0.5)) {
             const n = 1 + (rng() < 0.4 ? 1 : 0);

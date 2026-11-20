@@ -1231,7 +1231,8 @@ export class TerrainField {
         // Start on a tile that actually belongs to the pocket.
         const source = pocket.reduce((best, k) =>
           Math.hypot(k % N - cx, ((k / N) | 0) - cz) < Math.hypot(best % N - cx, ((best / N) | 0) - cz) ? k : best);
-        this._bridge(source % N, (source / N) | 0, bx, bz);
+        if (this.cliffRock) this._bridge(source % N, (source / N) | 0, bx, bz);
+        else this._bridge(Math.round(cx), Math.round(cz), bx, bz);
         bridgedAny = true;
       }
       if (!bridgedAny) return;
