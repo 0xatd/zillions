@@ -3,6 +3,16 @@
 This document defines the production target for Zillions 3D art. It applies to
 units, heroes, buildings, and defensive works.
 
+## Reference priority — Alex, 2026-11-20
+
+Read [Art Quality Standard](art-quality-standard.md) before any visual work.
+The primary reference is **Warcraft III Reforged: Forsaken Kingdom,
+Definitive Edition graphics**. Alex explicitly likes its painted, stylized
+look. Earlier toy/flat-color/minimal-texture guidance is superseded wherever
+it conflicts with that standard. Keep the siege game, faction identities,
+asset budgets, sockets, and deterministic simulation contracts below.
+This is a quality target, not a claim of current parity.
+
 ## Target
 
 Use a stylized, chunky science-fiction RTS style.

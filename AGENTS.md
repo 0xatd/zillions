@@ -10,7 +10,7 @@ Read these files before you change code:
 2. `docs/architecture.md`
 3. `docs/agent-brief.md`
 4. `docs/backend.md` for account, API, or data work
-5. `docs/art-direction.md` and `docs/art-pipeline.md` for 3D asset work
+5. `docs/art-quality-standard.md`, `docs/art-direction.md`, and `docs/art-pipeline.md` for any visual or 3D asset work
 6. The relevant source files and checks
 
 Use `llms.txt` when you need a compact repository index.

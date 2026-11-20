@@ -95,3 +95,5 @@ Run npm run check:postgres (throwaway local Postgres).
 Run git diff --check.
 Run a local Vercel production build.
 Do not call a pull request deployable until all three pass.
+
+- docs/art-quality-standard.md: mandatory visual quality bar; Forsaken Kingdom / Definitive Edition reference, acceptance checklist and Blender workflow.

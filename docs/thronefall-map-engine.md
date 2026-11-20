@@ -1,3 +1,9 @@
+# Current visual standard
+
+The terrain/simulation contracts below remain valid. Historical low-poly,
+flat-color and few/no-texture aesthetics are superseded by
+[Art Quality Standard](art-quality-standard.md), per Alex on 2026-11-20.
+
 # Why Thronefall's maps feel better than ours — and the engine that closes the gap
 
 Research notes + design doc. Part 1 is what Thronefall actually does (from the
