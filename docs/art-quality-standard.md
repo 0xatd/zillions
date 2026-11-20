@@ -115,3 +115,16 @@ and sockets and `art-pipeline.md` for export and fallback behavior.
 
 Update this document when Alex changes the direction. Keep progress notes and
 temporary findings in dated review reports rather than weakening this target.
+
+## Reusable landscape kit
+
+`src/landscape-art.js` authors merged procedural shapes and instances them
+from independent presentation seeds. Broadleaf crowns, layered conifers,
+branching trunks and undergrowth form groves rather than evenly repeated trees.
+Outcrops and fallen timber belong on already-blocked ground. Reeds belong in
+non-lava water. Do not place large decorative obstacles in traversable lanes.
+
+Terrain control maps distinguish working earth, forest floor, exposed crag and
+water. Grassy cliff shelves keep their turf. World-space rock strata and slow
+water movement must stay subordinate to combat. Keep each biome's palette,
+including snow and ash. Review these shared components across all five maps.

@@ -32,6 +32,8 @@ Default branch: main
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
+- src/landscape-art.js owns the instanced forest and shoreline scenery kit.
+- src/environment-art.js owns terrain materials and animated water.
 - src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and
   authority-ready mutation proposals.

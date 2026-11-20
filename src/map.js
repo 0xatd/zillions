@@ -4,7 +4,8 @@
 // so `scripts/map-check.mjs` can build and validate every level in Node.
 import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
-import { environmentMaterial, groundControl } from './environment-art.js';
+import { environmentMaterial, groundControl, waterMaterial } from './environment-art.js';
+import { buildForest, buildLandscapeEdges } from './landscape-art.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
@@ -313,17 +314,17 @@ export class GameMap extends TerrainField {
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);
-    const waterMat = toyMat({ color: this.theme && this.theme.palette ? this.theme.palette.water : 0x3f8fb0,
-      transparent: true, opacity: 0.85,
-      ...(this.isLava() ? { emissive: 0x7a1f08, emissiveIntensity: 0.8 } : {}),
-    });
+    const waterMat = waterMaterial(this);
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(N / 2, -0.22, N / 2);
+    water.name = 'landscape-water';
+    water.onBeforeRender = () => { waterMat.userData.time.value = performance.now() * .001; };
     group.add(water);
 
     group.add(this._buildRipples());
-    group.add(this._buildTrees());
+    group.add(buildForest(this));
+    group.add(buildLandscapeEdges(this));
     group.add(this._buildRocks());
     group.add(this._buildOre());
     group.add(this._buildDetail());
@@ -451,17 +452,20 @@ export class GameMap extends TerrainField {
           const t = this.tiles[this.idx(x + dx, z + dz)];
           return t !== TILE.WATER;
         });
-        if (shore) spots.push({ x: x + 0.5, z: z + 0.5, w: 0.55 + rng() * 0.25, r: 0 });
+        if (shore && rng() < .6) {
+          const vertical = this.tiles[this.idx(x+1,z)] !== TILE.WATER || this.tiles[this.idx(x-1,z)] !== TILE.WATER;
+          spots.push({x:x+.5,z:z+.5,w:.3+rng()*.4,r:vertical?Math.PI/2:0});
+        }
         else if (rng() < 0.055) spots.push({ x: x + rng(), z: z + rng(), w: 0.4 + rng() * 0.4, r: 0 });
       }
     }
     const geo = new THREE.PlaneGeometry(1, 0.1);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xeaf4f2, transparent: true, opacity: 0.65, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: this.isLava() ? 0xff9b38 : 0xb5d5cc, transparent: true, opacity: 0.32, depthWrite: false });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     spots.forEach((s, i) => {
-      q.identity();
+      q.setFromAxisAngle(new THREE.Vector3(0,1,0),s.r);
       sc.set(s.w, 1, 1);
       pos.set(s.x, -0.16, s.z);
       m.compose(pos, q, sc);
@@ -484,108 +488,6 @@ export class GameMap extends TerrainField {
       }
     }
     return spots;
-  }
-
-  _buildTrees() {
-    // Alien deepwood: leaning trunks under lobed, layered canopies — a tall
-    // crown cone with an offset understory lobe, so the treeline is a mass of
-    // overlapping rounded silhouettes instead of a picket of identical cones.
-    // A few trees carry bioluminescent spore pods that burn through the dark.
-    const spots = this._scatter(TILE.FOREST, (rng) => (rng() < 0.62 ? 1 : rng() < 0.9 ? 0 : 2));
-    const g = new THREE.Group();
-    // Toy kit: round crowns with a small pine beside each (the "lobe").
-    const kTrunk = kitGeo('prop_tree_round', 'trunk');
-    const kCanopy = kitGeo('prop_tree_round', 'canopy');
-    const kPine = kitGeo('prop_tree_pine', 'canopy');
-    const useKit = !!(kTrunk && kCanopy && kPine);
-    const trunkGeo = useKit ? kTrunk : new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
-    const trunkMat = useKit ? toyMat({ color: 0xffffff, vertexColors: true }) : toyMat({ color: 0xcbbfa0 });
-    // Rounded clustered crowns, not identical low-poly gemstones. Preserve
-    // the authored trunk height and footprint while giving the silhouette
-    // several overlapping leaf masses.
-    const crown = () => {
-      const bounds = new THREE.Box3();
-      if (useKit) { kCanopy.computeBoundingBox(); bounds.copy(kCanopy.boundingBox); }
-      else bounds.set(new THREE.Vector3(-.55,.7,-.55),new THREE.Vector3(.55,2,.55));
-      const center = bounds.getCenter(new THREE.Vector3()), span = bounds.getSize(new THREE.Vector3());
-      const geo = new THREE.IcosahedronGeometry(1, 2), p = geo.attributes.position;
-      const colors = [];
-      for (let i=0;i<p.count;i++) {
-        const x=p.getX(i), y=p.getY(i), z=p.getZ(i);
-        const lobe=1+.12*Math.sin(x*7+z*3)*Math.cos(y*6-z*4);
-        p.setXYZ(i,center.x+x*span.x*.55*lobe,center.y+y*span.y*.55*lobe,center.z+z*span.z*.55*lobe);
-        const shade=.76+.24*Math.max(0,y); colors.push(shade,shade,shade);
-      }
-      geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.computeVertexNormals();
-      return geo;
-    };
-    const canopyGeo = crown();
-    const canopyMat = environmentMaterial('foliage', { color: 0xffffff, vertexColors: true });
-    const lobeGeo = crown();
-    const lobeMat = canopyMat; // same program: instance color does the varying
-
-    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
-    const canopies = new THREE.InstancedMesh(canopyGeo, canopyMat, spots.length);
-    const lobes = new THREE.InstancedMesh(lobeGeo, lobeMat, spots.length);
-    trunks.castShadow = canopies.castShadow = true;
-    lobes.castShadow = false; // the crown already shadows the stand
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-    const eul = new THREE.Euler();
-    const c = new THREE.Color();
-    const rng = makeRNG(31);
-    const spores = [];
-    for (let i = 0; i < spots.length; i++) {
-      const s = spots[i];
-      const leanX = (rng() - 0.5) * 0.16, leanZ = (rng() - 0.5) * 0.16;
-      eul.set(leanX, s.r, leanZ);
-      q.setFromEuler(eul);
-      sc.set(s.s, s.s * (0.9 + rng() * 0.35), s.s);
-      const gy = this.groundY(s.x, s.z);
-      pos.set(s.x, gy + (useKit ? 0 : 0.32 * s.s), s.z);
-      m.compose(pos, q, sc);
-      trunks.setMatrixAt(i, m);
-      const ch = (0.62 + 0.55) * s.s * (0.95 + rng() * 0.2);
-      pos.set(s.x + leanX * 0.5, useKit ? gy : gy + ch, s.z + leanZ * 0.5);
-      if (useKit) sc.set(s.s * 1.25, s.s * 1.3, s.s * 1.25);
-      m.compose(pos, q, sc);
-      canopies.setMatrixAt(i, m);
-      // Understory lobe: offset to one side and lower, a second rounded mass.
-      const la = rng() * Math.PI * 2, lr = (useKit ? 0.5 : 0.28) + rng() * 0.2;
-      const ly = (0.55 + rng() * 0.25) * s.s;
-      pos.set(s.x + Math.cos(la) * lr * s.s, useKit ? gy : gy + ly, s.z + Math.sin(la) * lr * s.s);
-      sc.set(s.s * (0.8 + rng() * 0.4), s.s * (0.65 + rng() * 0.3), s.s * (0.8 + rng() * 0.4));
-      if (useKit) sc.multiplyScalar(0.8);
-      m.compose(pos, q, sc);
-      lobes.setMatrixAt(i, m);
-      // Canopies key off the map's forest color — one hue family per map
-      // (position-aware so a stitched map can vary palette by region).
-      const canopyHex = this.theme?.palette?.canopy;
-      c.setHex(canopyHex !== undefined ? canopyHex : this.colorOf(TILE.FOREST, s.x, s.z));
-      c.offsetHSL((rng() - 0.5) * 0.015, 0, (rng() - 0.5) * 0.05);
-      canopies.setColorAt(i, c);
-      c.offsetHSL(0.006, 0.06, -0.03); // understory sits in its own shade
-      lobes.setColorAt(i, c);
-      if (rng() < 0.16) spores.push({ x: s.x + (rng() - 0.5) * 0.5, z: s.z + (rng() - 0.5) * 0.5, y: gy + (0.5 + rng() * 0.5) * s.s, s: 0.5 + rng() * 0.5 });
-    }
-    g.add(trunks, canopies, lobes);
-    // Spore pods: teal pinpricks hanging in the deepwood (the biome's own
-    // bioluminescence — the sci-fi answer to ember-lit fantasy forests).
-    if (spores.length) {
-      const pods = new THREE.InstancedMesh(
-        new THREE.OctahedronGeometry(0.07, 0),
-        toyMat({ color: 0x5fd8c8, emissive: 0x3fb8a8, emissiveIntensity: 0.9 }),
-        spores.length,
-      );
-      q.identity();
-      spores.forEach((s, i) => {
-        sc.setScalar(s.s);
-        pos.set(s.x, s.y, s.z);
-        m.compose(pos, q, sc);
-        pods.setMatrixAt(i, m);
-      });
-      g.add(pods);
-    }
-    return g;
   }
 
   // Rock of a cliff-bound landform (its rim, the switchback cuts, any terrace

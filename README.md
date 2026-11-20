@@ -338,3 +338,11 @@ Three.js terms are in `vendor/THREE-LICENSE.md`.
 Use `assets.html` to review audio assets. Use `art-slice.html` to review
 production GLBs at gameplay distance and in silhouette mode. The production
 game does not link to either page.
+
+### Landscape presentation
+
+The terrain renderer uses a seeded environment kit in `src/landscape-art.js`:
+mixed broadleaf/conifer groves, undergrowth, rock outcrops, fallen trunks and
+shore reeds. `src/environment-art.js` blends painted terrain and animates
+shallow/deep water. Dressing does not change walkability, combat or saved state.
+See [the art quality standard](docs/art-quality-standard.md).
