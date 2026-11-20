@@ -4,6 +4,7 @@
 // so `scripts/map-check.mjs` can build and validate every level in Node.
 import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
+import { environmentMaterial, groundControl } from './environment-art.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
@@ -301,9 +302,8 @@ export class GameMap extends TerrainField {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.computeVertexNormals();
-    // Flat matte ground: no grain texture, colour comes only from the
-    // per-map palette baked into the vertex colours.
-    const mat = toyMat({ vertexColors: true });
+    // Painted terrain retains biome vertex colours beneath world-space materials.
+    const mat = environmentMaterial('ground', { vertexColors: true, control: groundControl(this), size: N, organic: this.terrainKind === 'hills' ? .12 : this.terrainKind === 'wastes' ? .24 : 1 });
     const terrain = new THREE.Mesh(geo, mat);
     terrain.receiveShadow = true;
     terrain.name = 'terrain';
@@ -500,9 +500,28 @@ export class GameMap extends TerrainField {
     const useKit = !!(kTrunk && kCanopy && kPine);
     const trunkGeo = useKit ? kTrunk : new THREE.CylinderGeometry(0.07, 0.14, 0.7, 5);
     const trunkMat = useKit ? toyMat({ color: 0xffffff, vertexColors: true }) : toyMat({ color: 0xcbbfa0 });
-    const canopyGeo = useKit ? kCanopy : new THREE.ConeGeometry(0.52, 1.3, 7);
-    const canopyMat = toyMat({ color: 0xffffff, vertexColors: useKit });
-    const lobeGeo = useKit ? kPine : new THREE.SphereGeometry(0.42, 7, 5);
+    // Rounded clustered crowns, not identical low-poly gemstones. Preserve
+    // the authored trunk height and footprint while giving the silhouette
+    // several overlapping leaf masses.
+    const crown = () => {
+      const bounds = new THREE.Box3();
+      if (useKit) { kCanopy.computeBoundingBox(); bounds.copy(kCanopy.boundingBox); }
+      else bounds.set(new THREE.Vector3(-.55,.7,-.55),new THREE.Vector3(.55,2,.55));
+      const center = bounds.getCenter(new THREE.Vector3()), span = bounds.getSize(new THREE.Vector3());
+      const geo = new THREE.IcosahedronGeometry(1, 2), p = geo.attributes.position;
+      const colors = [];
+      for (let i=0;i<p.count;i++) {
+        const x=p.getX(i), y=p.getY(i), z=p.getZ(i);
+        const lobe=1+.12*Math.sin(x*7+z*3)*Math.cos(y*6-z*4);
+        p.setXYZ(i,center.x+x*span.x*.55*lobe,center.y+y*span.y*.55*lobe,center.z+z*span.z*.55*lobe);
+        const shade=.76+.24*Math.max(0,y); colors.push(shade,shade,shade);
+      }
+      geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.computeVertexNormals();
+      return geo;
+    };
+    const canopyGeo = crown();
+    const canopyMat = environmentMaterial('foliage', { color: 0xffffff, vertexColors: true });
+    const lobeGeo = crown();
     const lobeMat = canopyMat; // same program: instance color does the varying
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);

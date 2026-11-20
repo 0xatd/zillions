@@ -1,6 +1,7 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
+import { environmentMaterial } from './environment-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
@@ -895,8 +896,8 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
-      toyMat({ color: 0xa6a091 }),
+      squarePlaza ? new THREE.PlaneGeometry(9.2, 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      environmentMaterial('stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
@@ -905,16 +906,15 @@ class App {
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
+    const ringGeo = new THREE.RingGeometry(4.38, 4.58, 64);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
+      color: 0x736d5c, transparent: true, opacity: 0.7, depthWrite: false,
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
     g.add(ring);
-    const laneMat = toyMat({ color: 0xb3ad9e });
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
+    const laneMat = environmentMaterial('stone', { color: 0x9e998b });
     // Render the reserved streets, including bent approaches through an inner
     // ward, rather than guessing radial strips from a generic city radius.
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
@@ -928,13 +928,8 @@ class App {
       lane.rotation.z = Math.PI / 2 - a;
       lane.position.set((ax + bx) / 2, plazaY + 0.012, (az + bz) / 2);
       lane.receiveShadow = true;
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
-      stripe.rotation.copy(lane.rotation);
-      stripe.position.copy(lane.position);
-      stripe.position.y = plazaY + 0.022;
-      drape(lane, 0.025); drape(stripe, 0.04);
+      drape(lane, 0.025);
       g.add(lane);
-      g.add(stripe);
     }
     // Switchback roads down the cliff face below each gate: a paved ribbon
     // draped over the cut so the zig-zag reads from the game camera.
@@ -996,8 +991,8 @@ class App {
       // Graphite edges separate the pale roadbed from both snow and moor;
       // amber tread bands identify the graded route at normal play zoom.
       const edgeMat = layer(0x514c55, -1);
-      const roadMat = layer(0xd8c9ae, -3);
-      const centreMat = layer(0xffba58, -5);
+      const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
+      const centreMat = layer(0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
@@ -4168,8 +4163,22 @@ class App {
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+    const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
       archTiles: this._archTiles, gateMain: this._gateMain, center });
+    const painted = new Map();
+    mesh.traverse(part => {
+      if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
+        const original = part.material;
+        if (!painted.has(original)) {
+          const material = environmentMaterial('building', { vertexColors: true, flatShading: true,
+            color: original.color, opacity: original.opacity, transparent: original.transparent, side: original.side });
+          painted.set(original, material);
+        }
+        part.material = painted.get(original);
+      }
+    });
+    for (const original of painted.keys()) original.dispose();
+    return mesh;
   }
 
   _syncBuildings() {

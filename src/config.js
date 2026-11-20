@@ -907,7 +907,7 @@ export const LEVELS = [
     ],
     blurb: 'A world split by one great rift. Three passes through it — and everything ends here.',
     theme: { terrain: 'vale', city: 'keyhole', liquidName: 'Void water',
-      palette: { grass: 0x6c5292, forest: 0x5d4682, canopy: 0xe07aae, water: 0x9d6ee0, mountain: 0xbcaadc, sand: 0x8a76aa, path: 0xa889b4, sky: 0xc6addf, skyTop: 0x4b3a7c, shadow: 0x1a1438 } },
+      palette: { grass: 0x747e68, forest: 0x4e6252, canopy: 0x8eab78, water: 0x526579, mountain: 0x98958e, sand: 0x9d947e, path: 0x9e9178, sky: 0xb3bdbe, skyTop: 0x526777, shadow: 0x222c3b } },
     boss: { name: 'The Zillion', icon: '👁️', hp: 9000, dmg: 75, speed: 1.0, chase: 2.2, scale: 4.2,
       color: 0x2f1f3f, score: 250, enrage: 0.4, armor: 0.2,
       spawn: { every: 10, count: 6, type: 'runner' }, roar: { every: 15, radius: 14, dur: 3.5 },
