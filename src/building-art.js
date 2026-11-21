@@ -327,7 +327,13 @@ function kitBuildingMesh(b,ctx={}) {
   if (!key || !hasKit(key)) return null;
   const model = kitClone(key);
   if (!model) return null;
-  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1.15,1.65,1.15);
+  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1.15,1.35,1.15);
+  // Stable presentation variation: no RNG consumption, footprint expansion,
+  // layout changes or false building tiers. District roofs stay subordinate.
+  if(b.kind==='house'){
+    const v=((b.id||0)*17)%7;
+    model.scale.set(.94+(v%3)*.02,.94+v*.035,.94+(v%3)*.02);
+  }
   const shared = kitMaterials();
   const body = shared.body.clone(), glow = shared.glow.clone();
   model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });

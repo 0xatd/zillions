@@ -6,14 +6,14 @@ import {levelById} from '../src/config.js';
 
 const level=levelById(5);
 const map=()=>new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
-test('a legacy positional colony save cannot silently turn a camp into a tower',()=>{
+for(const site of [0,1])test(`site ${site}: a legacy colony save cannot silently restore into a different layout`,()=>{
   const game=new Game(map(),'normal','scott',null,5);
-  game.foundCity(1,0);
+  game.foundCity(site,0);
   const camp=game.plots.find(p=>p.kind==='camp_ranger');
   game._construct(camp,true);
   const saved=game.snapshot();
   const original=JSON.stringify(saved);
-  for(const v of [5,6]) {
+  for(const v of [5,6,7]) {
     const legacy={...saved,v};
     assert.throws(()=>new Game(map(),'normal','scott',legacy,5),/older colony layout/);
   }

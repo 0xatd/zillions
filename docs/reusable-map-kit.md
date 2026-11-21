@@ -58,7 +58,7 @@ to economic building positions can affect combat; simulation equivalence to the
 old layout is neither expected nor claimed. Validate actual movement, campaign
 behavior, deterministic restore and art at gameplay distance.
 
-Snapshot version 7 and lobby protocol 8 protect this new layout. Old in-progress
+Snapshot version 8 and lobby protocol 9 protect this new layout. Old in-progress
 sieges cannot be resumed by this branch; original save archival and account
 progression remain intact. Do not merge or deploy without reviewing that impact.
 
@@ -87,3 +87,18 @@ Keep wall bases seated in rock, ramps visibly open, road hierarchy clear and
 district edges natural. Save actual screenshots and traversal results. A test
 pass is necessary, but does not establish visual quality. See
 [reference study](city-reference-study.md) for observed design principles.
+
+## Composition refinement
+
+`crown-courts-v2` replaces the long cross street with a bent main avenue,
+a smaller keep court and quieter west-district lanes. Residential frontages
+use authored staggered slots instead of a global row-alignment score. The
+same clearance and accessibility solver checks every candidate. Economic
+plot counts, IDs, military plots and graded ramps remain unchanged; positions
+and approach geometry change, so this is not simulation-equivalent to v1.
+
+The European starter keep now has an asymmetric watch tower, lower stair
+turret and pitched great hall, authored in the existing Blender pipeline.
+House height variation is ID-keyed and never enlarges its footprint. Cliff
+crests use continuous varying height, not a scatter of isolated rock props.
+Keep reusable shape rules separate from map-specific district coordinates.

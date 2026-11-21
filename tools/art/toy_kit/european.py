@@ -211,7 +211,11 @@ def castle(k, t, pal):
                 B.box(pal['stone2'] if course % 2 else pal['stone3'],
                       .26, .24, .26, sx*.83, base+course*.27, sz*.78)
     if t == 1:
-        round_tower(B, G, pal, -.96, -.48, .32, 2.5, crest=True)
+        # Asymmetric watch-tower and lower stair turret frame the great hall.
+        # All bases remain inside the original plinth / occupied footprint.
+        round_tower(B, G, pal, -1.12, -.68, .48, 3.45, crest=True)
+        round_tower(B, G, pal, 1.02, -.60, .38, 2.55, crest=True)
+        banner(B, pal, -1.12, -.68, 4.65, .8, big=.65)
         # A framed porch, not just a colored rectangle on a wall.
         for sx in (-.33, .33):
             B.box(pal['stone2'], .16, .9, .34, sx, base, .93)
@@ -219,7 +223,13 @@ def castle(k, t, pal):
         for i in range(3):
             B.box(pal['stone2'], .7+i*.12, .08, .22, 0, base-.08*i, 1.2+i*.18)
     if t == 1:
-        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=0)
+        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='merlon', windows=0)
+        painted_roof(B, pal, 1.9, .85, 1.8, y=base+1.92, overhang=.12)
+        # Stone entrance gable and deep porch establish a civic front.
+        B.box(pal['stone'], .72, 1.45, .35, 0, base, .83)
+        B.gable(pal['roof'], .86, .52, .62, 0, base+1.45, .86, overhang=.08)
+        for sx in (-.73, .73):
+            B.box(pal['stone2'], .18, 1.7, .24, sx, base, .86)
         door(B, pal, 0.4, 0.6, 0, 0.81, base)
         for x in (-0.5, 0.5):
             window(B, G, pal, x, base + 1.0, 0.81, w=0.16, h=0.22)

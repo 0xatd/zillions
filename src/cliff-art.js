@@ -10,7 +10,7 @@ export function buildCliffCrown(map,tileCH) {
   const group=new THREE.Group();group.name='cliff-crown-kit';
   if(!tileCH||!map.ledgeW)return group;
   const positions=[],edges=new Map(),N=map.size;
-  const raised=([x,z,y])=>[x,y+.56+.22*Math.sin(x*.43+z*.27)+.14*Math.sin(z*.71-x*.19),z];
+  const raised=([x,z,y])=>[x,y+.62+.34*Math.sin(x*.63+z*.41)+.20*Math.sin(z*1.13-x*.39),z];
   const key=v=>v.map(n=>n.toFixed(4)).join(',');
   const emit=(a,b,c)=>positions.push(...a,...b,...c);
   for(let z=1;z<N-1;z++)for(let x=1;x<N-1;x++){
@@ -45,7 +45,7 @@ export function buildCliffCrown(map,tileCH) {
     if(!vertices.has(id)){vertices.set(id,unique.length/3);unique.push(...p);}indices.push(vertices.get(id));
   }
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(unique,3));geometry.setIndex(indices);geometry.computeVertexNormals();
-  const material=environmentMaterial('rock',{color:new THREE.Color(map.colorOf(TILE.MOUNTAIN)).lerp(new THREE.Color(0x929481),.65),side:THREE.DoubleSide});
+  const material=environmentMaterial('rock',{color:new THREE.Color(map.colorOf(TILE.MOUNTAIN)).lerp(new THREE.Color(0x929481),.42),side:THREE.DoubleSide});
   const mesh=new THREE.Mesh(geometry,material);mesh.name='exposed-cliff-crown';mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
   return group;
 }
