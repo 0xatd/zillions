@@ -2,6 +2,12 @@
 
 Use this file as the entry point for agent work in Zillions.
 
+## Fortress craft
+
+Use the installed `rts-fortress-design` skill for walls, gates, bases and terrain
+junction work. Read `docs/reusable-map-kit.md` for implementation and all-map
+coverage. Passing path checks does not establish visual quality.
+
 ## Map composition requirement
 
 Read `docs/reusable-map-kit.md` before map/layout work. Alex rejected the

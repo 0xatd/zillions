@@ -1,3 +1,4 @@
+import { gateSupports } from './rampart-art-plan.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
@@ -790,6 +791,7 @@ class App {
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
+    this._gateSupports = null;
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
     for (const p of this.projectiles) this._destroyProjectile(p);
@@ -4169,11 +4171,16 @@ class App {
       this._wallTiles = new Set();
       this._archTiles = new Set();
       this._gateMain = new Set();
+      this._gateSupports = new Map();
       for (const p of plots) {
         if (p.kind !== 'wall') continue;
         for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
         for (const [x, z] of p.arch || (p.gate ? [p.gate] : [])) this._archTiles.add(z * N + x);
-        if (p.gate) this._gateMain.add(p.gate[1] * N + p.gate[0]);
+        if (p.gate) {
+          const key=p.gate[1]*N+p.gate[0];
+          this._gateMain.add(key);
+          this._gateSupports.set(key,gateSupports(p,this.game.map));
+        }
       }
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
@@ -4183,7 +4190,7 @@ class App {
     const frontage = frontageTile == null ? null :
       [frontageTile % this.map.size + .5, Math.floor(frontageTile / this.map.size) + .5];
     const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center, frontage, fortressKit: !!plan?.kit });
+      archTiles: this._archTiles, gateMain: this._gateMain, gateSupports: this._gateSupports, liveWallTiles: b.gate ? new Set(this.game.buildings.filter(o=>o.kind==='wall'&&o.alive).map(o=>o.z*this.map.size+o.x)) : null, center, frontage, fortressKit: !!plan?.kit, armoredWalls: this.game.culture === 'european' });
     const painted = new Map();
     mesh.traverse(part => {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
@@ -4206,8 +4213,11 @@ class App {
     for (const b of g.buildings) {
       seen.add(b.id);
       const plot = g.plots.find((p) => p.id === b.plotId);
-      const tierKey = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const artTier = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const supportKey = b.gate ? (this._gateSupports?.get(b.z*this.map.size+b.x)||[]).map(([x,z])=>!this._wallTiles.has(z*this.map.size+x)||!!g.occ[z*this.map.size+x]).join(',') : '';
+      const tierKey = artTier + ':' + supportKey;
       let rec = this.buildingMeshes.get(b.id);
+      const priorSpawnT = rec?.artTier === artTier ? rec.spawnT : undefined;
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
         this.scene.remove(rec.mesh);
         this._disposeObject3D(rec.mesh);
@@ -4231,7 +4241,7 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
+        rec = { mesh, b, tierKey, artTier, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }

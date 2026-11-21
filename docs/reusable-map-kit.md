@@ -181,3 +181,40 @@ sniper facilities have offset sensor towers. Workshops use open gantries, and
 fabricators use cylindrical chambers. These forms share the same armor palette
 and existing asset IDs, but no longer share one box-shaped building body.
 Rebuild through `frontier.py`; keep all tier, state and gameplay-distance checks.
+
+## All-map architectural assembly
+
+All five campaign maps and their alternate founding sites use the shared
+`rampart-art-plan.js` contracts. Straight cells draw one full panel instead of
+paired half-panels. Corners retain shared tile-edge endpoints; diagonal-only cells meet at clipped corner returns entirely inside their
+blocked footprint, and each damageable cell retains its own mesh, so destruction never leaves a long ghost curtain.
+Default human starter walls use the armored defense family on every map.
+
+Gate jambs sit on actual solid wall endpoint tiles or natural abutments outside
+all arch tiles, including diagonal/stepped openings. Destroyed wall abutments
+remove their jamb and canopy; gate meshes refresh from support occupancy without
+replaying the construction animation. The canopy follows those
+supports; its lowest beam is above the passage. The runtime assembles existing
+authored post geometry with merged control-room and canopy volumes. Fixed-width
+GLB gates remain the gallery/legacy-context fallback, not the in-game fitter.
+`tests/rampart-art-plan.test.mjs` covers all 15 sites and their 94 gates.
+
+All connected colony networks now distinguish paved main gate routes from earth
+service lanes. Existing frontage orientation and role-specific buildings apply
+across maps. This is shared architectural polish, not 15 relocated city plans:
+Black Vale remains the only custom court/district layout. No new simulation,
+plot-position, collision, economy, snapshot or protocol changes are introduced.
+
+Use the installed `rts-fortress-design` skill for future wall/base work. Its
+reusable craft and visual checks supplement this repository's exact contracts.
+
+For the transformed gate-geometry regression, start a local developer game,
+wait for its kit, then run in the browser console:
+
+```js
+await (await import('/scripts/rampart-art-proof.mjs')).proveGateClearance()
+```
+
+It checks 282 gate/tier combinations against actual open tiles using the
+renderer's real meshes. It rejects unloaded assets instead of silently proving
+the fallback. The baseline fixed-width gate fails on its first passage jamb.

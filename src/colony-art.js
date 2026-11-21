@@ -27,9 +27,9 @@ export function buildColonyStreets(map, roads) {
     const mesh=new THREE.Mesh(geo,environmentMaterial(kind,{color,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4}));mesh.receiveShadow=true;group.add(mesh);
   };
   // A single merged paving mesh avoids per-plot draws and crossing ribbons.
-  if(roads.kit){
+  if(roads.routes){
     // A dark stone kerb makes the route boundary legible against dirt/grass.
-    const pavedKeys=new Set(roads.kit.cells.filter(c=>c.piece==='road'||c.piece==='plaza').map(c=>`${c.x},${c.z}`));
+    const pavedKeys=new Set((roads.kit?.cells||[]).filter(c=>c.piece==='road'||c.piece==='plaza').map(c=>`${c.x},${c.z}`));
     for(const r of roads.routes)if(r.primary)for(const [x,z] of r.points)pavedKeys.add(`${Math.floor(x)},${Math.floor(z)}`);
     const paved=roads.tiles.filter(([x,z])=>pavedKeys.has(`${x},${z}`));
     const lanes=roads.tiles.filter(([x,z])=>!pavedKeys.has(`${x},${z}`));
