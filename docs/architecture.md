@@ -72,6 +72,8 @@ to snapshots when the state can affect later simulation.
 | File | Ownership |
 | --- | --- |
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
+| `src/colony-roads.js` | Deterministic built-footprint-aware courtyard, gate and frontage street network |
+| `src/colony-art.js` | Merged ground-following colony paving |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |

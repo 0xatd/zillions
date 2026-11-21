@@ -84,3 +84,22 @@ refresh all peers and create a new room after release.
 The built-ramp regression must call `foundCity(siteIndex, playerIndex)`, not the
 reverse. Exercise every Black Vale site with its own defenses constructed.
 A two-tile postern is a real gate whenever the graded switchback crosses it.
+
+## Connected colony composition
+
+The keep court and all interior building frontages now share a connected street
+network. `colony-roads.js` routes over ground that remains traversable with every
+planned building constructed. It uses fixed-order searches; it never clears rock,
+forest, walls or footprints to make a decorative shortcut. Gate streets connect
+to the existing switchbacks. Original plot counts, districts and terrain-specific
+colony silhouettes remain intact.
+
+`colony-art.js` renders the shared paving in one mesh. Black Vale's keep has a
+square court; its residential lanes and field access spurs replace isolated pads.
+Passive aura and payment outlines are thinner and quieter. Defense still holds
+the keep; troops are not forced to detour along a road when open ground is clear.
+
+The committed street regression covers all 15 authored sites with built plots,
+checks connected frontage and unobstructed pavement, and walks the hero along
+every principal gate route. The separate ramp regression covers both directions
+of all Black Vale switchbacks. No new collision barrier is introduced by art.
