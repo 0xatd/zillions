@@ -128,3 +128,9 @@ Terrain control maps distinguish working earth, forest floor, exposed crag and
 water. Grassy cliff shelves keep their turf. World-space rock strata and slow
 water movement must stay subordinate to combat. Keep each biome's palette,
 including snow and ash. Review these shared components across all five maps.
+
+## Playable benchmark
+
+Use [Black Vale benchmark](black-vale-benchmark.md) for the fixed scene, cameras,
+battle duration and comparison rules. Review the combined landscape, colony,
+hero and armies rather than judging each layer in isolation.

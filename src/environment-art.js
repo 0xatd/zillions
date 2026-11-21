@@ -121,7 +121,9 @@ export function environmentMaterial(kind, options = {}) {
       vec2 seams=abs(fract(shingles)-.5);
       float joint=max(smoothstep(.43,.49,seams.x),smoothstep(.39,.49,seams.y));
       float materialDetail=mix(.62+grain*2.1,1.06-joint*.32,roof);
-      diffuseColor.rgb*=materialDetail;
+      // Slate-blue roofs sit behind the bright faction cloth and unit crests.
+      vec3 slate=diffuseColor.rgb*vec3(1.20,1.02,.76)+vec3(.012,.016,.02);
+      diffuseColor.rgb=mix(diffuseColor.rgb,slate,roof*.72)*materialDetail;
     `;
     const foliage = /* glsl */`
       float leaves=artNoise(artWorld.xz*9.0+artWorld.y*3.0);

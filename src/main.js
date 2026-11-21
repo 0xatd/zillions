@@ -5077,9 +5077,9 @@ class App {
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
     this.sun.intensity = lerp(1.25, 2.3, b);
-    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
+    this.sun.color.setRGB(1, 0.94, 0.83).lerp(shadow, (1 - b) * 0.35);
     this.hemi.intensity = lerp(0.55, 0.75, b);
-    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.hemi.color.setRGB(0.83, 0.91, 1).lerp(shadow, (1 - b) * 0.4);
     this.hemi.groundColor.copy(shadow);
     this.amb.intensity = 0.35;
     this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);

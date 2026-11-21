@@ -10,6 +10,7 @@ space (metres = tiles, +z = front, origin at ground centre).
 import math
 
 from kit import shade, xform
+import combat
 
 PALETTE = {
     'stone': 0xe9d8b4, 'stone2': 0xd2bc92, 'stone3': 0xa88f6c, 'roof': 0x3a66c4,
@@ -638,83 +639,18 @@ def hero_forge(k, t, pal):
 
 # ---------------------------------------------------------------- figures
 #
-# Chunky block figurines, ~0.95 tall, facing +z. Limbs are separate parts
-# with their origin at the hip / shoulder so the runtime stride swings them.
-
-def _legs(k, pal, col, boot, hip=0.36, w=0.1, s=1.0):
-    for name, x in (('leg_l', -w), ('leg_r', w)):
-        L = k.part(name, origin=(x * s, hip * s, 0))
-        L.box(col, 0.14 * s, (hip - 0.08) * s, 0.16 * s, x * s, 0.08 * s, 0)
-        L.box(boot, 0.16 * s, 0.1 * s, 0.22 * s, x * s, 0, 0.02 * s)
-
-
-def _torso(B, pal, armor, cloth, s=1.0, wide=1.0):
-    B.box(armor, 0.36 * s * wide, 0.36 * s, 0.24 * s, 0, 0.34 * s, 0)
-    B.box(cloth, 0.38 * s * wide, 0.3 * s, 0.26 * s, 0, 0.3 * s, 0)
-    B.box(pal['trim'], 0.39 * s * wide, 0.05 * s, 0.27 * s, 0, 0.42 * s, 0)
-
+# Sculpted infantry keeps separate hip/shoulder pivots for runtime stride.
 
 def trooper(k, pal):
-    """Shield knight with a rifle-lance — the line soldier."""
-    B, G = k.B, k.G
-    steel, cloth = 0xc9d3df, pal['cloth']
-    _legs(k, pal, 0x8d98a8, pal['dark'])
-    _torso(B, pal, steel, cloth)
-    B.box(steel, 0.42, 0.14, 0.28, 0, 0.62, 0)              # pauldrons
-    B.box(steel, 0.3, 0.28, 0.3, 0, 0.72, 0)                # helm
-    B.box(pal['dark'], 0.24, 0.07, 0.04, 0, 0.83, 0.15)     # visor slit
-    G.box(pal['glow'], 0.18, 0.03, 0.02, 0, 0.845, 0.17)
-    B.box(pal['trim'], 0.06, 0.16, 0.28, 0, 1.0, -0.01)     # crest
-    A = k.part('arm_l', origin=(-0.24, 0.66, 0))
-    A.box(steel, 0.11, 0.3, 0.13, -0.25, 0.38, 0)
-    A.box(cloth, 0.06, 0.42, 0.34, -0.33, 0.3, 0.06)        # kite shield
-    A.box(pal['trim'], 0.07, 0.42, 0.06, -0.335, 0.3, 0.06)
-    A.box(pal['trim'], 0.07, 0.06, 0.3, -0.335, 0.48, 0.06)
-    R = k.part('arm_r', origin=(0.24, 0.66, 0))
-    R.box(steel, 0.11, 0.3, 0.13, 0.25, 0.38, 0)
-    R.box(pal['dark'], 0.07, 0.07, 0.62, 0.27, 0.42, 0.22)  # rifle-lance
-    R.box(pal['trim'], 0.09, 0.09, 0.07, 0.27, 0.41, 0.52)
-    G.box(pal['glow'], 0.04, 0.04, 0.1, 0.27, 0.43, 0.58)
+    combat.infantry(k, pal, 'soldier')
 
 
 def ranger(k, pal):
-    """Hooded scout with an energy bow."""
-    B, G = k.B, k.G
-    green, leather = 0x4f9a52, 0x8a6342
-    _legs(k, pal, leather, pal['dark'])
-    _torso(B, pal, leather, green)
-    B.box(green, 0.44, 0.12, 0.3, 0, 0.6, 0)                # cape shoulders
-    B.box(green, 0.36, 0.42, 0.06, 0, 0.24, -0.15)          # cape
-    B.box(pal['skin'], 0.24, 0.22, 0.24, 0, 0.7, 0)
-    B.prism(green, 4, 0.22, 0, 0.32, 0, 0.84, 0, phase=math.pi / 4)  # hood
-    B.box(pal['dark'], 0.2, 0.05, 0.03, 0, 0.78, 0.125)
-    A = k.part('arm_l', origin=(-0.22, 0.64, 0))
-    A.box(leather, 0.1, 0.3, 0.12, -0.23, 0.36, 0.02)
-    A.box(pal['wood'], 0.05, 0.62, 0.05, -0.27, 0.16, 0.18)  # bow stave
-    G.box(pal['glow'], 0.02, 0.56, 0.02, -0.27, 0.19, 0.14)  # string
-    R = k.part('arm_r', origin=(0.22, 0.64, 0))
-    R.box(leather, 0.1, 0.3, 0.12, 0.23, 0.36, 0)
-    B.box(leather, 0.12, 0.34, 0.12, 0.12, 0.42, -0.17)     # quiver
-    G.box(pal['glow'], 0.1, 0.06, 0.1, 0.12, 0.76, -0.17)
+    combat.infantry(k, pal, 'ranger')
 
 
 def marksman(k, pal):
-    """Cloaked sniper with a long rail rifle."""
-    B, G = k.B, k.G
-    violet, dark = 0x7a5cc0, 0x3d3560
-    _legs(k, pal, dark, pal['dark'])
-    _torso(B, pal, dark, violet)
-    B.box(violet, 0.4, 0.5, 0.06, 0, 0.18, -0.15)
-    B.box(dark, 0.27, 0.27, 0.27, 0, 0.68, 0)
-    G.box(0xc8a8ff, 0.08, 0.06, 0.03, 0.06, 0.79, 0.14)      # scope eye
-    B.box(violet, 0.31, 0.08, 0.31, 0, 0.93, 0)
-    A = k.part('arm_l', origin=(-0.22, 0.64, 0))
-    A.box(dark, 0.1, 0.3, 0.12, -0.23, 0.36, 0.04)
-    R = k.part('arm_r', origin=(0.22, 0.64, 0))
-    R.box(dark, 0.1, 0.3, 0.12, 0.23, 0.36, 0)
-    R.box(pal['dark'], 0.06, 0.08, 0.95, 0.18, 0.44, 0.3)
-    R.box(pal['steel'], 0.08, 0.08, 0.16, 0.18, 0.52, 0.18)
-    G.box(0xc8a8ff, 0.03, 0.03, 0.1, 0.18, 0.45, 0.8)
+    combat.infantry(k, pal, 'sniper')
 
 
 # ---------------------------------------------------------------- heroes
@@ -746,10 +682,10 @@ def _bike(B, G, look, length, width, height, nose, style):
     dk = pal_dark()
     hl = length / 2
     # hull, tapered: a wide mid block and a narrower tail
-    B.box(look['bike'], width, height, length * 0.62, 0, y0, 0.02)
+    combat.armor(B, look['bike'], width, height, length * 0.72, 0, y0, 0.02)
     B.box(shade(look['bike'], 0.82), width * 0.78, height * 0.86, length * 0.4, 0, y0 + 0.02, -hl + length * 0.2)
     # fairing + nose
-    B.box(look['main'], width * 0.86, height * 0.7, nose, 0, y0 + height * 0.22, hl - nose / 2 + 0.04)
+    combat.armor(B, look['main'], width * 0.86, height * 0.7, nose, 0, y0 + height * 0.22, hl - nose / 2 + 0.04)
     B.prism(look['main'], 4, width * 0.42, 0, nose * 0.8, 0, y0 + height * 0.55, hl + nose * 0.32,
             rx=math.pi / 2, phase=math.pi / 4)
     G.box(0xfff4c8, width * 0.34, 0.07, 0.03, 0, y0 + height * 0.5, hl + 0.06)      # headlamp
@@ -825,9 +761,7 @@ def _head(B, pal, y, z, r=HEAD_R, eyes=0x1b1d24, skin=None):
 
 
 def _cape(B, look, top, z, w, length, sway=0.0):
-    """Two-panel cape from the shoulders, flaring back."""
-    B.box(look['cape'], w, length * 0.55, 0.035, 0, top - length * 0.55, z, -0.18, 0, sway)
-    B.box(shade(look['cape'], 0.85), w * 1.12, length * 0.5, 0.035, 0, top - length * 1.0, z - 0.1, -0.42, 0, sway)
+    combat.cloth(B, look['cape'], top, z, w, length)
 
 
 def _pauldron(B, c, x, y, z, r):
@@ -938,84 +872,8 @@ def hero(k, key, pal):
 # rides the spines and plates so the roster reads apart. Arms are pivot-
 # relative (origin at the shoulder line) for the instanced swing.
 
-HIVE = 0x4b3d63
-HIVE2 = 0x6a5888
-HIVE3 = 0x2f2742
-
-
 def enemy(k, key, accent):
-    B, A, E = k.B, k.part('arms', origin=(0, 0.72, 0.02)), k.part('eyes', glow=True)
-    pv = 0.72
-    if key == 'walker':
-        for x in (-0.1, 0.1):
-            B.box(HIVE3, 0.13, 0.32, 0.15, x, 0, 0)
-        B.box(HIVE, 0.4, 0.38, 0.28, 0, 0.32, 0, 0.18, 0, 0)
-        B.box(accent, 0.3, 0.1, 0.12, 0, 0.62, -0.12, 0.3, 0, 0)
-        B.box(HIVE2, 0.28, 0.24, 0.26, 0, 0.7, 0.08, 0.25, 0, 0)
-        eyes = [(-0.06, 0.82, 0.22), (0.06, 0.82, 0.22)]
-        arm_len, arm_w = 0.42, 0.1
-    elif key == 'runner':
-        pv = 0.66
-        for x, z in ((-0.08, 0.1), (0.08, -0.12)):
-            B.box(HIVE3, 0.1, 0.34, 0.12, x, 0, z)
-        B.box(HIVE, 0.3, 0.3, 0.24, 0, 0.32, 0.03, 0.55, 0, 0)
-        B.box(accent, 0.08, 0.18, 0.28, 0, 0.55, -0.05, 0.55, 0, 0)
-        B.box(HIVE2, 0.22, 0.2, 0.28, 0, 0.56, 0.2, 0.4, 0, 0)
-        eyes = [(-0.05, 0.66, 0.36), (0.05, 0.66, 0.36)]
-        arm_len, arm_w = 0.38, 0.08
-    elif key == 'brute':
-        pv = 0.8
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.2, 0.34, 0.22, x, 0, 0)
-        B.box(HIVE, 0.66, 0.5, 0.44, 0, 0.32, 0)
-        B.box(accent, 0.7, 0.14, 0.3, 0, 0.78, -0.08)
-        B.box(HIVE2, 0.24, 0.18, 0.22, 0, 0.82, 0.18)
-        eyes = [(-0.06, 0.9, 0.3), (0.06, 0.9, 0.3)]
-        arm_len, arm_w = 0.5, 0.18
-    elif key == 'spitter':
-        for x in (-0.1, 0.1):
-            B.box(HIVE3, 0.12, 0.3, 0.14, x, 0, 0)
-        B.box(HIVE, 0.36, 0.34, 0.26, 0, 0.3, 0)
-        B.ico(accent, 0.24, 0, 0.62, -0.18, 1, 1, 1, sub=1)
-        B.box(HIVE2, 0.12, 0.26, 0.12, 0, 0.6, 0.1, -0.4, 0, 0)
-        B.box(HIVE2, 0.2, 0.16, 0.24, 0, 0.82, 0.2)
-        eyes = [(-0.05, 0.94, 0.33), (0.05, 0.94, 0.33)]
-        arm_len, arm_w = 0.32, 0.08
-    elif key == 'burrower':
-        pv = 0.5
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.14, 0.2, 0.3, x, 0, 0)
-        B.box(HIVE, 0.48, 0.3, 0.46, 0, 0.18, -0.04)
-        B.prism(accent, 6, 0.2, 0, 0.42, 0, 0.35, 0.2, rx=math.pi / 2)
-        B.box(HIVE2, 0.36, 0.12, 0.3, 0, 0.48, -0.08)
-        eyes = [(-0.12, 0.42, 0.18), (0.12, 0.42, 0.18)]
-        arm_len, arm_w = 0.3, 0.12
-    elif key == 'sieger':
-        pv = 0.78
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.18, 0.32, 0.22, x, 0, 0)
-        B.box(HIVE, 0.58, 0.46, 0.5, 0, 0.3, 0)
-        for i in range(3):
-            B.box(accent, 0.62 - i * 0.1, 0.1, 0.34 - i * 0.04, 0, 0.62 + i * 0.1, -0.06 - i * 0.04)
-        B.box(HIVE2, 0.42, 0.3, 0.2, 0, 0.36, 0.3)
-        eyes = [(-0.12, 0.6, 0.41), (0.12, 0.6, 0.41)]
-        arm_len, arm_w = 0.44, 0.16
-    else:  # caller
-        pv = 0.86
-        for x in (-0.08, 0.08):
-            B.box(HIVE3, 0.1, 0.42, 0.12, x, 0, 0)
-        B.box(HIVE, 0.28, 0.46, 0.22, 0, 0.4, 0)
-        B.box(HIVE2, 0.24, 0.22, 0.22, 0, 0.88, 0.02)
-        for i, a in enumerate((-0.5, 0, 0.5)):
-            E.prism(accent, 4, 0.04, 0, 0.3, math.sin(a) * 0.1, 1.08, 0, rz=-a)
-        eyes = [(-0.05, 1.0, 0.13), (0.05, 1.0, 0.13)]
-        arm_len, arm_w = 0.5, 0.07
-    A.origin.y = pv
-    for sx in (-1, 1):
-        A.box(HIVE2, arm_w, arm_w, arm_len, sx * (0.2 + arm_w), pv - arm_w, 0.06 + arm_len / 2 - 0.12)
-        A.box(accent, arm_w * 1.1, arm_w * 0.5, 0.08, sx * (0.2 + arm_w), pv - arm_w * 0.4, arm_len - 0.1)
-    for (x, y, z) in eyes:
-        E.box(0xffffff, 0.06, 0.05, 0.04, x, y, z)
+    combat.enemy(k, key, accent)
 
 
 # ---------------------------------------------------------------- props
