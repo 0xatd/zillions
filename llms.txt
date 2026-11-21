@@ -102,3 +102,11 @@ Do not call a pull request deployable until all three pass.
 
 - src/colony-roads.js connects the built colony court, gates and frontages.
 - src/colony-art.js renders its shared paving without new collision.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.

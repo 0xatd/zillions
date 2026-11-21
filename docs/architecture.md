@@ -306,3 +306,11 @@ When you add a system:
 5. Define failure behavior.
 6. Add a committed check.
 7. Update this document if module ownership changes.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.

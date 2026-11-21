@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import { environmentMaterial } from './environment-art.js';
-import { buildColonyStreets } from './colony-art.js';
+import { buildColonyStreets, buildFortressBoundary } from './colony-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
@@ -901,7 +901,7 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(9.2, 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      squarePlaza ? new THREE.PlaneGeometry(plan?.kit ? 8 : 9.2, plan?.kit ? 8 : 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
       environmentMaterial('stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
@@ -926,6 +926,7 @@ class App {
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
       [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
     if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads));
+    if (plan?.kit) g.add(buildFortressBoundary(this.map, plan, cx, cz));
     for (const [[ax, az], [bx, bz]] of (plan?.roads ? [] : streets)) {
       const len = Math.hypot(bx - ax, bz - az);
       if (len < 0.1) continue;
@@ -999,7 +1000,7 @@ class App {
       // amber tread bands identify the graded route at normal play zoom.
       const edgeMat = layer(0x514c55, -1);
       const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
-      const centreMat = layer(0xc5b078, -5);
+      const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
@@ -4178,7 +4179,7 @@ class App {
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
     const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center });
+      archTiles: this._archTiles, gateMain: this._gateMain, center, fortressKit: !!this.game.plots.find(p=>p.kind==='hq')?.plan?.kit });
     const painted = new Map();
     mesh.traverse(part => {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {

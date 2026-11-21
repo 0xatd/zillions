@@ -13,8 +13,10 @@ test('a legacy positional colony save cannot silently turn a camp into a tower',
   game._construct(camp,true);
   const saved=game.snapshot();
   const original=JSON.stringify(saved);
-  const legacy={...saved,v:5};
-  assert.throws(()=>new Game(map(),'normal','scott',legacy,5),/older colony layout/);
+  for(const v of [5,6]) {
+    const legacy={...saved,v};
+    assert.throws(()=>new Game(map(),'normal','scott',legacy,5),/older colony layout/);
+  }
   assert.equal(JSON.stringify(saved),original,'rejecting an old save must not alter the source');
   const restored=new Game(map(),'normal','scott',saved,5);
   assert.equal(restored.plots.find(p=>p.id===camp.id).kind,'camp_ranger');

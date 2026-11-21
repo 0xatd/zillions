@@ -30,6 +30,7 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
+import { composeFortress } from './fortress-plan.js';
 import { colonyRoads } from './colony-roads.js';
 import { SITE_FORMS, LEDGE, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
@@ -862,6 +863,8 @@ export function generatePlots(map, anchor = null, opts = {}) {
     const toward = Math.atan2(cz - camp.cz, cx - camp.cx);
     paintPathLine(camp.cx, camp.cz, camp.cx + Math.cos(toward) * 6, camp.cz + Math.sin(toward) * 6);
   }
+
+  composeFortress(map, plots, hq);
 
   if (rim && !form.ring && map.ledgeW) {
     computeInterior();

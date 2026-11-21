@@ -29,7 +29,7 @@ export function groundControl(map) {
     const k = (z * N + x) * 4;
     data[k] = Math.round(wear * 255);
     data[k + 1] = tile === TILE.FOREST ? 255 : 0;
-    data[k + 2] = tile === TILE.MOUNTAIN && !map.isLedgeRock?.(z * N + x) ? 255 : 0;
+    data[k + 2] = tile === TILE.MOUNTAIN ? 255 : 0;
     data[k + 3] = tile === TILE.WATER ? 255 : 0;
   }
   const texture = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
@@ -98,17 +98,22 @@ export function environmentMaterial(kind, options = {}) {
       vec3 painted=artSample(artWorld.xz*.32,vec2(0,0));
       diffuseColor.rgb*=painted*2.8+.25;
     `;
+    const soil = /* glsl */`
+      vec3 earth=artSample(artWorld.xz*.24,vec2(1,1));
+      diffuseColor.rgb*=earth*2.2+.25;
+    `;
     const rock = /* glsl */`
       vec3 face=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
       float horizontal=face.x>face.z?artWorld.z:artWorld.x;
-      vec2 p=vec2(horizontal*.24,artWorld.y*.32);
+      float top=smoothstep(.45,.85,face.y);
+      vec2 p=mix(vec2(horizontal*.24,artWorld.y*.32),artWorld.xz*.24,top);
       float warp=artNoise(vec2(horizontal*.7,artWorld.y*.23));
       vec3 painted=artSample(p+vec2(warp*.12,0),vec2(1,0));
       float grain=dot(painted,vec3(.2126,.7152,.0722));
       // Irregular long strata and occasional mineral seams, not brick courses.
       float bedding=sin(artWorld.y*9.0+warp*2.0+horizontal*.35)*.5+.5;
       float seam=smoothstep(.93,.99,artNoise(vec2(horizontal*1.6,artWorld.y*.35)));
-      diffuseColor.rgb*= (.64+grain*1.8)*mix(.86,1.1,bedding)*(1.-seam*.19);
+      diffuseColor.rgb*= (.64+grain*1.8)*mix(mix(.86,1.1,bedding),.9+artNoise(artWorld.xz*.9)*.2,top)*(1.-seam*.19*(1.-top));
     `;
     const building = /* glsl */`
       vec3 n=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
@@ -130,7 +135,7 @@ export function environmentMaterial(kind, options = {}) {
       float clumps=artNoise(artWorld.xz*2.8);
       diffuseColor.rgb*=.72+leaves*.3+clumps*.28;
     `;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
   };
   material.customProgramCacheKey = () => 'frontier-art-v2-' + kind;
   return material;

@@ -49,10 +49,14 @@ export function colonyRoads(map, plots) {
     routes.push({primary,points:path.map(j=>[j%N+.5,Math.floor(j/N)+.5])});
     connections.push({plotId,tile:found});
   };
+  // Author-designed streets precede frontage connectors. Connect every piece
+  // to the keep network so clipped terrain edges never leave isolated paving.
+  const kitTiles=hq.plan.kit?.cells || [];
+  for(const c of kitTiles)if(open(c.z*N+c.x))connect([c.z*N+c.x],null,false);
   gates.forEach(k=>connect([k],null,true));
   const buildings=plots.filter(p=>p.kind!=='wall'&&p!==hq&&Math.hypot(p.cx-hq.cx,p.cz-hq.cz)<hq.plan.reach)
     .sort((a,b)=>Math.hypot(a.cx-hq.cx,a.cz-hq.cz)-Math.hypot(b.cx-hq.cx,b.cz-hq.cz)||a.id-b.id);
   buildings.forEach(p=>connect(margin(p),p.id));
   for(const k of network)if(map.tiles[k]===TILE.GRASS)map.tiles[k]=TILE.PATH;
-  return {routes,connections,tiles:[...network].map(k=>[k%N,Math.floor(k/N)])};
+  return {kit:hq.plan.kit||null,routes,connections,tiles:[...network].map(k=>[k%N,Math.floor(k/N)])};
 }

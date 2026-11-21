@@ -75,7 +75,7 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-export const SNAPSHOT_VERSION = 6;
+export const SNAPSHOT_VERSION = 7;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
 export class Game {
