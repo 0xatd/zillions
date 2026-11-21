@@ -4,7 +4,7 @@ Owner: Alex. Established 2026-11-20. Status: standing art direction.
 
 ## The north star
 
-**Warcraft III Reforged: Forsaken Kingdom — Definitive Edition graphics.**
+**StarCraft II for sci-fi architecture and tactical readability; Dawn of War IV for weight and faction silhouettes; Forsaken Kingdom for painterly environmental richness.**
 
 Alex likes this specific new visual treatment, not merely the original
 Warcraft III or generic low-poly RTS art. The working style name is
@@ -37,7 +37,7 @@ in-engine views: broad quiet paving, readable unit silhouettes, inset masonry
 and warm localized lighting. Use comparable gameplay views for final
 camera-distance comparison. Keep source URLs and capture dates with reviews.
 
-StarCraft remains a secondary reference for tactical readability: clear
+StarCraft II is the primary architecture/readability reference: clear
 approaches, faction recognition, negative space and elevation hierarchy.
 It must not pull the approved painterly look back toward generic grey realism.
 

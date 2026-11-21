@@ -1,10 +1,12 @@
 // Ground-level settlement composition. Geometry follows the proven street
 // graph and wall footprints; it never invents a passage or collision object.
+import { biomeKit, cultureKit } from './world-art-kit.js';
 import * as THREE from 'three';
 import { environmentMaterial } from './environment-art.js';
 
-export function buildColonyStreets(map, roads) {
+export function buildColonyStreets(map, roads, culture = 'european') {
   const group=new THREE.Group();group.name='colony-streets';
+  const palette=cultureKit(culture).roads,environment=biomeKit(map);
   const make=(tiles,color,lift,inset=.16,kind='armor')=>{
     const pos=[],uv=[];
     const occupied=new Set(tiles.map(([x,z])=>`${x},${z}`));
@@ -33,9 +35,9 @@ export function buildColonyStreets(map, roads) {
     for(const r of roads.routes)if(r.primary)for(const [x,z] of r.points)pavedKeys.add(`${Math.floor(x)},${Math.floor(z)}`);
     const paved=roads.tiles.filter(([x,z])=>pavedKeys.has(`${x},${z}`));
     const lanes=roads.tiles.filter(([x,z])=>!pavedKeys.has(`${x},${z}`));
-    make(lanes,0xc1ae89,.04,.10,'soil');
-    make(paved,0x8a8774,.045,.04);
-    make(paved,0xa8a18a,.065,.11);
+    make(lanes,environment.roads.dust,.04,.10,'soil');
+    make(paved,palette.edge,.045,.04);
+    make(paved,palette.surface,.065,.11);
   }else make(roads.tiles,0x99917c,.045);
   return group;
 }

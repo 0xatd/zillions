@@ -9,7 +9,7 @@ The default human kit now uses `tools/art/toy_kit/frontier.py`: chamfered armor,
 steel frames, functional machinery, retracted blast-door housings and deep gate
 passages. Houses become habitat modules; farms use hydroponic grow beds; mills
 use turbines; command buildings have communication towers. Stable asset IDs,
-plot roles, costs, footprints and simulation remain unchanged. Other culture
+plot roles, costs and footprints remain unchanged. The later command-district pass relocates Black Vale economic plots and changes its reserved court; see the version note below. Other culture
 kits retain their legacy architecture. Descriptions of timber/stone/roofed
 assets below record the earlier draft and are superseded for the default kit.
 
@@ -218,3 +218,72 @@ await (await import('/scripts/rampart-art-proof.mjs')).proveGateClearance()
 It checks 282 gate/tier combinations against actual open tiles using the
 renderer's real meshes. It rejects unloaded assets instead of silently proving
 the fallback. The baseline fixed-width gate fails on its first passage jamb.
+
+## Culture × environment kit — command districts revision
+
+`src/world-art-kit.js` separates construction identity from ecology.
+
+- Culture owns road edge/paving palettes and command-court proportions. The
+  architecture palette is a design contract; GLB generators still own actual
+  building materials. Do not assume editing this metadata recolors models.
+- Biome owns tree mixture/density/height, understory, cliff crown height/relief/tint,
+  outcrop height, reeds and road dust. The five mission environments consume
+  these profiles through landscape-art, cliff-art and colony-art.
+- Collision, pathfinding, terrain tiles and simulation RNG do not use ecology
+  values. Cliff triangles stay clipped to blocked cliff ground; trees remain
+  inside forest tiles. Snow/ash colors still come from mission palettes.
+- Culture is not a copied city footprint. Keep common HQ hierarchy, entrance
+  scale, primary avenue and service lanes; fit district footprints to each site's
+  gates, cliffs and resources. Existing solver/road clearance rules still apply.
+
+### Reusable assets actually shipped in this draft
+
+The default Expedition culture has four command-building tiers with a broad
+foundation, deployment entrance and offset communications spine. All tiers use
+existing HQ IDs; the renderer no longer widens them beyond the four-tile plot.
+`frontier_units.py` shares an infantry rig with role-specific armor/weapons for
+Soldier, Ranger and Sniper, retaining named animation joints. Scott keeps his
+bike/weapon identity with matching armor. Other cultures keep their legacy units.
+The existing gate fitter, wall joins and damage lifecycle remain shared.
+
+Black Vale site 0 is the first command-district composition: an eight-tile court,
+shifted habitat and hydroponic groups, and connected service approaches. The
+other 14 founding sites keep their layouts while receiving shared rendering.
+Because plot placement changes, snapshot version is 9 and lobby protocol 10;
+older saves receive the existing incompatible-layout message. Account progress
+is unaffected. Do not mix old/new simulation clients in multiplayer.
+
+### Whole-game presentation
+
+A shared deployment screen presents mission identity and real phase labels,
+with an indeterminate track rather than invented percent progress. It clears
+on success and failure. Title/login styling shares the steel/amber language.
+The cinematics page explicitly states there is no cinematic content yet; this
+change does not create movies or claim a complete menu/HUD redesign.
+
+### Extension checklist
+
+1. Add/select a biome profile; keep tile collision independent of decoration.
+2. Use the culture's existing building/wall vocabulary and role proportions.
+3. Compose different districts around local gates/resources, not a pasted city.
+4. Check every affected mission at gameplay scale, plus Low and phone views.
+5. Prove troop silhouettes in combat and entrances against actual occupants.
+6. Run map/traversal, asset and targeted render tests, then production build.
+
+Remaining art work: bespoke biome tree/rock meshes, textured terrain transitions,
+non-default sci-fi culture kits, additional authored site compositions, cinematic
+content and a broader menu/HUD pass. Profile-driven variation is a foundation,
+not a claim these are finished environment art libraries.
+
+### Verification — 2026-11-21
+
+Local production build and full `npm run check` passed (54 test cases in the
+final test runner, plus the script checks and five traversal simulations).
+Targeted environment tests pass for all five missions. Browser checks verified
+loading success/failure cleanup and all four HQ meshes within 4×4 plots.
+Captured all five maps at full-map/gameplay scales, plus title, loading and
+empty cinematics on laptop/phone, Low detail and combat.
+
+Visual limitation: the existing landscape-phone HUD consumes much of the
+vertical play area. This kit pass does not fix that HUD layout; keep it visible
+in follow-up presentation review rather than calling phone polish complete.

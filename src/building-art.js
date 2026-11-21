@@ -338,7 +338,7 @@ function kitBuildingMesh(b,ctx={}) {
   if (!key || !hasKit(key)) return null;
   const model = kitClone(key);
   if (!model) return null;
-  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1.15,1.35,1.15);
+  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1,1.35,1);
   // Stable presentation variation: no RNG consumption, footprint expansion,
   // layout changes or false building tiers. District roofs stay subordinate.
   if(b.kind==='house'){

@@ -750,6 +750,9 @@ class App {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
     }
+    const deploymentLevel = levelById(snap?.level || mp?.level || this.ui.selectedLevel || 1);
+    this.ui.setDeploymentLoading(true, deploymentLevel);
+    try {
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -757,7 +760,7 @@ class App {
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
-      this.ui.showBanner('Loading…', '', 1500);
+      this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
     }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
@@ -770,12 +773,14 @@ class App {
     // muster (sim) and which kit the base is built from (art).
     const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
     setActiveCulture(cultureId);
+    this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
     const soloTicket = !snap && !mp
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
+    this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
@@ -873,6 +878,9 @@ class App {
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    } finally {
+      this.ui.setDeploymentLoading(false);
+    }
   }
 
   // A cobbled plaza + a lane out to every gate this city actually has — the
@@ -927,7 +935,7 @@ class App {
     // ward, rather than guessing radial strips from a generic city radius.
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
       [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
-    if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads));
+    if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads, this.game?.culture));
     if (plan?.kit) g.add(buildFortressBoundary(this.map, plan, cx, cz));
     for (const [[ax, az], [bx, bz]] of (plan?.roads ? [] : streets)) {
       const len = Math.hypot(bx - ax, bz - az);

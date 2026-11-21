@@ -109,23 +109,38 @@ def hangar(B,w,d,h,z=0):
 
 def castle(k,t,pal):
     B,G=k.B,k.G
-    top=module(k,2.1,1.9,1.75+.25*t,z=.04)
-    # Offset communications tower and low side power bay establish asymmetry.
-    h=3.35+.48*t
-    shell(B,FRAME,.93,.25,.93,-1.03,0,-.58)
-    shell(B,HULL,.86,h-.2,.86,-1.03,.2,-.58,taper=.16)
-    shell(B,EDGE,1.05,.18,1.05,-1.03,h,-.58)
-    window(B,G,-1.03,h-.46,-.13,.58)
-    mast(B,G,-1.03,h+.18,-.58,.72)
-    shell(B,STEEL,.65,1.15+.18*t,1.22,1.16,.08,-.31)
-    hatch(B,G,0,1.05,.18,.72,1.2)
-    B.box(AMBER,.65,.12,.05,0,1.66,1.13)
-    for x in (-.6,.6): window(B,G,x,1.52,1.0,.35)
-    for x in (-.52,0,.52): shell(B,PANEL,.40,.10,.66,x,top,-.2,cut=.05)
-    if t>=3: shell(B,EDGE,1.08,.52,.8,.25,top,-.35)
+    # Broad command podium and offset communications spine. Occupies the
+    # existing HQ square, not adjacent streets; tier changes add real mass.
+    shell(B,FRAME,3.65,.26,3.45,y=.02,cut=.38)
+    shell(B,STEEL,3.40,.32,3.16,y=.28,cut=.34)
+    top=module(k,2.48,2.36,2.12+.28*t,x=-.12,z=-.22,y=.57)
+    # A forward recessed deployment hall reads before any roof detail.
+    shell(B,HULL,2.72,.74,1.10,-.10,.60,1.01)
+    shell(B,FRAME,1.72,1.58,.30,-.10,.60,1.50)
+    hatch(B,G,-.10,1.67,.62,1.20,1.40)
+    B.box(AMBER,1.60,.16,.05,-.10,2.18,1.78)
+    for x in (-1.38,1.18):
+        shell(B,HULL,.34,1.85,.62,x,.56,1.17,cut=.08)
+        G.box(LIGHT,.12,.06,.035,x,2.12,1.49)
+    # Low reactor shoulder contrasts with the tall control spine.
+    shell(B,FRAME,.84,1.46,1.65,1.23,.56,-.36)
+    shell(B,PANEL,.79,.26,1.56,1.23,2.02,-.36)
+    for z in (-.85,-.38,.09): B.prism(STEEL,8,.22,.22,.34,1.23,2.28,z)
+    h=4.15+.43*t
+    shell(B,FRAME,.88,h,.90,-1.18,.50,-.93,taper=.10)
+    shell(B,HULL,.73,h-.2,.75,-1.18,.55,-.93,taper=.14)
+    shell(B,EDGE,1.12,.23,1.05,-1.18,h+.5,-.93)
+    shell(B,PANEL,.96,.48,.91,-1.18,h+.73,-.93)
+    window(B,G,-1.18,h+.86,-.46,.69)
+    mast(B,G,-1.18,h+1.21,-.93,.50)
+    for x in (-.72,.25): window(B,G,x,2.66,1.0,.62)
+    # Large roof plates, not a field of tiny greebles.
+    for x in (-.68,.30): shell(B,PANEL,.82,.16,1.62,x,top,-.36,cut=.10)
+    if t>=2: shell(B,HULL,1.48,.52,1.28,.18,top,-.42)
+    if t>=3: shell(B,FRAME,1.18,.31,1.0,.18,top+.52,-.42)
     if t>=4:
-        core=k.part('part_core',origin=(1.16,2.1,-.31),glow=True)
-        core.prism(LIGHT,8,.17,.17,.65,1.16,2.1,-.31)
+        core=k.part('part_core',origin=(1.23,2.65,-.36),glow=True)
+        core.prism(LIGHT,8,.16,.16,.45,1.23,2.65,-.36)
 
 
 def tower(k,t,pal):

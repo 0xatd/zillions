@@ -1,3 +1,4 @@
+import { cultureKit } from './world-art-kit.js';
 import { TILE, LEVELS } from './config.js';
 import { MAP_KIT_VERSION, MAP_PIECES, MAP_PREFABS, stampPrefab, rectangle, resolveConnections } from './map-kit.js';
 
@@ -13,12 +14,12 @@ export function composeFortress(map,plots,hq) {
 // Map-specific composition data. The placement, clearance and rendering rules
 // below are shared; another map supplies its own courts and street rectangles.
 export const FORTRESS_COMPOSITIONS=Object.freeze({
-  crownCourts:{id:'crown-courts-v2',name:'Crown & Courts fortress',
+  crownCourts:{id:'command-districts-v3',name:'Black Vale Command',
     streets:[[5,-14,3,8],[4,-7,3,6],[4,-2,3,7],[5,4,3,5],[7,8,3,7]],
     lanes:[[-10,3,7,2],[-5,2,3,2]],
-    courts:[{kind:'residential',x:-8,z:-3,preferenceAxis:[-1,0],
+    courts:[{kind:'residential',x:-9,z:-4,preferenceAxis:[-1,0],
       slots:[[-5,-3],[-5,1],[-3,5],[1,6],[3,2],[3,-3],[0,-6],[-4,-7]]},
-      {kind:'farmstead',x:11,z:-2,preferenceAxis:[1,0]}]},
+      {kind:'farmstead',x:11,z:1,preferenceAxis:[1,0]}]},
 });
 export function applyFortressComposition(map,plots,hq,design){
   if(!design?.streets?.length||design.courts?.length!==2)throw new Error('Fortress composition needs streets and two districts');
@@ -37,7 +38,8 @@ export function applyFortressComposition(map,plots,hq,design){
   // Actual gate connectors are derived after the layout exists.
   const avenue=design.streets.flatMap(([x,z,w,h])=>rectangle('road',cx+x,cz+z,w,h));
   const courts=design.courts.map(c=>({...c,x:cx+c.x,z:cz+c.z}));
-  const raw=[...rectangle('plaza',cx-3,cz-3,6,6),...avenue,...(design.lanes||[]).flatMap(([x,z,w,h])=>rectangle('dirt',cx+x,cz+z,w,h)),...courts.flatMap(c=>stampPrefab(MAP_PREFABS[c.kind],c))];
+  const courtWidth=cultureKit('european').layout.courtWidth;
+  const raw=[...rectangle('plaza',cx-courtWidth/2,cz-courtWidth/2,courtWidth,courtWidth),...avenue,...(design.lanes||[]).flatMap(([x,z,w,h])=>rectangle('dirt',cx+x,cz+z,w,h)),...courts.flatMap(c=>stampPrefab(MAP_PREFABS[c.kind],c))];
   for(const c of raw)if(MAP_PIECES[c.piece].walkable&&open(c.x,c.z)&&!blocked.has(key(c.x,c.z))){reserved.add(key(c.x,c.z));cells.set(key(c.x,c.z),c);}
   const candidates=[];
   for(let z=cz-16;z<=cz+16;z++)for(let x=cx-16;x<=cx+16;x++){

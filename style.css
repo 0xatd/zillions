@@ -1847,3 +1847,19 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
   .bigaction .bicon { font-size: 20px; }
   .bigaction .btext small { font-size: 9px; }
 }
+
+/* Shared mission deployment surface. No fabricated percentages or timer. */
+.deployment-screen { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:radial-gradient(ellipse at 65% 30%,#243c47,#101b23 60%,#080f15); color:#e1e7e5; }
+.deployment-card { width:min(580px,100%); border-left:3px solid #eaa45a; padding:24px 30px; background:#14232bcc; box-shadow:0 20px 70px #0006; }
+.deployment-kicker { font-size:11px; letter-spacing:.2em; color:#86d9dc; }
+.deployment-card h2 { font-size:clamp(25px,4vw,38px); margin:14px 0; color:#e2ded0; }
+.deployment-card p { line-height:1.6; color:#adbec5; margin:0 0 24px; }
+.deployment-track { height:3px; background:#34454e; overflow:hidden; margin:20px 0 12px; }
+.deployment-track span { display:block; height:100%; width:36%; background:#86d9dc; animation:deployment-scan 1.5s ease-in-out infinite alternate; }
+.deployment-card small { font-size:12px; color:#adbec5; }
+@keyframes deployment-scan { from {transform:translateX(-100%)} to {transform:translateX(280%)} }
+@media(prefers-reduced-motion:reduce) { .deployment-track span {animation:none;width:100%;opacity:.7} }
+.title-login { border-radius:3px; border-color:#6f818677; border-top:3px solid #eaa45a; background:#14232bee; }
+.login-heading > span { color:#86d9dc; }
+.presentation-empty { border-left:3px solid #eaa45a; padding:24px; background:#14232b; color:#adbec5; }
+@media(max-width:600px) { .deployment-screen {padding:16px} .deployment-card {padding:20px} }

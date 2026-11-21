@@ -3,15 +3,14 @@
 This document defines the production target for Zillions 3D art. It applies to
 units, heroes, buildings, and defensive works.
 
-## Reference priority — Alex, 2026-11-20
+## Reference priority — Alex, 2026-11-21
 
-Read [Art Quality Standard](art-quality-standard.md) before any visual work.
-The primary reference is **Warcraft III Reforged: Forsaken Kingdom,
-Definitive Edition graphics**. Alex explicitly likes its painted, stylized
-look. Earlier toy/flat-color/minimal-texture guidance is superseded wherever
-it conflicts with that standard. Keep the siege game, faction identities,
-asset budgets, sockets, and deterministic simulation contracts below.
-This is a quality target, not a claim of current parity.
+Read [Art Quality Standard](art-quality-standard.md). StarCraft II now leads
+sci-fi architecture, scale and battlefield readability. Dawn of War IV supplies
+weight and distinct faction silhouettes; Forsaken supplies painterly richness.
+Compare gameplay with gameplay. Label cinematic, loading, menu and promotional
+references separately. Apply one coherent language across those surfaces, not
+only the map. Preserve the original Zillions identity and existing siege rules.
 
 ## Sci-fi direction (2026-11-21)
 

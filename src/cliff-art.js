@@ -2,6 +2,7 @@
 // vertical face points away from the gameplay camera. Uses the SAME clipped
 // tile geometry as terrain; no new collision, ramp or raised walkable tile.
 import * as THREE from 'three';
+import { biomeKit } from './world-art-kit.js';
 import { TILE } from './config.js';
 import { tileTris } from './terrace-mesh.js';
 import { environmentMaterial } from './environment-art.js';
@@ -9,8 +10,8 @@ import { environmentMaterial } from './environment-art.js';
 export function buildCliffCrown(map,tileCH) {
   const group=new THREE.Group();group.name='cliff-crown-kit';
   if(!tileCH||!map.ledgeW)return group;
-  const positions=[],edges=new Map(),N=map.size;
-  const raised=([x,z,y])=>[x,y+.62+.34*Math.sin(x*.63+z*.41)+.20*Math.sin(z*1.13-x*.39),z];
+  const positions=[],edges=new Map(),N=map.size,profile=biomeKit(map).cliffs;
+  const raised=([x,z,y])=>[x,y+profile.lift+profile.relief*Math.sin(x*.63+z*.41)+profile.relief*.58*Math.sin(z*1.13-x*.39),z];
   const key=v=>v.map(n=>n.toFixed(4)).join(',');
   const emit=(a,b,c)=>positions.push(...a,...b,...c);
   for(let z=1;z<N-1;z++)for(let x=1;x<N-1;x++){
@@ -45,7 +46,7 @@ export function buildCliffCrown(map,tileCH) {
     if(!vertices.has(id)){vertices.set(id,unique.length/3);unique.push(...p);}indices.push(vertices.get(id));
   }
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(unique,3));geometry.setIndex(indices);geometry.computeVertexNormals();
-  const material=environmentMaterial('rock',{color:new THREE.Color(map.colorOf(TILE.MOUNTAIN)).lerp(new THREE.Color(0x929481),.42),side:THREE.DoubleSide});
+  const material=environmentMaterial('rock',{color:new THREE.Color(map.colorOf(TILE.MOUNTAIN)).lerp(new THREE.Color(profile.tint),.42),side:THREE.DoubleSide});
   const mesh=new THREE.Mesh(geometry,material);mesh.name='exposed-cliff-crown';mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
   return group;
 }

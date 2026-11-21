@@ -130,6 +130,9 @@ export class UI {
 
       <div id="tooltip" class="hidden"></div>
 
+      <div id="deployment-screen" class="deployment-screen hidden" role="status" aria-live="polite" aria-label="Preparing mission">
+        <div class="deployment-card"><span class="deployment-kicker">EXPEDITION COMMAND</span><h2 id="deployment-title"></h2><p id="deployment-detail"></p><div class="deployment-track" aria-hidden="true"><span></span></div><small id="deployment-phase">Preparing the battlefield</small></div>
+      </div>
       <div id="overlay" class="screen">
         <div id="screen-account" class="accountscreen title-screen">
           <div class="title-lockup">
@@ -310,7 +313,7 @@ export class UI {
           </div>
         </div>
 
-        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
+        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats presentation-empty">No cinematics are available in this build. Return to deployment to enter a siege.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
         <div id="screen-setup" class="setup hidden">
@@ -2944,6 +2947,17 @@ export class UI {
     t.style.top = 'auto';
   }
   _hideTip() { this.tooltip.classList.add('hidden'); }
+
+  setDeploymentLoading(on, level = null, phase = 'Preparing the battlefield') {
+    const el = this.root.querySelector('#deployment-screen');
+    if (!el) return;
+    if (level) {
+      this.root.querySelector('#deployment-title').textContent = level.name;
+      this.root.querySelector('#deployment-detail').textContent = level.blurb || 'Establish a colony. Hold the approaches. Push the siege outward.';
+    }
+    this.root.querySelector('#deployment-phase').textContent = phase;
+    el.classList.toggle('hidden', !on);
+  }
 
   showBanner(text, cls = '', dur = 3500) {
     this.banner.textContent = text;
