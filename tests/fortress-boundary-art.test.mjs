@@ -7,7 +7,7 @@ const {buildFortressBoundary}=await import('../src/colony-art.js');
 import {TerrainField} from '../src/terrain.js';
 import {levelById} from '../src/config.js';
 
-test('fortress watch bastions leave walkable ground and ramp tiles clear',()=>{
+test('all fortress masonry leaves walkable ground and ramp tiles clear',()=>{
  const l=levelById(5),m=new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests});
  const g=new Game(m,'normal','scott',null,5);
  g.foundCity(0,0);
@@ -18,7 +18,15 @@ test('fortress watch bastions leave walkable ground and ramp tiles clear',()=>{
  for(const mesh of root.children){
   for(let i=0;i<mesh.count;i++){
    mesh.getMatrixAt(i,matrix);scale.setFromMatrixScale(matrix);pos.setFromMatrixPosition(matrix);
-   if(scale.y<3)continue; // full-height bastion bodies, not the curtain
+   // The actual transformed footprint, including rotated curtain corners,
+   // must stay inside the simulation's natural barrier.
+   for(let u=-.5;u<=.501;u+=.1)for(let v=-.5;v<=.501;v+=.1){
+    const point=new Vector3(u,0,v).applyMatrix4(matrix);
+    const x=Math.floor(point.x),z=Math.floor(point.z);
+    assert.equal(map.isWalkable(x,z),false,`${mesh.name} hides walkable ground`);
+    assert.ok(!map.swRoad?.[z*map.size+x],`${mesh.name} hides a ramp`);
+   }
+   if(scale.y<3)continue;
    towers++;
    for(const dx of [-.68,0,.68])for(const dz of [-.68,0,.68]){
     const x=Math.floor(pos.x+dx),z=Math.floor(pos.z+dz);

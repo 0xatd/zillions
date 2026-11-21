@@ -126,3 +126,25 @@ Foliage uses flatter overlapping broadleaf crowns and irregular fir tiers.
 This is still a draft art pass. The tile-derived outer landform, repeated
 settlement density and universal material treatment remain below the Forsaken
 reference's authored finish. Do not describe this implementation as parity.
+
+## Wall appearance and scale refinement
+
+The natural-boundary kit now connects smoothed masonry half-spans through
+blocked rim cells. Diagonal returns use a blocked elbow rather than cutting
+across a walking corner. Battered footings, stone courses, capped battlements,
+arrow slits and occasional blue banners establish a wall/body/crown hierarchy.
+Every decorative footprint is checked against walkable and switchback tiles.
+Watch bastions remain scenery, not new combat buildings.
+
+European tier-2/3 wall and gate assets share that heavier masonry language.
+Gate lintels have more headroom; their simulated openings are unchanged.
+All four house tiers have taller inhabited bodies and entrances, without
+expanding their footprint. The three mounted kit heroes no longer use the
+old oversized display multiplier; selection/aura radii and collision remain
+unchanged. Fallback heroes and other culture buildings retain their existing
+proportions. Those are separate remaining consistency gaps.
+
+Cliff skirts share exact boundary vertices. Per-face normal displacement was
+removed because it opened cracks between adjacent faces; material fractures
+provide surface detail without separating the shell. The seam regression uses
+an independently specified raised block, not a screenshot or source-text check.

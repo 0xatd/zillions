@@ -448,16 +448,11 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
       const e0a = Math.min(Math.max(ya, lo0), hi0), e0b = Math.min(Math.max(yb, lo0), hi0);
       const e1a = Math.min(Math.max(ya, lo1), hi1), e1b = Math.min(Math.max(yb, lo1), hi1);
       if (e0b - e0a < 1e-4 && e1b - e1a < 1e-4) return;
-      // A shallow recessed rock profile adds mass without spreading rock
-      // into a traversable ramp. Adjacent strata share the same profile.
-      const length=Math.hypot(bx-ax,bz-az)||1;
-      let nx=-(bz-az)/length,nz=(bx-ax)/length;
-      const mx=(ax+bx)/2,mz=(az+bz)/2;
-      if(map.heightAt(Math.floor(mx+nx*.2),Math.floor(mz+nz*.2))<map.heightAt(Math.floor(mx-nx*.2),Math.floor(mz-nz*.2))){nx=-nx;nz=-nz;}
-      const hx=Math.floor(mx+nx*.2),hz=Math.floor(mz+nz*.2);
-      const rock=map.inBounds(hx,hz)&&map.tiles[hz*map.size+hx]===TILE_MOUNTAIN;
-      const point=(x,y,z)=>{const t=(y-y0)/Math.max(.01,y1-y0);const depth=rock?Math.sin(t*Math.PI)*(.20+.12*Math.sin(x*1.7+z*1.1+y*.45)**2):0;return [x+nx*depth,y,z+nz*depth];};
-      const quad = [point(ax,e0a,az),point(bx,e1a,bz),point(bx,e1b,bz),point(ax,e0a,az),point(bx,e1b,bz),point(ax,e0b,az)];
+      // Adjacent faces must share their exact boundary vertices. Per-face
+      // normal offsets pulled corners apart into visible daylight cracks.
+      // Sculpt relief in the material, never detach this watertight shell.
+      const quad = [[ax,e0a,az],[bx,e1a,bz],[bx,e1b,bz],
+        [ax,e0a,az],[bx,e1b,bz],[ax,e0b,az]];
       for (const v of quad) { pos.push(v[0], v[1], v[2]); col.push(c.r * lit, c.g * lit, c.b * lit); }
     };
     // A tall face wears a turf lip at the top; the rock below is banded.

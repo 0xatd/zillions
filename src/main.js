@@ -4301,10 +4301,10 @@ class App {
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
+        // Mounted heroes remain larger than infantry, not house-sized.
+        // The selection ring and outline carry readability at distance;
+        // the body no longer needs the old 1.25× enlargement.
+        kit.node.scale.multiplyScalar(0.78);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;

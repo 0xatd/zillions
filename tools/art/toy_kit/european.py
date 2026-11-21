@@ -329,7 +329,7 @@ def painted_roof(B, pal, w, h, d, x=0, y=0, z=0, ry=0, overhang=0.14):
 def house(k, t, pal):
     """Weighty timber-and-stone homes with steep roofs and a front cross gable."""
     B, G = k.B, k.G
-    h = 1.05 + .25*(t-1)
+    h = 1.50 + .25*(t-1)
     B.prism(pal['stone3'], 4, 1.16, 1.10, .22, phase=math.pi/4, sz=.87)
     B.box(pal['stone'], 1.43, h, 1.23, 0, .22, -.08)
     B.box(pal['wood'], 1.48, .10, 1.27, 0, .22+h*.56, -.08)
@@ -340,9 +340,9 @@ def house(k, t, pal):
                 B.box(pal['stone2'], .20, .13, .20, x, .22+j*.16, z)
     painted_roof(B, pal, 1.46, .88+.08*t, 1.26, y=h+.22, z=-.08, ry=math.pi/2, overhang=.14)
     # Porch gable breaks the repeated rectangular roof without growing collision.
-    B.box(pal['stone2'], .62, .9, .34, .22, .22, .61)
-    painted_roof(B, pal, .66, .48, .50, x=.22, y=1.12, z=.58, overhang=.07)
-    door(B, pal, .30, .65, .22, .80, .22)
+    B.box(pal['stone2'], .62, 1.12, .34, .22, .22, .61)
+    painted_roof(B, pal, .66, .48, .50, x=.22, y=1.34, z=.58, overhang=.07)
+    door(B, pal, .34, .86, .22, .80, .22)
     for j in range(2):
         B.box(pal['stone2'], .62+j*.1, .10, .13, .22, .12-j*.06, .84+j*.1)
     window(B, G, pal, -.38, .62, .55, w=.23, h=.27)

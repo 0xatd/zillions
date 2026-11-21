@@ -102,7 +102,14 @@ export function environmentMaterial(kind, options = {}) {
       vec3 face=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
       vec2 stoneUV=face.y>.65?artWorld.xz:vec2(face.x>face.z?artWorld.z:artWorld.x,artWorld.y);
       vec3 painted=artSample(stoneUV*.32,vec2(0,0));
-      diffuseColor.rgb*=painted*2.4+.35;
+      // Broad ashlar courses, softened joints and mineral variation. The
+      // structural trim stays legible instead of inheriting busy paving.
+      float row=floor(stoneUV.y*2.4);
+      vec2 block=vec2(stoneUV.x*1.8+mod(row,2.)*.5,stoneUV.y*2.4);
+      vec2 edge=min(fract(block),1.-fract(block));
+      float mortar=1.-smoothstep(.018,.058,min(edge.x,edge.y));
+      float blockTone=.94+.12*artHash(floor(block));
+      diffuseColor.rgb*=(painted*1.65+.55)*blockTone*(1.-mortar*.23);
     `;
     const soil = /* glsl */`
       vec3 earth=artSample(artWorld.xz*.24,vec2(1,1));
@@ -118,8 +125,10 @@ export function environmentMaterial(kind, options = {}) {
       float grain=dot(painted,vec3(.2126,.7152,.0722));
       // Irregular long strata and occasional mineral seams, not brick courses.
       float bedding=sin(artWorld.y*3.6+warp*3.2+horizontal*.5)*.5+.5;
-      float seam=smoothstep(.93,.99,artNoise(vec2(horizontal*1.6,artWorld.y*.35)));
-      diffuseColor.rgb*= (.64+grain*1.8)*mix(mix(.86,1.1,bedding),.9+artNoise(artWorld.xz*.9)*.2,top)*(1.-seam*.19*(1.-top));
+      float seam=smoothstep(.82,.94,artNoise(vec2(horizontal*1.6,artWorld.y*.35)));
+      float fracture=pow(1.-abs(sin(horizontal*2.2+warp*1.4+artWorld.y*.16)),9.);
+      float ledge=artNoise(vec2(horizontal*.4,artWorld.y*.8));
+      diffuseColor.rgb*= (.64+grain*1.8)*mix(mix(.86,1.1,bedding),.9+artNoise(artWorld.xz*.9)*.2,top)*(1.-seam*.26*(1.-top))*(1.-fracture*.24*(1.-top))*mix(.91,1.1,ledge);
     `;
     const building = /* glsl */`
       vec3 n=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
@@ -143,7 +152,7 @@ export function environmentMaterial(kind, options = {}) {
     `;
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
   };
-  material.customProgramCacheKey = () => 'frontier-art-v3-' + kind;
+  material.customProgramCacheKey = () => 'frontier-art-v4-' + kind;
   return material;
 }
 
