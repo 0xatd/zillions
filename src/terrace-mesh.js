@@ -456,7 +456,7 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
       if(map.heightAt(Math.floor(mx+nx*.2),Math.floor(mz+nz*.2))<map.heightAt(Math.floor(mx-nx*.2),Math.floor(mz-nz*.2))){nx=-nx;nz=-nz;}
       const hx=Math.floor(mx+nx*.2),hz=Math.floor(mz+nz*.2);
       const rock=map.inBounds(hx,hz)&&map.tiles[hz*map.size+hx]===TILE_MOUNTAIN;
-      const point=(x,y,z)=>{const t=(y-y0)/Math.max(.01,y1-y0);const depth=rock?Math.sin(t*Math.PI)*(.10+.04*Math.sin(x*.8+z*.6)):0;return [x+nx*depth,y,z+nz*depth];};
+      const point=(x,y,z)=>{const t=(y-y0)/Math.max(.01,y1-y0);const depth=rock?Math.sin(t*Math.PI)*(.20+.12*Math.sin(x*1.7+z*1.1+y*.45)**2):0;return [x+nx*depth,y,z+nz*depth];};
       const quad = [point(ax,e0a,az),point(bx,e1a,bz),point(bx,e1b,bz),point(ax,e0a,az),point(bx,e1b,bz),point(ax,e0b,az)];
       for (const v of quad) { pos.push(v[0], v[1], v[2]); col.push(c.r * lit, c.g * lit, c.b * lit); }
     };

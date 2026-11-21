@@ -102,3 +102,27 @@ turret and pitched great hall, authored in the existing Blender pipeline.
 House height variation is ID-keyed and never enlarges its footprint. Cliff
 crests use continuous varying height, not a scatter of isolated rock props.
 Keep reusable shape rules separate from map-specific district coordinates.
+
+## Shared architecture rebuild
+
+The European kit now uses full-height defensive drums, timber-and-stone
+homes with cross-gabled porches, corps-specific muster halls, barn/crop
+farmsteads and taller windmills. Keep upgrades retain the starter hall-and-
+watchtower silhouette instead of becoming a different miniature castle.
+All tiers are authored in `tools/art/toy_kit/european.py`; no external assets
+were copied. These building families are shared across campaign maps.
+
+Homes, farms and workshops turn toward their actual connected street tile.
+Turns are cardinal so square plot footprints remain valid. This is presentation
+only; plot positions, IDs, costs, collision and the simulation RNG are unchanged.
+
+The natural-boundary treatment uses spaced watch bastions on blocked ground,
+not one tower per grid cell. Their entire footprint must clear walkable tiles
+and graded ramps. They represent the natural fortification, not additional
+weapons or independently damageable buildings. Ground materials use connected
+earth clearings, narrow irregular turf transitions and quieter lane colors.
+Foliage uses flatter overlapping broadleaf crowns and irregular fir tiers.
+
+This is still a draft art pass. The tile-derived outer landform, repeated
+settlement density and universal material treatment remain below the Forsaken
+reference's authored finish. Do not describe this implementation as parity.

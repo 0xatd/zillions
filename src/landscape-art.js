@@ -25,7 +25,7 @@ function ellipsoid(x,y,z,sx,sy,sz,color,seed=0) {
   const geo=new THREE.SphereGeometry(1,7,5),p=geo.attributes.position;
   for(let i=0;i<p.count;i++){
     const a=p.getX(i),b=p.getY(i),c=p.getZ(i);
-    const l=1+.13*Math.sin(a*5+c*4+seed)*Math.cos(b*4-c*3);
+    const l=1+.22*Math.sin(a*7+c*6+seed)*Math.cos(b*5-c*4);
     p.setXYZ(i,x+a*sx*l,y+b*sy*l,z+c*sz*l);
   }
   return {geo,color};
@@ -38,21 +38,21 @@ function branch(a,b,r0,r1,color) {
 }
 function broadleaf(){
   return joined([
-    ellipsoid(0,2.6,0,.72,.67,.68,0xe4e8ca),
-    ellipsoid(-.55,2.1,.12,.58,.58,.55,0xbbc6a6,2),
-    ellipsoid(.48,2.28,.28,.62,.6,.58,0xd1d9b8,4),
+    ellipsoid(0,2.6,0,.78,.43,.73,0xe4e8ca),
+    ellipsoid(-.55,2.1,.12,.64,.35,.59,0xbbc6a6,2),
+    ellipsoid(.48,2.28,.28,.68,.39,.64,0xd1d9b8,4),
     ellipsoid(.1,2.02,-.5,.58,.5,.54,0xa5b798,7),
-    ellipsoid(-.16,2.94,-.13,.48,.4,.48,0xf3eed2,3),
+    ellipsoid(-.16,2.94,-.13,.52,.29,.53,0xf3eed2,3),
   ]);
 }
 function pine(){
   const parts=[];
   for(let k=0;k<4;k++){
     const y=.95+k*.62,r=.86-k*.17,h=1.25-k*.12;
-    const geo=new THREE.ConeGeometry(r,h,7,2),p=geo.attributes.position;
+    const geo=new THREE.ConeGeometry(r,h,12,3),p=geo.attributes.position;
     for(let i=0;i<p.count;i++){
-      const a=p.getX(i),b=p.getY(i),c=p.getZ(i),wave=1+.14*Math.sin(Math.atan2(c,a)*5+k);
-      p.setXYZ(i,a*wave,b+y+.06*Math.sin(a*8+c*7),c*wave);
+      const a=p.getX(i),b=p.getY(i),c=p.getZ(i),wave=1+.12*Math.sin(Math.atan2(c,a)*6+k);
+      p.setXYZ(i,a*wave,b+y+.10*Math.sin(a*8+c*7),c*wave);
     }
     parts.push({geo,color:[0x93a68b,0xb2c2a0,0xcad5b1,0xe2e4c1][k]});
   }return joined(parts);

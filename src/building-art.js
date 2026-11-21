@@ -334,6 +334,12 @@ function kitBuildingMesh(b,ctx={}) {
     const v=((b.id||0)*17)%7;
     model.scale.set(.94+(v%3)*.02,.94+v*.035,.94+(v%3)*.02);
   }
+  // Doors address the actual connected street. Cardinal turns keep the
+  // authored footprint inside its square plot; no occupancy or sim edits.
+  if(ctx.frontage && ['house','farm','workshop'].includes(b.kind)){
+    const dx=ctx.frontage[0]-b.cx,dz=ctx.frontage[1]-b.cz;
+    model.rotation.y=Math.abs(dx)>Math.abs(dz)?(dx>0?Math.PI/2:-Math.PI/2):(dz>=0?0:Math.PI);
+  }
   const shared = kitMaterials();
   const body = shared.body.clone(), glow = shared.glow.clone();
   model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });

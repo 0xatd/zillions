@@ -4178,8 +4178,12 @@ class App {
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
+    const plan = plots.find(p=>p.kind==='hq')?.plan;
+    const frontageTile = plan?.roads?.connections?.find(c=>c.plotId===b.plotId)?.tile;
+    const frontage = frontageTile == null ? null :
+      [frontageTile % this.map.size + .5, Math.floor(frontageTile / this.map.size) + .5];
     const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center, fortressKit: !!this.game.plots.find(p=>p.kind==='hq')?.plan?.kit });
+      archTiles: this._archTiles, gateMain: this._gateMain, center, frontage, fortressKit: !!plan?.kit });
     const painted = new Map();
     mesh.traverse(part => {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
