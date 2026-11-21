@@ -1,6 +1,7 @@
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
+import { environmentMaterial } from './environment-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
@@ -8,7 +9,7 @@ import {
 import { setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
-import { Game, runScore } from './game.js';
+import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
@@ -743,6 +744,10 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    if (snap && !isCompatibleSnapshot(snap)) {
+      this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
+      return;
+    }
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -895,8 +900,8 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
-      toyMat({ color: 0xa6a091 }),
+      squarePlaza ? new THREE.PlaneGeometry(9.2, 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      environmentMaterial('stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza) disc.rotation.z = -plan.facing;
@@ -905,31 +910,30 @@ class App {
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
+    const ringGeo = new THREE.RingGeometry(4.38, 4.58, 64);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
+      color: 0x736d5c, transparent: true, opacity: 0.7, depthWrite: false,
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
     g.add(ring);
-    const laneMat = toyMat({ color: 0xb3ad9e });
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
-    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
-    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
-    for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
+    const laneMat = environmentMaterial('stone', { color: 0x9e998b });
+    // Render the reserved streets, including bent approaches through an inner
+    // ward, rather than guessing radial strips from a generic city radius.
+    const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
+      [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
+    for (const [[ax, az], [bx, bz]] of streets) {
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.1) continue;
+      const a = Math.atan2(bz - az, bx - ax);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 2, terraced ? Math.ceil(len * 3) : 1), laneMat);
       lane.rotation.x = -Math.PI / 2;
-      lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.rotation.z = Math.PI / 2 - a;
+      lane.position.set((ax + bx) / 2, plazaY + 0.012, (az + bz) / 2);
       lane.receiveShadow = true;
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
-      stripe.rotation.copy(lane.rotation);
-      stripe.position.copy(lane.position);
-      stripe.position.y = plazaY + 0.022;
-      drape(lane, 0.025); drape(stripe, 0.04);
+      drape(lane, 0.025);
       g.add(lane);
-      g.add(stripe);
     }
     // Switchback roads down the cliff face below each gate: a paved ribbon
     // draped over the cut so the zig-zag reads from the game camera.
@@ -988,16 +992,27 @@ class App {
       // polygon offset keeps the kerb strictly under the bed and the bed
       // under the centre line.
       const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
-      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
-      // meet and their kerbs overlap it reads as a paved apron, not a hole.
-      const edgeMat = layer(0x8a7658, -1);
-      const roadMat = layer(0xd8c49a, -3);
-      const centreMat = layer(0xf1e4c4, -5);
+      // Graphite edges separate the pale roadbed from both snow and moor;
+      // amber tread bands identify the graded route at normal play zoom.
+      const edgeMat = layer(0x514c55, -1);
+      const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
+      const centreMat = layer(0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
-        g.add(ribbon(pts, 0.22, 0.075, centreMat));
+        // Broad transverse tread bands make the grade and each turn readable
+        // at play zoom. These are paint, not extra collision obstacles.
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az);
+          if (L < 0.1) continue;
+          const nx = -(bz - az) / L, nz = (bx - ax) / L;
+          for (let d = 0.65; d < L - 0.3; d += 1.65) {
+            const f = d / L, x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = ah + (bh - ah) * f;
+            g.add(ribbon([[x - nx * 0.55, z - nz * 0.55, h], [x + nx * 0.55, z + nz * 0.55, h]], 0.16, 0.08, centreMat));
+          }
+        }
         for (let q = 1; q < pts.length; q++) {
           const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
           const L = Math.hypot(bx - ax, bz - az);
@@ -1331,7 +1346,8 @@ class App {
       const cloudSave = await this.auth.loadLatestSave();
       if (cloudSave?.snap) {
         try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
-        this.ui.setContinue(cloudSave.snap);
+        const compatible = this._loadSave();
+        this.ui.setContinue(compatible?.snap || null);
       }
     } else if (status.enabled) {
       this.lobby = null;
@@ -1767,7 +1783,13 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 5 ? s : null;
+      if (s?.snap && !isCompatibleSnapshot(s.snap)) {
+        // Keep the original before a new siege can replace the active slot.
+        localStorage.setItem(`zillions_save_legacy_v${s.snap.v}`, JSON.stringify(s));
+        this.ui.showBanner('An older siege was archived because the colony layout changed. Start a new siege; account progression is unchanged.', '', 8000);
+        return null;
+      }
+      return s?.snap ? s : null;
     } catch { return null; }
   }
 
@@ -4152,8 +4174,22 @@ class App {
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+    const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
       archTiles: this._archTiles, gateMain: this._gateMain, center });
+    const painted = new Map();
+    mesh.traverse(part => {
+      if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
+        const original = part.material;
+        if (!painted.has(original)) {
+          const material = environmentMaterial('building', { vertexColors: true, flatShading: true,
+            color: original.color, opacity: original.opacity, transparent: original.transparent, side: original.side });
+          painted.set(original, material);
+        }
+        part.material = painted.get(original);
+      }
+    });
+    for (const original of painted.keys()) original.dispose();
+    return mesh;
   }
 
   _syncBuildings() {
@@ -5052,9 +5088,9 @@ class App {
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
     this.sun.intensity = lerp(1.25, 2.3, b);
-    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
+    this.sun.color.setRGB(1, 0.94, 0.83).lerp(shadow, (1 - b) * 0.35);
     this.hemi.intensity = lerp(0.55, 0.75, b);
-    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.hemi.color.setRGB(0.83, 0.91, 1).lerp(shadow, (1 - b) * 0.4);
     this.hemi.groundColor.copy(shadow);
     this.amb.intensity = 0.35;
     this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);

@@ -3,6 +3,16 @@
 This document defines the production target for Zillions 3D art. It applies to
 units, heroes, buildings, and defensive works.
 
+## Reference priority — Alex, 2026-11-20
+
+Read [Art Quality Standard](art-quality-standard.md) before any visual work.
+The primary reference is **Warcraft III Reforged: Forsaken Kingdom,
+Definitive Edition graphics**. Alex explicitly likes its painted, stylized
+look. Earlier toy/flat-color/minimal-texture guidance is superseded wherever
+it conflicts with that standard. Keep the siege game, faction identities,
+asset budgets, sockets, and deterministic simulation contracts below.
+This is a quality target, not a claim of current parity.
+
 ## Target
 
 Use a stylized, chunky science-fiction RTS style.
@@ -208,3 +218,30 @@ Use `tools/preview-shot.mjs`:
 It boots the actual game headless (Chromium + playwright-core), can found
 and fully construct a city instantly, and screenshots true gameplay frames.
 Judge every art change there before pushing.
+
+## Painted frontier environment pass — November 2026
+
+Alex's new reference bar is the terrain/base readability and material richness of
+StarCraft and Warcraft III. This supersedes the previous texture-free environment
+constraint, not the requirement for readable silhouettes or original assets.
+
+- Blend painted grass into worn working earth; keep routes in continuous stone.
+- Dark slate faces and pale ramp beds separate impassable cliffs from entrances.
+- Preserve biome palettes, unit colours, building tiers and collision geometry.
+- Use fuller clustered foliage, restrained roof joints and weathered foundations.
+- Judge the actual playable camera, not a texture sheet or a cinematic close-up.
+
+`assets/materials/frontier-atlas.webp` is an original AI-generated four-material
+atlas (grass, earth, paving, rock), generated for this project on 2026-11-20.
+It contains no extracted Blizzard assets. World-space sampling and shared atlas
+storage keep detail coherent without per-building image downloads. Control maps
+are presentation-only and consume no simulation randomness.
+
+Reference study (composition/material principles only):
+- https://news.blizzard.com/en-us/article/5740267/game-guide-terran-ramp-defense
+- https://news.blizzard.com/en-us/article/23395649/revisiting-the-warcraft-iii-editor
+- https://www.playground.ru/warcraft_3/news/blizzard_vernuli_originalnyj_warcraft_3_v_battle_net-1841635
+
+Cliff contour refinement incorporates the reviewed terrace-mesh changes from
+`cursor/smooth-cliff-rims-0f49` (PR #128), without importing its unrelated files.
+The navigation regression suite remains the authority on actual access.

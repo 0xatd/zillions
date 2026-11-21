@@ -1,3 +1,9 @@
+# Current visual standard
+
+The terrain/simulation contracts below remain valid. Historical low-poly,
+flat-color and few/no-texture aesthetics are superseded by
+[Art Quality Standard](art-quality-standard.md), per Alex on 2026-11-20.
+
 # Why Thronefall's maps feel better than ours — and the engine that closes the gap
 
 Research notes + design doc. Part 1 is what Thronefall actually does (from the
@@ -332,3 +338,19 @@ city read designed.
 validation). `node scripts/map-check.mjs --report` prints the per-level
 readout. The terrain signature uniqueness check still guarantees no two
 planets read the same.
+
+
+### Ramp and street integrity (2026-11-20)
+
+- Cliff sites own graded switchbacks. Founding must reuse those approaches,
+  not carve a straight causeway through their retaining rock.
+- The switchback footprint includes its landings and a diagonal-safe rock
+  divider between legs. `_sealPlateauEdges` closes rasterized shelf slivers
+  with visible rock tiles; `cliffRock` keeps node foundations and frontier
+  repairs from reopening those cliffs. Collision still uses the same tile map.
+- `hq.plan.streets` records the exact reserved street segments, including
+  inner-ward bends. Plaza rendering uses those endpoints, not generic radial
+  strips. Older snapshots without the field use the radial fallback.
+- `tests/cliff-access.test.mjs` covers founding, cardinal/diagonal shortcuts,
+  objective reachability, painted ramp centers, street/gate alignment, and
+  actual hero movement both ways on Black Vale's built-base ramps.

@@ -216,6 +216,7 @@ export class TerrainField {
     this.nestSpots = this._pickNests();
     this._carveWarRoads();
     this._shapePlateaus(elev);
+    this._sealPlateauEdges();
     this._carveOutpostPads();
     // Lane nodes are read BEFORE the frontier connector runs, so the connector
     // can guarantee they are reachable — a node marooned behind water or crag
@@ -228,6 +229,28 @@ export class TerrainField {
     this._connectPockets();
     this.chokeSpots = this._findChokepoints();
     this._nameSites();
+  }
+
+  // Rasterizing curved shelves can leave a diagonal sliver of low ground
+  // touching the upper deck. Give the low side a real retaining-rock tile;
+  // movement and rendering then agree, without an invisible height barrier.
+  _sealPlateauEdges() {
+    if (!this.ledgeW) return;
+    const N = this.size, seal = new Map();
+    for (let z = 1; z < N - 1; z++) for (let x = 1; x < N - 1; x++) {
+      const k = z * N + x;
+      if (!TILE_INFO[this.tiles[k]].walk || this.ledgeW[k] < 0.99) continue;
+      for (const delta of [1, -1, N, -N, N + 1, N - 1, -N + 1, -N - 1]) {
+        const j = k + delta;
+        if (!TILE_INFO[this.tiles[j]].walk || this.ledgeW[j] < 0.99 || this.swRoad[j]) continue;
+        if (this.ledgeH[k] - this.ledgeH[j] > 0.75) seal.set(j, Math.max(seal.get(j) || 0, this.ledgeH[k] + LEDGE.lip));
+      }
+    }
+    for (const [k, h] of seal) { this.tiles[k] = TILE.MOUNTAIN; this.ledgeH[k] = h; }
+    this.cliffRock = new Uint8Array(N * N);
+    for (let k = 0; k < N * N; k++) {
+      if (this.tiles[k] === TILE.MOUNTAIN && this.ledgeW[k] >= 0.99) this.cliffRock[k] = 1;
+    }
   }
 
   // The Labyrinth is one authored level. It does not mirror, roll rooms, or
@@ -585,8 +608,10 @@ export class TerrainField {
     // the cliff face runs sideways, turns, runs back, and drops out onto the
     // valley floor. Local frame: u = out from the shelf edge, s = across.
     // Everything in the cut that is not road is rock, stepped down leg by leg.
-    const SW = { half: 6.6, depth: 7.9, w: 1.2 };
-    const swPath = [[0, -0.6], [0, 1.6], [4.9, 1.6], [4.9, 5.2], [-4.9, 5.2], [-4.9, 9.6]];
+    // Leave a full rock divider even on a diagonal grid: nearby hairpin
+    // legs must not touch at a corner and let steering skip the climb.
+    const SW = { half: 8.0, depth: 8.7, w: 1.2 };
+    const swPath = [[0, -0.6], [0, 1.6], [4.9, 1.6], [4.9, 6.0], [-4.9, 6.0], [-4.9, 10.4]];
     const swLen = [0];
     for (let q = 1; q < swPath.length; q++) {
       swLen.push(swLen[q - 1] + Math.hypot(swPath[q][0] - swPath[q - 1][0], swPath[q][1] - swPath[q - 1][1]));
@@ -625,7 +650,7 @@ export class TerrainField {
           const rx = wx - c.cx, rz = wz - c.cz;
           const u = rx * c.dx + rz * c.dz;
           const sv = -rx * c.dz + rz * c.dx;
-          if (u >= -0.2 && u <= SW.depth + 2.2 && Math.abs(sv) <= SW.half) return [sv, u];
+          if (u >= -1.2 && u <= SW.depth + 3.5 && Math.abs(sv) <= SW.half) return [sv, u];
         }
         return null;
       };
@@ -641,7 +666,9 @@ export class TerrainField {
           const t = Math.atan2(Math.sin(Math.atan2(pz, px) - facing), Math.cos(Math.atan2(pz, px) - facing));
           const r = rimRadius(rim, t);
           const k = this.idx(x, z);
-          const cut = d >= r + 1.6 ? inCut(x + 0.5, z + 0.5) : null;
+          // The road cut owns its complete footprint, including the gate
+          // landing; clipping it against the curved rim slices off its sides.
+          const cut = inCut(x + 0.5, z + 0.5);
           if (cut) {
             const [sv, u] = cut;
             const [dist, at] = swNear(sv, u);
@@ -708,7 +735,7 @@ export class TerrainField {
           let e = nearOpen ? eHigh + (eLow - eHigh) * clamp(u / 7, 0, 1) : eLow;
           const w = clamp((pad + 6 - d) / 6, 0, 1);
           elev[k] = elev[k] * (1 - w) + e * w;
-          if (ledge && form.open.some(([c, hw]) => angDiff(t, c) <= hw) && u < 1.3) {
+          if (ledge && form.open.some(([c, hw]) => angDiff(t, c) <= hw) && u < 2.0) {
             // The shelf in front of an open wall ends in a rock lip too.
             this.tiles[k] = TILE.MOUNTAIN; elev[k] = eCrag; setLedge(k, LEDGE.out + LEDGE.lip);
             continue;
@@ -1149,6 +1176,7 @@ export class TerrainField {
           const x = nx + dx, z = nz + dz;
           if (!this.inBounds(x, z) || this.isBuildable(x, z)) continue;
           const i = this.idx(x, z);
+          if (this.cliffRock?.[i]) continue;
           this.tiles[i] = this.tiles[i] === TILE.WATER ? TILE.SAND : TILE.GRASS;
         }
       }
@@ -1199,7 +1227,12 @@ export class TerrainField {
           if (d < bd) { bd = d; bx = x; bz = z; }
         }
         if (bx < 0) continue;
-        this._bridge(Math.round(cx), Math.round(cz), bx, bz);
+        // A concave pocket's centroid can lie inside its surrounding cliff.
+        // Start on a tile that actually belongs to the pocket.
+        const source = pocket.reduce((best, k) =>
+          Math.hypot(k % N - cx, ((k / N) | 0) - cz) < Math.hypot(best % N - cx, ((best / N) | 0) - cz) ? k : best);
+        if (this.cliffRock) this._bridge(source % N, (source / N) | 0, bx, bz);
+        else this._bridge(Math.round(cx), Math.round(cz), bx, bz);
         bridgedAny = true;
       }
       if (!bridgedAny) return;
@@ -1231,13 +1264,38 @@ export class TerrainField {
   // campaign is winnable on a map whose water landed badly.
   _bridge(x0, z0, x1, z1) {
     const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0)));
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const x = Math.round(x0 + (x1 - x0) * t), z = Math.round(z0 + (z1 - z0) * t);
+    let route = Array.from({ length: steps + 1 }, (_, i) => [
+      Math.round(x0 + (x1 - x0) * i / steps), Math.round(z0 + (z1 - z0) * i / steps),
+    ]);
+    if (route.some(([x, z]) => this.cliffRock?.[this.idx(x, z)])) {
+      // A repair must go around a protected cliff, never cut a second ramp.
+      // Stable cardinal BFS finds a shortest detour through diggable ground.
+      const N = this.size, start = this.idx(x0, z0), goal = this.idx(x1, z1);
+      const parent = new Int32Array(N * N).fill(-1), queue = [start];
+      parent[start] = start;
+      for (let head = 0; head < queue.length && parent[goal] < 0; head++) {
+        const k = queue[head], x = k % N, z = (k / N) | 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz;
+          if (!this.inBounds(nx, nz)) continue;
+          const j = this.idx(nx, nz);
+          if (parent[j] >= 0 || this.cliffRock[j]) continue;
+          parent[j] = k; queue.push(j);
+        }
+      }
+      if (parent[goal] < 0) return;
+      route = [];
+      for (let k = goal; ; k = parent[k]) {
+        route.push([k % N, (k / N) | 0]);
+        if (k === start) break;
+      }
+    }
+    for (const [x, z] of route) {
       for (let dz = -1; dz <= 1; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (!this.inBounds(x + dx, z + dz)) continue;
           const k = this.idx(x + dx, z + dz);
+          if (this.cliffRock?.[k]) continue;
           const t2 = this.tiles[k];
           if (t2 === TILE.WATER) this.tiles[k] = TILE.SAND;
           else if (t2 === TILE.MOUNTAIN || t2 === TILE.FOREST) this.tiles[k] = TILE.GRASS;

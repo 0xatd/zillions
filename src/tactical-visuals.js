@@ -69,7 +69,7 @@ const OutlineEdgeShader = {
     uNear: { value: 0.5 },
     uFar: { value: 600 },
     uInk: { value: new THREE.Color(0x1d3557) },
-    uStrength: { value: 0.72 },
+    uStrength: { value: 0.46 },
     uDepthK: { value: 0.035 },
     uNormalK: { value: 0.55 },
   },
@@ -114,7 +114,9 @@ const OutlineEdgeShader = {
         dz = max(dz, z - z0);
         dn = max(dn, 1.0 - dot(n0, nrm(vUv + offs[i])));
       }
-      float edge = max(step(uDepthK * z0, dz), step(uNormalK, dn));
+      // Silhouettes keep their definition; internal facets get quieter paint-like seams.
+      float edge = max(smoothstep(uDepthK * z0, uDepthK * z0 * 1.6, dz),
+        .28 * smoothstep(uNormalK, uNormalK + .35, dn));
       if (z0 > uFar * 0.98) edge = 0.0;
       vec3 ink = mix(base.rgb * 0.35, uInk * 0.7, 0.5);
       gl_FragColor = vec4(mix(base.rgb, ink, edge * uStrength), base.a);
