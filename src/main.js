@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import { environmentMaterial } from './environment-art.js';
+import { buildColonyStreets, buildFortressBoundary } from './colony-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
@@ -883,7 +884,7 @@ class App {
     const g = new THREE.Group();
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
-    const squarePlaza = plan && plan.key === 'fort';
+    const squarePlaza = plan && ['fort', 'keyhole'].includes(plan.key);
     // On a terraced site the pad and walkways are draped over the ground so
     // they follow the steps instead of floating flat over the lower terraces.
     const terraced = !!this.map._tileCH;
@@ -900,11 +901,11 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(9.2, 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      squarePlaza ? new THREE.PlaneGeometry(plan?.kit ? 8 : 9.2, plan?.kit ? 8 : 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
       environmentMaterial('stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
-    if (squarePlaza) disc.rotation.z = -plan.facing;
+    if (squarePlaza && plan.key === 'fort') disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
     disc.position.set(cx, plazaY + 0.015, cz);
     drape(disc, 0.03);
@@ -917,13 +918,16 @@ class App {
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
-    g.add(ring);
+    if (!squarePlaza) g.add(ring);
+    else { ring.geometry.dispose(); ring.material.dispose(); }
     const laneMat = environmentMaterial('stone', { color: 0x9e998b });
     // Render the reserved streets, including bent approaches through an inner
     // ward, rather than guessing radial strips from a generic city radius.
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
       [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
-    for (const [[ax, az], [bx, bz]] of streets) {
+    if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads));
+    if (plan?.kit) g.add(buildFortressBoundary(this.map, plan, cx, cz));
+    for (const [[ax, az], [bx, bz]] of (plan?.roads ? [] : streets)) {
       const len = Math.hypot(bx - ax, bz - az);
       if (len < 0.1) continue;
       const a = Math.atan2(bz - az, bx - ax);
@@ -996,7 +1000,7 @@ class App {
       // amber tread bands identify the graded route at normal play zoom.
       const edgeMat = layer(0x514c55, -1);
       const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
-      const centreMat = layer(0xc5b078, -5);
+      const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
@@ -3989,7 +3993,7 @@ class App {
 
     // Glow ring at the pay point + radial progress arc.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
+    const ringGeo = new THREE.RingGeometry(1.46, 1.55, 40);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
     ring.position.set(px, 0.05, pz);
@@ -4174,8 +4178,12 @@ class App {
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
+    const plan = plots.find(p=>p.kind==='hq')?.plan;
+    const frontageTile = plan?.roads?.connections?.find(c=>c.plotId===b.plotId)?.tile;
+    const frontage = frontageTile == null ? null :
+      [frontageTile % this.map.size + .5, Math.floor(frontageTile / this.map.size) + .5];
     const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center });
+      archTiles: this._archTiles, gateMain: this._gateMain, center, frontage, fortressKit: !!plan?.kit });
     const painted = new Map();
     mesh.traverse(part => {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
@@ -4293,10 +4301,10 @@ class App {
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
+        // Mounted heroes remain larger than infantry, not house-sized.
+        // The selection ring and outline carry readability at distance;
+        // the body no longer needs the old 1.25× enlargement.
+        kit.node.scale.multiplyScalar(0.78);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4343,7 +4351,7 @@ class App {
         const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
         auraFill.position.y = 0.035;
         g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
+        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.12) / S, auraR / S, 72);
         auraGeo.rotateX(-Math.PI / 2);
         const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
         aura.position.y = 0.05;
@@ -4560,11 +4568,11 @@ class App {
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
+          aura.material.opacity = 0.10 + rank * 0.018 + Math.sin(t * 2.2 + u.id) * 0.015;
           if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
           if (pulse) {
             pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
+            pulse.material.opacity = rank ? 0.055 + rank * 0.012 : 0.025;
           }
         }
         const weave = rec.mesh.userData.weave;

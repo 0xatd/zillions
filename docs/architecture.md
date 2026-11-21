@@ -72,6 +72,8 @@ to snapshots when the state can affect later simulation.
 | File | Ownership |
 | --- | --- |
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
+| `src/colony-roads.js` | Deterministic built-footprint-aware courtyard, gate and frontage street network |
+| `src/colony-art.js` | Merged ground-following colony paving |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |
@@ -304,3 +306,11 @@ When you add a system:
 5. Define failure behavior.
 6. Add a committed check.
 7. Update this document if module ownership changes.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.

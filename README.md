@@ -35,6 +35,12 @@ Use this source order when documents disagree:
 5. `docs/agent-brief.md`.
 6. Future documents, including `docs/design-vision.md`.
 
+## Map-kit prototype
+
+`map-kit.html` is the reusable placement workbench (rotate, stamp, undo, JSON
+export/import). Black Vale's first city site is its first playable composition.
+Workbench exports are not yet playable missions. See `docs/reusable-map-kit.md`.
+
 ## The Game
 
 Zillions is a siege game and nothing else. The persistent living world (the
@@ -346,3 +352,6 @@ mixed broadleaf/conifer groves, undergrowth, rock outcrops, fallen trunks and
 shore reeds. `src/environment-art.js` blends painted terrain and animates
 shallow/deep water. Dressing does not change walkability, combat or saved state.
 See [the art quality standard](docs/art-quality-standard.md).
+
+Colony streets connect the keep courtyard, gates and district frontages around
+fully built footprints. Terrain barriers and each map's unique perimeter remain.

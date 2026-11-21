@@ -321,12 +321,25 @@ function authoredBuildingMesh(b) {
 // model per building kind and tier for the active culture. Each building gets
 // its OWN copy of the two kit materials (damage soot and construction fade are
 // per building); geometry is shared with the template.
-function kitBuildingMesh(b) {
+function kitBuildingMesh(b,ctx={}) {
   if (b.kind === 'wall') return null;
   const key = kitBuildingKey(b.kind, b.plotTier);
   if (!key || !hasKit(key)) return null;
   const model = kitClone(key);
   if (!model) return null;
+  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1.15,1.35,1.15);
+  // Stable presentation variation: no RNG consumption, footprint expansion,
+  // layout changes or false building tiers. District roofs stay subordinate.
+  if(b.kind==='house'){
+    const v=((b.id||0)*17)%7;
+    model.scale.set(.94+(v%3)*.02,.94+v*.035,.94+(v%3)*.02);
+  }
+  // Doors address the actual connected street. Cardinal turns keep the
+  // authored footprint inside its square plot; no occupancy or sim edits.
+  if(ctx.frontage && ['house','farm','workshop'].includes(b.kind)){
+    const dx=ctx.frontage[0]-b.cx,dz=ctx.frontage[1]-b.cz;
+    model.rotation.y=Math.abs(dx)>Math.abs(dz)?(dx>0?Math.PI/2:-Math.PI/2):(dz>=0?0:Math.PI);
+  }
   const shared = kitMaterials();
   const body = shared.body.clone(), glow = shared.glow.clone();
   model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
@@ -348,7 +361,7 @@ function kitBuildingMesh(b) {
 // plot's principal gate tile and aligned with the local wall run. The other
 // arch tiles draw nothing: they are the gatehouse's open passage.
 function kitWall(b, ctx, tier, K, KG) {
-  const t = Math.min(3, Math.max(1, tier | 0));
+  const t = Math.min(3, Math.max(ctx.fortressKit ? 2 : 1, tier | 0));
   const seg = kitGeometry(`wall_t${t}_seg`, 'body');
   const post = kitGeometry(`wall_t${t}_post`, 'body');
   const gate = kitGeometry(`gate_t${t}`, 'body');
@@ -419,7 +432,7 @@ function kitWall(b, ctx, tier, K, KG) {
 }
 
 export function buildBuildingMesh(b, ctx = {}) {
-  const authored = authoredBuildingMesh(b) || kitBuildingMesh(b);
+  const authored = authoredBuildingMesh(b) || kitBuildingMesh(b,ctx);
   if (authored) return authored;
 
   const g = new THREE.Group();

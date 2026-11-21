@@ -134,3 +134,11 @@ including snow and ash. Review these shared components across all five maps.
 Use [Black Vale benchmark](black-vale-benchmark.md) for the fixed scene, cameras,
 battle duration and comparison rules. Review the combined landscape, colony,
 hero and armies rather than judging each layer in isolation.
+
+## Reusable city and terrain craft (2026-11-21)
+
+Read [City reference study](city-reference-study.md) and [Reusable map kit](reusable-map-kit.md).
+Alex wants Black Vale improvements to become shared components and repeatable
+practice for all maps: cliff readability from both sides, natural wall/rock
+junctions, supported ramps, deliberate streets and district composition. WoW
+and fantasy-city concepts are inspiration only, never exact layouts or assets.
