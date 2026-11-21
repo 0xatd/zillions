@@ -88,7 +88,12 @@ def timber_front(B, pal, w, y0, y1, z, posts=3):
     for i in range(posts):
         x = -w / 2 + 0.03 + i * (w - 0.06) / (posts - 1)
         B.box(c, 0.05, y1 - y0, 0.03, x, y0, z)
-    B.box(c, 0.04, (y1 - y0) * 1.1, 0.03, -w * 0.25, y0 + 0.02, z, 0, 0, 0.6)
+    # Brace endpoints sit inside one timber bay. Boxes rotate about their
+    # base, not their centre; the former positive tilt escaped the facade.
+    dx = (w - .12) / (posts - 1) - .08
+    dy = y1 - y0 - .16
+    B.box(c, .045, math.hypot(dx, dy), .035, -w/2+.08, y0+.08, z,
+          0, 0, -math.atan2(dx, dy))
 
 
 def ridge(B, pal, w, y, z=0, ry=0.0, length=1.0):
