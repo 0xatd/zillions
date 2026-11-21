@@ -40,9 +40,9 @@ export function buildColonyStreets(map, roads) {
   return group;
 }
 
-// Connected armored revetments on the existing blocked rim. The smoothed half-spans
-// meet at shared midpoints; unlike independent tile boxes, corners do not
-// produce alternating teeth. No visual part may enter a walkable/ramp tile.
+// Connected armored revetments on the existing blocked rim. Clearance-checked
+// runs simplify tile staircases without moving the simulated boundary.
+// No visual part may enter a walkable/ramp tile.
 export function buildFortressBoundary(map,plan,cx,cz) {
   const group=new THREE.Group();group.name='fortress-cliff-parapet';
   if(!plan?.kit)return group;
@@ -93,16 +93,38 @@ export function buildFortressBoundary(map,plan,cx,cz) {
     box(coping,x,y+1.91,z,len+.04,.18,.56,ry);
     box(coping,x,y+.46,z,len+.04,.12,.53,ry);
   };
-  for(const n of nodes.values()){
-    if(!n.neighbors.length)continue;
-    for(const b of n.neighbors)span([n.px,n.pz],[(n.x+b.x)/2+.5,(n.z+b.z)/2+.5],n.y);
-    const tangent=n.neighbors.length===2?[n.neighbors[1].x-n.neighbors[0].x,n.neighbors[1].z-n.neighbors[0].z]:[n.neighbors[0].x-n.x,n.neighbors[0].z-n.z];
-    const ry=-Math.atan2(tangent[1],tangent[0]);
-    // Continuous armored crown: no medieval teeth or per-tile roof caps.
-    box(merlons,n.px,n.y+1.22,n.pz,.16,1.55,.59,ry);
-    if((n.x*3+n.z*5)%4===0){
-      box(footings,n.x+.5,n.y+.94,n.z+.5,.72,1.85,.72);
-      box(coping,n.x+.5,n.y+1.89,n.z+.5,.76,.14,.76);
+  // Follow complete rim chains before drawing. Long chords are allowed only
+  // within the blocked strip, never over a walking corner or a ramp mouth.
+  const visited=new Set(),edge=(a,b)=>[a.z*N+a.x,b.z*N+b.x].sort((a,b)=>a-b).join(':');
+  const chains=[];
+  const walk=(a,b)=>{
+    const chain=[a];
+    while(b&&!visited.has(edge(a,b))){
+      visited.add(edge(a,b));chain.push(b);
+      const next=b.neighbors.length===2?b.neighbors.find(n=>n!==a):null;
+      a=b;b=next;
+    }
+    chains.push(chain);
+  };
+  for(const n of nodes.values())if(n.neighbors.length!==2)for(const b of n.neighbors)walk(n,b);
+  for(const n of nodes.values())for(const b of n.neighbors)if(!visited.has(edge(n,b)))walk(n,b);
+  const clear=(a,b)=>{
+    const dx=b.px-a.px,dz=b.pz-a.pz;
+    return safe((a.px+b.px)/2,(a.pz+b.pz)/2,Math.hypot(dx,dz)+.04,.62,-Math.atan2(dz,dx));
+  };
+  const joints=new Set();
+  for(const chain of chains){
+    const runs=simplifyRimChain(chain,clear);
+    for(const [a,b] of runs){
+      span([a.px,a.pz],[b.px,b.pz],(a.y+b.y)/2);
+      for(const n of [a,b]){
+        const key=n.z*N+n.x;
+        if(joints.has(key))continue;
+        joints.add(key);
+        // Compact structural joints only at run endpoints, not every tile.
+        box(footings,n.px,n.y+.98,n.pz,.55,1.88,.55);
+        box(coping,n.px,n.y+1.96,n.pz,.59,.14,.59);
+      }
     }
   }
   const towers=[];
@@ -140,4 +162,22 @@ export function buildFortressBoundary(map,plan,cx,cz) {
   add(towerBodies,0xc3c9c5,'watch-bastion-bodies');add(coping,0xd3d6cd,'armor-coping');
   add(merlons,0x456876,'steel-reinforcement');add(recesses,0x283b45,'sensor-recesses');add(banners,0xeaa45a,'identification-panels');
   return group;
+}
+
+// Constrained line simplification for presentation only. Keep height steps,
+// junctions and the original landform; clearance is supplied by the caller.
+function simplifyRimChain(chain,clear){
+  const runs=[];
+  for(let i=0;i<chain.length-1;){
+    let end=i+1;
+    for(let j=i+2;j<chain.length;j++){
+      const a=chain[i],b=chain[j],dx=b.px-a.px,dz=b.pz-a.pz,len=Math.hypot(dx,dz);
+      if(len>6)break;
+      if(len<.01)continue;
+      const fits=chain.slice(i,j+1).every(n=>Math.abs(n.y-a.y)<.25&&Math.abs(dx*(n.pz-a.pz)-dz*(n.px-a.px))/len<.80);
+      if(fits&&clear(a,b))end=j;
+    }
+    runs.push([chain[i],chain[end]]);i=end;
+  }
+  return runs;
 }

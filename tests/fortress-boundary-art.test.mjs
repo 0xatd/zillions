@@ -14,7 +14,7 @@ test('all fortress masonry leaves walkable ground and ramp tiles clear',()=>{
  const h=g.plots.find(p=>p.kind==='hq');
  const map=g.map,tiles=map.tiles.slice(),elev=map.elev.slice();
  const root=buildFortressBoundary(map,h.plan,h.cx,h.cz);
- const matrix=new Matrix4(),scale=new Vector3(),pos=new Vector3();let towers=0;
+ const matrix=new Matrix4(),scale=new Vector3(),pos=new Vector3();let towers=0,longCurtains=0;
  for(const mesh of root.children){
   for(let i=0;i<mesh.count;i++){
    mesh.getMatrixAt(i,matrix);scale.setFromMatrixScale(matrix);pos.setFromMatrixPosition(matrix);
@@ -26,6 +26,7 @@ test('all fortress masonry leaves walkable ground and ramp tiles clear',()=>{
     assert.equal(map.isWalkable(x,z),false,`${mesh.name} hides walkable ground`);
     assert.ok(!map.swRoad?.[z*map.size+x],`${mesh.name} hides a ramp`);
    }
+   if(mesh.name==='armored-curtain'&&scale.x>=3)longCurtains++;
    if(scale.y<3)continue;
    towers++;
    for(const dx of [-.68,0,.68])for(const dz of [-.68,0,.68]){
@@ -36,6 +37,7 @@ test('all fortress masonry leaves walkable ground and ramp tiles clear',()=>{
   }
   mesh.geometry.dispose();mesh.material.dispose();
  }
+ assert.ok(longCurtains>=4,'rim must contain long architectural runs, not only tile half-spans');
  assert.ok(towers>=3,'fortress is missing its spaced defensive anchors');
  assert.deepEqual(map.tiles,tiles);assert.deepEqual(map.elev,elev);
 });

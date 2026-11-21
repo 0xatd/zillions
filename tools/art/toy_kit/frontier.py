@@ -76,15 +76,35 @@ def mast(B,G,x,y,z,h=.8):
 
 def house(k,t,pal):
     B,G=k.B,k.G
-    h=1.35+(t-1)*.21
-    top=module(k,1.48,1.34,h,z=-.06)
-    window(B,G,-.43,.67,.64,.23)
-    vent(B,.38,top-.03,.29,.34)
-    shell(B,STEEL,.45,.23,.55,-.38,top-.10,-.32,cut=.06)
-    for i in range(3): B.box(DARK,.31,.025,.055,-.38,top+.135,-.48+i*.14)
-    if t>=2: window(B,G,0,h-.03,.62,.76)
-    if t>=3: shell(B,HULL,.65,.35,.64,.30,top-.10,-.25)
-    if t>=4: mast(B,G,-.48,top,-.4,.66)
+    # Stepped duplex: tall living pod, low utility wing, sheltered entrance.
+    h=1.40+(t-1)*.24
+    top=module(k,.88,1.43,h,x=-.30,z=-.10)
+    shell(B,FRAME,.65,.17,1.05,.43,0,.05)
+    shell(B,HULL,.62,.87+.10*t,1.02,.43,.17,.05)
+    shell(B,PANEL,.68,.12,1.07,.43,1.04+.10*t,.05)
+    window(B,G,-.30,.88,.64,.53)
+    hatch(B,G,.43,.59,.18,.32,.76)
+    # Pitched solar canopy is a large sloping plane, not a tiny roof prop.
+    B.box(PANEL,.92,.10,1.12,-.30,top+.02,-.12,rz=-.16)
+    for z in (-.46,-.12,.22): B.box(STEEL,.86,.025,.035,-.30,top+.08,z,rz=-.16)
+    if t>=2: window(B,G,-.30,h-.12,.64,.50)
+    if t>=3:
+        shell(B,HULL,.59,.48,.69,.43,1.16+.10*t,-.12)
+        window(B,G,.43,1.43+.10*t,.24,.33)
+    if t>=4: mast(B,G,-.54,top,-.53,.67)
+
+
+def hangar(B,w,d,h,z=0):
+    # Faceted vaulted roof, extruded along the deep service bay.
+    profile=[(-w/2,0),(-w/2,h*.60),(-w*.34,h*.91),(0,h),
+             (w*.34,h*.91),(w/2,h*.60),(w/2,0)]
+    verts=[(x,y+.18,zz+z) for zz in (-d/2,d/2) for x,y in profile]
+    faces=[tuple(range(6,-1,-1)),tuple(range(7,14))]+[(i,(i+1)%7,(i+1)%7+7,i+7) for i in range(7)]
+    B.emit(verts,faces,HULL,xform())
+    for zz in (-d*.36,0,d*.36):
+        for (x1,y1),(x2,y2) in zip(profile[1:5],profile[2:6]):
+            dx,dy=x2-x1,y2-y1
+            B.box(STEEL,math.hypot(dx,dy)+.03,.06,.08,(x1+x2)/2,(y1+y2)/2+.20,zz+z,rz=math.atan2(dy,dx))
 
 
 def castle(k,t,pal):
@@ -128,21 +148,36 @@ def tower(k,t,pal):
 
 def camp(k,t,pal,trade='militia'):
     B,G=k.B,k.G
-    h=1.4+.23*t
-    top=module(k,1.77,1.51,h,z=-.14)
-    hatch(B,G,-.17,.65,.18,.69,1.13)
+    h=1.35+.23*t
     c={'militia':AMBER,'ranger':0x83aa82,'sniper':0xa392bf}[trade]
-    B.box(c,.79,.17,.08,-.15,1.5,.69)
+    shell(B,FRAME,1.90,.18,1.80)
     if trade=='militia':
-        shell(B,STEEL,.55,.58,.65,.45,top-.05,-.3)
-        vent(B,.45,top+.07,.04,.36)
+        hangar(B,1.76,1.65,h,z=-.08)
+        B.box(FRAME,1.24,1.15,.08,0,.18,.78)
+        hatch(B,G,0,.81,.18,.96,1.03)
+        B.box(c,1.20,.16,.07,0,1.40,.81)
+        if t>=2: shell(B,PANEL,.66,.26,.65,0,h+.12,-.35)
+        if t>=3: shell(B,STEEL,.42,.48,.45,-.44,h,-.36)
     elif trade=='ranger':
-        mast(B,G,.48,top,-.35,.83)
-        B.prism(PANEL,8,.29,.23,.13,.48,top+.43,-.35,rx=.55)
+        # Two low equipment wings around a recessed deployment porch.
+        for x in (-.54,.54):
+            shell(B,HULL,.65,h*.74,1.48,x,.18,-.12)
+            shell(B,PANEL,.70,.12,1.52,x,h*.74+.18,-.12)
+        shell(B,STEEL,1.65,.30,.60,0,h*.74+.25,-.48)
+        hatch(B,G,0,.22,.18,.43,.94)
+        B.box(c,1.65,.11,.09,0,h*.74+.18,.66)
+        mast(B,G,.52,h*.74+.30,-.40,.72+.16*t)
+        B.prism(PANEL,10,.36,.27,.13,.52,h*.74+.75,-.40,rx=.55)
     else:
-        shell(B,STEEL,.37,.90,.39,.50,top-.03,-.40)
-        window(B,G,.50,top+.57,-.18,.25)
-    for x in (-.67,.67): B.box(AMBER,.15,.025,.29,x,.05,.88)
+        # Offset sensor tower and low crew wing; no shared square barracks box.
+        top=module(k,.93,1.44,h+.32,x=-.35,z=-.12)
+        shell(B,HULL,.66,.92,1.16,.46,.18,.02)
+        shell(B,PANEL,.73,.13,1.23,.46,1.10,.02)
+        shell(B,FRAME,.70,.18,.65,-.35,top,-.34)
+        shell(B,c,.52,.48+.13*t,.48,-.35,top+.18,-.34)
+        window(B,G,-.35,top+.35,-.08,.35)
+        hatch(B,G,.46,.63,.18,.35,.80)
+    for x in (-.67,.67): B.box(c,.15,.025,.29,x,.05,.85)
 
 
 def farm(k,t,pal):
@@ -196,21 +231,35 @@ def mine(k,t,pal):
 
 def workshop(k,t,pal):
     B,G=k.B,k.G
-    top=module(k,1.75,1.54,1.20+.25*t,z=-.1)
-    hatch(B,G,-.25,.70,.18,.75,1.0)
-    for x in (.30,.65):
-        B.prism(STEEL,8,.13,.13,.65,x,top,-.4)
-        B.prism(FRAME,8,.18,.18,.10,x,top+.65,-.4)
-    B.box(AMBER,.60,.16,.06,-.25,1.35,.74)
+    # Open gantry with a rear service room and visible work deck.
+    shell(B,FRAME,1.85,.18,1.73)
+    shell(B,HULL,1.64,1.05+.18*t,.61,0,.18,-.51)
+    hatch(B,G,-.38,-.18,.18,.40,.85)
+    for x in (-.72,.72):
+        B.box(STEEL,.20,1.72+.20*t,.24,x,.18,.42)
+        shell(B,FRAME,.34,.22,.46,x,.18,.42,cut=.05)
+    B.box(AMBER,1.70,.27,.42,0,1.90+.20*t,.42)
+    B.box(FRAME,.14,.49,.14,.28,1.41+.20*t,.42)
+    shell(B,STEEL,.78,.34,.67,0,.18,.24)
+    B.box(PANEL,.88,.08,.72,0,.52,.24)
+    for x in (.30,.64): B.prism(STEEL,8,.12,.12,.57+.18*t,x,1.23+.18*t,-.52)
+    if t>=2: shell(B,PANEL,1.68,.13,.69,0,1.35+.18*t,-.51)
+    if t>=3: B.box(EDGE,.16,.23,1.34,-.72,2.28,-.02)
 
 
 def hero_forge(k,t,pal):
     B,G=k.B,k.G
-    top=module(k,1.70,1.55,1.2+.2*t)
-    shell(B,FRAME,.82,.20,.9,y=top-.05)
-    B.prism(STEEL,10,.33,.33,.65,0,top+.15,0)
-    G.prism(LIGHT,10,.28,.28,.23,0,top+.38,0)
-    shell(B,EDGE,.8,.12,.8,y=top+.80)
+    # Cylindrical fabrication chamber with open supporting yokes.
+    B.prism(FRAME,10,.83,.83,.22,0,0,0)
+    B.prism(HULL,10,.64,.55,1.02+.20*t,0,.22,0)
+    B.prism(STEEL,10,.65,.65,.15,0,1.24+.20*t,0)
+    G.prism(LIGHT,10,.50,.50,.27,0,1.39+.20*t,0)
+    for x in (-.69,.69):
+        shell(B,STEEL,.22,1.65+.30*t,.48,x,.22,0,cut=.04)
+    shell(B,EDGE,1.65,.20,.66,0,1.87+.30*t,0)
+    hatch(B,G,0,.65,.22,.42,.88)
+    if t>=2: B.prism(PANEL,10,.47,.33,.36,0,1.66+.20*t,0)
+    if t>=3: mast(B,G,-.68,2.97,0,.40)
 
 
 def outpost(k,t,pal):

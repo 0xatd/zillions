@@ -164,3 +164,20 @@ Cliff skirts share exact boundary vertices. Per-face normal displacement was
 removed because it opened cracks between adjacent faces; material fractures
 provide surface detail without separating the shell. The seam regression uses
 an independently specified raised block, not a screenshot or source-text check.
+
+## Architectural run and silhouette refinement
+
+The natural cliff-top boundary now traces connected rim chains and fits longer
+straight runs inside their blocked strip. Runs stop at junctions, substantial
+height changes, unsafe chords and a six-tile length limit. Compact joints mark
+run endpoints instead of decorating each tile. Complete span footprints remain
+clearance-checked against walkable ground and switchbacks. This does not move
+terrain, simulated wall plots, gate openings or collision. Buildable gate-wall
+sections retain their own existing kit assembly.
+
+Default habitat tiers use stepped living/service pods and a sloped solar canopy.
+Militia halls have vaulted shells; ranger facilities have separate low wings;
+sniper facilities have offset sensor towers. Workshops use open gantries, and
+fabricators use cylindrical chambers. These forms share the same armor palette
+and existing asset IDs, but no longer share one box-shaped building body.
+Rebuild through `frontier.py`; keep all tier, state and gameplay-distance checks.
