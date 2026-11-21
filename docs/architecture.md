@@ -88,7 +88,12 @@ to snapshots when the state can affect later simulation.
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.
 
-Authored unit and building models live under `assets/art-slice/`. Their source
+The default colony GLBs live under `assets/kit/european/`, generated from
+`tools/art/toy_kit/frontier.py` for buildings and defenses. Legacy shared units
+and props still use `european.py`. The culture registry selects builders without
+changing simulation IDs.
+
+Additional authored unit and building models live under `assets/art-slice/`. Their source
 and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.

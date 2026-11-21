@@ -13,6 +13,15 @@ it conflicts with that standard. Keep the siege game, faction identities,
 asset budgets, sockets, and deterministic simulation contracts below.
 This is a quality target, not a claim of current parity.
 
+## Sci-fi direction (2026-11-21)
+
+Alex explicitly chose stronger sci-fi. The default human settlement now targets
+armored expedition architecture: ivory ceramic armor, blue-grey panels, steel
+frames, amber markings and sparse cyan sensors. Author gatehouses as deep
+mechanical passages with retracted blast doors. Keep openings visibly clear.
+The reproducible source is `tools/art/toy_kit/frontier.py`; stable European
+asset IDs preserve loading and saves. Other culture kits remain legacy.
+
 ## Target
 
 Use a stylized, chunky science-fiction RTS style.

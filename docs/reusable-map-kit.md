@@ -2,6 +2,22 @@
 
 Status: authored prototype, not a production release or finished art target.
 
+## Current sci-fi override — 2026-11-21
+
+Alex chose stronger sci-fi after rejecting the medieval walls and entrances.
+The default human kit now uses `tools/art/toy_kit/frontier.py`: chamfered armor,
+steel frames, functional machinery, retracted blast-door housings and deep gate
+passages. Houses become habitat modules; farms use hydroponic grow beds; mills
+use turbines; command buildings have communication towers. Stable asset IDs,
+plot roles, costs, footprints and simulation remain unchanged. Other culture
+kits retain their legacy architecture. Descriptions of timber/stone/roofed
+assets below record the earlier draft and are superseded for the default kit.
+
+Cliff-top defenses use continuous capped armor and observation blocks instead
+of crenellations. Shared streets use broad service-slab material, not cobbles.
+The wall path still follows the existing terrain: this pass does not reauthor
+landforms or claim to solve every angular wall/cliff junction.
+
 Alex rejected the streets-only #136 result on 2026-11-21. Technical connectivity
 was not enough: the screenshot did not read as an intentional fortress. Alex
 requested reusable map parts in the spirit of the Warcraft II editor. This is

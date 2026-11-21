@@ -5,7 +5,7 @@ import { environmentMaterial } from './environment-art.js';
 
 export function buildColonyStreets(map, roads) {
   const group=new THREE.Group();group.name='colony-streets';
-  const make=(tiles,color,lift,inset=.16,kind='stone')=>{
+  const make=(tiles,color,lift,inset=.16,kind='armor')=>{
     const pos=[],uv=[];
     const occupied=new Set(tiles.map(([x,z])=>`${x},${z}`));
     for(const [x,z] of tiles){
@@ -40,7 +40,7 @@ export function buildColonyStreets(map, roads) {
   return group;
 }
 
-// Connected masonry on the existing blocked rim. The smoothed half-spans
+// Connected armored revetments on the existing blocked rim. The smoothed half-spans
 // meet at shared midpoints; unlike independent tile boxes, corners do not
 // produce alternating teeth. No visual part may enter a walkable/ramp tile.
 export function buildFortressBoundary(map,plan,cx,cz) {
@@ -98,9 +98,8 @@ export function buildFortressBoundary(map,plan,cx,cz) {
     for(const b of n.neighbors)span([n.px,n.pz],[(n.x+b.x)/2+.5,(n.z+b.z)/2+.5],n.y);
     const tangent=n.neighbors.length===2?[n.neighbors[1].x-n.neighbors[0].x,n.neighbors[1].z-n.neighbors[0].z]:[n.neighbors[0].x-n.x,n.neighbors[0].z-n.z];
     const ry=-Math.atan2(tangent[1],tangent[0]);
-    // One broad capped merlon per tile, not two tiny teeth on every edge.
-    box(merlons,n.px,n.y+2.22,n.pz,.43,.52,.48,ry);
-    box(coping,n.px,n.y+2.49,n.pz,.47,.09,.52,ry);
+    // Continuous armored crown: no medieval teeth or per-tile roof caps.
+    box(merlons,n.px,n.y+1.22,n.pz,.16,1.55,.59,ry);
     if((n.x*3+n.z*5)%4===0){
       box(footings,n.x+.5,n.y+.94,n.z+.5,.72,1.85,.72);
       box(coping,n.x+.5,n.y+1.89,n.z+.5,.76,.14,.76);
@@ -112,38 +111,33 @@ export function buildFortressBoundary(map,plan,cx,cz) {
     const x=n.x+.5+vx/l*.72,z=n.z+.5+vz/l*.72;
     if(towers.some(t=>Math.hypot(t.x-x,t.z-z)<8)||!safe(x,z,1.48,1.48))continue;
     towers.push({x,z,y:n.y});
-    // Battered plinth, solid shaft, corbelled fighting platform and quieter
-    // inset arrow slits. These are architectural anchors, not new weapons.
+    // Armored plinth, structural shaft and recessed observation band.
+    // These are architectural anchors, not new weapons.
     box(footings,x,n.y+.05,z,1.48,.60,1.48);
     box(towerBodies,x,n.y+1.65,z,1.25,3.5,1.25);
     box(coping,x,n.y+2.92,z,1.36,.20,1.36);
     box(coping,x,n.y+3.21,z,1.48,.24,1.48);
-    for(const dx of [-.51,.51])for(const dz of [-.51,.51]){
-      box(merlons,x+dx,n.y+3.59,z+dz,.40,.54,.40);
-      box(coping,x+dx,n.y+3.88,z+dz,.44,.08,.44);
-    }
+    box(merlons,x,n.y+3.52,z,1.20,.42,1.20);
+    box(coping,x,n.y+3.77,z,1.30,.12,1.30);
     for(const [dx,dz] of dirs){
       const ry=dx?Math.PI/2:0;
-      box(recesses,x+dx*.631,n.y+2.1,z+dz*.631,.09,.49,.018,ry);
-      box(coping,x+dx*.65,n.y+1.81,z+dz*.65,.22,.10,.07,ry);
-      if((dx>0||dz>0)&&towers.length%2===0){
-        box(banners,x+dx*.638,n.y+1.0,z+dz*.638,.42,.70,.018,ry);
-        box(coping,x+dx*.66,n.y+1.39,z+dz*.66,.52,.07,.06,ry);
-      }
+      box(recesses,x+dx*.631,n.y+2.1,z+dz*.631,.52,.28,.022,ry);
+      box(coping,x+dx*.65,n.y+1.91,z+dz*.65,.60,.10,.07,ry);
+      box(banners,x+dx*.638,n.y+.83,z+dz*.638,.36,.16,.025,ry);
     }
     // Seat the tower into its nearest curtain without crossing the rim.
     span([n.px,n.pz],[x,z],n.y);
   }
   const add=(items,color,name)=>{
     if(!items.length)return;
-    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),environmentMaterial('stone',{color}),items.length);
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),environmentMaterial('armor',{color}),items.length);
     mesh.name=name;
     const matrix=new THREE.Matrix4(),q=new THREE.Quaternion(),pos=new THREE.Vector3(),scale=new THREE.Vector3();
     items.forEach(([x,y,z,w,h,d,ry],i)=>{q.setFromAxisAngle(new THREE.Vector3(0,1,0),ry);matrix.compose(pos.set(x,y,z),q,scale.set(w,h,d));mesh.setMatrixAt(i,matrix);});
     mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
   };
-  add(stone,0x9b9888,'curtain-masonry');add(footings,0x777867,'battered-footings');
-  add(towerBodies,0xa5a18e,'watch-bastion-bodies');add(coping,0xc0b99f,'limestone-coping');
-  add(merlons,0xaba58f,'capped-battlements');add(recesses,0x292e2c,'arrow-slits');add(banners,0x384f77,'watch-banners');
+  add(stone,0xa7b0af,'armored-curtain');add(footings,0x485b62,'reinforced-footings');
+  add(towerBodies,0xc3c9c5,'watch-bastion-bodies');add(coping,0xd3d6cd,'armor-coping');
+  add(merlons,0x456876,'steel-reinforcement');add(recesses,0x283b45,'sensor-recesses');add(banners,0xeaa45a,'identification-panels');
   return group;
 }

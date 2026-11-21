@@ -34,8 +34,8 @@ export const SHARED_KIT = new Set(KIT_ASSETS.filter((n) => /^(hero_|enemy_|prop_
 export const CULTURES = {
   european: {
     key: 'european', name: 'European', status: 'built',
-    // Sci-fi knightly star-fortress: cream stone and steel, slate-blue roofs,
-    // gold trim, blue-and-gold banners, cyan energy lamps.
+    // Expedition fortress: ceramic armor, blue-grey service panels, steel
+    // frames and restrained amber/cyan functional accents. Stable culture ID.
     palette: {
       stone: 0xeee5cf, stone2: 0xd8ccb1, stone3: 0xb5a68a, roof: 0x3f70c8, roof2: 0x2f569e,
       trim: 0xf2c14e, banner: 0x3f70c8, accent: 0xc4473b, wood: 0x9a6b44, steel: 0x9aa6b6,

@@ -902,7 +902,7 @@ class App {
     };
     const disc = new THREE.Mesh(
       squarePlaza ? new THREE.PlaneGeometry(plan?.kit ? 8 : 9.2, plan?.kit ? 8 : 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
-      environmentMaterial('stone', { color: 0xa6a091 }),
+      environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
     if (squarePlaza && plan.key === 'fort') disc.rotation.z = -plan.facing;
@@ -920,7 +920,7 @@ class App {
     drape(ring, 0.05);
     if (!squarePlaza) g.add(ring);
     else { ring.geometry.dispose(); ring.material.dispose(); }
-    const laneMat = environmentMaterial('stone', { color: 0x9e998b });
+    const laneMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0x9e998b });
     // Render the reserved streets, including bent approaches through an inner
     // ward, rather than guessing radial strips from a generic city radius.
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
@@ -999,7 +999,7 @@ class App {
       // Graphite edges separate the pale roadbed from both snow and moor;
       // amber tread bands identify the graded route at normal play zoom.
       const edgeMat = layer(0x514c55, -1);
-      const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
+      const roadMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
       const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
@@ -4189,7 +4189,7 @@ class App {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
         const original = part.material;
         if (!painted.has(original)) {
-          const material = environmentMaterial('building', { vertexColors: true, flatShading: true,
+          const material = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'building', { vertexColors: true, flatShading: true,
             color: original.color, opacity: original.opacity, transparent: original.transparent, side: original.side });
           painted.set(original, material);
         }

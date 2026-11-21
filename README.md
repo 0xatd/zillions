@@ -26,6 +26,12 @@ Choose the document that matches your task:
 | Change gear, weapons, or the Lattice | `docs/weapons-and-items.md` and `docs/skill-tree-integration.md` |
 | Give an agent compact context | `llms.txt` |
 
+Default colony buildings and defenses are authored in
+`tools/art/toy_kit/frontier.py`: an armored expedition kit, exported to the
+existing European asset IDs. See the art quality standard for the sci-fi
+direction and the remaining legacy-culture boundary.
+
+
 Use this source order when documents disagree:
 
 1. Current code and `supabase/schema.sql`.

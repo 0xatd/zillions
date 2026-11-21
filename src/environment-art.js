@@ -145,14 +145,25 @@ export function environmentMaterial(kind, options = {}) {
       vec3 slate=diffuseColor.rgb*vec3(1.20,1.02,.76)+vec3(.012,.016,.02);
       diffuseColor.rgb=mix(diffuseColor.rgb,slate,roof*.72)*materialDetail;
     `;
+    const armor = /* glsl */`
+      vec3 n=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
+      vec2 p=n.y>.65?artWorld.xz:vec2(n.x>n.z?artWorld.z:artWorld.x,artWorld.y);
+      float grain=artNoise(p*17.0);
+      float broad=artNoise(p*.8);
+      // Subtle brushed wear and wide plate seams; never shingles or ashlar.
+      vec2 seams=abs(fract(p*vec2(.8,.55))-.5);
+      float joint=max(smoothstep(.488,.498,seams.x),smoothstep(.488,.498,seams.y));
+      float wear=artNoise(vec2(p.x*3.0,p.y*.23));
+      diffuseColor.rgb*= (.91+grain*.09+broad*.10)*(1.-joint*.10)*(.96+wear*.05);
+    `;
     const foliage = /* glsl */`
       float leaves=artNoise(artWorld.xz*9.0+artWorld.y*3.0);
       float clumps=artNoise(artWorld.xz*2.8);
       diffuseColor.rgb*=.72+leaves*.3+clumps*.28;
     `;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'armor' ? armor : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
   };
-  material.customProgramCacheKey = () => 'frontier-art-v4-' + kind;
+  material.customProgramCacheKey = () => 'frontier-art-v5-' + kind;
   return material;
 }
 

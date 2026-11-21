@@ -6,6 +6,7 @@ line troops; the economy buildings, outposts, heroes, horde and props are
 shared builders re-coloured by the culture palette.
 """
 import european
+import frontier
 import asian
 import south_american
 import middle_eastern
@@ -14,7 +15,8 @@ CULTURES = {
     'european': {
         'status': 'built',
         'palette': european.PALETTE,
-        'buildings': european,     # castle, tower, house, farm, mill, mine, camp, outpost, workshop, hero_forge
+        'walls': frontier,
+        'buildings': frontier,     # castle, tower, house, farm, mill, mine, camp, outpost, workshop, hero_forge
         'units': european,         # trooper, ranger, marksman, hero(), enemy()
     },
     'asian': {
