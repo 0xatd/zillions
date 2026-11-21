@@ -23,6 +23,14 @@ review scene, not a claim that Zillions has reached the reference's finish.
 Stop the animation loop on a software-rendered host. Wait for `loadAssets()`
 to finish. Render a complete frame after moving the camera or changing state,
 then finish WebGL work before capturing. Delays alone do not establish readiness.
+The frontier atlas starts loading when its material first compiles; `loadAssets()`
+alone does not wait for it. Verify the atlas image is complete and has a nonzero
+width, then render again. Use a fresh browser page or the normal match teardown
+when changing maps: calling `startGame()` twice directly leaves old terrain.
+
+For the closer combat comparison, place Scott on the walkable tile nearest
+`(site.x, site.z - 10)` before the same 9,000 ticks, then frame him at distance 48.
+This keeps him visible rather than hiding him behind the central keep.
 
 For full-frame costs, turn `renderer.info.autoReset` off, reset just before
 `frame()`, then record calls and triangles after it. Include shadow and post
