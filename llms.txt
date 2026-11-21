@@ -99,3 +99,6 @@ Run a local Vercel production build.
 Do not call a pull request deployable until all three pass.
 
 - docs/art-quality-standard.md: mandatory visual quality bar; Forsaken Kingdom / Definitive Edition reference, acceptance checklist and Blender workflow.
+
+- src/colony-roads.js connects the built colony court, gates and frontages.
+- src/colony-art.js renders its shared paving without new collision.

@@ -30,6 +30,7 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
+import { colonyRoads } from './colony-roads.js';
 import { SITE_FORMS, LEDGE, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
 const TAU = Math.PI * 2;
@@ -867,6 +868,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
     raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
   }
 
+  if (hq) hq.plan.roads = colonyRoads(map, plots);
   return plots;
 }
 
