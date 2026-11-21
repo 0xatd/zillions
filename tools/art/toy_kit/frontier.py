@@ -183,9 +183,14 @@ def mine(k,t,pal):
     h=1.8+.24*t
     for x in (-.05,.65): shell(B,STEEL,.17,h,.22,x,.20,-.2,cut=.03)
     B.box(AMBER,.94,.22,.42,.3,h,-.2)
-    rotor=k.part('part_rotor',origin=(.3,1.1,-.2))
-    rotor.prism(FRAME,10,.28,.17,1.1,.3,.2,-.2)
-    for j in range(5): rotor.prism(STEEL,10,.31,.26,.08,.3,.25+j*.18,-.2,phase=j*.2)
+    # Runtime spins part_rotor around Z. Keep the vertical auger static and
+    # animate its front-facing drive wheel on that established axis.
+    B.prism(FRAME,10,.28,.17,1.1,.3,.2,-.2)
+    for j in range(5): B.prism(STEEL,10,.31,.26,.08,.3,.25+j*.18,-.2,phase=j*.2)
+    rotor=k.part('part_rotor',origin=(.3,1.2,.17))
+    rotor.prism(STEEL,10,.25,.25,.10,.3,1.2,.17,rx=math.pi/2)
+    rotor.box(AMBER,.41,.055,.055,.3,1.1725,.23)
+    rotor.box(AMBER,.055,.41,.055,.3,.995,.23)
     hatch(B,G,-.52,.58,.22,.33,.85)
 
 
