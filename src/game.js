@@ -75,11 +75,15 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
+export const SNAPSHOT_VERSION = 6;
+export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
+
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
   // opts.rngSeed: the match seed (from the server-issued match ticket). Every
   // peer of a co-op match uses the same one; replays on the server reuse it.
   constructor(map, difficulty = 'normal', heroKeys = 'alexander', snap = null, levelId = 1, mode = 'campaign', opts = {}) {
+    if (snap && !isCompatibleSnapshot(snap)) throw new Error('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.');
     this.map = map;
     // Entity ids are part of the simulated state. A fresh match always starts
     // from the same id, so a second match in one tab (or a server replay in a
@@ -206,7 +210,7 @@ export class Game {
     else this._setupStart();
   }
 
-  // ---------- save / restore (v5: terrain-anchored cities + field loot) ----------
+  // ---------- save / restore (v6: protected cliff approaches and aligned posterns) ----------
   // Plot state restores BY ID and plot ids are positional, so any change to the
   // order `generatePlots` lays a city out invalidates older snapshots. Bump the
   // version when that happens — a stale save restores a house's tier onto a
@@ -214,7 +218,7 @@ export class Game {
 
   snapshot() {
     return {
-      v: 5, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
+      v: SNAPSHOT_VERSION, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       culture: this.culture,
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
       phase: this.phase, finalStand: this.finalStand ? 1 : 0,

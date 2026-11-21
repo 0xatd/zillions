@@ -92,7 +92,7 @@ test('hero can walk each Black Vale ramp both ways with the base built',()=>{
   for(let si=0;si<3;si++) {
     const map=new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
     const game=new Game(map,'normal','scott',null,level.id,'campaign');
-    game.foundCity(0,si);
+    game.foundCity(si,0);
     for(const plot of game.plots) if(plot.kind==='wall'||plot.kind==='tower') game._construct(plot,true);
     const hero=game.heroes[0];
     for(const road of map.sites[si].switchbacks) for(const points of [road,[...road].reverse()]) {

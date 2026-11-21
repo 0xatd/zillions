@@ -105,7 +105,7 @@ assert.ok(packageJson.scripts?.check?.includes('stabilization-check.mjs'), 'npm 
 assert.ok(read('src/main.js').includes('this._updateFogOfWar()'), 'main renderer must update the tactical vision shroud');
 assert.ok(read('src/ui.js').includes('fogVisionSources(game)'), 'minimap must use the same allied vision sources');
 assert.ok(read('art-slice.html').includes('State review'), 'art review page must expose state inspection');
-assert.ok(read('src/main.js').includes('s.snap.v === 5'), 'continue-save gate must accept current v5 snapshots');
+// Snapshot acceptance is verified behaviorally by snapshot-layout.test.mjs.
 assert.ok(read('scripts/sim-determinism-check.mjs').includes('workerArgs.push(ticksArg)'), 'determinism harness must forward --ticks to workers');
 
 const contract = read('docs/product-contract.md');

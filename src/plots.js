@@ -349,9 +349,13 @@ export function generatePlots(map, anchor = null, opts = {}) {
       // The gate goes on the tile nearest the plan's gate angle — but only if
       // there is enough open wall here to hang a gatehouse on.
       let gateTile = null;
-      if (open.length >= 4) {
+      // A narrow graded ramp is still an entrance. Requiring four wall
+      // tiles sealed Black Vale's two-tile postern and invented a third gate.
+      const rampTiles = role === 'rampart' && anchor?.switchbacks?.length
+        ? open.filter(tile => map.swRoad?.[tile.z * N + tile.x]) : [];
+      if (open.length >= 4 || rampTiles.length) {
         let bd = Infinity;
-        for (const tile of open) {
+        for (const tile of (rampTiles.length ? rampTiles : open)) {
           const d = angDiff(tile.ang, t);
           if (d < bd) { bd = d; gateTile = tile; }
         }

@@ -71,3 +71,16 @@ Terrain retains tile-derived cliff outlines. The hero rigs remain stylized
 procedural-part animation, not finished skeletal performances. Other culture
 armies retain their existing models. The small-screen HUD needs separate work.
 Do not treat screenshots or passing tests as evidence that these gaps are closed.
+
+## Save and multiplayer compatibility
+
+Protected cliff roads change positional plot IDs. Snapshot version 6 rejects
+older siege layouts before simulation construction; local legacy saves are
+archived under `zillions_save_legacy_v<version>` instead of restoring the wrong
+building kinds. Existing account progression is unchanged. Old in-progress
+sieges cannot resume on this layout. Multiplayer protocol 7 separates old tabs;
+refresh all peers and create a new room after release.
+
+The built-ramp regression must call `foundCity(siteIndex, playerIndex)`, not the
+reverse. Exercise every Black Vale site with its own defenses constructed.
+A two-tile postern is a real gate whenever the graded switchback crosses it.

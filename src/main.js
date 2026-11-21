@@ -9,7 +9,7 @@ import {
 import { setActiveCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
-import { Game, runScore } from './game.js';
+import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
@@ -744,6 +744,10 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    if (snap && !isCompatibleSnapshot(snap)) {
+      this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
+      return;
+    }
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -1342,7 +1346,8 @@ class App {
       const cloudSave = await this.auth.loadLatestSave();
       if (cloudSave?.snap) {
         try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
-        this.ui.setContinue(cloudSave.snap);
+        const compatible = this._loadSave();
+        this.ui.setContinue(compatible?.snap || null);
       }
     } else if (status.enabled) {
       this.lobby = null;
@@ -1778,7 +1783,13 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 5 ? s : null;
+      if (s?.snap && !isCompatibleSnapshot(s.snap)) {
+        // Keep the original before a new siege can replace the active slot.
+        localStorage.setItem(`zillions_save_legacy_v${s.snap.v}`, JSON.stringify(s));
+        this.ui.showBanner('An older siege was archived because the colony layout changed. Start a new siege; account progression is unchanged.', '', 8000);
+        return null;
+      }
+      return s?.snap ? s : null;
     } catch { return null; }
   }
 
