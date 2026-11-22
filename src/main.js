@@ -5048,11 +5048,17 @@ class App {
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
-    const buttonPays = canPay && this.buttonPay;
     const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
-    const pay = this.controlMode === 'build' && canPay && (buildHeld || buttonPays);
+    const physicalPayHeld = buildHeld || !!this.buttonPay;
+    // Eligibility can disappear after repair (a specialisation is due), then
+    // return while the same key/button remains down. Only a physical release
+    // rearms that press; lastPay alone tracks eligibility, not release.
+    if (!physicalPayHeld) this._payPressUsed = false;
+    const pay = this.controlMode === 'build' && canPay && physicalPayHeld
+      && (!this._payPressUsed || this.lastPay);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
+      if (pay) this._payPressUsed = true;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
     }
   }
