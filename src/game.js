@@ -75,8 +75,8 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-// v10: gate-bound tower positions; plot IDs are positional.
-export const SNAPSHOT_VERSION = 10;
+// v11: shared perimeter plan and terrain-fitted outer gates/defenders; IDs are positional.
+export const SNAPSHOT_VERSION = 11;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
 export class Game {
@@ -1146,13 +1146,13 @@ export class Game {
       const cost = Math.max(1, Math.ceil(def.cost * SIEGE.rebuildDiscount * share));
       return { mode: 'rebuild', cost, def, label: `Rebuild ${def.name}` };
     }
-    const nt = this.nextTier(plot);
-    if (nt) return nt.branch ? { mode: 'branch', nt } : { mode: 'build', cost: nt.cost, nt, def: nt.def, label: nt.def.name };
     const state = this.plotHpState(plot);
     if (state.maxHp > 0 && state.hp < state.maxHp - 0.5) {
       const cost = Math.max(1, Math.ceil((state.maxHp - state.hp) / SIEGE.repairHpPerGold));
-      return { mode: 'repair', cost, label: 'Repair' };
+      return { mode: 'repair', cost, label: 'Repair', hp: state.hp, maxHp: state.maxHp };
     }
+    const nt = this.nextTier(plot);
+    if (nt) return nt.branch ? { mode: 'branch', nt } : { mode: 'build', cost: nt.cost, nt, def: nt.def, label: nt.def.name };
     return null;
   }
 
@@ -1209,6 +1209,14 @@ export class Game {
       if (act.mode === 'repair') {
         this._repairPlot(plot, pay * SIEGE.repairHpPerGold);
         this.stats.repaired += pay;
+        // One hold completes one action. Never spend on the upgrade that
+        // becomes available after repairing; require release and press again.
+        if (this.plotAction(plot)?.mode !== 'repair') {
+          for (const hero of this.heroes) {
+            if (hero === h || this.buildTargetFor(hero)?.plot.id === plot.id) hero.payHold = false;
+          }
+          this.msg('Repair complete — release the build key before upgrading.', 'info');
+        }
         continue;
       }
       plot.paid += pay;
@@ -1216,6 +1224,7 @@ export class Game {
         plot.paid = 0;
         if (act.mode === 'rebuild') this._rebuildPlot(plot);
         else this._construct(plot);
+        h.payHold = false;
       } else if (this.gold <= 1e-6) {
         // Thronefall rule: an incomplete purchase is not a savings account.
         // If the purse runs dry, cancel this hold and send every committed coin
@@ -1252,8 +1261,19 @@ export class Game {
   _repairPlot(plot, hp) {
     const damaged = this.buildings.filter((b) => b.plotId === plot.id && b.alive && b.hp < b.maxHp);
     if (!damaged.length) return;
-    const each = hp / damaged.length;
-    for (const b of damaged) b.hp = Math.min(b.maxHp, b.hp + each);
+    // Distribute the purchased HP without losing it to nearly-full sections.
+    // Stable building order keeps co-op deterministic.
+    let remaining = hp;
+    let pending = damaged;
+    while (pending.length && remaining > 1e-8) {
+      const each = remaining / pending.length;
+      for (const b of pending) {
+        const restored = Math.min(b.maxHp - b.hp, each);
+        b.hp += restored;
+        remaining -= restored;
+      }
+      pending = pending.filter(b => b.hp < b.maxHp - 1e-8);
+    }
     this.emit({ type: 'repair', x: plot.cx, z: plot.cz });
   }
 
@@ -3205,7 +3225,8 @@ export class Game {
   _moveActor(a, dx, dz, speed, dt, gx = null, gz = null) {
     const step = speed * dt;
     // If somehow inside a building footprint, any walkable step out is legal.
-    const trapped = this.occ[(a.z | 0) * this.map.size + (a.x | 0)] > 0
+    const occupied = this.occ[(a.z | 0) * this.map.size + (a.x | 0)];
+    const trapped = (occupied > 0 && !this.gateIds.has(occupied))
       || !this.map.isWalkable(a.x | 0, a.z | 0);
     const pass = (x, z) => {
       if (!this.map.isWalkable(x | 0, z | 0)) return false;
@@ -3213,6 +3234,11 @@ export class Game {
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       return id === 0 || this.gateIds.has(id);
     };
+    // Direct hero steering needs the grid corner rule. Squads retain their
+    // existing goal-field/axis-slide recovery, covered by full playthroughs.
+    const canStep = (x,z) => pass(x,z) && (
+      !a.hero || (x|0)===(a.x|0) || (z|0)===(a.z|0) || (pass(x,a.z) && pass(a.x,z))
+    );
     // Standing in rock or inside a footprint (a wall raised on top of us, a
     // doorstep on a cliff lip): walk straight to the nearest open tile first.
     // Sliding about inside the footprint used to pin squads in wall tiles.
@@ -3241,11 +3267,11 @@ export class Game {
         const fd = this._fieldDir(a, gx, gz, far);
         if (fd) {
           const ex = a.x + fd[0] * step, ez = a.z + fd[1] * step;
-          if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+          if (canStep(ex, ez)) { a.x = ex; a.z = ez; return true; }
         }
       }
     }
-    if (pass(nx, nz)) { a.x = nx; a.z = nz; return true; }
+    if (canStep(nx, nz)) { a.x = nx; a.z = nz; return true; }
     // Everyone but a player-steered hero first plans a short way round
     // (a building corner, a cliff notch, a hold point on the far side of a
     // house) — plain axis-sliding there flip-flops against the detour.
@@ -3257,7 +3283,7 @@ export class Game {
         || this._detour(a.x, a.z, dx, dz, (x, z) => pass(x + 0.5, z + 0.5));
       if (det) {
         const ex = a.x + det[0] * step, ez = a.z + det[1] * step;
-        if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+        if (canStep(ex, ez)) { a.x = ex; a.z = ez; return true; }
       }
     }
     // Slide along the obstacle — only on an axis we really move along; a

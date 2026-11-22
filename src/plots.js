@@ -327,6 +327,16 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
     if (ringTiles[0]) walkTo(ringTiles[0].x, ringTiles[0].z, ringTiles[0].ang);
 
+    // Preserve secondary war-road crossings as side entrances rather
+    // than sealing them behind an arbitrary two-gate template.
+    if(role==='outer') {
+      gateAngles=[...gateAngles];
+      for(const road of map.roadPaths || [])for(const [x,z] of road.pts) {
+        if(Math.abs(Math.hypot(x-ox,z-oz)-radiusFn(0))>1)continue;
+        const angle=Math.atan2(z-oz,x-ox)-spin;
+        if(gateAngles.every(a=>angDiff(a,angle)>.8))gateAngles.push(angle);
+      }
+    }
     // Each gate angle owns the stretch of ring nearest to it.
     const groups = gateAngles.map(() => []);
     for (const tile of ringTiles) {
@@ -338,6 +348,20 @@ export function generatePlots(map, anchor = null, opts = {}) {
       groups[best].push(tile);
     }
 
+    // Outer gates must actually connect the courtyard to open country.
+    // The desired compass angle alone can put an arch against a cliff.
+    const outerGateOpen = tile => {
+      const arch = new Set(ringTiles.filter(q=>Math.hypot(q.x-tile.x,q.z-tile.z)<=1.5).map(q=>q.z*N+q.x));
+      const visited=new Set(),queue=[[ox,oz]];
+      for(let i=0;i<queue.length;i++) {
+        const [x,z]=queue[i],k=z*N+x;
+        if(visited.has(k)||!map.inBounds(x,z)||!map.isWalkable(x,z)||(seen.has(k)&&!arch.has(k)))continue;
+        visited.add(k);
+        if(Math.hypot(x-ox,z-oz)>radiusFn(0)+3)return true;
+        for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]])queue.push([x+dx,z+dz]);
+      }
+      return false;
+    };
     const made = [];
     let natural = 0;
     gateAngles.forEach((t, i) => {
@@ -358,6 +382,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       if (open.length >= 4 || rampTiles.length) {
         let bd = Infinity;
         for (const tile of (rampTiles.length ? rampTiles : open)) {
+          if(role==='outer'&&!outerGateOpen(tile))continue;
           const d = angDiff(tile.ang, t);
           if (d < bd) { bd = d; gateTile = tile; }
         }
@@ -388,7 +413,14 @@ export function generatePlots(map, anchor = null, opts = {}) {
       plots.push(p);
       if (gateTile) made.push({ gate: p.gate, ang: world, t: mid.ang, plot: p });
     });
-    return { gates: made, natural, length: ringTiles.length };
+    const owned = new Map(plots.filter(p => p.kind === 'wall' && p.role === role)
+      .flatMap(p => p.tiles.map(([x,z]) => [z*N+x, p])));
+    const perimeter = ringTiles.map(({x,z}) => {
+      const p = owned.get(z*N+x);
+      const gate = p?.arch?.some(([gx,gz]) => gx===x && gz===z);
+      return {x,z,kind:p ? (gate ? 'gate' : 'wall') : 'terrain',plotId:p?.id ?? null};
+    });
+    return { gates: made, natural, length: ringTiles.length, perimeter };
   };
 
   const gateAngles = [...planGates];
@@ -739,6 +771,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // the city gate. Bought in two arcs, so it is paid for the same way a city
   // wall is: gate first, ring second. The wild-choke picker survives only as
   // a fallback for maps that shipped no road anchors at all.
+  const outerPerimeters = [];
   const keepAnchors = pickOutpostKeeps(map, cx, cz, reach);
   for (const a of keepAnchors) {
     const KR = 6.4;
@@ -755,14 +788,26 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
     }
     const ring = traceRing(() => KR, [0, Math.PI],
-      { role: 'outer', useTerrain: false, ox, oz, spin: a.gateAng });
+      { role: 'outer', useTerrain: true, ox, oz, spin: a.gateAng });
+    outerPerimeters.push({kind:'fort',cx:ox,cz:oz,radius:KR,tiles:ring.perimeter});
     for (const p of plots) {
       if (p.role === 'outer' && !p.keep) { p.keep = [ox, oz]; p.wild = !!a.wild; }
     }
+    for (const g of ring.gates) markPathLine(ox,oz,g.gate[0],g.gate[1]);
     for (const g of ring.gates) {
-      // The tower stands just inside its gate, covering the road through it.
-      add('tower', Math.round(ox + Math.cos(g.ang) * (KR - 3) - 1),
-        Math.round(oz + Math.sin(g.ang) * (KR - 3) - 1), 2, {}, 2);
+      // Side bastion, not a tower planted in the gate's central transit lane.
+      const gx=g.gate[0]+.5,gz=g.gate[1]+.5;
+      const ix=(ox-gx)/Math.hypot(ox-gx,oz-gz), iz=(oz-gz)/Math.hypot(ox-gx,oz-gz);
+      const candidates=[];
+      for(let z=oz-6;z<=oz+5;z++)for(let x=ox-6;x<=ox+5;x++) {
+        const dx=x+1-gx,dz=z+1-gz,back=dx*ix+dz*iz,flank=-dx*iz+dz*ix;
+        if(back<.5 || Math.abs(flank)<2 || Math.hypot(dx,dz)>5 || !free(x,z,2))continue;
+        if(![0,1].every(dz=>[0,1].every(dx=>Math.hypot(x+dx+.5-ox,z+dz+.5-oz)<KR-.5)))continue;
+        candidates.push({x,z,score:Math.hypot(dx,dz)+Math.abs(back-1.4)});
+      }
+      candidates.sort((a,b)=>a.score-b.score||a.z-b.z||a.x-b.x);
+      const best=candidates[0];
+      if(best)add('tower',best.x,best.z,2,{outerDefense:g.plot.id,keep:[ox,oz]},0);
     }
     // A keep is a destination, not a picture: if the flood from the city
     // cannot reach its centre, cut a causeway — a promise is a road.
@@ -861,6 +906,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       facing, reach, gates: gates.map((g) => g.ang),
       streets,
       entrances: gates.length,
+      perimeters: [{kind:'base',cx,cz,radius:reach,tiles:rampart.perimeter}, ...outerPerimeters],
       natural: rampart.natural,
       naturalShare: rampart.length ? rampart.natural / rampart.length : 0,
       inner: !!inner,

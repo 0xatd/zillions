@@ -72,6 +72,14 @@ export function buildFortressBoundary(map,plan,cx,cz) {
   const group=new THREE.Group();group.name='fortress-cliff-parapet';
   if(!plan?.kit)return group;
   const N=map.size,ext=Math.ceil(plan.reach+2),nodes=new Map();
+  // The simulation's boundary is the sole owner of fortress architecture.
+  // Never dress every nearby cliff edge as a second competing fortification.
+  const boundary=plan.perimeters?.find(p=>p.kind==='base')?.tiles;
+  if(!boundary)return group;
+  const natural=boundary.filter(p=>p.kind==='terrain');
+  const built=boundary.filter(p=>p.kind!=='terrain');
+  const onBoundary=(x,z)=>natural.some(p=>Math.hypot(p.x-x,p.z-z)<=1.5)
+    && !built.some(p=>Math.hypot(p.x-x,p.z-z)<2.5);
   const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
   const stone=[],footings=[],coping=[],merlons=[],recesses=[],banners=[],towerBodies=[];
   const safe=(x,z,w,d,ry=0)=>{
@@ -80,13 +88,13 @@ export function buildFortressBoundary(map,plan,cx,cz) {
     for(let u=-w/2;u<=w/2+.001;u+=w/Math.max(2,Math.ceil(w/.2)))
       for(let v=-d/2;v<=d/2+.001;v+=d/Math.max(2,Math.ceil(d/.2))){
         const tx=Math.floor(x+c*u+s*v),tz=Math.floor(z-s*u+c*v);
-        if(tx<0||tz<0||tx>=N||tz>=N||map.isWalkable(tx,tz)||map.swRoad?.[tz*N+tx])return false;
+        if(tx<0||tz<0||tx>=N||tz>=N||!onBoundary(tx,tz)||map.isWalkable(tx,tz)||map.swRoad?.[tz*N+tx])return false;
       }
     return true;
   };
   const box=(items,x,y,z,w,h,d,ry=0)=>{if(safe(x,z,w,d,ry))items.push([x,y,z,w,h,d,ry]);};
   for(let z=Math.floor(cz)-ext;z<=cz+ext;z++)for(let x=Math.floor(cx)-ext;x<=cx+ext;x++){
-    if(x<1||z<1||x>=N-1||z>=N-1||map.isWalkable(x,z))continue;
+    if(x<1||z<1||x>=N-1||z>=N-1||!onBoundary(x,z)||map.isWalkable(x,z))continue;
     const distance=Math.hypot(x+.5-cx,z+.5-cz);
     if(distance<9||distance>plan.reach+1)continue;
     const inside=dirs.filter(([dx,dz])=>map.isWalkable(x+dx,z+dz)&&Math.hypot(x+dx+.5-cx,z+dz+.5-cz)<distance);
@@ -103,7 +111,7 @@ export function buildFortressBoundary(map,plan,cx,cz) {
     const candidates=Math.abs(dx)+Math.abs(dz)===2&&dx&&dz?[[a.x+dx,a.z],[a.x,a.z+dz]]:[[a.x+dx/2,a.z+dz/2]];
     if(candidates.some(([x,z])=>nodes.has(z*N+x)))continue;
     for(const [x,z] of candidates){
-      if(map.isWalkable(x,z)||map.swRoad?.[z*N+x])continue;
+      if(!onBoundary(x,z)||map.isWalkable(x,z)||map.swRoad?.[z*N+x])continue;
       nodes.set(z*N+x,{x,z,y:(a.y+b.y)/2,px:x+.5,pz:z+.5});break;
     }
   }

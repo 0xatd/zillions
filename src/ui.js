@@ -86,6 +86,10 @@ export class UI {
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
+      <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
+        <button id="battle-details-close" aria-label="Close details">×</button>
+        <div id="battle-details-content"></div>
+      </aside>
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -493,6 +497,9 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
+    q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
+    q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
+    q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
@@ -943,6 +950,8 @@ export class UI {
   }
 
   _showScreen(name) {
+    this._battlePanel = null;
+    this.root.querySelector('#battle-details').classList.add('hidden');
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
@@ -2617,7 +2626,35 @@ export class UI {
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
   }
 
+  inspectUnit(game, unit, enemy = false) {
+    this._battlePanel = {mode:'unit',game,id:unit.id,enemy};
+  }
+
+  _updateBattleDetails(game, player) {
+    const panel=this.root.querySelector('#battle-details'),body=this.root.querySelector('#battle-details-content');
+    const selection=this._battlePanel;
+    if(!selection){panel.classList.add('hidden');return;}
+    let html='';
+    if(selection.mode==='items') {
+      const hero=game.heroes[player];
+      const rows=keys=>keys.map(key=>{const item=itemInfo(key);return item ? `<article class="battle-item"><b>${escapeHtml(item.icon||'')} ${escapeHtml(item.name)}</b><p>${escapeHtml(item.desc||itemLines(item).join(' · '))}</p></article>`:'';}).join('');
+      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows(hero?.items||[])||'<p>No additional gear equipped.</p>'}`;
+    } else {
+      const unit=(selection.enemy?game.zombies:game.units).find(u=>u.id===selection.id);
+      const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
+      if(selection.game!==game||!unit||unit.dead||unit.hp<=0||!visible){this._battlePanel=null;panel.classList.add('hidden');return;}
+      const def=unit.def||{},stats=unit.hero?game.heroStats(unit):null;
+      const activity=unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
+      const hp=Math.max(0,Math.ceil(unit.hp)),max=Math.ceil(unit.maxHp);
+      html=`<h3>${escapeHtml(def.name||unit.type||'Unit')}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.range??1).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??def.speed??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
+    }
+    panel.classList.remove('hidden');
+    if(body.innerHTML!==html)body.innerHTML=html;
+  }
+
   update(game, p = 0, controls = {}) {
+    if(this._battleGame!==game){this._battleGame=game;this._battlePanel=null;}
+    this._updateBattleDetails(game,p);
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
@@ -2723,17 +2760,8 @@ export class UI {
       const packKey = (h.pack || []).join(',');
       if (this._packKey !== packKey) {
         this._packKey = packKey;
-        const slots = [];
-        for (let i = 0; i < PACK_SLOTS; i++) {
-          const key = (h.pack || [])[i];
-          const it = key ? itemInfo(key) : null;
-          slots.push(it
-            ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
-            : '<span class="pslot"></span>');
-        }
         const full = (h.pack || []).length >= PACK_SLOTS;
-        q('#a-pack').innerHTML = slots.join('')
-          + `<span class="pkey${full ? ' urgent' : ''}">${full ? 'FULL · G drops' : 'G drops'}</span>`;
+        q('#a-pack').innerHTML = `<button class="pack-open${full ? ' full' : ''}" aria-label="View carried items">Items · Pack ${(h.pack || []).length}/${PACK_SLOTS}${full ? ' FULL' : ''}</button>`;
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;

@@ -379,3 +379,45 @@ in this refinement. The existing gate and hero-visibility proofs still apply.
 
 `scripts/browser-shell-check.mjs` verifies actual deployment/navigation button
 bounds at phone, landscape and compact-laptop sizes, not just page overflow.
+
+## Perimeter ownership and battlefield feedback — November 22 follow-up
+
+The simulation now publishes `hq.plan.perimeters`: one main boundary and the
+fortified road outposts. Each tile belongs to natural terrain, a wall plot or a
+gate. Cliff cladding reads this plan and stays away from functional wall/gate
+sections; it must never invent a parallel defensive line. Unbuilt walls and
+combat breaches remain real openings. Natural terrain is not a paid wall.
+
+Road forts fit to natural barriers. Gate candidates must connect their interior
+to open ground; secondary war-road crossings can add side gates. Their towers
+sit on gate flanks with reserved courtyard routes, not in the middle of transit.
+Compact flag-centered satellites remain open positions, not enclosed bases.
+
+`tests/perimeter.test.mjs` checks all 15 founding sites at every wall tier:
+closure with gates blocked, reachability with gates open, and outer defenders'
+position/range. Movement regressions cover gate-jamb collision and diagonal
+wall/terrain corners. `tests/fortress-boundary-art.test.mjs` checks transformed
+cladding against the shared plan, actual walking ground and ramp clearance.
+These do not establish every possible crowd formation or every screenshot's
+exact movement history; retain the full playthrough and real-camera review.
+
+Damaged buildings offer Repair before Upgrade. Repair restores HP without
+changing tier; one completed hold cannot silently become an upgrade. Ruins
+still use Rebuild. Wall repairs redistribute purchased HP across damaged
+sections rather than wasting the share allocated to nearly-full pieces.
+The prompt names the action during payment; repair uses cyan progress and HP.
+
+Damaged-building bars use the mesh height and a readable minimum screen size.
+Critical damage is red. Walls show the weakest damaged segment per plot to
+avoid a stack of overlapping bars. Full-health buildings have no bar.
+
+Click/tap a visible unit for read-only stats. Hidden enemies cannot be inspected;
+selection clears when the unit dies or leaves vision. The Items button exposes
+named field-pack and equipped-item details without relying on hover tooltips.
+No individual unit commands, movement orders or economy actions are added.
+Run `scripts/battlefield-feedback-proof.mjs` in the developer battlefield and
+capture laptop, portrait phone and landscape results.
+
+Layout/movement/payment changes use snapshot 11 and lobby protocol 12. Previous
+siege saves are rejected through the existing incompatible-layout flow; account
+progression and server data are unchanged.
