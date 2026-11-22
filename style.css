@@ -2114,3 +2114,90 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 @media(max-width:600px) { .builder-controls { top:64px; left:8px; max-width:calc(100vw - 16px); font-size:11px; } #builder-status { display:block; margin:4px 0 0; } }
 .focus-enemy { width:100%; margin-top:8px; padding:8px; border:1px solid #dfb45c; border-radius:4px; background:#423623; color:#ffe4a0; cursor:pointer; }
 .focus-enemy:disabled { opacity:.55; cursor:default; }
+
+/* Chapter-first campaign: the conquest map is the primary content. */
+#screen-main.character-select { grid-template-columns:minmax(0,1fr) 300px; grid-template-rows:auto auto minmax(280px,1fr) 130px auto; gap:12px 22px; padding:16px 24px; }
+#screen-main .character-heading { grid-column:1/-1; grid-row:1; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+#screen-main .character-heading h1 { margin:0; font-size:25px; color:var(--chapter-color,#8ab7d0); overflow-wrap:anywhere; }
+#chapter-territory { font-size:12px; color:#adc0cd; }
+.chapter-identity { grid-column:1/-1; grid-row:2; display:flex; align-items:end; gap:12px; padding:12px; background:#0b1826; border:1px solid #486578; }
+.chapter-identity label { display:grid; gap:5px; text-align:left; font-size:12px; }
+.chapter-identity input,.chapter-identity select { padding:9px; background:#132938; color:#e7eff5; border:1px solid #537080; border-radius:4px; min-width:0; }
+.chapter-identity input { width:220px; }
+.chapter-identity button { min-height:36px; }
+.chapter-campaign { grid-column:1; grid-row:3; display:flex; flex-direction:column; min-width:0; min-height:0; border:1px solid #41607866; border-radius:10px; padding:14px; background:#081824cc; }
+.chapter-map-heading { display:flex; align-items:baseline; gap:14px; text-align:left; }
+.chapter-map-heading h2 { margin:0; font-size:22px; }
+.chapter-map-heading span { color:#9fb8c6; font-size:10px; letter-spacing:.12em; }
+#chapter-map { position:relative; flex:1; min-height:160px; margin:4px 0 12px; border-radius:8px; background:radial-gradient(ellipse at 46% 58%,#294d4eaa 0%,#163b40aa 30%,#12304466 55%,transparent 70%),repeating-linear-gradient(0deg,transparent 0 29px,#7aafb10d 30px); }
+#chapter-map svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+#chapter-map path { fill:none; stroke:#7d9eae66; stroke-width:.5; stroke-dasharray:1 1; }
+.chapter-city { position:absolute; left:var(--x); top:var(--y); transform:translate(-50%,-50%); display:grid; gap:2px; justify-items:center; min-width:65px; border:0; background:transparent; color:#e4edf2; cursor:pointer; }
+.chapter-city i { display:grid; place-items:center; width:28px; height:28px; border:1px solid #88aabb; border-radius:50%; background:#102634; font-style:normal; }
+.chapter-city b { font-size:12px; text-shadow:0 2px 4px #000; }
+.chapter-city small { font-size:10px; color:#b7c9d2; }
+.chapter-city.held i { background:#204e46; color:#9ce6b0; border-color:#72bc8c; }
+.chapter-city.frontier i { background:#6a502d; color:#ffda8a; border-color:#f1bf66; box-shadow:0 0 18px #f1bf6644; }
+.chapter-city.locked { opacity:.5; cursor:default; }
+#chapter-objective { display:grid; grid-template-columns:1fr auto; gap:3px 14px; text-align:left; align-items:center; }
+#chapter-objective b { font-size:14px; }
+#chapter-objective p { margin:0; font-size:12px; line-height:1.4; color:#b1c7d2; }
+#chapter-objective button { grid-column:2; grid-row:1/3; padding:10px; font-size:11px; }
+#chapter-services { display:flex; gap:8px; margin-top:12px; }
+#chapter-services button { flex:1; text-align:left; background:#153040; border:1px solid #52718655; border-radius:4px; color:#dde9f0; padding:8px; display:grid; gap:3px; }
+#chapter-services span { font-size:10px; color:#9fb7c5; }
+#screen-main .character-stage { grid-column:1; grid-row:4; display:grid; grid-template-columns:130px 1fr; grid-template-rows:130px; min-height:0; }
+#screen-main .character-avatar { position:relative; border:0; }
+#screen-main .character-copy { text-align:left; padding:18px; }
+#screen-main .character-copy h2 { font-size:18px; }
+#screen-main .character-copy p { margin:6px 0; font-size:12px; }
+#screen-main .roster-stage-label { display:none; }
+#screen-main .character-roster { grid-column:2; grid-row:3/5; padding:12px; gap:6px; overflow:auto; }
+#screen-main .character-row { padding:8px; min-height:50px; }
+#screen-main .character-row small { white-space:normal; font-size:11px; }
+#screen-main .character-row:disabled { opacity:.45; cursor:default; }
+#screen-main #character-list { overflow:auto; }
+#screen-main .character-footer { grid-row:5; padding-top:8px; gap:10px; }
+.chapter-legacy { margin-top:12px; font-size:11px; color:#9eb4c4; }
+.chapter-legacy summary { cursor:pointer; padding:8px 0; }
+@media(max-width:700px) {
+ #screen-main.character-select { display:flex; flex-direction:column; padding:12px; gap:12px; align-items:stretch; }
+ #screen-main .character-heading { flex-wrap:wrap; gap:4px; }
+ #screen-main .character-heading h1 { font-size:22px; }
+ .chapter-identity { flex-wrap:wrap; }
+ .chapter-identity label:first-child { width:100%; }
+ .chapter-identity input { box-sizing:border-box; width:100%; }
+ .chapter-campaign { flex:none; padding:10px; }
+ #chapter-map { min-height:220px; }
+ .chapter-city { min-width:50px; }
+ .chapter-city b { font-size:10px; }
+ #chapter-objective { grid-template-columns:1fr; }
+ #chapter-objective button { grid-column:1; grid-row:3; margin-top:6px; }
+ #chapter-services { gap:4px; }
+ #chapter-services button { padding:7px; font-size:11px; }
+ #screen-main .character-stage { flex:none; height:110px; grid-template-columns:100px 1fr; grid-template-rows:110px; }
+ #screen-main .character-copy { padding:10px; }
+ #screen-main .character-roster { flex:none; max-height:none; }
+ #screen-main #character-list { overflow:visible; }
+ #screen-main .character-footer { flex:none; }
+}
+#screen-main .character-row { flex-shrink:0; }
+@media(max-width:700px) {
+ #screen-main #character-list { max-height:none; min-height:0; flex:none; }
+ #screen-main .character-roster { min-height:0; overflow:visible; }
+}
+@media(min-width:701px) and (max-height:500px) {
+ #screen-main.character-select { grid-template-rows:auto auto 290px 110px auto; }
+}
+@media(min-width:701px) and (max-height:500px) {
+ #screen-main.character-select { grid-template-rows:auto auto 270px 110px auto; padding:10px 16px; gap:6px 16px; }
+ #screen-main .character-heading h1 { font-size:20px; }
+ .chapter-campaign { padding:10px; }
+ #chapter-map { min-height:130px; }
+ #chapter-services { display:none; }
+ #chapter-objective p { font-size:11px; }
+}
+@media(max-width:700px) {
+ #screen-main.character-select { justify-content:flex-start; }
+ #screen-main .character-heading { flex-shrink:0; }
+}

@@ -3,6 +3,29 @@
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 
+## Chapter-first product decision (Alex, 2026-11-22)
+
+The persistent identity is the player's chapter: name, colors, insignia and
+server-confirmed conquests. A new player creates the chapter and a customizable
+Vanguard founder, then recruits the seven existing named heroes as companions
+through Earth victories. Each companion can lead a mission and keeps its own
+gear/XP. The chapter owns campaign territory and the shared Alloy wallet.
+The five Earth battlefields are presented as city campaigns; clearing Earth
+opens the existing procedural frontier. This is an account campaign, NOT a
+persistent shared world, politics simulator or region-worker system.
+
+The chapter map is the signed-in home. Deploy opens existing mission setup;
+Armory/Quartermaster, Forge and skills are optional between-run services, not
+mandatory NPC errands. Existing character IDs, builds and equipment are kept;
+the first existing character (or explicitly stored founder) is the founder,
+other legacy commanders remain accessible. No destructive migration. New
+companion slots are additive. First-hour shopping is no longer compulsory.
+Only server-confirmed campaign progress determines online conquests/unlocks.
+Cosmetic chapter metadata cannot award victories, currency or items.
+
+This decision supersedes older character-first menu guidance below. Keep the
+siege, co-op, reward and economy invariants unchanged.
+
 ## Target
 
 Zillions is a browser siege game. The living world (overworld, planet hubs,

@@ -213,7 +213,7 @@ assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must ex
 assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
 assert.match(uiSource, /id="m-enter-world">DEPLOY/, 'Character Select must deploy straight to the siege missions');
 assert.match(uiSource, /id="m-custom">CUSTOM GAMES/, 'Character Select must retain Custom Games');
-assert.match(uiSource, /id="m-delete-character">DELETE CHARACTER/, 'Character Select must expose confirmed character deletion');
+assert.match(uiSource, /id="m-delete-character">RETIRE LEGACY CHARACTER/, 'The chapter must preserve confirmed retirement for legacy characters');
 assert.doesNotMatch(uiSource, /id="screen-world-menu"|id="living-world-map"|id="screen-galaxy"/, 'the overworld, living-world map, and galaxy screens were removed');
 assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open mission select');
 assert.match(mainSource, /onCampaignMap: \(\) => this\._openCampaignSelect\(\)/, 'Enter World must route to the campaign mission select');

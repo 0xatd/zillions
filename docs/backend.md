@@ -364,3 +364,14 @@ the account tree is the server-side ledger they will read from.
   ticket seed and input log; other matches are bounds-checked claims.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
+
+## Chapter metadata
+
+`chapter` in Auth metadata stores bounded cosmetic name/color/emblem and founder
+ID only. Companion identity links live with roster metadata. The roster cap is
+15, reserving capacity for eight pre-existing characters and seven named
+companions. Existing IDs, equipment ownership and authoritative progress are
+unchanged. Conquest and companion availability derive from the hydrated server
+campaign count; no separate client-owned capture list is accepted as authority.
+The Alloy wallet is shared; stashes and equipped loadouts remain per leader
+under the existing economy. This release does not introduce item transfers. New registrations receive no repeat account starter grant.

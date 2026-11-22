@@ -25,11 +25,11 @@ The startup flow is:
 index.html
   -> src/main.js
      -> account gate
-     -> selected character or character creation (Character Select)
+     -> chapter identity + founder creation, or existing chapter campaign
      -> Deploy -> mission select, Custom Games, or an online room
      -> deterministic siege
      -> end screen with server-confirmed rewards
-     -> Character Select
+     -> chapter campaign and recruited companions
      -> Three.js render loop
 ```
 
@@ -329,3 +329,21 @@ Campaign loading of workbench exports is not implemented.
 blocks local simulation advancement and commands, never multiplayer startup.
 It is not serialized. Resumed games and reduced-motion users bypass it. The
 existing loading screen remains separate and clears on both success and failure.
+
+## Chapter campaign (2026-11-22)
+
+`src/chapter.js` owns cosmetic normalization, five-city presentation and
+leader unlock thresholds. `player_stats.campaign_cleared` remains authority;
+there is no second conquest ledger. Auth metadata stores chapter name, colors,
+insignia and founder ID, plus companion identity links on existing character
+records. Capacity is fifteen: eight legacy characters plus seven companions.
+Recruitment uses the existing server character-registration/economy path;
+repeat recruitment selects the same deterministic per-account character ID.
+Founder models remain customizable; named companions use their named hero kit.
+No new simulation/snapshot format, database migration or reward grant path.
+
+Chapter/founder/recruit writes suspend older auth hydration while in flight;
+otherwise USER_UPDATED can replace a founder just created locally with the
+previous roster. A behavioral regression and live create/reload smoke cover
+this race. Campaign setup binds the chosen roster leader and announces changes
+through the existing multiplayer hero-pick path when switching modes.

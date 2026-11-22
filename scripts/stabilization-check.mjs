@@ -66,7 +66,7 @@ assert.doesNotMatch(main, /if \(u\.hero && this\.mpRole === 'guest'/,
   'local movement lead must not shift every hero on a guest client');
 assert.match(online, /this\._presenceBeat = setInterval[\s\S]*}, 15 \* 1000\);/, 'presence writes must stay on the slower heartbeat');
 assert.match(online, /this\._gamesPoll = setInterval[\s\S]*refreshGames\(\)[\s\S]*}, 5 \* 1000\);/, 'the read-only lobby fallback must self-heal within five seconds');
-assert.match(ui, /creator-cancel[\s\S]*mmoCharacters[\s\S]*_backOverlay/, 'mandatory character creation must not cancel into an empty roster');
+assert.match(ui, /creator-cancel[\s\S]*_backOverlay/, 'founder creation must return to the chapter without trapping navigation');
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
 

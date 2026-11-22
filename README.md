@@ -7,6 +7,21 @@ in lockstep co-op.
 
 Production: https://zillions.taborlin.co
 
+## Your chapter
+
+Create a chapter and its founder, then lead continuous sieges. The Earth
+campaign map tracks your chapter's confirmed city captures. Victories recruit
+named companions who can lead later expeditions with their own gear and skills.
+The chapter shares conquered territory and Salvage Alloy. Each leader keeps
+their own equipment and stash; mission gold belongs only to the current siege. Earth opens the existing
+procedural frontier after five captures. This is not a persistent shared world.
+
+Existing characters and equipment are preserved. The chapter starts with a
+customizable Vanguard founder; the seven named heroes become recruitable
+companions, not competing identities for that founder. Quartermaster, Forge and
+skills are optional between-run choices; deploy without shopping first.
+
+
 Repository: https://github.com/0xatd/zillions
 
 ## Start Here

@@ -1,3 +1,4 @@
+import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord } from './chapter.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -205,6 +206,9 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
+      onChapterSave: (draft) => this._saveChapter(draft),
+      onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
+      onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
       onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
@@ -640,7 +644,7 @@ class App {
     }
     if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
     const key = style.proxyHero || 'scott';
-    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style }).node;
+    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style.chapterLeader ? null : style }).node;
     p.model.scale.setScalar(1.45);
     p.model.position.y = -.02;
     p.scene.add(p.model);
@@ -1360,8 +1364,12 @@ class App {
   async _applyAuth(status) {
     this.authStatus = status;
     if (status.signedIn) {
+      // Auth emits USER_UPDATED while chapter/roster writes are in flight.
+      // An older hydration must not replace the founder/companion being saved.
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       await this.auth.ensureProfile(this.profile);
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
       }
@@ -1419,7 +1427,7 @@ class App {
       const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
+      if (returning) setTimeout(() => this.ui._showScreen('main'), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
@@ -1539,10 +1547,61 @@ class App {
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
   }
 
+  async _saveChapter(draft) {
+    if (this.game || this._chapterSaving) return;
+    const chapter = chapterIdentity({ ...draft, founderId: chapterFounder(this.profile)?.id });
+    if (!chapter.name) { this.ui.showBanner('Give your chapter a name.', 'bad', 2500); return; }
+    this._chapterSaving = true;
+    try {
+      this.profile.chapter = chapter;
+      const founder = chapterFounder(this.profile);
+      if (founder && this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(founder, { persistProfile: false });
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      if (!chapterFounder(this.profile)) this.ui.showCharacterCreator();
+      else this.ui.showBanner(`${chapter.name} is ready. Choose your next conquest.`, '', 3000);
+    } catch (err) {
+      this.ui.showBanner('Chapter could not sync. Your changes are kept here; save again to retry.', 'bad', 5000);
+    } finally { this._chapterSaving = false; }
+  }
+
+  async _recruitChapterLeader(key, { persist = true } = {}) {
+    if (this.game || this._chapterRecruiting) return;
+    if (!leaderAvailable(this.profile, key)) { this.ui.showBanner('Capture the required city to recruit this leader.', 'bad', 3000); return; }
+    this._chapterRecruiting = true;
+    try {
+      let character = leaderRecord(this.profile, key);
+      if (!character) {
+        const leader = CHAPTER_LEADERS.find(l => l.key === key);
+        character = makeMmoCharacter(HEROES[key].name, leader.classKey, chapterIdentity(this.profile.chapter).color);
+        character.id = `chapter_${key}_v1`;
+        character.chapterLeader = key;
+        character.firstHourGuideDismissed = true;
+        if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      }
+      this.profile.mmoCharacterId = character.id;
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      if (this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+      if (persist) {
+        this._storeProfileLocally();
+        if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+        this.ui.setProfile(this.profile);
+      }
+      return character;
+    } catch (err) {
+      this.ui.showBanner(err?.message === 'roster_full' ? 'The roster is full. Your existing leaders and equipment have been preserved.' : 'Recruitment could not sync. Select this leader again to retry.', 'bad', 5000);
+      throw err;
+    } finally { this._chapterRecruiting = false; }
+  }
+
   async _selectMmoCharacter(id) {
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
+    if (character.chapterLeader && !leaderAvailable(this.profile, character.chapterLeader)) return;
     this.profile.mmoCharacterId = character.id;
     this.profile.lastHero = character.proxyHero;
     this.ui.selectedHero = character.proxyHero;
@@ -1556,24 +1615,32 @@ class App {
     this.ui.setProfile(this.profile);
   }
 
-  _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
-    const clean = String(name || '').trim();
-    if (!clean) {
-      this.ui.showBanner('Choose a character name.', 'bad', 2200);
-      return;
-    }
-    const character = makeMmoCharacter(clean, classKey, appearance, raceKey, customization);
-    if (!addMmoCharacter(this.profile, character)) {
-      this.ui.showBanner('The character roster is full.', 'bad', 2200);
-      return;
-    }
-    this.profile.lastHero = character.proxyHero;
-    this.ui.selectedHero = character.proxyHero;
-    this._saveProfile();
-    this.ui.setProfile(this.profile);
-    const klass = MMO_CLASSES[character.classKey];
-    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, is ready for the siege.`, '', 3000);
-    this.ui._showScreen('main');
+  async _createMmoCharacter({ name, appearance, raceKey, customization } = {}) {
+    if (this.game || this._founderCreating) return;
+    const clean = String(name || '').trim().slice(0,18);
+    if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
+    if (chapterFounder(this.profile)) { this.ui._showScreen('main'); return; }
+    this._founderCreating = true;
+    const character = makeMmoCharacter(clean, 'vanguard', appearance, raceKey, customization);
+    try {
+      if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: character.id });
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) {
+        await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+        await this.auth.syncLocalProfile(this.profile);
+      }
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+    } catch (err) {
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      this.ui._showCharacterCreator();
+      this.ui.showBanner('Founder could not sync. Your character is preserved here; save the chapter to retry.', 'bad', 5000);
+    } finally { this._founderCreating = false; }
   }
 
   async _ensureAuthoritativeEconomy(character, { persistProfile = true } = {}) {

@@ -27,6 +27,14 @@ Read these files before you change code:
 
 Use `llms.txt` when you need a compact repository index.
 
+## Chapter direction — Alex, 2026-11-22
+
+Chapter-first account progression is now authorized: customizable chapter and
+founder, named hero companions recruited by conquest, five Earth city campaigns,
+then the existing frontier. This supersedes character-first home guidance, not
+the siege simulation or prohibition on persistent shared-world systems. Read
+`docs/chapter-campaign-plan.md` and the updated product contract.
+
 ## Product Boundary
 
 Zillions is a sci-fi siege game and only a siege game. The living world
