@@ -421,3 +421,24 @@ capture laptop, portrait phone and landscape results.
 Layout/movement/payment changes use snapshot 11 and lobby protocol 12. Previous
 siege saves are rejected through the existing incompatible-layout flow; account
 progression and server data are unchanged.
+
+### Direct-goal movement through Widow Bluff
+
+A local pathfinding window is not a reachability boundary. Escort and defense
+orders fall back to the shared whole-map goal field when the local flood cannot
+connect their positions. Direct-goal steering keeps that detour until the entire
+line to the goal is clear; a clear six-tile prefix does not justify turning back
+into a cliff. Attack lane waypoints retain their local formation steering.
+Goal fields remain occupancy-stamped, bounded and shared, not per-actor state.
+
+`tests/perimeter-traversal.test.mjs` walks the hero with actual directional
+commands and moves six escorts using Follow/Defend across the Black Vale fort
+beside Widow Bluff. It checks both directions between the main base, fort and
+node, partial construction, every wall tier, a breach and a rebuild. The prior
+movement fails the return trip. This is a controlled traversal scene, not proof
+of every possible battle crowd, and does not close external roads outside forts.
+
+Burrowers tunnel through wall barriers but attack other occupied structures.
+Tunneling into economic buildings put them inside zero-distance flow sources,
+where they could circle without attacking. A separate regression preserves wall
+tunneling while requiring a bite against a farm.

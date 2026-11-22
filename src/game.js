@@ -2319,7 +2319,7 @@ export class Game {
       return true;
     }
     if (zombie) this._moveZombie(actor, dx / d, dz / d, speed, dt, true);
-    else if (!this._moveActor(actor, dx / d, dz / d, speed, dt, wx, wz)
+    else if (!this._moveActor(actor, dx / d, dz / d, speed, dt, wx, wz, true)
       && Math.hypot(wx - actor.x, wz - actor.z) < 4.5) {
       // The waypoint (or our formation slot beside it) sits in a building or
       // on rock: close enough — take the next leg instead of grinding.
@@ -3222,7 +3222,7 @@ export class Game {
   }
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
-  _moveActor(a, dx, dz, speed, dt, gx = null, gz = null) {
+  _moveActor(a, dx, dz, speed, dt, gx = null, gz = null, laneWaypoint = false) {
     const step = speed * dt;
     // If somehow inside a building footprint, any walkable step out is legal.
     const occupied = this.occ[(a.z | 0) * this.map.size + (a.x | 0)];
@@ -3250,20 +3250,21 @@ export class Game {
       }
     }
     const nx = a.x + dx * step, nz = a.z + dz * step;
-    // A goal outside the planner's window (a lane node across the map) gets
-    // the whole-map field; the windowed one cannot see us and returned
-    // nothing, leaving the direct step and the local detour to undo each
-    // other every tick in a cliff notch (playthrough check, Greenfall).
-    const far = gx != null && Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34;
-    // Heading somewhere known with a house or crag across the next few
-    // tiles of the straight line: take the field's way round from the start.
-    // Stepping straight first and correcting next tick made squads shuttle
-    // between the two headings in a notch (playthrough check, 2026-10).
+    // A nearby goal can still require a detour outside the local window.
+    // A failed local flood is not proof that no route exists. Share the cached
+    // whole-map field in that case (Widow Bluff escort across the cliff).
+    const far = gx != null && (Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34
+      || (!a.hero && this._fieldReach(a, gx, gz) < 0));
+    // Keep the planned detour until the entire direct line is clear. Looking
+    // only six tiles ahead made a returning escort turn toward the cliff again
+    // as soon as it stepped away from it, endlessly undoing its own detour.
     if (gx != null && !a.hero && !trapped) {
-      const L = Math.hypot(gx - a.x, gz - a.z), M = Math.min(L, 6);
+      // A lane route already supplies intermediate waypoints. Its formation
+      // slot is not the route destination; keep the established local steering.
+      const L = Math.hypot(gx - a.x, gz - a.z), M = laneWaypoint ? Math.min(L, 6) : L;
       const open = L < 1e-3 || segOpen(a.x, a.z, a.x + (gx - a.x) / L * M, a.z + (gz - a.z) / L * M,
         (x, z) => pass(x + 0.5, z + 0.5));
-      if (!open) {
+      if (!open || far) {
         const fd = this._fieldDir(a, gx, gz, far);
         if (fd) {
           const ex = a.x + fd[0] * step, ez = a.z + fd[1] * step;
@@ -4290,8 +4291,9 @@ export class Game {
     const nz = zb.z + dz * speed * dt;
     const tx = nx | 0, tz = nz | 0;
     const occId = this.occ[tz * this.map.size + tx];
-    // Burrowers tunnel: barriers simply are not there for them.
-    if (occId > 0 && zb.def.burrow) {
+    // Burrowers bypass barriers, not economic/production buildings. Tunneling
+    // into a building source left them circling its zero-distance flow tiles.
+    if (occId > 0 && zb.def.burrow && this.buildings.find(b => b.id === occId)?.kind === 'wall') {
       if (this.map.isWalkable(tx, tz)) { zb.x = nx; zb.z = nz; zb.dirX = dx; zb.dirZ = dz; }
       return;
     }
@@ -4539,7 +4541,7 @@ export class Game {
           // The hive is behind our own wall — route to it, don't grind at it.
           u.targetNest = null;
         } else {
-          u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, n.x, n.z);
+          u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, n.x, n.z, true);
           u.facing = Math.atan2(dx, dz);
         }
       } else u.moving = false;
@@ -4632,7 +4634,7 @@ export class Game {
       const d = Math.hypot(dx, dz);
       if (d > 3.5 && !(Math.hypot(tx - u.x, tz - u.z) < 7 && this._fieldReach(u, tx + ox, tz + oz) === -1)) {
         // A formation slot on rock or inside a building: hold where we are.
-        u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, tx + ox, tz + oz);
+        u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, tx + ox, tz + oz, true);
         u.facing = Math.atan2(dx, dz);
         if (u.moving || Math.hypot(tx - u.x, tz - u.z) > 8) return;
       }
