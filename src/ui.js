@@ -2676,6 +2676,7 @@ export class UI {
     builder.classList.toggle('hidden',!b||game.mode==='labyrinth'||game.over||!!this._battlePanel);
     if(b){
       this._builderPaused=b.paused;
+      this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
       this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
       const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
       if(document.activeElement!==order)order.value=b.order;
@@ -2683,7 +2684,7 @@ export class UI {
       for(const control of [order,reserve,pause])control.disabled=p!==0;
       pause.textContent=b.paused?'Resume':'Pause';
       for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
-      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses at home.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
     }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';

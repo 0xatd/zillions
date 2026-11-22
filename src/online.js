@@ -16,7 +16,8 @@ const CURRENT_RULES = 'survival-plots';
 // v10: Black Vale command-district placement (snapshot v9).
 // v11: gate-bound defensive towers (snapshot v10).
 // v12: shared perimeters, repair-first payment, and hero corner collision.
-export const LOBBY_PROTOCOL_VERSION = 12;
+// v13: physical colony crew and corrected movement (snapshot v12).
+export const LOBBY_PROTOCOL_VERSION = 13;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

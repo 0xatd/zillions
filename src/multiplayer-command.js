@@ -29,8 +29,6 @@ export function guestCommand(input, player, playerCount) {
         ? { ...command, i: input.i ?? -1 } : null;
     case 'blessing':
       return integer(input.i) ? { ...command, i: input.i } : null;
-    case 'focus':
-      return input.id === null || integer(input.id) ? { ...command, id: input.id } : null;
     case 'cast': case 'towerpri': case 'swapset':
       return command;
     // Builder strategy spends the shared treasury: only the host can set it.

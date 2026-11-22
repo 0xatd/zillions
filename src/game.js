@@ -76,8 +76,8 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-// v11: shared perimeter plan and terrain-fitted outer gates/defenders; IDs are positional.
-export const SNAPSHOT_VERSION = 11;
+// v12: physical colony crew, builder orders and corrected escort routing.
+export const SNAPSHOT_VERSION = 12;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
 export class Game {
