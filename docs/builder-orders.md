@@ -73,3 +73,12 @@ minor-damage starvation, and snapshot/hash agreement.
 combat bot with Develop and explicit wall/tower preferences; it never issues a
 manual purchase. It retains the normal movement and mid-fight restore checks.
 This verifies a complete mission, not subjective combat quality.
+
+### Physical construction and blocked retreats
+
+The crew participates in the same fresh-foundation and sealed-pocket ejection
+as troops, including while paused. Ejection clears its old route so the next
+job approach is recomputed from the new position. A blocked retreat does not
+teleport the crew or repeatedly search every frame: it retries after the
+normal two-second planning cooldown. `tests/builder-physics.test.mjs` covers
+both cases with failing-before regressions.

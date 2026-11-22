@@ -123,7 +123,7 @@ export function updateBuilders(g,dt) {
  if(b.hp<=0){cancel(g,b);b.hp=0;b.recover=25;b.status='Crew recovering';return;}
  if(threat(g,b.x,b.z)){
   if(b.job){cancel(g,b);b.replan=0;}b.status='Retreating';
-  if(!b.route.length||b.replan===0){b.route=routeTo(g,b,(x,z)=>Math.hypot(x-g.hq.cx,z-g.hq.cz)<5&&!threat(g,x,z))||[];b.replan=2;}
+  if(b.replan===0){b.route=routeTo(g,b,(x,z)=>Math.hypot(x-g.hq.cx,z-g.hq.cz)<5&&!threat(g,x,z))||[];b.replan=2;}
   walk(g,b,dt);return;
  }
  if(b.paused){b.status='Paused';return;}

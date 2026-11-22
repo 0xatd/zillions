@@ -1393,7 +1393,9 @@ export class Game {
     // plot, so the new walls must not entomb you.
     // The horde too: a creep left inside a fresh wall tile, or sealed in a
     // nook by it, can never walk again (playthrough check, QA 2026-10-27).
-    const actors = this.zombies.length ? [...this.units, ...this.zombies] : this.units;
+    const actors = this.builders && this.builders.hp > 0 && !this.builders.recover
+      ? [...this.units, ...this.zombies, this.builders]
+      : this.zombies.length ? [...this.units, ...this.zombies] : this.units;
     for (const u of actors) {
       if (u.dead) continue;
       const ux = u.x | 0, uz = u.z | 0;
@@ -1455,6 +1457,9 @@ export class Game {
   // when given, is the actor's known sealed-off reachable set: candidates
   // inside it are skipped, since hopping there would just be the same trap.
   _ejectActor(u, cx, cz, pocket = null) {
+    // A manually placed foundation can cover even a paused crew. Reuse the
+    // same safe placement as troops, but discard travel from its old position.
+    if (u === this.builders) { u.route = []; u.replan = 0; }
     const N = this.map.size;
     let fallback = null;
     for (let r = 1; r < 24; r++) {
