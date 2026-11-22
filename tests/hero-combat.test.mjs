@@ -46,3 +46,17 @@ test('nearby heroes share troop-kill XP, distant heroes do not farm it remotely'
  const e=enemy(g,'walker',near.x+1);const xp=[near.xp,far.xp];g.damageZombie(e,10000,near.x+2,near.z);
  assert.ok(near.xp>xp[0]);assert.equal(far.xp,xp[1]);assert.ok(g.coins.length,'kill should leave collectible gold, regardless of last hitter');
 });
+
+test('crowded troops do not multiply ground-strike damage; centre takes the main hit',()=>{
+ for(const count of [2,8,16]) {
+  const g=fresh(),h=g.heroes[0];h.x=10;h.z=10;g.units=[h];
+  const troop=g._spawnUnit('soldier',20.5,20.5),others=[];
+  for(let i=1;i<count;i++)others.push(g._spawnUnit('soldier',20.5+.1*(i%3+1),20.5+.1*(i%4+1)));
+  const e=enemy(g,'brute',21,20.5);e.targetU=troop;ticks(g,1);
+  const before=[troop,...others].map(u=>u.hp);ticks(g,6);
+  const loss=[troop,...others].map((u,i)=>before[i]-u.hp);
+  assert.ok(Math.abs(loss[0]-e.def.dmg)<1e-6,'nearest victim retains full single-target damage');
+  assert.ok(loss.slice(1).every(n=>n>0),'surrounding troops receive a small splash');
+  assert.ok(Math.abs(loss.reduce((a,b)=>a+b,0)-e.def.dmg*1.25)<1e-6,'total strike damage must be bounded regardless of crowd size');
+ }
+});

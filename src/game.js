@@ -4282,15 +4282,19 @@ export class Game {
     hit.t-=dt;
     if(hit.t>1e-8)return;
     zb.windup=null;
-    for(const u of this.units) {
-      if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)continue;
+    const victims=this.units.filter(u=>{
+      if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)return false;
       // Fixed ground impact cannot pass through a cliff or an intact wall.
-      if(!segOpen(hit.x,hit.z,u.x,u.z,(x,z)=>{
+      return segOpen(hit.x,hit.z,u.x,u.z,(x,z)=>{
         const id=this.occ[z*this.map.size+x];
         return this.map.isWalkable(x,z)&&(!id||this.gateIds.has(id));
-      }))continue;
-      this._damageUnit(u,hit.damage,hit.kind==='slam'?zb:null);
-    }
+      });
+    }).sort((a,b)=>dist2(a.x,a.z,hit.x,hit.z)-dist2(b.x,b.z,hit.x,hit.z)||a.id-b.id);
+    // Full damage at the impact centre; the surrounding splash shares one
+    // small budget. A crowded gate must not multiply one brute's damage by
+    // the number of troops, since autonomous squads cannot dodge individually.
+    const splash=victims.length>1?hit.damage*.25/(victims.length-1):0;
+    victims.forEach((u,index)=>this._damageUnit(u,index===0?hit.damage:splash,hit.kind==='slam'?zb:null));
     this.emit({type:'groundstrike',kind:hit.kind,x:hit.x,z:hit.z,radius:hit.r,fromId:zb.id});
   }
 

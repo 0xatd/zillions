@@ -358,7 +358,9 @@ automatic targeting. Death or lost range clears focus automatically.
 
 Spitters telegraph an interruptible acid impact at a fixed ground position
 before damaging units; brutes wind up a short ground smash. Moving out of the
-ring or stunning/killing the attacker avoids the pending strike. Existing
+ring or stunning/killing the attacker avoids the pending strike. The nearest
+impact victim takes full damage; other victims share a splash budget of 25%
+of that hit, so crowded autonomous troops do not multiply its damage. Existing
 spitter attacks against structures retain their siege behavior. Warning rings
 come from pending simulation state, so pause, saves and Watch preserve them.
 
