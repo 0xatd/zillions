@@ -116,3 +116,14 @@ test('Develop saves for its missing frontline instead of endlessly buying afford
  g.gold=50;for(let i=0;i<6000&&!g.plots.some(p=>p.kind==='camp_militia'&&p.tier>0);i++)ticks(g,1);
  assert.ok(g.plots.some(p=>p.kind==='camp_militia'&&p.tier>0));assert.equal(g.plots.filter(p=>p.kind==='farm'&&p.tier>0).length,0);
 });
+test('Expand physically completes the selected forward perimeter and defenders before another fort',()=>{
+ const g=fresh(),b=g.builders,first=g.plots.find(p=>p.role==='outer'),same=(p,fort)=>p.keep?.[0]===fort.keep[0]&&p.keep?.[1]===fort.keep[1];
+ const second=g.plots.find(p=>p.role==='outer'&&!same(p,first));assert.ok(second);
+ const firstDefenses=g.plots.filter(p=>same(p,first)&&(p.kind==='wall'||p.outerDefense!=null));assert.ok(firstDefenses.some(p=>p.kind==='wall'));assert.ok(firstDefenses.some(p=>p.kind==='tower'));
+ const secondDefenses=g.plots.filter(p=>same(p,second)&&(p.kind==='wall'||p.outerDefense!=null));
+ const h=g.heroes[0];h.x=first.keep[0]+.5;h.z=first.keep[1]+.5;[b.x,b.z]=g._reseat(h.x,h.z,4);g._spawnUnit('soldier',second.keep[0]+.5,second.keep[1]+.5);g.gold=2000;order(g,'expand');
+ for(let i=0;i<18000&&!firstDefenses.every(p=>p.tier>0&&!p.ruined);i++)ticks(g,1);
+ assert.ok(firstDefenses.every(p=>p.tier>0&&!p.ruined),'crew must fund and construct walls AND gate defenders, not merely choose an expansion');
+ assert.ok(secondDefenses.every(p=>p.tier===0),'another safe fort must wait until selected defenses finish');
+ assert.ok(b.completed>=firstDefenses.length);assert.ok(g.gold<2000&&g.gold>=b.reserve);
+});
