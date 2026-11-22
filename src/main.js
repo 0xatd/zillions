@@ -1,3 +1,4 @@
+import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
@@ -2244,7 +2245,10 @@ class App {
         this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
       }
     }
-    else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
+    else if (m.t === 'cmd') {
+      const command = guestCommand(m.c, idx + 1, this.game?.heroes.length || 0);
+      if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
+    }
     else if (m.t === 'needWindow') {
       const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
