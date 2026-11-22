@@ -1324,7 +1324,7 @@ class App {
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, `🔧 Nothing repairs itself — hold ${build} to repair. Press ${tower} beside a tower to change what it shoots.`],
+      [62, `🔧 Damage repairs before upgrades — hold ${build} to restore health. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -3810,26 +3810,41 @@ class App {
     const MAXB = 300;
     const q = this.camera.quaternion;
 
-    const add = (x, y, z, frac, w) => {
+    const add = (x, y, z, frac, w, thickness = 1, structure = false) => {
       if (i >= MAXB) return;
       d.position.set(x, y, z);
       d.quaternion.copy(q);
-      d.scale.set(w, 1, 1);
+      d.scale.set(w + (structure ? w * .06 : 0), thickness * (structure ? 1.5 : 1), 1);
       d.updateMatrix();
       this.barBg.setMatrixAt(i, d.matrix);
       const left = new THREE.Vector3(-w / 2, 0, 0).applyQuaternion(q);
       d.position.set(x + left.x, y + left.y + 0.001, z + left.z);
-      d.scale.set(Math.max(0.01, w * frac), 1, 1);
+      d.scale.set(Math.max(0.01, w * frac), thickness, 1);
       d.updateMatrix();
       this.barFg.setMatrixAt(i, d.matrix);
-      c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
+      if (structure) c.setHex(frac <= .3 ? 0xff4545 : frac <= .6 ? 0xffbf47 : 0x65e3aa);
+      else c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
       this.barFg.setColorAt(i, c);
       i++;
     };
 
     const gy = (x, z) => this.map.groundY(x, z);
-    for (const b of g.buildings) {
-      if (b.hp < b.maxHp) add(b.cx, gy(b.cx, b.cz) + this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
+    // World-space bars retain a readable pixel size at normal play zoom.
+    // Wall arcs show their weakest damaged section, not dozens of overlapping
+    // bars or an average that hides the section about to fall.
+    const damaged = g.buildings.filter(b=>b.alive && b.hp < b.maxHp - .5);
+    const wallWorst = new Map();
+    for(const b of damaged)if(b.kind==='wall') {
+      const prior=wallWorst.get(b.plotId);
+      if(!prior || b.hp/b.maxHp < prior.hp/prior.maxHp)wallWorst.set(b.plotId,b);
+    }
+    for (const b of damaged) {
+      if(b.kind==='wall' && wallWorst.get(b.plotId)!==b)continue;
+      const height=this.buildingMeshes.get(b.id)?.healthHeight ?? this._buildingHeight(b.kind);
+      const y=gy(b.cx,b.cz)+height+.6;
+      const distance=this.camera.position.distanceTo(new THREE.Vector3(b.cx,y,b.cz));
+      const pixel=2*Math.tan(this.camera.fov*Math.PI/360)*distance/Math.max(1,this.renderer.domElement.clientHeight);
+      add(b.cx,y,b.cz,b.hp/b.maxHp,Math.max(1.6,48*pixel),Math.max(1.5,(b.hp/b.maxHp<=.3?7:5)*pixel/.12),true);
     }
     for (const n of g.nests) {
       if (n.alive && n.hp < n.maxHp) add(n.x, gy(n.x, n.z) + 2.6, n.z, n.hp / n.maxHp, 2.2);
@@ -4151,13 +4166,14 @@ class App {
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
         : this._plotRole(plot, nt, true);
-      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
+      const actionIcon = nt.mode === 'repair' ? '🔧' : nt.mode === 'rebuild' ? '🏗️' : built ? '⬆️' : PLOT_KINDS[plot.kind].icon;
+      const wantKey = actionIcon + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
         rec.group.remove(ud.label);
-        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, wantSub);
+        ud.label = this._makeLabelSprite(actionIcon, wantSub);
         ud.label.position.set(lx, built ? 3.1 : 2.1, lz);
         rec.group.add(ud.label);
       }
@@ -4166,10 +4182,12 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch && nt.mode !== 'repair';
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
-          const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
+          const hp = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+          const progress = hp ? hp.hp / hp.maxHp : plot.paid / nt.cost;
+          const filled = Math.min(total, Math.floor(progress * total + 1e-6));
           this._drawPips(ud.pips, total, filled);
           ud.pips.sprite.position.y = (built ? 4.1 : 3.0) + Math.sin(t * 2 + plot.id) * 0.12;
         }
@@ -4180,11 +4198,13 @@ class App {
       const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
+      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : nt.mode === 'repair' ? 0x75dfff : paying ? 0xfff2c8 : 0xffd75e);
       ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
 
       // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
+      const health = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+      const frac = nt.branch ? 0 : clamp(health ? health.hp / health.maxHp : plot.paid / nt.cost, 0, 1);
+      ud.prog.material.color.setHex(nt.mode === 'repair' ? 0x75dfff : 0xffd75e);
       ud.prog.visible = frac > 0.002;
       if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
         ud.progFrac = frac;
@@ -4279,7 +4299,8 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, artTier, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
+        const healthHeight = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y;
+        rec = { mesh, b, tierKey, artTier, healthHeight, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4713,6 +4734,23 @@ class App {
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
+    if(this._inspectRing)this._inspectRing.visible=false;
+    const selected=this.ui._battlePanel;
+    if(selected?.mode==='unit' && selected.game===this.game) {
+      const unit=(selected.enemy?this.game.zombies:this.game.units).find(u=>u.id===selected.id);
+      const visible=unit && !unit.dead && unit.hp>0 && (!selected.enemy || fogVisionSources(this.game).some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius));
+      if(visible) {
+        if(!this._inspectRing){
+          const geometry=new THREE.RingGeometry(.62,.73,32);geometry.rotateX(-Math.PI/2);
+          this._inspectRing=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({color:0x83e8ff,transparent:true,opacity:.9,depthWrite:false}));
+        }
+        if(!this._inspectRing.parent)this.scene.add(this._inspectRing);
+        this._inspectRing.visible=true;this._inspectRing.position.set(unit.x,this.map.groundY(unit.x,unit.z)+.1,unit.z);
+        this._inspectRing.material.color.setHex(selected.enemy?0xff7777:0x83e8ff);
+        this.tacticalVisuals.setSelection(selected.enemy?[]:[this.unitMeshes.get(unit.id)?.mesh],0x83e8ff);
+        return;
+      }
+    }
     const h = this.myHero();
     if (!this.game || !h || h.dead || this.game.phase !== 'live') {
       this.tacticalVisuals.setSelection([]);
@@ -4855,7 +4893,7 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': this.setSpeed(0); break;
-        case 'menu': this.togglePauseMenu(); break;
+        case 'menu': if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
@@ -4871,6 +4909,24 @@ class App {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       this.audio.init();
+      if(e.button!==0 || !this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden'))return;
+      const rect=cv.getBoundingClientRect(),vision=fogVisionSources(this.game);
+      let best=null,closest=26;
+      for(const [actors,enemy] of [[this.game.units,false],[this.game.zombies,true]])for(const unit of actors){
+        if(unit.dead||unit.hp<=0)continue;
+        if(enemy&&!vision.some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius))continue;
+        const world=new THREE.Vector3(unit.x,this.map.groundY(unit.x,unit.z)+(unit.hero?1.3:.9),unit.z);
+        const screen=world.clone().project(this.camera);
+        if(screen.z< -1||screen.z>1)continue;
+        const distance=Math.hypot(rect.left+(screen.x+1)*rect.width/2-e.clientX,rect.top+(1-screen.y)*rect.height/2-e.clientY);
+        if(distance<closest){closest=distance;best={unit,enemy,world};}
+      }
+      if(best){
+        // Do not select an enemy through an occluding terrain ridge.
+        const direction=best.world.clone().sub(this.camera.position),distance=direction.length();
+        const ray=new THREE.Raycaster(this.camera.position,direction.normalize(),0,distance-.2);
+        if(!best.enemy||!ray.intersectObject(this.terrain,true).length)this.ui.inspectUnit(this.game,best.unit,best.enemy);
+      } else {this.ui._battlePanel=null;}
     });
   }
 
@@ -5844,7 +5900,7 @@ class App {
       if (buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
-          if (!nt || !nt.branch) continue;
+          if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
           const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
         }
@@ -5863,15 +5919,17 @@ class App {
             const cost = Math.max(1, Math.ceil(act.cost - paid));
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const health = this.game.plotHpState(plot);
+            const hpLabel = `${Math.ceil(health.hp)} / ${Math.ceil(health.maxHp)} HP`;
+            const role = act.mode === 'repair' ? 'Restores health; keeps the current tier.' : this._plotRole(plot, nt);
             const buildKey = keyLabel(this.binds().dodge);
             const buildAltKey = keyLabel(this.binds().build);
             const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
-              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
+              ? `<div><b>${act.mode === 'repair' ? '🔧 Repairing' : act.mode === 'rebuild' ? '🏗️ Rebuilding' : plot.tier > 0 ? '⬆️ Upgrading' : '🏗️ Building'} ${name}</b> · ${act.mode === 'repair' ? hpLabel + ' · ' : ''}${cost}🪙 remaining</div><div class="buildrole">${this.game.gold < 1 ? 'No gold — work paused.' : 'Release to stop.'}</div>`
               : buildMode
-                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
-                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
+                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role}</div>`;
           }
         }
       }

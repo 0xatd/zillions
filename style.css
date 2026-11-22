@@ -2087,3 +2087,19 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 #screen-main #character-list.empty { flex:none; max-height:none; }
 #screen-main .character-empty { border:0; padding:24px 12px; }
 #screen-main:has(#character-list.empty) #m-create-character { color:#171b1c; background:linear-gradient(#eac17c,#bd8c43); border-color:#f1ce91; min-height:44px; }
+
+/* Optional battlefield inspection; never replaces hero control. */
+.battle-details { position:fixed; right:16px; top:60px; width:280px; max-height:calc(100dvh - 230px); overflow:auto; padding:14px; box-sizing:border-box; background:rgba(17,27,34,.97); border:1px solid #738b99; border-radius:8px; color:#eef5f7; z-index:35; pointer-events:auto; box-shadow:0 5px 24px #0008; }
+#battle-details-close { float:right; width:30px; height:30px; border:1px solid #738b99; border-radius:4px; background:#253640; color:white; font-size:22px; cursor:pointer; }
+.battle-details h3 { margin:0 32px 10px 0; font-size:17px; }
+.battle-details h4 { margin:14px 0 6px; color:#f0cd79; }
+.battle-details p { font-size:13px; line-height:1.45; color:#c9d7df; margin:6px 0; }
+.battle-details dl { display:grid; grid-template-columns:1fr auto; gap:6px; font-size:13px; }
+.battle-details dd { margin:0; font-weight:700; }
+.battle-item { border-top:1px solid #ffffff20; padding:8px 0; }
+.battle-item b { font-size:14px; }
+.inspect-health { height:9px; background:#10151d; border:1px solid #adbdc9; margin:10px 0 5px; }
+.inspect-health span { display:block; height:100%; background:#69dca4; }
+.pack-open,.battle-gear { border:1px solid #b49d62; background:#293641; color:#ffe5a5; border-radius:4px; padding:4px 8px; font:600 11px system-ui; cursor:pointer; }
+.pack-open.full { border-color:#ff9c7c; color:#ffbfaa; }
+@media(max-width:900px) { .battle-details { top:46px; right:8px; width:min(280px,calc(100vw - 16px)); max-height:calc(100dvh - 180px); padding:10px; } .pack-open { padding:2px 5px; font-size:10px; } }

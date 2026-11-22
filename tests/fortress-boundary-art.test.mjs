@@ -25,6 +25,9 @@ test('all fortress masonry leaves walkable ground and ramp tiles clear',()=>{
     const x=Math.floor(point.x),z=Math.floor(point.z);
     assert.equal(map.isWalkable(x,z),false,`${mesh.name} hides walkable ground`);
     assert.ok(!map.swRoad?.[z*map.size+x],`${mesh.name} hides a ramp`);
+    const boundary=h.plan.perimeters.find(p=>p.kind==='base').tiles;
+    assert.ok(boundary.filter(p=>p.kind==='terrain').some(p=>Math.hypot(p.x-x,p.z-z)<=1.5),'decorative wall invents a second perimeter');
+    assert.ok(boundary.filter(p=>p.kind!=='terrain').every(p=>Math.hypot(p.x-x,p.z-z)>=2.5),'decorative wall doubles a functional wall or gate');
    }
    if(mesh.name==='armored-curtain'&&scale.x>=3)longCurtains++;
    if(scale.y<3)continue;
