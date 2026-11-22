@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
+import { marineFlag } from './marine-recipe.js';
 
 const TEMPLATES = {};
 
@@ -33,6 +34,14 @@ const MANIFEST = {
   humanWall: 'assets/art-slice/human_wall.glb',
   humanGate: 'assets/art-slice/human_gate.glb',
 };
+
+// Marine heroes (default on; ?marineHeroes=0 opts out): the art-marines hero
+// line, built by tools/art/build_hero_marines.py.
+if (marineFlag('marineHeroes')) {
+  for (const k of ['scott', 'alexander', 'danny', 'turtle', 'john', 'tiger', 'aaron']) {
+    MANIFEST[`marineHero_${k}`] = `assets/art-marines/hero_${k}.glb`;
+  }
+}
 
 export const ART_SLICE_KEYS = Object.freeze([
   'heroScott', 'humanRifleman', 'hiveDrone',

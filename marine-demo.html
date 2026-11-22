@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zillions marine kit demo</title>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d131b; color: #dfe7ef; font: 14px system-ui, sans-serif; }
+    #hud { position: fixed; left: 12px; top: 10px; z-index: 2; background: #0d131bcc; padding: 8px 10px; border-radius: 6px; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="hud">Marine kit demo. Repo review tool. <code>?seed=name&amp;count=16&amp;chapter=crimson&amp;role=soldier&amp;view=rts|front</code> <span id="status">Loading kit...</span></div>
+  <canvas id="view"></canvas>
+  <script type="module" src="./marine-demo.js"></script>
+</body>
+</html>
