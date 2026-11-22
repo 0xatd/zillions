@@ -135,7 +135,7 @@ export function updateBuilders(g,dt) {
   const {choices,branches}=builderCandidates(g,b);let poor=false,blocked=false;
   for(const c of choices.slice(0,20)){
    if(manuallyUsed.has(c.p.id)||c.p.paid>0)continue;
-   if(g.gold-b.reserve<c.a.cost){poor=true;continue;}
+   if(g.gold-b.reserve<c.a.cost){poor=true;if(c.score>800)break;continue;}
    const route=routeTo(g,b,(x,z)=>atWork(g,c.p,x,z));if(route===null){blocked=true;continue;}
    if(route.some(([x,z])=>threat(g,x,z,4))){blocked=true;continue;}
    if(c.branch){c.p.branch=c.branch;c.a=g.plotAction(c.p);c.key=actionKey(c.p,c.a);}

@@ -76,3 +76,7 @@ test('a new critical repair interrupts and refunds discretionary work',()=>{
  const hq=g.plots.find(p=>p.kind==='hq');g.hq.hp=g.hq.maxHp*.3;
  ticks(g,122);assert.ok(b.job?.id===hq.id||g.hq.hp>g.hq.maxHp*.3,'new emergency must displace discretionary job');
 });
+test('an unaffordable emergency saves instead of repeatedly buying and cancelling lesser work',()=>{
+ const g=fresh(),b=g.builders;g.hq.hp=g.hq.maxHp*.3;g.gold=30;order(g,'develop');const gold=g.gold;ticks(g,600);
+ assert.equal(b.job,null);assert.equal(b.status,'Saving gold');assert.equal(g.gold,gold);assert.equal(b.completed,0);
+});
