@@ -340,7 +340,7 @@ export class AuthClient {
         campaign,
         chapter: chapterIdentity(localProfile.chapter),
         mmo_character_id: localProfile.mmoCharacterId || null,
-        mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 15) : [],
+        mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 18) : [],
       } }),
     ]);
     if (profileError) throw profileError;

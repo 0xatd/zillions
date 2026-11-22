@@ -1,3 +1,4 @@
+import { validAbilitySlot } from './hero-abilities.js';
 // The transport identifies a guest seat; packet payloads never choose it.
 // Return a minimal command or null before anything enters the lockstep queue.
 export function guestCommand(input, player, playerCount) {
@@ -31,7 +32,12 @@ export function guestCommand(input, player, playerCount) {
       return integer(input.i) ? { ...command, i: input.i } : null;
     case 'focus':
       return input.id === null || integer(input.id) ? { ...command, id: input.id } : null;
-    case 'cast': case 'towerpri': case 'swapset':
+    case 'cast':
+      if (input.slot !== undefined && !validAbilitySlot(input.slot)) return null;
+      if (input.id !== undefined && !integer(input.id)) return null;
+      if ((input.x !== undefined || input.z !== undefined) && !(Number.isFinite(input.x) && Number.isFinite(input.z) && input.x >= 0 && input.z >= 0)) return null;
+      return {...command, ...(input.slot !== undefined ? {slot:input.slot} : {}), ...(input.id !== undefined ? {id:input.id} : {}), ...(input.x !== undefined ? {x:input.x,z:input.z} : {})};
+    case 'towerpri': case 'swapset':
       return command;
     // Builder strategy spends the shared treasury: only the host can set it.
     // Guest packets, including forged p:0 packets, cannot enter those commands.

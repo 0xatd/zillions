@@ -1,4 +1,6 @@
-import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord } from './chapter.js';
+import { spellTarget, spellManaCost } from './hero-spells.js';
+import { heroAbility, abilityCooldown } from './hero-abilities.js';
+import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -192,7 +194,7 @@ class App {
           this.startGame(d, hero);
         }
       },
-      onCast: () => this.tryCast(),
+      onCast: (slot = 0) => this.tryCast(slot),
       onControlMode: () => this.toggleControlMode(),
       onBuildHold: (on) => { this.buttonPay = !!on; },
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
@@ -755,6 +757,7 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this.pendingAbility = null;
     if (snap && !isCompatibleSnapshot(snap)) {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
@@ -871,7 +874,7 @@ class App {
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer,
-      this.game.mode === 'campaign' ? selectedMmoCharacter(this.profile) : null);
+      this.game.mode === 'campaign' && this.mpRole !== 'spectator' ? selectedMmoCharacter(this.profile) : null);
     this.ui.setGameChatEnabled(this.netMode);
     if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
@@ -1569,7 +1572,7 @@ class App {
 
   async _recruitChapterLeader(key, { persist = true } = {}) {
     if (this.game || this._chapterRecruiting) return;
-    if (!leaderAvailable(this.profile, key)) { this.ui.showBanner('Capture the required city to recruit this leader.', 'bad', 3000); return; }
+    if (!(leaderRecord(this.profile,key) ? leaderAvailable(this.profile,key) : recruitmentAllowed(this.profile,key))) { this.ui.showBanner('This recruit needs a compatible chapter culture and the required conquest.', 'bad', 3000); return; }
     this._chapterRecruiting = true;
     try {
       let character = leaderRecord(this.profile, key);
@@ -1578,6 +1581,7 @@ class App {
         character = makeMmoCharacter(HEROES[key].name, leader.classKey, chapterIdentity(this.profile.chapter).color);
         character.id = `chapter_${key}_v1`;
         character.chapterLeader = key;
+        character.proxyHero = key;
         character.firstHourGuideDismissed = true;
         if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
       }
@@ -4903,6 +4907,12 @@ class App {
       cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
     }
     const hero=this.myHero(),target=hero?.target;
+    if(hero&&!hero.dead&&this.pendingAbility!=null){
+      const ab=heroAbility(hero.def,this.pendingAbility);if(ab?.range)cue(hero.x,hero.z,ab.range,0x7edac1,.4);
+    }
+    for(const caster of g.heroes)for(const e of caster.spells?.effects||[]){
+      if((e.kind==='blast'||e.kind==='zone')&&visible(e.x,e.z))cue(e.x,e.z,e.radius,e.delay>0?0xffce68:0x7edac1,.65);
+    }
     if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
       &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
       cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
@@ -5054,8 +5064,9 @@ class App {
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
-        case 'ability1':
-          if (this.controlMode === 'fight') this.tryCast();
+        case 'ability1': case 'ability2': case 'ability3':
+          e.preventDefault();
+          if (this.controlMode === 'fight') this.tryCast(Number(act.slice(-1)) - 1 + (isHeld(binds, this.keys, 'second_bar') ? 3 : 0));
           break;
         case 'build_mode':
           e.preventDefault();
@@ -5074,7 +5085,7 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': this.setSpeed(0); break;
-        case 'menu': if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
+        case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
@@ -5101,6 +5112,25 @@ class App {
         if(screen.z< -1||screen.z>1)continue;
         const distance=Math.hypot(rect.left+(screen.x+1)*rect.width/2-e.clientX,rect.top+(1-screen.y)*rect.height/2-e.clientY);
         if(distance<closest){closest=distance;best={unit,enemy,world};}
+      }
+      if (this.pendingAbility != null) {
+        const slot=this.pendingAbility,h=this.myHero(),ab=heroAbility(h?.def,slot);
+        if (!h || h.dead || this.controlMode !== 'fight' || !ab) {this.pendingAbility=null;return;}
+        if (ab.target==='enemy') {
+          if (!best?.enemy) {this.ui.showBanner('Select a visible enemy.', 'info');return;}
+          const target={id:best.unit.id};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Target is out of range or hidden.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        } else {
+          const pointer=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2);
+          const ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
+          const hit=ray.intersectObject(this.terrain,true)[0];
+          if (!hit) return;
+          const target={x:hit.point.x,z:hit.point.z};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Choose a point closer to your hero.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        }
+        this.pendingAbility=null;return;
       }
       if(best){
         // Do not select an enemy through an occluding terrain ridge.
@@ -5231,6 +5261,7 @@ class App {
   }
 
   toggleControlMode() {
+    this.pendingAbility = null;
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
     if (this.lastPay && this.controlMode === 'fight') {
@@ -5241,13 +5272,20 @@ class App {
     this.audio.click();
   }
 
-  tryCast() {
+  tryCast(slot = 0) {
     if (!this.game) return;
     const h = this.myHero();
     if (!h || h.dead) return;
-    if (h.abilCd > 0) { this.audio.deny(); return; }
+    if (!heroAbility(h.def, slot) || heroAbility(h.def, slot).passive || abilityCooldown(h, slot) > 0) { this.audio.deny(); return; }
+    const ab=heroAbility(h.def,slot);
+    if ((h.spells?.mana ?? h.def.mana ?? 0) < spellManaCost(h,slot) || h.spells?.charges?.[slot]?.count === 0) {this.audio.deny();return;}
+    if (ab.target==='point' || ab.target==='enemy') {
+      this.pendingAbility=slot;
+      this.ui.showBanner(`${ab.name}: select ${ab.target==='enemy'?'an enemy':'a point'} · ${keyLabel(this.binds().menu)} cancels`, 'info');
+      return;
+    }
     if (Math.random() < 0.4) this.audio.bark(h.key, 'attack');
-    this.issue({ t: 'cast', p: this.myPlayer });
+    this.issue({ t: 'cast', p: this.myPlayer, slot });
   }
 
   togglePauseMenu(help = false) {

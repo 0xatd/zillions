@@ -1,4 +1,6 @@
-import { CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
+import { spellManaCost } from './hero-spells.js';
+import { heroAbilities, abilityCooldown } from './hero-abilities.js';
+import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
 // DOM HUD and menus. The outer shell is multiplayer-first: Play Online leads
 // to the lobby, while Play Solo contains Story Campaign and Survival. Both
 // paths reuse the same battle setup screen. In-game, the compact action bar
@@ -133,6 +135,7 @@ export class UI {
           <div id="fight-kit" class="fight-kit hidden" aria-label="Hero abilities"></div>
           <div id="upgradepanel" class="hidden"></div>
           <button id="bigaction" class="bigaction"></button>
+          <div id="ability-slots" class="ability-slots" aria-label="Additional abilities"></div>
         </div>
         <div id="branchpanel" class="hidden"></div>
         <div id="blessingpanel" class="hidden"></div>
@@ -192,7 +195,7 @@ export class UI {
 
         <div id="screen-main" class="mainmenu character-select">
           <div class="character-heading"><h1 id="chapter-title">Your chapter</h1><span id="chapter-territory"></span></div>
-          <form id="chapter-identity" class="chapter-identity hidden"><label>Chapter name<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">SAVE CHAPTER</button></form>
+          <form id="chapter-identity" class="chapter-identity hidden"><label>Chapter name<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Recruitment culture<select id="chapter-culture"></select></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">SAVE CHAPTER</button></form>
           <div class="chapter-campaign"><div class="chapter-map-heading"><h2>Earth</h2><span id="chapter-earth-status"></span></div><div id="chapter-map" aria-label="Earth conquest map"></div><div id="chapter-objective"></div><div id="chapter-services"></div></div>
           <div id="character-stage" class="character-stage">
             <div id="character-avatar" class="character-avatar" aria-label="Selected character">
@@ -540,7 +543,8 @@ export class UI {
     };
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => { q('#chapter-identity').classList.toggle('hidden'); q('#chapter-name-input').focus(); };
-    q('#chapter-identity').onsubmit = e => { e.preventDefault(); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value}); };
+    q('#chapter-identity').onsubmit = e => { e.preventDefault(); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value,culture:q('#chapter-culture').value}); };
+    q('#chapter-culture').innerHTML=Object.entries(CHAPTER_CULTURES).map(([k,v])=>`<option value="${k}">${v.name} — ${v.desc}</option>`).join('');
     q('#chapter-color').innerHTML = Object.keys(CHAPTER_COLORS).map(k=>`<option value="${k}">${k}</option>`).join('');
     q('#chapter-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([k,v])=>`<option value="${k}">${v} ${k}</option>`).join('');
     q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
@@ -1262,6 +1266,7 @@ export class UI {
       q('#chapter-name-input').value = identity.name;
       q('#chapter-color').value = identity.color;
       q('#chapter-emblem').value = identity.emblem;
+      q('#chapter-culture').value = identity.culture;
     }
     q('#chapter-identity').classList.toggle('hidden', !!identity.name);
     const cities = chapterCities(p);
@@ -1285,10 +1290,10 @@ export class UI {
     if(founder){const b=document.createElement('button');b.className='character-row';b.dataset.id=founder.id;b.innerHTML=`<span>⚑</span><span><b>${escapeHtml(founder.name)}</b><small>Founder · Level ${founder.level||1}</small></span>`;b.onclick=()=>this.cb.onCharacterSelect?.(founder.id);list.appendChild(b);}
     else if(chapterIdentity(p.chapter).name){const b=document.createElement('button');b.className='character-row';b.textContent='CREATE YOUR FOUNDER';b.onclick=()=>this.showCharacterCreator();list.appendChild(b);}
     for(const leader of CHAPTER_LEADERS){
-      const c=leaderRecord(p,leader.key),available=leaderAvailable(p,leader.key),h=HEROES[leader.key];
+      const c=leaderRecord(p,leader.key),available=leaderRecord(p,leader.key)?leaderAvailable(p,leader.key):recruitmentAllowed(p,leader.key),h=HEROES[leader.key];
       const button=document.createElement('button');button.className='character-row';
       button.dataset.id=c?.id||'';button.disabled=!available;
-      button.innerHTML=`<span>${h.icon}</span><span><b>${escapeHtml(h.name)}</b><small>${c?`Level ${c.level||1} · ${leader.role}`:available?'Recruit to your chapter':`Capture ${chapterCities(p)[leader.capture-1]?.name}`}</small></span>`;
+      button.innerHTML=`<span>${h.icon}</span><span><b>${escapeHtml(h.name)}</b><small>${c?`Level ${c.level||1} · ${leader.role}`:available?`${leader.source==='academy'?(leader.discovery && p.campaign>=leader.discovery?'Academy / exploration · ':'Academy · '):leader.source==='exploration'?'Exploration · ':leader.source==='encounter'?'Cinder encounter · ':''}Recruit to your chapter`:!leaderAvailable(p,leader.key)?`Capture ${chapterCities(p)[leader.capture-1]?.name}`:'Restricted by chapter culture'}</small></span>`;
       button.onclick=()=>this.cb.onChapterRecruit?.(leader.key);list.appendChild(button);
     }
     const legacy=characters.filter(c=>!c.chapterLeader && c.id!==founder?.id);
@@ -1513,7 +1518,7 @@ export class UI {
   _renderAbilitiesOverview(character) {
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
     const hero = HEROES[character.proxyHero || klass.proxy] || HEROES.scott;
-    const cards = [
+    const cards = hero.abilities ? hero.abilities.map(a=>[a.passive?'PASSIVE':'ACTIVE ABILITY',a]) : [
       ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
     ];
     this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
@@ -2290,8 +2295,8 @@ export class UI {
           <div><b>${h.name}</b><small>${h.tagline}</small></div>
         </div>
         <div class="hc-stats">HP ${h.hp} · DMG ${h.dmg} · RANGE ${h.range} · SPEED ${h.speed}</div>
-        <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
-        <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
+        ${h.aura ? `<div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>` : ''}
+        ${heroAbilities(h).filter(Boolean).map(ab=>`<div class="hc-row"><span class="hc-k">${ab.passive ? 'Passive' : 'Ability'}</span><b>${ab.icon} ${ab.name}</b><p>${ab.desc}</p></div>`).join('')}
         ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
     `;
       grid.appendChild(card);
@@ -2602,6 +2607,7 @@ export class UI {
 
   _heroTip(h) {
     const a = h.ability;
+    if (h.abilities) return `<b>${escapeHtml(h.name)}</b><br>` + h.abilities.map(ab=>`<b>${escapeHtml(ab.name)}</b><br>${escapeHtml(ab.desc)}<br>`).join('');
     const au = h.aura;
     const passives = (h.passives || [])
       .map((p) => `<span class="tfx">${p.icon} <b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
@@ -2626,6 +2632,7 @@ export class UI {
     const mode = this.root.querySelector('#mode-toggle');
     if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
+    if (character && character.proxyHero !== h.key) character = null;
     const d = h.def;
     const kit = this.root.querySelector('#fight-kit');
     if (kit) {
@@ -2634,7 +2641,7 @@ export class UI {
         ...(d.passives || []).map((passive, index) => ({
           kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
         })),
-        { kind: this._keyLabel('ability1'), icon: d.ability.icon, name: d.ability.name, desc: d.ability.desc, active: true },
+        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':`${slot>=3?this._keyLabel('second_bar')+'+':''}${this._keyLabel('ability'+(slot%3+1))}`,icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
       ].filter(Boolean);
       kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
         <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
@@ -2642,9 +2649,13 @@ export class UI {
     }
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
-    face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
-    this.root.querySelector('#a-name').textContent = character ? `${character.name} · ${klass.name}` : d.name;
+    face.innerHTML = character && !character.chapterLeader ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
+    this.root.querySelector('#a-name').textContent = character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name;
     const big = this.root.querySelector('#bigaction');
+    this.root.querySelector('#ability-slots').onclick = e => {
+      const button = e.target.closest('[data-ability-slot]');
+      if (button && !button.disabled) this.cb.onCast(Number(button.dataset.abilitySlot));
+    };
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
       else if (this._bigMode === 'cast') this.cb.onCast();
@@ -2672,11 +2683,12 @@ export class UI {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
     const fighting = mode === 'fight';
+    this.root.querySelector('#actionbar')?.classList.toggle('multi-kit', fighting && !!this._game?.heroes[this._p]?.def.abilities);
     chip.classList.toggle('fight', fighting);
     chip.classList.toggle('build', !fighting);
     const label = chip.querySelector('span');
     if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
-    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting);
+    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting || !!this._game?.heroes[this._p]?.def.abilities);
     this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
     chip.title = fighting
       ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
@@ -2850,10 +2862,23 @@ export class UI {
           <span><b>${stats.speed.toFixed(1)}</b><small>SPD</small></span>
           <span><b>${stats.regen.toFixed(1)}</b><small>REG</small></span>
           <span class="aurastat"><b>${stats.auraRadius.toFixed(1)}</b><small>AURA</small></span>
-          <em>${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected</em>`;
+          <em>${h.def.aura ? `${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected` : 'Abilities · select a target to cast'}</em>`;
       }
 
       this._updateUpgradePanel(game, h);
+
+      const slots = q('#ability-slots');
+      slots.hidden = controlMode !== 'fight' || game.phase === 'found';
+      const slotMarkup = heroAbilities(h.def).map((ability, slot) => {
+        if (!ability || ability.passive || slot === 0) return '';
+        const cd = abilityCooldown(h, slot);
+        const charge=h.spells?.charges?.[slot];
+        const empty=charge?.count===0;
+        const noMana=(h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,slot);
+        const label = `${slot >= 3 ? this._keyLabel('second_bar') + '+' : ''}${this._keyLabel('ability' + (slot % 3 + 1))}`;
+        return `<button data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} title="${escapeHtml(ability.desc || '')}">${ability.icon || ''} ${escapeHtml(ability.name)}<small>${ability.passive ? 'Passive' : noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : label}</small></button>`;
+      }).join('');
+      if (slots.innerHTML !== slotMarkup) slots.innerHTML = slotMarkup;
 
       // The one big contextual button: found the city, build in Build mode, or cast.
       const big = q('#bigaction');
@@ -2888,9 +2913,9 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} MP${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
-        big.disabled = h.dead;
+        big.disabled = h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0);
       }
     }
 

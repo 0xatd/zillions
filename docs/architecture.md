@@ -347,3 +347,19 @@ otherwise USER_UPDATED can replace a founder just created locally with the
 previous roster. A behavioral regression and live create/reload smoke cover
 this race. Campaign setup binds the chosen roster leader and announces changes
 through the existing multiplayer hero-pick path when switching modes.
+
+## Multi-ability runtime (roster expansion)
+
+`hero-abilities.js` owns the six-slot/cooldown compatibility contract.
+`hero-kits.js` owns authored core kits, registered by `config.js`.
+`hero-spells.js` owns deterministic targeted spell execution and pending effects.
+`game.js` integrates updates, snapshots, upgrades and attack hooks; no DOM timer
+may resolve a spell. Legacy single-ability leaders retain their Q action.
+`lockstep-hash.js` covers cooldowns, mana, charges, pending effects and hit history.
+Protocol 14 rejects older rooms; snapshot 13 is written and snapshot 12 can be
+read with empty additional slots. Old clients reject the new snapshot version.
+
+Point/enemy spells enter a target-selection mode. Pointer selection emits the
+same cast command as other input; Escape cancels before spending resources.
+The sim checks range, visibility for unit targeting, mana and cooldown before
+accepting a cast. The host sanitizes guest slots and target coordinates.

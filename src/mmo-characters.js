@@ -14,7 +14,7 @@ import {
 import { itemInfo, itemMods } from './config.js';
 import { xpToNextLevel } from './match-rewards.js';
 
-export const MAX_MMO_CHARACTERS = 15; // eight legacy characters plus seven chapter leaders
+export const MAX_MMO_CHARACTERS = 18; // eight legacy characters plus implemented chapter leaders
 // What a character can keep between adventures. Rolled gear is unique, so
 // without a cap a stash grows without bound inside the profile blob.
 export const STASH_SLOTS = 60;
@@ -261,7 +261,7 @@ export function normalizeMmoCharacters(profile) {
     : [];
   for (const character of profile.mmoCharacters) {
     const klass = MMO_CLASSES[character.classKey];
-    character.proxyHero = klass.proxy;
+    character.proxyHero = chapterLeaderStyle(character) ? character.chapterLeader : klass.proxy;
     character.raceKey = MMO_RACES[character.raceKey] ? character.raceKey : 'human';
     character.customization = normalizeCustomization(character.raceKey, character.customization);
     character.entitlements = {

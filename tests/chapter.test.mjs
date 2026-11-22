@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CHAPTER_LEADERS,chapterIdentity,chapterCities,chapterFounder,leaderAvailable} from '../src/chapter.js';
+import {CHAPTER_LEADERS,chapterIdentity,chapterCities,chapterFounder,leaderAvailable,recruitmentAllowed} from '../src/chapter.js';
 import {makeMmoCharacter,normalizeMmoCharacters,characterCamp,addMmoCharacter} from '../src/mmo-characters.js';
 import {AuthClient} from '../src/auth.js';
 import {HEROES,levelById} from '../src/config.js';
@@ -17,11 +17,11 @@ test('chapter cosmetics cannot invent captures or unlock companions',()=>{
  p.campaign=5;assert.ok(CHAPTER_LEADERS.every(l=>leaderAvailable(p,l.key)));assert.ok(chapterCities(p).every(c=>c.status==='held'));
 });
 
-test('eight legacy commanders plus seven companions preserve every identity and build',()=>{
+test('eight legacy commanders plus all implemented companions preserve every identity and build',()=>{
  const roster=Array.from({length:8},(_,i)=>makeMmoCharacter('Legacy '+i));const p={mmoCharacters:roster,mmoCharacterId:roster[3].id,chapter:{founderId:roster[3].id}};
  const before=structuredClone(roster);
  for(const l of CHAPTER_LEADERS){const c=makeMmoCharacter(HEROES[l.key].name,l.classKey);c.chapterLeader=l.key;c.id='chapter_'+l.key+'_v1';assert.ok(addMmoCharacter(p,c));}
- normalizeMmoCharacters(p);assert.equal(p.mmoCharacters.length,15);assert.equal(chapterFounder(p).id,before[3].id);
+ normalizeMmoCharacters(p);assert.equal(p.mmoCharacters.length,8+CHAPTER_LEADERS.length);assert.equal(chapterFounder(p).id,before[3].id);
  for(let i=0;i<8;i++){assert.equal(p.mmoCharacters[i].id,before[i].id);assert.deepEqual(p.mmoCharacters[i].equipment,before[i].equipment);assert.equal(p.mmoCharacters[i].level,before[i].level);}
 });
 
@@ -34,7 +34,7 @@ test('cloud hydration uses server conquest and preserves chapter/founder metadat
 test('founder keeps appearance; each companion brings its named hero kit through restore',()=>{
  const founder=makeMmoCharacter('Founder');assert.ok(characterCamp(founder).characterStyle);
  const level=levelById(1);
- for(const l of CHAPTER_LEADERS){const c=makeMmoCharacter(HEROES[l.key].name,l.classKey);c.chapterLeader=l.key;const camp=characterCamp(c);
+ for(const l of CHAPTER_LEADERS){const c=makeMmoCharacter(HEROES[l.key].name,l.classKey);c.chapterLeader=l.key;normalizeMmoCharacters({mmoCharacters:[c]});const camp=characterCamp(c);
  assert.equal(c.proxyHero,l.key);assert.equal(camp.characterStyle,null);
  const terrain=()=>new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
  const game=new Game(terrain(),'normal',[{k:l.key,camp}],null,1);assert.equal(game.heroes[0].key,l.key);assert.equal(game.heroes[0].def.ability.name,HEROES[l.key].ability.name);
@@ -59,4 +59,12 @@ test('returning from an arcade kit to campaign announces the founder kit to peer
  ui._syncChapterHeroChoice('campaign');assert.equal(ui.selectedHero,'scott');assert.deepEqual(sent,['scott']);
  ui._syncChapterHeroChoice('campaign');assert.deepEqual(sent,['scott'],'unchanged selection must not produce duplicate peer changes');
  ui.selectedHero='tiger';ui._syncChapterHeroChoice('survival');assert.equal(ui.selectedHero,'tiger','arcade kits remain selectable');
+});
+
+test('recruitment culture restricts new nonhuman recruits but not earned conquests',()=>{
+ const p={campaign:2,chapter:{culture:'human'}};
+ assert.equal(recruitmentAllowed(p,'sniper'),false);assert.equal(recruitmentAllowed(p,'lina'),true);
+ assert.equal(leaderAvailable(p,'sniper'),true,'existing companion must not be erased by culture changes');
+ p.chapter.culture='coalition';assert.equal(recruitmentAllowed(p,'sniper'),true);
+ p.campaign=0;assert.equal(recruitmentAllowed(p,'lina'),false);
 });

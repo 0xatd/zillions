@@ -26,6 +26,22 @@ Cosmetic chapter metadata cannot award victories, currency or items.
 This decision supersedes older character-first menu guidance below. Keep the
 siege, co-op, reward and economy invariants unchanged.
 
+## Hero roster expansion (authorized, implementation in progress)
+
+The target is the full Dota-reference roster, not seven renamed kits. The
+127-entry reference inventory in `docs/roster/coverage.json` tracks coverage;
+only actual implemented kits belong in selection. Academy recruitment and
+exploration are distinct acquisition routes. Exploration can discover humans
+and nonhumans. Chapter recruitment culture may exclude new nonhuman recruits;
+changing culture must not delete already-owned companions or their gear.
+Numbered/prime variants are requested but not implemented.
+
+Core-kit implementation is not exact patch parity. Missing talents, facets,
+item-granted abilities and innate mechanics must remain explicit in the coverage
+report. Use our own visuals, not extracted Dota assets. New kit commands and
+all their pending/cooldown/resource state must survive snapshot and lockstep.
+Q/E/R are active slots; the rebindable secondary-bar action exposes three more.
+
 ## Target
 
 Zillions is a browser siege game. The living world (overworld, planet hubs,

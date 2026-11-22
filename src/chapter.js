@@ -1,8 +1,12 @@
-// Chapter identity is cosmetic. Conquest is derived from the account's
+// Chapter identity and recruitment policy are metadata. Conquest comes from the account's
 // server-confirmed campaign count, never from chapter metadata.
 export const CHAPTER_COLORS = Object.freeze({ iron:'#8493a6', crimson:'#b94b51', cobalt:'#4679b8', bone:'#b7aa8c', void:'#6d568f', forest:'#4f785d' });
 export const CHAPTER_EMBLEMS = Object.freeze({ star:'✦', shield:'⬡', wings:'⋈', sun:'☀' });
+export const CHAPTER_CULTURES = Object.freeze({ coalition:{name:'Coalition',desc:'Human and nonhuman companions welcome.'}, human:{name:'Human compact',desc:'Recruit human companions only. Existing companions are retained.'} });
 export const CHAPTER_LEADERS = Object.freeze([
+  { key:'axe', classKey:'berserker', capture:3, species:'nonhuman', source:'encounter', role:'Oglodi war leader' },
+  { key:'sniper', classKey:'recon', capture:1, species:'nonhuman', source:'exploration', role:'Keenfolk marksman' },
+  { key:'lina', classKey:'arcanist', capture:1, species:'human', source:'academy', discovery:2, role:'Fire mage' },
   { key:'scott', classKey:'vanguard', capture:1, role:'Frontline captain' },
   { key:'alexander', classKey:'recon', capture:1, role:'Recon commander' },
   { key:'aaron', classKey:'engineer', capture:2, role:'Ward commander' },
@@ -23,6 +27,7 @@ export function conquestCount(profile) {
 }
 export function chapterIdentity(raw) {
   return { version:1, founderId:typeof raw?.founderId==='string'?raw.founderId.slice(0,96):null, name:String(raw?.name||'').trim().replace(/[\u0000-\u001f]/g,'').slice(0,32),
+    culture:Object.hasOwn(CHAPTER_CULTURES,raw?.culture)?raw.culture:'coalition',
     color:Object.hasOwn(CHAPTER_COLORS,raw?.color)?raw.color:'cobalt',
     emblem:Object.hasOwn(CHAPTER_EMBLEMS,raw?.emblem)?raw.emblem:'star' };
 }
@@ -40,4 +45,9 @@ export function chapterLeaderStyle(character) { return !!CHAPTER_LEADERS.find(l=
 export function chapterFounder(profile) {
   const roster=profile?.mmoCharacters||[];
   return roster.find(c=>c.id===profile?.chapter?.founderId && !c.chapterLeader) || roster.find(c=>!c.chapterLeader) || null;
+}
+
+export function recruitmentAllowed(profile,key) {
+  const leader=CHAPTER_LEADERS.find(l=>l.key===key);
+  return !!leader && leaderAvailable(profile,key) && (chapterIdentity(profile?.chapter).culture!=='human' || leader.species!=='nonhuman');
 }

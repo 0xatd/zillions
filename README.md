@@ -214,6 +214,12 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
+## Roster expansion — work in progress
+
+The chapter branch now includes Lina, Sniper and Axe core-kit prototypes alongside
+preserved legacy leaders. This is not the completed 127-hero roster or exact
+Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+
 ## Controls
 
 The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
@@ -226,9 +232,9 @@ which reads the same table the game dispatches through.
 | Shift | Gallop at full health |
 | Space | Build mode: build/pay. Fight mode: dodge roll |
 | Q | Fight mode: primary ability (your hero special) |
-| E, R | Ability II and III — reserved; heroes carry one ability today |
+| E, R | Ability II and III, when available |
 | X | Draw the other weapon set |
-| Ctrl | Secondary ability bar — reserved |
+| Ctrl | Hold for secondary Q/E/R ability slots |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
 | Alt | Switch between Build mode and Fight mode |

@@ -2201,3 +2201,18 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
  #screen-main.character-select { justify-content:flex-start; }
  #screen-main .character-heading { flex-shrink:0; }
 }
+
+.ability-slots{display:flex;flex-wrap:wrap;gap:4px}.ability-slots[hidden]{display:none}.ability-slots button{flex:1;min-width:70px;padding:6px;font-size:12px}.ability-slots small{display:block;opacity:.75}
+
+/* Multi-ability heroes keep every live button inside the command bar. */
+#actionbar.multi-kit .actionmain { grid-template-columns:minmax(140px,.85fr) minmax(120px,1fr) minmax(180px,1.5fr); }
+#actionbar.multi-kit .bigaction { grid-column:2; }
+#actionbar.multi-kit .ability-slots { grid-column:3; min-height:0; flex-wrap:nowrap; }
+#actionbar.multi-kit .ability-slots button { min-width:0; white-space:normal; border:1px solid #4f8878; border-radius:5px; color:#e4eee9; background:#15352b; }
+@media(max-width:600px) {
+  #actionbar.multi-kit { height:154px; }
+  #actionbar.multi-kit .actionmain { grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) 44px; }
+  #actionbar.multi-kit .bigaction { grid-column:2; grid-row:1; }
+  #actionbar.multi-kit .ability-slots { grid-column:1 / -1; grid-row:2; }
+  #actionbar.multi-kit .bigaction .bicon { display:none; }
+}

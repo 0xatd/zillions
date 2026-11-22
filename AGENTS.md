@@ -107,6 +107,11 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 
 ### Heroes
 
+Alex authorized a Dota-reference roster expansion on 2026-11-22. The older
+fixed-name roster below is now the legacy compatibility set, not a ban on new
+kits. Preserve legacy character IDs and gear. See `docs/roster/implementation.md`
+for completed mechanics and explicit gaps; a catalog entry is not a playable kit.
+
 - Keep this roster: Scott English, Alexander Thomas, Daniel Donovan, Turtle
   Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock.
 - Treat `src/config.js` as the source of truth for hero data.

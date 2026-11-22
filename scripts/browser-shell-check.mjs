@@ -313,6 +313,20 @@ try {
       head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
     }, -.3);
   }
+  assert.equal(await evaluate(`(async () => {
+    const {Game}=await import('/src/game.js');
+    const {TerrainField}=await import('/src/terrain.js');
+    const {levelById}=await import('/src/config.js');
+    const level=levelById(1),map=new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
+    const game=new Game(map,'normal','lina',null,1);
+    const ui=window.__app.ui;
+    ui.initHUD(game,0,{name:'Wrong founder',classKey:'vanguard',proxyHero:'scott'});
+    const correctName=document.querySelector('#a-name').textContent==='Lina';
+    ui.update(game,0,{controlMode:'fight'});
+    ui._renderAbilitiesOverview({classKey:'arcanist',proxyHero:'lina'});
+    const sheet=document.querySelector('#sheet-panel-abilities').textContent;
+    return correctName && ['Dragon Slave','Light Strike Array','Laguna Blade','Fiery Soul'].every(name=>sheet.includes(name)) && !sheet.includes('Unassigned');
+  })()`), true, 'battle identity must match the actual hero and the ability sheet must show its complete core kit');
   // Runs last: showEnd replaces the overlay markup, as a finished match does.
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
