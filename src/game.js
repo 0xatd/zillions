@@ -1216,14 +1216,16 @@ export class Game {
       plot.payFx = 0.3; // renderer hint
 
       if (act.mode === 'repair') {
+        // Resolve fellow payers before healing changes target eligibility.
+        // A branch-only plot disappears from buildTargetFor after repair.
+        const repairers = this.heroes.filter(hero => hero === h
+          || (hero.payHold && this.buildTargetFor(hero)?.plot.id === plot.id));
         this._repairPlot(plot, pay * SIEGE.repairHpPerGold);
         this.stats.repaired += pay;
         // One hold completes one action. Never spend on the upgrade that
         // becomes available after repairing; require release and press again.
         if (this.plotAction(plot)?.mode !== 'repair') {
-          for (const hero of this.heroes) {
-            if (hero === h || this.buildTargetFor(hero)?.plot.id === plot.id) hero.payHold = false;
-          }
+          for (const hero of repairers) hero.payHold = false;
           this.msg('Repair complete — release the build key before upgrading.', 'info');
         }
         continue;
