@@ -87,7 +87,7 @@ test('host can pause and protect gold while their hero is down',()=>{
 });
 test('worker takes actual bites, not damage from stunned, idle, or engaged enemies',()=>{
  const g=fresh(),b=g.builders;g.exec({t:'builderPause',on:true,p:0});const e={id:777,x:b.x,z:b.z,hp:100,dead:false,state:2,atkT:0,stunT:5,def:{dmg:10}};g.zombies=[e];
- const hp=b.hp;ticks(g,1);assert.equal(b.hp,hp);e.stunT=0;e.state=0;ticks(g,1);assert.equal(b.hp,hp);
+ const hp=b.hp;ticks(g,1);assert.equal(b.hp,hp);e.stunT=0;e.windup={t:.4};ticks(g,1);assert.equal(b.hp,hp);e.windup=null;e.state=0;ticks(g,1);assert.equal(b.hp,hp);
  e.state=2;e.targetU={dead:false};ticks(g,1);assert.equal(b.hp,hp);e.targetU=null;e.x=b.x;e.z=b.z;ticks(g,1);
  assert.equal(b.hp,hp-10);assert.equal(e.atkT,.8);assert.ok(g.events.some(x=>x.type==='bite'&&x.fromId===777));
  ticks(g,1);assert.equal(b.hp,hp-10,'same enemy cannot double-bite without its combat cooldown elapsing');
@@ -96,7 +96,7 @@ test('lost node ownership cancels a queued satellite job without spending',()=>{
  const g=fresh(),b=g.builders,p=g.plots.find(p=>p.kind==='outpost'),n=g.nodes[p.nodeId];n.owner='player';b.x=p.cx+3;b.z=p.cz;order(g,'expand');
  // Keep only this eligible frontier job; captured nodes are the input contract.
  const others=g.plots;g.plots=[...others.filter(q=>q.kind==='hq'),p];ticks(g,1);assert.equal(b.job?.id,p.id);
- const gold=g.gold,escrow=b.paid;n.owner='hive';ticks(g,1);assert.equal(b.job,null);assert.ok(Math.abs(g.gold-gold-escrow)<1e-6);
+ const gold=g.gold,escrow=b.paid;assert.ok(escrow>0);n.owner='hive';ticks(g,1);assert.equal(b.job,null);assert.equal(b.status,'Territory lost');assert.ok(Math.abs(g.gold-gold-escrow)<1e-6);
 });
 test('cancelling a configured branch purchase does not consume the specialisation',()=>{
  const g=fresh(),b=g.builders,p=g.plots.find(p=>p.kind==='tower'&&!p.keep);g._construct(p,true);g._construct(p,true);

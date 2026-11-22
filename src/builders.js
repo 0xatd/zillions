@@ -16,10 +16,10 @@ function cancel(g,b) {
 export function builderCommand(g,c) {
  if(c.p!==0||!g.heroes[0]||g.mode==='labyrinth'||g.phase!=='live'||g.over)return;
  const b=g.builders;if(!b)return;
- if(c.t==='builderOrder'&&Object.hasOwn(BUILDER_ORDERS,c.s)){cancel(g,b);b.order=c.s;b.paused=false;b.replan=0;}
- if(c.t==='builderPause'&&typeof c.on==='boolean'){b.paused=c.on;if(c.on)cancel(g,b);b.replan=0;}
- if(c.t==='builderDoctrine'&&['tower','wall'].includes(c.kind)&&(['ask',...(c.kind==='tower'?['ballista','flame']:['shock','bastion'])].includes(c.branch))){cancel(g,b);b.branches[c.kind]=c.branch;b.replan=0;}
- if(c.t==='builderReserve'&&Number.isInteger(c.gold)&&c.gold>=0&&c.gold<=1000){b.reserve=c.gold;if(g.gold<b.reserve)cancel(g,b);}
+ if(c.t==='builderOrder'&&Object.hasOwn(BUILDER_ORDERS,c.s)){cancel(g,b);b.order=c.s;b.paused=false;b.replan=0;b.status='Planning';}
+ if(c.t==='builderPause'&&typeof c.on==='boolean'){b.paused=c.on;if(c.on)cancel(g,b);b.replan=0;b.status=c.on?'Paused':'Planning';}
+ if(c.t==='builderDoctrine'&&['tower','wall'].includes(c.kind)&&(['ask',...(c.kind==='tower'?['ballista','flame']:['shock','bastion'])].includes(c.branch))){cancel(g,b);b.branches[c.kind]=c.branch;b.replan=0;b.status=b.paused?'Paused':'Planning';}
+ if(c.t==='builderReserve'&&Number.isInteger(c.gold)&&c.gold>=0&&c.gold<=1000){b.reserve=c.gold;if(g.gold<b.reserve){cancel(g,b);b.status=b.paused?'Paused':'Saving gold';}}
 }
 function threat(g,x,z,r=7) {return g.zombies.some(e=>!e.dead&&e.hp>0&&Math.hypot(e.x-x,e.z-z)<r);}
 function local(g,p) {const base=g.plots.find(q=>q.kind==='hq')?.plan?.perimeters?.find(q=>q.kind==='base');return base&&Math.hypot(p.cx-base.cx,p.cz-base.cz)<base.radius+2&&p.role!=='outer'&&p.outerDefense==null&&p.nodeId==null;}
@@ -115,7 +115,7 @@ export function updateBuilders(g,dt) {
  // Opportunistic bites use the enemy's real attack cadence, not invisible
  // proximity DPS. A stunned, resting, or already-engaged enemy cannot hit it.
  for(const e of g.zombies){
-  if(e.dead||e.hp<=0||e.state!==2||e.stunT>0||e.atkT>0||e.def?.ranged||e.def?.siege||(e.targetU&&!e.targetU.dead))continue;
+  if(e.dead||e.hp<=0||e.state!==2||e.stunT>0||e.windup||e.atkT>0||e.def?.ranged||e.def?.siege||(e.targetU&&!e.targetU.dead))continue;
   if(Math.hypot(e.x-b.x,e.z-b.z)>=.75)continue;
   e.atkT=.8;b.hp-=Math.max(0,e.def?.dmg||0);
   g.emit({type:'bite',fromId:e.id,fx:e.x,fz:e.z,tx:b.x,tz:b.z,x:b.x,z:b.z,targetScale:.8});
@@ -131,7 +131,7 @@ export function updateBuilders(g,dt) {
  const manuallyUsed=new Set(g.heroes.filter(h=>!h.dead&&h.payHold).map(h=>g.buildTargetFor(h)?.plot.id));
  if(b.frontier){const target=g.plots.find(p=>holdingKey(p)===b.frontier);if(!target||established(g,target)||!frontierSafe(g,target))b.frontier=null;}
  let p=b.job&&g.plots.find(p=>p.id===b.job.id),a=p&&crewAction(g,p,b.job.branch);
- if(b.job&&(!a||actionKey(p,a)!==b.job.key||g.plotLocked(p)||(!local(g,p)&&!established(g,p)&&!frontierSafe(g,p))||manuallyUsed.has(p.id)||p.paid>0||threat(g,p.cx,p.cz,5))){cancel(g,b);b.replan=1;p=null;a=null;}
+ if(b.job&&(!a||actionKey(p,a)!==b.job.key||g.plotLocked(p)||(!local(g,p)&&!established(g,p)&&!frontierSafe(g,p))||manuallyUsed.has(p.id)||p.paid>0||threat(g,p.cx,p.cz,5))){const reason=p&&g.plotLocked(p)?'Territory lost':p&&manuallyUsed.has(p.id)?'Manual work':'Replanning';cancel(g,b);b.status=reason;b.replan=1;p=null;a=null;}
  // Reconsider discretionary work at a bounded cadence when a genuine
  // emergency appears; the interrupted purchase is completely refundable.
  if(b.job&&b.replan===0){
@@ -166,10 +166,10 @@ export function updateBuilders(g,dt) {
  b.status=a.mode==='repair'?'Repairing':a.mode==='rebuild'?'Rebuilding':p.tier?'Upgrading':'Building';
  if(a.mode==='repair'){
   g._repairPlot(p,pay*SIEGE.repairHpPerGold);g.stats.repaired+=pay;
-  if(g.plotAction(p)?.mode!=='repair'){b.completed++;b.job=null;b.replan=1;}
+  if(g.plotAction(p)?.mode!=='repair'){b.completed++;b.job=null;b.replan=1;b.status='Planning';}
  }else{
   b.paid+=pay;
-  if(b.paid>=b.job.cost-1e-6){b.paid=0;if(a.mode==='rebuild')g._rebuildPlot(p);else {if(b.job.branch)p.branch=b.job.branch;g._construct(p);}b.completed++;b.job=null;b.replan=1;}
+  if(b.paid>=b.job.cost-1e-6){b.paid=0;if(a.mode==='rebuild')g._rebuildPlot(p);else {if(b.job.branch)p.branch=b.job.branch;g._construct(p);}b.completed++;b.job=null;b.replan=1;b.status='Planning';}
  }
 }
 export function builderStatus(g){const b=g.builders;if(!b)return '';const p=b.job&&g.plots.find(p=>p.id===b.job.id);return p?`${b.status} ${PLOT_KINDS[p.kind]?.name||p.kind} · ${Math.ceil(Math.max(0,b.job.mode==='repair'?(g.plotAction(p)?.cost||0):b.job.cost-b.paid))} gold`:b.status;}
