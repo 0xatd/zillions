@@ -372,12 +372,12 @@ export const ZOMBIES = {
   runner:  { hp: 26,  dmg: 4,  speed: 1.7,  chase: 4.2, color: 0xd0c052, scale: 0.92, score: 2 },
   // Bone and bulk. Fire renders it; shock earths out through all that meat.
   brute:   { hp: 420, dmg: 26, speed: 0.85, chase: 1.6, color: 0xa060d8, scale: 1.75, score: 8,
-    resist: { thermal: -0.25, shock: 0.3 }, desc: 'Winds up a heavy ground smash. Step out or interrupt it.' },
+    resist: { thermal: -0.25, shock: 0.3 } },
   spitter: {
     hp: 42, dmg: 11, speed: 1.05, chase: 1.95, color: 0xc9d84e, scale: 1.05, score: 3,
     ranged: 8.5, rof: 0.5,
     resist: { thermal: -0.2 },
-    desc: 'Lobs acid at your position. Leave the marked ground; intercept it before it shells your walls.',
+    desc: 'Spits acid from beyond your wall. You cannot turtle it out.',
   },
   burrower: {
     hp: 58, dmg: 12, speed: 1.2, chase: 2.5, color: 0x8a6ad0, scale: 0.98, score: 4,
