@@ -253,3 +253,11 @@ Reference study (composition/material principles only):
 Cliff contour refinement incorporates the reviewed terrace-mesh changes from
 `cursor/smooth-cliff-rims-0f49` (PR #128), without importing its unrelated files.
 The navigation regression suite remains the authority on actual access.
+
+## Colony crew
+
+The shared builder is a compact amber utility rig with dark feet/backpack, a
+cyan visor, and a work tool. It is smaller than the hero and has no gun. Its
+route bob and working-tool movement reflect simulation status without changing
+collision. The procedural mesh is retained across frames and disposed on a
+new battlefield. High and Low must both keep its silhouette readable.

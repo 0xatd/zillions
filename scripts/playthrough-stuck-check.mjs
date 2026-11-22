@@ -19,6 +19,7 @@ import { SIM_DT, levelById } from '../src/config.js';
 import { TerrainField } from '../src/terrain.js';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const BUILDERS = process.argv.includes('--builders');
 const REPORT = process.argv.includes('--report');
 const IDS = (args[0] || '1,2,3,4,5').split(',').map(Number);
 const MAX_MIN = Number(args[1] || 30);
@@ -174,6 +175,7 @@ function play(targetLevel) {
   setStance('defend');
   const maxTicks = Math.round(MAX_MIN * 60 / SIM_DT);
   const wall0 = Date.now();
+  let workerMinGold=Infinity;
   const RESTORE_AT = Math.round(240 / SIM_DT);
   for (let tick = 0; tick < maxTicks && !game.over; tick++) {
     if (tick === RESTORE_AT) {
@@ -213,6 +215,7 @@ function play(targetLevel) {
       restoreSame = stable(live) === stable(twin.snapshot());
       if (!restoreSame && !process.env.RDIFF) console.error('restore diff:', diff(live, twin.snapshot()));
     }
+    if(BUILDERS&&game.builders)workerMinGold=Math.min(workerMinGold,game.gold);
     const hero = game.heroes[0];
     if (!hero) break;
     if (game.phase === 'found') {
@@ -220,6 +223,7 @@ function play(targetLevel) {
       if (moveHeroToward(hero, site.x, site.z, true, 1.8) < 2.2) {
         command({ t: 'hdir', x: 0, z: 0, p: 0 });
         command({ t: 'found', s: targetSite, p: 0 });
+        if(BUILDERS){command({t:'builderOrder',s:'develop',p:0});command({t:'builderDoctrine',kind:'tower',branch:'flame',p:0});command({t:'builderDoctrine',kind:'wall',branch:'bastion',p:0});}
       }
     } else if (!hero.dead) {
       if (hero.skillPoints > 0) command({ t: 'heroUpgrade', key: 'damage', p: 0 });
@@ -247,7 +251,7 @@ function play(targetLevel) {
           ? ((pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb) || a.tier - b.tier || da - db)
           : (a.tier - b.tier || (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb) || da - db);
       });
-      if (underSiege) plan = null;
+      if (BUILDERS || underSiege) plan = null;
       else if (!plan || !candidates.includes(plan) || !game.plotAction(plan)) {
         const desired = game.firstSiege?.stage === 'opening' ? 'camp_militia'
           : builtCount('camp_militia') < 2 ? 'camp_militia'
@@ -315,7 +319,7 @@ function play(targetLevel) {
       if (u && tick % 3 === 0) console.error(game.time.toFixed(1), u.x.toFixed(2), u.z.toFixed(2), 'mv', u.moving, 'gx', u.gateExit, 'gc', (u.gateCool || 0).toFixed(1), 'ex', u.exitDx, u.exitDz, 'route', u.route ? u.routeI + '/' + u.route.length : '-', 'gi', u.targetGi, 'tgt', !!u.target, 'nest', !!u.targetNest, 'rp', (u.repathT || 0).toFixed(1), 'wp', u.route ? u.route[u.routeI].map((v) => v.toFixed(1)).join(',') : '', 'reach', u.route ? game._fieldReach(u, u.route[u.routeI][0], u.route[u.routeI][1]) : '', 'fd', u.route ? JSON.stringify(game._fieldDir(u, u.route[u.routeI][0], u.route[u.routeI][1])) : '');
     }
   }
-  return {
+  return { ...(BUILDERS?{builderJobs:game.builders?.completed,builderSpent:game.builders?.spent,workerMinGold}:{}),
     level: `${level.id} ${level.name}`, over: game.over, won: game.won,
     minutes: +(game.time / 60).toFixed(1), wallSec: +((Date.now() - wall0) / 1000).toFixed(0),
     kills: game.stats.kills, built: game.stats.built, lost: game.stats.lost, armyPeak: game.stats.armyPeak,

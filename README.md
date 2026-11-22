@@ -361,3 +361,11 @@ See [the art quality standard](docs/art-quality-standard.md).
 
 Colony streets connect the keep courtyard, gates and district frontages around
 fully built footprints. Terrain barriers and each map's unique perimeter remain.
+
+### Builder orders
+
+After founding, open **Builders** beside the battlefield controls to select
+Maintain, Develop, Expand, Fortify, Prosper or Mobilize. Pause and a protected
+gold reserve keep spending explicit. Tower/wall preferences authorise crew
+specialisations; Ask me leaves those choices manual. See
+[Builder orders](docs/builder-orders.md).

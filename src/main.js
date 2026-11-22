@@ -226,6 +226,7 @@ class App {
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
+      onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
@@ -848,6 +849,7 @@ class App {
     this._clearSiteMarkers();
     this._clearNestMeshes();
     this._clearLootMeshes();
+    if(this._builderMesh){this.scene.remove(this._builderMesh);this._disposeObject3D(this._builderMesh);this._builderMesh=null;}
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -4735,8 +4737,30 @@ class App {
     this.tacticalVisuals.pulse(x, z, { color: 0xff493d, radius: 4.2, life: 1.5 });
   }
 
-  // Outline the one object the local hero can act on. This is presentation
-  // state only; it must never enter commands, snapshots, or lockstep hashes.
+  // Small amber construction rig, distinct from armed troops.
+  _syncBuilder(t) {
+    const b=this.game?.builders;
+    if(!b||b.recover>0){if(this._builderMesh)this._builderMesh.visible=false;return;}
+    if(!this._builderMesh){
+      const crew=new THREE.Group();crew.name='colony-builder';
+      const armor=new THREE.MeshStandardMaterial({color:0xe7b44c,roughness:.75});
+      const dark=new THREE.MeshStandardMaterial({color:0x293c4b,roughness:.8});
+      const light=new THREE.MeshBasicMaterial({color:0x8eeaff});
+      const box=(w,h,d,x,y,z,mat)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;crew.add(m);return m;};
+      box(.7,.75,.5,0,.85,0,armor);box(.46,.4,.43,0,1.43,0,armor);box(.4,.12,.04,0,1.46,.23,light);
+      box(.23,.55,.27,-.22,.27,0,dark);box(.23,.55,.27,.22,.27,0,dark);
+      box(.23,.6,.23,-.49,.88,0,armor);box(.23,.6,.23,.49,.88,0,armor);
+      box(.5,.48,.27,0,.94,-.4,dark);crew.userData.tool=box(.2,.18,.7,.5,.62,.3,dark);
+      const ring=new THREE.Mesh(new THREE.RingGeometry(.65,.76,24),new THREE.MeshBasicMaterial({color:0xe7b44c,side:THREE.DoubleSide,transparent:true,opacity:.65,depthWrite:false}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;crew.add(ring);
+      this._builderMesh=crew;
+    }
+    const m=this._builderMesh;if(!m.parent)this.scene.add(m);m.visible=true;
+    m.position.set(b.x,this.map.groundY(b.x,b.z)+(b.status==='Travelling'?Math.abs(Math.sin(t*9))*.06:0),b.z);
+    m.userData.tool.rotation.x=['Building','Repairing','Rebuilding','Upgrading'].includes(b.status)?Math.sin(t*14)*.2:0;
+    if(b.route[0])m.rotation.y=Math.atan2(b.route[0][0]-b.x,b.route[0][1]-b.z);
+  }
+
+  // Outline the one object the local hero can act on; presentation only.
   _updateTacticalSelection() {
     if(this._inspectRing)this._inspectRing.visible=false;
     const selected=this.ui._battlePanel;
@@ -5774,6 +5798,7 @@ class App {
       this._updateTitleSpace(t);
     }
 
+    if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
       if (!this.missionIntro) this._updateHeroInput();
       if (!this.paused && !this.game.over && !this.missionIntro) {
@@ -5795,6 +5820,7 @@ class App {
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
       this._syncUnits(t, dt);
+      this._syncBuilder(t);
       this._syncNests(t);
       this._syncLoot(t);
       this._syncPlots(t);

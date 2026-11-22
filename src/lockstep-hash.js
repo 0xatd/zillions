@@ -11,6 +11,7 @@ import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 
 export function stateHash(g) {
   let h = 7;
+  if(g.builders) h = (h * 31 + hashString(JSON.stringify(g.builders))) | 0;
   h = (h * 31 + Math.round(g.gold)) | 0;
   h = (h * 31 + g.coins.length) | 0;
   h = (h * 31 + g.zombies.length) | 0;

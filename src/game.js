@@ -25,6 +25,7 @@ import {
   LABYRINTH_LIVES, BLESSING_KEYS,
   cultureKey, unitDefFor,
 } from './config.js';
+import {createBuilders, updateBuilders, builderCommand} from './builders.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
 import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
@@ -150,6 +151,7 @@ export class Game {
     this.laneGraph = null;
     this.cityGi = -1;
 
+    this.builders = null;
     this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
     this.threat = 0;             // the clock that replaced nightfall
@@ -226,6 +228,7 @@ export class Game {
       gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
+      builders: this.builders ? JSON.parse(JSON.stringify(this.builders)) : null,
       firstSiege: this.firstSiege ? {
         stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
         waveIds: [...this.firstSiege.waveIds], reward: this.firstSiege.reward,
@@ -355,6 +358,7 @@ export class Game {
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
+    this.builders = this.mode !== 'labyrinth' && snap.builders ? JSON.parse(JSON.stringify(snap.builders)) : null;
     this.firstSiege = snap.firstSiege ? {
       stage: snap.firstSiege.stage || 'opening', nestId: snap.firstSiege.nestId ?? null,
       waveIds: [...(snap.firstSiege.waveIds || [])], reward: snap.firstSiege.reward || FIRST_SIEGE_REWARD,
@@ -832,6 +836,7 @@ export class Game {
       } else { h.x = this.hq.cx; h.z = this.hq.cz; this._ejectActor(h, this.hq); }
     });
     this.phase = 'live';
+    if (this.mode !== 'labyrinth') this.builders = createBuilders(this);
     if (this.firstSiege) {
       const reachable = this.nests.filter((n) => n.alive && !n.offMap);
       const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
@@ -2906,6 +2911,7 @@ export class Game {
         break;
       }
       case 'heroUpgrade': this.upgradeHero(c.p || 0, c.key); break;
+      case 'builderOrder': case 'builderPause': case 'builderReserve': case 'builderDoctrine': builderCommand(this,c); break;
       case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
@@ -3895,6 +3901,7 @@ export class Game {
     this._updateSiege(dt);
     if (this.over) return;
     this._updatePlots(dt);
+    updateBuilders(this,dt);
     this._updateCamps(dt);
     this._updateSupport(dt);
     this._updateCoins();

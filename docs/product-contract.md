@@ -339,3 +339,12 @@ perimeter at every tier. Deliberately open satellite positions are not forts.
 Tower placement must protect entrances while leaving troop routes clear.
 Clicking a unit inspects it; it never grants individual-unit commands. Carried
 items must be readable by click/tap, not hover alone.
+
+## Builder orders
+
+A visible shared colony crew can carry out Maintain, Develop, Expand, Fortify,
+Prosper or Mobilize orders. Host-controlled policy, pause and a protected gold
+reserve replace individual worker micro. Manual construction remains available
+and takes precedence. The crew uses existing planned plots and paid actions;
+it does not claim territory, fight or create a separate economy. See
+[Builder orders](builder-orders.md) for spending, specialisations and recovery.

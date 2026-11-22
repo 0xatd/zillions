@@ -11,6 +11,7 @@ import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS, CULTURE_ARMIES, cultureKey,
 } from './config.js';
+import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
@@ -90,6 +91,16 @@ export class UI {
         <button id="battle-details-close" aria-label="Close details">×</button>
         <div id="battle-details-content"></div>
       </aside>
+      <section id="builder-controls" class="builder-controls hidden" aria-label="Builder orders">
+        <button id="builder-toggle" aria-expanded="false">Builders</button><span id="builder-status"></span>
+        <div id="builder-options" class="hidden">
+          <label>Order <select id="builder-order">${Object.entries(BUILDER_ORDERS).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label>
+          <button id="builder-pause">Resume</button>
+          <label>Keep gold <input id="builder-reserve" type="number" min="0" max="1000" step="5" value="10"></label>
+          <label>Towers <select id="builder-tower"><option value="ask">Ask me</option><option value="ballista">Long range</option><option value="flame">Anti-horde</option></select></label>
+          <label>Walls <select id="builder-wall"><option value="ask">Ask me</option><option value="bastion">Armor</option><option value="shock">Shock</option></select></label><p id="builder-help"></p>
+        </div>
+      </section>
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -498,6 +509,11 @@ export class UI {
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
     q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
+    q('#builder-toggle').onclick = () => {const open=q('#builder-options').classList.toggle('hidden')===false;q('#builder-toggle').setAttribute('aria-expanded',String(open));};
+    q('#builder-order').onchange = e => this.cb.onBuilder?.({t:'builderOrder',s:e.target.value});
+    for(const kind of ['tower','wall'])q('#builder-'+kind).onchange=e=>this.cb.onBuilder?.({t:'builderDoctrine',kind,branch:e.target.value});
+    q('#builder-pause').onclick = () => this.cb.onBuilder?.({t:'builderPause',on:!this._builderPaused});
+    q('#builder-reserve').onchange = e => {const gold=Number(e.target.value);if(Number.isInteger(gold)&&gold>=0&&gold<=1000)this.cb.onBuilder?.({t:'builderReserve',gold});};
     q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
@@ -951,6 +967,7 @@ export class UI {
 
   _showScreen(name) {
     this._battlePanel = null;
+    this.root.querySelector('#builder-controls').classList.add('hidden');
     this.root.querySelector('#battle-details').classList.add('hidden');
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
@@ -2638,7 +2655,7 @@ export class UI {
     if(selection.mode==='items') {
       const hero=game.heroes[player];
       const rows=keys=>keys.map(key=>{const item=itemInfo(key);return item ? `<article class="battle-item"><b>${escapeHtml(item.icon||'')} ${escapeHtml(item.name)}</b><p>${escapeHtml(item.desc||itemLines(item).join(' · '))}</p></article>`:'';}).join('');
-      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows(hero?.items||[])||'<p>No additional gear equipped.</p>'}`;
+      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows([...new Set([...(hero?.items||[]),...Object.values(hero?.equipment||{}).filter(Boolean)])])||'<p>No additional gear equipped.</p>'}`;
     } else {
       const unit=(selection.enemy?game.zombies:game.units).find(u=>u.id===selection.id);
       const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
@@ -2655,6 +2672,19 @@ export class UI {
   update(game, p = 0, controls = {}) {
     if(this._battleGame!==game){this._battleGame=game;this._battlePanel=null;}
     this._updateBattleDetails(game,p);
+    const builder=this.root.querySelector('#builder-controls'),b=game.builders;
+    builder.classList.toggle('hidden',!b||game.mode==='labyrinth'||game.over||!!this._battlePanel);
+    if(b){
+      this._builderPaused=b.paused;
+      this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
+      const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
+      if(document.activeElement!==order)order.value=b.order;
+      if(document.activeElement!==reserve)reserve.value=b.reserve;
+      for(const control of [order,reserve,pause])control.disabled=p!==0;
+      pause.textContent=b.paused?'Resume':'Pause';
+      for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses at home.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+    }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);

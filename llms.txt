@@ -112,3 +112,5 @@ rotation, connections and authored-layout collision/elevation compilation.
 `src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
 `map-kit-page.js` provide local placement, route testing and JSON roundtrip.
 Campaign loading of workbench exports is not implemented.
+
+- docs/builder-orders.md: colony crew strategy, spending, movement and verification.

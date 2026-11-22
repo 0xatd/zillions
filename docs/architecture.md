@@ -47,6 +47,7 @@ module already owns that rule.
 | File | Ownership |
 | --- | --- |
 | `src/game.js` | Deterministic game state, commands, combat, economy, buildings, snapshots, and restore |
+| `src/builders.js` | Shared colony crew orders, job planning, travel, refundable construction escrow and recovery |
 | `src/config.js` | Heroes, levels, plot definitions, items, balance constants, and `levelById()` |
 | `src/lanes.js` | Deterministic lane graph and route data |
 | `src/flowfield.js` | Flow-field pathfinding |
