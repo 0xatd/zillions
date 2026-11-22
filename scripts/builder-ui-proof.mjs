@@ -10,6 +10,11 @@ export async function proveBuilderUI() {
  if(!a._builderMesh?.visible||g.builders.completed<1||g.gold<30-1e-6)throw Error('Visible crew/work/reserve contract failed');
  document.querySelector('#builder-pause').click();a.frame();if(!g.builders.paused)throw Error('Pause did not reach simulation');
  const bounds=document.querySelector('#builder-controls').getBoundingClientRect();if(bounds.left<0||bounds.right>innerWidth||bounds.bottom>innerHeight)throw Error('Builder panel exceeds viewport');
+ // Editing policy fields must release movement/payment and suppress game hotkeys.
+ reserve.focus();a.keys.add('w');const hero=a.myHero();hero.mx=1;hero.mz=0;a.lastDir={x:1,z:0,s:false};
+ reserve.dispatchEvent(new KeyboardEvent('keydown',{key:'b',bubbles:true}));a._updateHeroInput();
+ if(hero.mx!==0||hero.mz!==0||hero.payHold||a.keys.size)throw Error('Builder form leaked movement or build input');
+ reserve.blur();
  a.ui.update(g,1);if(!document.querySelector('#builder-order').disabled)throw Error('Guest can change builder order');a.ui.update(g,0);
  return {completed:g.builders.completed,gold:g.gold,bounds:{x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height}};
 }
