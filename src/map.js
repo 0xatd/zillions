@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { toyMat } from './toy-style.js';
 import { environmentMaterial, groundControl, waterMaterial } from './environment-art.js';
+import { buildCliffCrown } from './cliff-art.js';
 import { buildForest, buildLandscapeEdges } from './landscape-art.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
@@ -141,9 +142,10 @@ export class GameMap extends TerrainField {
             if (!this.inBounds(tx, tz)) continue;
             const ti = this.idx(tx, tz);
             const t = this.tiles[ti];
-            // Terrace steps are grassy shelves: the rock shows on the face.
+            // Exposed rock crests distinguish a cliff from walkable turf from either side.
             const tc = this.isLedgeRock(ti);
-            col.setHex(this.colorOf(tc ? TILE.GRASS : t));
+            col.setHex(this.colorOf(t));
+            if(tc)col.lerp(scratch.setHex(this.colorOf(TILE.GRASS)),.22);
             // The switchback bed is a darker shelf; the paved ribbon on top
             // carries the road colour, so the zig-zag stands out.
             if (this.swRoad && this.swRoad[ti]) col.setHex(this.colorOf(TILE.GRASS)).multiplyScalar(0.8);
@@ -311,6 +313,7 @@ export class GameMap extends TerrainField {
     group.add(terrain);
     const strata = cliffSkirt(this, tileCH, this.colorOf(TILE.MOUNTAIN), this.colorOf(TILE.GRASS), this.theme?.palette?.shadow);
     if (strata) group.add(strata);
+    group.add(buildCliffCrown(this, tileCH));
 
     // Water plane above sunken tiles.
     const waterGeo = new THREE.PlaneGeometry(N, N);

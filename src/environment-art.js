@@ -24,12 +24,12 @@ export function groundControl(map) {
     // Working ground around the keep, grassy shoulders around each district.
     for (const site of map.sites) {
       const d = Math.hypot(x + .5 - site.x, z + .5 - site.z);
-      wear = Math.max(wear, Math.max(0, 1 - d / 19) * .75);
+      wear = Math.max(wear, Math.max(0, 1 - d / 20) * .92);
     }
     const k = (z * N + x) * 4;
     data[k] = Math.round(wear * 255);
     data[k + 1] = tile === TILE.FOREST ? 255 : 0;
-    data[k + 2] = tile === TILE.MOUNTAIN && !map.isLedgeRock?.(z * N + x) ? 255 : 0;
+    data[k + 2] = tile === TILE.MOUNTAIN ? 255 : 0;
     data[k + 3] = tile === TILE.WATER ? 255 : 0;
   }
   const texture = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
@@ -73,14 +73,18 @@ export function environmentMaterial(kind, options = {}) {
       float noise=artNoise(p*.21)*.7+artNoise(p*.61)*.3;
       float macro=artNoise(p*.045+vec2(19,7));
       // Broad painted meadows with irregular worn edges, not a noisy carpet.
-      float dirt=smoothstep(.26,.73,control.r*.86 + noise*.34 + (macro-.5)*.18);
+      // Distinct connected soil clearings; narrow broken turf edges, not
+      // a full-screen blend of two equally noisy textures.
+      float boundary=control.r + (artNoise(p*.32)-.5)*.31 + (artNoise(p*3.6)-.5)*.12;
+      float dirt=smoothstep(.33,.42,boundary);
 
       vec3 grass=artSample(p*.25,vec2(0,1));
       vec3 soil=artSample(p*.20,vec2(1,1));
       float luminosity=max(.07,dot(diffuseColor.rgb,vec3(.2126,.7152,.0722)));
       vec3 tint=mix(vec3(1),diffuseColor.rgb/luminosity,.36);
       float grassValue=dot(grass,vec3(.2126,.7152,.0722));
-      grass=mix(vec3(grassValue)*vec3(.82,1.02,.64),grass,.46);
+      grass=mix(vec3(.16,.245,.075),grass,.28);
+      soil=mix(vec3(.34,.235,.125),soil,.32);
       grass*=mix(vec3(.85,.94,1.0),vec3(1.08,1.04,.85),macro);
       vec3 painted=mix(grass,soil,dirt)*tint;
       // Forest floors and scree have their own material; preserve biome hue.
@@ -91,24 +95,40 @@ export function environmentMaterial(kind, options = {}) {
       float grain=dot(painted,vec3(.2126,.7152,.0722));
       painted=mix(diffuseColor.rgb*(.7+grain*2.0),painted,artOrganic);
       // Keep snow, ash and blight identities; texture is a material layer.
-      diffuseColor.rgb=mix(diffuseColor.rgb,painted*1.25,.78);
-      diffuseColor.rgb*=mix(.88,1.13,macro)*mix(.96,1.03,noise);
+      diffuseColor.rgb=mix(diffuseColor.rgb,painted*1.25,.90);
+      diffuseColor.rgb*=mix(.94,1.06,macro)*mix(.98,1.02,noise);
     `;
     const stone = /* glsl */`
-      vec3 painted=artSample(artWorld.xz*.32,vec2(0,0));
-      diffuseColor.rgb*=painted*2.8+.25;
+      vec3 face=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
+      vec2 stoneUV=face.y>.65?artWorld.xz:vec2(face.x>face.z?artWorld.z:artWorld.x,artWorld.y);
+      vec3 painted=artSample(stoneUV*.32,vec2(0,0));
+      // Broad ashlar courses, softened joints and mineral variation. The
+      // structural trim stays legible instead of inheriting busy paving.
+      float row=floor(stoneUV.y*2.4);
+      vec2 block=vec2(stoneUV.x*1.8+mod(row,2.)*.5,stoneUV.y*2.4);
+      vec2 edge=min(fract(block),1.-fract(block));
+      float mortar=1.-smoothstep(.018,.058,min(edge.x,edge.y));
+      float blockTone=.94+.12*artHash(floor(block));
+      diffuseColor.rgb*=(painted*1.65+.55)*blockTone*(1.-mortar*.23);
+    `;
+    const soil = /* glsl */`
+      vec3 earth=artSample(artWorld.xz*.24,vec2(1,1));
+      diffuseColor.rgb*=earth*2.2+.25;
     `;
     const rock = /* glsl */`
       vec3 face=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
       float horizontal=face.x>face.z?artWorld.z:artWorld.x;
-      vec2 p=vec2(horizontal*.24,artWorld.y*.32);
+      float top=smoothstep(.45,.85,face.y);
+      vec2 p=mix(vec2(horizontal*.24,artWorld.y*.32),artWorld.xz*.24,top);
       float warp=artNoise(vec2(horizontal*.7,artWorld.y*.23));
       vec3 painted=artSample(p+vec2(warp*.12,0),vec2(1,0));
       float grain=dot(painted,vec3(.2126,.7152,.0722));
       // Irregular long strata and occasional mineral seams, not brick courses.
-      float bedding=sin(artWorld.y*9.0+warp*2.0+horizontal*.35)*.5+.5;
-      float seam=smoothstep(.93,.99,artNoise(vec2(horizontal*1.6,artWorld.y*.35)));
-      diffuseColor.rgb*= (.64+grain*1.8)*mix(.86,1.1,bedding)*(1.-seam*.19);
+      float bedding=sin(artWorld.y*3.6+warp*3.2+horizontal*.5)*.5+.5;
+      float seam=smoothstep(.82,.94,artNoise(vec2(horizontal*1.6,artWorld.y*.35)));
+      float fracture=pow(1.-abs(sin(horizontal*2.2+warp*1.4+artWorld.y*.16)),9.);
+      float ledge=artNoise(vec2(horizontal*.4,artWorld.y*.8));
+      diffuseColor.rgb*= (.64+grain*1.8)*mix(mix(.86,1.1,bedding),.9+artNoise(artWorld.xz*.9)*.2,top)*(1.-seam*.26*(1.-top))*(1.-fracture*.24*(1.-top))*mix(.91,1.1,ledge);
     `;
     const building = /* glsl */`
       vec3 n=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
@@ -125,14 +145,25 @@ export function environmentMaterial(kind, options = {}) {
       vec3 slate=diffuseColor.rgb*vec3(1.20,1.02,.76)+vec3(.012,.016,.02);
       diffuseColor.rgb=mix(diffuseColor.rgb,slate,roof*.72)*materialDetail;
     `;
+    const armor = /* glsl */`
+      vec3 n=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))));
+      vec2 p=n.y>.65?artWorld.xz:vec2(n.x>n.z?artWorld.z:artWorld.x,artWorld.y);
+      float grain=artNoise(p*17.0);
+      float broad=artNoise(p*.8);
+      // Subtle brushed wear and wide plate seams; never shingles or ashlar.
+      vec2 seams=abs(fract(p*vec2(.8,.55))-.5);
+      float joint=max(smoothstep(.488,.498,seams.x),smoothstep(.488,.498,seams.y));
+      float wear=artNoise(vec2(p.x*3.0,p.y*.23));
+      diffuseColor.rgb*= (.91+grain*.09+broad*.10)*(1.-joint*.10)*(.96+wear*.05);
+    `;
     const foliage = /* glsl */`
       float leaves=artNoise(artWorld.xz*9.0+artWorld.y*3.0);
       float clumps=artNoise(artWorld.xz*2.8);
       diffuseColor.rgb*=.72+leaves*.3+clumps*.28;
     `;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'armor' ? armor : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
   };
-  material.customProgramCacheKey = () => 'frontier-art-v2-' + kind;
+  material.customProgramCacheKey = () => 'frontier-art-v5-' + kind;
   return material;
 }
 

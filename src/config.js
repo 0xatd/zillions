@@ -129,7 +129,7 @@ export const PLOT_KINDS = {
       { name: 'Manor', cost: 34, hp: 560, income: 24 },
       { name: 'Arcology', cost: 82, hp: 900, income: 44 },
     ],
-    desc: 'Home to taxpaying settlers. Pays coins on every income tick.',
+    desc: 'Home to taxpaying settlers. Produces gold automatically over time.',
   },
   farm: {
     name: 'Farm', icon: '🌾',

@@ -1,6 +1,7 @@
 // Reusable environment kit. All placement uses an independent presentation
 // seed; large silhouettes stay on impassable tiles, never on playable lanes.
 import * as THREE from 'three';
+import { biomeKit } from './world-art-kit.js';
 import { TILE } from './config.js';
 import { makeRNG, makeNoise } from './utils.js';
 import { environmentMaterial } from './environment-art.js';
@@ -25,7 +26,7 @@ function ellipsoid(x,y,z,sx,sy,sz,color,seed=0) {
   const geo=new THREE.SphereGeometry(1,7,5),p=geo.attributes.position;
   for(let i=0;i<p.count;i++){
     const a=p.getX(i),b=p.getY(i),c=p.getZ(i);
-    const l=1+.13*Math.sin(a*5+c*4+seed)*Math.cos(b*4-c*3);
+    const l=1+.22*Math.sin(a*7+c*6+seed)*Math.cos(b*5-c*4);
     p.setXYZ(i,x+a*sx*l,y+b*sy*l,z+c*sz*l);
   }
   return {geo,color};
@@ -38,21 +39,21 @@ function branch(a,b,r0,r1,color) {
 }
 function broadleaf(){
   return joined([
-    ellipsoid(0,2.6,0,.72,.67,.68,0xe4e8ca),
-    ellipsoid(-.55,2.1,.12,.58,.58,.55,0xbbc6a6,2),
-    ellipsoid(.48,2.28,.28,.62,.6,.58,0xd1d9b8,4),
+    ellipsoid(0,2.6,0,.78,.43,.73,0xe4e8ca),
+    ellipsoid(-.55,2.1,.12,.64,.35,.59,0xbbc6a6,2),
+    ellipsoid(.48,2.28,.28,.68,.39,.64,0xd1d9b8,4),
     ellipsoid(.1,2.02,-.5,.58,.5,.54,0xa5b798,7),
-    ellipsoid(-.16,2.94,-.13,.48,.4,.48,0xf3eed2,3),
+    ellipsoid(-.16,2.94,-.13,.52,.29,.53,0xf3eed2,3),
   ]);
 }
 function pine(){
   const parts=[];
   for(let k=0;k<4;k++){
     const y=.95+k*.62,r=.86-k*.17,h=1.25-k*.12;
-    const geo=new THREE.ConeGeometry(r,h,7,2),p=geo.attributes.position;
+    const geo=new THREE.ConeGeometry(r,h,12,3),p=geo.attributes.position;
     for(let i=0;i<p.count;i++){
-      const a=p.getX(i),b=p.getY(i),c=p.getZ(i),wave=1+.14*Math.sin(Math.atan2(c,a)*5+k);
-      p.setXYZ(i,a*wave,b+y+.06*Math.sin(a*8+c*7),c*wave);
+      const a=p.getX(i),b=p.getY(i),c=p.getZ(i),wave=1+.12*Math.sin(Math.atan2(c,a)*6+k);
+      p.setXYZ(i,a*wave,b+y+.10*Math.sin(a*8+c*7),c*wave);
     }
     parts.push({geo,color:[0x93a68b,0xb2c2a0,0xcad5b1,0xe2e4c1][k]});
   }return joined(parts);
@@ -74,21 +75,21 @@ function instanced(group,name,geo,mat,spots,map,shadow=true){
 export function buildForest(map){
   const group=new THREE.Group();group.name='landscape-forest';
   const rng=makeRNG((map.seed*47+183)>>>0),patch=makeNoise(makeRNG((map.seed*11+7)>>>0));
-  const oaks=[],pines=[],trunks=[],shrubs=[];
+  const oaks=[],pines=[],trunks=[],shrubs=[],profile=biomeKit(map);
   const base=new THREE.Color(map.theme?.palette?.canopy??map.colorOf(TILE.FOREST));
   const c=new THREE.Color();
   for(let z=1;z<map.size-1;z++)for(let x=1;x<map.size-1;x++){
     if(map.tiles[map.idx(x,z)]!==TILE.FOREST)continue;
     const grove=patch(x*.09,z*.09,2);
-    if(rng()>.48+grove*.3)continue;
+    if(rng()>profile.trees.density+grove*.3)continue;
     const s=.68+rng()*.42;
-    const spot={x:x+.25+rng()*.5,z:z+.25+rng()*.5,sx:s,sy:s*(.9+rng()*.3),sz:s,r:rng()*Math.PI*2};
+    const spot={x:x+.25+rng()*.5,z:z+.25+rng()*.5,sx:s,sy:s*(.9+rng()*.3)*profile.trees.height,sz:s,r:rng()*Math.PI*2};
     c.copy(base).offsetHSL((grove-.5)*.055,-.03,(grove-.5)*.07);
-    const conifer=map.terrainKind==='hills'||rng()<.16+grove*.3;
+    const conifer=rng()<profile.trees.conifers;
     if(conifer)c.multiplyScalar(.85);
     spot.color=c.getHex();(conifer?pines:oaks).push(spot);
     trunks.push({...spot,color:0xffffff});
-    if(rng()<.24)shrubs.push({x:spot.x,z:spot.z,s:.45+rng()*.35,r:spot.r,color:base.clone().multiplyScalar(.7).getHex()});
+    if(rng()<profile.trees.understory)shrubs.push({x:spot.x,z:spot.z,s:.45+rng()*.35,r:spot.r,color:base.clone().multiplyScalar(.7).getHex()});
   }
   const wood=joined([
     branch([0,0,0],[.06,2.15,0],.15,.06,0x71604b),
@@ -105,6 +106,7 @@ export function buildForest(map){
 
 export function buildLandscapeEdges(map){
   const group=new THREE.Group();group.name='landscape-edges';
+  const profile=biomeKit(map);
   const rng=makeRNG((map.seed*67+913)>>>0),boulders=[],bushes=[],reeds=[],logs=[];
   const color=new THREE.Color(map.colorOf(TILE.MOUNTAIN));
   const green=new THREE.Color(map.theme?.palette?.canopy??map.colorOf(TILE.FOREST));
@@ -115,7 +117,7 @@ export function buildLandscapeEdges(map){
     // Large dressing only occupies terrain the simulation already blocks.
     // Keep a margin to paths and retain all switchback/ledge surfaces exactly.
     if(tile===TILE.MOUNTAIN&&!map.isLedgeRock(i)&&neighbors.some(t=>t!==TILE.MOUNTAIN)&&rng()<.24){
-      boulders.push({x:x+.5,z:z+.5,sx:.55+rng()*.3,sy:.6+rng()*.7,sz:.55+rng()*.3,r:rng()*6.28,color:color.clone().multiplyScalar(.85+rng()*.3).getHex()});
+      boulders.push({x:x+.5,z:z+.5,sx:.55+rng()*.3,sy:(.6+rng()*.7)*profile.rocks.height,sz:.55+rng()*.3,r:rng()*6.28,color:color.clone().multiplyScalar(.85+rng()*.3).getHex()});
     }
     if(tile===TILE.FOREST&&neighbors.some(t=>t===TILE.GRASS)&&rng()<.26){
       bushes.push({x:x+.5,z:z+.5,s:.5+rng()*.4,r:rng()*6.28,color:green.clone().multiplyScalar(.8+rng()*.22).getHex()});
@@ -123,7 +125,7 @@ export function buildLandscapeEdges(map){
       if(neighbors.every(t=>t===TILE.FOREST||t===TILE.GRASS)&&map.tiles[map.idx(x-1,z)]===TILE.FOREST&&map.tiles[map.idx(x+1,z)]===TILE.FOREST&&rng()<.12)
         logs.push({x:x+.5,z:z+.5,s:.7+rng()*.25,r:0});
     }
-    if(tile===TILE.WATER&&!map.isLava()&&neighbors.some(t=>t===TILE.GRASS||t===TILE.SAND)&&rng()<.3){
+    if(tile===TILE.WATER&&!map.isLava()&&neighbors.some(t=>t===TILE.GRASS||t===TILE.SAND)&&rng()<profile.reeds){
       reeds.push({x:x+.25+rng()*.5,z:z+.25+rng()*.5,y:-.24,s:.7+rng()*.6,r:rng()*6.28,color:green.clone().lerp(new THREE.Color(0xa59e61),.45).getHex()});
     }
   }

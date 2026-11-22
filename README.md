@@ -26,6 +26,12 @@ Choose the document that matches your task:
 | Change gear, weapons, or the Lattice | `docs/weapons-and-items.md` and `docs/skill-tree-integration.md` |
 | Give an agent compact context | `llms.txt` |
 
+Default colony buildings and defenses are authored in
+`tools/art/toy_kit/frontier.py`: an armored expedition kit, exported to the
+existing European asset IDs. See the art quality standard for the sci-fi
+direction and the remaining legacy-culture boundary.
+
+
 Use this source order when documents disagree:
 
 1. Current code and `supabase/schema.sql`.
@@ -34,6 +40,12 @@ Use this source order when documents disagree:
 4. `docs/architecture.md`.
 5. `docs/agent-brief.md`.
 6. Future documents, including `docs/design-vision.md`.
+
+## Map-kit prototype
+
+`map-kit.html` is the reusable placement workbench (rotate, stamp, undo, JSON
+export/import). Black Vale's first city site is its first playable composition.
+Workbench exports are not yet playable missions. See `docs/reusable-map-kit.md`.
 
 ## The Game
 
@@ -346,3 +358,6 @@ mixed broadleaf/conifer groves, undergrowth, rock outcrops, fallen trunks and
 shore reeds. `src/environment-art.js` blends painted terrain and animates
 shallow/deep water. Dressing does not change walkability, combat or saved state.
 See [the art quality standard](docs/art-quality-standard.md).
+
+Colony streets connect the keep courtyard, gates and district frontages around
+fully built footprints. Terrain barriers and each map's unique perimeter remain.

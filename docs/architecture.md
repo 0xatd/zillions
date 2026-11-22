@@ -72,6 +72,9 @@ to snapshots when the state can affect later simulation.
 | File | Ownership |
 | --- | --- |
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
+| `src/colony-roads.js` | Deterministic built-footprint-aware courtyard, gate and frontage street network |
+| `src/colony-art.js` | Ground-following main/service paving and clearance-checked cliff defenses |
+| `src/rampart-art-plan.js` | Presentation-only wall panels, clipped corner joins and gate support fitting |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |
@@ -86,7 +89,12 @@ to snapshots when the state can affect later simulation.
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.
 
-Authored unit and building models live under `assets/art-slice/`. Their source
+The default colony GLBs live under `assets/kit/european/`, generated from
+`tools/art/toy_kit/frontier.py` for buildings and defenses. Legacy shared units
+and props still use `european.py`. The culture registry selects builders without
+changing simulation IDs.
+
+Additional authored unit and building models live under `assets/art-slice/`. Their source
 and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.
@@ -304,3 +312,19 @@ When you add a system:
 5. Define failure behavior.
 6. Add a committed check.
 7. Update this document if module ownership changes.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.
+
+### Mission arrival presentation
+
+`main.js` owns the optional fresh-solo campaign arrival and its camera distance.
+`ui.js` renders mission identity and the skip action. The four-second sequence
+blocks local simulation advancement and commands, never multiplayer startup.
+It is not serialized. Resumed games and reduced-motion users bypass it. The
+existing loading screen remains separate and clears on both success and failure.

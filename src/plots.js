@@ -30,6 +30,8 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
+import { composeFortress } from './fortress-plan.js';
+import { colonyRoads } from './colony-roads.js';
 import { SITE_FORMS, LEDGE, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
 const TAU = Math.PI * 2;
@@ -631,12 +633,49 @@ export function generatePlots(map, anchor = null, opts = {}) {
     return camp;
   };
 
+  // Gate defenders are placed against their own entrance, not by the generic
+  // spiral search (which could drift a tower six tiles into another district).
+  // Keep the aperture and approach road reserved; a tower may abut a wall,
+  // but its entire footprint must remain on the interior's buildable ground.
+  const addGateTower = (g, side) => {
+    if (!interior) computeInterior();
+    const gx = g.gate[0] + .5, gz = g.gate[1] + .5;
+    const ix = -Math.cos(g.ang), iz = -Math.sin(g.ang);
+    const candidates = [];
+    for (let z = Math.floor(gz) - 6; z <= gz + 5; z++) {
+      for (let x = Math.floor(gx) - 6; x <= gx + 5; x++) {
+        const dx = x + 1 - gx, dz = z + 1 - gz;
+        const back = dx * ix + dz * iz;
+        const flank = (-dx * iz + dz * ix) * side;
+        const distance = Math.hypot(dx, dz);
+        if (back < .5 || flank < 1.8 || distance > 5.5 || !free(x, z, 2)) continue;
+        if (![0, 1].every(oz => [0, 1].every(ox => interior[(z + oz) * N + x + ox]))) continue;
+        candidates.push({ x, z, score: distance + Math.abs(back - 1.5) * .35 });
+      }
+    }
+    candidates.sort((a, b) => a.score - b.score || a.z - b.z || a.x - b.x);
+    const chosen = candidates[0];
+    const defense = { gateId: g.plot.id, side };
+    if (chosen) return add('tower', chosen.x, chosen.z, 2, { gateDefenses: [defense] }, 0);
+    // Adjacent wetland gates can share the bastion between them. Keep that
+    // explicit instead of inventing a distant defender or blocking the road.
+    const shared = plots.filter(p => p.kind === 'tower' && p.gateDefenses?.length)
+      .filter(p => {
+        const dx = p.cx - gx, dz = p.cz - gz;
+        return Math.hypot(dx, dz) <= 6 && (-dx * iz + dz * ix) * side >= 1.8;
+      }).sort((a, b) => Math.hypot(a.cx-gx,a.cz-gz)-Math.hypot(b.cx-gx,b.cz-gz))[0];
+    if (shared) { shared.gateDefenses.push(defense); return shared; }
+    return (rim ? addInside : add)('tower', ...gateFlank(g, side), 2, { gateDefenses: [defense] }, 6);
+  };
+
   // --- Every entrance is a WARD. Towers flanking the gate, and a muster camp
   // inside it: the squads that hold this gate and the squads that push out of
   // it start here, not on the other side of town. Mycenae's gate bastion, a
   // hillfort's guarded passage, a bailey's barracks — same idea, same reason.
+  // Reserve every gate's defenders before a neighbouring ward's camp can
+  // consume the tight space between two adjacent entrances.
+  for (const g of gates) for (const side of [-1, 1]) addGateTower(g, side);
   gates.forEach((g, i) => {
-    for (const side of [-1, 1]) (rim ? addInside : add)('tower', ...gateFlank(g, side), 2, {}, 6);
     const camp = addCamp(CAMP_KINDS[i % CAMP_KINDS.length], ...gateFlank(g, i % 2 ? 1 : -1, 6.5, 4.2));
     if (camp) { g.camp = camp; g.plot.ward = camp.kind; }
   });
@@ -862,11 +901,14 @@ export function generatePlots(map, anchor = null, opts = {}) {
     paintPathLine(camp.cx, camp.cz, camp.cx + Math.cos(toward) * 6, camp.cz + Math.sin(toward) * 6);
   }
 
+  composeFortress(map, plots, hq);
+
   if (rim && !form.ring && map.ledgeW) {
     computeInterior();
     raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
   }
 
+  if (hq) hq.plan.roads = colonyRoads(map, plots);
   return plots;
 }
 

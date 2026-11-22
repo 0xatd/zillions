@@ -86,3 +86,17 @@ frame, disable `renderer.info.autoReset`, reset immediately before the frame,
 and record the counters after the frame. Include shadows and postprocessing
 consistently on both sides. Software-host timing is not a hardware GPU FPS
 measurement. Retain the capture script and its scene settings with the images.
+
+## Default expedition kit (2026-11-21)
+
+`tools/art/toy_kit/frontier.py` owns default human buildings and defenses.
+`cultures.py` selects it while `european.py` retains shared unit/prop builders
+and legacy support for other culture imports. Build with:
+
+```bash
+blender --background --python tools/art/toy_kit/build.py -- --culture european
+```
+
+Do not rename the `european` asset IDs or simulation culture key as an art edit.
+Runtime `armor` material supplies quiet wear, not masonry/shingle texture.
+Changed assets still use body/glow and existing turret/rotor/core bindings.

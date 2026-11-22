@@ -1,7 +1,10 @@
+import { gateSupports } from './rampart-art-plan.js';
+import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
 import { environmentMaterial } from './environment-art.js';
+import { buildColonyStreets, buildFortressBoundary } from './colony-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
@@ -748,6 +751,10 @@ class App {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
     }
+    this._finishMissionIntro();
+    const deploymentLevel = levelById(snap?.level || mp?.level || this.ui.selectedLevel || 1);
+    this.ui.setDeploymentLoading(true, deploymentLevel);
+    try {
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -755,7 +762,7 @@ class App {
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
-      this.ui.showBanner('Loading…', '', 1500);
+      this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
     }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
@@ -768,12 +775,14 @@ class App {
     // muster (sim) and which kit the base is built from (art).
     const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
     setActiveCulture(cultureId);
+    this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
     const soloTicket = !snap && !mp
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
+    this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
@@ -789,6 +798,7 @@ class App {
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
+    this._gateSupports = null;
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
     for (const p of this.projectiles) this._destroyProjectile(p);
@@ -826,6 +836,9 @@ class App {
     this.blockFx = [];
     this._blockT = 0;
     this._blockWarned = {};
+    // Rejoin/restore can enter startGame without a page reload. A prior
+    // landform must not remain above the new map and hide its units.
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     this._setupFogOfWar();
@@ -869,7 +882,27 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
+    if (!snap && !mp && mode === 'campaign' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.missionIntro = { elapsed: 0, distance: this.camDist };
+      this.ui.showMissionIntro(level, () => this._finishMissionIntro());
+    }
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    } catch (error) {
+      this._finishMissionIntro();
+      throw error;
+    } finally {
+      this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  // Presentation-only arrival. Never runs for network, Watch or restored games.
+  _finishMissionIntro() {
+    if (this.missionIntro) {
+      this.camDist = this.missionIntro.distance;
+      this.lastDir = { x: 0, z: 0, s: false };
+    }
+    this.missionIntro = null;
+    this.ui?.hideMissionIntro();
   }
 
   // A cobbled plaza + a lane out to every gate this city actually has — the
@@ -883,7 +916,7 @@ class App {
     const g = new THREE.Group();
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
-    const squarePlaza = plan && plan.key === 'fort';
+    const squarePlaza = plan && ['fort', 'keyhole'].includes(plan.key);
     // On a terraced site the pad and walkways are draped over the ground so
     // they follow the steps instead of floating flat over the lower terraces.
     const terraced = !!this.map._tileCH;
@@ -900,11 +933,11 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(9.2, 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
-      environmentMaterial('stone', { color: 0xa6a091 }),
+      squarePlaza ? new THREE.PlaneGeometry(plan?.kit ? 8 : 9.2, plan?.kit ? 8 : 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
-    if (squarePlaza) disc.rotation.z = -plan.facing;
+    if (squarePlaza && plan.key === 'fort') disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
     disc.position.set(cx, plazaY + 0.015, cz);
     drape(disc, 0.03);
@@ -917,13 +950,16 @@ class App {
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
-    g.add(ring);
-    const laneMat = environmentMaterial('stone', { color: 0x9e998b });
+    if (!squarePlaza) g.add(ring);
+    else { ring.geometry.dispose(); ring.material.dispose(); }
+    const laneMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0x9e998b });
     // Render the reserved streets, including bent approaches through an inner
     // ward, rather than guessing radial strips from a generic city radius.
     const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
       [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
-    for (const [[ax, az], [bx, bz]] of streets) {
+    if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads, this.game?.culture));
+    if (plan?.kit) g.add(buildFortressBoundary(this.map, plan, cx, cz));
+    for (const [[ax, az], [bx, bz]] of (plan?.roads ? [] : streets)) {
       const len = Math.hypot(bx - ax, bz - az);
       if (len < 0.1) continue;
       const a = Math.atan2(bz - az, bx - ax);
@@ -995,8 +1031,8 @@ class App {
       // Graphite edges separate the pale roadbed from both snow and moor;
       // amber tread bands identify the graded route at normal play zoom.
       const edgeMat = layer(0x514c55, -1);
-      const roadMat = environmentMaterial('stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
-      const centreMat = layer(0xc5b078, -5);
+      const roadMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
+      const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
@@ -1481,7 +1517,7 @@ class App {
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
-    if (!this.game) return;
+    if (!this.game || this.missionIntro) return;
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
@@ -2141,6 +2177,7 @@ class App {
   }
 
   _handleFrameError(error) {
+    this._finishMissionIntro();
     this.paused = true;
     this._netPumpStop();
     console.error('game frame failed', error);
@@ -3854,7 +3891,14 @@ class App {
       const splash = def.splash ? ' splash' : '';
       roles.push(compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`);
     }
-    if (def.income) roles.push(compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`);
+    if (def.income) {
+      const perMinute = def.income / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      const current = this.game?.buildings.find(b => b.plotId === plot.id && b.alive);
+      const currentRate = (current?.def.income || 0) / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      roles.push(compact ? `+${perMinute.toFixed(1)} gold/min` : currentRate > 0
+        ? `Income ${currentRate.toFixed(1)} → ${perMinute.toFixed(1)} gold/min.`
+        : `Produces ${perMinute.toFixed(1)} gold/min automatically.`);
+    }
     if (def.repairRate) roles.push(compact ? `${def.repairRate}/s repair` : `Automatically repairs ${def.repairRate} HP/s within ${def.repairRadius} tiles.`);
     if (def.heroDmg) roles.push(compact ? `heroes +${Math.round(def.heroDmg * 100)}% dmg` : `All heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`);
     if (roles.length) return roles.join(compact ? ' · ' : ' ');
@@ -3989,7 +4033,7 @@ class App {
 
     // Glow ring at the pay point + radial progress arc.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
+    const ringGeo = new THREE.RingGeometry(1.46, 1.55, 40);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
     ring.position.set(px, 0.05, pz);
@@ -4165,23 +4209,32 @@ class App {
       this._wallTiles = new Set();
       this._archTiles = new Set();
       this._gateMain = new Set();
+      this._gateSupports = new Map();
       for (const p of plots) {
         if (p.kind !== 'wall') continue;
         for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
         for (const [x, z] of p.arch || (p.gate ? [p.gate] : [])) this._archTiles.add(z * N + x);
-        if (p.gate) this._gateMain.add(p.gate[1] * N + p.gate[0]);
+        if (p.gate) {
+          const key=p.gate[1]*N+p.gate[0];
+          this._gateMain.add(key);
+          this._gateSupports.set(key,gateSupports(p,this.game.map));
+        }
       }
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
+    const plan = plots.find(p=>p.kind==='hq')?.plan;
+    const frontageTile = plan?.roads?.connections?.find(c=>c.plotId===b.plotId)?.tile;
+    const frontage = frontageTile == null ? null :
+      [frontageTile % this.map.size + .5, Math.floor(frontageTile / this.map.size) + .5];
     const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center });
+      archTiles: this._archTiles, gateMain: this._gateMain, gateSupports: this._gateSupports, liveWallTiles: b.gate ? new Set(this.game.buildings.filter(o=>o.kind==='wall'&&o.alive).map(o=>o.z*this.map.size+o.x)) : null, center, frontage, fortressKit: !!plan?.kit, armoredWalls: this.game.culture === 'european' });
     const painted = new Map();
     mesh.traverse(part => {
       if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
         const original = part.material;
         if (!painted.has(original)) {
-          const material = environmentMaterial('building', { vertexColors: true, flatShading: true,
+          const material = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'building', { vertexColors: true, flatShading: true,
             color: original.color, opacity: original.opacity, transparent: original.transparent, side: original.side });
           painted.set(original, material);
         }
@@ -4198,8 +4251,11 @@ class App {
     for (const b of g.buildings) {
       seen.add(b.id);
       const plot = g.plots.find((p) => p.id === b.plotId);
-      const tierKey = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const artTier = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const supportKey = b.gate ? (this._gateSupports?.get(b.z*this.map.size+b.x)||[]).map(([x,z])=>!this._wallTiles.has(z*this.map.size+x)||!!g.occ[z*this.map.size+x]).join(',') : '';
+      const tierKey = artTier + ':' + supportKey;
       let rec = this.buildingMeshes.get(b.id);
+      const priorSpawnT = rec?.artTier === artTier ? rec.spawnT : undefined;
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
         this.scene.remove(rec.mesh);
         this._disposeObject3D(rec.mesh);
@@ -4223,7 +4279,7 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
+        rec = { mesh, b, tierKey, artTier, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4247,7 +4303,7 @@ class App {
     if (!obj) return;
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
-      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData.kitShared && !o.userData.sharedGeometry) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
@@ -4293,10 +4349,10 @@ class App {
       const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
       if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
+        // Mounted heroes remain larger than infantry, not house-sized.
+        // The selection ring and outline carry readability at distance;
+        // the body no longer needs the old 1.25× enlargement.
+        kit.node.scale.multiplyScalar(0.78);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4343,7 +4399,7 @@ class App {
         const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
         auraFill.position.y = 0.035;
         g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
+        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.12) / S, auraR / S, 72);
         auraGeo.rotateX(-Math.PI / 2);
         const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
         aura.position.y = 0.05;
@@ -4536,6 +4592,11 @@ class App {
         }
       }
       if (u.hero) {
+        if (u === this.myHero()) {
+          const shells = rec.mesh.userData.occlusionShells ||= installHeroOcclusionShell(rec.mesh.userData.body);
+          const occluded = !u.dead && terrainOccludesHero(this.map, this.camera.position, rec.mesh.position);
+          for (const shell of shells) shell.visible = occluded;
+        }
         const wantOp = u.stealth ? 0.3 : 1;
         if (rec.op !== wantOp) {
           rec.op = wantOp;
@@ -4560,11 +4621,11 @@ class App {
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
+          aura.material.opacity = 0.10 + rank * 0.018 + Math.sin(t * 2.2 + u.id) * 0.015;
           if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
           if (pulse) {
             pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
+            pulse.material.opacity = rank ? 0.055 + rank * 0.012 : 0.025;
           }
         }
         const weave = rec.mesh.userData.weave;
@@ -4945,6 +5006,7 @@ class App {
 
   togglePauseMenu(help = false) {
     if (!this.game) return;
+    this._finishMissionIntro();
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
     this.ui.setMatchExit(this.netMode ? this.mpRole : null);
@@ -5386,6 +5448,7 @@ class App {
           // The chosen ground is levelled and the city plan appears — rebuild
           // the terrain mesh (tiles changed), plant the plaza, redraw the map.
           this.scene.remove(this.terrain);
+          this._disposeObject3D(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
           if (this.plaza) this.scene.remove(this.plaza);
@@ -5638,6 +5701,13 @@ class App {
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
+    if (this.missionIntro) {
+      this.missionIntro.elapsed += dt;
+      const progress = Math.min(1, this.missionIntro.elapsed / 4);
+      const eased = progress * progress * (3 - 2 * progress);
+      this.camDist = this.missionIntro.distance + 16 * (1 - eased);
+      if (progress >= 1) this._finishMissionIntro();
+    }
     this._updateCamera(dt);
 
     if (!this.game && this.titleSpace) {
@@ -5645,8 +5715,8 @@ class App {
     }
 
     if (this.game) {
-      this._updateHeroInput();
-      if (!this.paused && !this.game.over) {
+      if (!this.missionIntro) this._updateHeroInput();
+      if (!this.paused && !this.game.over && !this.missionIntro) {
         if (this.netMode) {
           this._advanceNetSim();
         } else {

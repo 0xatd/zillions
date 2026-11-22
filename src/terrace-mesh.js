@@ -448,7 +448,11 @@ export function cliffSkirt(map, tileCH, rockHex, grassHex, shadowHex) {
       const e0a = Math.min(Math.max(ya, lo0), hi0), e0b = Math.min(Math.max(yb, lo0), hi0);
       const e1a = Math.min(Math.max(ya, lo1), hi1), e1b = Math.min(Math.max(yb, lo1), hi1);
       if (e0b - e0a < 1e-4 && e1b - e1a < 1e-4) return;
-      const quad = [[ax, e0a, az], [bx, e1a, bz], [bx, e1b, bz], [ax, e0a, az], [bx, e1b, bz], [ax, e0b, az]];
+      // Adjacent faces must share their exact boundary vertices. Per-face
+      // normal offsets pulled corners apart into visible daylight cracks.
+      // Sculpt relief in the material, never detach this watertight shell.
+      const quad = [[ax,e0a,az],[bx,e1a,bz],[bx,e1b,bz],
+        [ax,e0a,az],[bx,e1b,bz],[ax,e0b,az]];
       for (const v of quad) { pos.push(v[0], v[1], v[2]); col.push(c.r * lit, c.g * lit, c.b * lit); }
     };
     // A tall face wears a turf lip at the top; the rock below is banded.

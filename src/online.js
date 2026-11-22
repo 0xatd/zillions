@@ -13,7 +13,9 @@ const CURRENT_RULES = 'survival-plots';
 // v6: siege-only reward tickets, revised terrain and culture-specific armies.
 // v5 production clients cannot simulate this release in lockstep.
 // v7: protected cliff routes and positional colony layout v6.
-export const LOBBY_PROTOCOL_VERSION = 7;
+// v10: Black Vale command-district placement (snapshot v9).
+// v11: gate-bound defensive towers (snapshot v10).
+export const LOBBY_PROTOCOL_VERSION = 11;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

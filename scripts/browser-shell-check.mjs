@@ -128,11 +128,11 @@ try {
     await delay(80);
     const geometry = JSON.parse(await evaluate(`(() => {
       const a = document.querySelector('#first-hour-guide').getBoundingClientRect();
-      const b = document.querySelector('.character-roster').getBoundingClientRect();
-      return JSON.stringify({ overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
-        guide: { left:a.left,right:a.right,top:a.top,bottom:a.bottom }, roster: { left:b.left,right:b.right,top:b.top,bottom:b.bottom } });
+      const controls = [...document.querySelectorAll('#character-list, .character-roster > button, .character-footer')].map(e => e.getBoundingClientRect());
+      return JSON.stringify({ overlap: controls.some(b => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top),
+        guide: { left:a.left,right:a.right,top:a.top,bottom:a.bottom } });
     })()`));
-    assert.equal(geometry.overlap, false, `first-hour guide overlaps roster at ${viewport.width}x${viewport.height}: ${JSON.stringify(geometry)}`);
+    assert.equal(geometry.overlap, false, `first-hour guide overlaps usable controls at ${viewport.width}x${viewport.height}: ${JSON.stringify(geometry)}`);
   }
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
@@ -218,12 +218,33 @@ try {
     return !!live && liveEmpty && maps.length >= 6 && playable && !document.querySelector('#screen-setup').classList.contains('hidden');
   })()`), true, 'Custom Games must separate live rooms from a playable Arcade catalog');
   assert.equal(await evaluate(`(() => {
-    const avatar = document.querySelector('#character-avatar');
-    const loadout = document.querySelectorAll('#character-loadout span');
-    return !!avatar && avatar.dataset.class === 'vanguard'
-      && document.querySelectorAll('#character-avatar .avatar-body > span').length >= 7
-      && loadout.length === 4;
-  })()`), true, 'Character Select must stage a full character silhouette and visible loadout, not only a class icon');
+    const app = window.__app;
+    app.ui._showScreen('main');
+    app._renderCharacterPreview(0);
+    const preview = app.characterPreviews.get('roster-preview-canvas');
+    const canvas = document.querySelector('#roster-preview-canvas');
+    const name = document.querySelector('#character-name');
+    const model = preview?.model;
+    return !!model && model.userData.visualState?.role === 'frontline'
+      && preview.renderer.info.render.calls > 0 && canvas.clientWidth > 100 && canvas.clientHeight > 150
+      && !canvas.classList.contains('hidden') && name.textContent.includes('Journey Test')
+      && !document.querySelector('#m-enter-world').disabled;
+  })()`), true, 'Character Select must render the selected gameplay model with its name and usable Deploy action');
+  // Deployment and navigation must be visible, not merely free of overflow.
+  for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await evaluate(`(() => {
+      window.__app.ui._showScreen('main');
+      const screen = document.querySelector('#screen-main');
+      screen.scrollTop = 0;
+      return ['#m-enter-world', '#m-character-sheet', '#m-custom', '#m-settings'].every(selector => {
+        const button = document.querySelector(selector), r = button.getBoundingClientRect();
+        return !button.disabled && r.width > 30 && r.height >= 28 && r.top >= 0
+          && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+      });
+    })()`), true, `Commander navigation must fit above the fold at ${width}x${height}`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
     const room = { join_code: 'ABC123', visibility: 'public', mode: 'campaign', level: 1, difficulty: 'normal', max_players: 4 };

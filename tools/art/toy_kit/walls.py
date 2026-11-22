@@ -39,20 +39,23 @@ def _stone_run(B, pal, h, thick, merl=True, n=4, battered=False):
     B.box(st3, 1.02, 0.16, thick + 0.16, 0.5, 0, 0)                    # footing
     if battered:
         B.box(shade(st2, 0.95), 1.02, h * 0.45, thick + 0.12, 0.5, 0.16, 0)
-    # the body as a few big ashlar blocks: irregular top line, varied shade
-    for i in range(n):
-        x0 = i / n
-        bh = h - 0.16 + JIT[i % 8]
-        B.box(shade(st, SHD[i % 8]), 1.0 / n + 0.005, bh, thick, x0 + 0.5 / n, 0.16, 0)
-    # a few proud stones on both faces: the hand-built look
-    for i, (x, y) in enumerate(((0.22, 0.42), (0.71, 0.3), (0.5, 0.72))):
-        for s in (-1, 1):
-            B.box(shade(st2, SHD[(i + 3) % 8]), 0.2, 0.13, 0.04, x, y * h, s * (thick / 2 + 0.01))
+    B.box(st, 1.02, h-.16, thick, .5, .16, 0)
+    # Dimensional horizontal courses and a battered foot establish masonry,
+    # while the painted atlas supplies fine joints. No vertical picket slabs.
+    for row in range(4):
+        y = .2 + row*(h-.25)/4
+        for side in (-1,1):
+            B.box(shade(st2, .92+row*.025), 1.02, .055, .035,
+                  .5, y, side*(thick/2+.008))
+    for side in (-1,1):
+        B.box(st3, .075, .42, .016, .52, h*.58, side*(thick/2+.012))
+        B.box(st2, .18, .065, .07, .52, h*.58-.07, side*(thick/2+.025))
     B.box(st2, 1.02, 0.1, thick + 0.08, 0.5, h, 0)                     # wall-walk cap
     if merl:
         for i in range(2):
             x = 0.25 + i * 0.5
-            B.box(st, 0.24, 0.24, 0.16, x, h + 0.1, thick / 2 - 0.04)   # outer merlons
+            B.box(st, 0.32, 0.40, 0.24, x, h + 0.1, thick / 2 - 0.08)
+            B.box(st2, 0.36, 0.065, 0.28, x, h + 0.50, thick / 2 - 0.08)   # outer merlons
         B.box(st2, 1.0, 0.1, 0.08, 0.5, h + 0.1, -thick / 2 + 0.04)     # inner parapet lip
 
 
@@ -65,9 +68,9 @@ def wall_seg(k, t, pal):
         B.box(shade(pal['wood'], 0.8), 1.0, 0.07, 0.07, 0.5, 0.25, -0.09)
         return
     if t == 2:
-        _stone_run(B, pal, 1.0, 0.46)
+        _stone_run(B, pal, 1.95, 0.60, battered=True)
         return
-    _stone_run(B, pal, 1.32, 0.56, battered=True)
+    _stone_run(B, pal, 2.3, 0.64, battered=True)
     G.box(pal['glow'], 1.0, 0.05, 0.02, 0.5, 0.95, 0.29)
     G.box(pal['glow'], 1.0, 0.05, 0.02, 0.5, 0.95, -0.29)
 
@@ -81,7 +84,7 @@ def wall_post(k, t, pal):
         B.prism(shade(pal['wood'], 0.7), 6, 0.185, 0.185, 0.07, 0, 0.75, 0)
         return
     if t == 2:
-        w, h = 0.72, 1.45
+        w, h = 0.78, 2.45
         B.box(pal['stone3'], w + 0.14, 0.18, w + 0.14, 0, 0, 0)
         B.box(pal['stone'], w, h - 0.18, w, 0, 0.18, 0)
         B.box(pal['stone2'], w + 0.1, 0.1, w + 0.1, 0, h, 0)
@@ -89,7 +92,7 @@ def wall_post(k, t, pal):
             B.box(pal['stone'], 0.2, 0.22, 0.2, x * (w / 2 - 0.05), h + 0.1, z * (w / 2 - 0.05))
         B.box(pal['dark'], 0.08, 0.2, 0.04, 0, h * 0.62, w / 2 + 0.005)
         return
-    r, h = 0.44, 1.85
+    r, h = 0.46, 2.85
     B.prism(pal['stone3'], 8, r * 1.2, r * 1.15, 0.2, 0, 0, 0, phase=0.2)
     B.prism(pal['stone'], 8, r, r * 0.94, h - 0.2, 0, 0.2, 0, phase=0.2)
     B.prism(pal['stone2'], 8, r * 1.14, r * 1.14, 0.12, 0, h, 0, phase=0.2)
@@ -125,7 +128,7 @@ def gatehouse(k, t, pal):
         B.box(pal['field'], 1.7, 0.03, 1.2, 0, 0, 0)                            # trodden threshold
         return
     if t == 2:
-        w, h = 0.95, 2.0
+        w, h = 0.95, 3.1
         for s in (-1, 1):
             x = s * tx
             B.box(pal['stone3'], w + 0.18, 0.2, w + 0.18, x, 0, 0)
@@ -135,17 +138,17 @@ def gatehouse(k, t, pal):
                 B.box(pal['stone'], 0.22, 0.24, 0.22, x + dx * (w / 2 - 0.06), h + 0.12, dz * (w / 2 - 0.06))
             G.box(pal['warm'], 0.12, 0.2, 0.04, x, h * 0.6, w / 2 + 0.01)
         # the bridge over the passage: a solid arch block with a lit slit
-        B.box(pal['stone'], 2 * tx - w + 0.05, 0.62, 0.8, 0, 1.3, 0)
-        B.box(pal['stone2'], 2 * tx - w + 0.1, 0.1, 0.86, 0, 1.92, 0)
+        B.box(pal['stone'], 2 * tx - w + 0.05, 0.72, 0.8, 0, 2.1, 0)
+        B.box(pal['stone2'], 2 * tx - w + 0.1, 0.1, 0.86, 0, 2.82, 0)
         for i in range(3):
-            B.box(pal['stone'], 0.22, 0.22, 0.16, -0.5 + i * 0.5, 2.02, 0.35)
-        B.box(pal['dark'], 1.5, 0.22, 0.06, 0, 1.08, 0.35)                     # raised portcullis
+            B.box(pal['stone'], 0.22, 0.22, 0.16, -0.5 + i * 0.5, 2.92, 0.35)
+        B.box(pal['dark'], 1.5, 0.22, 0.06, 0, 1.96, 0.35)                     # raised portcullis
         for i in range(5):
-            B.box(pal['dark'], 0.04, 0.3, 0.05, -0.6 + i * 0.3, 0.86, 0.35)
-        B.box(pal['trim'], 0.5, 0.1, 0.04, 0, 1.62, 0.41)
+            B.box(pal['dark'], 0.04, 0.3, 0.05, -0.6 + i * 0.3, 1.76, 0.35)
+        B.box(pal['trim'], 0.5, 0.1, 0.04, 0, 2.42, 0.41)
         B.box(pal['stone2'], 1.7, 0.03, 1.2, 0, 0, 0)                          # paved threshold
         return
-    r, h = 0.62, 2.55
+    r, h = 0.62, 3.55
     for s in (-1, 1):
         x = s * tx
         B.prism(pal['stone3'], 8, r * 1.2, r * 1.14, 0.24, x, 0, 0, phase=0.2)
@@ -156,14 +159,14 @@ def gatehouse(k, t, pal):
         G.box(pal['warm'], 0.12, 0.22, 0.04, x, h * 0.62, r * 0.96)
         G.prism(pal['glow'], 8, r * 1.0, r * 1.0, 0.06, x, h * 0.4, 0, phase=0.2)
         _flag(B, pal, x + s * 0.2, 0.62, 0.5, 1.4, flip=s < 0)
-    B.box(pal['stone'], 2 * tx - 2 * r + 0.1, 0.8, 0.95, 0, 1.5, 0)
-    B.box(pal['stone2'], 2 * tx - 2 * r + 0.15, 0.12, 1.0, 0, 2.3, 0)
+    B.box(pal['stone'], 2 * tx - 2 * r + 0.1, 0.8, 0.95, 0, 2.3, 0)
+    B.box(pal['stone2'], 2 * tx - 2 * r + 0.15, 0.12, 1.0, 0, 3.1, 0)
     for i in range(3):
-        B.box(pal['stone'], 0.24, 0.26, 0.18, -0.45 + i * 0.45, 2.42, 0.41)
-    B.box(pal['banner'], 0.55, 0.62, 0.04, 0, 1.52, 0.49)                     # the big gate banner
-    B.box(pal['trim'], 0.2, 0.2, 0.05, 0, 1.75, 0.5)
-    B.box(pal['dark'], 1.3, 0.2, 0.06, 0, 1.28, 0.42)
+        B.box(pal['stone'], 0.24, 0.26, 0.18, -0.45 + i * 0.45, 3.22, 0.41)
+    B.box(pal['banner'], 0.55, 0.62, 0.04, 0, 2.32, 0.49)                     # the big gate banner
+    B.box(pal['trim'], 0.2, 0.2, 0.05, 0, 2.55, 0.5)
+    B.box(pal['dark'], 1.3, 0.2, 0.06, 0, 2.08, 0.42)
     for i in range(5):
-        B.box(pal['dark'], 0.04, 0.3, 0.05, -0.52 + i * 0.26, 1.06, 0.42)
+        B.box(pal['dark'], 0.04, 0.3, 0.05, -0.52 + i * 0.26, 1.86, 0.42)
     B.box(pal['stone2'], 1.6, 0.03, 1.3, 0, 0, 0)
     G.box(pal['glow'], 1.2, 0.03, 0.25, 0, 0.035, 0.45)
