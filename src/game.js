@@ -4280,7 +4280,10 @@ export class Game {
     for(const u of this.units) {
       if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)continue;
       // Fixed ground impact cannot pass through a cliff or an intact wall.
-      if(!this._walkLine(hit.x,hit.z,u.x,u.z))continue;
+      if(!segOpen(hit.x,hit.z,u.x,u.z,(x,z)=>{
+        const id=this.occ[z*this.map.size+x];
+        return this.map.isWalkable(x,z)&&(!id||this.gateIds.has(id));
+      }))continue;
       this._damageUnit(u,hit.damage,hit.kind==='slam'?zb:null);
     }
     this.emit({type:'groundstrike',kind:hit.kind,x:hit.x,z:hit.z,radius:hit.r,fromId:zb.id});
