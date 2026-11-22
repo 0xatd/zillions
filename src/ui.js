@@ -2436,6 +2436,9 @@ export class UI {
   _buildLevelRow(cleared, allUnlocked = false, mode = 'campaign') {
     this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
+    // showEnd replaces the setup overlay before the server receipt arrives.
+    // Keep campaign state, but render the roster only when setup exists again.
+    if (!row) return;
     row.innerHTML = '';
     const labyrinth = mode === 'labyrinth';
     // The war, in one line: Earth first, then the stars — and every world you
