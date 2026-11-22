@@ -14,7 +14,7 @@ function cancel(g,b) {
  b.paid=0;b.job=null;b.route=[];
 }
 export function builderCommand(g,c) {
- if(c.p!==0||!g.heroes[0]||g.heroes[0].dead||g.mode==='labyrinth'||g.phase!=='live'||g.over)return;
+ if(c.p!==0||!g.heroes[0]||g.mode==='labyrinth'||g.phase!=='live'||g.over)return;
  const b=g.builders;if(!b)return;
  if(c.t==='builderOrder'&&Object.hasOwn(BUILDER_ORDERS,c.s)){cancel(g,b);b.order=c.s;b.paused=false;b.replan=0;}
  if(c.t==='builderPause'&&typeof c.on==='boolean'){b.paused=c.on;if(c.on)cancel(g,b);b.replan=0;}
@@ -33,6 +33,12 @@ function frontierSafe(g,p) {
  if(p.nodeId!=null)return g.nodes[p.nodeId]?.owner==='player';
  return g.units.some(u=>!u.dead&&u.hp>0&&Math.hypot(u.x-p.cx,u.z-p.cz)<12);
 }
+function crewAction(g,p,branch){
+ const action=g.plotAction(p);
+ if(action?.mode!=='branch')return action;
+ const def=action.nt.options[branch];
+ return def?{mode:'build',cost:def.cost,def,branch}:action;
+}
 function actionKey(p,a){return `${p.id}:${p.tier}:${a.mode}:${p.branch||''}`;}
 // No automatic irreversible branch choice. The crew skips it and the UI
 // reports that the player must choose a specialisation when no other job exists.
@@ -40,11 +46,7 @@ export function builderCandidates(g,b) {
  const choices=[];let branches=false;
  for(const p of g.plots){
   if(!g.firstSiegePlotActionable(p))continue;
-  let a=g.plotAction(p);if(!a)continue;if(a.mode==='branch'){
-   const branch=b.branches?.[p.kind],def=a.nt.options[branch];
-   if(!def){branches=true;continue;}
-   a={mode:'build',cost:def.cost,def,branch};
-  }
+  const a=crewAction(g,p,b.branches?.[p.kind]);if(!a)continue;if(a.mode==='branch'){branches=true;continue;}
   const inBase=local(g,p),inHolding=inBase||established(g,p),damage=a.mode==='repair'||a.mode==='rebuild';
   if(!inHolding&&!frontierSafe(g,p))continue;
   if(threat(g,p.cx,p.cz,5))continue;
@@ -110,8 +112,14 @@ export function updateBuilders(g,dt) {
  if(b.recover>0){b.recover=Math.max(0,b.recover-dt);b.status='Crew recovering';if(!b.recover){const seat=g._reseat(g.hq.cx,g.hq.cz,8);if(seat){[b.x,b.z]=seat;b.hp=b.maxHp;}else b.recover=2;}return;}
  // A crew caught in melee takes damage and returns to HQ after a recovery
  // delay. No permanent soft-lock and no free replacement gold reward.
- const attackers=g.zombies.filter(e=>!e.dead&&e.hp>0&&Math.hypot(e.x-b.x,e.z-b.z)<1.7);
- for(const e of attackers)b.hp-=Math.max(1,e.def?.dmg||5)*dt;
+ // Opportunistic bites use the enemy's real attack cadence, not invisible
+ // proximity DPS. A stunned, resting, or already-engaged enemy cannot hit it.
+ for(const e of g.zombies){
+  if(e.dead||e.hp<=0||e.state!==2||e.stunT>0||e.atkT>0||e.def?.ranged||e.def?.siege||(e.targetU&&!e.targetU.dead))continue;
+  if(Math.hypot(e.x-b.x,e.z-b.z)>=.75)continue;
+  e.atkT=.8;b.hp-=Math.max(0,e.def?.dmg||0);
+  g.emit({type:'bite',fromId:e.id,fx:e.x,fz:e.z,tx:b.x,tz:b.z,x:b.x,z:b.z,targetScale:.8});
+ }
  if(b.hp<=0){cancel(g,b);b.hp=0;b.recover=25;b.status='Crew recovering';return;}
  if(threat(g,b.x,b.z)){
   if(b.job){cancel(g,b);b.replan=0;}b.status='Retreating';
@@ -122,7 +130,7 @@ export function updateBuilders(g,dt) {
  if(b.hp<b.maxHp&&Math.hypot(b.x-g.hq.cx,b.z-g.hq.cz)<6)b.hp=Math.min(b.maxHp,b.hp+8*dt);
  const manuallyUsed=new Set(g.heroes.filter(h=>!h.dead&&h.payHold).map(h=>g.buildTargetFor(h)?.plot.id));
  if(b.frontier){const target=g.plots.find(p=>holdingKey(p)===b.frontier);if(!target||established(g,target)||!frontierSafe(g,target))b.frontier=null;}
- let p=b.job&&g.plots.find(p=>p.id===b.job.id),a=p&&g.plotAction(p);
+ let p=b.job&&g.plots.find(p=>p.id===b.job.id),a=p&&crewAction(g,p,b.job.branch);
  if(b.job&&(!a||actionKey(p,a)!==b.job.key||g.plotLocked(p)||(!local(g,p)&&!established(g,p)&&!frontierSafe(g,p))||manuallyUsed.has(p.id)||p.paid>0||threat(g,p.cx,p.cz,5))){cancel(g,b);b.replan=1;p=null;a=null;}
  // Reconsider discretionary work at a bounded cadence when a genuine
  // emergency appears; the interrupted purchase is completely refundable.
@@ -138,9 +146,8 @@ export function updateBuilders(g,dt) {
    if(g.gold-b.reserve<c.a.cost){poor=true;if(c.score>800)break;continue;}
    const route=routeTo(g,b,(x,z)=>atWork(g,c.p,x,z));if(route===null){blocked=true;continue;}
    if(route.some(([x,z])=>threat(g,x,z,4))){blocked=true;continue;}
-   if(c.branch){c.p.branch=c.branch;c.a=g.plotAction(c.p);c.key=actionKey(c.p,c.a);}
    if(b.order==='expand'&&!local(g,c.p)&&!established(g,c.p))b.frontier=holdingKey(c.p);
-   b.job={id:c.p.id,key:c.key,mode:c.a.mode,cost:c.a.cost};b.route=route;p=c.p;a=c.a;break;
+   b.job={id:c.p.id,key:c.key,mode:c.a.mode,cost:c.a.cost,branch:c.branch||null};b.route=route;p=c.p;a=c.a;break;
   }
   b.replan=2;
   if(!b.job)b.status=poor?'Saving gold':blocked?'Route blocked':branches?'Choose a specialisation':'No eligible work';
@@ -162,7 +169,7 @@ export function updateBuilders(g,dt) {
   if(g.plotAction(p)?.mode!=='repair'){b.completed++;b.job=null;b.replan=1;}
  }else{
   b.paid+=pay;
-  if(b.paid>=b.job.cost-1e-6){b.paid=0;if(a.mode==='rebuild')g._rebuildPlot(p);else g._construct(p);b.completed++;b.job=null;b.replan=1;}
+  if(b.paid>=b.job.cost-1e-6){b.paid=0;if(a.mode==='rebuild')g._rebuildPlot(p);else {if(b.job.branch)p.branch=b.job.branch;g._construct(p);}b.completed++;b.job=null;b.replan=1;}
  }
 }
 export function builderStatus(g){const b=g.builders;if(!b)return '';const p=b.job&&g.plots.find(p=>p.id===b.job.id);return p?`${b.status} ${PLOT_KINDS[p.kind]?.name||p.kind} · ${Math.ceil(Math.max(0,b.job.mode==='repair'?(g.plotAction(p)?.cost||0):b.job.cost-b.paid))} gold`:b.status;}

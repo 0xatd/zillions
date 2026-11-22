@@ -2,7 +2,8 @@
 
 A siege has one shared, visible crew. It starts paused when the city is founded.
 The host chooses an order beside the army controls. Other players see its work
-but cannot change the shared spending policy. Manual construction still works.
+but cannot change the shared spending policy. The host may still pause or
+change policy while their hero is down. Manual construction still works.
 Labyrinth has no crew or builder controls.
 
 ## Orders
@@ -35,7 +36,8 @@ repair budget, construction and rebuild methods as manual work.
 
 Tower and wall specialisations default to Ask me. Set Long range / Anti-horde
 and Armor / Shock to authorise future crew choices. Existing choices never
-change. With Ask me, the crew skips those upgrades and reports Choose a
+change. A queued specialisation is committed only when construction completes;
+cancelling unfinished work does not consume that choice. With Ask me, the crew skips those upgrades and reports Choose a
 specialisation if nothing else can be done. These preferences make a complete
 builder-led mission possible without a hidden irreversible choice.
 
@@ -44,7 +46,10 @@ builder-led mission possible without a hidden irreversible choice.
 The crew follows a cardinal global route to a reachable work point outside a
 new structure's footprint. It rechecks occupied route tiles and current target
 state. Unsafe routes are skipped. It retreats toward the Keep when enemies
-come close. Enemies within melee distance damage the crew; if overwhelmed, it
+come close. An aggro melee enemy with no other living target can bite the crew at its
+normal attack cooldown. The bite has the same visible attack event as combat;
+stunned, idle and already-engaged enemies cannot inflict proximity damage.
+If overwhelmed, it
 recovers at the Keep after 25 seconds without a replacement fee or reward.
 It cannot attack, scout territory, capture nodes or join army formations.
 

@@ -46,7 +46,7 @@ test('builder job, escrow, route and reserve restore deterministically and affec
 });
 test('only valid host commands act; threat pauses spending and a lost crew recovers',()=>{
  const g=fresh(),b=g.builders;for(const c of [{t:'builderOrder',s:'develop',p:1},{t:'builderReserve',gold:NaN,p:0},{t:'builderReserve',gold:-1,p:0},{t:'builderOrder',s:'bogus',p:0}])g.exec(c);assert.equal(b.paused,true);assert.equal(b.reserve,10);
- order(g,'develop');ticks(g,100);const gold=g.gold;b.hp=1;g.zombies=[{x:b.x,z:b.z,hp:10,dead:false,def:{dmg:60}}];ticks(g,1);assert.equal(b.hp,0);assert.ok(b.recover>0);assert.ok(g.gold>=gold);g.zombies=[];ticks(g,1600);assert.equal(b.recover,0);assert.ok(b.hp>0);
+ order(g,'develop');ticks(g,100);const gold=g.gold;b.hp=1;g.zombies=[{id:123,x:b.x,z:b.z,hp:10,dead:false,state:2,atkT:0,stunT:0,def:{dmg:60}}];ticks(g,1);assert.equal(b.hp,0);assert.ok(b.recover>0);assert.ok(g.gold>=gold);g.zombies=[];ticks(g,1600);assert.equal(b.recover,0);assert.ok(b.hp>0);
 });
 test('minor wall wear cannot starve development; established frontier holdings remain serviceable',()=>{
  const g=fresh(),b=g.builders,wall=g.plots.find(p=>p.kind==='wall'&&p.role!=='outer');g._construct(wall,true);const section=g.buildings.find(x=>x.plotId===wall.id);section.hp-=1;
@@ -79,4 +79,28 @@ test('a new critical repair interrupts and refunds discretionary work',()=>{
 test('an unaffordable emergency saves instead of repeatedly buying and cancelling lesser work',()=>{
  const g=fresh(),b=g.builders;g.hq.hp=g.hq.maxHp*.3;g.gold=30;order(g,'develop');const gold=g.gold;ticks(g,600);
  assert.equal(b.job,null);assert.equal(b.status,'Saving gold');assert.equal(g.gold,gold);assert.equal(b.completed,0);
+});
+
+test('host can pause and protect gold while their hero is down',()=>{
+ const g=fresh();order(g,'develop');g.heroes[0].dead=true;g.exec({t:'builderPause',on:true,p:0});g.exec({t:'builderReserve',gold:100,p:0});
+ assert.equal(g.builders.paused,true);assert.equal(g.builders.reserve,100);const gold=g.gold;ticks(g,120);assert.equal(g.gold,gold);
+});
+test('worker takes actual bites, not damage from stunned, idle, or engaged enemies',()=>{
+ const g=fresh(),b=g.builders;g.exec({t:'builderPause',on:true,p:0});const e={id:777,x:b.x,z:b.z,hp:100,dead:false,state:2,atkT:0,stunT:5,def:{dmg:10}};g.zombies=[e];
+ const hp=b.hp;ticks(g,1);assert.equal(b.hp,hp);e.stunT=0;e.state=0;ticks(g,1);assert.equal(b.hp,hp);
+ e.state=2;e.targetU={dead:false};ticks(g,1);assert.equal(b.hp,hp);e.targetU=null;e.x=b.x;e.z=b.z;ticks(g,1);
+ assert.equal(b.hp,hp-10);assert.equal(e.atkT,.8);assert.ok(g.events.some(x=>x.type==='bite'&&x.fromId===777));
+ ticks(g,1);assert.equal(b.hp,hp-10,'same enemy cannot double-bite without its combat cooldown elapsing');
+});
+test('lost node ownership cancels a queued satellite job without spending',()=>{
+ const g=fresh(),b=g.builders,p=g.plots.find(p=>p.kind==='outpost'),n=g.nodes[p.nodeId];n.owner='player';b.x=p.cx+3;b.z=p.cz;order(g,'expand');
+ // Keep only this eligible frontier job; captured nodes are the input contract.
+ const others=g.plots;g.plots=[...others.filter(q=>q.kind==='hq'),p];ticks(g,1);assert.equal(b.job?.id,p.id);
+ const gold=g.gold,escrow=b.paid;n.owner='hive';ticks(g,1);assert.equal(b.job,null);assert.ok(Math.abs(g.gold-gold-escrow)<1e-6);
+});
+test('cancelling a configured branch purchase does not consume the specialisation',()=>{
+ const g=fresh(),b=g.builders,p=g.plots.find(p=>p.kind==='tower'&&!p.keep);g._construct(p,true);g._construct(p,true);
+ g.plots=g.plots.filter(q=>q.kind==='hq'||q===p);order(g,'fortify');g.exec({t:'builderDoctrine',kind:'tower',branch:'flame',p:0});
+ for(let i=0;i<3000&&!b.paid;i++)ticks(g,1);assert.ok(b.paid>0);assert.equal(p.branch,null);
+ const gold=g.gold,paid=b.paid;g.exec({t:'builderPause',on:true,p:0});assert.equal(p.branch,null);assert.ok(Math.abs(g.gold-gold-paid)<1e-6);assert.equal(p.tier,2);
 });
