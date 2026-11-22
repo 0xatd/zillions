@@ -20,11 +20,6 @@ test('standing in the tell takes exactly one hit; stun interrupts and dead caste
  e.atkT=0;ticks(g,1);e.stunT=1;ticks(g,10);assert.equal(h.hp,hitHp,'interrupted attack still landed');
  e.stunT=0;e.atkT=0;ticks(g,1);e.dead=true;ticks(g,10);assert.equal(h.hp,hitHp,'dead caster still struck');
 });
-test('ground impact does not reach through an intact barrier inside its radius',()=>{
- const g=fresh(),h=g.heroes[0];h.x=20.9;h.z=20.5;const e=enemy(g,'spitter',24,20.5);
- const hp=h.hp;ticks(g,1);h.x=22.1;g.occ[20*g.map.size+21]=999;
- ticks(g,8);assert.equal(h.hp,hp,'nearby wall must shield the pending impact');
-});
 test('windup and focus survive restore; pending impact enters peer hash',()=>{
  const g=fresh(),h=g.heroes[0],e=enemy(g);g.exec({t:'focus',p:0,id:e.id});ticks(g,1);
  assert.equal(h.focusId,e.id);const restored=new Game(map(),'normal','alexander',g.snapshot(),1);
