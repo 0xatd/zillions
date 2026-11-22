@@ -62,6 +62,7 @@ const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_SPECTATOR_BUFFER = 1024; // bounded loading backlog (~68 seconds)
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
@@ -2268,7 +2269,29 @@ class App {
     for (const p of this.peers) p.send(msg);
   }
 
+  _startPendingSpectators() {
+    // Called only before commands at a whole lockstep boundary. The snapshot
+    // does not contain that window yet, so the first buffered packet is exact.
+    for (const rec of this.pendingSpectators) {
+      if (rec.started || !rec.peer.open) continue;
+      rec.started = true;
+      rec.frame = this.simFrame;
+      rec.buffer = [];
+      rec.overflow = false;
+      rec.peer.send({ t: 'spectateStart', snap: this.game.snapshot(), frame: rec.frame });
+    }
+  }
+
   _broadcastSpectators(msg) {
+    for (const rec of this.pendingSpectators) {
+      if (!rec.started || rec.overflow) continue;
+      if (rec.buffer.length >= NET_SPECTATOR_BUFFER) {
+        // Do not grow memory indefinitely on a slow-loading watcher. Once its
+        // current restore finishes, Ready requests a fresh boundary snapshot.
+        rec.buffer.length = 0;
+        rec.overflow = true;
+      } else rec.buffer.push(msg);
+    }
     for (const p of this.spectators) p.send(msg);
   }
 
@@ -2341,7 +2364,7 @@ class App {
       await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
       this.simFrame = m.frame;
       this.netPrimed = false;
-      this.net.send({ t: 'spectateReady' });
+      this.net.send({ t: 'spectateReady', frame: m.frame });
       this.ui.showBanner('Watching live — camera controls work, battle controls are read-only.', '', 5000);
     }
     else if (m.t === 'resync') {
@@ -2402,7 +2425,7 @@ class App {
   }
 
   _requestMissingWindow(w) {
-    if (!this.net || this.mpRole !== 'guest') return;
+    if (!this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
     const now = performance.now();
     if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
     this._missingWindow = w;
@@ -2429,7 +2452,7 @@ class App {
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
     // rate a few percent to hold its measured jitter target in the bank.
     // Network jitter then shows up as imperceptible speed drift, not freezes.
-    if (this.mpRole === 'guest') {
+    if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
       const banked = this._windowsBuffered();
       if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
       else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
@@ -2443,6 +2466,7 @@ class App {
         const w = this.simFrame / NET_STEP;
         let bundle;
         if (this.mpRole === 'host') {
+          this._startPendingSpectators();
           bundle = [...this.outbox];
           this.outbox = [];
           for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
@@ -2450,6 +2474,7 @@ class App {
           // channel a late/lost packet is healed by the next one instead of
           // freezing every guest.
           this._broadcastFast({ t: 'w', w, c: bundle, p: this._recentWindows.slice() });
+          this._broadcastSpectators({ t: 'w', w, c: bundle, p: [] });
           this._recentWindows.push([w, bundle]);
           if (this._recentWindows.length > NET_REDUNDANCY) this._recentWindows.shift();
           rememberWindow(this._windowHistory, w, bundle, NET_HISTORY);
@@ -3027,17 +3052,26 @@ class App {
   }
 
   async _acceptSpectator(sig) {
-    if (!this.netMode || this.mpRole !== 'host' || !this.game || !this.onlinePending) return;
+    if (!this.netMode || this.mpRole !== 'host' || !this.game || this.game.over || !this.onlinePending) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession();
+    const peer = new NetSession(this.lobby?.iceServers);
     const rec = { peer, name: sig.name || 'Watcher', started: false, buffer: [] };
+    this._attachNetDiagnostics(peer);
     peer.onOpen = () => {
       this.onlinePending.delete(sig.from);
       this.pendingSpectators.push(rec);
       this.ui.showBanner(`👁️ @${rec.name} is watching.`, '', 2600);
     };
     peer.onMessage = (m) => {
-      if (m.t !== 'spectateReady') return;
+      if (m.t === 'needWindow' && this.spectators.includes(peer)) {
+        const commands = this._windowHistory.get(Number(m.w));
+        if (commands) peer.send({ t: 'w', w: Number(m.w), c: commands, p: [] });
+        return;
+      }
+      // A Watch connection can acknowledge loading or request a lost window;
+      // never send it through the player command/seat handler.
+      if (m.t !== 'spectateReady' || !rec.started || m.frame !== rec.frame) return;
+      if (rec.overflow) { rec.started = false; return; }
       for (const packet of rec.buffer) peer.send(packet);
       rec.buffer.length = 0;
       this.pendingSpectators = this.pendingSpectators.filter((entry) => entry !== rec);
@@ -3048,6 +3082,12 @@ class App {
       this.spectators = this.spectators.filter((entry) => entry !== peer);
     };
     this.onlinePending.set(sig.from, peer);
+    setTimeout(() => {
+      if (this.onlinePending?.get(sig.from) === peer && !peer.open) {
+        this.onlinePending.delete(sig.from);
+        peer.destroy();
+      }
+    }, 20000);
     try {
       const code = await peer.host();
       await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code, role: 'spectator' });
@@ -3131,7 +3171,7 @@ class App {
     clearTimeout(this._reconnectT);
     this._reconnectT = setTimeout(() => {
       if (!this.netMode || !this.game || this.game.over || this.net?.open) return;
-      this.lobby.signal({ t: 'knock', name: this._publicName() })
+      this.lobby.signal({ t: 'knock', name: this._publicName(), ...(this.mpRole === 'spectator' ? { role: 'spectator' } : {}) })
         .catch(() => {})
         .finally(() => {
           // If the host's offer doesn't land, try again with backoff.
