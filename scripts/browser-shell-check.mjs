@@ -230,6 +230,21 @@ try {
       && !canvas.classList.contains('hidden') && name.textContent.includes('Journey Test')
       && !document.querySelector('#m-enter-world').disabled;
   })()`), true, 'Character Select must render the selected gameplay model with its name and usable Deploy action');
+  // Deployment and navigation must be visible, not merely free of overflow.
+  for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await evaluate(`(() => {
+      window.__app.ui._showScreen('main');
+      const screen = document.querySelector('#screen-main');
+      screen.scrollTop = 0;
+      return ['#m-enter-world', '#m-character-sheet', '#m-custom', '#m-settings'].every(selector => {
+        const button = document.querySelector(selector), r = button.getBoundingClientRect();
+        return !button.disabled && r.width > 30 && r.height >= 28 && r.top >= 0
+          && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+      });
+    })()`), true, `Commander navigation must fit above the fold at ${width}x${height}`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
     const room = { join_code: 'ABC123', visibility: 'public', mode: 'campaign', level: 1, difficulty: 'normal', max_players: 4 };

@@ -363,3 +363,19 @@ Both cliff-foot occlusion and stale-map overlap are independently reproduced.
 The exact inbound screenshot still lacks its start/continue/rejoin sequence;
 these fixes do not imply that every cliff art-quality issue is finished.
 The live site still serves the pre-draft release until #137 is reviewed/landed.
+
+## Readability refinement — second pass, 2026-11-22
+
+The commander deck keeps deployment and utility navigation above the fold at
+390×844 and 844×390. Roster rows retain their size and scroll inside the roster;
+long names wrap. The empty roster presents one creation action without a blank
+model stage or disabled deployment controls. Keyboard focus remains visible.
+
+Desktop combat gives the ability grid more width and two-line names. Economic
+upgrade prompts show current → upgraded gold/min; new buildings show their
+output without payout bookkeeping. Income timing and balance are unchanged.
+No tower positions, terrain, unit meshes, collision or snapshot versions change
+in this refinement. The existing gate and hero-visibility proofs still apply.
+
+`scripts/browser-shell-check.mjs` verifies actual deployment/navigation button
+bounds at phone, landscape and compact-laptop sizes, not just page overflow.

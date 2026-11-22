@@ -2021,3 +2021,69 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 #r-gold .income-rate { margin-left:5px; }
 #screen-main #m-delete-character { background:none; border-color:transparent; color:#8b9aa6; font-size:11px; }
 #screen-main #m-delete-character:hover { color:#ffabab; border-color:#a65c5c; }
+
+/* Keep deployment and system actions in view on short command decks. */
+#screen-main .character-row { flex-shrink:0; transform:none; }
+#screen-main .character-row:focus-visible,
+#screen-main button:focus-visible { outline:2px solid #f1ce91; outline-offset:3px; }
+#screen-main .character-row > span:last-child { min-width:0; }
+#screen-main .character-row b { overflow-wrap:anywhere; }
+@media(max-width:700px) {
+ #screen-main.character-select { padding:14px 16px; gap:10px; }
+ #screen-main .character-heading h1 { font-size:24px; margin-bottom:0; }
+ #screen-main .character-stage { min-height:0; grid-template-rows:150px auto; }
+ #screen-main .character-copy { padding:8px 0 0; }
+ #screen-main .character-copy h2 { font-size:19px; }
+ #screen-main .character-copy p { margin:5px auto; font-size:12px; }
+ #screen-main .character-gear { display:none; }
+ #screen-main .character-roster { padding:10px; gap:6px; }
+ #screen-main #character-list { max-height:138px; min-height:0; }
+ #screen-main .character-row { min-height:60px; padding:8px; }
+ #screen-main .character-footer { padding-top:8px; gap:6px; }
+ #screen-main .character-footer .utilitybtn { flex:1 1 auto; min-height:36px; padding:6px 8px; font-size:10px; }
+ #screen-main .first-hour-guide { margin-top:4px; padding-top:8px; }
+ #screen-main .first-hour-guide p { display:none; }
+}
+@media(min-width:701px) and (max-height:500px) {
+ #screen-main.character-select { grid-template-columns:minmax(0,1fr) minmax(280px,38%); grid-template-rows:auto minmax(0,1fr) auto; padding:10px 20px; gap:6px 20px; }
+ #screen-main .character-heading { display:flex; align-items:baseline; gap:16px; }
+ #screen-main .character-heading h1 { font-size:20px; margin:0; }
+ #screen-main .character-heading > span { font-size:9px; }
+ #screen-main .character-stage { grid-template-rows:minmax(100px,1fr) auto; }
+ #screen-main .character-copy { padding:5px 0 0; }
+ #screen-main .character-copy h2 { font-size:17px; }
+ #screen-main .character-copy p { font-size:11px; margin:4px auto 0; }
+ #screen-main .character-roster { padding:8px; gap:5px; }
+ #screen-main .roster-label { font-size:9px; margin:0; }
+ #screen-main #character-list { min-height:60px; }
+ #screen-main .character-row { min-height:54px; padding:6px; }
+ #screen-main .character-roster > button { min-height:30px; padding:5px 8px; font-size:11px; }
+ #screen-main .first-hour-guide { margin-top:0; padding-top:5px; }
+ #screen-main .first-hour-guide > span, #screen-main .first-hour-guide > b { display:none; }
+ #screen-main .first-hour-guide button { min-height:26px; padding:4px 8px; font-size:10px; }
+ #screen-main .character-footer { padding-top:6px; gap:8px; flex-wrap:nowrap; }
+ #screen-main .character-footer .utilitybtn { min-height:30px; padding:5px 8px; font-size:10px; }
+ #screen-main .profilerow { font-size:10px; }
+}
+/* Give abilities enough room to read; the action button does not need half
+   the command bar. Two-line names retain full labels at gameplay size. */
+@media(min-width:901px) and (min-height:651px) {
+ .actionmain, .actionmain:has(#upgradepanel.hidden) { grid-template-columns:190px minmax(250px,1fr) minmax(180px,.8fr); }
+ .fight-ability { padding:4px 6px; column-gap:4px; grid-template-columns:18px minmax(0,1fr); }
+ .fight-ability > span { font-size:16px; }
+ .fight-ability b { white-space:normal; overflow:visible; font-size:10px; line-height:1.15; }
+ .fight-ability small { font-size:7px; letter-spacing:.04em; }
+}
+/* A new account needs one clear creation action, not an empty model stage
+   plus disabled deployment and duplicate onboarding buttons. */
+#screen-main:has(#character-list.empty) { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
+#screen-main:has(#character-list.empty) .character-stage,
+#screen-main:has(#character-list.empty) .roster-label,
+#screen-main:has(#character-list.empty) #m-enter-world,
+#screen-main:has(#character-list.empty) #m-delete-character,
+#screen-main:has(#character-list.empty) #m-character-sheet,
+#screen-main:has(#character-list.empty) #first-hour-guide { display:none; }
+#screen-main:has(#character-list.empty) .character-roster { width:min(100%,480px); justify-self:center; align-self:center; box-sizing:border-box; }
+#screen-main #character-list.empty { flex:none; max-height:none; }
+#screen-main .character-empty { border:0; padding:24px 12px; }
+#screen-main:has(#character-list.empty) #m-create-character { color:#171b1c; background:linear-gradient(#eac17c,#bd8c43); border-color:#f1ce91; min-height:44px; }

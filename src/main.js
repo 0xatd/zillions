@@ -3893,7 +3893,11 @@ class App {
     }
     if (def.income) {
       const perMinute = def.income / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
-      roles.push(compact ? `+${perMinute.toFixed(1)} gold/min` : `Produces ${perMinute.toFixed(1)} gold per minute, paid automatically every ${SIEGE.incomeTick} seconds. Fractional gold carries forward.`);
+      const current = this.game?.buildings.find(b => b.plotId === plot.id && b.alive);
+      const currentRate = (current?.def.income || 0) / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      roles.push(compact ? `+${perMinute.toFixed(1)} gold/min` : currentRate > 0
+        ? `Income ${currentRate.toFixed(1)} → ${perMinute.toFixed(1)} gold/min.`
+        : `Produces ${perMinute.toFixed(1)} gold/min automatically.`);
     }
     if (def.repairRate) roles.push(compact ? `${def.repairRate}/s repair` : `Automatically repairs ${def.repairRate} HP/s within ${def.repairRadius} tiles.`);
     if (def.heroDmg) roles.push(compact ? `heroes +${Math.round(def.heroDmg * 100)}% dmg` : `All heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`);
