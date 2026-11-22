@@ -320,3 +320,11 @@ rotation, connections and authored-layout collision/elevation compilation.
 `src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
 `map-kit-page.js` provide local placement, route testing and JSON roundtrip.
 Campaign loading of workbench exports is not implemented.
+
+### Mission arrival presentation
+
+`main.js` owns the optional fresh-solo campaign arrival and its camera distance.
+`ui.js` renders mission identity and the skip action. The four-second sequence
+blocks local simulation advancement and commands, never multiplayer startup.
+It is not serialized. Resumed games and reduced-motion users bypass it. The
+existing loading screen remains separate and clears on both success and failure.

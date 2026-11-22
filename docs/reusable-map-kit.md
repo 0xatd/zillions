@@ -287,3 +287,41 @@ empty cinematics on laptop/phone, Low detail and combat.
 Visual limitation: the existing landscape-phone HUD consumes much of the
 vertical play area. This kit pass does not fix that HUD layout; keep it visible
 in follow-up presentation review rather than calling phone polish complete.
+
+## Playable showcase follow-through — 2026-11-22
+
+This pass builds on the command court, HQ tiers and culture/biome layer above.
+It does not relocate another plot or change the save/protocol contract.
+
+- Verified paved routes receive a single merged amber lane-guide mesh. Marks
+  stay inside straight road tiles, drape to the terrain and leave junctions
+  quiet. The same rule applies to all five default-culture missions.
+- Expedition Soldier has a wider powered shoulder/pack silhouette; Sniper has
+  an asymmetric sensor hood. Ranger retains the lighter reconnaissance rig.
+  These are the existing three troop roles, not new balance classes.
+- Scott has a sealed red command helmet, armored rider and gravity maul on
+  his existing heavy hoverbike. Other named heroes and character-customized
+  rigs are unchanged. All named limb pivots remain; there are no new stats.
+- Fresh solo campaign starts have a four-second skippable in-engine arrival:
+  fixed-yaw camera dolly, mission title and objective. Simulation and commands
+  wait until it ends. Resume, multiplayer, Watch and reduced-motion users skip
+  it. Escape ends arrival before opening pause. Failure cleanup restores the
+  HUD and camera. This is a short arrival, not a standalone cinematic film.
+- Landscape-phone command HUD is 88px high. Portrait has its own fitted layout.
+  Upgrade choices use contextual panels rather than disappearing at small
+  viewports or squeezing four choices into a desktop HUD cell. Main mission
+  panels and debrief reuse the steel/amber presentation language.
+
+Browser proof, from a loaded developer page at 844 × 390:
+
+```js
+await (await import('/scripts/showcase-browser-proof.mjs')).proveArrivalAndHUD()
+```
+
+It checks real arrival input/simulation freeze, skip, restore exclusion, actual
+upgrade spending and HUD bounds. Use a fresh page for visual captures after
+this lifecycle test; direct repeated startGame calls do not perform teardown.
+
+Remaining quality gaps are authored cliff contours, crowd overlap and finished
+skeletal animation. Non-default cultures and other named heroes still need their
+own coherent sci-fi migration. The arrival does not constitute a film library.

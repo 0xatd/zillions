@@ -1863,3 +1863,121 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 .login-heading > span { color:#86d9dc; }
 .presentation-empty { border-left:3px solid #eaa45a; padding:24px; background:#14232b; color:#adbec5; }
 @media(max-width:600px) { .deployment-screen {padding:16px} .deployment-card {padding:20px} }
+
+/* Expedition presentation: shared shell, deployment and debrief vocabulary. */
+.setup, .endpanel { border-color:#6f818677; border-top:3px solid #eaa45a; border-radius:4px; }
+.setuphead h2, .endpanel h1 { color:#e2ded0; letter-spacing:.04em; }
+.endpanel { background:linear-gradient(145deg,#14232bf5,#0d171ff5); }
+.endpanel .howto.stats { border-left:2px solid #86d9dc; }
+.mission-intro { position:fixed; inset:0; z-index:35; display:flex; align-items:flex-end; justify-content:space-between; gap:20px; padding:8vh 6vw; background:linear-gradient(transparent 45%,#07121de6); }
+.mission-intro::before { content:''; position:absolute; inset:0 0 auto; height:5vh; background:#07121d; }
+.mission-intro-copy { border-left:3px solid #eaa45a; padding-left:20px; max-width:650px; }
+.mission-intro-copy span { color:#86d9dc; font-size:11px; letter-spacing:.2em; }
+.mission-intro-copy h2 { font-size:clamp(26px,4vw,50px); margin:8px 0; }
+.mission-intro-copy p { color:#bbcbd0; font-size:14px; }
+#mission-intro-skip { padding:12px 18px; white-space:nowrap; border-color:#86d9dc88; }
+.mission-arrival #actionbar, .mission-arrival #topbar, .mission-arrival #minimap-wrap, .mission-arrival #banner { visibility:hidden; }
+/* Compact landscape controls leave the fight visible. Upgrades remain usable. */
+@media (max-height:650px) and (min-width:600px) {
+  :root { --command-height:88px; --minimap-size:88px; --command-gap:6px; }
+  #actionbar { padding:4px; gap:3px; grid-template-rows:26px minmax(0,1fr); background:#101b23d9; border-radius:4px; }
+  .commandtop { grid-template-columns:1fr 108px; gap:4px; }
+  .rallyhints { gap:2px; font-size:11px; padding:0 3px; }
+  #stancebar .stance { padding:4px; }
+  .actionmain, .actionmain:has(#upgradepanel.hidden) { grid-template-columns:minmax(160px,1fr) minmax(170px,1fr); gap:4px; }
+  #fight-kit, .herostats { display:none; }
+  .actionmain .bigaction, .actionmain:has(#upgradepanel.hidden) .bigaction { grid-column:2; padding:3px 8px; font-size:12px; }
+  #heroplate { padding:3px 6px; gap:6px; }
+  .hpportrait img { width:30px; height:30px; border-radius:3px; }
+  .hpinfo { font-size:11px; }
+  #buildhint { left:auto; max-width:460px; padding:5px 10px; font-size:11px; border-radius:4px; }
+  #buildhint .buildrole { display:none; }
+  #upgradepanel:not(.hidden) { display:block !important; position:absolute; bottom:calc(100% + 6px); right:0; width:min(520px,80vw); height:100px; background:#10212bf5; }
+  #actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 112px); }
+  .uprow { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .upbtn { padding:4px; grid-template-columns:1fr; }
+  .upicon { display:none; }
+  .upbtn small { font-size:9px; }
+}
+@media(max-width:599px) {
+  .mission-intro { flex-direction:column; justify-content:flex-end; align-items:flex-start; padding:28px 20px; }
+  .mission-intro-copy { padding-left:12px; }
+}
+@media(max-width:599px) {
+  :root { --command-height:112px; --minimap-size:80px; --command-gap:6px; }
+  #topbar { width:100%; max-width:100%; gap:1px; padding:3px; flex-wrap:wrap; justify-content:center; }
+  #topbar .res { font-size:10px; padding:1px 3px; }
+  #minimap-wrap { left:auto; right:6px; top:62px; bottom:auto; }
+  #actionbar { left:6px; right:6px; padding:4px; gap:4px; grid-template-rows:30px minmax(0,1fr); border-radius:4px; }
+  .commandtop { grid-template-columns:minmax(0,1fr) 84px; gap:2px; }
+  .rallyhints { font-size:9px; gap:0; padding:0; }
+  #stancebar .stance { white-space:normal; padding:3px; }
+  .mode-toggle { padding:2px; gap:2px; }
+  .mode-toggle span { font-size:10px; white-space:normal; }
+  .actionmain, .actionmain:has(#upgradepanel.hidden) { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px; }
+  #fight-kit, .herostats { display:none; }
+  #heroplate { padding:4px; gap:4px; }
+  .hpportrait img { width:28px; height:28px; }
+  .hpinfo { min-width:0; font-size:10px; }
+  #a-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .actionmain .bigaction, .actionmain:has(#upgradepanel.hidden) .bigaction { grid-column:2; padding:4px; font-size:12px; }
+  #buildhint { padding:5px; font-size:11px; }
+  #buildhint .buildrole { display:none; }
+  #upgradepanel:not(.hidden) { display:block !important; position:absolute; bottom:calc(100% + 6px); right:0; width:100%; height:132px; background:#10212bf5; }
+  #actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 144px); }
+  .upbtn { padding:4px; }
+}
+@media(max-height:650px) and (min-width:600px) {
+  #heroplate .hpbar.herohp { margin-top:2px; height:5px; }
+  #heroplate .hpbar.heroxp { margin-top:2px; height:3px; }
+  #heroplate .packrow { margin-top:2px; }
+  #heroplate .packrow .pslot { width:11px; height:11px; line-height:9px; font-size:8px; }
+  #banner { top:48px; max-width:70vw; font-size:15px; line-height:1.25; }
+  #banner .banner-title { font-size:18px; }
+  #banner .banner-detail { font-size:11px; }
+  #upgradepanel:not(.hidden) { height:124px; }
+  #actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 136px); }
+  .upbtn { grid-template-rows:minmax(24px,auto) minmax(0,1fr) 12px; }
+}
+/* Upgrade choices are contextual popovers, never a four-button row squeezed
+   into one narrow HUD cell. All four choices retain descriptions and ranks. */
+@media(min-width:901px) and (min-height:651px) {
+  .actionmain { grid-template-columns:176px 160px minmax(200px,1fr); }
+  .actionmain .bigaction { grid-column:3; }
+  #upgradepanel:not(.hidden) { position:absolute; right:0; bottom:calc(100% + 8px); width:min(680px,80vw); height:132px; background:#10212bf5; }
+  #actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 148px); }
+  .upbtn { grid-template-columns:1fr; grid-template-rows:26px minmax(0,1fr) 12px; }
+  .upicon { display:none; }
+}
+@media(max-width:599px) {
+  #upgradepanel:not(.hidden) { height:200px; }
+  #actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 212px); }
+  .upbtn { grid-template-columns:1fr; grid-template-rows:26px minmax(0,1fr) 12px; }
+  .upicon { display:none; }
+  .upbtn b { font-size:11px; }
+}
+.endpanel .endactions .startbtn { color:#dce9ed; background:#243c47; border-color:#86d9dc88; }
+.endpanel .endactions .startbtn.primary { color:#17120a; background:var(--gold); }
+@media(max-width:599px) {
+  .endpanel h1 { font-size:30px; }
+  .endpanel .howto.stats { font-size:13px; padding:14px; }
+  .endpanel .tagline { font-size:14px; }
+  .endpanel .endactions .startbtn { font-size:13px; padding:12px; }
+}
+@media(max-width:599px) {
+  .setup { padding:18px 16px; }
+  .setuphead { gap:10px; flex-wrap:wrap; }
+  .setuphead h2 { font-size:18px; }
+  #screen-setup .diffseg { flex-wrap:wrap; }
+  #screen-setup .diffbtn { flex:1 1 120px; min-width:0; }
+  #screen-setup .startbtn { max-width:100%; padding:14px 8px; font-size:14px; white-space:normal; }
+  .settingsgrid, .settingspane, .setpane { min-width:0; }
+  .settingspane { padding:14px; }
+  .settingstabs { flex-wrap:wrap; gap:3px; }
+  .setrow { display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:6px; }
+  .setrow > span:first-child { grid-column:1 / -1; }
+  .setrow input[type="range"] { min-width:0; width:100%; }
+  .setrow input[type="checkbox"] { justify-self:start; }
+  .setrow .modeseg { grid-column:1 / -1; flex-wrap:wrap; }
+  .sethint { overflow-wrap:anywhere; }
+}

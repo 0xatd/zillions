@@ -103,3 +103,18 @@ The committed street regression covers all 15 authored sites with built plots,
 checks connected frontage and unobstructed pavement, and walks the hero along
 every principal gate route. The separate ramp regression covers both directions
 of all Black Vale switchbacks. No new collision barrier is introduced by art.
+
+## Showcase revision — 2026-11-22
+
+For current captures, end the presentation-only arrival with
+`__app._finishMissionIntro()` before fixing the review camera. Do not advance
+it by running simulation ticks. Screenshot the arrival separately at its real
+spawn with fog enabled. The default infantry/Scott sources now live in
+`frontier_units.py`; other named heroes still delegate to the legacy builder.
+Current branch compatibility is snapshot 9 / protocol 10 from the earlier
+command-district pass, superseding the historical version note above.
+
+Review level-up choices with `myHero().skillPoints = 1` in a local development
+fixture and spend the point through the actual button. The small-screen panel
+must remain visible and every choice readable. Review both 844 × 390 and
+390 × 844. The landscape HUD is 88px high; expanded choices are contextual.

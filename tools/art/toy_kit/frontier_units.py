@@ -10,7 +10,7 @@ from combat import armor, loft
 from frontier import HULL, FRAME, STEEL, PANEL, AMBER, LIGHT
 
 ROLES = {
-    'soldier': dict(width=1.18,plate=HULL,mark=AMBER,barrel=.47,pack=.33),
+    'soldier': dict(width=1.32,plate=HULL,mark=AMBER,barrel=.47,pack=.33),
     'ranger': dict(width=.86,plate=PANEL,mark=0x91b596,barrel=.37,pack=.23),
     'sniper': dict(width=.95,plate=STEEL,mark=0xb39acb,barrel=.92,pack=.27),
 }
@@ -50,6 +50,14 @@ def infantry(k,role):
             armor(A,FRAME,.23,.33,.12,x,.31,.14)
             armor(A,HULL,.20,.29,.06,x,.33,.21)
             A.box(AMBER,.06,.22,.025,x,.36,.25)
+    if role=='soldier':
+        # Braced heavy silhouette: a broad rear power unit and shoulder collar.
+        armor(B,FRAME,.49,.28,.22,0,.64,-.22)
+        for x in (-.21,.21): armor(B,STEEL,.12,.25,.20,x,.73,-.20)
+    if role=='sniper':
+        # Low asymmetric sensor hood, distinct from the heavy's squared pack.
+        armor(B,PANEL,.31,.09,.37,0,.98,-.04)
+        armor(B,FRAME,.12,.50,.16,-.24,.40,-.23)
     if role=='ranger':
         B.box(FRAME,.035,.27,.035,-.10,.75,-.22)
         G.box(LIGHT,.045,.035,.045,-.10,1.0,-.22)
@@ -59,10 +67,34 @@ def ranger(k,pal): infantry(k,'ranger')
 def marksman(k,pal): infantry(k,'sniper')
 
 def hero(k,key,pal):
-    legacy.hero(k,key,pal)
-    if key=='scott':
-        # Preserve Scott's gravity-maul/bike identity; establish armored weight
-        # with broad structural plates rather than more oversized body scale.
-        for x in (-.29,.29):
-            armor(k.B,STEEL,.20,.20,.32,x,.90,-.10)
-            k.B.box(AMBER,.12,.045,.025,x,1.05,.07)
+    if key!='scott':
+        legacy.hero(k,key,pal)
+        return
+    B,G=k.B,k.G
+    # Scott retains his red heavy hoverbike and gravity maul. The sealed
+    # command helmet and powered shoulder yoke replace the knight crest.
+    look=dict(legacy.HERO_LOOK['scott'],trim=HULL,bike=FRAME,glow=LIGHT)
+    legacy._bike(B,G,look,1.02,.50,.27,.28,'heavy')
+    armor(B,FRAME,.38,.22,.32,0,.49,-.12)
+    armor(B,0x9f3432,.49,.36,.35,0,.68,-.10)
+    armor(B,HULL,.30,.22,.07,0,.77,.095)
+    B.box(AMBER,.17,.05,.025,0,.90,.14)
+    armor(B,FRAME,.42,.28,.19,0,.76,-.34)
+    loft(B,0x9f3432,[(0,.18,.16,0),(.20,.19,.17,0),(.29,.14,.14,-.015)],y=1.08,z=-.10)
+    B.box(FRAME,.33,.09,.045,0,1.18,.065)
+    G.box(LIGHT,.26,.035,.026,0,1.21,.095)
+    for name,side in [('leg_l',-1),('leg_r',1)]:
+        x=side*.22;L=k.part(name,origin=(x,.63,-.07))
+        armor(L,FRAME,.16,.25,.22,x,.35,.03)
+        armor(L,HULL,.17,.14,.11,x,.43,.16)
+        armor(L,FRAME,.19,.10,.30,x,.28,.12)
+    for name,side in [('arm_l',-1),('arm_r',1)]:
+        x=side*.30;A=k.part(name,origin=(x,1.02,-.10))
+        armor(A,HULL,.28,.22,.35,x,.91,-.10)
+        armor(A,0x9f3432,.18,.29,.19,x,.65,.01)
+        armor(A,STEEL,.20,.15,.24,x,.61,.09)
+        if side==1:
+            A.box(FRAME,.065,.82,.065,x+.10,.60,.12,rz=-.32)
+            armor(A,FRAME,.47,.25,.30,x+.22,1.26,.12)
+            armor(A,HULL,.10,.29,.34,x+.42,1.24,.12)
+            G.box(LIGHT,.035,.16,.23,x+.48,1.30,.12)

@@ -38,6 +38,29 @@ export function buildColonyStreets(map, roads, culture = 'european') {
     make(lanes,environment.roads.dust,.04,.10,'soil');
     make(paved,palette.edge,.045,.04);
     make(paved,palette.surface,.065,.11);
+    // Embedded lane guides belong to the verified road tiles, never adjacent
+    // building footprints. A single mesh keeps the shared kit inexpensive.
+    if (culture === 'european') {
+      const keys = new Set(paved.map(([x,z])=>`${x},${z}`)), positions=[];
+      const quad=(x0,z0,x1,z1)=>{
+        for(const [x,z] of [[x0,z0],[x0,z1],[x1,z1],[x0,z0],[x1,z1],[x1,z0]])
+          positions.push(x,map.groundY(x,z)+.08,z);
+      };
+      for(const [x,z] of paved) {
+        if((x+z)%3!==0)continue;
+        const horizontal=keys.has(`${x-1},${z}`)&&keys.has(`${x+1},${z}`);
+        const vertical=keys.has(`${x},${z-1}`)&&keys.has(`${x},${z+1}`);
+        // Leave junctions and command courts quiet; guide straight approaches.
+        if(horizontal&&!vertical)quad(x+.23,z+.46,x+.77,z+.54);
+        if(vertical&&!horizontal)quad(x+.46,z+.23,x+.54,z+.77);
+      }
+      if(positions.length) {
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.computeVertexNormals();
+        const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xeaa45a,roughness:1,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-5}));
+        mesh.name='colony-lane-guides';mesh.receiveShadow=true;group.add(mesh);
+      }
+    }
   }else make(roads.tiles,0x99917c,.045);
   return group;
 }

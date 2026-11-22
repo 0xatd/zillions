@@ -750,6 +750,7 @@ class App {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
     }
+    this._finishMissionIntro();
     const deploymentLevel = levelById(snap?.level || mp?.level || this.ui.selectedLevel || 1);
     this.ui.setDeploymentLoading(true, deploymentLevel);
     try {
@@ -877,10 +878,27 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
+    if (!snap && !mp && mode === 'campaign' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.missionIntro = { elapsed: 0, distance: this.camDist };
+      this.ui.showMissionIntro(level, () => this._finishMissionIntro());
+    }
     if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    } catch (error) {
+      this._finishMissionIntro();
+      throw error;
     } finally {
       this.ui.setDeploymentLoading(false);
     }
+  }
+
+  // Presentation-only arrival. Never runs for network, Watch or restored games.
+  _finishMissionIntro() {
+    if (this.missionIntro) {
+      this.camDist = this.missionIntro.distance;
+      this.lastDir = { x: 0, z: 0, s: false };
+    }
+    this.missionIntro = null;
+    this.ui?.hideMissionIntro();
   }
 
   // A cobbled plaza + a lane out to every gate this city actually has — the
@@ -1495,7 +1513,7 @@ class App {
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
-    if (!this.game) return;
+    if (!this.game || this.missionIntro) return;
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
@@ -2155,6 +2173,7 @@ class App {
   }
 
   _handleFrameError(error) {
+    this._finishMissionIntro();
     this.paused = true;
     this._netPumpStop();
     console.error('game frame failed', error);
@@ -4971,6 +4990,7 @@ class App {
 
   togglePauseMenu(help = false) {
     if (!this.game) return;
+    this._finishMissionIntro();
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
     this.ui.setMatchExit(this.netMode ? this.mpRole : null);
@@ -5664,6 +5684,13 @@ class App {
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
+    if (this.missionIntro) {
+      this.missionIntro.elapsed += dt;
+      const progress = Math.min(1, this.missionIntro.elapsed / 4);
+      const eased = progress * progress * (3 - 2 * progress);
+      this.camDist = this.missionIntro.distance + 16 * (1 - eased);
+      if (progress >= 1) this._finishMissionIntro();
+    }
     this._updateCamera(dt);
 
     if (!this.game && this.titleSpace) {
@@ -5671,8 +5698,8 @@ class App {
     }
 
     if (this.game) {
-      this._updateHeroInput();
-      if (!this.paused && !this.game.over) {
+      if (!this.missionIntro) this._updateHeroInput();
+      if (!this.paused && !this.game.over && !this.missionIntro) {
         if (this.netMode) {
           this._advanceNetSim();
         } else {

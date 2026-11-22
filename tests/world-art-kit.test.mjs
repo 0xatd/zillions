@@ -25,3 +25,20 @@ test('same terrain mask produces frozen conifers versus wetland broadleaf withou
   assert.deepEqual(tiles,before);
   for(const g of [cold,wet])g.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});
 });
+
+test('expedition lane guides stay on straight paved cells and leave junctions clear',()=>{
+  const tiles=[[1,2],[2,2],[3,2],[4,2],[5,2],[3,1],[3,3]];
+  const roads={tiles,routes:[{primary:true,points:tiles.map(([x,z])=>[x+.5,z+.5])}]};
+  const map={terrainKind:'fen',groundY:(x,z)=>x*.1+z*.2};
+  const group=buildColonyStreets(map,roads);
+  const guides=group.getObjectByName('colony-lane-guides');
+  assert.ok(guides,'straight road must have visible guide markings');
+  const p=guides.geometry.attributes.position;
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i),z=p.getZ(i);
+    assert.ok(tiles.some(([tx,tz])=>x>tx&&x<tx+1&&z>tz&&z<tz+1),'guide left its road tile');
+    assert.ok(!(x>3&&x<4&&z>2&&z<3),'guide occupies a junction');
+    assert.ok(Math.abs(p.getY(i)-map.groundY(x,z)-.08)<1e-6,'guide floats above graded road');
+  }
+  group.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});
+});
