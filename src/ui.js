@@ -140,12 +140,12 @@ export class UI {
       <div id="overlay" class="screen">
         <div id="screen-account" class="accountscreen title-screen">
           <div class="title-lockup">
-            <div class="brandeyebrow">THE LAST WAR CROSSES THE STARS</div>
+            <div class="brandeyebrow">HERO-LED SIEGE WARFARE</div>
             <h1 class="gametitle">ZILLIONS</h1>
-            <p class="gamesub">Every world is a battlefield.</p>
+            <p class="gamesub">Build your stronghold. Hold against the swarm.</p>
           </div>
           <div class="accountcard title-login">
-            <div class="login-heading"><span>ACCOUNT LOGIN</span><h2>Welcome to Zillions</h2><p>Sign in to continue to your characters and worlds.</p></div>
+            <div class="login-heading"><span>COMMAND DECK</span><h2>Enter the frontier</h2><p>Your commander. Your next siege.</p></div>
             <div class="accountstatus" id="account-status">Checking account…</div>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
             <div class="login-divider" id="a-login-divider"><span>OR</span></div>
@@ -172,27 +172,19 @@ export class UI {
             <button id="a-settings">SETTINGS</button>
             <button id="a-quit">QUIT</button>
           </nav>
-          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · STARSHIP ONLINE <small>BUILD 0.1</small></div>
         </div>
 
         <div id="screen-main" class="mainmenu character-select">
-          <div class="character-heading"><span>ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment and level persist between sieges. Press C from the main menu to return here.</small></div>
-          <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
+          <div class="character-heading"><span>ZILLIONS / COMMAND DECK</span><h1>Your commander</h1></div>
           <div id="character-stage" class="character-stage">
             <div id="character-avatar" class="character-avatar" aria-label="Selected character">
               <div class="avatar-backlight"></div>
-              <div class="avatar-body">
-                <span class="avatar-head"></span><span class="avatar-torso"></span>
-                <span class="avatar-arm left"></span><span class="avatar-arm right"></span>
-                <span class="avatar-leg left"></span><span class="avatar-leg right"></span>
-                <span class="avatar-weapon" id="character-weapon"></span>
-                <span id="character-sigil" class="character-sigil"></span>
-              </div>
-              <div class="avatar-loadout" id="character-loadout"></div>
+              <canvas id="roster-preview-canvas" aria-label="Commander preview"></canvas>
+              <span class="roster-stage-label">EXPEDITION PERSONNEL</span>
             </div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
+          <aside class="character-roster"><span class="roster-label">CHOOSE COMMANDER</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
           <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
@@ -1276,9 +1268,7 @@ export class UI {
       this.root.querySelector('#character-name').textContent = 'CREATE YOUR FIRST CHARACTER';
       this.root.querySelector('#character-tagline').textContent = 'Choose a class and take the field.';
       this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
-      this.root.querySelector('#character-sigil').textContent = '✦';
-      this.root.querySelector('#character-loadout').innerHTML = '';
-      this.root.querySelector('#character-weapon').textContent = '';
+      this.root.querySelector('#roster-preview-canvas').classList.add('hidden');
       return;
     }
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
@@ -1287,24 +1277,13 @@ export class UI {
     const gear = EQUIP_SLOTS.map((slot) => equipped[slot] ? itemInfo(equipped[slot]) : null).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
       row.classList.toggle('sel', row.dataset.id === character.id);
+      row.setAttribute('aria-pressed', String(row.dataset.id === character.id));
     }
-    const sigil = this.root.querySelector('#character-sigil');
-    sigil.textContent = klass.icon;
-    sigil.style.backgroundImage = '';
-    sigil.classList.remove('has-portrait');
-    sigil.style.setProperty('--hero-color', appearance.color);
-    const avatar = this.root.querySelector('#character-avatar');
-    avatar.style.setProperty('--hero-color', appearance.color);
-    avatar.dataset.class = character.classKey || 'vanguard';
-    const weapon = equipped[character.activeSet === 1 ? 'weapon2' : 'weapon'];
-    const weaponItem = weapon ? itemInfo(weapon) : null;
-    this.root.querySelector('#character-weapon').textContent = weaponItem?.icon || '⚔';
-    this.root.querySelector('#character-loadout').innerHTML = [
-      ['HEAD', klass.icon],
-      ['ARMOUR', equipped.armor ? itemInfo(equipped.armor)?.icon : '◇'],
-      ['WEAPON', weaponItem?.icon || '◇'],
-      ['IMPLANT', equipped.implant1 ? itemInfo(equipped.implant1)?.icon : '◇'],
-    ].map(([label, icon]) => `<span><i>${icon}</i><small>${label}</small></span>`).join('');
+    this.root.querySelector('#roster-preview-canvas').classList.remove('hidden');
+    this.root.querySelector('#character-avatar').style.setProperty('--hero-color', appearance.color);
+    this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+      proxyHero: character.proxyHero || klass.proxy, classKey: character.classKey, canvasId: 'roster-preview-canvas' });
     this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
     this.root.querySelector('#character-tagline').textContent = `${klass.name} — ${klass.role} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP · ${character.talentPoints || 0} talent points`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
@@ -2642,7 +2621,8 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
-    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
+    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b><small class="income-rate">+${((game.incomeRate || 0) * 60).toFixed(1)}/min</small>`;
+    q('#r-gold').title = 'Gold · automatic income every 4 seconds. Fractional gold carries forward. Building and repair spending reduces the balance.';
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.

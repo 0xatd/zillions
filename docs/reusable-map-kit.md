@@ -249,7 +249,7 @@ The existing gate fitter, wall joins and damage lifecycle remain shared.
 Black Vale site 0 is the first command-district composition: an eight-tile court,
 shifted habitat and hydroponic groups, and connected service approaches. The
 other 14 founding sites keep their layouts while receiving shared rendering.
-Because plot placement changes, snapshot version is 9 and lobby protocol 10;
+The initial command-district pass used snapshot 9 / lobby protocol 10 (superseded below);
 older saves receive the existing incompatible-layout message. Account progress
 is unaffected. Do not mix old/new simulation clients in multiplayer.
 
@@ -320,8 +320,46 @@ await (await import('/scripts/showcase-browser-proof.mjs')).proveArrivalAndHUD()
 
 It checks real arrival input/simulation freeze, skip, restore exclusion, actual
 upgrade spending and HUD bounds. Use a fresh page for visual captures after
-this lifecycle test; direct repeated startGame calls do not perform teardown.
+this lifecycle test; startGame now removes/disposes the previous terrain on rejoin or restore.
+Use a fresh page per map when reviewing other transient scene objects.
 
 Remaining quality gaps are authored cliff contours, crowd overlap and finished
 skeletal animation. Non-default cultures and other named heroes still need their
 own coherent sci-fi migration. The arrival does not constitute a film library.
+
+
+## Gate defenders and command deck — 2026-11-22
+
+- Gate towers use a bounded interior search against their own entrance, not
+  the generic six-tile spiral. Reserve all gate defenders before camps.
+- A tight pair of adjacent Rotmire gates shares its central bastion rather
+  than placing a defender outside useful gate coverage. `gateDefenses` records
+  this relationship; the aperture and approach reservations remain clear.
+- Tests cover all 42 main entrances across 15 campaign sites. Dedicated
+  defenders stay within 5.5 tiles of their gate center; a shared bastion can
+  serve a second gate within 6 tiles, inside the first tower tier's range.
+- Placement changes require snapshot 10 / multiplayer protocol 11. Do not
+  resume a positional old save by changing only its version number.
+- Login and roster now share a responsive command-deck shell. Roster previews
+  use the existing gameplay model pipeline, including race, class and gear.
+  Retired CSS mannequins must not return; they clipped the entire model through
+  colliding `.avatar-body` rules. Preview remains local, not an auth operation.
+- Farm/house income is automatic, accumulated fractionally and paid every four
+  seconds during a live siege. Building `income` is per 40 seconds, not per tick.
+  The HUD and build descriptions show gold/minute including map/relic modifiers.
+- Repeated mission initialization must remove and dispose its old terrain.
+  The previous code retained it, producing overlapping landforms and buried
+  actors. `proveArrivalAndHUD` checks the actual restore lifecycle.
+
+- At Black Vale (114.5, 100.5), the camera-facing ridge also hides Recon in a
+  fresh mission. The own-hero occlusion shell inherits animated mesh transforms
+  and uses GreaterDepth: only hidden fragments get an amber silhouette. A
+  bounded terrain-height sightline enables it; open ground leaves it off.
+  This is presentation-only, does not expose enemies, and does not move units,
+  change camera yaw, flatten terrain or alter collision. High and Low need
+  separate actual frame proof; mesh-count tests cannot prove rendered visibility.
+
+Both cliff-foot occlusion and stale-map overlap are independently reproduced.
+The exact inbound screenshot still lacks its start/continue/rejoin sequence;
+these fixes do not imply that every cliff art-quality issue is finished.
+The live site still serves the pre-draft release until #137 is reviewed/landed.

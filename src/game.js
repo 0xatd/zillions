@@ -75,7 +75,8 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-export const SNAPSHOT_VERSION = 9;
+// v10: gate-bound tower positions; plot IDs are positional.
+export const SNAPSHOT_VERSION = 10;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
 export class Game {

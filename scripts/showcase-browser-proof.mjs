@@ -14,9 +14,13 @@ export async function proveArrivalAndHUD() {
   document.querySelector('#mission-intro-skip').click();
   check(!a.missionIntro&&a.camDist===distance,'Skip did not restore gameplay camera');
   check(!a.ui.root.classList.contains('mission-arrival'),'Skip left HUD hidden');
+  const priorTerrain=a.terrain;let disposed=false;
+  priorTerrain.getObjectByName('terrain').geometry.addEventListener('dispose',()=>{disposed=true;});
   const snap=a.game.snapshot();
   await a.startGame('normal','scott',null,snap);
   check(!a.missionIntro,'Restored game incorrectly replays arrival');
+  const terrains=[];a.scene.traverse(o=>{if(o.name==='terrain')terrains.push(o);});
+  check(terrains.length===1&&!priorTerrain.parent&&disposed,'Restore left the previous landform covering the new map');
   a.paused=true;
   const hero=a.myHero();hero.skillPoints=1;
   a.ui.update(a.game,0,{controlMode:'fight'});

@@ -111,8 +111,9 @@ For current captures, end the presentation-only arrival with
 it by running simulation ticks. Screenshot the arrival separately at its real
 spawn with fog enabled. The default infantry/Scott sources now live in
 `frontier_units.py`; other named heroes still delegate to the legacy builder.
-Current branch compatibility is snapshot 9 / protocol 10 from the earlier
-command-district pass, superseding the historical version note above.
+Current branch compatibility is snapshot 10 / protocol 11: gate-bound tower
+positions supersede the earlier command-district pass. Existing account
+progression is unchanged; old positional siege snapshots are rejected.
 
 Review level-up choices with `myHero().skillPoints = 1` in a local development
 fixture and spend the point through the actual button. The small-screen panel

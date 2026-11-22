@@ -1,4 +1,5 @@
 import { gateSupports } from './rampart-art-plan.js';
+import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
@@ -835,6 +836,9 @@ class App {
     this.blockFx = [];
     this._blockT = 0;
     this._blockWarned = {};
+    // Rejoin/restore can enter startGame without a page reload. A prior
+    // landform must not remain above the new map and hide its units.
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     this._setupFogOfWar();
@@ -3887,7 +3891,10 @@ class App {
       const splash = def.splash ? ' splash' : '';
       roles.push(compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`);
     }
-    if (def.income) roles.push(compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`);
+    if (def.income) {
+      const perMinute = def.income / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      roles.push(compact ? `+${perMinute.toFixed(1)} gold/min` : `Produces ${perMinute.toFixed(1)} gold per minute, paid automatically every ${SIEGE.incomeTick} seconds. Fractional gold carries forward.`);
+    }
     if (def.repairRate) roles.push(compact ? `${def.repairRate}/s repair` : `Automatically repairs ${def.repairRate} HP/s within ${def.repairRadius} tiles.`);
     if (def.heroDmg) roles.push(compact ? `heroes +${Math.round(def.heroDmg * 100)}% dmg` : `All heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`);
     if (roles.length) return roles.join(compact ? ' · ' : ' ');
@@ -4292,7 +4299,7 @@ class App {
     if (!obj) return;
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
-      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData.kitShared && !o.userData.sharedGeometry) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
@@ -4581,6 +4588,11 @@ class App {
         }
       }
       if (u.hero) {
+        if (u === this.myHero()) {
+          const shells = rec.mesh.userData.occlusionShells ||= installHeroOcclusionShell(rec.mesh.userData.body);
+          const occluded = !u.dead && terrainOccludesHero(this.map, this.camera.position, rec.mesh.position);
+          for (const shell of shells) shell.visible = occluded;
+        }
         const wantOp = u.stealth ? 0.3 : 1;
         if (rec.op !== wantOp) {
           rec.op = wantOp;
@@ -5432,6 +5444,7 @@ class App {
           // The chosen ground is levelled and the city plan appears — rebuild
           // the terrain mesh (tiles changed), plant the plaza, redraw the map.
           this.scene.remove(this.terrain);
+          this._disposeObject3D(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
           if (this.plaza) this.scene.remove(this.plaza);
