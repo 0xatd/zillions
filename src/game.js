@@ -309,6 +309,7 @@ export class Game {
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
         mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
         coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
+        focusId: h.focusId ?? null,
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
@@ -334,6 +335,7 @@ export class Game {
       zombies: this.zombies.map((z) => [z.type, snapNum(z.x), snapNum(z.z), snapNum(z.hp), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0, {
         id: z.id, dx: snapNum(z.dirX || 0), dz: snapNum(z.dirZ || 0),
         timer: snapNum(z.timer || 0), atk: snapNum(z.atkT || 0),
+        windup: z.windup ? { ...z.windup } : null,
         targetU: z.targetU ? z.targetU.id : null, anim: snapNum(z.phase || 0), hit: snapNum(z.hitFlash || 0),
         stun: snapNum(z.stunT || 0), slow: snapNum(z.slowT || 0), slowMul: snapNum(z.slowMul || 1),
         progress: snapNum(z.progressT || 0), px: snapNum(z.px || 0), pz: snapNum(z.pz || 0),
@@ -527,6 +529,7 @@ export class Game {
       h.abilCd = hs.cd || 0;
       h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
       h.cooldown = hs.atkCd || 0;
+      h.focusId = hs.focusId ?? null;
       h.retargetT = hs.rt || 0;
       h.facing = hs.facing || 0;
       h.mx = hs.mx || 0;
@@ -570,6 +573,7 @@ export class Game {
       if (meta.maxHp) zb.maxHp = meta.maxHp;
       zb.dirX = meta.dx || 0; zb.dirZ = meta.dz || 0;
       zb.timer = meta.timer || 0; zb.atkT = meta.atk || 0;
+      zb.windup = meta.windup ? { ...meta.windup } : null;
       zb.phase = meta.anim || 0; zb.hitFlash = meta.hit || 0;
       zb.stunT = meta.stun || 0; zb.slowT = meta.slow || 0; zb.slowMul = meta.slowMul || 1;
       zb.progressT = meta.progress || 0; zb.px = meta.px || 0; zb.pz = meta.pz || 0;
@@ -2894,6 +2898,24 @@ export class Game {
     this.msg(`⭐ ${h.def.name} upgraded ${choice ? `${choice.icon} ${choice.name}` : key} to rank ${h.upgrades[key]}.`, 'info');
   }
 
+  // Optional hero-only attack priority. Inspection never issues this command.
+  // The hero does not chase: movement remains entirely player controlled.
+  canFocusEnemy(h, enemy) {
+    return !!h && !h.dead && !!enemy && !enemy.dead && enemy.hp > 0
+      && dist2(h.x,h.z,enemy.x,enemy.z) < 19 ** 2
+      && dist2(h.x,h.z,enemy.x,enemy.z) <= this.heroRange(h) ** 2;
+  }
+
+  focusEnemy(player, id) {
+    const h=this.heroes[player];
+    if(!h || h.dead || !Number.isInteger(player))return;
+    if(id===null){h.focusId=null;h.retargetT=0;return;}
+    if(!Number.isInteger(id))return;
+    const enemy=this.zombies.find(z=>z.id===id);
+    if(!this.canFocusEnemy(h,enemy))return;
+    h.focusId=id;h.target=enemy;h.targetNest=null;h.retargetT=0;
+  }
+
   // Central command entry point — local input and remote co-op players both go
   // through here, so the sim stays deterministic under lockstep.
   exec(c) {
@@ -2905,6 +2927,7 @@ export class Game {
         break;
       }
       case 'cast': this.castAbility(c.p || 0); break;
+      case 'focus': this.focusEnemy(c.p ?? 0, c.id); break;
       case 'pay': { // hold-to-build: the build key is down/up
         const h = this.heroes[c.p || 0];
         if (h) h.payHold = !!c.on;
@@ -4087,7 +4110,11 @@ export class Game {
 
       if (zb.boss) this._updateBoss(zb, dt);
 
-      if (zb.stunT > 0) { zb.stunT -= dt; continue; }
+      if (zb.stunT > 0) { zb.stunT -= dt; zb.windup=null; continue; }
+      if (zb.windup) {
+        this._resolveEnemyWindup(zb,dt);
+        continue;
+      }
       let speedMul = 1 + (zb.frenzy ? (zb.def.call ? 0 : 0.3) : 0);
       if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
       zb.speedMul = speedMul;
@@ -4188,8 +4215,16 @@ export class Game {
             zb.atkT = cd;
             // Thorns only reflects real melee contact (a bite), not a spitter's
             // ranged acid from outside the fight.
-            this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
-            this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
+            if(!zb.boss && (zb.type==='brute' || zb.type==='spitter')) {
+              // Commit to a ground point before the hit, allowing a dodge or
+              // stun to change the outcome. Cooldown still starts at commitment.
+              const duration = range ? 0.8 : 0.6;
+              zb.windup={x:u.x,z:u.z,r:range?1.25:1.4,t:duration,duration,
+                damage:zb.def.dmg*dmgMul,kind:range?'acid':'slam'};
+            } else {
+              this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
+              this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
+            }
           }
         } else {
           const px = zb.x, pz = zb.z, pa = zb.atkT;
@@ -4235,6 +4270,20 @@ export class Game {
         }
       }
     }
+  }
+
+  _resolveEnemyWindup(zb, dt) {
+    const hit=zb.windup;
+    hit.t-=dt;
+    if(hit.t>1e-8)return;
+    zb.windup=null;
+    for(const u of this.units) {
+      if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)continue;
+      // Fixed ground impact cannot pass through a cliff or an intact wall.
+      if(!this._walkLine(hit.x,hit.z,u.x,u.z))continue;
+      this._damageUnit(u,hit.damage,hit.kind==='slam'?zb:null);
+    }
+    this.emit({type:'groundstrike',kind:hit.kind,x:hit.x,z:hit.z,radius:hit.r,fromId:zb.id});
   }
 
   // Spitter: hits structures from outside their reach, so turtling is not a
@@ -4419,7 +4468,12 @@ export class Game {
       // between worlds: no gunfire until the threads release him.
       if (u.hero && u.swapCd > 0) u.swapCd = Math.max(0, u.swapCd - dt);
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
-      if (u.retargetT <= 0 || (u.target && u.target.dead)) {
+      let focus=null;
+      if(u.hero && u.focusId!=null) {
+        focus=this.zombies.find(z=>z.id===u.focusId);
+        if(!this.canFocusEnemy(u,focus)){u.focusId=null;focus=null;u.retargetT=0;}
+      }
+      if (u.retargetT <= 0 || (u.target && u.target.dead) || (u.hero && !u.target && !u.targetNest)) {
         u.retargetT = 0.25;
         // Pushing troops HUNT (see far beyond weapon range); everyone else
         // only engages what wanders into range.
@@ -4456,6 +4510,7 @@ export class Game {
           u.target = null;
         }
       }
+      if(focus){u.target=focus;u.targetNest=null;}
       // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
       // squad troops too), not just heroes self-buffing.
       const rofMult = (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);

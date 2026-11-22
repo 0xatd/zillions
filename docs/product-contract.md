@@ -348,3 +348,21 @@ reserve replace individual worker micro. Manual construction remains available
 and takes precedence. The crew uses existing planned plots and paid actions;
 it does not claim territory, fight or create a separate economy. See
 [Builder orders](builder-orders.md) for spending, specialisations and recovery.
+## Hero-led combat controls
+
+Inspection remains read-only until the player explicitly chooses **Focus
+attacks** in an enemy's details. Focus only prioritizes that enemy for the local
+hero while it remains within weapon range and personal vision (19 tiles).
+It does not move the hero or command troops. **Clear attack focus** returns to
+automatic targeting. Death or lost range clears focus automatically.
+
+Spitters telegraph an interruptible acid impact at a fixed ground position
+before damaging units; brutes wind up a short ground smash. Moving out of the
+ring or stunning/killing the attacker avoids the pending strike. Existing
+spitter attacks against structures retain their siege behavior. Warning rings
+come from pending simulation state, so pause, saves and Watch preserve them.
+
+Nearby living heroes already share XP from allied kills; distant heroes do not
+receive remote kill XP. Gold remains collectible on the ground, and signed-in
+progression remains server-owned. There is no last-hit requirement or new
+client-side reward authority.

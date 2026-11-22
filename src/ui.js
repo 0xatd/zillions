@@ -508,6 +508,10 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
+    q('#battle-details-content').onclick = event => {
+      const button=event.target.closest('[data-focus-enemy]');
+      if(button && !button.disabled)this.cb.onFocusEnemy?.(button.dataset.focusEnemy==='clear'?null:Number(button.dataset.focusEnemy));
+    };
     q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
     q('#builder-toggle').onclick = () => {const open=q('#builder-options').classList.toggle('hidden')===false;q('#builder-toggle').setAttribute('aria-expanded',String(open));};
     q('#builder-order').onchange = e => this.cb.onBuilder?.({t:'builderOrder',s:e.target.value});
@@ -2661,9 +2665,15 @@ export class UI {
       const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
       if(selection.game!==game||!unit||unit.dead||unit.hp<=0||!visible){this._battlePanel=null;panel.classList.add('hidden');return;}
       const def=unit.def||{},stats=unit.hero?game.heroStats(unit):null;
-      const activity=unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
+      const activity=unit.windup?(unit.windup.kind==='acid'?'Aiming acid — move out of the ring':'Winding up a smash — move or interrupt'):unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
       const hp=Math.max(0,Math.ceil(unit.hp)),max=Math.ceil(unit.maxHp);
-      html=`<h3>${escapeHtml(def.name||unit.type||'Unit')}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.range??1).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??def.speed??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
+      html=`<h3>${escapeHtml(def.name||(unit.type?unit.type[0].toUpperCase()+unit.type.slice(1):'Unit'))}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.ranged??def.range??.75).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??(selection.enemy?def.chase:def.speed)??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
+    }
+    if(selection.mode==='unit' && selection.enemy) {
+      const hero=game.heroes[player],enemy=game.zombies.find(z=>z.id===selection.id);
+      const focused=hero?.focusId===enemy?.id,canFocus=game.canFocusEnemy(hero,enemy);
+      const focusAction=`<button class="focus-enemy" data-focus-enemy="${focused?'clear':enemy?.id}" ${!focused&&!canFocus?'disabled':''}>${focused?'Clear attack focus':'Focus attacks'}</button><p>${focused?'Your hero prioritizes this enemy.':canFocus?'Prioritize this enemy; movement stays manual.':'Move your hero into weapon range to focus.'}</p>`;
+      html=html.replace('<dl>',focusAction+'<dl>');
     }
     panel.classList.remove('hidden');
     if(body.innerHTML!==html)body.innerHTML=html;
