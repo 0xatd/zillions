@@ -1,3 +1,4 @@
+import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
@@ -61,6 +62,7 @@ const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_SPECTATOR_BUFFER = 1024; // bounded loading backlog (~68 seconds)
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
@@ -225,6 +227,8 @@ class App {
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
+      onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
+      onFocusEnemy: (id) => this.issue({t:'focus',p:this.myPlayer,id}),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
@@ -847,6 +851,7 @@ class App {
     this._clearSiteMarkers();
     this._clearNestMeshes();
     this._clearLootMeshes();
+    if(this._builderMesh){this.scene.remove(this._builderMesh);this._disposeObject3D(this._builderMesh);this._builderMesh=null;}
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -1324,7 +1329,7 @@ class App {
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, `🔧 Nothing repairs itself — hold ${build} to repair. Press ${tower} beside a tower to change what it shoots.`],
+      [62, `🔧 Damage repairs before upgrades — hold ${build} to restore health. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -2244,7 +2249,10 @@ class App {
         this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
       }
     }
-    else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
+    else if (m.t === 'cmd') {
+      const command = guestCommand(m.c, idx + 1, this.game?.heroes.length || 0);
+      if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
+    }
     else if (m.t === 'needWindow') {
       const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
@@ -2261,7 +2269,29 @@ class App {
     for (const p of this.peers) p.send(msg);
   }
 
+  _startPendingSpectators() {
+    // Called only before commands at a whole lockstep boundary. The snapshot
+    // does not contain that window yet, so the first buffered packet is exact.
+    for (const rec of this.pendingSpectators) {
+      if (rec.started || !rec.peer.open) continue;
+      rec.started = true;
+      rec.frame = this.simFrame;
+      rec.buffer = [];
+      rec.overflow = false;
+      rec.peer.send({ t: 'spectateStart', snap: this.game.snapshot(), frame: rec.frame });
+    }
+  }
+
   _broadcastSpectators(msg) {
+    for (const rec of this.pendingSpectators) {
+      if (!rec.started || rec.overflow) continue;
+      if (rec.buffer.length >= NET_SPECTATOR_BUFFER) {
+        // Do not grow memory indefinitely on a slow-loading watcher. Once its
+        // current restore finishes, Ready requests a fresh boundary snapshot.
+        rec.buffer.length = 0;
+        rec.overflow = true;
+      } else rec.buffer.push(msg);
+    }
     for (const p of this.spectators) p.send(msg);
   }
 
@@ -2334,7 +2364,7 @@ class App {
       await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
       this.simFrame = m.frame;
       this.netPrimed = false;
-      this.net.send({ t: 'spectateReady' });
+      this.net.send({ t: 'spectateReady', frame: m.frame });
       this.ui.showBanner('Watching live — camera controls work, battle controls are read-only.', '', 5000);
     }
     else if (m.t === 'resync') {
@@ -2395,7 +2425,7 @@ class App {
   }
 
   _requestMissingWindow(w) {
-    if (!this.net || this.mpRole !== 'guest') return;
+    if (!this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
     const now = performance.now();
     if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
     this._missingWindow = w;
@@ -2422,7 +2452,7 @@ class App {
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
     // rate a few percent to hold its measured jitter target in the bank.
     // Network jitter then shows up as imperceptible speed drift, not freezes.
-    if (this.mpRole === 'guest') {
+    if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
       const banked = this._windowsBuffered();
       if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
       else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
@@ -2436,6 +2466,7 @@ class App {
         const w = this.simFrame / NET_STEP;
         let bundle;
         if (this.mpRole === 'host') {
+          this._startPendingSpectators();
           bundle = [...this.outbox];
           this.outbox = [];
           for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
@@ -2443,6 +2474,7 @@ class App {
           // channel a late/lost packet is healed by the next one instead of
           // freezing every guest.
           this._broadcastFast({ t: 'w', w, c: bundle, p: this._recentWindows.slice() });
+          this._broadcastSpectators({ t: 'w', w, c: bundle, p: [] });
           this._recentWindows.push([w, bundle]);
           if (this._recentWindows.length > NET_REDUNDANCY) this._recentWindows.shift();
           rememberWindow(this._windowHistory, w, bundle, NET_HISTORY);
@@ -3020,17 +3052,26 @@ class App {
   }
 
   async _acceptSpectator(sig) {
-    if (!this.netMode || this.mpRole !== 'host' || !this.game || !this.onlinePending) return;
+    if (!this.netMode || this.mpRole !== 'host' || !this.game || this.game.over || !this.onlinePending) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession();
+    const peer = new NetSession(this.lobby?.iceServers);
     const rec = { peer, name: sig.name || 'Watcher', started: false, buffer: [] };
+    this._attachNetDiagnostics(peer);
     peer.onOpen = () => {
       this.onlinePending.delete(sig.from);
       this.pendingSpectators.push(rec);
       this.ui.showBanner(`👁️ @${rec.name} is watching.`, '', 2600);
     };
     peer.onMessage = (m) => {
-      if (m.t !== 'spectateReady') return;
+      if (m.t === 'needWindow' && this.spectators.includes(peer)) {
+        const commands = this._windowHistory.get(Number(m.w));
+        if (commands) peer.send({ t: 'w', w: Number(m.w), c: commands, p: [] });
+        return;
+      }
+      // A Watch connection can acknowledge loading or request a lost window;
+      // never send it through the player command/seat handler.
+      if (m.t !== 'spectateReady' || !rec.started || m.frame !== rec.frame) return;
+      if (rec.overflow) { rec.started = false; return; }
       for (const packet of rec.buffer) peer.send(packet);
       rec.buffer.length = 0;
       this.pendingSpectators = this.pendingSpectators.filter((entry) => entry !== rec);
@@ -3041,6 +3082,12 @@ class App {
       this.spectators = this.spectators.filter((entry) => entry !== peer);
     };
     this.onlinePending.set(sig.from, peer);
+    setTimeout(() => {
+      if (this.onlinePending?.get(sig.from) === peer && !peer.open) {
+        this.onlinePending.delete(sig.from);
+        peer.destroy();
+      }
+    }, 20000);
     try {
       const code = await peer.host();
       await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code, role: 'spectator' });
@@ -3124,7 +3171,7 @@ class App {
     clearTimeout(this._reconnectT);
     this._reconnectT = setTimeout(() => {
       if (!this.netMode || !this.game || this.game.over || this.net?.open) return;
-      this.lobby.signal({ t: 'knock', name: this._publicName() })
+      this.lobby.signal({ t: 'knock', name: this._publicName(), ...(this.mpRole === 'spectator' ? { role: 'spectator' } : {}) })
         .catch(() => {})
         .finally(() => {
           // If the host's offer doesn't land, try again with backoff.
@@ -3810,26 +3857,41 @@ class App {
     const MAXB = 300;
     const q = this.camera.quaternion;
 
-    const add = (x, y, z, frac, w) => {
+    const add = (x, y, z, frac, w, thickness = 1, structure = false) => {
       if (i >= MAXB) return;
       d.position.set(x, y, z);
       d.quaternion.copy(q);
-      d.scale.set(w, 1, 1);
+      d.scale.set(w + (structure ? w * .06 : 0), thickness * (structure ? 1.5 : 1), 1);
       d.updateMatrix();
       this.barBg.setMatrixAt(i, d.matrix);
       const left = new THREE.Vector3(-w / 2, 0, 0).applyQuaternion(q);
       d.position.set(x + left.x, y + left.y + 0.001, z + left.z);
-      d.scale.set(Math.max(0.01, w * frac), 1, 1);
+      d.scale.set(Math.max(0.01, w * frac), thickness, 1);
       d.updateMatrix();
       this.barFg.setMatrixAt(i, d.matrix);
-      c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
+      if (structure) c.setHex(frac <= .3 ? 0xff4545 : frac <= .6 ? 0xffbf47 : 0x65e3aa);
+      else c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
       this.barFg.setColorAt(i, c);
       i++;
     };
 
     const gy = (x, z) => this.map.groundY(x, z);
-    for (const b of g.buildings) {
-      if (b.hp < b.maxHp) add(b.cx, gy(b.cx, b.cz) + this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
+    // World-space bars retain a readable pixel size at normal play zoom.
+    // Wall arcs show their weakest damaged section, not dozens of overlapping
+    // bars or an average that hides the section about to fall.
+    const damaged = g.buildings.filter(b=>b.alive && b.hp < b.maxHp - .5);
+    const wallWorst = new Map();
+    for(const b of damaged)if(b.kind==='wall') {
+      const prior=wallWorst.get(b.plotId);
+      if(!prior || b.hp/b.maxHp < prior.hp/prior.maxHp)wallWorst.set(b.plotId,b);
+    }
+    for (const b of damaged) {
+      if(b.kind==='wall' && wallWorst.get(b.plotId)!==b)continue;
+      const height=this.buildingMeshes.get(b.id)?.healthHeight ?? this._buildingHeight(b.kind);
+      const y=gy(b.cx,b.cz)+height+.6;
+      const distance=this.camera.position.distanceTo(new THREE.Vector3(b.cx,y,b.cz));
+      const pixel=2*Math.tan(this.camera.fov*Math.PI/360)*distance/Math.max(1,this.renderer.domElement.clientHeight);
+      add(b.cx,y,b.cz,b.hp/b.maxHp,Math.max(1.6,48*pixel),Math.max(1.5,(b.hp/b.maxHp<=.3?7:5)*pixel/.12),true);
     }
     for (const n of g.nests) {
       if (n.alive && n.hp < n.maxHp) add(n.x, gy(n.x, n.z) + 2.6, n.z, n.hp / n.maxHp, 2.2);
@@ -4151,13 +4213,14 @@ class App {
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
         : this._plotRole(plot, nt, true);
-      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
+      const actionIcon = nt.mode === 'repair' ? '🔧' : nt.mode === 'rebuild' ? '🏗️' : built ? '⬆️' : PLOT_KINDS[plot.kind].icon;
+      const wantKey = actionIcon + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
         rec.group.remove(ud.label);
-        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, wantSub);
+        ud.label = this._makeLabelSprite(actionIcon, wantSub);
         ud.label.position.set(lx, built ? 3.1 : 2.1, lz);
         rec.group.add(ud.label);
       }
@@ -4166,10 +4229,12 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch && nt.mode !== 'repair';
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
-          const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
+          const hp = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+          const progress = hp ? hp.hp / hp.maxHp : plot.paid / nt.cost;
+          const filled = Math.min(total, Math.floor(progress * total + 1e-6));
           this._drawPips(ud.pips, total, filled);
           ud.pips.sprite.position.y = (built ? 4.1 : 3.0) + Math.sin(t * 2 + plot.id) * 0.12;
         }
@@ -4180,11 +4245,13 @@ class App {
       const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
+      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : nt.mode === 'repair' ? 0x75dfff : paying ? 0xfff2c8 : 0xffd75e);
       ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
 
       // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
+      const health = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+      const frac = nt.branch ? 0 : clamp(health ? health.hp / health.maxHp : plot.paid / nt.cost, 0, 1);
+      ud.prog.material.color.setHex(nt.mode === 'repair' ? 0x75dfff : 0xffd75e);
       ud.prog.visible = frac > 0.002;
       if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
         ud.progFrac = frac;
@@ -4279,7 +4346,8 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, artTier, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
+        const healthHeight = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y;
+        rec = { mesh, b, tierKey, artTier, healthHeight, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4710,9 +4778,90 @@ class App {
     this.tacticalVisuals.pulse(x, z, { color: 0xff493d, radius: 4.2, life: 1.5 });
   }
 
+  // Small amber construction rig, distinct from armed troops.
+  _syncBuilder(t) {
+    const b=this.game?.builders;
+    if(!b||b.recover>0){if(this._builderMesh)this._builderMesh.visible=false;return;}
+    if(!this._builderMesh){
+      const crew=new THREE.Group();crew.name='colony-builder';
+      const armor=new THREE.MeshStandardMaterial({color:0xe7b44c,roughness:.75});
+      const dark=new THREE.MeshStandardMaterial({color:0x293c4b,roughness:.8});
+      const light=new THREE.MeshBasicMaterial({color:0x8eeaff});
+      const box=(w,h,d,x,y,z,mat)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;crew.add(m);return m;};
+      box(.7,.75,.5,0,.85,0,armor);box(.46,.4,.43,0,1.43,0,armor);box(.4,.12,.04,0,1.46,.23,light);
+      box(.23,.55,.27,-.22,.27,0,dark);box(.23,.55,.27,.22,.27,0,dark);
+      box(.23,.6,.23,-.49,.88,0,armor);box(.23,.6,.23,.49,.88,0,armor);
+      box(.5,.48,.27,0,.94,-.4,dark);crew.userData.tool=box(.2,.18,.7,.5,.62,.3,dark);
+      const ring=new THREE.Mesh(new THREE.RingGeometry(.65,.76,24),new THREE.MeshBasicMaterial({color:0xe7b44c,side:THREE.DoubleSide,transparent:true,opacity:.65,depthWrite:false}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;crew.add(ring);
+      this._builderMesh=crew;
+    }
+    const m=this._builderMesh;if(!m.parent)this.scene.add(m);m.visible=true;
+    m.position.set(b.x,this.map.groundY(b.x,b.z)+(b.status==='Travelling'?Math.abs(Math.sin(t*9))*.06:0),b.z);
+    m.userData.tool.rotation.x=['Building','Repairing','Rebuilding','Upgrading'].includes(b.status)?Math.sin(t*14)*.2:0;
+    if(b.route[0])m.rotation.y=Math.atan2(b.route[0][0]-b.x,b.route[0][1]-b.z);
+  }
+
+  // Outline the one object the local hero can act on; presentation only.
+  _updateCombatCues() {
+    const g=this.game;
+    if(this._combatCueGame!==g) {
+      for(const mesh of this._combatCues||[]) {
+        mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();
+      }
+      this._combatCues=[];this._combatCueGame=g;
+    }
+    for(const mesh of this._combatCues)mesh.visible=false;
+    if(!g)return;
+    const vision=fogVisionSources(g),visible=(x,z)=>vision.some(v=>Math.hypot(v.x-x,v.z-z)<v.radius);
+    let index=0;
+    const cue=(x,z,r,color,opacity=.8)=>{
+      if(index>=48)return;
+      let mesh=this._combatCues[index];
+      if(!mesh) {
+        const geo=new THREE.RingGeometry(.86,1,48);geo.rotateX(-Math.PI/2);
+        mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+        this._combatCues.push(mesh);
+      }
+      if(!mesh.parent)this.scene.add(mesh);
+      mesh.visible=true;mesh.position.set(x,this.map.groundY(x,z)+.13,z);
+      mesh.scale.setScalar(r);mesh.material.color.setHex(color);mesh.material.opacity=opacity;
+      index++;
+    };
+    // Actual pending impacts, not event timers: pause/restore/Watch agree.
+    for(const enemy of g.zombies) {
+      const hit=enemy.windup;
+      if(enemy.dead||!hit||!visible(enemy.x,enemy.z)||!visible(hit.x,hit.z))continue;
+      const p=1-hit.t/hit.duration;
+      cue(hit.x,hit.z,hit.r,hit.kind==='acid'?0xdfff55:0xff7844,.95);
+      cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
+    }
+    const hero=this.myHero(),target=hero?.target;
+    if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
+      &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
+      cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
+    }
+  }
+
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
+    if(this._inspectRing)this._inspectRing.visible=false;
+    const selected=this.ui._battlePanel;
+    if(selected?.mode==='unit' && selected.game===this.game) {
+      const unit=(selected.enemy?this.game.zombies:this.game.units).find(u=>u.id===selected.id);
+      const visible=unit && !unit.dead && unit.hp>0 && (!selected.enemy || fogVisionSources(this.game).some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius));
+      if(visible) {
+        if(!this._inspectRing){
+          const geometry=new THREE.RingGeometry(.62,.73,32);geometry.rotateX(-Math.PI/2);
+          this._inspectRing=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({color:0x83e8ff,transparent:true,opacity:.9,depthWrite:false}));
+        }
+        if(!this._inspectRing.parent)this.scene.add(this._inspectRing);
+        this._inspectRing.visible=true;this._inspectRing.position.set(unit.x,this.map.groundY(unit.x,unit.z)+.1,unit.z);
+        this._inspectRing.material.color.setHex(selected.enemy?0xff7777:0x83e8ff);
+        this.tacticalVisuals.setSelection(selected.enemy?[]:[this.unitMeshes.get(unit.id)?.mesh],0x83e8ff);
+        return;
+      }
+    }
     const h = this.myHero();
     if (!this.game || !h || h.dead || this.game.phase !== 'live') {
       this.tacticalVisuals.setSelection([]);
@@ -4787,8 +4936,11 @@ class App {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
+      if (e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable)) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
       this.keys.add(k);
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
         this.ui.openGameChat();
@@ -4855,7 +5007,7 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': this.setSpeed(0); break;
-        case 'menu': this.togglePauseMenu(); break;
+        case 'menu': if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
@@ -4871,6 +5023,24 @@ class App {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       this.audio.init();
+      if(e.button!==0 || !this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden'))return;
+      const rect=cv.getBoundingClientRect(),vision=fogVisionSources(this.game);
+      let best=null,closest=26;
+      for(const [actors,enemy] of [[this.game.units,false],[this.game.zombies,true]])for(const unit of actors){
+        if(unit.dead||unit.hp<=0)continue;
+        if(enemy&&!vision.some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius))continue;
+        const world=new THREE.Vector3(unit.x,this.map.groundY(unit.x,unit.z)+(unit.hero?1.3:.9),unit.z);
+        const screen=world.clone().project(this.camera);
+        if(screen.z< -1||screen.z>1)continue;
+        const distance=Math.hypot(rect.left+(screen.x+1)*rect.width/2-e.clientX,rect.top+(1-screen.y)*rect.height/2-e.clientY);
+        if(distance<closest){closest=distance;best={unit,enemy,world};}
+      }
+      if(best){
+        // Do not select an enemy through an occluding terrain ridge.
+        const direction=best.world.clone().sub(this.camera.position),distance=direction.length();
+        const ray=new THREE.Raycaster(this.camera.position,direction.normalize(),0,distance-.2);
+        if(!best.enemy||!ray.intersectObject(this.terrain,true).length)this.ui.inspectUnit(this.game,best.unit,best.enemy);
+      } else {this.ui._battlePanel=null;}
     });
   }
 
@@ -4900,6 +5070,9 @@ class App {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
     const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    if (editing) this.keys.clear();
     if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
     if (isHeld(binds, this.keys, 'move_down')) dz += 1;
     if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
@@ -4915,11 +5088,17 @@ class App {
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
-    const buttonPays = canPay && this.buttonPay;
     const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
-    const pay = this.controlMode === 'build' && canPay && (buildHeld || buttonPays);
+    const physicalPayHeld = buildHeld || !!this.buttonPay;
+    // Eligibility can disappear after repair (a specialisation is due), then
+    // return while the same key/button remains down. Only a physical release
+    // rearms that press; lastPay alone tracks eligibility, not release.
+    if (!physicalPayHeld) this._payPressUsed = false;
+    const pay = this.controlMode === 'build' && canPay && physicalPayHeld
+      && (!this._payPressUsed || this.lastPay);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
+      if (pay) this._payPressUsed = true;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
     }
   }
@@ -5264,6 +5443,12 @@ class App {
     }
     for (const e of g.events) {
       switch (e.type) {
+        case 'groundstrike': {
+          if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
+            this._impactRing(e.x,e.z,{color:e.kind==='acid'?0xdfff55:0xff7844,radius:e.radius,life:.24});
+          }
+          break;
+        }
         case 'shot': {
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
@@ -5714,6 +5899,7 @@ class App {
       this._updateTitleSpace(t);
     }
 
+    if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
       if (!this.missionIntro) this._updateHeroInput();
       if (!this.paused && !this.game.over && !this.missionIntro) {
@@ -5735,10 +5921,12 @@ class App {
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
       this._syncUnits(t, dt);
+      this._syncBuilder(t);
       this._syncNests(t);
       this._syncLoot(t);
       this._syncPlots(t);
       this._updateTacticalSelection();
+      this._updateCombatCues();
 
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
@@ -5844,7 +6032,7 @@ class App {
       if (buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
-          if (!nt || !nt.branch) continue;
+          if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
           const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
         }
@@ -5863,15 +6051,17 @@ class App {
             const cost = Math.max(1, Math.ceil(act.cost - paid));
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const health = this.game.plotHpState(plot);
+            const hpLabel = `${Math.ceil(health.hp)} / ${Math.ceil(health.maxHp)} HP`;
+            const role = act.mode === 'repair' ? 'Restores health; keeps the current tier.' : this._plotRole(plot, nt);
             const buildKey = keyLabel(this.binds().dodge);
             const buildAltKey = keyLabel(this.binds().build);
             const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
-              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
+              ? `<div><b>${act.mode === 'repair' ? '🔧 Repairing' : act.mode === 'rebuild' ? '🏗️ Rebuilding' : plot.tier > 0 ? '⬆️ Upgrading' : '🏗️ Building'} ${name}</b> · ${act.mode === 'repair' ? hpLabel + ' · ' : ''}${cost}🪙 remaining</div><div class="buildrole">${this.game.gold < 1 ? 'No gold — work paused.' : 'Release to stop.'}</div>`
               : buildMode
-                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
-                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
+                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role}</div>`;
           }
         }
       }

@@ -253,3 +253,20 @@ Reference study (composition/material principles only):
 Cliff contour refinement incorporates the reviewed terrace-mesh changes from
 `cursor/smooth-cliff-rims-0f49` (PR #128), without importing its unrelated files.
 The navigation regression suite remains the authority on actual access.
+
+## Colony crew
+
+The shared builder is a compact amber utility rig with dark feet/backpack, a
+cyan visor, and a work tool. It is smaller than the hero and has no gun. Its
+route bob and working-tool movement reflect simulation status without changing
+collision. The procedural mesh is retained across frames and disposed on a
+new battlefield. High and Low must both keep its silhouette readable.
+## Combat intent cues
+
+A small red ring marks the hero's current automatic attack target; amber marks
+an explicit Focus attacks choice. Inspection retains its larger cyan/red ring.
+Acid impact warnings use yellow-green outlines; heavy smashes use orange.
+A growing white timing ring approaches the fixed impact boundary.
+Only show pending warnings within allied vision, in both High and Low. Render
+from simulation windup state rather than a presentation event timer, and pool
+up to 48 cue meshes to bound cost. Dispose the pool when the game changes.

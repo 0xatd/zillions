@@ -11,13 +11,22 @@ import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 
 export function stateHash(g) {
   let h = 7;
+  if(g.builders) h = (h * 31 + hashString(JSON.stringify(g.builders))) | 0;
   h = (h * 31 + Math.round(g.gold)) | 0;
   h = (h * 31 + g.coins.length) | 0;
   h = (h * 31 + g.zombies.length) | 0;
   h = (h * 31 + g.units.length) | 0;
   h = (h * 31 + g.buildings.length) | 0;
   h = (h * 31 + g.stats.kills) | 0;
+  for (const enemy of g.zombies) {
+    const w=enemy.windup;
+    if(w) {
+      h=(h*31+hashString(w.kind))|0;
+      for(const v of [enemy.id,w.x,w.z,w.r,w.t,w.duration,w.damage])h=(h*31+Math.round(v*1000))|0;
+    }
+  }
   for (const hr of g.heroes) {
+    h=(h*31+(hr.focusId??0))|0;
     h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;
     // Gear and the Lattice reach the hash too. Two peers holding different

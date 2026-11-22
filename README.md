@@ -228,6 +228,9 @@ which reads the same table the game dispatches through.
 | Esc | Open the game menu |
 
 Movement is not camera-relative. W always moves north on the minimap.
+Click/tap a unit to inspect it. An in-range enemy offers **Focus attacks**
+for your hero only; **Clear attack focus** restores automatic targeting.
+Inspection alone never changes orders. Use **Items** to read carried gear.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
@@ -361,3 +364,11 @@ See [the art quality standard](docs/art-quality-standard.md).
 
 Colony streets connect the keep courtyard, gates and district frontages around
 fully built footprints. Terrain barriers and each map's unique perimeter remain.
+
+### Builder orders
+
+After founding, open **Builders** beside the battlefield controls to select
+Maintain, Develop, Expand, Fortify, Prosper or Mobilize. Pause and a protected
+gold reserve keep spending explicit. Tower/wall preferences authorise crew
+specialisations; Ask me leaves those choices manual. See
+[Builder orders](docs/builder-orders.md).

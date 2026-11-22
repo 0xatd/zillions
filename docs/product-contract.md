@@ -40,8 +40,10 @@ Use continuous siege on a lane graph as the gameplay base:
   income upgrades should pay back inside a few minutes of siege.
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; ground coins come from combat and conquest.
-- Nothing repairs itself — damage and ruins are paid for with the same
-  hold-to-build verb.
+- Damage and ruins use the same hold-to-build input with distinct Repair and
+  Rebuild actions. Repair takes priority over upgrades; completing a repair
+  requires a fresh press before upgrading. Paid support infrastructure may
+  repair nearby structures; ruins still require rebuilding.
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
 - Living allied heroes and troops reveal the battlefield around them. Ground
@@ -329,3 +331,40 @@ Play Online or Custom Games.
 - Do not expose `assets.html` from the game screen.
 - Do not add fake room rows, fake players, fake stats, or fake account labels.
 - Update this document when the product target changes.
+
+## Perimeter and inspection clarification
+
+Main bases and fortified road outposts require one coherent terrain/wall/gate
+perimeter at every tier. Deliberately open satellite positions are not forts.
+Tower placement must protect entrances while leaving troop routes clear.
+Clicking a unit inspects it; it never grants individual-unit commands. Carried
+items must be readable by click/tap, not hover alone.
+
+## Builder orders
+
+A visible shared colony crew can carry out Maintain, Develop, Expand, Fortify,
+Prosper or Mobilize orders. Host-controlled policy, pause and a protected gold
+reserve replace individual worker micro. Manual construction remains available
+and takes precedence. The crew uses existing planned plots and paid actions;
+it does not claim territory, fight or create a separate economy. See
+[Builder orders](builder-orders.md) for spending, specialisations and recovery.
+## Hero-led combat controls
+
+Inspection remains read-only until the player explicitly chooses **Focus
+attacks** in an enemy's details. Focus only prioritizes that enemy for the local
+hero while it remains within weapon range and personal vision (19 tiles).
+It does not move the hero or command troops. **Clear attack focus** returns to
+automatic targeting. Death or lost range clears focus automatically.
+
+Spitters telegraph an interruptible acid impact at a fixed ground position
+before damaging units; brutes wind up a short ground smash. Moving out of the
+ring or stunning/killing the attacker avoids the pending strike. The nearest
+impact victim takes full damage; other victims share a splash budget of 25%
+of that hit, so crowded autonomous troops do not multiply its damage. Existing
+spitter attacks against structures retain their siege behavior. Warning rings
+come from pending simulation state, so pause, saves and Watch preserve them.
+
+Nearby living heroes already share XP from allied kills; distant heroes do not
+receive remote kill XP. Gold remains collectible on the ground, and signed-in
+progression remains server-owned. There is no last-hit requirement or new
+client-side reward authority.

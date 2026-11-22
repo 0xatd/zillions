@@ -13,7 +13,7 @@ for(const site of [0,1])test(`site ${site}: a legacy colony save cannot silently
   game._construct(camp,true);
   const saved=game.snapshot();
   const original=JSON.stringify(saved);
-  for(const v of [5,6,7]) {
+  for(const v of [5,6,7,10,11]) {
     const legacy={...saved,v};
     assert.throws(()=>new Game(map(),'normal','scott',legacy,5),/older colony layout/);
   }

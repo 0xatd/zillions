@@ -25,6 +25,7 @@ import {
   LABYRINTH_LIVES, BLESSING_KEYS,
   cultureKey, unitDefFor,
 } from './config.js';
+import {createBuilders, updateBuilders, builderCommand} from './builders.js';
 import { FlowField } from './flowfield.js';
 import { generatePlots } from './plots.js';
 import { buildLaneGraph, nodeRoute, reachableFrom, routeWaypoints } from './lanes.js';
@@ -75,8 +76,8 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-// v10: gate-bound tower positions; plot IDs are positional.
-export const SNAPSHOT_VERSION = 10;
+// v12: colony crew, corrected escort routing and committed combat windups.
+export const SNAPSHOT_VERSION = 12;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
 export class Game {
@@ -150,6 +151,7 @@ export class Game {
     this.laneGraph = null;
     this.cityGi = -1;
 
+    this.builders = null;
     this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
     this.threat = 0;             // the clock that replaced nightfall
@@ -226,6 +228,7 @@ export class Game {
       gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
+      builders: this.builders ? JSON.parse(JSON.stringify(this.builders)) : null,
       firstSiege: this.firstSiege ? {
         stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
         waveIds: [...this.firstSiege.waveIds], reward: this.firstSiege.reward,
@@ -306,6 +309,7 @@ export class Game {
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
         mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
         coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
+        focusId: h.focusId ?? null,
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
@@ -331,6 +335,7 @@ export class Game {
       zombies: this.zombies.map((z) => [z.type, snapNum(z.x), snapNum(z.z), snapNum(z.hp), z.state, z.wave ? 1 : 0, z.boss ? 1 : 0, z.enraged ? 1 : 0, {
         id: z.id, dx: snapNum(z.dirX || 0), dz: snapNum(z.dirZ || 0),
         timer: snapNum(z.timer || 0), atk: snapNum(z.atkT || 0),
+        windup: z.windup ? { ...z.windup } : null,
         targetU: z.targetU ? z.targetU.id : null, anim: snapNum(z.phase || 0), hit: snapNum(z.hitFlash || 0),
         stun: snapNum(z.stunT || 0), slow: snapNum(z.slowT || 0), slowMul: snapNum(z.slowMul || 1),
         progress: snapNum(z.progressT || 0), px: snapNum(z.px || 0), pz: snapNum(z.pz || 0),
@@ -355,6 +360,7 @@ export class Game {
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
+    this.builders = this.mode !== 'labyrinth' && snap.builders ? JSON.parse(JSON.stringify(snap.builders)) : null;
     this.firstSiege = snap.firstSiege ? {
       stage: snap.firstSiege.stage || 'opening', nestId: snap.firstSiege.nestId ?? null,
       waveIds: [...(snap.firstSiege.waveIds || [])], reward: snap.firstSiege.reward || FIRST_SIEGE_REWARD,
@@ -523,6 +529,7 @@ export class Game {
       h.abilCd = hs.cd || 0;
       h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
       h.cooldown = hs.atkCd || 0;
+      h.focusId = hs.focusId ?? null;
       h.retargetT = hs.rt || 0;
       h.facing = hs.facing || 0;
       h.mx = hs.mx || 0;
@@ -566,6 +573,7 @@ export class Game {
       if (meta.maxHp) zb.maxHp = meta.maxHp;
       zb.dirX = meta.dx || 0; zb.dirZ = meta.dz || 0;
       zb.timer = meta.timer || 0; zb.atkT = meta.atk || 0;
+      zb.windup = meta.windup ? { ...meta.windup } : null;
       zb.phase = meta.anim || 0; zb.hitFlash = meta.hit || 0;
       zb.stunT = meta.stun || 0; zb.slowT = meta.slow || 0; zb.slowMul = meta.slowMul || 1;
       zb.progressT = meta.progress || 0; zb.px = meta.px || 0; zb.pz = meta.pz || 0;
@@ -832,6 +840,7 @@ export class Game {
       } else { h.x = this.hq.cx; h.z = this.hq.cz; this._ejectActor(h, this.hq); }
     });
     this.phase = 'live';
+    if (this.mode !== 'labyrinth') this.builders = createBuilders(this);
     if (this.firstSiege) {
       const reachable = this.nests.filter((n) => n.alive && !n.offMap);
       const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
@@ -1146,13 +1155,13 @@ export class Game {
       const cost = Math.max(1, Math.ceil(def.cost * SIEGE.rebuildDiscount * share));
       return { mode: 'rebuild', cost, def, label: `Rebuild ${def.name}` };
     }
-    const nt = this.nextTier(plot);
-    if (nt) return nt.branch ? { mode: 'branch', nt } : { mode: 'build', cost: nt.cost, nt, def: nt.def, label: nt.def.name };
     const state = this.plotHpState(plot);
     if (state.maxHp > 0 && state.hp < state.maxHp - 0.5) {
       const cost = Math.max(1, Math.ceil((state.maxHp - state.hp) / SIEGE.repairHpPerGold));
-      return { mode: 'repair', cost, label: 'Repair' };
+      return { mode: 'repair', cost, label: 'Repair', hp: state.hp, maxHp: state.maxHp };
     }
+    const nt = this.nextTier(plot);
+    if (nt) return nt.branch ? { mode: 'branch', nt } : { mode: 'build', cost: nt.cost, nt, def: nt.def, label: nt.def.name };
     return null;
   }
 
@@ -1207,8 +1216,18 @@ export class Game {
       plot.payFx = 0.3; // renderer hint
 
       if (act.mode === 'repair') {
+        // Resolve fellow payers before healing changes target eligibility.
+        // A branch-only plot disappears from buildTargetFor after repair.
+        const repairers = this.heroes.filter(hero => hero === h
+          || (hero.payHold && this.buildTargetFor(hero)?.plot.id === plot.id));
         this._repairPlot(plot, pay * SIEGE.repairHpPerGold);
         this.stats.repaired += pay;
+        // One hold completes one action. Never spend on the upgrade that
+        // becomes available after repairing; require release and press again.
+        if (this.plotAction(plot)?.mode !== 'repair') {
+          for (const hero of repairers) hero.payHold = false;
+          this.msg('Repair complete — release the build key before upgrading.', 'info');
+        }
         continue;
       }
       plot.paid += pay;
@@ -1216,6 +1235,7 @@ export class Game {
         plot.paid = 0;
         if (act.mode === 'rebuild') this._rebuildPlot(plot);
         else this._construct(plot);
+        h.payHold = false;
       } else if (this.gold <= 1e-6) {
         // Thronefall rule: an incomplete purchase is not a savings account.
         // If the purse runs dry, cancel this hold and send every committed coin
@@ -1252,8 +1272,19 @@ export class Game {
   _repairPlot(plot, hp) {
     const damaged = this.buildings.filter((b) => b.plotId === plot.id && b.alive && b.hp < b.maxHp);
     if (!damaged.length) return;
-    const each = hp / damaged.length;
-    for (const b of damaged) b.hp = Math.min(b.maxHp, b.hp + each);
+    // Distribute the purchased HP without losing it to nearly-full sections.
+    // Stable building order keeps co-op deterministic.
+    let remaining = hp;
+    let pending = damaged;
+    while (pending.length && remaining > 1e-8) {
+      const each = remaining / pending.length;
+      for (const b of pending) {
+        const restored = Math.min(b.maxHp - b.hp, each);
+        b.hp += restored;
+        remaining -= restored;
+      }
+      pending = pending.filter(b => b.hp < b.maxHp - 1e-8);
+    }
     this.emit({ type: 'repair', x: plot.cx, z: plot.cz });
   }
 
@@ -1364,7 +1395,9 @@ export class Game {
     // plot, so the new walls must not entomb you.
     // The horde too: a creep left inside a fresh wall tile, or sealed in a
     // nook by it, can never walk again (playthrough check, QA 2026-10-27).
-    const actors = this.zombies.length ? [...this.units, ...this.zombies] : this.units;
+    const actors = this.builders && this.builders.hp > 0 && !this.builders.recover
+      ? [...this.units, ...this.zombies, this.builders]
+      : this.zombies.length ? [...this.units, ...this.zombies] : this.units;
     for (const u of actors) {
       if (u.dead) continue;
       const ux = u.x | 0, uz = u.z | 0;
@@ -1426,6 +1459,9 @@ export class Game {
   // when given, is the actor's known sealed-off reachable set: candidates
   // inside it are skipped, since hopping there would just be the same trap.
   _ejectActor(u, cx, cz, pocket = null) {
+    // A manually placed foundation can cover even a paused crew. Reuse the
+    // same safe placement as troops, but discard travel from its old position.
+    if (u === this.builders) { u.route = []; u.replan = 0; }
     const N = this.map.size;
     let fallback = null;
     for (let r = 1; r < 24; r++) {
@@ -2299,7 +2335,7 @@ export class Game {
       return true;
     }
     if (zombie) this._moveZombie(actor, dx / d, dz / d, speed, dt, true);
-    else if (!this._moveActor(actor, dx / d, dz / d, speed, dt, wx, wz)
+    else if (!this._moveActor(actor, dx / d, dz / d, speed, dt, wx, wz, true)
       && Math.hypot(wx - actor.x, wz - actor.z) < 4.5) {
       // The waypoint (or our formation slot beside it) sits in a building or
       // on rock: close enough — take the next leg instead of grinding.
@@ -2869,6 +2905,24 @@ export class Game {
     this.msg(`⭐ ${h.def.name} upgraded ${choice ? `${choice.icon} ${choice.name}` : key} to rank ${h.upgrades[key]}.`, 'info');
   }
 
+  // Optional hero-only attack priority. Inspection never issues this command.
+  // The hero does not chase: movement remains entirely player controlled.
+  canFocusEnemy(h, enemy) {
+    return !!h && !h.dead && !!enemy && !enemy.dead && enemy.hp > 0
+      && dist2(h.x,h.z,enemy.x,enemy.z) < 19 ** 2
+      && dist2(h.x,h.z,enemy.x,enemy.z) <= this.heroRange(h) ** 2;
+  }
+
+  focusEnemy(player, id) {
+    const h=this.heroes[player];
+    if(!h || h.dead || !Number.isInteger(player))return;
+    if(id===null){h.focusId=null;h.retargetT=0;return;}
+    if(!Number.isInteger(id))return;
+    const enemy=this.zombies.find(z=>z.id===id);
+    if(!this.canFocusEnemy(h,enemy))return;
+    h.focusId=id;h.target=enemy;h.targetNest=null;h.retargetT=0;
+  }
+
   // Central command entry point — local input and remote co-op players both go
   // through here, so the sim stays deterministic under lockstep.
   exec(c) {
@@ -2880,12 +2934,14 @@ export class Game {
         break;
       }
       case 'cast': this.castAbility(c.p || 0); break;
+      case 'focus': this.focusEnemy(c.p ?? 0, c.id); break;
       case 'pay': { // hold-to-build: the build key is down/up
         const h = this.heroes[c.p || 0];
         if (h) h.payHold = !!c.on;
         break;
       }
       case 'heroUpgrade': this.upgradeHero(c.p || 0, c.key); break;
+      case 'builderOrder': case 'builderPause': case 'builderReserve': case 'builderDoctrine': builderCommand(this,c); break;
       case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
@@ -3202,10 +3258,11 @@ export class Game {
   }
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
-  _moveActor(a, dx, dz, speed, dt, gx = null, gz = null) {
+  _moveActor(a, dx, dz, speed, dt, gx = null, gz = null, laneWaypoint = false) {
     const step = speed * dt;
     // If somehow inside a building footprint, any walkable step out is legal.
-    const trapped = this.occ[(a.z | 0) * this.map.size + (a.x | 0)] > 0
+    const occupied = this.occ[(a.z | 0) * this.map.size + (a.x | 0)];
+    const trapped = (occupied > 0 && !this.gateIds.has(occupied))
       || !this.map.isWalkable(a.x | 0, a.z | 0);
     const pass = (x, z) => {
       if (!this.map.isWalkable(x | 0, z | 0)) return false;
@@ -3213,6 +3270,13 @@ export class Game {
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       return id === 0 || this.gateIds.has(id);
     };
+    // Hero input keeps the grid corner rule. Off-centre squads follow smooth
+    // field headings: check their actual swept segment, not only its endpoint
+    // (corner tunneling) or both side cells (rejects legal turns and stalls).
+    const canStep = (x,z) => pass(x,z) && (a.hero
+      ? ((x|0)===(a.x|0) || (z|0)===(a.z|0) || (pass(x,a.z) && pass(a.x,z)))
+      : segOpen(a.x,a.z,x,z,(tx,tz)=>pass(tx+.5,tz+.5))
+    );
     // Standing in rock or inside a footprint (a wall raised on top of us, a
     // doorstep on a cliff lip): walk straight to the nearest open tile first.
     // Sliding about inside the footprint used to pin squads in wall tiles.
@@ -3224,28 +3288,29 @@ export class Game {
       }
     }
     const nx = a.x + dx * step, nz = a.z + dz * step;
-    // A goal outside the planner's window (a lane node across the map) gets
-    // the whole-map field; the windowed one cannot see us and returned
-    // nothing, leaving the direct step and the local detour to undo each
-    // other every tick in a cliff notch (playthrough check, Greenfall).
-    const far = gx != null && Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34;
-    // Heading somewhere known with a house or crag across the next few
-    // tiles of the straight line: take the field's way round from the start.
-    // Stepping straight first and correcting next tick made squads shuttle
-    // between the two headings in a notch (playthrough check, 2026-10).
+    // A nearby goal can still require a detour outside the local window.
+    // A failed local flood is not proof that no route exists. Share the cached
+    // whole-map field in that case (Widow Bluff escort across the cliff).
+    const far = gx != null && (Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34
+      || (!a.hero && this._fieldReach(a, gx, gz) < 0));
+    // Keep the planned detour until the entire direct line is clear. Looking
+    // only six tiles ahead made a returning escort turn toward the cliff again
+    // as soon as it stepped away from it, endlessly undoing its own detour.
     if (gx != null && !a.hero && !trapped) {
-      const L = Math.hypot(gx - a.x, gz - a.z), M = Math.min(L, 6);
+      // A lane route already supplies intermediate waypoints. Its formation
+      // slot is not the route destination; keep the established local steering.
+      const L = Math.hypot(gx - a.x, gz - a.z), M = laneWaypoint ? Math.min(L, 6) : L;
       const open = L < 1e-3 || segOpen(a.x, a.z, a.x + (gx - a.x) / L * M, a.z + (gz - a.z) / L * M,
         (x, z) => pass(x + 0.5, z + 0.5));
-      if (!open) {
+      if (!open || far) {
         const fd = this._fieldDir(a, gx, gz, far);
         if (fd) {
           const ex = a.x + fd[0] * step, ez = a.z + fd[1] * step;
-          if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+          if (canStep(ex, ez)) { a.x = ex; a.z = ez; return true; }
         }
       }
     }
-    if (pass(nx, nz)) { a.x = nx; a.z = nz; return true; }
+    if (canStep(nx, nz)) { a.x = nx; a.z = nz; return true; }
     // Everyone but a player-steered hero first plans a short way round
     // (a building corner, a cliff notch, a hold point on the far side of a
     // house) — plain axis-sliding there flip-flops against the detour.
@@ -3257,7 +3322,7 @@ export class Game {
         || this._detour(a.x, a.z, dx, dz, (x, z) => pass(x + 0.5, z + 0.5));
       if (det) {
         const ex = a.x + det[0] * step, ez = a.z + det[1] * step;
-        if (pass(ex, ez)) { a.x = ex; a.z = ez; return true; }
+        if (canStep(ex, ez)) { a.x = ex; a.z = ez; return true; }
       }
     }
     // Slide along the obstacle — only on an axis we really move along; a
@@ -3866,6 +3931,7 @@ export class Game {
     this._updateSiege(dt);
     if (this.over) return;
     this._updatePlots(dt);
+    updateBuilders(this,dt);
     this._updateCamps(dt);
     this._updateSupport(dt);
     this._updateCoins();
@@ -4051,7 +4117,11 @@ export class Game {
 
       if (zb.boss) this._updateBoss(zb, dt);
 
-      if (zb.stunT > 0) { zb.stunT -= dt; continue; }
+      if (zb.stunT > 0) { zb.stunT -= dt; zb.windup=null; continue; }
+      if (zb.windup) {
+        this._resolveEnemyWindup(zb,dt);
+        continue;
+      }
       let speedMul = 1 + (zb.frenzy ? (zb.def.call ? 0 : 0.3) : 0);
       if (zb.slowT > 0) { zb.slowT -= dt; speedMul *= zb.slowMul; }
       zb.speedMul = speedMul;
@@ -4152,8 +4222,16 @@ export class Game {
             zb.atkT = cd;
             // Thorns only reflects real melee contact (a bite), not a spitter's
             // ranged acid from outside the fight.
-            this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
-            this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
+            if(!zb.boss && (zb.type==='brute' || zb.type==='spitter')) {
+              // Commit to a ground point before the hit, allowing a dodge or
+              // stun to change the outcome. Cooldown still starts at commitment.
+              const duration = range ? 0.8 : 0.6;
+              zb.windup={x:u.x,z:u.z,r:range?1.25:1.4,t:duration,duration,
+                damage:zb.def.dmg*dmgMul,kind:range?'acid':'slam'};
+            } else {
+              this._damageUnit(u, zb.def.dmg * dmgMul, range ? null : zb);
+              this.emit({ type: range ? 'spit' : 'bite', fromId: zb.id, fx: zb.x, fz: zb.z, tx: u.x, tz: u.z, x: u.x, z: u.z, targetScale: u.hero ? 1.18 : 1 });
+            }
           }
         } else {
           const px = zb.x, pz = zb.z, pa = zb.atkT;
@@ -4199,6 +4277,31 @@ export class Game {
         }
       }
     }
+  }
+
+  _resolveEnemyWindup(zb, dt) {
+    const hit=zb.windup;
+    hit.t-=dt;
+    if(hit.t>1e-8)return;
+    zb.windup=null;
+    const groundOpen=(x,z)=>{
+      const id=this.occ[z*this.map.size+x];
+      return this.map.isWalkable(x,z)&&(!id||this.gateIds.has(id));
+    };
+    // A melee smash cannot land through a wall raised during its windup or
+    // across a blocked diagonal corner. Acid is an intentional arcing lob.
+    if(hit.kind==='slam'&&!segOpen(zb.x,zb.z,hit.x,hit.z,groundOpen))return;
+    const victims=this.units.filter(u=>{
+      if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)return false;
+      // Fixed ground impact cannot pass through a cliff or an intact wall.
+      return segOpen(hit.x,hit.z,u.x,u.z,groundOpen);
+    }).sort((a,b)=>dist2(a.x,a.z,hit.x,hit.z)-dist2(b.x,b.z,hit.x,hit.z)||a.id-b.id);
+    // Full damage at the impact centre; the surrounding splash shares one
+    // small budget. A crowded gate must not multiply one brute's damage by
+    // the number of troops, since autonomous squads cannot dodge individually.
+    const splash=victims.length>1?hit.damage*.25/(victims.length-1):0;
+    victims.forEach((u,index)=>this._damageUnit(u,index===0?hit.damage:splash,hit.kind==='slam'?zb:null));
+    this.emit({type:'groundstrike',kind:hit.kind,x:hit.x,z:hit.z,radius:hit.r,fromId:zb.id});
   }
 
   // Spitter: hits structures from outside their reach, so turtling is not a
@@ -4264,8 +4367,9 @@ export class Game {
     const nz = zb.z + dz * speed * dt;
     const tx = nx | 0, tz = nz | 0;
     const occId = this.occ[tz * this.map.size + tx];
-    // Burrowers tunnel: barriers simply are not there for them.
-    if (occId > 0 && zb.def.burrow) {
+    // Burrowers bypass barriers, not economic/production buildings. Tunneling
+    // into a building source left them circling its zero-distance flow tiles.
+    if (occId > 0 && zb.def.burrow && this.buildings.find(b => b.id === occId)?.kind === 'wall') {
       if (this.map.isWalkable(tx, tz)) { zb.x = nx; zb.z = nz; zb.dirX = dx; zb.dirZ = dz; }
       return;
     }
@@ -4382,7 +4486,12 @@ export class Game {
       // between worlds: no gunfire until the threads release him.
       if (u.hero && u.swapCd > 0) u.swapCd = Math.max(0, u.swapCd - dt);
       if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
-      if (u.retargetT <= 0 || (u.target && u.target.dead)) {
+      let focus=null;
+      if(u.hero && u.focusId!=null) {
+        focus=this.zombies.find(z=>z.id===u.focusId);
+        if(!this.canFocusEnemy(u,focus)){u.focusId=null;focus=null;u.retargetT=0;}
+      }
+      if (u.retargetT <= 0 || (u.target && u.target.dead) || (u.hero && !u.target && !u.targetNest)) {
         u.retargetT = 0.25;
         // Pushing troops HUNT (see far beyond weapon range); everyone else
         // only engages what wanders into range.
@@ -4419,6 +4528,7 @@ export class Game {
           u.target = null;
         }
       }
+      if(focus){u.target=focus;u.targetNest=null;}
       // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
       // squad troops too), not just heroes self-buffing.
       const rofMult = (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);
@@ -4513,7 +4623,7 @@ export class Game {
           // The hive is behind our own wall — route to it, don't grind at it.
           u.targetNest = null;
         } else {
-          u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, n.x, n.z);
+          u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, n.x, n.z, true);
           u.facing = Math.atan2(dx, dz);
         }
       } else u.moving = false;
@@ -4606,7 +4716,7 @@ export class Game {
       const d = Math.hypot(dx, dz);
       if (d > 3.5 && !(Math.hypot(tx - u.x, tz - u.z) < 7 && this._fieldReach(u, tx + ox, tz + oz) === -1)) {
         // A formation slot on rock or inside a building: hold where we are.
-        u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, tx + ox, tz + oz);
+        u.moving = this._moveActor(u, dx / d, dz / d, u.def.speed, dt, tx + ox, tz + oz, true);
         u.facing = Math.atan2(dx, dz);
         if (u.moving || Math.hypot(tx - u.x, tz - u.z) > 8) return;
       }

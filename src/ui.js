@@ -11,6 +11,7 @@ import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS, CULTURE_ARMIES, cultureKey,
 } from './config.js';
+import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
@@ -86,6 +87,20 @@ export class UI {
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
+      <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
+        <button id="battle-details-close" aria-label="Close details">×</button>
+        <div id="battle-details-content"></div>
+      </aside>
+      <section id="builder-controls" class="builder-controls hidden" aria-label="Builder orders">
+        <button id="builder-toggle" aria-expanded="false">Builders</button><span id="builder-status"></span>
+        <div id="builder-options" class="hidden">
+          <label>Order <select id="builder-order">${Object.entries(BUILDER_ORDERS).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label>
+          <button id="builder-pause">Resume</button>
+          <label>Keep gold <input id="builder-reserve" type="number" min="0" max="1000" step="5" value="10"></label>
+          <label>Towers <select id="builder-tower"><option value="ask">Ask me</option><option value="ballista">Long range</option><option value="flame">Anti-horde</option></select></label>
+          <label>Walls <select id="builder-wall"><option value="ask">Ask me</option><option value="bastion">Armor</option><option value="shock">Shock</option></select></label><p id="builder-help"></p>
+        </div>
+      </section>
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -493,6 +508,18 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
+    q('#battle-details-content').onclick = event => {
+      const button=event.target.closest('[data-focus-enemy]');
+      if(button && !button.disabled)this.cb.onFocusEnemy?.(button.dataset.focusEnemy==='clear'?null:Number(button.dataset.focusEnemy));
+    };
+    q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
+    q('#builder-toggle').onclick = () => {const open=q('#builder-options').classList.toggle('hidden')===false;q('#builder-toggle').setAttribute('aria-expanded',String(open));};
+    q('#builder-order').onchange = e => this.cb.onBuilder?.({t:'builderOrder',s:e.target.value});
+    for(const kind of ['tower','wall'])q('#builder-'+kind).onchange=e=>this.cb.onBuilder?.({t:'builderDoctrine',kind,branch:e.target.value});
+    q('#builder-pause').onclick = () => this.cb.onBuilder?.({t:'builderPause',on:!this._builderPaused});
+    q('#builder-reserve').onchange = e => {const gold=Number(e.target.value);if(Number.isInteger(gold)&&gold>=0&&gold<=1000)this.cb.onBuilder?.({t:'builderReserve',gold});};
+    q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
+    q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
@@ -943,6 +970,9 @@ export class UI {
   }
 
   _showScreen(name) {
+    this._battlePanel = null;
+    this.root.querySelector('#builder-controls').classList.add('hidden');
+    this.root.querySelector('#battle-details').classList.add('hidden');
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
@@ -2406,6 +2436,9 @@ export class UI {
   _buildLevelRow(cleared, allUnlocked = false, mode = 'campaign') {
     this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
+    // showEnd replaces the setup overlay before the server receipt arrives.
+    // Keep campaign state, but render the roster only when setup exists again.
+    if (!row) return;
     row.innerHTML = '';
     const labyrinth = mode === 'labyrinth';
     // The war, in one line: Earth first, then the stars — and every world you
@@ -2617,7 +2650,55 @@ export class UI {
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
   }
 
+  inspectUnit(game, unit, enemy = false) {
+    this._battlePanel = {mode:'unit',game,id:unit.id,enemy};
+  }
+
+  _updateBattleDetails(game, player) {
+    const panel=this.root.querySelector('#battle-details'),body=this.root.querySelector('#battle-details-content');
+    const selection=this._battlePanel;
+    if(!selection){panel.classList.add('hidden');return;}
+    let html='';
+    if(selection.mode==='items') {
+      const hero=game.heroes[player];
+      const rows=keys=>keys.map(key=>{const item=itemInfo(key);return item ? `<article class="battle-item"><b>${escapeHtml(item.icon||'')} ${escapeHtml(item.name)}</b><p>${escapeHtml(item.desc||itemLines(item).join(' · '))}</p></article>`:'';}).join('');
+      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows([...new Set([...(hero?.items||[]),...Object.values(hero?.equipment||{}).filter(Boolean)])])||'<p>No additional gear equipped.</p>'}`;
+    } else {
+      const unit=(selection.enemy?game.zombies:game.units).find(u=>u.id===selection.id);
+      const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
+      if(selection.game!==game||!unit||unit.dead||unit.hp<=0||!visible){this._battlePanel=null;panel.classList.add('hidden');return;}
+      const def=unit.def||{},stats=unit.hero?game.heroStats(unit):null;
+      const activity=unit.windup?(unit.windup.kind==='acid'?'Aiming acid — move out of the ring':'Winding up a smash — move or interrupt'):unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
+      const hp=Math.max(0,Math.ceil(unit.hp)),max=Math.ceil(unit.maxHp);
+      html=`<h3>${escapeHtml(def.name||(unit.type?unit.type[0].toUpperCase()+unit.type.slice(1):'Unit'))}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.ranged??def.range??.75).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??(selection.enemy?def.chase:def.speed)??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
+    }
+    if(selection.mode==='unit' && selection.enemy) {
+      const hero=game.heroes[player],enemy=game.zombies.find(z=>z.id===selection.id);
+      const focused=hero?.focusId===enemy?.id,canFocus=game.canFocusEnemy(hero,enemy);
+      const focusAction=`<button class="focus-enemy" data-focus-enemy="${focused?'clear':enemy?.id}" ${!focused&&!canFocus?'disabled':''}>${focused?'Clear attack focus':'Focus attacks'}</button><p>${focused?'Your hero prioritizes this enemy.':canFocus?'Prioritize this enemy; movement stays manual.':'Move your hero into weapon range to focus.'}</p>`;
+      html=html.replace('<dl>',focusAction+'<dl>');
+    }
+    panel.classList.remove('hidden');
+    if(body.innerHTML!==html)body.innerHTML=html;
+  }
+
   update(game, p = 0, controls = {}) {
+    if(this._battleGame!==game){this._battleGame=game;this._battlePanel=null;}
+    this._updateBattleDetails(game,p);
+    const builder=this.root.querySelector('#builder-controls'),b=game.builders;
+    builder.classList.toggle('hidden',!b||game.mode==='labyrinth'||game.over||!!this._battlePanel);
+    if(b){
+      this._builderPaused=b.paused;
+      this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
+      this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
+      const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
+      if(document.activeElement!==order)order.value=b.order;
+      if(document.activeElement!==reserve)reserve.value=b.reserve;
+      for(const control of [order,reserve,pause])control.disabled=p!==0;
+      pause.textContent=b.paused?'Resume':'Pause';
+      for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+    }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
@@ -2723,17 +2804,8 @@ export class UI {
       const packKey = (h.pack || []).join(',');
       if (this._packKey !== packKey) {
         this._packKey = packKey;
-        const slots = [];
-        for (let i = 0; i < PACK_SLOTS; i++) {
-          const key = (h.pack || [])[i];
-          const it = key ? itemInfo(key) : null;
-          slots.push(it
-            ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
-            : '<span class="pslot"></span>');
-        }
         const full = (h.pack || []).length >= PACK_SLOTS;
-        q('#a-pack').innerHTML = slots.join('')
-          + `<span class="pkey${full ? ' urgent' : ''}">${full ? 'FULL · G drops' : 'G drops'}</span>`;
+        q('#a-pack').innerHTML = `<button class="pack-open${full ? ' full' : ''}" aria-label="View carried items">Items · Pack ${(h.pack || []).length}/${PACK_SLOTS}${full ? ' FULL' : ''}</button>`;
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;
