@@ -127,3 +127,20 @@ test('Expand physically completes the selected forward perimeter and defenders b
  assert.ok(secondDefenses.every(p=>p.tier===0),'another safe fort must wait until selected defenses finish');
  assert.ok(b.completed>=firstDefenses.length);assert.ok(g.gold<2000&&g.gold>=b.reserve);
 });
+test('Maintain rebuilds a safe previously built fort without recalling its escort',()=>{
+ const g=fresh(),b=g.builders,fort=g.plots.find(p=>p.role==='outer'),same=p=>p.keep?.[0]===fort.keep[0]&&p.keep?.[1]===fort.keep[1];
+ const defenses=g.plots.filter(p=>same(p)&&(p.kind==='wall'||p.outerDefense!=null));
+ for(const p of defenses)g._construct(p,true);
+ const wall=defenses.find(p=>p.kind==='wall'),section=g.buildings.find(x=>x.plotId===wall.id);
+ g._damageBuilding(section,section.maxHp+1);g.buildings=g.buildings.filter(x=>x.alive);
+ assert.equal(wall.ruined,true);assert.ok(g.units.every(u=>Math.hypot(u.x-wall.cx,u.z-wall.cz)>=12));
+ order(g,'maintain');assert.ok(builderCandidates(g,b).choices.some(c=>c.p.id===wall.id),'safe owned ruin remains a maintenance job without an escort');
+ for(let i=0;i<12000&&wall.ruined;i++)ticks(g,1);
+ assert.equal(wall.ruined,false,'crew must travel and complete the rebuild without cancelling its job');
+ // Repair eligibility does not turn an unfinished new fort into an established
+ // holding or permit unsafe work through active enemy pressure.
+ const other=g.plots.find(p=>p.role==='outer'&&!same(p));
+ order(g,'develop');assert.ok(!builderCandidates(g,b).choices.some(c=>c.p.id===other.id));
+ const rebuilt=g.buildings.find(x=>x.plotId===wall.id);g._damageBuilding(rebuilt,rebuilt.maxHp+1);g.buildings=g.buildings.filter(x=>x.alive);
+ g.zombies=[{x:wall.cx,z:wall.cz,hp:100,dead:false}];order(g,'maintain');assert.ok(!builderCandidates(g,b).choices.some(c=>c.p.id===wall.id),'hostile work site remains unsafe');
+});

@@ -29,6 +29,9 @@ function established(g,p){
  if(!p.keep)return false;
  return g.plots.filter(q=>q.keep?.[0]===p.keep[0]&&q.keep?.[1]===p.keep[1]&&(q.kind==='wall'||q.outerDefense!=null)).every(q=>q.tier>0&&!q.ruined);
 }
+// Existing paid structures stay maintainable after a breach; a ruined wall
+// must not turn safe owned property back into an unclaimed expansion.
+function maintenance(p,a) {return p.tier>0&&(a?.mode==='repair'||a?.mode==='rebuild');}
 function frontierSafe(g,p) {
  if(p.nodeId!=null)return g.nodes[p.nodeId]?.owner==='player';
  return g.units.some(u=>!u.dead&&u.hp>0&&Math.hypot(u.x-p.cx,u.z-p.cz)<12);
@@ -48,7 +51,7 @@ export function builderCandidates(g,b) {
   if(!g.firstSiegePlotActionable(p))continue;
   const a=crewAction(g,p,b.branches?.[p.kind]);if(!a)continue;if(a.mode==='branch'){branches=true;continue;}
   const inBase=local(g,p),inHolding=inBase||established(g,p),damage=a.mode==='repair'||a.mode==='rebuild';
-  if(!inHolding&&!frontierSafe(g,p))continue;
+  if(!inHolding&&!maintenance(p,a)&&!frontierSafe(g,p))continue;
   if(threat(g,p.cx,p.cz,5))continue;
   const hp=g.plotHpState(p),ratio=hp.hp/Math.max(1,hp.maxHp);
   const critical=damage&&(p.ruined||ratio<(p.kind==='hq'?.65:.35));
@@ -134,7 +137,7 @@ export function updateBuilders(g,dt) {
  const manuallyUsed=new Set(g.heroes.filter(h=>!h.dead&&h.payHold).map(h=>g.buildTargetFor(h)?.plot.id));
  if(b.frontier){const target=g.plots.find(p=>holdingKey(p)===b.frontier);if(!target||established(g,target)||!frontierSafe(g,target))b.frontier=null;}
  let p=b.job&&g.plots.find(p=>p.id===b.job.id),a=p&&crewAction(g,p,b.job.branch);
- if(b.job&&(!a||actionKey(p,a)!==b.job.key||g.plotLocked(p)||(!local(g,p)&&!established(g,p)&&!frontierSafe(g,p))||manuallyUsed.has(p.id)||p.paid>0||threat(g,p.cx,p.cz,5))){const reason=p&&g.plotLocked(p)?'Territory lost':p&&manuallyUsed.has(p.id)?'Manual work':'Replanning';cancel(g,b);b.status=reason;b.replan=1;p=null;a=null;}
+ if(b.job&&(!a||actionKey(p,a)!==b.job.key||g.plotLocked(p)||(!local(g,p)&&!established(g,p)&&!maintenance(p,a)&&!frontierSafe(g,p))||manuallyUsed.has(p.id)||p.paid>0||threat(g,p.cx,p.cz,5))){const reason=p&&g.plotLocked(p)?'Territory lost':p&&manuallyUsed.has(p.id)?'Manual work':'Replanning';cancel(g,b);b.status=reason;b.replan=1;p=null;a=null;}
  // Reconsider discretionary work at a bounded cadence when a genuine
  // emergency appears; the interrupted purchase is completely refundable.
  if(b.job&&b.replan===0){
