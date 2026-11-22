@@ -176,7 +176,7 @@ function play(targetLevel) {
   const maxTicks = Math.round(MAX_MIN * 60 / SIM_DT);
   const wall0 = Date.now();
   let workerMinGold=Infinity;
-  const RESTORE_AT = Math.round(240 / SIM_DT);
+  const RESTORE_AT = Math.round((BUILDERS ? 60 : 240) / SIM_DT);
   for (let tick = 0; tick < maxTicks && !game.over; tick++) {
     if (tick === RESTORE_AT) {
       // Mid-match restore on the real terrain, mid-fight: a fresh Game built
@@ -217,6 +217,7 @@ function play(targetLevel) {
     }
     if(BUILDERS&&game.builders)workerMinGold=Math.min(workerMinGold,game.gold);
     const hero = game.heroes[0];
+    if(BUILDERS&&process.env.BUILDER_TRACE&&tick%Math.round(30/SIM_DT)===0&&game.builders)console.error(JSON.stringify({trace:true,time:Math.round(game.time),gold:Math.round(game.gold),crew:{status:game.builders.status,hp:game.builders.hp,job:game.builders.job?.id},hq:game.hq?.hp,hero:hero&&{hp:hero.hp,x:hero.x,z:hero.z},built:game.plots.filter(p=>p.tier>0).reduce((a,p)=>(a[p.kind]=(a[p.kind]||[]).concat(p.tier),a),{}),threat:game.hq&&game.zombies.filter(z=>!z.dead&&Math.hypot(z.x-game.hq.cx,z.z-game.hq.cz)<12).length}));
     if (!hero) break;
     if (game.phase === 'found') {
       const site = game.map.sites[targetSite];

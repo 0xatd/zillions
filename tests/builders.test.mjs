@@ -110,3 +110,9 @@ test('a crew cannot be bitten diagonally through a blocked wall corner',()=>{
  g.zombies=[{id:778,x:x+1.01,z:z+1.01,hp:100,dead:false,state:2,atkT:0,stunT:0,def:{dmg:10}}];
  const hp=b.hp;ticks(g,1);assert.equal(b.hp,hp);assert.equal(g.zombies[0].atkT,0);
 });
+test('Develop saves for its missing frontline instead of endlessly buying affordable farms',()=>{
+ const g=fresh(),b=g.builders;for(const kind of ['house','tower'])g._construct(g.plots.find(p=>p.kind===kind),true);
+ g.gold=22;order(g,'develop');const gold=g.gold;ticks(g,600);assert.equal(g.gold,gold);assert.equal(b.status,'Saving gold');assert.equal(b.completed,0);
+ g.gold=50;for(let i=0;i<6000&&!g.plots.some(p=>p.kind==='camp_militia'&&p.tier>0);i++)ticks(g,1);
+ assert.ok(g.plots.some(p=>p.kind==='camp_militia'&&p.tier>0));assert.equal(g.plots.filter(p=>p.kind==='farm'&&p.tier>0).length,0);
+});

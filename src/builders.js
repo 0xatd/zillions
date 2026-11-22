@@ -80,6 +80,7 @@ export function builderCandidates(g,b) {
     score=ECON.has(p.kind)?(econ===0?600:econ<3?390:250):MILITARY(p.kind)?(camps===0?550:camps<2?420:240):p.kind==='tower'?(towers===0?500:towers<3?380:230):p.kind==='wall'?150:100;
    }
   }
+  if(b.order==='develop'&&MILITARY(p.kind)&&p.kind==='camp_militia'&&!g.plots.some(q=>q.kind==='camp_militia'&&q.tier>0&&!q.ruined))score+=30;
   score-=p.tier*45+Math.hypot(b.x-p.cx,b.z-p.cz)*.8+a.cost*.1;
   choices.push({p,a,score,key:actionKey(p,a),branch:a.branch});
  }
@@ -145,9 +146,11 @@ export function updateBuilders(g,dt) {
   const {choices,branches}=builderCandidates(g,b);let poor=false,blocked=false;
   for(const c of choices.slice(0,20)){
    if(manuallyUsed.has(c.p.id)||c.p.paid>0)continue;
-   if(g.gold-b.reserve<c.a.cost){poor=true;if(c.score>800)break;continue;}
    const route=routeTo(g,b,(x,z)=>atWork(g,c.p,x,z));if(route===null){blocked=true;continue;}
    if(route.some(([x,z])=>threat(g,x,z,4))){blocked=true;continue;}
+   // Save for the next useful job. Repeatedly buying cheap substitutes
+   // starved camps and gate defenses even with a steadily growing economy.
+   if(g.gold-b.reserve<c.a.cost){poor=true;break;}
    if(b.order==='expand'&&!local(g,c.p)&&!established(g,c.p))b.frontier=holdingKey(c.p);
    b.job={id:c.p.id,key:c.key,mode:c.a.mode,cost:c.a.cost,branch:c.branch||null};b.route=route;p=c.p;a=c.a;break;
   }
