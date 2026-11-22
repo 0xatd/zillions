@@ -4896,8 +4896,11 @@ class App {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
+      if (e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable)) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
       this.keys.add(k);
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
         this.ui.openGameChat();
@@ -5027,6 +5030,9 @@ class App {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
     const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    if (editing) this.keys.clear();
     if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
     if (isHeld(binds, this.keys, 'move_down')) dz += 1;
     if (isHeld(binds, this.keys, 'move_left')) dx -= 1;

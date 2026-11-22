@@ -13,7 +13,7 @@ test('valid existing guest controls preserve payloads',()=>{
   {t:'hdir',x:.6,z:-.8,s:true},{t:'dodge',x:0,z:1},
   {t:'pay',on:false},{t:'stance',s:'attack'},{t:'heroUpgrade',key:'damage'},
   {t:'choose',id:9,b:'defense'},{t:'found',s:2},{t:'drop',i:-1},
-  {t:'blessing',i:1},
+  {t:'blessing',i:1},{t:'focus',id:27},{t:'focus',id:null},
   {t:'cast'},{t:'towerpri'},{t:'swapset'},
  ]) assert.deepEqual(guestCommand(input,1,2),{...input,p:1});
  assert.deepEqual(guestCommand({t:'pay',on:true,p:1,gold:999999},1,2),{t:'pay',on:true,p:1});

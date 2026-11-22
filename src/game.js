@@ -76,7 +76,7 @@ function segOpen(x0, z0, x1, z1, pass) {
   return false;
 }
 
-// v12: physical colony crew, builder orders and corrected escort routing.
+// v12: colony crew, corrected escort routing and committed combat windups.
 export const SNAPSHOT_VERSION = 12;
 export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION;
 
