@@ -228,6 +228,9 @@ which reads the same table the game dispatches through.
 | Esc | Open the game menu |
 
 Movement is not camera-relative. W always moves north on the minimap.
+Click/tap a unit to inspect it. An in-range enemy offers **Focus attacks**
+for your hero only; **Clear attack focus** restores automatic targeting.
+Inspection alone never changes orders. Use **Items** to read carried gear.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
