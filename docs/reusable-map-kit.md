@@ -418,7 +418,7 @@ No individual unit commands, movement orders or economy actions are added.
 Run `scripts/battlefield-feedback-proof.mjs` in the developer battlefield and
 capture laptop, portrait phone and landscape results.
 
-Layout/movement/payment changes use snapshot 11 and lobby protocol 12. Previous
+The combined builder/combat release uses snapshot 12 and lobby protocol 13. Previous
 siege saves are rejected through the existing incompatible-layout flow; account
 progression and server data are unchanged.
 

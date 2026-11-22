@@ -58,8 +58,9 @@ It cannot attack, scout territory, capture nodes or join army formations.
 `src/builders.js` owns deterministic scoring, routing, crew state and refundable
 construction escrow. `Game` integrates commands, founding, updates and
 snapshots. The full crew state affects the lockstep hash, including its route,
-job, policy, timers and escrow. Commands require host seat zero, a living host
-hero, a live siege and valid order/reserve/doctrine values. No backend or account
+job, policy, timers and escrow. Commands require host seat zero, an existing host
+hero, a live siege and valid order/reserve/doctrine values. The host can manage
+orders while their hero is down. No backend or account
 economy is involved.
 
 ## Verification
