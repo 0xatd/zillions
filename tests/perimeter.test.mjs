@@ -56,14 +56,17 @@ test('standing in a legal gate does not let a hero walk through its solid jamb',
  const before=[h.x,h.z];g._moveActor(h,dx,dz,3,1/30);assert.deepEqual([h.x,h.z],before,'gate must not activate trapped-actor collision bypass');
 });
 
-test('hero cannot squeeze diagonally through a closed wall corner',()=>{
+test('hero and squad cannot squeeze diagonally through a closed wall corner',()=>{
  const l=LEVELS[0],m=new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),g=new Game(m,'normal','scott',null,l.id);g.foundCity(0,0);
  for(const p of g.plots.filter(p=>p.kind==='wall'))g._construct(p,true);
  const N=m.size,solid=(x,z)=>!m.isWalkable(x,z)||(g.occ[z*N+x]&&!g.gateIds.has(g.occ[z*N+x]));let corner;
  for(let z=1;z<N-1&&!corner;z++)for(let x=1;x<N-1&&!corner;x++)for(const dx of [-1,1])for(const dz of [-1,1]){
  if(m.isWalkable(x,z)&&!g.occ[z*N+x]&&m.isWalkable(x+dx,z+dz)&&!g.occ[(z+dz)*N+x+dx]&&solid(x+dx,z)&&solid(x,z+dz)&&(g.occ[z*N+x+dx]||g.occ[(z+dz)*N+x]))corner={x,z,dx,dz};}
  assert.ok(corner,'fixture must contain a closed diagonal wall corner');
- const {x,z,dx,dz}=corner,h=g.heroes[0];h.x=x+.5+dx*.49;h.z=z+.5+dz*.49;
- const before=[h.x,h.z];g._moveActor(h,dx/Math.SQRT2,dz/Math.SQRT2,3,1/30);
- assert.deepEqual([h.x,h.z],before,'wall corners must obey the same no-corner-cut rule as pathfinding');
+ const {x,z,dx,dz}=corner;
+ for(const actor of [g.heroes[0],g._spawnUnit('soldier',x+.5,z+.5)]){
+  actor.x=x+.5+dx*.49;actor.z=z+.5+dz*.49;
+  g._moveActor(actor,dx/Math.SQRT2,dz/Math.SQRT2,3,1/30);
+  assert.deepEqual([Math.floor(actor.x),Math.floor(actor.z)],[x,z],`${actor.hero?'hero':'squad'} must not cross the solid corner`);
+ }
 });

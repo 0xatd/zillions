@@ -442,3 +442,9 @@ Burrowers tunnel through wall barriers but attack other occupied structures.
 Tunneling into economic buildings put them inside zero-distance flow sources,
 where they could circle without attacking. A separate regression preserves wall
 tunneling while requiring a bite against a farm.
+
+Squads validate the swept movement segment rather than just its destination.
+This prevents cutting through a closed wall/terrain corner while preserving
+legal off-centre turns. Applying the hero's stricter two-side-cell rule to all
+squads stalled formations; endpoint-only checks let them tunnel corners. The
+shared perimeter regression exercises both hero and troop corner collision.

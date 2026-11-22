@@ -3234,10 +3234,12 @@ export class Game {
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       return id === 0 || this.gateIds.has(id);
     };
-    // Direct hero steering needs the grid corner rule. Squads retain their
-    // existing goal-field/axis-slide recovery, covered by full playthroughs.
-    const canStep = (x,z) => pass(x,z) && (
-      !a.hero || (x|0)===(a.x|0) || (z|0)===(a.z|0) || (pass(x,a.z) && pass(a.x,z))
+    // Hero input keeps the grid corner rule. Off-centre squads follow smooth
+    // field headings: check their actual swept segment, not only its endpoint
+    // (corner tunneling) or both side cells (rejects legal turns and stalls).
+    const canStep = (x,z) => pass(x,z) && (a.hero
+      ? ((x|0)===(a.x|0) || (z|0)===(a.z|0) || (pass(x,a.z) && pass(a.x,z)))
+      : segOpen(a.x,a.z,x,z,(tx,tz)=>pass(tx+.5,tz+.5))
     );
     // Standing in rock or inside a footprint (a wall raised on top of us, a
     // doorstep on a cliff lip): walk straight to the nearest open tile first.
