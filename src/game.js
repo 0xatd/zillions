@@ -4282,13 +4282,17 @@ export class Game {
     hit.t-=dt;
     if(hit.t>1e-8)return;
     zb.windup=null;
+    const groundOpen=(x,z)=>{
+      const id=this.occ[z*this.map.size+x];
+      return this.map.isWalkable(x,z)&&(!id||this.gateIds.has(id));
+    };
+    // A melee smash cannot land through a wall raised during its windup or
+    // across a blocked diagonal corner. Acid is an intentional arcing lob.
+    if(hit.kind==='slam'&&!segOpen(zb.x,zb.z,hit.x,hit.z,groundOpen))return;
     const victims=this.units.filter(u=>{
       if(u.dead || dist2(u.x,u.z,hit.x,hit.z)>hit.r*hit.r)return false;
       // Fixed ground impact cannot pass through a cliff or an intact wall.
-      return segOpen(hit.x,hit.z,u.x,u.z,(x,z)=>{
-        const id=this.occ[z*this.map.size+x];
-        return this.map.isWalkable(x,z)&&(!id||this.gateIds.has(id));
-      });
+      return segOpen(hit.x,hit.z,u.x,u.z,groundOpen);
     }).sort((a,b)=>dist2(a.x,a.z,hit.x,hit.z)-dist2(b.x,b.z,hit.x,hit.z)||a.id-b.id);
     // Full damage at the impact centre; the surrounding splash shares one
     // small budget. A crowded gate must not multiply one brute's damage by

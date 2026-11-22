@@ -60,3 +60,9 @@ test('crowded troops do not multiply ground-strike damage; centre takes the main
   assert.ok(Math.abs(loss.reduce((a,b)=>a+b,0)-e.def.dmg*1.25)<1e-6,'total strike damage must be bounded regardless of crowd size');
  }
 });
+
+test('brute windup cannot finish through a newly blocked corner',()=>{
+ const g=fresh(),h=g.heroes[0];h.x=21.1;h.z=21.1;const e=enemy(g,'brute',20.9,20.9);
+ const hp=h.hp;ticks(g,1);assert.ok(e.windup);g.occ[20*g.map.size+21]=999;
+ ticks(g,6);assert.equal(h.hp,hp,'melee smash crossed an intact corner');assert.equal(e.windup,null);
+});
