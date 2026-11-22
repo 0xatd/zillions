@@ -227,6 +227,7 @@ class App {
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
+      onFocusEnemy: (id) => this.issue({t:'focus',p:this.myPlayer,id}),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
@@ -4761,6 +4762,48 @@ class App {
   }
 
   // Outline the one object the local hero can act on; presentation only.
+  _updateCombatCues() {
+    const g=this.game;
+    if(this._combatCueGame!==g) {
+      for(const mesh of this._combatCues||[]) {
+        mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();
+      }
+      this._combatCues=[];this._combatCueGame=g;
+    }
+    for(const mesh of this._combatCues)mesh.visible=false;
+    if(!g)return;
+    const vision=fogVisionSources(g),visible=(x,z)=>vision.some(v=>Math.hypot(v.x-x,v.z-z)<v.radius);
+    let index=0;
+    const cue=(x,z,r,color,opacity=.8)=>{
+      if(index>=48)return;
+      let mesh=this._combatCues[index];
+      if(!mesh) {
+        const geo=new THREE.RingGeometry(.86,1,48);geo.rotateX(-Math.PI/2);
+        mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+        this._combatCues.push(mesh);
+      }
+      if(!mesh.parent)this.scene.add(mesh);
+      mesh.visible=true;mesh.position.set(x,this.map.groundY(x,z)+.13,z);
+      mesh.scale.setScalar(r);mesh.material.color.setHex(color);mesh.material.opacity=opacity;
+      index++;
+    };
+    // Actual pending impacts, not event timers: pause/restore/Watch agree.
+    for(const enemy of g.zombies) {
+      const hit=enemy.windup;
+      if(enemy.dead||!hit||!visible(enemy.x,enemy.z)||!visible(hit.x,hit.z))continue;
+      const p=1-hit.t/hit.duration;
+      cue(hit.x,hit.z,hit.r,hit.kind==='acid'?0xdfff55:0xff7844,.95);
+      cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
+    }
+    const hero=this.myHero(),target=hero?.target;
+    if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
+      &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
+      cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
+    }
+  }
+
+  // Outline the one object the local hero can act on. This is presentation
+  // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
     if(this._inspectRing)this._inspectRing.visible=false;
     const selected=this.ui._battlePanel;
@@ -5348,6 +5391,12 @@ class App {
     }
     for (const e of g.events) {
       switch (e.type) {
+        case 'groundstrike': {
+          if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
+            this._impactRing(e.x,e.z,{color:e.kind==='acid'?0xdfff55:0xff7844,radius:e.radius,life:.24});
+          }
+          break;
+        }
         case 'shot': {
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
@@ -5825,6 +5874,7 @@ class App {
       this._syncLoot(t);
       this._syncPlots(t);
       this._updateTacticalSelection();
+      this._updateCombatCues();
 
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
