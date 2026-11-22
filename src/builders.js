@@ -117,6 +117,8 @@ export function updateBuilders(g,dt) {
  for(const e of g.zombies){
   if(e.dead||e.hp<=0||e.state!==2||e.stunT>0||e.windup||e.atkT>0||e.def?.ranged||e.def?.siege||(e.targetU&&!e.targetU.dead))continue;
   if(Math.hypot(e.x-b.x,e.z-b.z)>=.75)continue;
+  const ex=e.x|0,ez=e.z|0,bx=b.x|0,bz=b.z|0;
+  if(!open(g,ex,ez)||!open(g,bx,bz)||(ex!==bx&&ez!==bz&&(!open(g,ex,bz)||!open(g,bx,ez))))continue;
   e.atkT=.8;b.hp-=Math.max(0,e.def?.dmg||0);
   g.emit({type:'bite',fromId:e.id,fx:e.x,fz:e.z,tx:b.x,tz:b.z,x:b.x,z:b.z,targetScale:.8});
  }

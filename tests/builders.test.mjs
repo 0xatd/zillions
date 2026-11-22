@@ -104,3 +104,9 @@ test('cancelling a configured branch purchase does not consume the specialisatio
  for(let i=0;i<3000&&!b.paid;i++)ticks(g,1);assert.ok(b.paid>0);assert.equal(p.branch,null);
  const gold=g.gold,paid=b.paid;g.exec({t:'builderPause',on:true,p:0});assert.equal(p.branch,null);assert.ok(Math.abs(g.gold-gold-paid)<1e-6);assert.equal(p.tier,2);
 });
+test('a crew cannot be bitten diagonally through a blocked wall corner',()=>{
+ const g=fresh(),b=g.builders;const x=b.x|0,z=b.z|0;b.x=x+.99;b.z=z+.99;
+ g.map.isWalkable=(tx,tz)=>!(tx===x+1&&tz===z)&&!(tx===x&&tz===z+1);g.occ.fill(0);
+ g.zombies=[{id:778,x:x+1.01,z:z+1.01,hp:100,dead:false,state:2,atkT:0,stunT:0,def:{dmg:10}}];
+ const hp=b.hp;ticks(g,1);assert.equal(b.hp,hp);assert.equal(g.zombies[0].atkT,0);
+});
