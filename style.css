@@ -2216,3 +2216,35 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
   #actionbar.multi-kit #ability-slots { grid-column:1 / -1; grid-row:2; }
   #actionbar.multi-kit .bigaction .bicon { display:none; }
 }
+
+/* Persistent parties are a compact chapter action; the map stays primary. */
+.friend-party-dialog{color:#e9edf2;background:#17212c;border:1px solid #536477;border-radius:14px;padding:20px;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box}
+.friend-party-dialog::backdrop{background:#050a12b8}
+.friend-party-dialog header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.friend-party-dialog h2{margin:0;font-size:1.3rem}
+.friend-party-dialog button{cursor:pointer}
+.friend-party-dialog input{box-sizing:border-box;width:100%;padding:10px;color:inherit;background:#0c141f;border:1px solid #536477;border-radius:6px;margin:6px 0}
+.friend-party-dialog .menubtn{width:auto;min-height:40px;padding:8px 12px;margin:4px}
+.party-status{min-height:1.2em;color:#e8c582;font-size:.9rem}
+.party-roster{list-style:none;margin:0 0 12px;padding:0}
+.party-roster li{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 0;border-bottom:1px solid #354352}
+.party-roster li>span{flex:1 1 180px;overflow-wrap:anywhere}
+.party-roster .menubtn{font-size:.75rem;min-height:36px}
+.party-actions{margin:12px 0}.party-body small{color:#b5c3d0}
+@media(max-width:600px){.friend-party-dialog{padding:14px}.party-actions .menubtn{width:100%;margin:4px 0}}
+
+.friend-party-dialog{margin:auto}
+.friend-party-dialog header button{color:inherit;background:#293746;border:1px solid #536477;border-radius:6px;width:32px;height:32px}
+.party-member-actions summary{cursor:pointer;color:#b5c3d0;font-size:.8rem;padding:8px}
+.party-member-actions[open]{flex-basis:100%}
+
+body:has(.friend-party-dialog[open]){overflow:hidden}
+@media(min-width:601px) and (max-height:500px){
+ .friend-party-dialog{width:min(780px,calc(100vw - 32px));padding:14px}
+ .friend-party-dialog .party-body{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
+ .friend-party-dialog .party-roster{grid-row:span 3}
+ .friend-party-dialog .party-actions{margin:4px 0}
+ .friend-party-dialog .menubtn{font-size:.85rem;margin:2px;min-height:36px}
+ .friend-party-dialog .party-status:empty{display:none}
+ .friend-party-dialog small{font-size:.75rem}
+}

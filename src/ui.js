@@ -206,7 +206,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -552,6 +552,7 @@ export class UI {
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
+    q('#m-party').onclick = () => this.cb.onPartyOpen?.();
     q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#m-delete-character').onclick = () => {
       const character = this._sheetCharacter();

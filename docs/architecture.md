@@ -363,3 +363,14 @@ Point/enemy spells enter a target-selection mode. Pointer selection emits the
 same cast command as other input; Escape cancels before spending resources.
 The sim checks range, visibility for unit targeting, mana and cooldown before
 accepting a cast. The host sanitizes guest slots and target coordinates.
+
+### Persistent friend parties
+
+`src/friend-party.js` owns the guarded Supabase RPC client and invite parsing.
+`src/friend-party-ui.js` owns the compact chapter modal and bounded-lifetime
+refresh loop. Closing it stops polling. `src/main.js` connects its actions to
+existing private-room creation/joining. The party never simulates combat.
+
+Chapter -> private party -> existing room -> Ready -> WebRTC siege -> same party.
+A failed party request leaves the old room system available. A room that finishes
+or becomes stale is no longer offered as the next match; membership survives.
