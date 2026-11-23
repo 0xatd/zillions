@@ -1,3 +1,4 @@
+import { HitFeedback } from './hit-feedback.js';
 import {FriendParty,partyCode} from './friend-party.js';
 import {showFriendParty} from './friend-party-ui.js';
 import {visibleInFog} from './fog-of-war.js';
@@ -866,6 +867,7 @@ class App {
     this._clearSiteMarkers();
     this._clearNestMeshes();
     this._clearLootMeshes();
+    this.hitFeedback?.clear();
     if(this._builderMesh){this.scene.remove(this._builderMesh);this._disposeObject3D(this._builderMesh);this._builderMesh=null;}
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
@@ -5643,6 +5645,10 @@ class App {
           break;
         }
         case 'shot': {
+          if (visibleInFog(vision,e.tx,e.tz)) {
+            this.hitFeedback ||= new HitFeedback(this.scene);
+            this.hitFeedback.show(e);
+          }
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
             this.audio.melee();
@@ -6088,6 +6094,9 @@ class App {
       if (progress >= 1) this._finishMissionIntro();
     }
     this._updateCamera(dt);
+    const hitVision=this.game ? fogVisionSources(this.game) : [];
+    this.hitFeedback?.update(dt,(x,z)=>visibleInFog(hitVision,x,z));
+
     this._audioSceneAt = (this._audioSceneAt || 0) - dt;
     if (this._audioSceneAt <= 0) {
       this._audioSceneAt = 0.25;

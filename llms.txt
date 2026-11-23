@@ -120,4 +120,6 @@ Campaign loading of workbench exports is not implemented.
 - src/friend-party.js — authenticated persistent-group client and invite URLs
 - src/friend-party-ui.js — compact chapter party modal
 
+- src/hit-feedback.js: bounded hero hit numbers and disposable presentation resources.
+
 - src/audio-beds.js: scene score, lazy CC0 music/ambience and ducking.

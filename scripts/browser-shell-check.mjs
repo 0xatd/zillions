@@ -360,6 +360,15 @@ try {
     return pending && granted && rejected && back;
   })()`), true, 'the end screen must show pending, then exactly the server-granted rewards (or the rejection)');
   assert.equal(await evaluate(`(async () => {
+    const {HitFeedback}=await import('/src/hit-feedback.js');
+    const feedback=new HitFeedback(__app.scene);
+    for(let i=0;i<40;i++)feedback.show({heroKey:'lina',tx:20,tz:20,damage:57,crit:!!(i%2)});
+    const capped=feedback.active.length===24;
+    feedback.update(.1,()=>false);const fogCleared=feedback.active.length===0;
+    feedback.show({heroKey:'lina',tx:20,tz:20,damage:57,crit:true});feedback.update(.7);
+    return capped && fogCleared && feedback.active.length===0;
+  })()`),true,'hit labels stay bounded, disappear under fog and expire');
+  assert.equal(await evaluate(`(async () => {
     const app=__app;app.renderer.setAnimationLoop(null);
     const {AudioSys}=await import('/src/audio.js');const audio=new AudioSys();
     audio.setMuted(true);audio.setVolume(.4);audio.setMusicVolume(.3);audio.init();

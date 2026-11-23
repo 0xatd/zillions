@@ -401,5 +401,8 @@ invite link or code. The leader opens the next private match; members open that
 room and mark Ready. Your selected chapter leader joins the match. The group
 survives between matches and across sign-ins. Membership is limited to four.
 
+Hero weapon hits show short-lived damage numbers; gold numbers marked `!` denote
+critical hits. Spell aiming indicators and the command bar are unchanged.
+
 Music and biome ambience use the existing music/master settings. Missing tracks
 fall back to the procedural score; local combat sound and global base alerts stay intact.
