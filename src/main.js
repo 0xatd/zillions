@@ -6088,6 +6088,16 @@ class App {
       if (progress >= 1) this._finishMissionIntro();
     }
     this._updateCamera(dt);
+    this._audioSceneAt = (this._audioSceneAt || 0) - dt;
+    if (this._audioSceneAt <= 0) {
+      this._audioSceneAt = 0.25;
+      const g=this.game, listener=this.myHero();
+      const nearby=g?.zombies?.filter(z=>!z.dead && hearingGain(listener,z)>0).length || 0;
+      if (nearby >= 2) this._audioCombatUntil=t+5;
+      this.audio.updateScene({inMatch:!!g,over:g?.over,won:g?.won,phase:g?.phase,
+        biome:g?.level?.theme?.terrain,combat:!!g && t<(this._audioCombatUntil || 0),
+        select:!!document.querySelector('#screen-setup:not(.hidden)')});
+    }
 
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
