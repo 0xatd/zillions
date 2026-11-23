@@ -13,13 +13,14 @@ import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
-import { setActiveCulture } from './cultures.js';
+import { setActiveCulture, activeCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
 import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -3732,8 +3733,11 @@ class App {
   // Load GLB art once; when the toy kit lands, hand it to the map props and
   // rebuild the horde pools on kit geometry. Presentation only.
   _loadArt() {
+    // Seeded kit marines for colony troops (default on; ?marines=0 opts out).
+    // The kit loads alongside the art so the first troops already use it.
+    const marineKit = MARINE_FLAGS.units ? loadMarineKit().catch(() => false) : null;
     if (!this._artLoading) {
-      this._artLoading = loadAssets().then(() => {
+      this._artLoading = loadAssets().then(() => marineKit).then(() => {
         this.assetsLoaded = true;
         setMapKit(kitGeometry);
         if (hasKit('enemy_walker') && this.horde) {
@@ -4484,9 +4488,20 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
-      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (kit) {
+      // Marine heroes (default on, ?marineHeroes=0 opts out): art-marines GLBs.
+      const marineHero = MARINE_FLAGS.heroes && !u.characterStyle ? assetClone(`marineHero_${u.key}`) : null;
+      const kit = !marineHero && !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !marineHero && !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (marineHero) {
+        marineHero.scale.setScalar(0.6);
+        body.add(marineHero);
+        const weapon = assetPart(marineHero, 'weapon');
+        if (weapon) trackWeapon(weapon);
+        g.userData.limbs = {
+          legL: assetPart(marineHero, 'leg_l'), legR: assetPart(marineHero, 'leg_r'),
+          armL: assetPart(marineHero, 'arm_l'), armR: assetPart(marineHero, 'arm_r'),
+        };
+      } else if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
         // Mounted heroes remain larger than infantry, not house-sized.
         // The selection ring and outline carry readability at distance;
@@ -4581,9 +4596,17 @@ class App {
       // snipers and hero summons get their own procedural rigs (unit-art.js)
       // so the army reads apart at a glance.
       const d = u.def;
-      const kit = this._kitFigure(`unit_${u.key}`);
-      const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
-      if (kit) {
+      // Marines (default on, ?marines=0 opts out): a unique seeded marine per unit (same on every peer).
+      const marine = MARINE_FLAGS.units ? marineForUnit(u, { matchSeed: this.game?.rngSeed ?? 0, culture: activeCulture() }) : null;
+      const kit = marine ? null : this._kitFigure(`unit_${u.key}`);
+      const authored = !marine && !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
+      if (marine) {
+        marine.node.scale.multiplyScalar(0.42);
+        body.add(marine.node);
+        g.userData.limbs = marine.limbs;
+        g.userData.marineNode = marine.node;
+        if (marine.weapon) trackWeapon(marine.weapon);
+      } else if (kit) {
         // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4622,6 +4645,12 @@ class App {
   }
 
   _syncUnits(t, dt = 0) {
+    // Marine LOD: full kit near the camera, ~1.5k-tri kit beyond a cut-off
+    // that pulls in as the army grows or the camera zooms out.
+    const marineCount = this._marineCount || 0;
+    const lodFactor = marineCount > 120 ? 1.0 : marineCount > 45 ? 1.12 : 1.35;
+    const marineLodFar = this.camDist > 78 ? 0 : this.camDist * lodFactor;
+    let marinesSeen = 0;
     const g = this.game;
     const seen = new Set();
     for (const u of g.units) {
@@ -4714,6 +4743,17 @@ class App {
         if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
         if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
       }
+      const marineNode = rec.mesh.userData.marineNode;
+      if (marineNode) {
+        marinesSeen++;
+        let low = MARINE_FLAGS.lod === 'lo';
+        if (MARINE_FLAGS.lod === 'auto') {
+          const d = this.camera.position.distanceTo(rec.mesh.position);
+          const wasLow = marineNode.userData.marineLod?.low;
+          low = d > marineLodFar + (wasLow ? -2 : 2); // hysteresis: no flicker at the edge
+        }
+        setMarineLod(marineNode, low);
+      }
       if (weaponParts.length && attackPulse > 0) {
         for (const part of weaponParts) {
           const rp = part.userData.restPos;
@@ -4794,6 +4834,7 @@ class App {
         affected.material.opacity = 0.34 + Math.sin(t * 4.6 + u.id) * 0.12;
       }
     }
+    this._marineCount = marinesSeen;
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) {
         this.scene.remove(rec.mesh);

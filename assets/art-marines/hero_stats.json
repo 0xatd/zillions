@@ -1,0 +1,20 @@
+{
+  "triangles": {
+    "alexander": 6832,
+    "danny": 6866,
+    "turtle": 6564,
+    "john": 7040,
+    "tiger": 5268,
+    "aaron": 7132,
+    "scott": 6912
+  },
+  "notes": {
+    "alexander": "Verdant green + polished gold, standard weight; bareheaded flattop commander with gold laurels, nanite pods and a long scoped marksman rifle.",
+    "danny": "Cobalt blue + gunmetal, light frame; hooded stalker with toxic-green visor, swept pauldrons, cloak, comms mast and an extra-long sniper.",
+    "turtle": "Sea-green + brass, heaviest frame; slab helm, huge block pauldrons, hex-plated turtle-shell reactor, hex tower shield and a war hammer.",
+    "john": "Panda bone-white torso + charcoal limbs and shoulders with amber trim, heavy brawler; bearded topknot with a scar, giant power fists with amber knuckle glow and a brew gourd.",
+    "tiger": "Tiger orange with black stripes, lean standard frame; mohawk + war paint, jump pack, twin glowing triple claws.",
+    "aaron": "Royal violet + gold, standard frame; twin-lens warden helm with a floating halo, tiered pauldrons, cape and a crystal-crowned staff.",
+    "scott": "Crimson + bone white, heavy frame; crested visor helm, banded tiered pauldrons, twin-barrel shotgun and a gravity hammer slung on his back."
+  }
+}
