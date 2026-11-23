@@ -1,0 +1,17 @@
+{
+  "music": {
+    "menu": "music/menu.ogg",
+    "build": "music/build.ogg",
+    "combat": "music/combat.ogg",
+    "victory": "music/victory.ogg",
+    "defeat": "music/defeat.ogg",
+    "select": "music/select.ogg"
+  },
+  "ambient": {
+    "meadow": "ambient/meadow.ogg",
+    "swamp": "ambient/swamp.ogg",
+    "volcanic": "ambient/volcanic.ogg",
+    "snow": "ambient/snow.ogg",
+    "valley": "ambient/valley.ogg"
+  }
+}

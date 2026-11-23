@@ -383,3 +383,11 @@ HP loss after mitigation, before follow-up ability damage. It does not add RNG
 rolls, change combat math or pause simulation. Fog hides labels; expired labels
 and match teardown dispose textures/materials. Spell/range indicators and HUD
 layout remain unchanged. This replaces only the hit/crit portion of PR #124.
+
+## Music and ambience
+
+`src/audio-beds.js` owns the lazy-loaded CC0 score salvaged from PR #132.
+`AudioSys` shares its context/master limiter with beds. Existing music and master
+settings control them; combat SFX remain procedural and hero-local. Base warnings
+remain global and duck beds. Failed tracks keep procedural fallback; late loads
+cannot switch the current scene. Source records: `assets/audio/cc0/LICENSES.md`.

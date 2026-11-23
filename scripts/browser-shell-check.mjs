@@ -34,7 +34,7 @@ const profile = await mkdtemp(join(tmpdir(), 'zillions-browser-'));
 const browser = spawn(chrome, [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
-  '--window-size=1440,1000',
+  '--window-size=1440,1000', '--autoplay-policy=no-user-gesture-required',
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, `http://127.0.0.1:${serverPort}/`,
 ], { stdio: 'ignore' });
 
@@ -368,6 +368,29 @@ try {
     feedback.show({heroKey:'lina',tx:20,tz:20,damage:57,crit:true});feedback.update(.7);
     return capped && fogCleared && feedback.active.length===0;
   })()`),true,'hit labels stay bounded, disappear under fog and expire');
+  assert.equal(await evaluate(`(async () => {
+    const app=__app;app.renderer.setAnimationLoop(null);
+    const {AudioSys}=await import('/src/audio.js');const audio=new AudioSys();
+    audio.setMuted(true);audio.setVolume(.4);audio.setMusicVolume(.3);audio.init();
+    if(audio.master.gain.value!==0)return false;
+    audio.setMuted(false);audio.updateScene({});
+    const wait=async(fn)=>{for(let i=0;i<150;i++){if(fn())return;await new Promise(r=>setTimeout(r,100));}throw Error('audio timeout');};
+    await wait(()=>audio.beds.slots.music?.id==='menu');
+    const settings=Math.abs(audio.master.gain.value-.22)<.0001 && Math.abs(audio.beds.output.gain.value-.3)<.0001 && audio.musicGain.gain.value===0;
+    const realFetch=window.fetch;
+    try {
+      window.fetch=async(url,...args)=>{
+        if(String(url).endsWith('music/select.ogg'))throw Error('intentional missing-track fixture');
+        if(String(url).endsWith('music/build.ogg'))await new Promise(r=>setTimeout(r,500));
+        return realFetch(url,...args);
+      };
+      audio.updateScene({select:true});await wait(()=>audio.beds.failed.has('music/select'));
+      const fallback=audio.musicGain.gain.value>0;
+      audio.updateScene({inMatch:true,phase:'found',biome:'fen'});audio.updateScene({});
+      await wait(()=>audio.beds.buffers.has('music/build'));
+      return settings && fallback && audio.beds.slots.music.id==='menu' && audio.beds.slots.ambient===null;
+    } finally {window.fetch=realFetch;audio.beds.dispose();clearInterval(audio.musicTimer);await audio.ctx.close();}
+  })()`),true,'real audio settings, missing-file fallback and stale-load protection');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

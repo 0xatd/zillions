@@ -1,3 +1,5 @@
+import { AudioBeds } from './audio-beds.js';
+
 // Runtime audio: procedural WebAudio for core SFX, with generated MP3 barks
 // layered in where they are wired.
 
@@ -38,22 +40,28 @@ export class AudioSys {
     try {
       if (this.barkEl) this.barkEl.pause();
       this.barkEl = new Audio('assets/audio/click-pack/' + pick.file);
-      this.barkEl.volume = 0.75;
+      this.barkEl.volume = 0.75 * this.volMult;
       this.barkEl.play().catch(() => {});
     } catch { /* no-op */ }
   }
 
   init() {
-    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.55;
-    this.master.connect(this.ctx.destination);
+    this.master.gain.value = this.muted ? 0 : 0.55 * this.volMult;
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -2;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.002;
+    this.limiter.release.value = 0.18;
+    this.master.connect(this.limiter).connect(this.ctx.destination);
 
     this.musicGain = this.ctx.createGain();
-    this.musicGain.gain.value = 0.16;
+    this.musicGain.gain.value = 0.16 * this.musicMult;
     this.musicGain.connect(this.master);
 
     // Shared white noise buffer for percussive sounds.
@@ -62,11 +70,17 @@ export class AudioSys {
     const data = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
+    this.beds = new AudioBeds(this.ctx, this.master, (active) => {
+      this.sampledMusic = active;
+      this.musicGain.gain.value = active ? 0 : 0.16 * this.musicMult;
+    });
+    this.beds.setVolume(this.musicMult);
     this.startMusic();
   }
 
   setMuted(m) {
     this.muted = m;
+    if (m) this.barkEl?.pause();
     if (this.master) this.master.gain.value = m ? 0 : 0.55 * this.volMult;
   }
 
@@ -79,8 +93,11 @@ export class AudioSys {
 
   setMusicVolume(v) {
     this.musicMult = Math.max(0, Math.min(1, v));
-    if (this.musicGain) this.musicGain.gain.value = 0.16 * this.musicMult;
+    if (this.musicGain) this.musicGain.gain.value = this.sampledMusic ? 0 : 0.16 * this.musicMult;
+    this.beds?.setVolume(this.musicMult);
   }
+
+  updateScene(scene) { this.beds?.setScene(scene); }
 
   _later(fn, delay) {
     const gain=this.eventGain;
@@ -180,6 +197,7 @@ export class AudioSys {
   }
 
   bossHorn() {
+    this.beds?.duck();
     this._tone(1.2, { freq: 65, type: 'sawtooth', gain: 0.18, slide: -15, attack: 0.05 });
     this._tone(1.2, { freq: 98, type: 'sawtooth', gain: 0.12, slide: -20, attack: 0.08 });
     this._noise(1.0, { freq: 180, q: 0.7, gain: 0.2, type: 'lowpass', sweep: -80 });
@@ -191,6 +209,7 @@ export class AudioSys {
   }
 
   underattack() {
+    this.beds?.duck();
     this._tone(0.16, { freq: 520, type: 'square', gain: 0.09 });
     this._later(() => this._tone(0.16, { freq: 440, type: 'square', gain: 0.09 }), 180);
   }
