@@ -119,7 +119,7 @@ export function updateSpells(g,h,dt) {
       g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius});
     } else if(e.kind==='blast') {
       for(const z of g.zombies)if(d2(e,z)<=e.radius**2)hit(g,h,e,z);
-      g.emit({type:'groundstrike',x:e.x,z:e.z,r:e.radius});
+      g.emit({type:'groundstrike',x:e.x,z:e.z,radius:e.radius});
     } else if(e.kind==='bolt'||e.kind==='cull') {
       const z=g.zombies.find(z=>z.id===e.targetId&&!z.dead);
       if(z){

@@ -5594,7 +5594,10 @@ class App {
     const vision=fogVisionSources(g);
     const hiddenEffects=new Set(['shot','spit','zdeath','death','groundstrike','cast','stealth']);
     for (const e of g.events) {
-      if(hiddenEffects.has(e.type) && Number.isFinite(e.x) && !visibleInFog(vision,e.x,e.z))continue;
+      if(hiddenEffects.has(e.type)) {
+        const x=e.fx??e.x,z=e.fz??e.z;
+        if(Number.isFinite(x) && !visibleInFog(vision,x,z) && !(Number.isFinite(e.tx)&&visibleInFog(vision,e.tx,e.tz)))continue;
+      }
       this.audio.eventGain=eventHearingGain(this.myHero() || (this.isSpectator ? {x:this.focus.x,z:this.focus.z} : null),e);
       switch (e.type) {
         case 'groundstrike': {
