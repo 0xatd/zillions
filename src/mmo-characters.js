@@ -1,4 +1,4 @@
-import { chapterLeaderStyle } from './chapter.js';
+import { chapterLeaderStyle, CHAPTER_ROSTER_LIMIT } from './chapter.js';
 // Persistent player-created siege characters. Named Zillions heroes remain in
 // Custom Games; created characters carry their own class, level, equipment and
 // appearance between sieges. For signed-in players level, XP, stats and loot
@@ -14,7 +14,7 @@ import {
 import { itemInfo, itemMods } from './config.js';
 import { xpToNextLevel } from './match-rewards.js';
 
-export const MAX_MMO_CHARACTERS = 18; // eight legacy characters plus implemented chapter leaders
+export const MAX_MMO_CHARACTERS = CHAPTER_ROSTER_LIMIT; // eight legacy characters plus implemented chapter leaders
 // What a character can keep between adventures. Rolled gear is unique, so
 // without a cap a stash grows without bound inside the profile blob.
 export const STASH_SLOTS = 60;

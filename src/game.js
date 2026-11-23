@@ -1,4 +1,5 @@
-import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellState, spellOnAttackTaken, spellCooldownBase, SPELL_UPGRADE_KEYS } from './hero-spells.js';
+import { tickUnitBuffs, unitBuffMod } from './combat-buffs.js';
+import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, SPELL_UPGRADE_KEYS } from './hero-spells.js';
 import { heroAbility, abilityCooldown, abilityCooldowns, setAbilityCooldown, tickAbilityCooldowns } from './hero-abilities.js';
 // Core simulation — continuous siege.
 //
@@ -291,7 +292,7 @@ export class Game {
         gateExit: u.gateExit ? 1 : 0, gateCool: snapNum(u.gateCool || 0),
         exitDx: u.exitDx != null ? snapNum(u.exitDx) : null,
         exitDz: u.exitDz != null ? snapNum(u.exitDz) : null,
-        shield: snapNum(u.shieldHp || 0),
+        shield: snapNum(u.shieldHp || 0), spellBuffs:u.spellBuffs ? structuredClone(u.spellBuffs) : null,
         squad: u.squadId || null, squadI: u.squadIndex ?? -1, squadN: u.squadSize || 0,
         // Temporary allies (Tiger's clones, Aaron's spirit) carry a lifespan and
         // a per-instance stat override instead of the shared UNITS[key] def.
@@ -315,7 +316,7 @@ export class Game {
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
         stealth: !!h.stealth, weaveT: snapNum(h.weaveT || 0), weaveDmg: snapNum(h.weaveDmg || 0),
         weaveKey: h.weaveKey || 0, hasteT: snapNum(h.hasteT || 0), hasteMult: snapNum(h.hasteMult || 1),
-        shield: snapNum(h.shieldHp || 0),
+        shield: snapNum(h.shieldHp || 0), spellBuffs:h.spellBuffs ? structuredClone(h.spellBuffs) : null,
         fortifyT: snapNum(h.fortifyT || 0), fortifyArmor: snapNum(h.fortifyArmor || 0), fortifyThorns: snapNum(h.fortifyThorns || 0),
         summonId: h._summonId != null ? h._summonId : null, procT: { ...(h._procT || {}) },
         items: [...(h.items || [])],
@@ -484,7 +485,7 @@ export class Game {
       u.gateCool = us.gateCool || 0;
       u.exitDx = us.exitDx ?? null;
       u.exitDz = us.exitDz ?? null;
-      u.shieldHp = us.shield || 0;
+      u.shieldHp = us.shield || 0;u.spellBuffs=us.spellBuffs ? structuredClone(us.spellBuffs) : null;
       u.squadId = us.squad || null;
       u.squadIndex = us.squadI ?? -1;
       u.squadSize = us.squadN || 0;
@@ -531,6 +532,7 @@ export class Game {
       h.abilCd = hs.cd || 0;
       h.abilityCds = Array.from({length: 6}, (_, slot) => Number.isFinite(hs.abilityCds?.[slot]) ? Math.max(0, hs.abilityCds[slot]) : 0);
       if (hs.abilityCds) h.abilCd = h.abilityCds[0];
+      h.spellBuffs=hs.spellBuffs ? structuredClone(hs.spellBuffs) : null;
       h.spells = hs.spells ? structuredClone(hs.spells) : null;
       h._restoreOrder = hs.order ?? Number.MAX_SAFE_INTEGER;
       h.cooldown = hs.atkCd || 0;
@@ -2864,7 +2866,7 @@ export class Game {
       damage: this.heroDmg(h),
       range: this.heroRange(h),
       rate: spellAttackSpeed(h) * (h.weapon || h.def).rof * (1 + ((h.mods && h.mods.rof) || 0)),
-      speed: spellMoveSpeed(h) * h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + ((h.mods && h.mods.speed) || 0)),
+      speed: (1+unitBuffMod(h,'speed')) * spellMoveSpeed(h) * h.def.speed * (1 + 0.025 * (h.level - 1)) * (1 + ((h.mods && h.mods.speed) || 0)),
       regen: h.def.regen + 0.25 * (h.level - 1) + ((h.mods && h.mods.regen) || 0),
       cooldown: spellCooldownBase(h) * Math.max(0.15, cdMult),
       auraRadius: aura ? aura.radius : 0,
@@ -2963,7 +2965,7 @@ export class Game {
     // Base damage comes from the WEAPON. Growth per level stays on the hero,
     // because levelling the character is not levelling the gun.
     const w = h.weapon || h.def;
-    return (w.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg);
+    return (w.dmg + h.def.levelDmg * heroGrowthUnits(h.level)) * (1 + h.mods.dmg) * (1 + unitBuffMod(h,'damage'));
   }
 
   addXp(h, amount) {
@@ -3188,6 +3190,7 @@ export class Game {
   }
 
   _updateHeroOne(h, dt) {
+    tickUnitBuffs(h,dt);
     tickAbilityCooldowns(h, dt);
     updateSpells(this,h,dt);
     if (h.dead) {
@@ -3272,7 +3275,7 @@ export class Game {
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
   _moveActor(a, dx, dz, speed, dt, gx = null, gz = null, laneWaypoint = false) {
-    const step = speed * dt;
+    const step = speed * (1 + unitBuffMod(a,'speed')) * dt;
     // If somehow inside a building footprint, any walkable step out is legal.
     const occupied = this.occ[(a.z | 0) * this.map.size + (a.x | 0)];
     const trapped = (occupied > 0 && !this.gateIds.has(occupied))
@@ -3871,7 +3874,7 @@ export class Game {
       this.emit({ type: 'evade', x: u.x, z: u.z });
       return;
     }
-    const armor = (u.def.armor || 0) + ((mods && mods.armor) || 0) + (u.fortifyArmor || 0) + (u.auraArmor || 0) + (u.spells?.cullArmor || 0);
+    const armor = (u.def.armor || 0) + ((mods && mods.armor) || 0) + (u.fortifyArmor || 0) + (u.auraArmor || 0) + (u.spells?.cullArmor || 0) + unitBuffMod(u,'armor');
     // Negative armour has to bite. Gating on `armor > 0` silently discarded
     // every doctrine drawback that traded armour away, making them free.
     if (armor) dmg *= Math.max(0.25, Math.min(1.75, 1 - armor));
@@ -4459,6 +4462,7 @@ export class Game {
           this.emit({ type: 'expire', x: u.x, z: u.z });
         }
       }
+      if (!u.hero) tickUnitBuffs(u,dt);
       if (u.hasteT > 0) u.hasteT -= dt;
       if (u.dead || u.hero) { if (u.hero) { u.cooldown -= dt; u.retargetT -= dt; } } else {
         u.cooldown -= dt;
@@ -4586,6 +4590,7 @@ export class Game {
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = u.hero ? spellAttack(this,u,zb,hitDmg()) : hitDmg();
           this.damageZombie(zb, dmg, u.x, u.z, w.types || null, u.hero ? u.mods : null);
+          if(u.hero)spellAfterAttack(this,u,zb,dmg);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (w.splash) {
             const s2 = w.splash * w.splash;

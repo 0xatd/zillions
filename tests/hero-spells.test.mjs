@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Game} from '../src/game.js';
 import {TILE} from '../src/config.js';
-import {LINA_KIT,SNIPER_KIT,AXE_KIT} from '../src/hero-kits.js';
-import {spellState,updateSpells,spellMoveSpeed,spellAttackSpeed,spellAttack} from '../src/hero-spells.js';
+import {LINA_KIT,SNIPER_KIT,AXE_KIT,SVEN_KIT} from '../src/hero-kits.js';
+import {spellState,updateSpells,spellMoveSpeed,spellAttackSpeed,spellAttack,spellAfterAttack} from '../src/hero-spells.js';
 import {stateHash} from '../src/lockstep-hash.js';
 const map=()=>{const size=48;return {size,seed:81818,sites:[],nestSpots:[],nodeSpots:[],tiles:new Uint8Array(size*size).fill(TILE.GRASS),idx:(x,z)=>z*size+x,inBounds:(x,z)=>x>=0&&z>=0&&x<size&&z<size,isBuildable:(x,z)=>x>=0&&z>=0&&x<size&&z<size,isWalkable:(x,z)=>x>=0&&z>=0&&x<size&&z<size};};
 function fresh(){const g=new Game(map(),'normal','scott',null,1);g.zombies=[];g.nests=[];g.heroes[0].def=LINA_KIT;const h=g.heroes[0];h.x=h.z=20;spellState(h);return g;}
@@ -106,4 +106,29 @@ test('new kit stats remain finite and every available rank point has a real dest
   assert.equal(h.skillPoints,0);
   for(const [k,v] of Object.entries(g.heroStats(h)))assert.ok(Number.isFinite(v),`${key}/${k} is not finite`);
  }
+});
+
+
+test('Storm Hammer travels before hitting a cluster and stunning only nearby enemies',()=>{
+ const g=fresh(),h=g.heroes[0];h.def=SVEN_KIT;h.spells=null;
+ const a=enemy(g,25,20),b=enemy(g,26,21),c=enemy(g,29,20);
+ g.exec({t:'cast',slot:0,id:a.id});updateSpells(g,h,.3);assert.equal(a.hp,5000);
+ updateSpells(g,h,.3);assert.ok(a.hp<5000);assert.ok(b.hp<5000);assert.equal(c.hp,5000);assert.ok(a.stunT>0 && b.stunT>0);
+});
+test('Sven buffs survive restore, expire, and same Warcry does not stack across sources',async()=>{
+ const {applyUnitBuff,tickUnitBuffs,unitBuffMod}=await import('../src/combat-buffs.js');
+ const g=fresh(),h=g.heroes[0];h.def=SVEN_KIT;h.spells=null;
+ g.exec({t:'cast',slot:1});assert.equal(unitBuffMod(h,'armor'),.1);assert.equal(unitBuffMod(h,'speed'),.15);
+ applyUnitBuff(h,'warcry',999,4,{armor:.2,speed:.15});assert.equal(unitBuffMod(h,'armor'),.2);assert.equal(unitBuffMod(h,'speed'),.15);
+ g.exec({t:'cast',slot:2});assert.equal(unitBuffMod(h,'damage'),1);
+ const r=new Game(map(),'normal','scott',g.snapshot(),1);r.heroes[0].def=SVEN_KIT;
+ assert.equal(stateHash(g),stateHash(r));tickUnitBuffs(h,5);tickUnitBuffs(r.heroes[0],5);
+ assert.equal(unitBuffMod(h,'armor'),.1);assert.equal(stateHash(g),stateHash(r));
+ tickUnitBuffs(h,4);assert.equal(unitBuffMod(h,'armor'),0);assert.equal(unitBuffMod(h,'damage'),1);
+ tickUnitBuffs(h,12);assert.equal(unitBuffMod(h,'damage'),0);
+});
+test('Great Cleave hits behind the primary target, never beside or behind the attacker',()=>{
+ const g=fresh(),h=g.heroes[0];h.def=SVEN_KIT;
+ const primary=enemy(g,22,20),behind=enemy(g,25,20),side=enemy(g,22,24),back=enemy(g,18,20);
+ spellAfterAttack(g,h,primary,100);assert.equal(primary.hp,5000);assert.ok(behind.hp<5000);assert.equal(side.hp,5000);assert.equal(back.hp,5000);
 });

@@ -27,7 +27,9 @@ export function stateHash(g) {
       for(const v of [enemy.id,w.x,w.z,w.r,w.t,w.duration,w.damage])h=(h*31+Math.round(v*1000))|0;
     }
   }
+  for (const unit of g.units) if(!unit.hero && unit.spellBuffs) h=(h*31+hashString(JSON.stringify(unit.spellBuffs)))|0;
   for (const hr of g.heroes) {
+    if(hr.spellBuffs)h=(h*31+hashString(JSON.stringify(hr.spellBuffs)))|0;
     if (hr.spells) h = (h * 31 + hashString(JSON.stringify(hr.spells))) | 0;
     for (const cd of abilityCooldowns(hr)) h = (h * 31 + Math.round(cd * 1000)) | 0;
     h=(h*31+(hr.focusId??0))|0;

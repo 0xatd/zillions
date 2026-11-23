@@ -1,3 +1,4 @@
+import { applyUnitBuff } from './combat-buffs.js';
 // Deterministic multi-slot spell runtime. Pending casts are plain data and
 // belong to the hero snapshot, never to renderer timers or DOM callbacks.
 import {heroAbility, abilityCooldown, setAbilityCooldown} from './hero-abilities.js';
@@ -49,6 +50,7 @@ export function castSpell(g,h,slot,input={}) {
     targetId:ab.target==='enemy'?target.id:null,delay:ab.delay||0,channel:!!ab.channel,
     damage:value(ab.damage,rank),stun:value(ab.stun,rank),radius:ab.radius||0,
     slow:ab.slow||0,types:ab.types||null,pure:!!ab.pure,t:ab.duration||0,hit:[],kills:target.killCount||0};
+  if(ab.projectileSpeed)effect.delay+=Math.sqrt(d2(h,target))/ab.projectileSpeed;
   if(ab.spell==='taunt'){effect.targets=g.zombies.filter(z=>!z.dead&&d2(h,z)<=ab.radius**2).map(z=>z.id);}
   if(ab.spell==='wave') {
     const distance=Math.hypot(target.x-h.x,target.z-h.z);
@@ -59,9 +61,13 @@ export function castSpell(g,h,slot,input={}) {
   s.mana-=mana;
   if(charge){charge.count--;if(!charge.t)charge.t=ab.recharge;}
   if(ab.spell==='taunt'){h.fortifyT=ab.duration;h.fortifyArmor=ab.armor;h.fortifyThorns=0;for(const z of g.zombies)if(effect.targets.includes(z.id)){z.targetU=h;z.retarget=.3;z.state=2;z.windup=null;}}
+  if(ab.spell==='buff'){
+    const mods=Object.fromEntries(Object.entries(ab.mods).map(([key,v])=>[key,value(v,rank)]));
+    for(const ally of g.units)if(!ally.dead&&(ab.selfOnly?ally.id===h.id:d2(h,ally)<=ab.radius**2))applyUnitBuff(ally,ab.key,h.id,ab.duration,mods);
+  }
   if(ab.spell==='aim'){s.aimT=ab.duration;s.aimRange=value(ab.rangeBonus,rank);}
   setAbilityCooldown(h,slot,value(ab.cd,rank)*Math.max(.15,1-h.mods.cdr));
-  if(ab.spell!=='aim')s.effects.push(effect);
+  if(!['aim','buff'].includes(ab.spell))s.effects.push(effect);
   g.emit({type:'cast',heroId:h.id,x:h.x,z:h.z,radius:ab.radius||3,icon:ab.icon,key:ab.key});
   return true;
 }
@@ -116,7 +122,9 @@ export function updateSpells(g,h,dt) {
       g.emit({type:'groundstrike',x:e.x,z:e.z,r:e.radius});
     } else if(e.kind==='bolt'||e.kind==='cull') {
       const z=g.zombies.find(z=>z.id===e.targetId&&!z.dead);
-      if(z){hit(g,h,e,z);if(e.kind==='cull'&&z.boss&&z.dead){setAbilityCooldown(h,e.slot,0);s.cullArmor=(s.cullArmor||0)+.015;}g.emit({type:'shot',kind:'hero',heroKey:h.key,fromId:h.id,fx:h.x,fz:h.z,tx:z.x,tz:z.z,fy:1});}
+      if(z){
+        if(e.radius){for(const other of g.zombies)if(d2(z,other)<=e.radius**2)hit(g,h,e,other);}else hit(g,h,e,z);
+        if(e.kind==='cull'&&z.boss&&z.dead){setAbilityCooldown(h,e.slot,0);s.cullArmor=(s.cullArmor||0)+.015;}g.emit({type:'shot',kind:'hero',heroKey:h.key,fromId:h.id,fx:h.x,fz:h.z,tx:z.x,tz:z.z,fy:1});}
     }
   }
   for(const {effect,target} of zoneHits.values())hit(g,h,effect,target);
@@ -148,4 +156,16 @@ export function spellOnAttackTaken(g,h,attacker) {
   s.helixHits=0;s.helixCd=ab.cd;
   for(const z of g.zombies)if(!z.dead&&d2(h,z)<=ab.radius**2)g.damageZombie(z,value(ab.damage,rank),h.x,h.z,null,null,true);
   g.emit({type:'cast',heroId:h.id,x:h.x,z:h.z,radius:ab.radius,icon:'↻',key:'counter_helix'});
+}
+
+export function spellAfterAttack(g,h,target,damage) {
+  const cleave=h.def.cleave;if(!cleave)return;
+  const distance=Math.sqrt(d2(h,target));if(distance<.001)return;
+  const dx=(target.x-h.x)/distance,dz=(target.z-h.z)/distance;
+  for(const z of g.zombies){
+    if(z.dead||z.id===target.id)continue;
+    const along=(z.x-h.x)*dx+(z.z-h.z)*dz,across=Math.abs((z.x-h.x)*dz-(z.z-h.z)*dx);
+    if(along>=distance&&along<=distance+cleave.distance&&across<=cleave.width*along/(distance+cleave.distance))
+      g.damageZombie(z,damage*value(cleave.share,spellRank(h,3)),h.x,h.z,{kinetic:1});
+  }
 }

@@ -4,6 +4,7 @@ export const CHAPTER_COLORS = Object.freeze({ iron:'#8493a6', crimson:'#b94b51',
 export const CHAPTER_EMBLEMS = Object.freeze({ star:'✦', shield:'⬡', wings:'⋈', sun:'☀' });
 export const CHAPTER_CULTURES = Object.freeze({ coalition:{name:'Coalition',desc:'Human and nonhuman companions welcome.'}, human:{name:'Human compact',desc:'Recruit human companions only. Existing companions are retained.'} });
 export const CHAPTER_LEADERS = Object.freeze([
+  { key:'sven', classKey:'vanguard', capture:2, species:'nonhuman', source:'exploration', role:'Half-Meranth knight' },
   { key:'axe', classKey:'berserker', capture:3, species:'nonhuman', source:'encounter', role:'Oglodi war leader' },
   { key:'sniper', classKey:'recon', capture:1, species:'nonhuman', source:'exploration', role:'Keenfolk marksman' },
   { key:'lina', classKey:'arcanist', capture:1, species:'human', source:'academy', discovery:2, role:'Fire mage' },
@@ -15,6 +16,7 @@ export const CHAPTER_LEADERS = Object.freeze([
   { key:'danny', classKey:'operative', capture:4, role:'Strike commander' },
   { key:'tiger', classKey:'psion', capture:5, role:'Expedition commander' },
 ]);
+export const CHAPTER_ROSTER_LIMIT = 8 + CHAPTER_LEADERS.length;
 export const CHAPTER_CITIES = Object.freeze([
   { level:1, name:'Greenfall', kind:'Landing city', x:15,y:68, reward:'Recruit Scott English and Alexander Thomas — frontline or reconnaissance command.' },
   { level:2, name:'Rotmire', kind:'Marsh stronghold', x:34,y:40, reward:'Recruit Aaron Whitlock — healing wards and summoned support.' },

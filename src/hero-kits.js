@@ -49,3 +49,18 @@ export const AXE_KIT = {
   ],
 };
 AXE_KIT.ability=AXE_KIT.abilities[0];
+
+export const SVEN_KIT = {
+  kitStatus:'core',key:'sven',name:'Sven',icon:'⚔',color:0x3c669e,trim:0xc7c5c1,
+  tagline:'An armored sword fighter who turns a clustered battle into a cleave.',
+  hp:580,dmg:55,range:1.9,rof:.85,speed:4.1,noise:10,melee:true,
+  levelHp:48,levelDmg:6,regen:3,mana:420,manaRegen:4,aura:null,passives:[],
+  cleave:{share:[.4,.6,.9],distance:6,width:3},
+  abilities:[
+    {key:'storm_hammer',name:'Storm Hammer',icon:'🔨',spell:'bolt',target:'enemy',cd:[21,18,15],mana:110,range:7,delay:.2,projectileSpeed:18,radius:2.5,damage:[95,190,320],stun:[1,1.3,1.6],types:{shock:1},desc:'Throw a hammer at an enemy, damaging and stunning it and nearby foes on impact.'},
+    {key:'warcry',name:'Warcry',icon:'📣',spell:'buff',target:'self',cd:[35,30,20],mana:60,radius:7,duration:8,mods:{armor:[.1,.15,.2],speed:.15},desc:'Nearby allied troops and heroes gain armor and movement speed for eight seconds.'},
+    {key:'gods_strength',name:"God's Strength",icon:'💪',spell:'buff',target:'self',cd:[110,100,90],mana:[100,150,200],duration:20,selfOnly:true,mods:{damage:[1,1.5,2]},desc:'For twenty seconds, greatly increase your attack damage.'},
+    {key:'great_cleave',name:'Great Cleave',icon:'◀',passive:true,desc:'Attacks splash a portion of their damage through enemies behind the primary target.'},
+  ],
+};
+SVEN_KIT.ability=SVEN_KIT.abilities[0];
