@@ -1,3 +1,8 @@
+import {visibleInFog} from './fog-of-war.js';
+import {eventHearingGain, hearingGain} from './audio-distance.js';
+import { spellTarget, spellManaCost } from './hero-spells.js';
+import { heroAbility, abilityCooldown } from './hero-abilities.js';
+import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -192,7 +197,7 @@ class App {
           this.startGame(d, hero);
         }
       },
-      onCast: () => this.tryCast(),
+      onCast: (slot = 0) => this.tryCast(slot),
       onControlMode: () => this.toggleControlMode(),
       onBuildHold: (on) => { this.buttonPay = !!on; },
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
@@ -206,6 +211,9 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
+      onChapterSave: (draft) => this._saveChapter(draft),
+      onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
+      onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
       onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
@@ -641,7 +649,7 @@ class App {
     }
     if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
     const key = style.proxyHero || 'scott';
-    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style }).node;
+    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style.chapterLeader ? null : style }).node;
     p.model.scale.setScalar(1.45);
     p.model.position.y = -.02;
     p.scene.add(p.model);
@@ -752,6 +760,7 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this.pendingAbility = null;
     if (snap && !isCompatibleSnapshot(snap)) {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
@@ -868,7 +877,7 @@ class App {
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer,
-      this.game.mode === 'campaign' ? selectedMmoCharacter(this.profile) : null);
+      this.game.mode === 'campaign' && this.mpRole !== 'spectator' ? selectedMmoCharacter(this.profile) : null);
     this.ui.setGameChatEnabled(this.netMode);
     if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
@@ -1361,8 +1370,12 @@ class App {
   async _applyAuth(status) {
     this.authStatus = status;
     if (status.signedIn) {
+      // Auth emits USER_UPDATED while chapter/roster writes are in flight.
+      // An older hydration must not replace the founder/companion being saved.
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       await this.auth.ensureProfile(this.profile);
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
       }
@@ -1420,7 +1433,7 @@ class App {
       const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
+      if (returning) setTimeout(() => this.ui._showScreen('main'), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
@@ -1540,10 +1553,62 @@ class App {
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
   }
 
+  async _saveChapter(draft) {
+    if (this.game || this._chapterSaving) return;
+    const chapter = chapterIdentity({ ...draft, founderId: chapterFounder(this.profile)?.id });
+    if (!chapter.name) { this.ui.showBanner('Give your chapter a name.', 'bad', 2500); return; }
+    this._chapterSaving = true;
+    try {
+      this.profile.chapter = chapter;
+      const founder = chapterFounder(this.profile);
+      if (founder && this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(founder, { persistProfile: false });
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      if (!chapterFounder(this.profile)) this.ui.showCharacterCreator();
+      else this.ui.showBanner(`${chapter.name} is ready. Choose your next conquest.`, '', 3000);
+    } catch (err) {
+      this.ui.showBanner('Chapter could not sync. Your changes are kept here; save again to retry.', 'bad', 5000);
+    } finally { this._chapterSaving = false; }
+  }
+
+  async _recruitChapterLeader(key, { persist = true } = {}) {
+    if (this.game || this._chapterRecruiting) return;
+    if (!(leaderRecord(this.profile,key) ? leaderAvailable(this.profile,key) : recruitmentAllowed(this.profile,key))) { this.ui.showBanner('This recruit needs a compatible chapter culture and the required conquest.', 'bad', 3000); return; }
+    this._chapterRecruiting = true;
+    try {
+      let character = leaderRecord(this.profile, key);
+      if (!character) {
+        const leader = CHAPTER_LEADERS.find(l => l.key === key);
+        character = makeMmoCharacter(HEROES[key].name, leader.classKey, chapterIdentity(this.profile.chapter).color);
+        character.id = `chapter_${key}_v1`;
+        character.chapterLeader = key;
+        character.proxyHero = key;
+        character.firstHourGuideDismissed = true;
+        if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      }
+      this.profile.mmoCharacterId = character.id;
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      if (this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+      if (persist) {
+        this._storeProfileLocally();
+        if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+        this.ui.setProfile(this.profile);
+      }
+      return character;
+    } catch (err) {
+      this.ui.showBanner(err?.message === 'roster_full' ? 'The roster is full. Your existing leaders and equipment have been preserved.' : 'Recruitment could not sync. Select this leader again to retry.', 'bad', 5000);
+      throw err;
+    } finally { this._chapterRecruiting = false; }
+  }
+
   async _selectMmoCharacter(id) {
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
+    if (character.chapterLeader && !leaderAvailable(this.profile, character.chapterLeader)) return;
     this.profile.mmoCharacterId = character.id;
     this.profile.lastHero = character.proxyHero;
     this.ui.selectedHero = character.proxyHero;
@@ -1557,24 +1622,32 @@ class App {
     this.ui.setProfile(this.profile);
   }
 
-  _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
-    const clean = String(name || '').trim();
-    if (!clean) {
-      this.ui.showBanner('Choose a character name.', 'bad', 2200);
-      return;
-    }
-    const character = makeMmoCharacter(clean, classKey, appearance, raceKey, customization);
-    if (!addMmoCharacter(this.profile, character)) {
-      this.ui.showBanner('The character roster is full.', 'bad', 2200);
-      return;
-    }
-    this.profile.lastHero = character.proxyHero;
-    this.ui.selectedHero = character.proxyHero;
-    this._saveProfile();
-    this.ui.setProfile(this.profile);
-    const klass = MMO_CLASSES[character.classKey];
-    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, is ready for the siege.`, '', 3000);
-    this.ui._showScreen('main');
+  async _createMmoCharacter({ name, appearance, raceKey, customization } = {}) {
+    if (this.game || this._founderCreating) return;
+    const clean = String(name || '').trim().slice(0,18);
+    if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
+    if (chapterFounder(this.profile)) { this.ui._showScreen('main'); return; }
+    this._founderCreating = true;
+    const character = makeMmoCharacter(clean, 'vanguard', appearance, raceKey, customization);
+    try {
+      if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: character.id });
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) {
+        await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+        await this.auth.syncLocalProfile(this.profile);
+      }
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+    } catch (err) {
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      this.ui._showCharacterCreator();
+      this.ui.showBanner('Founder could not sync. Your character is preserved here; save the chapter to retry.', 'bad', 5000);
+    } finally { this._founderCreating = false; }
   }
 
   async _ensureAuthoritativeEconomy(character, { persistProfile = true } = {}) {
@@ -3691,8 +3764,10 @@ class App {
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
     this.horde.begin();
+    const vision=fogVisionSources(g);
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
+      if(!visibleInFog(vision,zb.x,zb.z))continue;
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
@@ -3904,7 +3979,7 @@ class App {
       if (u.hp < u.maxHp) add(u.x, gy(u.x, u.z) + 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
     for (const zb of g.zombies) {
-      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
+      if (zb.type === 'brute' && zb.hp < zb.maxHp && visibleInFog(fogVisionSources(g),zb.x,zb.z)) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
     }
     this.barBg.count = this.barFg.count = i;
     this.barBg.instanceMatrix.needsUpdate = true;
@@ -4877,6 +4952,12 @@ class App {
       cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
     }
     const hero=this.myHero(),target=hero?.target;
+    if(hero&&!hero.dead&&this.pendingAbility!=null){
+      const ab=heroAbility(hero.def,this.pendingAbility);if(ab?.range)cue(hero.x,hero.z,ab.range,0x7edac1,.4);
+    }
+    for(const caster of g.heroes)for(const e of caster.spells?.effects||[]){
+      if((e.kind==='blast'||e.kind==='zone')&&visible(e.x,e.z))cue(e.x,e.z,e.radius,e.delay>0?0xffce68:0x7edac1,.65);
+    }
     if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
       &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
       cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
@@ -5028,8 +5109,9 @@ class App {
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
-        case 'ability1':
-          if (this.controlMode === 'fight') this.tryCast();
+        case 'ability1': case 'ability2': case 'ability3':
+          e.preventDefault();
+          if (this.controlMode === 'fight') this.tryCast(Number(act.slice(-1)) - 1 + (isHeld(binds, this.keys, 'second_bar') ? 3 : 0));
           break;
         case 'build_mode':
           e.preventDefault();
@@ -5048,7 +5130,7 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': this.setSpeed(0); break;
-        case 'menu': if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
+        case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
@@ -5075,6 +5157,25 @@ class App {
         if(screen.z< -1||screen.z>1)continue;
         const distance=Math.hypot(rect.left+(screen.x+1)*rect.width/2-e.clientX,rect.top+(1-screen.y)*rect.height/2-e.clientY);
         if(distance<closest){closest=distance;best={unit,enemy,world};}
+      }
+      if (this.pendingAbility != null) {
+        const slot=this.pendingAbility,h=this.myHero(),ab=heroAbility(h?.def,slot);
+        if (!h || h.dead || this.controlMode !== 'fight' || !ab) {this.pendingAbility=null;return;}
+        if (ab.target==='enemy') {
+          if (!best?.enemy) {this.ui.showBanner('Select a visible enemy.', 'info');return;}
+          const target={id:best.unit.id};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Target is out of range or hidden.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        } else {
+          const pointer=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2);
+          const ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
+          const hit=ray.intersectObject(this.terrain,true)[0];
+          if (!hit) return;
+          const target={x:hit.point.x,z:hit.point.z};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Choose a point closer to your hero.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        }
+        this.pendingAbility=null;return;
       }
       if(best){
         // Do not select an enemy through an occluding terrain ridge.
@@ -5205,6 +5306,7 @@ class App {
   }
 
   toggleControlMode() {
+    this.pendingAbility = null;
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
     this.buttonPay = false;
     if (this.lastPay && this.controlMode === 'fight') {
@@ -5215,13 +5317,20 @@ class App {
     this.audio.click();
   }
 
-  tryCast() {
+  tryCast(slot = 0) {
     if (!this.game) return;
     const h = this.myHero();
     if (!h || h.dead) return;
-    if (h.abilCd > 0) { this.audio.deny(); return; }
+    if (!heroAbility(h.def, slot) || heroAbility(h.def, slot).passive || abilityCooldown(h, slot) > 0) { this.audio.deny(); return; }
+    const ab=heroAbility(h.def,slot);
+    if ((h.spells?.mana ?? h.def.mana ?? 0) < spellManaCost(h,slot) || h.spells?.charges?.[slot]?.count === 0) {this.audio.deny();return;}
+    if (ab.target==='point' || ab.target==='enemy') {
+      this.pendingAbility=slot;
+      this.ui.showBanner(`${ab.name}: select ${ab.target==='enemy'?'an enemy':'a point'} · ${keyLabel(this.binds().menu)} cancels`, 'info');
+      return;
+    }
     if (Math.random() < 0.4) this.audio.bark(h.key, 'attack');
-    this.issue({ t: 'cast', p: this.myPlayer });
+    this.issue({ t: 'cast', p: this.myPlayer, slot });
   }
 
   togglePauseMenu(help = false) {
@@ -5482,7 +5591,14 @@ class App {
       const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
       g.events.splice(0, g.events.length - 30, ...keep);
     }
+    const vision=fogVisionSources(g);
+    const hiddenEffects=new Set(['shot','spit','zdeath','death','groundstrike','cast','stealth']);
     for (const e of g.events) {
+      if(hiddenEffects.has(e.type)) {
+        const x=e.fx??e.x,z=e.fz??e.z;
+        if(Number.isFinite(x) && !visibleInFog(vision,x,z) && !(Number.isFinite(e.tx)&&visibleInFog(vision,e.tx,e.tz)))continue;
+      }
+      this.audio.eventGain=eventHearingGain(this.myHero() || (this.isSpectator ? {x:this.focus.x,z:this.focus.z} : null),e);
       switch (e.type) {
         case 'groundstrike': {
           if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
@@ -5855,6 +5971,7 @@ class App {
           break;
       }
     }
+    this.audio.eventGain=1;
     g.events.length = 0;
   }
 
@@ -6036,7 +6153,8 @@ class App {
       }
 
       // Ambient groans when the horde is active.
-      const aggro = this.game.aggroCount();
+      const listener=this.myHero();
+      const aggro = this.game.zombies.filter(z=>!z.dead && hearingGain(listener,z)>0).length;
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
 
       // Wave marker pulse.

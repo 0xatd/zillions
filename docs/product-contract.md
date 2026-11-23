@@ -3,6 +3,45 @@
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 
+## Chapter-first product decision (Alex, 2026-11-22)
+
+The persistent identity is the player's chapter: name, colors, insignia and
+server-confirmed conquests. A new player creates the chapter and a customizable
+Vanguard founder, then recruits the seven existing named heroes as companions
+through Earth victories. Each companion can lead a mission and keeps its own
+gear/XP. The chapter owns campaign territory and the shared Alloy wallet.
+The five Earth battlefields are presented as city campaigns; clearing Earth
+opens the existing procedural frontier. This is an account campaign, NOT a
+persistent shared world, politics simulator or region-worker system.
+
+The chapter map is the signed-in home. Deploy opens existing mission setup;
+Armory/Quartermaster, Forge and skills are optional between-run services, not
+mandatory NPC errands. Existing character IDs, builds and equipment are kept;
+the first existing character (or explicitly stored founder) is the founder,
+other legacy commanders remain accessible. No destructive migration. New
+companion slots are additive. First-hour shopping is no longer compulsory.
+Only server-confirmed campaign progress determines online conquests/unlocks.
+Cosmetic chapter metadata cannot award victories, currency or items.
+
+This decision supersedes older character-first menu guidance below. Keep the
+siege, co-op, reward and economy invariants unchanged.
+
+## Hero roster expansion (authorized, implementation in progress)
+
+The target is the full Dota-reference roster, not seven renamed kits. The
+127-entry reference inventory in `docs/roster/coverage.json` tracks coverage;
+only actual implemented kits belong in selection. Academy recruitment and
+exploration are distinct acquisition routes. Exploration can discover humans
+and nonhumans. Chapter recruitment culture may exclude new nonhuman recruits;
+changing culture must not delete already-owned companions or their gear.
+Numbered/prime variants are requested but not implemented.
+
+Core-kit implementation is not exact patch parity. Missing talents, facets,
+item-granted abilities and innate mechanics must remain explicit in the coverage
+report. Use our own visuals, not extracted Dota assets. New kit commands and
+all their pending/cooldown/resource state must survive snapshot and lockstep.
+Q/E/R are active slots; the rebindable secondary-bar action exposes three more.
+
 ## Target
 
 Zillions is a browser siege game. The living world (overworld, planet hubs,

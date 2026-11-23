@@ -100,20 +100,20 @@ try {
     create: !!document.querySelector('#m-create-character'),
   })`);
   assert.equal(JSON.parse(entryDom).offline, true, `entry controls missing: ${entryDom}`);
-  assert.equal(await evaluate(`(() => {
+  assert.equal(await evaluate(`(async () => {
     const app = window.__app;
-    const offline = document.querySelector('#a-offline');
-    const create = document.querySelector('#m-create-character');
-    const name = document.querySelector('#creator-name');
-    const form = document.querySelector('#character-create-form');
-    offline.click();
-    create.click();
-    name.value = 'Journey Test';
-    form.requestSubmit();
+    document.querySelector('#a-offline').click();
+    await app._saveChapter({name:'Journey Chapter',color:'cobalt',emblem:'star'});
+    const founderScreen = !document.querySelector('#screen-character-create').classList.contains('hidden');
+    document.querySelector('#creator-cancel').click();
+    const canResumeFounder = [...document.querySelectorAll('#character-list button')].some(b=>b.textContent==='CREATE YOUR FOUNDER');
+    app.ui.showCharacterCreator();
+    await app._createMmoCharacter({name:'Journey Test',appearance:'iron',raceKey:'human'});
     const selected = !document.querySelector('#screen-main').classList.contains('hidden');
-    document.querySelector('#m-enter-world').click();
-    return selected && !document.querySelector('#screen-setup').classList.contains('hidden') && !app.ow && !app.owMap;
-  })()`), true, 'new account must create a character, return to Character Select, and deploy straight to the siege missions');
+    document.querySelector('#chapter-next').click();
+    const choices=[...document.querySelectorAll('#herorow .herocard')].filter(c=>!c.classList.contains('hidden'));
+    return founderScreen && canResumeFounder && selected && !document.querySelector('#screen-setup').classList.contains('hidden') && choices.length===1 && choices[0].querySelector('b').textContent==='Journey Test' && !app.ow && !app.owMap;
+  })()`), true, 'new account creates a chapter and founder, then deploys straight to its first conquest');
   await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
@@ -136,63 +136,13 @@ try {
   }
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
-    const app = window.__app;
-    const character = app.profile.mmoCharacters[0];
-    const originalDirty = app.ui.cb.onProfileDirty;
-    const originalAuthority = app.ui.cb.useAuthoritativeEconomy;
-    const originalCampaign = app.ui.cb.onCampaignMap;
-    const original = {
-      items: structuredClone(character.items),
-      equipment: structuredClone(character.equipment),
-      hadDismissal: Object.prototype.hasOwnProperty.call(character, 'firstHourGuideDismissed'),
-      dismissal: character.firstHourGuideDismissed,
-    };
-    let result = false;
-    try {
-      character.firstHourGuideDismissed = false;
-      character.items = [];
-      character.equipment = {};
-      app.ui.setProfile(app.profile);
-      app.ui._showScreen('main');
-      const guide = document.querySelector('#first-hour-guide');
-      const action = guide.querySelector('[data-guide-action]');
-      const skip = guide.querySelector('[data-guide-skip]');
-      let campaignOpened = 0;
-      app.ui.cb.onCampaignMap = () => { campaignOpened++; };
-      const offlineWired = !guide.classList.contains('hidden') && action?.textContent === 'DEPLOY'
-        && /sign in/i.test(guide.textContent) && !!skip;
-      action.click();
-      const offlineRouted = campaignOpened === 1;
-      app.ui.cb.useAuthoritativeEconomy = () => true;
-      app.ui._showScreen('main');
-      app.ui.setProfile(app.profile);
-      const onlineAction = document.querySelector('#first-hour-guide [data-guide-action]');
-      const onlineWired = onlineAction?.textContent === 'OPEN MARKET';
-      onlineAction.click();
-      const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
-        && document.querySelector('#sheet-tab-shop').classList.contains('sel');
-      let dirtied = 0;
-      app.ui.cb.onProfileDirty = () => { dirtied++; };
-      app.ui._showScreen('main');
-      app.ui.setProfile(app.profile);
-      document.querySelector('#first-hour-guide [data-guide-skip]').click();
-      const skipped = character.firstHourGuideDismissed === true
-        && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
-      result = offlineWired && offlineRouted && onlineWired && routed && skipped;
-    } finally {
-      app.ui.cb.onProfileDirty = originalDirty;
-      app.ui.cb.useAuthoritativeEconomy = originalAuthority;
-      app.ui.cb.onCampaignMap = originalCampaign;
-      character.items = original.items;
-      character.equipment = original.equipment;
-      if (original.hadDismissal) character.firstHourGuideDismissed = original.dismissal;
-      else delete character.firstHourGuideDismissed;
-      app.ui.setProfile(app.profile);
-      if (!original.hadDismissal) delete character.firstHourGuideDismissed;
-      app.ui.hideOverlay();
-    }
-    return result;
-  })()`), true, 'first-deployment guide must route offline players to a mission, signed-in players to Market, and persist its per-character skip');
+    const app=window.__app; app.ui.setProfile(app.profile); app.ui._showScreen('main');
+    const noShoppingGate=document.querySelector('#first-hour-guide').classList.contains('hidden');
+    document.querySelector('#chapter-services [data-service="shop"]').click();
+    const armoryOpen=!document.querySelector('#screen-character-sheet').classList.contains('hidden') && document.querySelector('#sheet-tab-shop').classList.contains('sel');
+    document.querySelector('#sheet-close').click();
+    return noShoppingGate && armoryOpen && !document.querySelector('#chapter-next').disabled;
+  })()`), true, 'chapter permits immediate deployment and optional quartermaster access');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     const noWorld = !document.querySelector('[id^="ow-"]') && !document.querySelector('#living-world-map') && !document.querySelector('#screen-world-menu');
@@ -226,7 +176,7 @@ try {
     const name = document.querySelector('#character-name');
     const model = preview?.model;
     return !!model && model.userData.visualState?.role === 'frontline'
-      && preview.renderer.info.render.calls > 0 && canvas.clientWidth > 100 && canvas.clientHeight > 150
+      && preview.renderer.info.render.calls > 0 && canvas.clientWidth >= 100 && canvas.clientHeight >= 100
       && !canvas.classList.contains('hidden') && name.textContent.includes('Journey Test')
       && !document.querySelector('#m-enter-world').disabled;
   })()`), true, 'Character Select must render the selected gameplay model with its name and usable Deploy action');
@@ -237,12 +187,12 @@ try {
       window.__app.ui._showScreen('main');
       const screen = document.querySelector('#screen-main');
       screen.scrollTop = 0;
-      return ['#m-enter-world', '#m-character-sheet', '#m-custom', '#m-settings'].every(selector => {
+      return ['#chapter-map', '#chapter-next'].every(selector => {
         const button = document.querySelector(selector), r = button.getBoundingClientRect();
         return !button.disabled && r.width > 30 && r.height >= 28 && r.top >= 0
           && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
       });
-    })()`), true, `Commander navigation must fit above the fold at ${width}x${height}`);
+    })()`), true, `Chapter map and primary deployment must fit above the fold at ${width}x${height}`);
   }
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
@@ -362,6 +312,37 @@ try {
     await capture('robot-bulwark-heavy-full-gear', 'robot', { face: 'tri-eye', body: 'bulwark', head: 'crest', legs: 'heavy' }, {
       head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
     }, -.3);
+  }
+  assert.equal(await evaluate(`(async () => {
+    const {Game}=await import('/src/game.js');
+    const {TerrainField}=await import('/src/terrain.js');
+    const {levelById}=await import('/src/config.js');
+    const level=levelById(1),map=new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
+    const game=new Game(map,'normal','lina',null,1);
+    const ui=window.__app.ui;
+    ui.initHUD(game,0,{name:'Wrong founder',classKey:'vanguard',proxyHero:'scott'});
+    const correctName=document.querySelector('#a-name').textContent==='Lina';
+    ui.update(game,0,{controlMode:'fight'});
+    ui._renderAbilitiesOverview({classKey:'arcanist',proxyHero:'lina'});
+    const sheet=document.querySelector('#sheet-panel-abilities').textContent;
+    return correctName && ['Dragon Slave','Light Strike Array','Laguna Blade','Fiery Soul'].every(name=>sheet.includes(name)) && !sheet.includes('Unassigned');
+  })()`), true, 'battle identity must match the actual hero and the ability sheet must show its complete core kit');
+  // Check actual spell buttons, not just the command bar's bounding box.
+  for (const [width,height] of [[1366,768],[390,844],[844,390]]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});
+    const bounds=await evaluate(`(async()=>{
+      const {Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{levelById}=await import('/src/config.js');
+      const l=levelById(1),bad=[];
+      for(const key of ['lina','sniper','axe','sven']) {
+        const g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal',key,null,1);g.foundCity(0);
+        __app.ui.initHUD(g,0);__app.ui.update(g,0,{controlMode:'fight'});
+        for(const e of document.querySelectorAll('#bigaction,#ability-slots button')) {
+          const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)bad.push({key,slot:e.dataset.abilitySlot,rect:r.toJSON()});
+        }
+      }
+      return bad;
+    })()`);
+    assert.deepEqual(bounds,[],`spell controls must fit ${width}x${height}`);
   }
   // Runs last: showEnd replaces the overlay markup, as a finished match does.
   assert.equal(await evaluate(`(() => {

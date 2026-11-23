@@ -114,3 +114,6 @@ rotation, connections and authored-layout collision/elevation compilation.
 Campaign loading of workbench exports is not implemented.
 
 - docs/builder-orders.md: colony crew strategy, spending, movement and verification.
+
+- docs/roster/implementation.md — roster scope, working mechanics and remaining gaps
+- src/hero-abilities.js, src/hero-spells.js, src/hero-kits.js — multi-slot spell runtime and authored kits

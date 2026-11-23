@@ -27,6 +27,14 @@ Read these files before you change code:
 
 Use `llms.txt` when you need a compact repository index.
 
+## Chapter direction — Alex, 2026-11-22
+
+Chapter-first account progression is now authorized: customizable chapter and
+founder, named hero companions recruited by conquest, five Earth city campaigns,
+then the existing frontier. This supersedes character-first home guidance, not
+the siege simulation or prohibition on persistent shared-world systems. Read
+`docs/chapter-campaign-plan.md` and the updated product contract.
+
 ## Product Boundary
 
 Zillions is a sci-fi siege game and only a siege game. The living world
@@ -98,6 +106,12 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - Every hero's signature weapon must stay identical to that hero's own stats.
 
 ### Heroes
+
+Alex reduced the Dota-reference expansion to Lina, Sniper, Axe and Sven on
+2026-11-23. Do not implement the remaining reference roster without a new request. The older
+fixed-name roster below is now the legacy compatibility set, not a ban on new
+kits. Preserve legacy character IDs and gear. See `docs/roster/implementation.md`
+for completed mechanics and explicit gaps; a catalog entry is not a playable kit.
 
 - Keep this roster: Scott English, Alexander Thomas, Daniel Donovan, Turtle
   Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock.

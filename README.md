@@ -7,6 +7,21 @@ in lockstep co-op.
 
 Production: https://zillions.taborlin.co
 
+## Your chapter
+
+Create a chapter and its founder, then lead continuous sieges. The Earth
+campaign map tracks your chapter's confirmed city captures. Victories recruit
+named companions who can lead later expeditions with their own gear and skills.
+The chapter shares conquered territory and Salvage Alloy. Each leader keeps
+their own equipment and stash; mission gold belongs only to the current siege. Earth opens the existing
+procedural frontier after five captures. This is not a persistent shared world.
+
+Existing characters and equipment are preserved. The chapter starts with a
+customizable Vanguard founder; the seven named heroes become recruitable
+companions, not competing identities for that founder. Quartermaster, Forge and
+skills are optional between-run choices; deploy without shopping first.
+
+
 Repository: https://github.com/0xatd/zillions
 
 ## Start Here
@@ -199,6 +214,12 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
+## Roster expansion — work in progress
+
+The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
+preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
+Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+
 ## Controls
 
 The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
@@ -211,9 +232,9 @@ which reads the same table the game dispatches through.
 | Shift | Gallop at full health |
 | Space | Build mode: build/pay. Fight mode: dodge roll |
 | Q | Fight mode: primary ability (your hero special) |
-| E, R | Ability II and III — reserved; heroes carry one ability today |
+| E, R | Ability II and III, when available |
 | X | Draw the other weapon set |
-| Ctrl | Secondary ability bar — reserved |
+| Ctrl | Hold for secondary Q/E/R ability slots |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
 | Alt | Switch between Build mode and Fight mode |

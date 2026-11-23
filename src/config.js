@@ -1,3 +1,4 @@
+import { LINA_KIT, SNIPER_KIT, AXE_KIT, SVEN_KIT } from './hero-kits.js';
 // Game balance & static definitions — continuous-siege conquest.
 // The planet is a lane graph: your camps emit squads that walk out and take
 // nodes, the hives emit squads that walk in. There is no day, no night, and
@@ -639,6 +640,11 @@ export const HEROES = {
     ],
   },
 };
+
+HEROES.lina = LINA_KIT;
+HEROES.sniper = SNIPER_KIT;
+HEROES.axe = AXE_KIT;
+HEROES.sven = SVEN_KIT;
 
 // Coin drops. Coins are no longer paid by the calendar — income is credited
 // automatically and physical coins fall from combat and conquest only.

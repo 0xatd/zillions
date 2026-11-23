@@ -1,3 +1,4 @@
+import { abilityCooldowns } from './hero-abilities.js';
 // The lockstep state hash.
 //
 // Every peer computes this over its own simulation each window and compares.
@@ -19,13 +20,18 @@ export function stateHash(g) {
   h = (h * 31 + g.buildings.length) | 0;
   h = (h * 31 + g.stats.kills) | 0;
   for (const enemy of g.zombies) {
+    for (const value of [enemy.hp,enemy.stunT||0,enemy.slowT||0,enemy.slowMul??1,enemy.killCount||0]) h=(h*31+Math.round(value*1000))|0;
     const w=enemy.windup;
     if(w) {
       h=(h*31+hashString(w.kind))|0;
       for(const v of [enemy.id,w.x,w.z,w.r,w.t,w.duration,w.damage])h=(h*31+Math.round(v*1000))|0;
     }
   }
+  for (const unit of g.units) if(!unit.hero && unit.spellBuffs) h=(h*31+hashString(JSON.stringify(unit.spellBuffs)))|0;
   for (const hr of g.heroes) {
+    if(hr.spellBuffs)h=(h*31+hashString(JSON.stringify(hr.spellBuffs)))|0;
+    if (hr.spells) h = (h * 31 + hashString(JSON.stringify(hr.spells))) | 0;
+    for (const cd of abilityCooldowns(hr)) h = (h * 31 + Math.round(cd * 1000)) | 0;
     h=(h*31+(hr.focusId??0))|0;
     h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;

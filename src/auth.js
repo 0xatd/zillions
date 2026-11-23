@@ -1,3 +1,4 @@
+import { chapterIdentity, CHAPTER_ROSTER_LIMIT } from './chapter.js';
 import { backendEnabled, setBackendSession } from './backend.js';
 import { THREAT_PERIOD } from './config.js';
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
@@ -211,6 +212,7 @@ export class AuthClient {
       ? stats.campaign_cleared
       : campaignProgress(this.user?.user_metadata?.campaign);
     return {
+      chapter: chapterIdentity(this.user?.user_metadata?.chapter),
       name: username,
       username,
       usernameSet: !!profile.username_set,
@@ -336,8 +338,9 @@ export class AuthClient {
       }).eq('id', this.user.id),
       this.client.auth.updateUser({ data: {
         campaign,
+        chapter: chapterIdentity(localProfile.chapter),
         mmo_character_id: localProfile.mmoCharacterId || null,
-        mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, 8) : [],
+        mmo_characters: Array.isArray(localProfile.mmoCharacters) ? localProfile.mmoCharacters.slice(0, CHAPTER_ROSTER_LIMIT) : [],
       } }),
     ]);
     if (profileError) throw profileError;

@@ -434,6 +434,15 @@ for (const [key, hero] of Object.entries(HEROES)) {
   assert.ok(hero.dmg >= 18 && hero.dmg <= 70, `${key} dmg ${hero.dmg} is out of the hero power band`);
   assert.ok(hero.range >= 1.2 && hero.range <= 14, `${key} range ${hero.range} is out of the hero power band`);
   assert.ok(hero.speed > 0 && hero.regen >= 0, `${key} has a non-positive speed or negative regen`);
+  if (hero.abilities) {
+    assert.ok(hero.mana>0 && hero.manaRegen>0, `${key} needs a usable resource pool`);
+    for(const ab of hero.abilities){
+      if(ab.passive)continue;
+      for(const cd of [ab.cd].flat())assert.ok(cd>0 && cd<=120, `${key}/${ab.key} invalid cooldown`);
+      for(const [field,v] of Object.entries(ab))if(Array.isArray(v))assert.equal(v.length,3,`${key}/${ab.key}/${field} rank coverage`);
+    }
+    continue;
+  }
   assert.ok(hero.ability.cd >= 10 && hero.ability.cd <= 14, `${key} ult cooldown ${hero.ability.cd}s is out of band`);
   // Any rank-scaled array on the ability (dmg, dur, radius-per-rank, etc.)
   // must have exactly 3 entries — one per ult rank.

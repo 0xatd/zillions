@@ -139,7 +139,7 @@ const canonicalHeroes = {
   tiger: { name: 'Tiger Reyes', color: 0xd8721f, trim: 0x1c1a18 },
   aaron: { name: 'Aaron Whitlock', color: 0x6a4fae, trim: 0xf0d060 },
 };
-assert.deepEqual(Object.keys(HEROES), Object.keys(canonicalHeroes), 'canonical hero roster or order changed');
+assert.deepEqual(Object.keys(HEROES).filter(key=>!HEROES[key].abilities), Object.keys(canonicalHeroes), 'canonical hero roster or order changed');
 for (const [key, expected] of Object.entries(canonicalHeroes)) {
   assert.equal(HEROES[key]?.name, expected.name, `${key} canonical hero name changed`);
   assert.equal(HEROES[key]?.color, expected.color, `${key} hero model armor color changed`);
@@ -164,6 +164,11 @@ assert.equal(HERO_UPGRADE_MAX, 3, 'hero upgrade branches should stay capped at r
   assert.ok(late < early, 'late-level stat growth must taper below campaign-band growth');
 }
 for (const [key, hero] of Object.entries(HEROES)) {
+  if (hero.abilities) {
+    assert.ok(hero.abilities.length>=4 && hero.abilities.length<=6, `${key} must expose a real multi-slot kit`);
+    assert.ok(hero.abilities.every(a=>a.passive||a.spell||a.cast), `${key} contains an unimplemented ability`);
+    continue;
+  }
   assert.equal((hero.passives || []).length, 2, `${key} must keep exactly two passive upgrade paths`);
   assert.ok(hero.aura, `${key} must keep an aura upgrade path`);
   assert.ok(hero.ability, `${key} must keep an ult damage upgrade path`);
@@ -213,7 +218,7 @@ assert.match(uiSource, /id="a-cinematics">CINEMATICS/, 'the title screen must ex
 assert.match(uiSource, /id="screen-main" class="mainmenu character-select"/, 'the optional character roster must exist');
 assert.match(uiSource, /id="m-enter-world">DEPLOY/, 'Character Select must deploy straight to the siege missions');
 assert.match(uiSource, /id="m-custom">CUSTOM GAMES/, 'Character Select must retain Custom Games');
-assert.match(uiSource, /id="m-delete-character">DELETE CHARACTER/, 'Character Select must expose confirmed character deletion');
+assert.match(uiSource, /id="m-delete-character">RETIRE LEGACY CHARACTER/, 'The chapter must preserve confirmed retirement for legacy characters');
 assert.doesNotMatch(uiSource, /id="screen-world-menu"|id="living-world-map"|id="screen-galaxy"/, 'the overworld, living-world map, and galaxy screens were removed');
 assert.match(uiSource, /#m-enter-world'\)\.onclick = \(\) => this\.cb\.onCampaignMap/, 'Enter World must open mission select');
 assert.match(mainSource, /onCampaignMap: \(\) => this\._openCampaignSelect\(\)/, 'Enter World must route to the campaign mission select');

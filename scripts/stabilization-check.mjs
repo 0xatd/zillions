@@ -34,8 +34,8 @@ assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
 assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an explicit logout action');
 assert.match(ui, /#m-logout'\)\.onclick = \(\) => this\.cb\.onSignOut/, 'logout must call auth instead of repainting the title');
 assert.match(main, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'the shell must sign out of the account backend');
-assert.match(ui, /id="fight-kit"[\s\S]*d\.aura[\s\S]*d\.passives[\s\S]*d\.ability/, 'Fight mode must render the hero aura, passives, and active ability');
-assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting\)/, 'the complete hero kit must appear in Fight mode');
+assert.match(ui, /id="fight-kit"[\s\S]*d\.aura[\s\S]*d\.passives[\s\S]*heroAbilities\(d\)/, 'Fight mode must render the hero aura, passives, and active ability');
+assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting/, 'the complete hero kit must appear in Fight mode');
 
 // Build and Fight are explicit action contexts. Space builds in Build mode and
 // dodges in Fight mode; Q only casts in Fight mode. Movement stays shared.
@@ -44,7 +44,7 @@ assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'dodge'\)[\s\S]*control
 assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'build'\)/, 'B must remain a secondary Build-mode binding');
 assert.match(main, /case 'dodge':[\s\S]*controlMode !== 'fight'[\s\S]*case 'ability1'/, 'Space must be blocked from dodging in Build mode');
 assert.match(main, /case 'dodge':[\s\S]*issue\(\{ t: 'dodge'/, 'Space must dispatch dodge in Fight mode');
-assert.match(main, /case 'ability1':[\s\S]*controlMode === 'fight'[\s\S]*tryCast\(\)/, 'Q must cast only in Fight mode');
+assert.match(main, /case 'ability1':[\s\S]*controlMode === 'fight'[\s\S]*tryCast\(/, 'Q must cast only in Fight mode');
 assert.match(main, /case 'build':[\s\S]*_tryFound\(\)/, 'Build must found the city');
 assert.match(keybinds, /Toggle Build \/ Fight mode/, 'Alt must describe the contextual mode switch');
 
@@ -66,7 +66,7 @@ assert.doesNotMatch(main, /if \(u\.hero && this\.mpRole === 'guest'/,
   'local movement lead must not shift every hero on a guest client');
 assert.match(online, /this\._presenceBeat = setInterval[\s\S]*}, 15 \* 1000\);/, 'presence writes must stay on the slower heartbeat');
 assert.match(online, /this\._gamesPoll = setInterval[\s\S]*refreshGames\(\)[\s\S]*}, 5 \* 1000\);/, 'the read-only lobby fallback must self-heal within five seconds');
-assert.match(ui, /creator-cancel[\s\S]*mmoCharacters[\s\S]*_backOverlay/, 'mandatory character creation must not cancel into an empty roster');
+assert.match(ui, /creator-cancel[\s\S]*_backOverlay/, 'founder creation must return to the chapter without trapping navigation');
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
 
