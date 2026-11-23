@@ -3846,11 +3846,11 @@ export class Game {
     this.stats.damageTaken[sourceKey] = (this.stats.damageTaken[sourceKey] || 0) + dmg;
     b.hitT = this.time;
     this.emit({ type: 'bhit', x: b.cx, z: b.cz, fromId: source?.id, fx: source?.x, fz: source?.z });
-    if (this.time - (this._uaT || -99) > 20) {
+    if (this.time - (this._uaT ?? -99) > 20) {
       this._uaT = this.time;
       this.msg('⚔️ The city is under attack!', 'warn');
       this.emit({ type: 'ping', x: b.cx, z: b.cz });
-      this.emit({ type: 'underattack' });
+      this.emit({ type: 'underattack', x:b.cx, z:b.cz });
     }
     if (b.hp <= 0) this._destroyBuilding(b, true);
   }

@@ -19,7 +19,7 @@ import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
-import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
+import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources, visibleInFog } from './fog-of-war.js';
 import {
   MMO_CLASSES, MMO_RACES, CLASS_ATTRS, CREATOR_PARTS, APPEARANCES, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
@@ -3813,8 +3813,9 @@ export class UI {
       else ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
     }
     ctx.fillStyle = '#e6493a';
-    for (const zb of game.zombies) ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
-    if (game.boss && !game.boss.dead) {
+    const contactVision=fogVisionSources(game);
+    for (const zb of game.zombies) if(visibleInFog(contactVision,zb.x,zb.z))ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
+    if (game.boss && !game.boss.dead && visibleInFog(contactVision,game.boss.x,game.boss.z)) {
       ctx.fillStyle = '#ff2d1f';
       ctx.fillRect(game.boss.x - 2.5, game.boss.z - 2.5, 5, 5);
       ctx.strokeStyle = '#ffd75e';
@@ -3953,7 +3954,7 @@ export class UI {
         ctx.fillRect(u.x - 0.7, u.z - 0.7, 1.6, 1.6);
       }
     }
-    if (game.boss && !game.boss.dead) {
+    if (game.boss && !game.boss.dead && visibleInFog(contactVision,game.boss.x,game.boss.z)) {
       const bossPulse = (performance.now() / 700) % 1;
       ctx.fillStyle = '#ff2d1f';
       ctx.fillRect(game.boss.x - 3, game.boss.z - 3, 6, 6);

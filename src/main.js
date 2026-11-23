@@ -1,3 +1,5 @@
+import {visibleInFog} from './fog-of-war.js';
+import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
@@ -3762,8 +3764,10 @@ class App {
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
     this.horde.begin();
+    const vision=fogVisionSources(g);
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
+      if(!visibleInFog(vision,zb.x,zb.z))continue;
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
@@ -3975,7 +3979,7 @@ class App {
       if (u.hp < u.maxHp) add(u.x, gy(u.x, u.z) + 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
     for (const zb of g.zombies) {
-      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
+      if (zb.type === 'brute' && zb.hp < zb.maxHp && visibleInFog(fogVisionSources(g),zb.x,zb.z)) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
     }
     this.barBg.count = this.barFg.count = i;
     this.barBg.instanceMatrix.needsUpdate = true;
@@ -5587,7 +5591,11 @@ class App {
       const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
       g.events.splice(0, g.events.length - 30, ...keep);
     }
+    const vision=fogVisionSources(g);
+    const hiddenEffects=new Set(['shot','spit','zdeath','death','groundstrike','cast','stealth']);
     for (const e of g.events) {
+      if(hiddenEffects.has(e.type) && Number.isFinite(e.x) && !visibleInFog(vision,e.x,e.z))continue;
+      this.audio.eventGain=eventHearingGain(this.myHero() || (this.isSpectator ? {x:this.focus.x,z:this.focus.z} : null),e);
       switch (e.type) {
         case 'groundstrike': {
           if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
@@ -5960,6 +5968,7 @@ class App {
           break;
       }
     }
+    this.audio.eventGain=1;
     g.events.length = 0;
   }
 
@@ -6141,7 +6150,8 @@ class App {
       }
 
       // Ambient groans when the horde is active.
-      const aggro = this.game.aggroCount();
+      const listener=this.myHero();
+      const aggro = this.game.zombies.filter(z=>!z.dead && hearingGain(listener,z)>0).length;
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
 
       // Wave marker pulse.

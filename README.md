@@ -216,8 +216,8 @@ hero always had.
 
 ## Roster expansion — work in progress
 
-The chapter branch now includes Lina, Sniper and Axe core-kit prototypes alongside
-preserved legacy leaders. This is not the completed 127-hero roster or exact
+The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
+preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
 Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
 
 ## Controls

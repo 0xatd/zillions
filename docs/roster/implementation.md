@@ -1,6 +1,6 @@
-# Full-roster implementation — in progress
+# Four-hero implementation — in progress
 
-Alex authorized the full reference roster. We have NOT completed that scope,
+Alex reduced scope on 2026-11-23 to Lina, Sniper, Axe and Sven.
 and the roster expansion is not approved for production. The chapter candidate
 is PR140; expanded combat work is isolated on `codex/hero-roster` above it.
 
@@ -26,8 +26,8 @@ latest official patch and not a source of imported art/audio/descriptions.
 
 ## Explicit remaining scope
 
-- The other 124 reference heroes have no implemented kits yet.
-- Current three kits are siege adaptations, NOT exact Dota parity: three rank
+- The other reference heroes are out of scope, not queued for implementation.
+- Current four kits are siege adaptations, NOT exact Dota parity: three rank
   bands; no talent/facet system; Lina's Flame Cloak/Slow Burn are not implemented;
   Sniper's vision cone/reveal and some item-upgrade/kill-refresh rules are not
   implemented. His grenade currently staggers rather than applying disarm.
@@ -47,3 +47,5 @@ Cast effect, valid/invalid targets, resource costs, cooldowns, passives, interru
 rank changes, deaths, terrain interaction, snapshot continuation, lockstep guest
 payloads and real mouse/touch controls. Never mark a name or reskinned generic
 spell as a completed hero. Record remaining mechanics, not just a green count.
+
+- Sven: Storm Hammer, Warcry, Gods Strength and Great Cleave. Siege-adapted numbers; no facets, talents or item upgrades.

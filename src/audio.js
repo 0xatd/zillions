@@ -5,6 +5,7 @@ const BARK_HERO = { alexander: 'alex', scott: 'scott', danny: 'danny' };
 
 export class AudioSys {
   constructor() {
+    this.eventGain = 1;
     this.barkIndex = null;
     this.lastBarkT = 0;
     this.barkEl = null;
@@ -81,10 +82,17 @@ export class AudioSys {
     if (this.musicGain) this.musicGain.gain.value = 0.16 * this.musicMult;
   }
 
+  _later(fn, delay) {
+    const gain=this.eventGain;
+    return setTimeout(()=>{const prior=this.eventGain;this.eventGain=gain;try{fn();}finally{this.eventGain=prior;}},delay);
+  }
+
   now() { return this.ctx ? this.ctx.currentTime : 0; }
 
   _noise(dur, { freq = 1200, q = 1, gain = 0.3, type = 'bandpass', attack = 0.002, sweep = 0 } = {}) {
     if (!this.ctx || this.muted) return;
+    gain *= this.eventGain;
+    if(gain<=0)return;
     const t = this.now();
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
@@ -102,6 +110,8 @@ export class AudioSys {
 
   _tone(dur, { freq = 440, type = 'sine', gain = 0.15, slide = 0, attack = 0.005, dest = null } = {}) {
     if (!this.ctx || this.muted) return;
+    if(!dest)gain *= this.eventGain;
+    if(gain<=0)return;
     const t = this.now();
     const o = this.ctx.createOscillator();
     o.type = type; o.frequency.setValueAtTime(freq, t);
@@ -182,7 +192,7 @@ export class AudioSys {
 
   underattack() {
     this._tone(0.16, { freq: 520, type: 'square', gain: 0.09 });
-    setTimeout(() => this._tone(0.16, { freq: 440, type: 'square', gain: 0.09 }), 180);
+    this._later(() => this._tone(0.16, { freq: 440, type: 'square', gain: 0.09 }), 180);
   }
 
   cast(key) {
@@ -202,7 +212,7 @@ export class AudioSys {
       case 'holy':
       case 'deathpulse':
         for (let i = 0; i < 3; i++) {
-          setTimeout(() => this._tone(0.12, { freq: (key === 'holy' ? 620 : 380) + i * 140, type: 'triangle', gain: 0.09 }), i * 70);
+          this._later(() => this._tone(0.12, { freq: (key === 'holy' ? 620 : 380) + i * 140, type: 'triangle', gain: 0.09 }), i * 70);
         }
         return;
       case 'timelapse':
@@ -238,7 +248,7 @@ export class AudioSys {
 
   levelup() {
     const notes = [392, 523, 659, 784];
-    notes.forEach((f, i) => setTimeout(() => this._tone(0.3, { freq: f, type: 'triangle', gain: 0.12 }), i * 90));
+    notes.forEach((f, i) => this._later(() => this._tone(0.3, { freq: f, type: 'triangle', gain: 0.12 }), i * 90));
   }
 
   herodown() {
@@ -247,7 +257,7 @@ export class AudioSys {
   }
 
   revive() {
-    [262, 392, 523].forEach((f, i) => setTimeout(() => this._tone(0.35, { freq: f, type: 'triangle', gain: 0.11 }), i * 110));
+    [262, 392, 523].forEach((f, i) => this._later(() => this._tone(0.35, { freq: f, type: 'triangle', gain: 0.11 }), i * 110));
   }
 
   pickup(kind) {
@@ -302,7 +312,7 @@ export class AudioSys {
 
   bell() {
     for (let i = 0; i < 3; i++) {
-      setTimeout(() => {
+      this._later(() => {
         this._tone(1.4, { freq: 340, type: 'triangle', gain: 0.16, attack: 0.005 });
         this._tone(1.4, { freq: 508, type: 'sine', gain: 0.08, attack: 0.005 });
         this._tone(1.0, { freq: 226, type: 'sine', gain: 0.07, attack: 0.005 });
@@ -311,7 +321,7 @@ export class AudioSys {
   }
 
   dawn() {
-    [392, 494, 587, 784].forEach((f, i) => setTimeout(() => this._tone(0.45, { freq: f, type: 'triangle', gain: 0.09 }), i * 130));
+    [392, 494, 587, 784].forEach((f, i) => this._later(() => this._tone(0.45, { freq: f, type: 'triangle', gain: 0.09 }), i * 130));
   }
 
   click() { this._tone(0.05, { freq: 700, type: 'triangle', gain: 0.06, slide: 150 }); }
@@ -321,7 +331,7 @@ export class AudioSys {
   alarm() {
     for (let i = 0; i < 3; i++) {
       const t0 = i * 0.55;
-      setTimeout(() => {
+      this._later(() => {
         this._tone(0.28, { freq: 660, type: 'square', gain: 0.10 });
         this._tone(0.28, { freq: 495, type: 'square', gain: 0.08 });
       }, t0 * 1000);
@@ -335,12 +345,12 @@ export class AudioSys {
 
   victory() {
     const notes = [523, 659, 784, 1047];
-    notes.forEach((f, i) => setTimeout(() => this._tone(0.5, { freq: f, type: 'triangle', gain: 0.14 }), i * 160));
+    notes.forEach((f, i) => this._later(() => this._tone(0.5, { freq: f, type: 'triangle', gain: 0.14 }), i * 160));
   }
 
   defeat() {
     const notes = [392, 330, 262, 196];
-    notes.forEach((f, i) => setTimeout(() => this._tone(0.7, { freq: f, type: 'sawtooth', gain: 0.1 }), i * 260));
+    notes.forEach((f, i) => this._later(() => this._tone(0.7, { freq: f, type: 'sawtooth', gain: 0.1 }), i * 260));
   }
 
   // Slow ambient minor-chord pad, cycling forever. Quiet, moody.

@@ -18,3 +18,7 @@ export function fogVisionSources(game, limit = MAX_VISION_SOURCES) {
     radius: unit.hero ? HERO_VISION_RADIUS : TROOP_VISION_RADIUS,
   }));
 }
+
+export function visibleInFog(sources,x,z) {
+  return sources.some(s=>(s.x-x)**2+(s.z-z)**2<s.radius**2);
+}

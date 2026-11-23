@@ -7,7 +7,7 @@
       "id": 102,
       "key": "abaddon",
       "name": "Abaddon",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "abaddon_death_coil",
         "abaddon_aphotic_shield",
@@ -20,7 +20,7 @@
       "id": 73,
       "key": "alchemist",
       "name": "Alchemist",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "alchemist_acid_spray",
         "alchemist_unstable_concoction",
@@ -35,7 +35,7 @@
       "id": 68,
       "key": "ancient_apparition",
       "name": "Ancient Apparition",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "ancient_apparition_cold_feet",
         "ancient_apparition_ice_vortex",
@@ -49,7 +49,7 @@
       "id": 1,
       "key": "antimage",
       "name": "Anti-Mage",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "antimage_mana_break",
         "antimage_blink",
@@ -62,7 +62,7 @@
       "id": 113,
       "key": "arc_warden",
       "name": "Arc Warden",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "arc_warden_flux",
         "arc_warden_magnetic_field",
@@ -94,7 +94,7 @@
       "id": 3,
       "key": "bane",
       "name": "Bane",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "bane_enfeeble",
         "bane_brain_sap",
@@ -108,7 +108,7 @@
       "id": 65,
       "key": "batrider",
       "name": "Batrider",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "batrider_sticky_napalm",
         "batrider_flamebreak",
@@ -122,7 +122,7 @@
       "id": 38,
       "key": "beastmaster",
       "name": "Beastmaster",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "beastmaster_wild_axes",
         "beastmaster_summon_razorback",
@@ -136,7 +136,7 @@
       "id": 4,
       "key": "bloodseeker",
       "name": "Bloodseeker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "bloodseeker_bloodrage",
         "bloodseeker_blood_bath",
@@ -149,7 +149,7 @@
       "id": 62,
       "key": "bounty_hunter",
       "name": "Bounty Hunter",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "bounty_hunter_shuriken_toss",
         "bounty_hunter_jinada",
@@ -163,7 +163,7 @@
       "id": 78,
       "key": "brewmaster",
       "name": "Brewmaster",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "brewmaster_thunder_clap",
         "brewmaster_cinder_brew",
@@ -176,7 +176,7 @@
       "id": 99,
       "key": "bristleback",
       "name": "Bristleback",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "bristleback_viscous_nasal_goo",
         "bristleback_quill_spray",
@@ -190,7 +190,7 @@
       "id": 61,
       "key": "broodmother",
       "name": "Broodmother",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "broodmother_insatiable_hunger",
         "broodmother_spin_web",
@@ -204,7 +204,7 @@
       "id": 96,
       "key": "centaur",
       "name": "Centaur Warrunner",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "centaur_hoof_stomp",
         "centaur_double_edge",
@@ -219,7 +219,7 @@
       "id": 81,
       "key": "chaos_knight",
       "name": "Chaos Knight",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "chaos_knight_chaos_bolt",
         "chaos_knight_reality_rift",
@@ -233,7 +233,7 @@
       "id": 66,
       "key": "chen",
       "name": "Chen",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "chen_penitence",
         "chen_holy_persuasion",
@@ -246,7 +246,7 @@
       "id": 56,
       "key": "clinkz",
       "name": "Clinkz",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "clinkz_strafe",
         "clinkz_searing_arrows",
@@ -261,7 +261,7 @@
       "id": 51,
       "key": "rattletrap",
       "name": "Clockwerk",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "rattletrap_battery_assault",
         "rattletrap_power_cogs",
@@ -277,7 +277,7 @@
       "id": 5,
       "key": "crystal_maiden",
       "name": "Crystal Maiden",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "crystal_maiden_crystal_nova",
         "crystal_maiden_frostbite",
@@ -292,7 +292,7 @@
       "id": 55,
       "key": "dark_seer",
       "name": "Dark Seer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "dark_seer_vacuum",
         "dark_seer_ion_shell",
@@ -306,7 +306,7 @@
       "id": 119,
       "key": "dark_willow",
       "name": "Dark Willow",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "dark_willow_bramble_maze",
         "dark_willow_shadow_realm",
@@ -320,7 +320,7 @@
       "id": 135,
       "key": "dawnbreaker",
       "name": "Dawnbreaker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "dawnbreaker_fire_wreath",
         "dawnbreaker_celestial_hammer",
@@ -335,7 +335,7 @@
       "id": 50,
       "key": "dazzle",
       "name": "Dazzle",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "dazzle_poison_touch",
         "dazzle_shallow_grave",
@@ -350,7 +350,7 @@
       "id": 43,
       "key": "death_prophet",
       "name": "Death Prophet",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "death_prophet_carrion_swarm",
         "death_prophet_silence",
@@ -363,7 +363,7 @@
       "id": 87,
       "key": "disruptor",
       "name": "Disruptor",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "disruptor_thunder_strike",
         "disruptor_glimpse",
@@ -377,7 +377,7 @@
       "id": 69,
       "key": "doom_bringer",
       "name": "Doom",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "doom_bringer_devour",
         "doom_bringer_scorched_earth",
@@ -392,7 +392,7 @@
       "id": 49,
       "key": "dragon_knight",
       "name": "Dragon Knight",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "dragon_knight_breathe_fire",
         "dragon_knight_dragon_tail",
@@ -406,7 +406,7 @@
       "id": 6,
       "key": "drow_ranger",
       "name": "Drow Ranger",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "drow_ranger_frost_arrows",
         "drow_ranger_wave_of_silence",
@@ -420,7 +420,7 @@
       "id": 107,
       "key": "earth_spirit",
       "name": "Earth Spirit",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "earth_spirit_boulder_smash",
         "earth_spirit_rolling_boulder",
@@ -434,7 +434,7 @@
       "id": 7,
       "key": "earthshaker",
       "name": "Earthshaker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "earthshaker_fissure",
         "earthshaker_enchant_totem",
@@ -447,7 +447,7 @@
       "id": 103,
       "key": "elder_titan",
       "name": "Elder Titan",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "elder_titan_echo_stomp",
         "elder_titan_ancestral_spirit",
@@ -462,7 +462,7 @@
       "id": 106,
       "key": "ember_spirit",
       "name": "Ember Spirit",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "ember_spirit_searing_chains",
         "ember_spirit_sleight_of_fist",
@@ -476,7 +476,7 @@
       "id": 58,
       "key": "enchantress",
       "name": "Enchantress",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "enchantress_impetus",
         "enchantress_enchant",
@@ -491,7 +491,7 @@
       "id": 33,
       "key": "enigma",
       "name": "Enigma",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "enigma_malefice",
         "enigma_demonic_conversion",
@@ -504,7 +504,7 @@
       "id": 41,
       "key": "faceless_void",
       "name": "Faceless Void",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "faceless_void_time_walk",
         "faceless_void_time_dilation",
@@ -518,7 +518,7 @@
       "id": 121,
       "key": "grimstroke",
       "name": "Grimstroke",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "grimstroke_dark_artistry",
         "grimstroke_ink_creature",
@@ -532,7 +532,7 @@
       "id": 72,
       "key": "gyrocopter",
       "name": "Gyrocopter",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "gyrocopter_rocket_barrage",
         "gyrocopter_homing_missile",
@@ -546,7 +546,7 @@
       "id": 123,
       "key": "hoodwink",
       "name": "Hoodwink",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "hoodwink_acorn_shot",
         "hoodwink_bushwhack",
@@ -562,7 +562,7 @@
       "id": 59,
       "key": "huskar",
       "name": "Huskar",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "huskar_inner_fire",
         "huskar_burning_spear",
@@ -575,7 +575,7 @@
       "id": 74,
       "key": "invoker",
       "name": "Invoker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "invoker_quas",
         "invoker_wex",
@@ -599,7 +599,7 @@
       "id": 91,
       "key": "wisp",
       "name": "Io",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "wisp_tether",
         "wisp_spirits",
@@ -615,7 +615,7 @@
       "id": 64,
       "key": "jakiro",
       "name": "Jakiro",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "jakiro_dual_breath",
         "jakiro_ice_path",
@@ -629,7 +629,7 @@
       "id": 8,
       "key": "juggernaut",
       "name": "Juggernaut",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "juggernaut_blade_fury",
         "juggernaut_healing_ward",
@@ -642,7 +642,7 @@
       "id": 90,
       "key": "keeper_of_the_light",
       "name": "Keeper of the Light",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "keeper_of_the_light_illuminate",
         "keeper_of_the_light_blinding_light",
@@ -658,7 +658,7 @@
       "id": 145,
       "key": "kez",
       "name": "Kez",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "kez_echo_slash",
         "kez_grappling_claw",
@@ -676,7 +676,7 @@
       "id": 23,
       "key": "kunkka",
       "name": "Kunkka",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "kunkka_torrent",
         "kunkka_tidebringer",
@@ -691,7 +691,7 @@
       "id": 155,
       "key": "largo",
       "name": "Largo",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "largo_catchy_lick",
         "largo_frogstomp",
@@ -707,7 +707,7 @@
       "id": 104,
       "key": "legion_commander",
       "name": "Legion Commander",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "legion_commander_overwhelming_odds",
         "legion_commander_press_the_attack",
@@ -720,7 +720,7 @@
       "id": 52,
       "key": "leshrac",
       "name": "Leshrac",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "leshrac_split_earth",
         "leshrac_diabolic_edict",
@@ -734,7 +734,7 @@
       "id": 31,
       "key": "lich",
       "name": "Lich",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "lich_frost_nova",
         "lich_frost_shield",
@@ -748,7 +748,7 @@
       "id": 54,
       "key": "life_stealer",
       "name": "Lifestealer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "life_stealer_rage",
         "life_stealer_open_wounds",
@@ -781,7 +781,7 @@
       "id": 26,
       "key": "lion",
       "name": "Lion",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "lion_impale",
         "lion_voodoo",
@@ -794,7 +794,7 @@
       "id": 80,
       "key": "lone_druid",
       "name": "Lone Druid",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "lone_druid_entangle",
         "lone_druid_spirit_link",
@@ -807,7 +807,7 @@
       "id": 48,
       "key": "luna",
       "name": "Luna",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "luna_lucent_beam",
         "luna_lunar_orbit",
@@ -820,7 +820,7 @@
       "id": 77,
       "key": "lycan",
       "name": "Lycan",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "lycan_summon_wolves",
         "lycan_howl",
@@ -834,7 +834,7 @@
       "id": 97,
       "key": "magnataur",
       "name": "Magnus",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "magnataur_shockwave",
         "magnataur_empower",
@@ -848,7 +848,7 @@
       "id": 136,
       "key": "marci",
       "name": "Marci",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "marci_grapple",
         "marci_companion_run",
@@ -861,7 +861,7 @@
       "id": 129,
       "key": "mars",
       "name": "Mars",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "mars_spear",
         "mars_gods_rebuke",
@@ -874,7 +874,7 @@
       "id": 94,
       "key": "medusa",
       "name": "Medusa",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "medusa_split_shot",
         "medusa_mystic_snake",
@@ -888,7 +888,7 @@
       "id": 82,
       "key": "meepo",
       "name": "Meepo",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "meepo_earthbind",
         "meepo_poof",
@@ -903,7 +903,7 @@
       "id": 9,
       "key": "mirana",
       "name": "Mirana",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "mirana_starfall",
         "mirana_arrow",
@@ -916,7 +916,7 @@
       "id": 114,
       "key": "monkey_king",
       "name": "Monkey King",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "monkey_king_boundless_strike",
         "monkey_king_tree_dance",
@@ -933,7 +933,7 @@
       "id": 10,
       "key": "morphling",
       "name": "Morphling",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "morphling_waveform",
         "morphling_adaptive_strike_agi",
@@ -948,7 +948,7 @@
       "id": 138,
       "key": "muerta",
       "name": "Muerta",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "muerta_dead_shot",
         "muerta_the_calling",
@@ -962,7 +962,7 @@
       "id": 89,
       "key": "naga_siren",
       "name": "Naga Siren",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "naga_siren_mirror_image",
         "naga_siren_ensnare",
@@ -977,7 +977,7 @@
       "id": 53,
       "key": "furion",
       "name": "Nature's Prophet",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "furion_sprout",
         "furion_teleportation",
@@ -991,7 +991,7 @@
       "id": 36,
       "key": "necrolyte",
       "name": "Necrophos",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "necrolyte_death_pulse",
         "necrolyte_ghost_shroud",
@@ -1005,7 +1005,7 @@
       "id": 60,
       "key": "night_stalker",
       "name": "Night Stalker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "night_stalker_void",
         "night_stalker_crippling_fear",
@@ -1018,7 +1018,7 @@
       "id": 88,
       "key": "nyx_assassin",
       "name": "Nyx Assassin",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "nyx_assassin_impale",
         "nyx_assassin_jolt",
@@ -1033,7 +1033,7 @@
       "id": 84,
       "key": "ogre_magi",
       "name": "Ogre Magi",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "ogre_magi_fireblast",
         "ogre_magi_ignite",
@@ -1048,7 +1048,7 @@
       "id": 57,
       "key": "omniknight",
       "name": "Omniknight",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "omniknight_purification",
         "omniknight_martyr",
@@ -1061,7 +1061,7 @@
       "id": 111,
       "key": "oracle",
       "name": "Oracle",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "oracle_fortunes_end",
         "oracle_fates_edict",
@@ -1076,7 +1076,7 @@
       "id": 76,
       "key": "obsidian_destroyer",
       "name": "Outworld Devourer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "obsidian_destroyer_arcane_orb",
         "obsidian_destroyer_astral_imprisonment",
@@ -1089,7 +1089,7 @@
       "id": 120,
       "key": "pangolier",
       "name": "Pangolier",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "pangolier_swashbuckle",
         "pangolier_shield_crash",
@@ -1105,7 +1105,7 @@
       "id": 44,
       "key": "phantom_assassin",
       "name": "Phantom Assassin",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "phantom_assassin_stifling_dagger",
         "phantom_assassin_phantom_strike",
@@ -1119,7 +1119,7 @@
       "id": 12,
       "key": "phantom_lancer",
       "name": "Phantom Lancer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "phantom_lancer_spirit_lance",
         "phantom_lancer_doppelwalk",
@@ -1132,7 +1132,7 @@
       "id": 110,
       "key": "phoenix",
       "name": "Phoenix",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "phoenix_icarus_dive",
         "phoenix_fire_spirits",
@@ -1149,7 +1149,7 @@
       "id": 137,
       "key": "primal_beast",
       "name": "Primal Beast",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "primal_beast_onslaught",
         "primal_beast_trample",
@@ -1164,7 +1164,7 @@
       "id": 13,
       "key": "puck",
       "name": "Puck",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "puck_illusory_orb",
         "puck_waning_rift",
@@ -1178,7 +1178,7 @@
       "id": 14,
       "key": "pudge",
       "name": "Pudge",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "pudge_meat_hook",
         "pudge_rot",
@@ -1191,7 +1191,7 @@
       "id": 45,
       "key": "pugna",
       "name": "Pugna",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "pugna_nether_blast",
         "pugna_decrepify",
@@ -1204,7 +1204,7 @@
       "id": 39,
       "key": "queenofpain",
       "name": "Queen of Pain",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "queenofpain_shadow_strike",
         "queenofpain_blink",
@@ -1217,7 +1217,7 @@
       "id": 15,
       "key": "razor",
       "name": "Razor",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "razor_plasma_field",
         "razor_static_link",
@@ -1230,7 +1230,7 @@
       "id": 32,
       "key": "riki",
       "name": "Riki",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "riki_smoke_screen",
         "riki_blink_strike",
@@ -1243,7 +1243,7 @@
       "id": 131,
       "key": "ringmaster",
       "name": "Ring Master",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "ringmaster_tame_the_beasts",
         "ringmaster_the_box",
@@ -1258,7 +1258,7 @@
       "id": 86,
       "key": "rubick",
       "name": "Rubick",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "rubick_telekinesis",
         "rubick_fade_bolt",
@@ -1277,7 +1277,7 @@
       "id": 16,
       "key": "sand_king",
       "name": "Sand King",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "sandking_burrowstrike",
         "sandking_sand_storm",
@@ -1290,7 +1290,7 @@
       "id": 79,
       "key": "shadow_demon",
       "name": "Shadow Demon",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "shadow_demon_disruption",
         "shadow_demon_disseminate",
@@ -1305,7 +1305,7 @@
       "id": 11,
       "key": "nevermore",
       "name": "Shadow Fiend",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "nevermore_shadowraze1",
         "nevermore_shadowraze2",
@@ -1320,7 +1320,7 @@
       "id": 27,
       "key": "shadow_shaman",
       "name": "Shadow Shaman",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "shadow_shaman_ether_shock",
         "shadow_shaman_voodoo",
@@ -1334,7 +1334,7 @@
       "id": 75,
       "key": "silencer",
       "name": "Silencer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "silencer_curse_of_the_silent",
         "silencer_glaives_of_wisdom",
@@ -1347,7 +1347,7 @@
       "id": 101,
       "key": "skywrath_mage",
       "name": "Skywrath Mage",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "skywrath_mage_arcane_bolt",
         "skywrath_mage_concussive_shot",
@@ -1360,7 +1360,7 @@
       "id": 28,
       "key": "slardar",
       "name": "Slardar",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "slardar_sprint",
         "slardar_slithereen_crush",
@@ -1373,7 +1373,7 @@
       "id": 93,
       "key": "slark",
       "name": "Slark",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "slark_dark_pact",
         "slark_pounce",
@@ -1387,7 +1387,7 @@
       "id": 128,
       "key": "snapfire",
       "name": "Snapfire",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "snapfire_scatterblast",
         "snapfire_firesnap_cookie",
@@ -1421,7 +1421,7 @@
       "id": 67,
       "key": "spectre",
       "name": "Spectre",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "spectre_spectral_dagger",
         "spectre_shadow_step",
@@ -1435,7 +1435,7 @@
       "id": 71,
       "key": "spirit_breaker",
       "name": "Spirit Breaker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "spirit_breaker_charge_of_darkness",
         "spirit_breaker_bulldoze",
@@ -1449,7 +1449,7 @@
       "id": 17,
       "key": "storm_spirit",
       "name": "Storm Spirit",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "storm_spirit_static_remnant",
         "storm_spirit_electric_vortex",
@@ -1462,7 +1462,7 @@
       "id": 18,
       "key": "sven",
       "name": "Sven",
-      "status": "planned",
+      "status": "core-implemented-unreviewed",
       "abilityKeys": [
         "sven_storm_bolt",
         "sven_great_cleave",
@@ -1475,7 +1475,7 @@
       "id": 105,
       "key": "techies",
       "name": "Techies",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "techies_sticky_bomb",
         "techies_reactive_tazer",
@@ -1491,7 +1491,7 @@
       "id": 46,
       "key": "templar_assassin",
       "name": "Templar Assassin",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "templar_assassin_refraction",
         "templar_assassin_meld",
@@ -1506,7 +1506,7 @@
       "id": 109,
       "key": "terrorblade",
       "name": "Terrorblade",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "terrorblade_reflection",
         "terrorblade_conjure_image",
@@ -1521,7 +1521,7 @@
       "id": 29,
       "key": "tidehunter",
       "name": "Tidehunter",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "tidehunter_gush",
         "tidehunter_kraken_shell",
@@ -1535,7 +1535,7 @@
       "id": 98,
       "key": "shredder",
       "name": "Timbersaw",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "shredder_whirling_death",
         "shredder_timber_chain",
@@ -1550,7 +1550,7 @@
       "id": 34,
       "key": "tinker",
       "name": "Tinker",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "tinker_laser",
         "tinker_march_of_the_machines",
@@ -1565,7 +1565,7 @@
       "id": 19,
       "key": "tiny",
       "name": "Tiny",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "tiny_avalanche",
         "tiny_toss",
@@ -1580,7 +1580,7 @@
       "id": 83,
       "key": "treant",
       "name": "Treant Protector",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "treant_natures_grasp",
         "treant_leech_seed",
@@ -1594,7 +1594,7 @@
       "id": 95,
       "key": "troll_warlord",
       "name": "Troll Warlord",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "troll_warlord_switch_stance",
         "troll_warlord_whirling_axes_ranged",
@@ -1608,7 +1608,7 @@
       "id": 100,
       "key": "tusk",
       "name": "Tusk",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "tusk_ice_shards",
         "tusk_snowball",
@@ -1624,7 +1624,7 @@
       "id": 108,
       "key": "abyssal_underlord",
       "name": "Underlord",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "abyssal_underlord_firestorm",
         "abyssal_underlord_pit_of_malice",
@@ -1637,7 +1637,7 @@
       "id": 85,
       "key": "undying",
       "name": "Undying",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "undying_decay",
         "undying_soul_rip",
@@ -1651,7 +1651,7 @@
       "id": 70,
       "key": "ursa",
       "name": "Ursa",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "ursa_earthshock",
         "ursa_overpower",
@@ -1664,7 +1664,7 @@
       "id": 20,
       "key": "vengefulspirit",
       "name": "Vengeful Spirit",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "vengefulspirit_magic_missile",
         "vengefulspirit_wave_of_terror",
@@ -1677,7 +1677,7 @@
       "id": 40,
       "key": "venomancer",
       "name": "Venomancer",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "venomancer_venomous_gale",
         "venomancer_snakebite",
@@ -1690,7 +1690,7 @@
       "id": 47,
       "key": "viper",
       "name": "Viper",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "viper_poison_attack",
         "viper_nethertoxin",
@@ -1704,7 +1704,7 @@
       "id": 92,
       "key": "visage",
       "name": "Visage",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "visage_grave_chill",
         "visage_soul_assumption",
@@ -1719,7 +1719,7 @@
       "id": 126,
       "key": "void_spirit",
       "name": "Void Spirit",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "void_spirit_aether_remnant",
         "void_spirit_dissimilate",
@@ -1732,7 +1732,7 @@
       "id": 37,
       "key": "warlock",
       "name": "Warlock",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "warlock_fatal_bonds",
         "warlock_shadow_word",
@@ -1745,7 +1745,7 @@
       "id": 63,
       "key": "weaver",
       "name": "Weaver",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "weaver_the_swarm",
         "weaver_shukuchi",
@@ -1759,7 +1759,7 @@
       "id": 21,
       "key": "windrunner",
       "name": "Windranger",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "windrunner_shackleshot",
         "windrunner_powershot",
@@ -1774,7 +1774,7 @@
       "id": 112,
       "key": "winter_wyvern",
       "name": "Winter Wyvern",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "winter_wyvern_arctic_burn",
         "winter_wyvern_splinter_blast",
@@ -1787,7 +1787,7 @@
       "id": 30,
       "key": "witch_doctor",
       "name": "Witch Doctor",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "witch_doctor_paralyzing_cask",
         "witch_doctor_voodoo_restoration",
@@ -1801,7 +1801,7 @@
       "id": 42,
       "key": "skeleton_king",
       "name": "Wraith King",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "skeleton_king_hellfire_blast",
         "skeleton_king_bone_guard",
@@ -1814,7 +1814,7 @@
       "id": 22,
       "key": "zuus",
       "name": "Zeus",
-      "status": "planned",
+      "status": "out-of-scope",
       "abilityKeys": [
         "zuus_arc_lightning",
         "zuus_lightning_bolt",
