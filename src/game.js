@@ -4247,6 +4247,13 @@ export class Game {
 
       // 1) Chase a nearby living unit if close. Veiled heroes are invisible.
       if (zb.targetU && (zb.targetU.dead || zb.targetU.stealth || dist2(zb.x, zb.z, zb.targetU.x, zb.targetU.z) > 130)) zb.targetU = null;
+      // A target can move behind terrain after acquisition. Axis sliding
+      // still reports motion there, so the zero-motion escape never fires.
+      // Ordinary melee chases release that stale lock and resume the siege.
+      if (zb.targetU && !range && !forcedTaunt
+        && !this._walkLine(zb.x, zb.z, zb.targetU.x, zb.targetU.z)) {
+        zb.targetU = null; zb.retarget = 0.6;
+      }
       zb.retarget = (zb.retarget || 0) - dt;
       if (!zb.targetU && zb.retarget <= 0) {
         zb.retarget = 0.4 + this.rng() * 0.3;

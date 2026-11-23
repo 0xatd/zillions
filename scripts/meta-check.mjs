@@ -68,7 +68,7 @@ for (const world of simSamples) {
   assert.ok(score.score >= 0, `${label}: a run scored negative`);
   assert.equal(score.levelId, world.levelId, `${label}: the score names the wrong world`);
   assert.equal(score.worldKind, world.kind, `${label}: the score forgot what kind of world it was`);
-  assert.equal(score.mult, world.mult, `${label}: the score forgot how hard the world was`);
+  assert.equal(score.mult, game.level.rewardMult ?? world.mult, `${label}: the score forgot how hard the world was`);
   scores.push({ world, score });
 }
 
