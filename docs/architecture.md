@@ -374,3 +374,12 @@ existing private-room creation/joining. The party never simulates combat.
 Chapter -> private party -> existing room -> Ready -> WebRTC siege -> same party.
 A failed party request leaves the old room system available. A room that finishes
 or becomes stale is no longer offered as the next match; membership survives.
+
+## Hero hit feedback
+
+`src/hit-feedback.js` draws up to 24 short-lived hero damage labels. Gold `!` labels
+identify the existing attack critical roll. Shot metadata reports primary target
+HP loss after mitigation, before follow-up ability damage. It does not add RNG
+rolls, change combat math or pause simulation. Fog hides labels; expired labels
+and match teardown dispose textures/materials. Spell/range indicators and HUD
+layout remain unchanged. This replaces only the hit/crit portion of PR #124.

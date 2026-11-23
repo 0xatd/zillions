@@ -4608,6 +4608,7 @@ export class Game {
       // Rolled here — the actual attack execution, not heroStats()/heroDmg()
       // display math — so the shared RNG stream stays identical across peers
       // regardless of how often each client's HUD happens to re-render.
+      let attackCrit = false;
       const hitDmg = () => {
         let dmg = u.hero ? this.heroDmg(u) : u.def.dmg * (u.auraDmg || 1) * (1 + this.relicMods.troopDmg);
         const critChance = (u.hero ? (w.critChance || 0) + (u.mods.critChance || 0) : 0) + (u.auraCrit || 0);
@@ -4618,6 +4619,7 @@ export class Game {
           const critMult = u.hero
             ? (w.critMult || 1.75) + ((u.mods && u.mods.critMult) || 0)
             : 1.75;
+          attackCrit = true;
           dmg *= critMult;
         }
         return dmg;
@@ -4628,7 +4630,9 @@ export class Game {
           u.cooldown = 1 / (w.rof * rofMult);
           u.facing = Math.atan2(zb.x - u.x, zb.z - u.z);
           const dmg = u.hero ? spellAttack(this,u,zb,hitDmg()) : hitDmg();
+          const hpBefore = zb.hp;
           this.damageZombie(zb, dmg, u.x, u.z, w.types || null, u.hero ? u.mods : null);
+          const hitDamage = Math.max(0, hpBefore - zb.hp);
           if(u.hero)spellAfterAttack(this,u,zb,dmg);
           // Shotgun spread: the blast mauls everything packed around the target.
           if (w.splash) {
@@ -4639,7 +4643,7 @@ export class Game {
             }
           }
           const kind = u.hero ? (w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero') : u.key;
-          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale });
+          this.emit({ type: 'shot', kind, fromId: u.id, heroKey: u.hero ? u.key : null, fx: u.x, fz: u.z, tx: zb.x, tz: zb.z, fy: u.hero ? 0.9 : 0.7, targetScale: zb.def.scale, damage: hitDamage, crit: attackCrit });
           if (w.noise > 0) this.wakeZombies(u.x, u.z, w.noise);
         }
       } else if (u.targetNest && u.targetNest.alive && u.cooldown <= 0) {
