@@ -119,3 +119,5 @@ Campaign loading of workbench exports is not implemented.
 - src/hero-abilities.js, src/hero-spells.js, src/hero-kits.js — multi-slot spell runtime and authored kits
 - src/friend-party.js — authenticated persistent-group client and invite URLs
 - src/friend-party-ui.js — compact chapter party modal
+
+- src/audio-beds.js: scene score, lazy CC0 music/ambience and ducking.

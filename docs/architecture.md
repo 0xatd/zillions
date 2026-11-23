@@ -374,3 +374,11 @@ existing private-room creation/joining. The party never simulates combat.
 Chapter -> private party -> existing room -> Ready -> WebRTC siege -> same party.
 A failed party request leaves the old room system available. A room that finishes
 or becomes stale is no longer offered as the next match; membership survives.
+
+## Music and ambience
+
+`src/audio-beds.js` owns the lazy-loaded CC0 score salvaged from PR #132.
+`AudioSys` shares its context/master limiter with beds. Existing music and master
+settings control them; combat SFX remain procedural and hero-local. Base warnings
+remain global and duck beds. Failed tracks keep procedural fallback; late loads
+cannot switch the current scene. Source records: `assets/audio/cc0/LICENSES.md`.
