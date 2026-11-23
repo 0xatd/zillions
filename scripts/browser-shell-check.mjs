@@ -327,6 +327,23 @@ try {
     const sheet=document.querySelector('#sheet-panel-abilities').textContent;
     return correctName && ['Dragon Slave','Light Strike Array','Laguna Blade','Fiery Soul'].every(name=>sheet.includes(name)) && !sheet.includes('Unassigned');
   })()`), true, 'battle identity must match the actual hero and the ability sheet must show its complete core kit');
+  // Check actual spell buttons, not just the command bar's bounding box.
+  for (const [width,height] of [[1366,768],[390,844],[844,390]]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});
+    const bounds=await evaluate(`(async()=>{
+      const {Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{levelById}=await import('/src/config.js');
+      const l=levelById(1),bad=[];
+      for(const key of ['lina','sniper','axe','sven']) {
+        const g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal',key,null,1);g.foundCity(0);
+        __app.ui.initHUD(g,0);__app.ui.update(g,0,{controlMode:'fight'});
+        for(const e of document.querySelectorAll('#bigaction,#ability-slots button')) {
+          const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)bad.push({key,slot:e.dataset.abilitySlot,rect:r.toJSON()});
+        }
+      }
+      return bad;
+    })()`);
+    assert.deepEqual(bounds,[],`spell controls must fit ${width}x${height}`);
+  }
   // Runs last: showEnd replaces the overlay markup, as a finished match does.
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;

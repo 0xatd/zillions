@@ -107,7 +107,8 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 
 ### Heroes
 
-Alex authorized a Dota-reference roster expansion on 2026-11-22. The older
+Alex reduced the Dota-reference expansion to Lina, Sniper, Axe and Sven on
+2026-11-23. Do not implement the remaining reference roster without a new request. The older
 fixed-name roster below is now the legacy compatibility set, not a ban on new
 kits. Preserve legacy character IDs and gear. See `docs/roster/implementation.md`
 for completed mechanics and explicit gaps; a catalog entry is not a playable kit.
