@@ -375,3 +375,17 @@ unchanged. Conquest and companion availability derive from the hydrated server
 campaign count; no separate client-owned capture list is accepted as authority.
 The Alloy wallet is shared; stashes and equipped loadouts remain per leader
 under the existing economy. This release does not introduce item transfers. New registrations receive no repeat account starter grant.
+
+## Friend parties
+
+Migration `20261123000100_friend_parties.sql` adds `friend_parties` and
+`friend_party_members`. Each account belongs to at most one group. Only
+`friend_party_action` mutates membership; it serializes joins with party row
+locks, enforces four seats and verifies leader-only actions and room ownership.
+`friend_party_snapshot` returns only the caller's group, public handles and its
+active room. Clients have no direct table access. No recursive RLS subqueries.
+Removing a member rotates the invitation code. Leaving as leader transfers the
+group to the earliest remaining member; leaving last deletes it. Room seats
+are separate: leaving a party does not silently terminate a running battle.
+The migration is additive and was applied to the Zillions project for isolated
+account QA on 2026-11-23. No existing account, reward or inventory schema changed.

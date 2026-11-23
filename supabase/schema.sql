@@ -1074,3 +1074,6 @@ revoke insert, update, delete on public.match_history from anon, authenticated;
 revoke insert, update, delete on public.game_characters from anon, authenticated;
 revoke insert, update, delete on public.item_instances from anon, authenticated;
 revoke insert, update, delete on public.player_wallets from anon, authenticated;
+
+-- Persistent friend groups and guarded RPCs are defined in
+-- migrations/20261123000100_friend_parties.sql. Apply migrations after schema.

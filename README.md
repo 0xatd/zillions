@@ -393,3 +393,10 @@ Maintain, Develop, Expand, Fortify, Prosper or Mobilize. Pause and a protected
 gold reserve keep spending explicit. Tower/wall preferences authorise crew
 specialisations; Ask me leaves those choices manual. See
 [Builder orders](docs/builder-orders.md).
+
+### Play with friends
+
+Open **Play with friends** from your chapter. Create a party and share its
+invite link or code. The leader opens the next private match; members open that
+room and mark Ready. Your selected chapter leader joins the match. The group
+survives between matches and across sign-ins. Membership is limited to four.

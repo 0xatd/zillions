@@ -1,3 +1,5 @@
+import {FriendParty,partyCode} from './friend-party.js';
+import {showFriendParty} from './friend-party-ui.js';
 import {visibleInFog} from './fog-of-war.js';
 import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
@@ -211,6 +213,7 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
+      onPartyOpen: () => this._openFriendParty(),
       onChapterSave: (draft) => this._saveChapter(draft),
       onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
       onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
@@ -340,6 +343,8 @@ class App {
     // a development/offline mirror.
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
+    const invite=partyCode(location.search);
+    if(invite) sessionStorage.setItem('zillions-party-invite',invite);
     this._authenticatedEntryHandled = false;
     this.profile = this._loadProfile();
     this.meta = loadMeta();
@@ -1405,6 +1410,7 @@ class App {
         this.ui.setContinue(compatible?.snap || null);
       }
     } else if (status.enabled) {
+      document.querySelector('#friend-party-dialog')?.close();
       this.lobby = null;
       this._authenticatedEntryHandled = false;
     }
@@ -1442,7 +1448,7 @@ class App {
     if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (selectedMmoCharacter(this.profile)) setTimeout(() => this.ui._showScreen('main'), 0);
+      if (selectedMmoCharacter(this.profile)) setTimeout(() => {this.ui._showScreen('main');if(sessionStorage.getItem('zillions-party-invite'))this._openFriendParty();}, 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
     }
   }
@@ -2628,6 +2634,36 @@ class App {
   // ---------------- scene setup ----------------
 
   // ---------------- online lobby ----------------
+
+  async _openFriendParty() {
+    try {
+      if (!this.authStatus?.signedIn) throw new Error('Sign in to play with friends.');
+      if (!this.profile.mmoCharacters?.length) throw new Error('Create your chapter founder first.');
+      const lobby=await this._openLobby();
+      if (!lobby?.connected) throw new Error('The lobby is unavailable. Retry when your connection recovers.');
+      const client=new FriendParty(lobby.sb);
+      showFriendParty({client,userId:lobby.me.id,code:partyCode(location.search)||sessionStorage.getItem('zillions-party-invite')||'',
+        onJoined:()=>{sessionStorage.removeItem('zillions-party-invite');const url=new URL(location.href);url.searchParams.delete('party');history.replaceState(null,'',url);},
+        hostRoom:async party=>{
+          if(this.netMode)throw new Error('Finish or leave your current match first.');
+          if(lobby.game)throw new Error('Leave your current room before opening the next match.');
+          await this.createOnlineGame('private');
+          if(!lobby.game || this.mpRole!=='host')throw new Error('Could not open the room. Retry.');
+          try {await party.act('room',{room:lobby.game.id});}
+          catch(error){await this._leaveOnlineRoom();throw error;}
+        },
+        joinRoom:async room=>{
+          if(this.netMode)throw new Error('You are already in a match. Close this panel to return.');
+          if(lobby.game?.id===room.id){this.ui.showSetup({online:lobby.game,mode:lobby.game.mode});this._onRoomUpdate(lobby.game);return;}
+          if(lobby.game)throw new Error('Leave your current room before joining the party room.');
+          const row=await lobby.findByCode(room.code);
+          if(!row)throw new Error('That room has ended. Ask the leader to host the next match.');
+          if(row.host_id===lobby.me.id)throw new Error('Your hosted room belongs to another tab. Return there or close it before hosting again.');
+          await this.joinOnlineGame(row);
+          if(!lobby.game || lobby.game.id!==room.id)throw new Error('Could not join. The match may have started or your game needs a refresh.');
+        }});
+    } catch(error){this.ui.showBanner(error.message||'Could not open your party.','bad',6000);}
+  }
 
   async _openLobby() {
     if (this.lobby) {

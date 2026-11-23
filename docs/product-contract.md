@@ -407,3 +407,14 @@ Nearby living heroes already share XP from allied kills; distant heroes do not
 receive remote kill XP. Gold remains collectible on the ground, and signed-in
 progression remains server-owned. There is no last-hit requirement or new
 client-side reward authority.
+
+## Friend groups — authorized 2026-11-23
+
+A persistent private party coordinates up to four friends between existing
+sieges. It is not a living world or shared combat server. Invite links/codes,
+leader handoff, removal and another private room are in scope. The chapter's
+selected founder/companion remains the player's leader; the party has no legacy
+seven-hero list or duplicate Ready screen. Existing rooms still enforce seats,
+Ready, campaign eligibility, reconnect and server-owned rewards. Party chat,
+public profiles, ally revival and new social blocking systems are not in this
+release. Existing lobby friends/chat remain available.
