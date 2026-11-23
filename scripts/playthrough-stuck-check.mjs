@@ -4,7 +4,8 @@
 //
 //   node scripts/playthrough-stuck-check.mjs [levelIds=1,2,3,4,5] [maxMinutes=30] [--report]
 //
-// Asserts per map: no stuck actor, the horde reaches and strikes the base,
+// Asserts per map: no stuck actor, the horde reaches the base (a successful
+// defense may prevent building damage; a loss must include it),
 // the match ends (win or lose) inside the cap, and a snapshot taken 4 min in
 // and restored into a fresh Game runs the next 20 s identically to the live
 // game (real terrain, mid-fight — the flat-map determinism check cannot see
@@ -232,13 +233,14 @@ function play(targetLevel) {
         if(BUILDERS){command({t:'builderOrder',s:'develop',p:0});command({t:'builderDoctrine',kind:'tower',branch:'flame',p:0});command({t:'builderDoctrine',kind:'wall',branch:'bastion',p:0});}
       }
     } else if (!hero.dead) {
-      if (hero.skillPoints > 0) command({ t: 'heroUpgrade', key: 'damage', p: 0 });
       for (let player = 0; player < game.heroes.length; player++) {
         const ally = game.heroes[player];
         if (ally.dead) continue;
+        const upgrade=game.heroUpgradeChoices(ally).filter(c=>c.rank<c.max).sort((a,b)=>a.rank-b.rank)[0];
+        if(ally.skillPoints>0 && upgrade)command({t:'heroUpgrade',key:upgrade.key,p:player});
         const enemy = game.zombies.filter(z => !z.dead).sort((a,b) =>
           Math.hypot(a.x-ally.x,a.z-ally.z)-Math.hypot(b.x-ally.x,b.z-ally.z))[0];
-        if (tick % 15 === 0) for (let slot = 0; slot < 3; slot++) {
+        if (tick % 15 === 0) for (let slot = 0; slot < (ally.def.abilities?.length || 1); slot++) {
           command({ t:'cast', p:player, slot, ...(enemy ? {id:enemy.id,x:enemy.x,z:enemy.z} : {}) });
         }
         if (player > 0) {
@@ -359,7 +361,7 @@ for (const id of IDS) {
   console.log(JSON.stringify(REPORT ? r : { ...r, stuck: r.stuck.slice(0, 8), stuckCount: r.stuck.length }));
   try {
     assert.equal(r.stuck.length, 0, `${r.level}: ${r.stuck.length} stuck figure(s)`);
-    assert.ok(r.reached && r.struck, `${r.level}: the horde never reached/struck the base`);
+    assert.ok(r.reached && (r.struck || r.won), `${r.level}: the horde never reached the base, or a loss had no building damage`);
     assert.ok(r.over, `${r.level}: match did not finish inside ${MAX_MIN} min`);
     assert.notEqual(r.restoreSame, false, `${r.level}: snapshot/restore diverged mid-match`);
   } catch (e) { failed++; console.error('FAIL', e.message); }
