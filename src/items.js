@@ -633,8 +633,8 @@ export function rolledMods(keys) {
 // quality to where the player is, and it is why affix tiers exist at all.
 export function worldItemLevel(levelId, level = null, diff = null) {
   const base = Math.max(1, Math.min(100, Math.round((Number(levelId) || 1) * 1.6)));
-  const byMult = level && level.mult ? Math.round((level.mult - 1) * 34) : 0;
-  const byDiff = diff && diff.mult ? Math.round((diff.mult - 1) * 12) : 0;
+  const byMult = level && level.mult ? Math.round(((level.rewardMult ?? level.mult) - 1) * 34) : 0;
+  const byDiff = diff && diff.mult ? Math.round(((diff.rewardMult ?? diff.mult) - 1) * 12) : 0;
   return Math.max(1, Math.min(100, base + byMult + byDiff));
 }
 

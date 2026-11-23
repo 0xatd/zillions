@@ -38,7 +38,8 @@ mills and workshops are still shared European shapes recoloured.
 Gameplay: every culture musters the same three trades from the same camps
 (militia / ranger / sniper), but `CULTURE_ARMIES` in `src/config.js`
 overrides their stats (evade, armour/thorns, splash, range, rate of fire,
-speed) within a few percent of the European power level:
+speed) inside a narrow band of the European power level. Troopers in every
+culture still drop a walker in the same number of shots:
 - European (Star Knights): reference line.
 - Asian (Jade Lantern Dynasty): evasive fast glaive guards, rapid short-reach
   repeaters, rocket fire-lances with splash.

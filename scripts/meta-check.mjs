@@ -168,8 +168,8 @@ setMetaBackend(memoryBackend(null));
   assert.equal(loadMeta().currency, award.earned, 'the payout must land in the balance');
   assert.equal(loadMeta().lifetime.runs, 1, 'a run must be counted');
   assert.equal(loadMeta().records.worldsCleared, 1, 'a cleared world must be recorded');
-  assert.ok(loadMeta().records.highestThreat >= 2.2, 'the highest threat cleared must be recorded');
-  assert.equal(loadMeta().records.highestTier, threatTierFor(sample.mult), 'the threat band cleared must be recorded');
+  assert.ok(loadMeta().records.highestThreat >= (sample.rewardMult ?? sample.mult), 'the highest threat cleared must be recorded');
+  assert.equal(loadMeta().records.highestTier, threatTierFor(sample.rewardMult ?? sample.mult), 'the threat band cleared must be recorded');
 
   // Clearing the same world twice does not double-count it.
   awardRun({ ...sample, score: 5000, won: true, cleared: true });
