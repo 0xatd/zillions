@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { CULTURE_ARMIES } from '../src/config.js';
 import {
@@ -56,12 +57,25 @@ test('the coach waits for the current lesson', () => {
   assert.equal(coachComplete(coach), true);
 });
 
-test('space resumes a pause and does not steal the live battle binding', () => {
-  assert.equal(pauseIntent({ paused: false, key: 'space' }), 'ignore');
-  assert.equal(pauseIntent({ paused: false, key: 'pause' }), 'pause');
-  assert.equal(pauseIntent({ paused: true, key: 'space' }), 'resume');
-  assert.equal(pauseIntent({ paused: true, key: 'pause' }), 'resume');
-  assert.equal(pauseIntent({ menuOpen: true, key: 'space' }), 'resume-menu');
+test('the bound pause action wins, and the mode key only resumes a pause', () => {
+  assert.equal(pauseIntent({ paused: false, action: 'pause' }), 'ignore');
+  assert.equal(pauseIntent({ paused: true, action: 'pause' }), 'resume');
+  assert.equal(pauseIntent({ menuOpen: true, action: 'pause' }), 'resume-menu');
+  assert.equal(pauseIntent({ paused: false, action: 'dodge' }), 'ignore');
+  assert.equal(pauseIntent({ paused: true, action: 'dodge' }), 'resume');
+  assert.equal(pauseIntent({ paused: true, action: 'menu' }), 'open-menu');
+  const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const start = source.indexOf("const act = actionFor(binds, k, 'battle')");
+  const handler = source.slice(start, source.indexOf('switch (act)', start));
+  assert.match(handler, /pauseIntent\(\{[\s\S]*action: act/);
+  assert.doesNotMatch(handler, /=== ' '/);
+  assert.match(source.slice(start, start + 4000), /case 'pause':[\s\S]{0,120}setSpeed\(0\)/);
+});
+
+test('email sign-in clears its busy button when the request finishes', () => {
+  const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('async _signInWithEmail'), source.indexOf('async _signOut'));
+  assert.match(fn, /finally[\s\S]*_clearBusy\(\)/);
 });
 
 test('node labels keep the full place name', () => {

@@ -1573,6 +1573,8 @@ class App {
       if (status) status.textContent = 'Sign-in link sent. Check your email to continue.';
     } catch (error) {
       this.ui.showBanner(`Sign-in failed: ${error.message}`, 'bad', 6000);
+    } finally {
+      this.ui._clearBusy();
     }
   }
 
@@ -1645,7 +1647,10 @@ class App {
       else this.ui.showBanner(`${chapter.name} is ready. Choose your next conquest.`, '', 3000);
     } catch (err) {
       this.ui.showBanner('Chapter could not sync. Your changes are kept here; save again to retry.', 'bad', 5000);
-    } finally { this._chapterSaving = false; }
+    } finally {
+      this._chapterSaving = false;
+      this.ui._clearBusy();
+    }
   }
 
   async _recruitChapterLeader(key, { persist = true } = {}) {
@@ -5258,14 +5263,11 @@ class App {
       // Scoped: the battle loop can only ever pick an action that listens in a
       // battle. Conflict detection guarantees no two of those share a key.
       const act = actionFor(binds, k, 'battle');
-      const pauseKey = k === ' ' || k === 'spacebar' ? 'space' : act === 'pause' ? 'pause' : act === 'menu' ? 'menu' : 'other';
-      const intent = pauseIntent({ paused: this.paused, menuOpen: this.ui.pauseOpen, key: pauseKey });
+      const intent = pauseIntent({ paused: this.paused, menuOpen: this.ui.pauseOpen, action: act });
       if (intent === 'resume-menu') { e.preventDefault(); this.closePauseMenu(); return; }
-      if (intent === 'resume' || intent === 'pause') { e.preventDefault(); this.setSpeed(0); return; }
-      if (this.paused) {
-        if (act === 'menu') this.togglePauseMenu();
-        return;
-      }
+      if (intent === 'resume') { e.preventDefault(); this.setSpeed(0); return; }
+      if (intent === 'open-menu') { this.togglePauseMenu(); return; }
+      if (this.paused) return;
       switch (act) {
         case 'dodge': {
           e.preventDefault();
@@ -5300,7 +5302,7 @@ class App {
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
-        case 'pause': break;
+        case 'pause': e.preventDefault(); this.setSpeed(0); break;
         case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);

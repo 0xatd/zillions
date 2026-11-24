@@ -148,13 +148,19 @@ export function coachComplete(coach) {
   return !coach || coach.index >= COACH_STEPS.length;
 }
 
-// Space resumes a pause. During play Space stays Build or dodge, so this
-// returns ignore and the battle binding handles it.
-export function pauseIntent({ paused = false, menuOpen = false, key = 'other' } = {}) {
-  const resumes = key === 'pause' || key === 'space';
-  if (menuOpen && resumes) return 'resume-menu';
-  if (paused && resumes) return 'resume';
-  if (!paused && !menuOpen && key === 'pause') return 'pause';
+// Pause follows the bound action. The mode action (build / dodge) can resume
+// a pause, and only after the declared action has been resolved. A live match
+// leaves that action to the battle switch, so rebinding Pause onto its key
+// still pauses.
+export function pauseIntent({ paused = false, menuOpen = false, action = null } = {}) {
+  if (action === 'pause') {
+    if (menuOpen) return 'resume-menu';
+    if (paused) return 'resume';
+    return 'ignore';
+  }
+  if (action === 'dodge' && (menuOpen || paused)) return menuOpen ? 'resume-menu' : 'resume';
+  if (action === 'menu' && menuOpen) return 'resume-menu';
+  if (action === 'menu' && paused) return 'open-menu';
   return 'ignore';
 }
 

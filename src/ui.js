@@ -87,7 +87,7 @@ export class UI {
       </div>
 
       <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
-        <div><b>PAUSED</b><span id="pause-veil-speed">Speed 1×</span><small>P or Space resumes · Esc opens the menu</small></div>
+        <div><b>PAUSED</b><span id="pause-veil-speed">Speed 1×</span><small id="pause-veil-hint"></small></div>
       </div>
       <aside id="coach" class="coach hidden" role="status">
         <span id="coach-kicker">FIRST SIEGE</span>
@@ -3199,6 +3199,8 @@ export class UI {
       veil.classList.toggle('hidden', !paused || menusOpen || this.pauseOpen);
       const speedLine = veil.querySelector('#pause-veil-speed');
       if (speedLine) speedLine.textContent = `Speed ${speed}×`;
+      const hint = veil.querySelector('#pause-veil-hint');
+      if (hint) hint.textContent = `${this._keyLabel('pause')} pauses and resumes · ${this._keyLabel('dodge')} also resumes · ${this._keyLabel('menu')} opens the menu`;
     }
     for (const b of this.root.querySelectorAll('.speed')) {
       b.classList.toggle('active', !paused && +b.dataset.s === speed);
