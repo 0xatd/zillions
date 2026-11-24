@@ -263,7 +263,7 @@ export class UI {
         <div id="screen-character-create" class="character-create-screen hidden">
           <div class="creator-head"><span>CHAPTER FOUNDER</span><h1>CREATE YOUR FOUNDER</h1><p>You lead the first landing. Companions join your chapter as you conquer.</p></div>
           <form id="character-create-form" class="creator-form creator-xl">
-            <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>The same procedural model appears in the world and in combat.</span></section>
+            <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>Choose how your founder looks.</span></section>
             <div class="creator-controls">
               <label>NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
               <fieldset><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
@@ -339,13 +339,13 @@ export class UI {
             <h2 id="s-title">Choose your battle</h2>
             <div id="modeseg" class="modeseg hidden"></div>
           </div>
-          <div class="steplabel field-label">1 · Battlefield <span id="warstatus" class="warstatus"></span></div>
+          <div class="steplabel field-label">Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
+          <div class="steplabel hero-label">Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
           <div class="herorow" id="herorow"></div>
-          <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
+          <div class="steplabel culture-label">Colony culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
-          <div class="steplabel diff-label">4 · Difficulty</div>
+          <div class="steplabel diff-label">Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
           <button class="startbtn" id="s-start">▶ &nbsp;START — TAKE THE PLANET</button>
@@ -1274,7 +1274,9 @@ export class UI {
     q('#chapter-map').innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M15 68 L34 40 L53 66 L73 36 L87 62" /></svg>` + cities.map(c=>`<button class="chapter-city ${c.status}" data-city="${c.level}" style="--x:${c.x}%;--y:${c.y}%" ${c.status==='locked'?'disabled':''} aria-label="${c.name}: ${c.status}"><i>${c.status==='held'?'✓':c.status==='frontier'?'⚑':'○'}</i><b>${c.name}</b><small>${c.status==='held'?'Held':c.status==='frontier'?'Next conquest':'Locked'}</small></button>`).join('');
     for(const button of q('#chapter-map').querySelectorAll('[data-city]')) button.onclick=()=>this.cb.onChapterMission?.(Number(button.dataset.city));
     const next=cities.find(c=>c.status==='frontier');
-    q('#chapter-objective').innerHTML=next ? `<b>${next.kind} · ${next.name}</b><p>${next.reward}</p><button class="menubtn primary" id="chapter-next">ASSAULT ${next.name.toUpperCase()}</button>` : `<b>Earth belongs to your chapter.</b><p>Your spaceport opens expeditions beyond Earth. Revisit a held city or push into the frontier.</p><button class="menubtn primary" id="chapter-next">FRONTIER EXPEDITION</button>`;
+    const recruitment=next?.recruits.length ? `Unlock ${next.recruits.map(key=>HEROES[key].name).join(', ')}.` : '';
+    const reward=next?.level===5 ? `${recruitment} Open frontier expeditions beyond Earth.`.trim() : recruitment || 'Secure the city and advance your chapter.';
+    q('#chapter-objective').innerHTML=next ? `<b>${next.kind} · ${next.name}</b><p>${escapeHtml(reward)}</p><button class="menubtn primary" id="chapter-next">ASSAULT ${next.name.toUpperCase()}</button>` : `<b>Earth belongs to your chapter.</b><p>Your spaceport opens expeditions beyond Earth. Revisit a held city or push into the frontier.</p><button class="menubtn primary" id="chapter-next">FRONTIER EXPEDITION</button>`;
     q('#chapter-next').disabled=!(p.mmoCharacters||[]).length;
     q('#chapter-next').onclick=()=>this.cb.onChapterMission?.(next?.level || count+1);
     q('#chapter-services').innerHTML=`<button data-service="shop"><b>Quartermaster</b><span>Armory · shared Alloy</span></button><button data-service="crafting"><b>Forge</b><span>Equipment & sockets</span></button><button data-service="lattice"><b>War council</b><span>Leader skills</span></button>`;
@@ -2418,10 +2420,10 @@ export class UI {
     const fieldLabel = setupScreen.querySelector('.field-label');
     const heroLabel = setupScreen.querySelector('.hero-label');
     const diffLabel = setupScreen.querySelector('.diff-label');
-    if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : '1 · Battlefield <span id="warstatus" class="warstatus"></span>';
-    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : '2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
+    if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : 'Battlefield <span id="warstatus" class="warstatus"></span>';
+    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : 'Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
     if (heroLabel && mode === 'campaign' && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
-    if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : '3 · Difficulty';
+    if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : 'Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
     this._renderModeSeg(mode, coop || !!online);

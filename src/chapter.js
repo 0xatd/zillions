@@ -18,11 +18,11 @@ export const CHAPTER_LEADERS = Object.freeze([
 ]);
 export const CHAPTER_ROSTER_LIMIT = 8 + CHAPTER_LEADERS.length;
 export const CHAPTER_CITIES = Object.freeze([
-  { level:1, name:'Greenfall', kind:'Landing city', x:15,y:68, reward:'Recruit Scott English and Alexander Thomas — frontline or reconnaissance command.' },
-  { level:2, name:'Rotmire', kind:'Marsh stronghold', x:34,y:40, reward:'Recruit Aaron Whitlock — healing wards and summoned support.' },
-  { level:3, name:'Cinder', kind:'Forge city', x:53,y:66, reward:'Recruit John Marlowe and Turtle Voss — assault or bastion command.' },
-  { level:4, name:'Barrow', kind:'Fortress city', x:73,y:36, reward:'Recruit Daniel Donovan — mobile strike leadership.' },
-  { level:5, name:'Black Vale', kind:'Planetary gateway', x:87,y:62, reward:'Recruit Tiger Reyes and open frontier expeditions beyond Earth.' },
+  { level:1, name:'Greenfall', kind:'Landing city', x:15,y:68 },
+  { level:2, name:'Rotmire', kind:'Marsh stronghold', x:34,y:40 },
+  { level:3, name:'Cinder', kind:'Forge city', x:53,y:66 },
+  { level:4, name:'Barrow', kind:'Fortress city', x:73,y:36 },
+  { level:5, name:'Black Vale', kind:'Planetary gateway', x:87,y:62 },
 ]);
 export function conquestCount(profile) {
   const n=Number(profile?.campaign);return Number.isFinite(n)?Math.max(0,Math.floor(n)):0;
@@ -37,7 +37,11 @@ export function leaderAvailable(profile,key) {
   const leader=CHAPTER_LEADERS.find(l=>l.key===key);return !!leader && conquestCount(profile)>=leader.capture;
 }
 export function chapterCities(profile) {
-  const count=conquestCount(profile);return CHAPTER_CITIES.map(c=>({...c,status:count>=c.level?'held':count+1===c.level?'frontier':'locked'}));
+  const count=conquestCount(profile);
+  return CHAPTER_CITIES.map(c=>({...c,
+    status:count>=c.level?'held':count+1===c.level?'frontier':'locked',
+    recruits:CHAPTER_LEADERS.filter(l=>l.capture===c.level && recruitmentAllowed({...profile,campaign:c.level},l.key)).map(l=>l.key),
+  }));
 }
 export function leaderRecord(profile,key) {
   return (profile?.mmoCharacters||[]).find(c=>c.chapterLeader===key);
