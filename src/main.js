@@ -6,6 +6,7 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -132,6 +133,7 @@ function addInkOutline(root) {
 
 class App {
   constructor() {
+    this._bootStart = performance.now();
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
@@ -255,6 +257,10 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openCampaignSelect(),
+      onGuestPlay: () => this._playAsGuest(),
+      onQuickStart: (draft) => this._quickStart(draft),
+      onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
+      onCoachSkip: () => this._skipCoach(),
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -287,9 +293,9 @@ class App {
 
     this._setupLights();
     this._setupParticles();
-    this._setupZombieMeshes();
-    // Start pulling the toy kit now so the menu horde swaps to it early.
-    this._loadArt().catch(() => {});
+    // Horde meshes and GLB kits are the heavy title-time work. Paint the
+    // shell first, then build them on the next frame. startGame also calls
+    // this, so a fast Play still has meshes before the first zombie draw.
     this._setupCoins();
     this._setupBars();
     this._setupCorpses();
@@ -407,6 +413,20 @@ class App {
     this.scene.fog.color.setHex(0x030711);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
+    this._boot = { shellMs: Math.round(performance.now() - this._bootStart) };
+    window.__zillionsBoot = this._boot;
+    requestAnimationFrame(() => this._ensurePresentation());
+  }
+
+  // Presentation-only. Safe to call more than once. Never touches the sim.
+  _ensurePresentation() {
+    if (this._presentationReady) return;
+    this._presentationReady = true;
+    const started = performance.now();
+    this._setupZombieMeshes();
+    this._loadArt().catch(() => {});
+    this._boot = { ...(this._boot || {}), hordeMs: Math.round(performance.now() - started) };
+    window.__zillionsBoot = this._boot;
   }
 
   // ---------------- title diorama ----------------
@@ -500,8 +520,8 @@ class App {
           + Math.cos(lon * 7.3 + lat * 5.1) * 0.2;
         const polar = Math.abs(lat) > 1.18;
         const land = landNoise > 0.48 && !polar;
-        const daylight = 0.72 + 0.22 * Math.cos(lon + 0.65) * Math.cos(lat);
-        const base = polar ? [170, 199, 213] : land ? [48, 93, 73] : [21, 69, 111];
+        const daylight = 0.92 + 0.12 * Math.cos(lon + 0.65) * Math.cos(lat);
+        const base = polar ? [214, 230, 238] : land ? [78, 148, 96] : [46, 118, 176];
         const i = (y * texW + x) * 4;
         globePixels[i] = Math.round(base[0] * daylight);
         globePixels[i + 1] = Math.round(base[1] * daylight);
@@ -532,7 +552,7 @@ class App {
     orbitalGlobe.add(signals);
     const orbitalGlow = new THREE.Mesh(
       new THREE.SphereGeometry(108, 48, 28),
-      new THREE.MeshBasicMaterial({ color: 0x58bdf2, transparent: true, opacity: 0.34, side: THREE.BackSide, depthWrite: false, fog: false }),
+      new THREE.MeshBasicMaterial({ color: 0x8fd4ff, transparent: true, opacity: 0.55, side: THREE.BackSide, depthWrite: false, fog: false }),
     );
     group.add(orbitalGlow);
 
@@ -592,7 +612,7 @@ class App {
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
     constellations.quaternion.copy(this.camera.quaternion);
-    orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
+    orbitalGlobe.position.copy(cameraLocal(18, -36, -210));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
@@ -774,6 +794,7 @@ class App {
     this._finishMissionIntro();
     const deploymentLevel = levelById(snap?.level || mp?.level || this.ui.selectedLevel || 1);
     this.ui.setDeploymentLoading(true, deploymentLevel);
+    this._ensurePresentation();
     try {
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
@@ -904,11 +925,14 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
-    if (!snap && !mp && mode === 'campaign' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const skipIntro = this._skipMissionIntro || (this.profile.games > 0);
+    this._skipMissionIntro = false;
+    if (!snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       this.missionIntro = { elapsed: 0, distance: this.camDist };
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
-    if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign') this._startCoach();
+    else if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
     } catch (error) {
       this._finishMissionIntro();
       throw error;
@@ -1333,6 +1357,43 @@ class App {
     this.issue({ t: 'found', s: best, p: this.myPlayer });
   }
 
+  _startCoach() {
+    this._coach = freshCoach();
+    this._coachOrigin = null;
+    this._coachSawAttack = false;
+    this._paintCoach();
+  }
+
+  _noteCoach(event) {
+    if (!this._coach) return;
+    this._coach = coachAdvance(this._coach, event);
+    this._paintCoach();
+  }
+
+  _paintCoach() {
+    if (!this._coach || coachComplete(this._coach)) {
+      if (this._coach && coachComplete(this._coach)) {
+        this.profile.tutorialDone = true;
+        this._saveProfile();
+      }
+      this._coach = null;
+      this.ui.hideCoach();
+      return;
+    }
+    const step = COACH_STEPS[this._coach.index];
+    const extra = step.id === 'stances'
+      ? `Done: ${['defend', 'guard', 'attack'].filter((stance) => this._coach.stances[stance]).join(', ') || 'none yet'}.`
+      : '';
+    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length, extra);
+  }
+
+  _skipCoach() {
+    this._coach = null;
+    this.profile.tutorialDone = true;
+    this._saveProfile();
+    this.ui.hideCoach();
+  }
+
   _startTutorial() {
     const binds = this.binds();
     const build = keyLabel(binds.build);
@@ -1447,6 +1508,12 @@ class App {
     }
     // WoW grammar: authentication ends at Character Select. The player chooses
     // who enters; the generic signed-out title never doubles as account home.
+    if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled
+      && this._guestSession && !this._quickCommitted && !selectedMmoCharacter(this.profile)
+      && this.ui._lastScreen === 'quick') {
+      this._authenticatedEntryHandled = true;
+      return;
+    }
     if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
@@ -1630,7 +1697,60 @@ class App {
     this.ui.setProfile(this.profile);
   }
 
-  async _createMmoCharacter({ name, appearance, raceKey, customization } = {}) {
+  _playAsGuest() {
+    this.audio.init();
+    const signedIn = !!this.auth?.isSignedIn() && !this.auth.status().needsUsername;
+    if (!signedIn) {
+      this._guestSession = true;
+      this.ui.noteGuestSession();
+    }
+    const returning = !!(chapterFounder(this.profile) || this.profile.quickSetupDone);
+    this.ui._accountAccepted = true;
+    if (returning) {
+      this.ui._showScreen('main');
+      return;
+    }
+    this.ui.showQuickSetup(normalizeQuickSetup({
+      chapterName: this.profile.chapter?.name || QUICK_DEFAULTS.chapterName,
+      founderName: QUICK_DEFAULTS.founderName,
+      army: this.ui.selectedCulture,
+      color: this.profile.chapter?.color,
+      emblem: this.profile.chapter?.emblem,
+    }));
+  }
+
+  async _quickStart(raw) {
+    if (this.game || this._quickCommitted) return;
+    const draft = normalizeQuickSetup(raw);
+    this._quickCommitted = true;
+    this.ui.selectedCulture = draft.army;
+    this.ui.selectedDiff = draft.difficulty;
+    this.ui.selectedMode = 'campaign';
+    this.ui.selectedLevel = Math.min(LEVELS.length, Math.max(1, Number(this.profile.campaign || 0) + 1));
+    try { localStorage.setItem('zillions.culture', draft.army); } catch { /* private mode */ }
+    try {
+      if (!chapterIdentity(this.profile.chapter).name) {
+        this.profile.chapter = chapterIdentity({ ...this.profile.chapter, name: draft.chapterName, color: draft.color, emblem: draft.emblem });
+      }
+      if (!chapterFounder(this.profile)) {
+        await this._createMmoCharacter({ name: draft.founderName, appearance: draft.color, raceKey: 'human', customization: {}, quiet: true });
+      }
+      if (!chapterFounder(this.profile)) throw new Error('founder_missing');
+      this.profile.quickSetupDone = true;
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+      this.ui.setProfile(this.profile);
+      this._skipMissionIntro = true;
+      await this.startGame(draft.difficulty, this.ui.selectedHero);
+    } catch (err) {
+      this._quickCommitted = false;
+      this.ui._clearBusy();
+      this.ui.showBanner('The siege could not start. Your names are still here.', 'bad', 3600);
+      console.warn('quick start failed', err);
+    }
+  }
+
+  async _createMmoCharacter({ name, appearance, raceKey, customization, quiet = false } = {}) {
     if (this.game || this._founderCreating) return;
     const clean = String(name || '').trim().slice(0,18);
     if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
@@ -1648,8 +1768,10 @@ class App {
         await this.auth.syncLocalProfile(this.profile);
       }
       this.ui.setProfile(this.profile);
-      this.ui._showScreen('main');
-      this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+      if (!quiet) {
+        this.ui._showScreen('main');
+        this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+      }
     } catch (err) {
       this.ui.setProfile(this.profile);
       this.ui._showScreen('main');
@@ -4033,24 +4155,27 @@ class App {
   // ---------------- plot foundations ----------------
 
   _makeLabelSprite(text, sub = '') {
+    const wide = String(sub || '').length > 10;
+    const fitted = fittedLabel(sub || '', wide ? 496 : 240);
     const cnv = document.createElement('canvas');
-    cnv.width = 256; cnv.height = 128;
+    cnv.width = wide ? 512 : 256;
+    cnv.height = 128;
     const ctx = cnv.getContext('2d');
     ctx.textAlign = 'center';
     ctx.font = '64px serif';
-    ctx.fillText(text, 128, 62);
+    ctx.fillText(text, cnv.width / 2, 62);
     if (sub) {
-      ctx.font = 'bold 34px system-ui, sans-serif';
+      ctx.font = `bold ${fitted.size}px system-ui, sans-serif`;
       ctx.fillStyle = '#ffd75e';
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.lineWidth = 6;
-      ctx.strokeText(sub, 128, 108);
-      ctx.fillText(sub, 128, 108);
+      ctx.strokeText(sub, cnv.width / 2, 108);
+      ctx.fillText(sub, cnv.width / 2, 108);
     }
     const tex = new THREE.CanvasTexture(cnv);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
     const sp = new THREE.Sprite(mat);
-    sp.scale.set(2.4, 1.2, 1);
+    sp.scale.set(wide ? 4.6 : 2.4, 1.2, 1);
     return sp;
   }
 
@@ -5133,6 +5258,14 @@ class App {
       // Scoped: the battle loop can only ever pick an action that listens in a
       // battle. Conflict detection guarantees no two of those share a key.
       const act = actionFor(binds, k, 'battle');
+      const pauseKey = k === ' ' || k === 'spacebar' ? 'space' : act === 'pause' ? 'pause' : act === 'menu' ? 'menu' : 'other';
+      const intent = pauseIntent({ paused: this.paused, menuOpen: this.ui.pauseOpen, key: pauseKey });
+      if (intent === 'resume-menu') { e.preventDefault(); this.closePauseMenu(); return; }
+      if (intent === 'resume' || intent === 'pause') { e.preventDefault(); this.setSpeed(0); return; }
+      if (this.paused) {
+        if (act === 'menu') this.togglePauseMenu();
+        return;
+      }
       switch (act) {
         case 'dodge': {
           e.preventDefault();
@@ -5158,16 +5291,16 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'defend' }); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
+        case 'stance_follow': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'guard' }); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
+        case 'stance_push': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'attack' }); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
-        case 'pause': this.setSpeed(0); break;
+        case 'pause': break;
         case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
@@ -5346,6 +5479,7 @@ class App {
   toggleControlMode() {
     this.pendingAbility = null;
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
+    this._noteCoach({ type: 'mode' });
     this.buttonPay = false;
     if (this.lastPay && this.controlMode === 'fight') {
       this.lastPay = false;
@@ -5645,6 +5779,7 @@ class App {
           break;
         }
         case 'shot': {
+          if (e.heroKey) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
             this.hitFeedback ||= new HitFeedback(this.scene);
             this.hitFeedback.show(e);
@@ -6052,6 +6187,24 @@ class App {
   }
 
   _updateTutorial(dt) {
+    if (this._coach && this.game) {
+      const hero = this.myHero();
+      if (hero) {
+        if (!this._coachOrigin) this._coachOrigin = { x: hero.x, z: hero.z };
+        const events = [];
+        if (Math.hypot(hero.x - this._coachOrigin.x, hero.z - this._coachOrigin.z) > 1.4) events.push({ type: 'move' });
+        if (this.game.phase !== 'found') events.push({ type: 'founded' });
+        if ((this.game.stats?.built || 0) > 0) events.push({ type: 'built' });
+        if (this._coachSawAttack) { events.push({ type: 'attack' }); this._coachSawAttack = false; }
+        if (events.length) {
+          const before = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
+          this._coach = coachApply(this._coach, events);
+          const after = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
+          if (before !== after) this._paintCoach();
+        }
+      }
+      return;
+    }
     if (!this._tut || !this.game) return;
     this._tutT = (this._tutT || 0) + dt;
     const step = this._tut.steps[this._tut.i];
