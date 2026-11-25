@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { CULTURE_ARMIES } from '../src/config.js';
+import { HEROES } from '../src/config.js';
 import {
   QUICK_DEFAULTS, TITLE_CLICKS, abilityBar, coachAdvance, coachApply, coachComplete,
-  cultureExplain, fittedLabel, freshCoach, leaderRoster, normalizeQuickSetup,
+  cultureExplain, fittedLabel, freshCoach, leaderHeroKey, leaderRoster, normalizeQuickSetup,
   pauseIntent, randomizeQuickSetup,
 } from '../src/first-run.js';
 
@@ -32,15 +33,26 @@ test('each army culture says what it changes', () => {
   assert.match(cultureExplain('middle_eastern').changes, /Longest range/);
 });
 
-test('the leader grid is twelve names and only Vanguard can deploy', () => {
+test('the leader grid is twelve names and four leaders can deploy', () => {
   const roster = leaderRoster();
   assert.equal(roster.length, 12);
-  assert.deepEqual(roster.filter((leader) => leader.playable).map((leader) => leader.key), ['vanguard']);
+  assert.deepEqual(roster.filter((leader) => leader.playable).map((leader) => leader.key), ['vanguard', 'alexander', 'aaron', 'tiger']);
   assert.ok(roster.every((leader) => leader.playable || leader.soon));
+  assert.equal(leaderHeroKey('vanguard'), 'scott');
+  assert.equal(leaderHeroKey('alexander'), 'alexander');
   const bar = abilityBar({ ability: { name: 'Gravity Hammer', icon: '🔨', desc: 'A circle.' }, tagline: 'Short range.', shotgun: true });
   assert.deepEqual(bar.map((slot) => slot.key), ['Q', 'W', 'E', 'R']);
   assert.equal(bar[0].name, 'Gravity Hammer');
   assert.equal(bar[2].state, 'reserved');
+  for (const key of ['alexander', 'aaron', 'tiger']) {
+    const kit = abilityBar(HEROES[key]);
+    assert.deepEqual(kit.map((slot) => slot.key), ['Q', 'W', 'E', 'R']);
+    assert.ok(kit.every((slot) => slot.state === 'ready' && slot.detail.length > 40), key);
+    assert.match(kit[3].detail, /Ctrl\+Q/);
+  }
+  assert.equal(abilityBar(HEROES.alexander)[0].name, 'Trueflight');
+  assert.equal(abilityBar(HEROES.tiger)[1].name, 'Stillpoint');
+  assert.equal(abilityBar(HEROES.aaron)[3].name, 'Choir');
 });
 
 test('the coach waits for the current lesson', () => {

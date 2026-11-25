@@ -1,5 +1,5 @@
 import { tickUnitBuffs, unitBuffMod } from './combat-buffs.js';
-import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, SPELL_UPGRADE_KEYS } from './hero-spells.js';
+import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, spellManaCost, spellRank, SPELL_UPGRADE_KEYS } from './hero-spells.js';
 import { heroAbility, abilityCooldown, abilityCooldowns, setAbilityCooldown, tickAbilityCooldowns } from './hero-abilities.js';
 // Core simulation — continuous siege.
 //
@@ -2997,6 +2997,31 @@ export class Game {
     if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
   }
 
+  _fadeSentinels(h) {
+    for (const u of this.units) {
+      if (u.dead || !u.temp || u.ownerHeroId !== h.id || u.key !== 'aaron_spirit') continue;
+      u.dead = true;
+      this.emit({ type: 'expire', x: u.x, z: u.z });
+    }
+    h._summonId = null;
+  }
+
+  _spawnSentinel(h, stats, x, z) {
+    const u = this._spawnUnit('aaron_spirit', x, z, null);
+    const hp = Math.max(1, Math.round(stats.hp));
+    const dmg = Math.max(1, Math.round(stats.dmg));
+    u.def = { ...UNITS.aaron_spirit, hp, dmg };
+    u.hp = hp;
+    u.maxHp = hp;
+    u.holdX = x;
+    u.holdZ = z;
+    u.temp = true;
+    u.expireT = stats.dur;
+    u.ownerHeroId = h.id;
+    h._summonId = u.id;
+    return u;
+  }
+
   castAbility(p = 0, slot = 0, input = {}) {
     if (!Number.isInteger(p) || p < 0) return;
     const h = this.heroes[p];
@@ -3006,11 +3031,14 @@ export class Game {
     if (ab.spell) { if (!castSpell(this,h,slot,input)) this.emit({type:'deny'}); return; }
     if (!ab.cast) return;
     if (abilityCooldown(h, slot) > 0) { this.emit({ type: 'deny' }); return; }
-    if (ab.mana && spellState(h).mana < ab.mana) {this.emit({type:'deny'});return;}
-    if (ab.mana) spellState(h).mana -= ab.mana;
-    const r = abilityRank(h.level, h.upgrades) - 1;
-    const ultMult = this.heroUltDamageMult(h);
-    setAbilityCooldown(h, slot, ab.cd * Math.max(0.15, 1 - h.mods.cdr));
+    const ranked = !!h.def.abilities;
+    const r = ranked ? spellRank(h, slot) : abilityRank(h.level, h.upgrades) - 1;
+    const cost = spellManaCost(h, slot);
+    if (cost && spellState(h).mana < cost) {this.emit({type:'deny'});return;}
+    if (cost) spellState(h).mana -= cost;
+    const ultMult = ranked ? 1 : this.heroUltDamageMult(h);
+    const cdBase = Array.isArray(ab.cd) ? ab.cd[Math.min(ab.cd.length - 1, r)] : ab.cd;
+    setAbilityCooldown(h, slot, cdBase * Math.max(0.15, 1 - h.mods.cdr));
 
     switch (ab.cast) {
       case 'aoeDmg': {
@@ -3114,22 +3142,32 @@ export class Game {
         break;
       }
       case 'summon': {
-        // Aaron: a single spirit sentinel that fights until its time runs out
-        // — recasting replaces it instead of stacking summons.
-        if (h._summonId != null) {
-          const old = this.units.find((u) => u.id === h._summonId && !u.dead);
-          if (old) { old.dead = true; this.emit({ type: 'expire', x: old.x, z: old.z }); }
-        }
+        // One spirit sentinel. Recasting replaces every sentinel this hero owns.
+        this._fadeSentinels(h);
         const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
         const sx = h.x + dirX * 1.6, sz = h.z + dirZ * 1.6;
-        const u = this._spawnUnit('aaron_spirit', sx, sz, null);
-        const hp = ab.hp[r];
-        u.def = { ...UNITS.aaron_spirit, hp, dmg: Math.round(ab.dmg[r] * ultMult) };
-        u.hp = hp; u.maxHp = hp;
-        u.holdX = sx; u.holdZ = sz;
-        u.temp = true; u.expireT = ab.dur[r]; u.ownerHeroId = h.id;
-        h._summonId = u.id;
+        this._spawnSentinel(h, { hp: ab.hp[r], dmg: ab.dmg[r] * ultMult, dur: ab.dur[r] }, sx, sz);
         this.emit({ type: 'summon', x: sx, z: sz });
+        break;
+      }
+      case 'choir': {
+        this._fadeSentinels(h);
+        const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
+        const sideX = dirZ, sideZ = -dirX;
+        for (const side of [-1.3, 1.3]) {
+          const sx = h.x + dirX * 1.5 + sideX * side, sz = h.z + dirZ * 1.5 + sideZ * side;
+          this._spawnSentinel(h, { hp: ab.hp[r], dmg: ab.dmg[r] * ultMult, dur: ab.dur[r] }, sx, sz);
+        }
+        const radius = ab.radius || 7;
+        const heal = ab.heal[r];
+        const r2 = radius * radius;
+        for (const ally of this.units) {
+          if (ally.dead || ally.hp <= 0) continue;
+          if (dist2(h.x, h.z, ally.x, ally.z) > r2) continue;
+          ally.hp = Math.min(ally.maxHp, ally.hp + heal);
+        }
+        this.emit({ type: 'summon', x: h.x, z: h.z, count: 2 });
+        this.emit({ type: 'mend', x: h.x, z: h.z, radius, color: 0xf0d060 });
         break;
       }
     }

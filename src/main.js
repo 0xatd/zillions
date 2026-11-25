@@ -6,7 +6,7 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
-import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, leaderHeroKey, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -1746,7 +1746,10 @@ class App {
       if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
       this.ui.setProfile(this.profile);
       this._skipMissionIntro = true;
-      await this.startGame(draft.difficulty, this.ui.selectedHero);
+      const heroKey = leaderHeroKey(draft.leader);
+      this.ui.selectedLeader = draft.leader;
+      this.ui.selectedHero = heroKey;
+      await this.startGame(draft.difficulty, heroKey);
     } catch (err) {
       this._quickCommitted = false;
       this.ui._clearBusy();
@@ -5776,7 +5779,8 @@ class App {
       switch (e.type) {
         case 'groundstrike': {
           if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
-            this._impactRing(e.x,e.z,{color:e.kind==='acid'?0xdfff55:0xff7844,radius:e.radius,life:.24});
+            this._impactRing(e.x,e.z,{color:e.color||(e.kind==='acid'?0xdfff55:0xff7844),radius:e.radius,life:.28});
+            this.burst(e.x, 0.35, e.z, { count: 16, color: e.color || 0xff7844, speed: 2.2, life: 0.4, size: 0.5, up: 1.6 });
           }
           break;
         }
@@ -6018,7 +6022,12 @@ class App {
           const caster = this.unitMeshes.get(e.heroId);
           if (caster) caster.cast = { t: 0.52, dur: 0.52, kind: e.key };
           this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
-          const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff };
+          const CAST_COLORS = {
+            hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff, choir: 0xf0d060,
+            trueflight: 0xf3c53d, glass_sight: 0x9dffc2, meridian: 0xfff1c2,
+            rift_lance: 0xd8721f, stillpoint: 0xffd27a, dread_well: 0x6a4fae, unmake: 0xfff1c9,
+            mending_pulse: 0xb7f0c8, still_ward: 0x8fd6ff,
+          };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
           const R = e.radius;
           const n = Math.min(40, Math.round(R * 6));
@@ -6061,7 +6070,11 @@ class App {
           this.burst(e.x, 1.0, e.z, { count: 10, color: 0x9fd6ff, speed: 1.0, life: 0.4, size: 0.42, up: 1.4 });
           break;
         case 'brewzone':
-          this.burst(e.x, 0.2, e.z, { count: 6, color: 0xffb347, speed: 0.4, life: 0.5, size: 0.6, spread: 1.6, up: 0.4 });
+          this.burst(e.x, 0.2, e.z, { count: 6, color: e.color || 0xffb347, speed: 0.4, life: 0.5, size: 0.6, spread: 1.6, up: 0.4 });
+          break;
+        case 'mend':
+          this._spawnAbilityRing(e.x, e.z, { color: e.color || 0xb7f0c8, radius: 0.4, to: e.radius || 4, life: 0.45, opacity: 0.8, width: 0.18 });
+          this.burst(e.x, 0.8, e.z, { count: 14, color: e.color || 0xb7f0c8, speed: 1.2, life: 0.5, size: 0.45, up: 1.8 });
           break;
         case 'zap':
           this.burst(e.x, 0.6, e.z, { count: 5, color: 0x4dd8c8, speed: 1.8, life: 0.25, size: 0.4, up: 1.4 });

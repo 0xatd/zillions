@@ -1,8 +1,13 @@
-# Four-hero implementation — in progress
+# Roster implementation
 
-Alex reduced scope on 2026-11-23 to Lina, Sniper, Axe and Sven.
-and the roster expansion is not approved for production. The chapter candidate
-is PR140; expanded combat work is isolated on `codex/hero-roster` above it.
+The setup screen deploys four leaders with original names. Vanguard is the melee
+frontliner. Alexander Thomas is the ranged carry (Trueflight, Kickback Charge,
+Glass Sight, Meridian). Tiger Reyes is the warp caster (Rift Lance, Stillpoint,
+Dread Well, Unmake). Aaron Whitlock is the support summoner (Astral Sentinel,
+Mending Pulse, Still Ward, Choir). The other eight grid names stay locked.
+
+Reference-named prototypes remain in the simulation and stay off the setup
+grid. They are not the playable leaders.
 
 Reference inventory: 127 names/ability identifiers retrieved from OpenDota's
 `dotaconstants` on 2026-11-22. This is an auditable inventory, not proof of the

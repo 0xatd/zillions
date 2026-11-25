@@ -3,6 +3,8 @@
 import { CULTURE_ARMIES, cultureKey, HEROES } from './config.js';
 import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS } from './chapter.js';
 
+export const PLAYABLE_LEADER_KEYS = Object.freeze(['vanguard', 'alexander', 'aaron', 'tiger']);
+
 export const QUICK_DEFAULTS = Object.freeze({
   chapterName: 'First Landing',
   founderName: 'Vanguard',
@@ -10,6 +12,7 @@ export const QUICK_DEFAULTS = Object.freeze({
   color: 'cobalt',
   emblem: 'star',
   difficulty: 'casual',
+  leader: 'vanguard',
 });
 
 const CHAPTER_NAMES = ['First Landing', 'Greenfall Host', 'Ash Gate', 'North Watch', 'Low Keep'];
@@ -25,6 +28,7 @@ export function randomizeQuickSetup(rng = Math.random) {
     color: pick(Object.keys(CHAPTER_COLORS)),
     emblem: pick(Object.keys(CHAPTER_EMBLEMS)),
     difficulty: pick(DIFFICULTIES),
+    leader: pick(PLAYABLE_LEADER_KEYS),
   };
 }
 
@@ -38,7 +42,13 @@ export function normalizeQuickSetup(raw = {}) {
     color: Object.hasOwn(CHAPTER_COLORS, raw.color) ? raw.color : QUICK_DEFAULTS.color,
     emblem: Object.hasOwn(CHAPTER_EMBLEMS, raw.emblem) ? raw.emblem : QUICK_DEFAULTS.emblem,
     difficulty: DIFFICULTIES.includes(raw.difficulty) ? raw.difficulty : QUICK_DEFAULTS.difficulty,
+    leader: PLAYABLE_LEADER_KEYS.includes(raw.leader) ? raw.leader : QUICK_DEFAULTS.leader,
   };
+}
+
+export function leaderHeroKey(key) {
+  if (key === 'vanguard') return 'scott';
+  return HEROES[key] ? key : 'scott';
 }
 
 // What a culture changes on the battlefield. European is the reference line.
@@ -58,27 +68,63 @@ export function cultureExplain(key) {
   };
 }
 
-// Vanguard plus the eleven chapter leaders. Only Vanguard can deploy today.
+const LEADER_KITS = {
+  alexander: { role: 'Ranged carry', kit: 'Trueflight, Kickback Charge, Glass Sight, Meridian.' },
+  tiger: { role: 'Warp caster', kit: 'Rift Lance, Stillpoint, Dread Well, Unmake.' },
+  aaron: { role: 'Support summoner', kit: 'Astral Sentinel, Mending Pulse, Still Ward, Choir.' },
+};
+
+// Vanguard plus the eleven chapter leaders. Four can deploy.
 export function leaderRoster() {
   return [
     {
       key: 'vanguard',
       name: 'Vanguard',
-      role: 'Your founder. Frontline command.',
+      role: 'Melee frontliner',
+      kit: 'Gravity Hammer. The other three slots stay open.',
       playable: true,
       soon: false,
     },
-    ...CHAPTER_LEADERS.map((leader) => ({
-      key: leader.key,
-      name: HEROES[leader.key]?.name || leader.key,
-      role: leader.role,
-      playable: false,
-      soon: true,
-    })),
+    ...CHAPTER_LEADERS.map((leader) => {
+      const ready = Object.hasOwn(LEADER_KITS, leader.key);
+      return {
+        key: leader.key,
+        name: HEROES[leader.key]?.name || leader.key,
+        role: ready ? LEADER_KITS[leader.key].role : leader.role,
+        kit: ready ? LEADER_KITS[leader.key].kit : '',
+        playable: ready,
+        soon: !ready,
+      };
+    }),
   ];
 }
 
+const BAR_KEYS = ['Q', 'W', 'E', 'R'];
+const CAST_WITH = [
+  'Press Q.',
+  'Press E. W moves the hero.',
+  'Press R.',
+  'Press Ctrl+Q.',
+];
+
 export function abilityBar(hero) {
+  const active = Array.isArray(hero?.abilities) ? hero.abilities.filter((ability) => ability && !ability.passive) : [];
+  if (active.length >= 4) {
+    const resource = hero.resource || 'mana';
+    return BAR_KEYS.map((key, index) => {
+      const ability = active[index];
+      const cd = Array.isArray(ability.cd) ? ability.cd[0] : ability.cd;
+      const mana = Array.isArray(ability.mana) ? ability.mana[0] : ability.mana;
+      const cost = mana ? ` Costs ${mana} ${resource}.` : '';
+      return {
+        key,
+        name: ability.name,
+        icon: ability.icon || '✦',
+        detail: `${ability.desc} ${CAST_WITH[index]} Cooldown ${cd}s.${cost}`,
+        state: 'ready',
+      };
+    });
+  }
   const special = hero?.ability;
   return [
     { key: 'Q', name: special?.name || 'Special', icon: special?.icon || '✦', detail: special?.desc || 'Fight-mode special.', state: 'ready' },

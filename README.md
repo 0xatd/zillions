@@ -214,11 +214,13 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
-## Roster expansion — work in progress
+## Playable leaders
 
-The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
-preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
-Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+The setup screen deploys four leaders. Vanguard is the melee frontliner. Alexander
+Thomas is the ranged carry. Tiger Reyes is the warp caster. Aaron Whitlock is the
+support summoner. Each of those three has a QWER kit with cooldowns and a mana
+pool. The other eight names stay locked. W still moves the hero, so the bar's
+W, E and R casts are E, R and Ctrl+Q. See [implementation coverage](docs/roster/implementation.md).
 
 ## Controls
 

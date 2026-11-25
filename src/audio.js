@@ -259,6 +259,44 @@ export class AudioSys {
         this._tone(0.5, { freq: 190, type: 'sawtooth', gain: 0.12, slide: 70, attack: 0.03 });
         this._tone(0.5, { freq: 254, type: 'sawtooth', gain: 0.09, slide: 90, attack: 0.03 });
         return;
+      case 'trueflight':
+        this._noise(0.08, { freq: 2400, q: 2, gain: 0.16, sweep: -800 });
+        this._tone(0.12, { freq: 880, type: 'square', gain: 0.07, slide: -220 });
+        return;
+      case 'glass_sight':
+        this._tone(0.28, { freq: 660, type: 'sine', gain: 0.08, slide: 420, attack: 0.02 });
+        this._tone(0.22, { freq: 990, type: 'triangle', gain: 0.05, slide: 180, attack: 0.04 });
+        return;
+      case 'meridian':
+        this._tone(0.45, { freq: 140, type: 'sawtooth', gain: 0.1, slide: -40, attack: 0.04 });
+        this._tone(0.2, { freq: 1400, type: 'sine', gain: 0.06, slide: -600 });
+        return;
+      case 'rift_lance':
+        this._noise(0.28, { freq: 700, q: 0.9, gain: 0.2, sweep: -400 });
+        this._tone(0.2, { freq: 220, type: 'sawtooth', gain: 0.08, slide: 80 });
+        return;
+      case 'stillpoint':
+        this._tone(0.16, { freq: 180, type: 'square', gain: 0.1, slide: -60 });
+        this._noise(0.2, { freq: 1200, q: 1.4, gain: 0.14, sweep: -700 });
+        return;
+      case 'dread_well':
+        this._tone(0.4, { freq: 90, type: 'sine', gain: 0.1, slide: -20, attack: 0.05 });
+        this._noise(0.35, { freq: 240, q: 0.7, gain: 0.12, type: 'lowpass', sweep: -80 });
+        return;
+      case 'unmake':
+        this._noise(0.5, { freq: 180, q: 0.6, gain: 0.24, type: 'lowpass', sweep: -100 });
+        this._tone(0.4, { freq: 70, type: 'sawtooth', gain: 0.14, slide: -30 });
+        return;
+      case 'mending_pulse':
+        for (let i = 0; i < 3; i++) this._later(() => this._tone(0.14, { freq: 520 + i * 160, type: 'triangle', gain: 0.08 }), i * 60);
+        return;
+      case 'still_ward':
+        this._tone(0.35, { freq: 440, type: 'sine', gain: 0.07, slide: 80, attack: 0.04 });
+        this._tone(0.3, { freq: 660, type: 'triangle', gain: 0.05, slide: 40, attack: 0.06 });
+        return;
+      case 'choir':
+        [392, 494, 587].forEach((freq, i) => this._later(() => this._tone(0.28, { freq, type: 'triangle', gain: 0.08 }), i * 50));
+        return;
       default:
         this._noise(0.3, { freq: 800, q: 1, gain: 0.2, sweep: -500 });
         this._tone(0.25, { freq: 300, type: 'square', gain: 0.08, slide: -150 });
