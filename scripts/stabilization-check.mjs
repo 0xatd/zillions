@@ -25,7 +25,7 @@ assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never 
 assert.match(ui, /id="m-enter-world">DEPLOY</, 'Character Select must own Deploy');
 assert.match(ui, /id="m-custom">CUSTOM GAMES</, 'Character Select must retain Custom Games');
 assert.doesNotMatch(ui, /id="ow-|screen-world-menu/, 'the removed overworld HUD and Game Menu must not return');
-assert.match(main, /_openCampaignSelect\(\)[\s\S]*showSetup\(\{ mode: 'campaign' \}\)/,
+assert.match(main, /_openCampaignSelect\([^)]*\)[\s\S]*showSetup\(\{ mode: 'campaign', level \}\)/,
   'Enter World must open the campaign mission select directly');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,
   'authenticated entry must open Character Select or character creation');

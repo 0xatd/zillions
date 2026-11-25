@@ -2287,3 +2287,44 @@ body:has(.friend-party-dialog[open]){overflow:hidden}
  .friend-party-dialog .party-status:empty{display:none}
  .friend-party-dialog small{font-size:.75rem}
 }
+
+/* Campaign HUD: fixed-height hero plate; signature overflow never pushes Pack offscreen. */
+#heroplate .hpinfo { min-width:0; }
+#a-name { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#a-items { flex-wrap:nowrap; overflow:hidden; max-height:22px; }
+#a-items .hitem { flex:none; }
+#a-pack .pack-open { max-width:100%; white-space:nowrap; font-size:11px; }
+#upgradepanel:not(.hidden) { display:block !important; height:auto; max-height: min(240px, 45vh); overflow:auto; }
+#upgradepanel .uphead { width:100%; border:0; background:#142933; color:#f4df9c; cursor:pointer; padding:6px; }
+#upgradepanel .uprow:not(.hidden) { min-height:106px; }
+#actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 48px); }
+#actionbar:has(#upgradepanel .uprow:not(.hidden)) #buildhint { display:none; }
+@media(max-width:599px), (max-height:650px) {
+  #a-items { display:none; } /* All bonuses remain accessible in Pack. */
+  #a-name { font-size:10px; }
+  .hplvl { font-size:9px; margin-left:0; }
+}
+#actionbar { min-height:140px; }
+#heroplate { min-height:0; padding:4px; }
+#heroplate .hpinfo { font-size:11px; }
+#heroplate .hpbar.herohp { height:4px; margin-top:2px; }
+#heroplate .hpbar.heroxp { height:3px; margin-top:2px; }
+#heroplate .hplvl { font-size:10px; }
+#heroplate .packrow { margin-top:2px; }
+#heroplate #a-items { max-height:18px; margin-top:1px; }
+#heroplate #a-items .hitem { font-size:10px; padding:1px 2px; }
+#actionbar .fight-kit { min-height:0; }
+/* First-run coach shares the HUD: never cover controls or a chosen detail panel. */
+.coach { top:64px; bottom:auto; left:auto; right:16px; padding:9px 12px; background:#10202b; }
+.coach b { font-size:15px; }
+.coach p { font-size:12px; }
+body:has(#upgradepanel .uprow:not(.hidden)) .coach,
+body:has(#battle-details:not(.hidden)) .coach,
+body:has(#combat-alert:not(.hidden)) .coach { display:none; }
+@media(max-width:800px) { .coach { top:110px; bottom:auto; } }
+
+@media(max-width:599px) {
+  .abilities-overview { grid-template-columns:minmax(0,1fr); }
+  .abilities-overview article { min-width:0; }
+  .abilities-overview p { overflow-wrap:anywhere; }
+}

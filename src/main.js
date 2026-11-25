@@ -9,7 +9,7 @@ import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, lead
 import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
-import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
+import { terrainOccludesHero, structuresOccludeHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
@@ -219,7 +219,7 @@ class App {
       onPartyOpen: () => this._openFriendParty(),
       onChapterSave: (draft) => this._saveChapter(draft),
       onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
-      onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
+      onChapterMission: (level) => this._openCampaignSelect(level),
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
       onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
@@ -240,6 +240,10 @@ class App {
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
+      onLocateKeep: () => {
+        const keep = this.game?.buildings.find(b => b.kind === 'hq' && b.alive);
+        if (keep) { this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 }; }
+      },
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
@@ -647,13 +651,13 @@ class App {
   // ---------------- mission select ----------------
   // "Enter World" opens the campaign mission select for the selected
   // character. The game is a siege game: every run starts from here.
-  _openCampaignSelect() {
+  _openCampaignSelect(level = null) {
     if (this.game) return;
     if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
       this.ui.showCharacterCreator();
       return;
     }
-    this.ui.showSetup({ mode: 'campaign' });
+    this.ui.showSetup({ mode: 'campaign', level });
   }
 
   _setCharacterPreview(style) {
@@ -787,6 +791,7 @@ class App {
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
     this.pendingAbility = null;
+    this._keepPeek = null;
     if (snap && !isCompatibleSnapshot(snap)) {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
@@ -1081,6 +1086,10 @@ class App {
       const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
+        const entrance = pts.reduce((low, p) => p[2] < low[2] ? p : low, pts[0]);
+        const marker = this._makeLabelSprite('↗', 'RAMP');
+        marker.position.set(entrance[0], entrance[2] + 1.3, entrance[1]);
+        g.add(marker);
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
         // Broad transverse tread bands make the grade and each turn readable
@@ -1154,6 +1163,12 @@ class App {
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
       gr.position.y = this.map.groundY(s.x, s.z);
+      for (const path of s.switchbacks || []) {
+        const entrance = path.reduce((low, p) => p[2] < low[2] ? p : low, path[0]);
+        const marker = this._makeLabelSprite('↗', 'RAMP');
+        marker.position.set(entrance[0], entrance[2] + 1.3 - gr.position.y, entrance[1]);
+        gr.add(marker);
+      }
       this.scene.add(gr);
       this.siteMarkers.push(gr);
     }
@@ -1187,7 +1202,7 @@ class App {
           : 'Open on nearly every side: you will be building the whole wall.';
       // The survey is the authoritative claim about this ground, so drop the
       // generic "open on every side" flavour when the wall line says otherwise.
-      const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
+      const hint = s.switchbacks?.length ? 'Raised site — enter by the marked switchback ramps. ' : (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
       const siteName = s.name || `Site ${i + 1}`;
       this.ui.showLocationBanner(
         `🏳️ ${siteName}`,
@@ -1354,6 +1369,7 @@ class App {
       this.audio.deny();
       return;
     }
+    this._payPressUsed = true; // Founding consumes this press; release before buying an upgrade.
     this.issue({ t: 'found', s: best, p: this.myPlayer });
   }
 
@@ -2020,14 +2036,15 @@ class App {
   }
 
   _storeProfileLocally() {
-    try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+    try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); return true; } catch { return false; }
   }
 
   _saveProfile() {
-    this._storeProfileLocally();
+    const stored = this._storeProfileLocally();
     if (this.auth?.isSignedIn()) {
       this.auth.syncLocalProfile(this.profile).catch((err) => console.warn('profile sync failed', err));
     }
+    return stored;
   }
 
   _loadSave() {
@@ -2092,7 +2109,9 @@ class App {
       this._submitMatchResult(won, h, character);
     } else {
       this._recordGuestGameEnd(won, h);
-      this._saveProfile();
+      const saved = this._saveProfile();
+      this._endExtras = { ...this._endExtras, saved, local: true, campaignCleared: this.profile.campaign,
+        ...(!saved ? { error: 'Browser storage is unavailable. Progress remains in this tab but is not saved.' } : {}) };
     }
     this._netPumpStop();
     if (this.lobby) this.lobby.setMatchActive(false);
@@ -2148,22 +2167,34 @@ class App {
       report,
       ...(replay ? { replay } : {}),
     };
-    queuePendingMatch(pending);
-    try {
-      const result = await this._sendMatchResult(pending);
-      this._applyMatchResult(character, result, quests);
-    } catch (error) {
-      console.warn('match result failed', error);
-      const retryable = retryableMatchError(error);
-      if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
-      this._endExtras = {
-        ...(this._endExtras || {}), pending: false, grants: [], quests,
-        error: retryable
-          ? 'Command could not confirm your rewards yet. They will be claimed automatically next time you sign in.'
-          : `Command rejected this report (${error?.message || 'invalid'}). No rewards were granted.`,
-      };
-      this.ui.setEndRewards?.(this._endExtras);
-    }
+    const queued = queuePendingMatch(pending);
+    const endGame = this.game;
+    let sending = false;
+    const submit = async () => {
+      if (sending) return;
+      sending = true;
+      const active = () => this.game === endGame && this.auth?.user?.id === pending.userId;
+      if (active()) { this._endExtras = { pending: true, grants: [], quests }; this.ui.setEndRewards?.(this._endExtras); }
+      try {
+        const result = await this._sendMatchResult(pending);
+        if (this.auth?.user?.id === pending.userId) this._applyMatchResult(character, result, quests, { quiet: !active() });
+      } catch (error) {
+        console.warn('match result failed', { requestId: pending.requestId, status: error?.status, code: error?.message });
+        const retryable = retryableMatchError(error);
+        if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
+        if (active()) {
+          this._endExtras = {
+            pending: false, saved: false, grants: [], quests,
+            retry: retryable ? submit : null,
+            error: retryable
+              ? `Rewards are not confirmed yet. Retry now.${queued ? ' This report is saved for retry when you sign in again.' : ' Keep this tab open until confirmation.'}`
+              : 'Rewards could not be saved because this match report was rejected. Your previous progress is unchanged.',
+          };
+          this.ui.setEndRewards?.(this._endExtras);
+        }
+      } finally { sending = false; }
+    };
+    await submit();
   }
 
   async _sendMatchResult(pending) {
@@ -2236,7 +2267,7 @@ class App {
           return { ...authored, ...q, desc: authored.desc || q.desc || '', done: !!q.done, claimed: serverQuests.has(q.id) };
         }),
         xp: result.xpGained, levels: result.levelsGained || [], alloy: result.alloyGained || 0,
-        skipped: result.skippedItems || [], pending: false,
+        skipped: result.skippedItems || [], pending: false, saved: true, campaignCleared: st.campaignCleared,
       };
       this.ui.setEndRewards?.(this._endExtras);
     }
@@ -3987,7 +4018,11 @@ class App {
     const g = this.game;
     const d = this._zdummy;
     let i = 0;
+    const occupied = new Set();
     for (const cn of g.coins) {
+      const cell = `${Math.floor(cn.x * 2)},${Math.floor(cn.z * 2)}`;
+      if (occupied.has(cell)) continue;
+      occupied.add(cell);
       if (i >= 400) break;
       if (!this.coinBorn.has(cn.id)) this.coinBorn.set(cn.id, t);
       const age = t - this.coinBorn.get(cn.id);
@@ -4262,7 +4297,7 @@ class App {
   // any zoom, and a small holo-gem floats above it. Cost + icon ride a tag
   // sprite (see _syncPlots), so every free spot says what goes there and
   // what it costs without opening a menu.
-  _makeBeacon(x, z, r = 1.15) {
+  _makeBeacon(x, z, r = 1.15, role = 'defense') {
     const grp = new THREE.Group();
     if (!this._padMats) {
       this._padMats = {
@@ -4272,20 +4307,25 @@ class App {
         gem: new THREE.MeshBasicMaterial({ color: 0xbff8ff }),
       };
     }
-    const m = this._padMats;
-    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, 6), m.plate);
+    this._rolePadMats ||= {};
+    const colors = { economy: 0xe0be68, army: 0x83c6eb, defense: 0xe3997b, support: 0xb8a4e5 };
+    const m = this._rolePadMats[role] ||= Object.fromEntries(Object.entries(this._padMats).map(([key,mat])=>{
+      const copy=mat.clone(); if(key!=='plate')copy.color.setHex(colors[role]); return [key,copy];
+    }));
+    const segments = { economy: 4, army: 3, defense: 6, support: 8 }[role];
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, segments), m.plate);
     plate.position.set(x, 0.04, z);
     plate.rotation.y = Math.PI / 6;
     plate.receiveShadow = true;
     grp.add(plate);
-    const fillGeo = new THREE.CircleGeometry(r * 0.86, 6);
+    const fillGeo = new THREE.CircleGeometry(r * 0.86, segments);
     fillGeo.rotateX(-Math.PI / 2);
     const fill = new THREE.Mesh(fillGeo, m.fill);
     fill.position.set(x, 0.09, z);
     fill.rotation.y = Math.PI / 6;
     fill.userData.noOutline = true;
     grp.add(fill);
-    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
+    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, segments);
     rimGeo.rotateX(-Math.PI / 2);
     const rim = new THREE.Mesh(rimGeo, m.rim);
     rim.position.set(x, 0.095, z);
@@ -4306,7 +4346,8 @@ class App {
     const anchor = plot.anchor || plot.gate;
     const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
     const padR = plot.kind === 'wall' ? 0.5 : plot.kind === 'hq' ? 2.3 : 1.2;
-    const beacon = this._makeBeacon(mx, mz, padR);
+    const role = kind.unit ? 'army' : ['house','farm','mill','mine'].includes(plot.kind) ? 'economy' : ['workshop','hero_forge'].includes(plot.kind) ? 'support' : 'defense';
+    const beacon = this._makeBeacon(mx, mz, padR, role);
     g.add(beacon);
     g.userData.beacon = beacon;
     const label = this._makeLabelSprite(kind.icon, '');
@@ -4593,8 +4634,9 @@ class App {
             materials.push(material);
           }
         });
-        const healthHeight = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y;
-        rec = { mesh, b, tierKey, artTier, healthHeight, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
+        const occlusionBounds = new THREE.Box3().setFromObject(mesh);
+        const healthHeight = occlusionBounds.max.y - mesh.position.y;
+        rec = { mesh, b, tierKey, artTier, healthHeight, occlusionBounds, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4945,8 +4987,13 @@ class App {
       if (u.hero) {
         if (u === this.myHero()) {
           const shells = rec.mesh.userData.occlusionShells ||= installHeroOcclusionShell(rec.mesh.userData.body);
-          const occluded = !u.dead && terrainOccludesHero(this.map, this.camera.position, rec.mesh.position);
-          for (const shell of shells) shell.visible = occluded;
+          // Bound checks are presentation-only and cached at 10 Hz, not a scene raycast.
+          if (t >= (rec.occlusionCheckAt || 0)) {
+            rec.occlusionCheckAt = t + .1;
+            rec.occluded = terrainOccludesHero(this.map, this.camera.position, rec.mesh.position)
+              || structuresOccludeHero(this.buildingMeshes.values(), this.camera.position, rec.mesh.position);
+          }
+          for (const shell of shells) shell.visible = !u.dead && !!rec.occluded;
         }
         const wantOp = u.stealth ? 0.3 : 1;
         if (rec.op !== wantOp) {
@@ -5586,8 +5633,9 @@ class App {
     const h = this.myHero();
     if (h) {
       const lead = 1.6;
-      const tx = h.x + (h.mx || 0) * lead;
-      const tz = h.z + (h.mz || 0) * lead;
+      const peek = this._keepPeek?.until > performance.now() && !h.mx && !h.mz ? this._keepPeek : null;
+      const tx = peek ? peek.x : h.x + (h.mx || 0) * lead;
+      const tz = peek ? peek.z : h.z + (h.mz || 0) * lead;
       const k = 1 - Math.exp(-6 * dt);
       this.focus.x += (tx - this.focus.x) * k;
       this.focus.z += (tz - this.focus.z) * k;

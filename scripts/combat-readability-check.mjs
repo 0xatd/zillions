@@ -14,6 +14,7 @@ assert.equal(combatAlert(game({ finalStand: true, boss: { dead: false, enraged: 
 const keepLoss = runReview({ won: false, stats: { kills: 50, built: 6, lost: 4, bestHeld: 1 }, threat: 3,
   game: game({ buildings: [{ kind: 'hq', alive: false, hp: 0, maxHp: 100 }] }) });
 assert.match(keepLoss.cause.title, /Keep/);
+assert.doesNotMatch(keepLoss.action, /champion|final counterattack/, 'early Keep loss does not recommend a boss-phase response');
 assert.match(keepLoss.action, /defense|Defend|warning/);
 const explicitKeep = runReview({ won: false, stats: {}, game: game({ defeatCause: 'keep_destroyed', buildings: [], liveNests: () => 3 }) });
 assert.match(explicitKeep.cause.title, /Keep/, 'authoritative Keep cause wins over live nests');
