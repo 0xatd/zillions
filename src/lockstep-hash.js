@@ -35,6 +35,11 @@ export function stateHash(g) {
     if (hr.spells) h = (h * 31 + hashString(JSON.stringify(hr.spells))) | 0;
     for (const cd of abilityCooldowns(hr)) h = (h * 31 + Math.round(cd * 1000)) | 0;
     h=(h*31+(hr.focusId??0))|0;
+    if (hr.orderX != null && hr.orderZ != null) {
+      h = (h * 31 + Math.round(hr.orderX * 64) + Math.round(hr.orderZ * 64) * 3) | 0;
+      h = (h * 31 + (hr.orderKind === 'attack' ? 2 : 1)) | 0;
+      h = (h * 31 + (hr.orderId ?? 0)) | 0;
+    }
     h = (h * 31 + Math.round(hr.x * 8) + Math.round(hr.z * 8) * 7 + hr.level * 131) | 0;
     for (const v of Object.values(hr.upgrades || {})) h = (h * 31 + v * 17) | 0;
     // Gear and the Lattice reach the hash too. Two peers holding different

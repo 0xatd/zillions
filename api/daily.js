@@ -9,6 +9,8 @@ import {
   acceptableDay, dailyChallenge, dailyKey, publicChallenge, publicHandle, validDay, validateDailyReplay,
   verifyDailySubmission,
 } from '../src/daily.js';
+import { boardReplayId, shareReplayFromDaily } from '../src/share-replay.js';
+import { clientIpHash, publishReplayRecord } from './replay.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const BODY_LIMIT = 2 * 1024 * 1024;
@@ -33,7 +35,7 @@ async function parseBody(req) {
   catch { throw httpError('invalid_json', 400); }
 }
 
-function entry(row, rank, mine) {
+function entry(row, rank, mine, replayId = null) {
   return {
     rank,
     mine: !!mine,
@@ -45,6 +47,7 @@ function entry(row, rank, mine) {
     seconds: row.duration_seconds,
     won: !!row.won,
     hero: row.hero,
+    replayId,
   };
 }
 
@@ -69,14 +72,30 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
       const found = await rows(`profiles?select=handle,username_set&id=eq.${userId}&limit=1`);
       return found[0]?.username_set ? found[0].handle || '' : '';
     },
+    async replayLinks(day) {
+      try {
+        const response = await fetchImpl(
+          `${url}/rest/v1/replays?select=id,user_id,sim_hash&day=eq.${day}&board=eq.true&mode=eq.daily`,
+          { headers },
+        );
+        if (!response.ok) return new Map();
+        const found = await response.json();
+        const links = new Map();
+        for (const row of found || []) links.set(row.user_id, { id: row.id, hash: row.sim_hash });
+        return links;
+      } catch {
+        return new Map();
+      }
+    },
     async board({ day, userId }) {
       const top = await rows(
-        `daily_scores?select=user_id,display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero&day=eq.${day}&order=score.desc,created_at.asc,user_id.asc&limit=${BOARD_LIMIT}`,
+        `daily_scores?select=user_id,display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,sim_hash&day=eq.${day}&order=score.desc,created_at.asc,user_id.asc&limit=${BOARD_LIMIT}`,
       );
+      const links = await this.replayLinks(day);
       let me = null;
       if (userId && UUID.test(userId)) {
         const mine = await rows(
-          `daily_scores?select=display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,created_at&user_id=eq.${userId}&day=eq.${day}&limit=1`,
+          `daily_scores?select=display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,sim_hash,created_at&user_id=eq.${userId}&day=eq.${day}&limit=1`,
         );
         if (mine[0]) {
           const better = await count(`daily_scores?select=user_id&day=eq.${day}&score=gt.${mine[0].score}`);
@@ -85,13 +104,16 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
             `daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=lt.${created}`,
           );
           const tied = await count(`daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=eq.${created}&user_id=lt.${userId}`);
-          me = entry(mine[0], better + earlier + tied + 1, true);
+          me = entry(mine[0], better + earlier + tied + 1, true, boardReplayId(links, userId, mine[0].sim_hash));
         }
       }
       return {
-        entries: top.map((row, index) => entry(row, index + 1, userId && row.user_id === userId)),
+        entries: top.map((row, index) => entry(row, index + 1, userId && row.user_id === userId, boardReplayId(links, row.user_id, row.sim_hash))),
         me,
       };
+    },
+    async publishReplay(args) {
+      return publishReplayRecord({ url, serviceKey, fetchImpl, ...args });
     },
     async submit(args) {
       const response = await fetchImpl(`${url}/rest/v1/rpc/submit_daily_score`, {
@@ -132,7 +154,7 @@ export async function processDailyBoard({ day, userId = null, store, now = new D
 }
 
 export async function processDailySubmit({
-  userId, body, store, now = new Date(), deadline = Infinity, clock = () => performance.now(),
+  userId, body, store, now = new Date(), deadline = Infinity, clock = () => performance.now(), ipHash = null,
 }) {
   if (!userId || !UUID.test(userId)) throw httpError('sign_in_required', 401);
   const raw = body?.replay ?? body;
@@ -160,6 +182,20 @@ export async function processDailySubmit({
     simHash: verdict.hash | 0,
     replay: parsed.replay,
   });
+  let replayId = null;
+  // A worse or equal run keeps the stored score. Leave that score's Watch
+  // link alone so the board does not start playing a different siege.
+  if (saved.improved && typeof store.publishReplay === 'function') {
+    try {
+      const shared = shareReplayFromDaily(parsed.replay, { won: !!verdict.standing.won });
+      if (shared) {
+        const published = await store.publishReplay({ userId, replay: shared, board: true, ipHash });
+        replayId = published?.id || null;
+      }
+    } catch {
+      replayId = null;
+    }
+  }
   return {
     ok: true,
     score: saved.score,
@@ -170,6 +206,7 @@ export async function processDailySubmit({
     won: !!saved.won,
     rank: saved.rank,
     improved: !!saved.improved,
+    replayId,
   };
 }
 
@@ -212,6 +249,7 @@ export default async function handler(req, res) {
       body,
       store,
       deadline: started + REPLAY_BUDGET_MS,
+      ipHash: clientIpHash(req),
     });
     return send(res, 200, result);
   } catch (error) {

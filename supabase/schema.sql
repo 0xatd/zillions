@@ -1079,3 +1079,6 @@ revoke insert, update, delete on public.player_wallets from anon, authenticated;
 -- migrations/20261123000100_friend_parties.sql. Apply migrations after schema.
 -- Daily Siege scores are defined in
 -- migrations/20261125000100_daily_siege.sql. Apply that file by hand.
+-- Shareable replays are defined in
+-- migrations/20261125000200_share_replays.sql. Apply that file by hand.
+-- public.replays is readable and writable only by the service role.

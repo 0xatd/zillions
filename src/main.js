@@ -63,15 +63,20 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
-import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest } from './backend.js';
+import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest, replayPublishRequest, replayReadRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import {
   PENDING_DAILY_KEY, acceptDailyBoardPaint, acceptableDay, buildDailyReplay, dailyChallenge, dailyKey, dailyScore,
   formatDailyStanding,
 } from './daily.js';
+import {
+  buildShareReplay, leaderKey, openReplay, playReplayTo, replayIdFromLocation,
+  replayProblem, shareReplayPath,
+} from './share-replay.js';
 import { persistRunTelemetry } from './run-telemetry.js';
-import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
+import { loadBinds, loadFeel, saveBinds, saveFeel, resetBinds, actionFor, isHeld, keyLabel, bindKey } from './keybinds.js';
+import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop } from './combat-input.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
@@ -133,12 +138,23 @@ function outlineGeometry(geo) {
   OUTLINE_GEO.set(geo, out);
   return out;
 }
-function addInkOutline(root) {
+const OUTLINE_MATS = new Map();
+function outlineMaterial(color) {
+  const key = color >>> 0;
+  let mat = OUTLINE_MATS.get(key);
+  if (mat) return mat;
+  mat = new THREE.MeshBasicMaterial({ color: key, side: THREE.BackSide });
+  mat.onBeforeCompile = OUTLINE_MAT.onBeforeCompile;
+  OUTLINE_MATS.set(key, mat);
+  return mat;
+}
+function addInkOutline(root, color = 0x0e0b10) {
   const meshes = [];
   root.traverse((o) => { if (o.isMesh && !o.userData.ink) meshes.push(o); });
   const outs = [];
+  const mat = outlineMaterial(color);
   for (const m of meshes) {
-    const o = new THREE.Mesh(outlineGeometry(m.geometry), OUTLINE_MAT);
+    const o = new THREE.Mesh(outlineGeometry(m.geometry), mat);
     o.userData.ink = true;
     o.userData.keepOpacity = true;
     m.add(o);
@@ -183,6 +199,11 @@ class App {
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
+    this._hitStop = 0;
+    this._hitFeel = { hold: 0, gap: 0 };
+    this._presentHold = false;
+    this._cameraPinned = true;
+    this._attackMoveArmed = false;
     this.motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     this.speed = 1;
@@ -191,8 +212,8 @@ class App {
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, gx: 0, gz: 0 };
     this.lastDir = { x: 0, z: 0, s: false };
-    // Build and fight are distinct action contexts. Movement is shared, but
-    // Space builds in Build mode and dodges in Fight mode.
+    // Build and fight are distinct action contexts. Right-click orders the hero.
+    // The dodge key funds construction in Build mode and dodges in Fight mode.
     this.controlMode = 'build';
     this.buttonPay = false;     // command-bar build button held state
     this.lastPay = false;       // build pay held state, mirrored into the sim
@@ -277,6 +298,7 @@ class App {
       useAuthoritativeEconomy: () => !!this.auth?.isSignedIn(),
       onLatticeRewire: (character) => this._rewireLatticeOnServer(character),
       onKeybindChange: (binds) => this.setBinds(binds),
+      onFeelChange: (feel) => this.setFeel(feel),
       onKeybindReset: () => this.resetKeybinds(),
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onCharacterPreview: (style) => this._setCharacterPreview(style),
@@ -307,6 +329,13 @@ class App {
       onDailyPlay: () => this._startDaily(),
       onDailySignIn: () => { this._stashDaily(); this._signIn(); },
       onDailyEmail: (email) => { this._stashDaily(); this._signInWithEmail(email); },
+      onShareReplay: () => this._shareReplay(),
+      onReplayToggle: () => this.setSpeed(0),
+      onReplaySpeed: (speed) => this.setSpeed(speed),
+      onReplaySeek: (step) => this._seekReplay(step),
+      onReplayFollow: () => this._toggleReplayFollow(),
+      onReplaySeed: () => this._playReplaySeed(),
+      onReplayExit: () => { location.href = '/'; },
       onQuickStart: (draft) => this._quickStart(draft),
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
@@ -396,6 +425,8 @@ class App {
     this._missingRequestAt = 0;
     this._frameMs = 16.7;
     this._diagUiAt = 0;
+    this._cameraPinned = true;
+    this._attackMoveArmed = false;
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
 
@@ -427,6 +458,7 @@ class App {
 
     this.ui.setProfile(this.profile);
     this.ui.setKeybinds(this.binds());
+    this.ui.setFeel(this.feel());
     this.ui.setQualityUI(this.tacticalVisuals.choice, this.tacticalVisuals.quality);
     // Settings restore: volumes apply inside AudioSys before any sound.
     // The graphics choice lives in its own key. An older settings blob only
@@ -456,6 +488,7 @@ class App {
       }).catch(() => {});
     }, 1500);
     this._consumeShareLink();
+    this._bootReplay();
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -849,6 +882,8 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this._seedRun = !!this._startingSeedRun;
+    this._startingSeedRun = false;
     this.pendingAbility = null;
     this._keepPeek = null;
     if (snap && !isCompatibleSnapshot(snap)) {
@@ -883,26 +918,40 @@ class App {
     setActiveCulture(cultureId);
     this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
+    // A seed run uses the shared match seed and does not take a reward ticket.
+    const forcedSeed = Number.isInteger(this._forcedSeed) ? this._forcedSeed >>> 0 : null;
+    this._forcedSeed = null;
     // Solo signed-in runs fetch their ticket (and match seed) first.
-    const soloTicket = !snap && !mp && mode !== 'daily'
+    const soloTicket = !snap && !mp && mode !== 'daily' && forcedSeed == null
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const matchSeed = daily ? daily.seed : this._match.seed;
+    const matchSeed = daily ? daily.seed : (forcedSeed != null ? forcedSeed : this._match.seed);
     this.game = new Game(this.map, daily ? 'normal' : difficulty, heroKeys, snap, levelId, mode,
       Number.isInteger(matchSeed) ? { rngSeed: matchSeed, culture: cultureId, ...(daily ? { daily } : {}) } : { culture: cultureId });
-    // Record inputs for leaderboard verification. A resumed run continues the
-    // log it saved; a resume without one cannot be verified (it still pays).
-    // Daily runs always record, including guests, so a later sign-in can submit.
-    if (mode === 'daily' || (this.auth?.isSignedIn() && mp?.role !== 'spectator')) {
+    // Every played run keeps an input log so it can be shared. A resumed run
+    // continues the log it saved. A resume without one, and a spectator, cannot
+    // be replayed from the first step.
+    if (mp?.role !== 'spectator') {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
     if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
+    this._mountMatchView({ mode, level, snap, mp, heroKey, matchInbox });
+    } catch (error) {
+      this._finishMissionIntro();
+      throw error;
+    } finally {
+      this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  // Shared battlefield presentation for a live match and a replay.
+  _mountMatchView({ mode, level, snap = null, mp = null, heroKey = null, matchInbox = null, replay = false }) {
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -915,7 +964,7 @@ class App {
     this.zombieAttacks.clear();
     this.lastPay = false;
     this._endExtras = null;
-    if (!snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
+    if (!replay && !snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
     this._netPumpStop();
@@ -941,6 +990,7 @@ class App {
       this._netPumpStart();
       if (this.onlineMode && this.lobby) this.lobby.setMatchActive(true);
     }
+    this._clearWorldMeshes();
     for (const f of this.blockFx) { this.scene.remove(f.mesh); this._disposeObject3D(f.mesh); }
     this.blockFx = [];
     this._blockT = 0;
@@ -987,7 +1037,9 @@ class App {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
     }
-    this.ui.showBanner(mode === 'daily'
+    this.ui.showBanner(replay
+      ? `${level.name} — replay. Pause, change speed, or scrub. Follow the leader, or fly the camera.`
+      : mode === 'daily'
       ? `${level.name} — DAILY SIEGE. Same map, same waves, same modifiers for every commander today.`
       : mode === 'survival'
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
@@ -996,19 +1048,285 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
-    const skipIntro = this._skipMissionIntro || (this.profile.games > 0);
+    const skipIntro = replay || this._skipMissionIntro || (this.profile.games > 0);
     this._skipMissionIntro = false;
-    if (!snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!replay && !snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       this.missionIntro = { elapsed: 0, distance: this.camDist };
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
-    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
-    else if (!this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
+    if (!replay && !this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
+    else if (!replay && !this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
+  }
+
+  _clearWorldMeshes() {
+    for (const rec of this.buildingMeshes?.values() || []) {
+      this.scene.remove(rec.mesh);
+      this._disposeObject3D(rec.mesh);
+    }
+    this.buildingMeshes?.clear();
+    for (const rec of this.unitMeshes?.values() || []) {
+      this.scene.remove(rec.mesh);
+      this._disposeObject3D(rec.mesh);
+    }
+    this.unitMeshes?.clear();
+    for (const rec of this.plotMeshes?.values() || []) {
+      this.scene.remove(rec.group);
+      this._disposeObject3D(rec.group);
+    }
+    this.plotMeshes?.clear();
+    this._ghostMat = null;
+    this._clearNestMeshes();
+    this._clearLootMeshes();
+    this._clearSiteMarkers();
+    if (this.plaza) { this.scene.remove(this.plaza); this._disposeObject3D(this.plaza); this.plaza = null; }
+    for (const p of this.projectiles || []) this._destroyProjectile?.(p);
+    this.projectiles = [];
+    for (const c of this.payCoins || []) this.scene.remove(c.mesh);
+    this.payCoins = [];
+    this.coinBorn?.clear();
+  }
+
+  _replayClock(steps) {
+    const seconds = Math.max(0, Math.round(steps * SIM_DT));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  }
+
+  _replayBarState() {
+    const session = this.replay;
+    if (!session?.replay) return null;
+    const frames = session.replay.frames;
+    let note = '';
+    if (session.seeking) note = 'Simulating…';
+    else if (session.checked) note = session.hashOk
+      ? 'Replay matches the recorded result.'
+      : 'This replay does not match the recorded result.';
+    return {
+      paused: !!session.paused,
+      seeking: !!session.seeking,
+      speed: session.speed,
+      frames,
+      step: session.step,
+      follow: session.follow !== false,
+      label: `${this._replayClock(session.step)} / ${this._replayClock(frames)}`,
+      note,
+    };
+  }
+
+  async _bootReplay() {
+    const id = replayIdFromLocation(location.pathname, location.search, window.__ZILLIONS_REPLAY__ || '');
+    if (!id) return;
+    this._replayBoot = id;
+    this.ui.showReplayGate('Loading replay…');
+    try {
+      const result = await replayReadRequest(id);
+      if (!result) {
+        this.ui.showReplayGate('Replay links need the game server.');
+        return;
+      }
+      if (!result.ok || !result.replay?.log) {
+        this.ui.showReplayGate(replayProblem(result));
+        return;
+      }
+      await this.startReplay(result.replay);
     } catch (error) {
-      this._finishMissionIntro();
-      throw error;
+      this.ui.showReplayGate(error?.message === 'not_found'
+        ? replayProblem({ error: 'not_found' })
+        : 'This replay could not be loaded.');
+    }
+  }
+
+  async startReplay(raw) {
+    const opened = openReplay(raw, {
+      mapFactory: (mapSeed, theme, opts) => new GameMap(mapSeed, theme, opts),
+    });
+    if (opened.status !== 'ready') {
+      this.ui.showReplayGate(replayProblem(opened));
+      return;
+    }
+    const level = levelById(opened.replay.levelId);
+    this.ui.setDeploymentLoading(true, level, 'Loading replay');
+    this._finishMissionIntro();
+    try {
+      this.audio.init();
+      this._clearMenuBackdrop();
+      if (!this.assetsLoaded) {
+        this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
+        await this._loadArt();
+      }
+      setActiveCulture(cultureKey(opened.replay.culture));
+      await loadKitCulture(cultureKey(opened.replay.culture));
+      this._match = null;
+      this.netMode = false;
+      this.mpRole = null;
+      this.myPlayer = 0;
+      this.paused = false;
+      this.map = opened.map;
+      this.pal = level.theme.palette;
+      this.game = opened.game;
+      this.replay = {
+        ...opened,
+        speed: 1,
+        paused: false,
+        follow: true,
+        acc: 0,
+        seeking: false,
+        seekTo: 0,
+        checked: false,
+        hashOk: false,
+      };
+      this._mountMatchView({ mode: opened.replay.mode, level, replay: true });
+      this.ui.hideStart();
+      this.ui.showReplayBar(this._replayBarState());
+    } catch (error) {
+      this.replay = null;
+      this.ui.showReplayGate('This replay could not be played.');
+      console.warn('replay failed', error);
     } finally {
       this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  _seekReplay(step) {
+    if (!this.replay) return;
+    const frames = this.replay.replay.frames;
+    this.replay.seekTo = Math.max(0, Math.min(frames, step | 0));
+    this.replay.seeking = this.replay.seekTo !== this.replay.step;
+    this.replay.checked = false;
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _toggleReplayFollow() {
+    if (!this.replay) return;
+    this.replay.follow = !this.replay.follow;
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _noteReplayEnd() {
+    if (!this.replay || this.replay.checked || (this.replay.step < this.replay.replay.frames && !this.game.over)) return;
+    this.replay.checked = true;
+    this.replay.paused = true;
+    this.replay.hashOk = this.replay.step === this.replay.replay.frames && (stateHash(this.game) | 0) === (this.replay.replay.hash | 0);
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _advanceReplay(dt) {
+    const session = this.replay;
+    if (!session) return;
+    if (session.seeking) {
+      const before = session.game;
+      const result = playReplayTo(session, session.seekTo, { maxSteps: 240 });
+      if (session.game !== before) {
+        this.game = session.game;
+        this._flushReplayPresentation();
+      } else this.game = session.game;
+      if (result.done) {
+        session.seeking = false;
+        session.acc = 0;
+        if (session.step >= session.replay.frames || session.game.over) this._noteReplayEnd();
+      }
+      this.ui.setReplayBar(this._replayBarState());
+      return;
+    }
+    if (session.paused || session.step >= session.replay.frames) {
+      if (session.step >= session.replay.frames) this._noteReplayEnd();
+      return;
+    }
+    session.acc += dt * session.speed;
+    let guard = 0;
+    while (session.acc >= SIM_DT && guard < 64 && session.step < session.replay.frames && !session.game.over) {
+      playReplayTo(session, session.step + 1, { maxSteps: 1 });
+      this.game = session.game;
+      session.acc -= SIM_DT;
+      guard++;
+    }
+    if (session.acc > SIM_DT * 4) session.acc = 0;
+    if (session.step >= session.replay.frames || session.game.over) this._noteReplayEnd();
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _flushReplayPresentation() {
+    this._clearWorldMeshes();
+    for (const marker of this.nodeMarkers || []) this._disposeObject3D(marker);
+    this._clearNodeMarkers();
+    this._wallTiles = null;
+    this._gateSupports = null;
+    if (!this.game || !this.map) return;
+    if (this.game.site >= 0) {
+      const site = this.map.sites[this.game.site];
+      if (site) {
+        this.plaza = this._buildPlaza(site.x, site.z);
+        this.scene.add(this.plaza);
+      }
+    } else if (this.game.mode !== 'labyrinth') this._makeSiteMarkers();
+  }
+
+  async _shareReplay() {
+    const button = this.ui.root.querySelector('#b-share-replay');
+    const replay = buildShareReplay(this.game, {
+      leaders: this._match?.heroes || this.game?.heroSetups,
+      difficulty: this.game?.diffKey,
+    });
+    if (!replay) {
+      this.ui.setReplayShareNote(Array.isArray(this.game?.inputLog)
+        ? 'This replay is too large to share.'
+        : 'This run has no complete input log to share.');
+      return;
+    }
+    if (button) { button.disabled = true; button.textContent = 'Sharing…'; }
+    try {
+      const result = await replayPublishRequest(replay);
+      if (!result?.id) {
+        if (button) { button.disabled = false; button.textContent = 'Share replay'; }
+        this.ui.setReplayShareNote('Replay links need the game server.');
+        return;
+      }
+      const url = `${location.origin}${shareReplayPath(result.id)}`;
+      let copied = false;
+      try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url); copied = true; } } catch { copied = false; }
+      if (button) button.textContent = copied ? 'Link copied' : 'Share replay';
+      this.ui.setReplayShareNote(copied ? url : `Copy this link: ${url}`);
+    } catch (error) {
+      if (button) { button.disabled = false; button.textContent = 'Share replay'; }
+      const code = error?.message || '';
+      const text = code === 'rate_limited' ? 'Too many shared replays this hour. Try again later.'
+        : code === 'replay_too_large' ? 'This replay is too large to share.'
+        : code === 'sim_version_mismatch' ? 'This build cannot share a replay the server would accept.'
+        : code === 'replay_not_configured' ? 'Replay storage is not set up on the server yet.'
+        : 'The replay could not be shared.';
+      this.ui.setReplayShareNote(text);
+    }
+  }
+
+  async _playReplaySeed() {
+    const spec = this.replay?.replay;
+    if (!spec) return;
+    const hero = leaderKey(spec.leaders[0]);
+    this.replay = null;
+    this.paused = true;
+    this.ui.hideReplayBar();
+    this._clearWorldMeshes();
+    this._startingSeedRun = true;
+    this._forcedSeed = spec.mode === 'daily' ? null : (spec.seed >>> 0);
+    this.ui.selectedCulture = spec.culture;
+    setActiveCulture(cultureKey(spec.culture));
+    this._skipMissionIntro = true;
+    try {
+      if (spec.mode === 'daily') {
+        this.game = null;
+        this._dailyChallenge = dailyChallenge(spec.day);
+        await this._startDaily(this._dailyChallenge);
+        return;
+      }
+      this.game = null;
+      this.ui.selectedMode = spec.mode;
+      this.ui.selectedLevel = spec.levelId;
+      this.ui.selectedDiff = spec.difficulty;
+      this.ui.selectedHero = hero;
+      await this.startGame(spec.difficulty, hero);
+    } catch (error) {
+      this._seedRun = false;
+      this.ui.showBanner('That seed could not be started.', 'bad', 4000);
+      console.warn('seed run failed', error);
     }
   }
 
@@ -1466,7 +1784,9 @@ class App {
     }
     const binds = this.binds();
     const labels = Object.fromEntries(Object.entries({ build: 'build', defend: 'stance_defend',
-      push: 'stance_push', north: 'move_up', west: 'move_left', south: 'move_down', east: 'move_right', mode: 'build_mode', ability: 'ability1' }).map(([label, action]) => [label, keyLabel(binds[action])]));
+      push: 'stance_push', north: 'move_up', west: 'move_left', south: 'move_down', east: 'move_right',
+      mode: 'build_mode', ability: 'ability1', ability2: 'ability2', ability3: 'ability3', ability4: 'ability4',
+      center: 'camera_center' }).map(([label, action]) => [label, keyLabel(binds[action])]));
     const step = coachStep(this._coach, labels);
     const siege = this.game?.firstSiege;
     if (['stances', 'attack', 'victory'].includes(step.id)) {
@@ -1489,7 +1809,7 @@ class App {
     const push = keyLabel(binds.stance_push);
     const tower = keyLabel(binds.tower_priority);
     const steps = [
-      [1.5, '🕹️ WASD moves your hero. Hold SHIFT to sprint.'],
+      [1.5, '🕹️ Right-click the ground to move. Right-click an enemy to attack. Hold SHIFT to sprint.'],
       [5, `🏳️ This land is unclaimed! Ride to a flagged site and press ${build} to found your city.`],
       [14, `💰 Walk to a glowing foundation and HOLD ${build} — your coins build it.`],
       [24, `⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press ${push} and those squads push out along the lanes on their own.`],
@@ -1569,6 +1889,8 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    // A shared replay owns the screen. Account hydration above still ran.
+    if (this._replayBoot) return;
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -1703,6 +2025,7 @@ class App {
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
+    if (this.replay) return;
     if (!this.game || this.missionIntro) return;
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
@@ -2211,7 +2534,7 @@ class App {
   // host frame hitch becomes a stall broadcast to all guests, and stringify +
   // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
-    if (!this.game || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
+    if (!this.game || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -2272,11 +2595,13 @@ class App {
     }
   }
 
-  async _startDaily() {
+  async _startDaily(requested = null) {
     // Drop a board response that is still in flight. Play has left the brief.
     this._dailyTicket = (this._dailyTicket || 0) + 1;
     if (this.game) return;
-    const challenge = this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey());
+    const challenge = requested?.day
+      ? requested
+      : (this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey()));
     this._dailyChallenge = challenge;
     this.ui.selectedMode = 'daily';
     this.ui.selectedLevel = challenge.levelId;
@@ -2345,9 +2670,11 @@ class App {
         return null;
       }
       this._dropStashedDaily(stashed);
-      const line = result.improved
+      const watch = shareReplayPath(result.replayId || '');
+      const link = watch ? ` Replay ${location.origin}${watch}` : '';
+      const line = (result.improved
         ? `Saved. Rank ${result.rank} with ${result.score}.`
-        : `Today's board already has your better score. Rank ${result.rank}.`;
+        : `Today's board already has your better score. Rank ${result.rank}.`) + link;
       if (!quiet) this.ui.setDailyStatus(line);
       else this.ui.showBanner(line, '', 5000);
       return result;
@@ -2371,6 +2698,11 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if (this._seedRun) {
+      this._seedRun = false;
+      this._endExtras = { seedRun: true, local: true };
+      return;
+    }
     if (this.game?.mode === 'daily') {
       this._finishDailyRun(won);
       return;
@@ -4947,6 +5279,7 @@ class App {
   }
 
   _updateZombieMeshes(t, dt = 0) {
+    if (this._presentHold) return;
     const g = this.game;
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
@@ -4989,7 +5322,7 @@ class App {
       else if (zb.hitFlash > 0) c.setRGB(1.6, 1.2, 1.2);
       else if (zb.auraSources && zb.auraSources.length) c.setHex(0x9fd6ff);
       else if (zb.boss) c.setHex(zb.def.color).multiplyScalar(1.5); // champion wears its own color
-      else c.setRGB(1, 1, 1);
+      else c.setRGB(1.12, 0.78, 0.72);
       // Eyes: hunting dead burn red, idle wanderers smoulder amber.
       const eyeHex = zb.auraSources && zb.auraSources.length ? 0x7fd6ff : zb.state === 2 ? 0xff4636 : 0xd8973a;
       this.horde.write(
@@ -5726,7 +6059,7 @@ class App {
         // The selection ring and outline carry readability at distance;
         // the body no longer needs the old 1.25× enlargement.
         kit.node.scale.multiplyScalar(0.78);
-        g.userData.outlines = addInkOutline(kit.node);
+        g.userData.outlines = addInkOutline(kit.node, d.color || 0x0e0b10);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
         g.userData.bob = { node: kit.node, y: kit.node.position.y };
@@ -5827,6 +6160,7 @@ class App {
         if (marine.weapon) trackWeapon(marine.weapon);
       } else if (kit) {
         // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
+        g.userData.outlines = addInkOutline(kit.node, d.color || 0x4a7ab8);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
       } else if (authored) {
@@ -5852,6 +6186,15 @@ class App {
         for (const part of model.weaponParts) weaponParts.push(part);
       }
     }
+    const team = u.hero ? (u.def?.color || 0x59c8ff) : (u.def?.color || 0x4a7ab8);
+    const teamGeo = new THREE.RingGeometry(u.hero ? 0.78 : 0.32, u.hero ? 0.92 : 0.46, 28);
+    teamGeo.rotateX(-Math.PI / 2);
+    const teamRing = new THREE.Mesh(teamGeo, new THREE.MeshBasicMaterial({ color: team, transparent: true, opacity: 0.92, depthWrite: false }));
+    teamRing.position.y = 0.04;
+    teamRing.userData.keepOpacity = true;
+    teamRing.userData.teamColor = team;
+    g.add(teamRing);
+    g.userData.teamRing = teamRing;
     const affectedGeo = new THREE.RingGeometry(0.38, 0.48, 28);
     affectedGeo.rotateX(-Math.PI / 2);
     const affected = new THREE.Mesh(affectedGeo, new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.5, depthWrite: false }));
@@ -5864,6 +6207,7 @@ class App {
   }
 
   _syncUnits(t, dt = 0) {
+    if (this._presentHold) return;
     // Marine LOD: full kit near the camera, ~1.5k-tri kit beyond a cut-off
     // that pulls in as the army grows or the camera zooms out.
     const marineCount = this._marineCount || 0;
@@ -5882,6 +6226,8 @@ class App {
         this.unitMeshes.set(u.id, rec);
       }
       if (u.hp < rec.lastHp && !u.dead) rec.hit = { t: 0.22, dur: 0.22 };
+      const teamRing = rec.mesh.userData.teamRing;
+      if (teamRing) teamRing.material.color.setHex(rec.hit ? 0xfff6ee : teamRing.userData.teamColor);
       rec.lastHp = u.hp;
       const ground = this.map.groundY(u.x, u.z);
       const preset = this.tacticalVisuals?.preset;
@@ -6291,8 +6637,15 @@ class App {
   _setupInput() {
     const cv = this.canvas;
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      const k = e.key.toLowerCase();
+      const k = bindKey(e);
+      if (e.repeat) {
+        const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
+        if (this.game && !typing) {
+          const repeatAct = actionFor(this.binds(), k, 'battle');
+          if (repeatAct === 'camera_center' || (repeatAct && (repeatAct.startsWith('camera_') || repeatAct.startsWith('move_')))) e.preventDefault();
+        }
+        return;
+      }
       if (e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable)) {
         if (e.key === 'Escape') e.target.blur();
         return;
@@ -6351,9 +6704,21 @@ class App {
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
-        case 'ability1': case 'ability2': case 'ability3':
+        case 'ability1': case 'ability2': case 'ability3': case 'ability4': {
           e.preventDefault();
-          if (this.controlMode === 'fight') this.tryCast(Number(act.slice(-1)) - 1 + (isHeld(binds, this.keys, 'second_bar') ? 3 : 0));
+          const slot = castSlot(act, isHeld(binds, this.keys, 'second_bar'));
+          if (this.controlMode === 'fight' && slot != null) this.tryCast(slot);
+          break;
+        }
+        case 'attack_move':
+          e.preventDefault();
+          this._attackMoveArmed = !this._attackMoveArmed;
+          this.ui.showBanner(this._attackMoveArmed ? 'Attack-move armed. Click the ground or an enemy.' : 'Attack-move cancelled.', 'info', 1600);
+          break;
+        case 'camera_center':
+          e.preventDefault();
+          this._cameraPinned = true;
+          this._recenter = true;
           break;
         case 'build_mode':
           e.preventDefault();
@@ -6372,23 +6737,48 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': e.preventDefault(); this.setSpeed(0); break;
-        case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
+        case 'menu': if (this.pendingAbility != null || this._attackMoveArmed) {this.pendingAbility=null;this._attackMoveArmed=false;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('keyup', (e) => this.keys.delete(bindKey(e)));
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 22, 95);
     }, { passive: false });
 
+    cv.addEventListener('pointermove', (e) => {
+      if (!this._replayDrag || e.pointerId !== this._replayDrag.id) return;
+      this._replayDrag.dx += e.clientX - this._replayDrag.x;
+      this._replayDrag.dy += e.clientY - this._replayDrag.y;
+      this._replayDrag.x = e.clientX;
+      this._replayDrag.y = e.clientY;
+    });
+    cv.addEventListener('pointerup', (e) => {
+      if (this._replayDrag && e.pointerId === this._replayDrag.id) this._replayDrag = null;
+    });
+    cv.addEventListener('pointercancel', (e) => {
+      if (this._replayDrag && e.pointerId === this._replayDrag.id) this._replayDrag = null;
+    });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    cv.addEventListener('pointermove', (e) => { this._pointer = { x: e.clientX, y: e.clientY, in: true }; });
+    cv.addEventListener('pointerleave', () => { if (this._pointer) this._pointer.in = false; });
     cv.addEventListener('pointerdown', (e) => {
+      if (this.replay && this.replay.follow === false && (e.button === 2 || e.button === 1)) {
+        this._replayDrag = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, id: e.pointerId };
+        return;
+      }
       this.audio.init();
-      if(e.button!==0 || !this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden'))return;
+      if (!this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden')) return;
+      if (e.button === 2 && this.pendingAbility != null) { this.pendingAbility = null; return; }
+      if (e.button === 2 || (e.button === 0 && this._attackMoveArmed)) {
+        this._issuePointerOrder(e);
+        return;
+      }
+      if (e.button !== 0) return;
       const rect=cv.getBoundingClientRect(),vision=fogVisionSources(this.game);
       let best=null,closest=26;
       for(const [actors,enemy] of [[this.game.units,false],[this.game.zombies,true]])for(const unit of actors){
@@ -6434,6 +6824,11 @@ class App {
     return this._binds;
   }
 
+  feel() {
+    if (!this._feel) this._feel = loadFeel();
+    return this._feel;
+  }
+
   setBinds(next) {
     this._binds = saveBinds(next);
     this.ui.setKeybinds(this._binds);
@@ -6441,17 +6836,90 @@ class App {
     return this._binds;
   }
 
+  setFeel(next) {
+    this._feel = saveFeel(next);
+    this.ui.setFeel(this._feel);
+    if (this._coach) this._paintCoach();
+    return this._feel;
+  }
+
   resetKeybinds() {
     this._binds = resetBinds();
+    this._feel = loadFeel({ force: true });
     this.ui.setKeybinds(this._binds);
+    this.ui.setFeel(this._feel);
     if (this._coach) this._paintCoach();
     return this._binds;
   }
 
-  // WASD → hero direction, sent through the lockstep pipe only on change.
-  // Zillions uses a fixed Thronefall-style orientation during gameplay:
-  // WASD maps to the minimap cardinal directions. This keeps keyboard
-  // movement, player view movement, and minimap movement aligned.
+  _issuePointerOrder(e) {
+    const picked = this._pickPointer(e);
+    const order = pointerOrder({ button: e.button, armed: this._attackMoveArmed, enemy: !!picked.enemy });
+    this._attackMoveArmed = false;
+    if (!order) return;
+    const point = picked.enemy ? picked.unit : picked.ground;
+    if (!point) return;
+    const q = quantizeOrder(point.x, point.z);
+    const cmd = { t: 'horder', p: this.myPlayer, x: q.x, z: q.z, k: order.k };
+    if (order.k === 'attack' && picked.enemy) cmd.id = picked.unit.id;
+    this.issue(cmd);
+    this._showOrderMarker(q.x, q.z, order.k);
+  }
+
+  _pickPointer(e) {
+    const cv = this.canvas;
+    const rect = cv.getBoundingClientRect();
+    const vision = fogVisionSources(this.game);
+    let best = null, closest = 26;
+    for (const unit of this.game.zombies) {
+      if (unit.dead || unit.hp <= 0) continue;
+      if (!vision.some((v) => Math.hypot(v.x - unit.x, v.z - unit.z) < v.radius)) continue;
+      const world = new THREE.Vector3(unit.x, this.map.groundY(unit.x, unit.z) + 0.9, unit.z);
+      const screen = world.clone().project(this.camera);
+      if (screen.z < -1 || screen.z > 1) continue;
+      const distance = Math.hypot(rect.left + (screen.x + 1) * rect.width / 2 - e.clientX, rect.top + (1 - screen.y) * rect.height / 2 - e.clientY);
+      if (distance < closest) { closest = distance; best = unit; }
+    }
+    const pointer = new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, 1 - (e.clientY - rect.top) / rect.height * 2);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(pointer, this.camera);
+    const hit = this.terrain ? ray.intersectObject(this.terrain, true)[0] : null;
+    return { enemy: !!best, unit: best, ground: hit ? { x: hit.point.x, z: hit.point.z } : null };
+  }
+
+  _showOrderMarker(x, z, kind) {
+    if (this._orderMarker) {
+      this.scene.remove(this._orderMarker);
+      this._orderMarker.geometry.dispose();
+      this._orderMarker.material.dispose();
+      this._orderMarker = null;
+    }
+    const geo = new THREE.RingGeometry(0.28, 0.5, 28);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: kind === 'attack' ? 0xff4d3a : 0xf3c53d,
+      transparent: true, opacity: 0.92, depthWrite: false,
+    }));
+    mesh.position.set(x, (this.map?.groundY(x, z) || 0) + 0.12, z);
+    this.scene.add(mesh);
+    this._orderMarker = mesh;
+    this._orderMarkerLife = 0.7;
+  }
+
+  _presentCue(event) {
+    const cue = impactCue(event);
+    if (!cue) return;
+    if (cue.shake) this.shake = Math.max(this.shake, cue.shake);
+    if (cue.hitStop) {
+      this._hitFeel = armHitStop(this._hitFeel, cue.hitStop);
+      this._hitStop = this._hitFeel.hold;
+    }
+    if (cue.sample) this.audio.impactSample(cue.sample);
+  }
+
+  // Optional direct-move keys → a cardinal direction, sent through the lockstep
+  // pipe only on change. Right-click orders are the main move. Directions stay
+  // aligned with the minimap: north is always north.
   _updateHeroInput() {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
@@ -6459,10 +6927,10 @@ class App {
     const active = document.activeElement;
     const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
     if (editing) this.keys.clear();
-    if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
-    if (isHeld(binds, this.keys, 'move_down')) dz += 1;
-    if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
-    if (isHeld(binds, this.keys, 'move_right')) dx += 1;
+    if (isHeld(binds, this.keys, 'camera_up') || this.keys.has(String('w'))) dz -= 1;
+    if (isHeld(binds, this.keys, 'camera_down') || this.keys.has(String('s'))) dz += 1;
+    if (isHeld(binds, this.keys, 'camera_left') || this.keys.has(String('a'))) dx -= 1;
+    if (isHeld(binds, this.keys, 'camera_right') || this.keys.has(String('d'))) dx += 1;
     const s = isHeld(binds, this.keys, 'sprint');
     const last = this.lastDir;
     if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
@@ -6606,6 +7074,18 @@ class App {
   // setSpeed(0) toggles pause; 1/2 set speed and unpause.
   // Co-op runs locked at 1x — the lockstep would stall otherwise.
   setSpeed(s) {
+    if (this.replay) {
+      if (s === 0) this.replay.paused = !this.replay.paused;
+      else if (s === 1 || s === 2 || s === 4 || s === 8) {
+        this.replay.speed = s;
+        this.replay.paused = false;
+      }
+      this.speed = this.replay.speed;
+      this.paused = !!this.replay.paused;
+      this.ui.setSpeedUI(this.replay.speed, this.replay.paused);
+      this.ui.setReplayBar(this._replayBarState());
+      return;
+    }
     if (s === 0) this.paused = !this.paused;
     else if (this.netMode) { this.paused = false; }
     else { this.speed = s; this.paused = false; }
@@ -6653,19 +7133,78 @@ class App {
     this.tacticalVisuals.resize(w, h);
   }
 
+  _panReplayCamera(dt) {
+    let dx = 0;
+    let dz = 0;
+    const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    if (!editing) {
+      if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+      if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+      if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+      if (isHeld(binds, this.keys, 'move_right')) dx += 1;
+    }
+    const speed = 22 * (this.camDist / 46);
+    this.focus.x += dx * speed * dt;
+    this.focus.z += dz * speed * dt;
+    if (this._replayDrag) {
+      const scale = this.camDist * 0.012;
+      this.focus.x += this._replayDrag.dx * scale;
+      this.focus.z += this._replayDrag.dy * scale;
+      this._replayDrag.dx = 0;
+      this._replayDrag.dy = 0;
+    }
+  }
+
   _updateCamera(dt) {
     if (!this.game) return;
 
-    // Camera glued to the hero with a soft lag + movement lookahead.
+    const feel = this.feel();
+    const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    let panX = 0, panZ = 0;
+    if (!this.replay && !editing && !this.paused && !this._presentHold) {
+      const held = (axis, action) => cameraAxisHeld(binds, this.keys, axis, {
+        wasdCamera: !!feel.wasdCamera, actionFor, isHeld, cameraAction: action,
+      });
+      if (held('up', 'camera_up')) panZ -= 1;
+      if (held('down', 'camera_down')) panZ += 1;
+      if (held('left', 'camera_left')) panX -= 1;
+      if (held('right', 'camera_right')) panX += 1;
+      if (feel.edgePan !== false && this._pointer?.in) {
+        const edge = 36;
+        const w = window.innerWidth, h = window.innerHeight;
+        const x = this._pointer.x, y = this._pointer.y;
+        if (x < edge) panX -= (edge - x) / edge;
+        else if (x > w - edge) panX += (x - (w - edge)) / edge;
+        if (y < edge) panZ -= (edge - y) / edge;
+        else if (y > h - edge) panZ += (y - (h - edge)) / edge;
+      }
+    }
+    if (panX || panZ) this._cameraPinned = false;
     const h = this.myHero();
-    if (h) {
+    if (this.replay?.follow === false) {
+      this._panReplayCamera(dt);
+    } else if (this._recenter && h) {
+      this.focus.x = h.x;
+      this.focus.z = h.z;
+      this._recenter = false;
+      this._cameraPinned = true;
+    } else if ((this.replay?.follow || this._cameraPinned) && h && !this._presentHold) {
+      // Glued to the hero until the player pans. Space pins it again.
       const lead = 1.6;
-      const peek = this._keepPeek?.until > performance.now() && !h.mx && !h.mz ? this._keepPeek : null;
+      const peek = this._keepPeek?.until > performance.now() && !h.mx && !h.mz && h.orderX == null ? this._keepPeek : null;
       const tx = peek ? peek.x : h.x + (h.mx || 0) * lead;
       const tz = peek ? peek.z : h.z + (h.mz || 0) * lead;
       const k = 1 - Math.exp(-6 * dt);
       this.focus.x += (tx - this.focus.x) * k;
       this.focus.z += (tz - this.focus.z) * k;
+    } else if ((panX || panZ) && !this._presentHold) {
+      const len = Math.hypot(panX, panZ) || 1;
+      this.focus.x += (panX / len) * 24 * dt;
+      this.focus.z += (panZ / len) * 24 * dt;
     }
     const mapSize = this.map?.size || MAP_SIZE;
     const edgePad = 1.2;
@@ -6685,7 +7224,11 @@ class App {
     let sx = 0, sz = 0;
     if (this.shake > 0) {
       this.shake -= dt;
-      const s = this.motionPreference.matches ? 0 : Math.max(0, Math.min(this.shake, 0.25));
+      const scale = scaledShake(1, {
+        reduceShake: !!this.feel().reduceShake,
+        reduceMotion: !!this.motionPreference.matches,
+      });
+      const s = Math.max(0, Math.min(this.shake, 0.25)) * scale;
       sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
     }
     this.camera.position.set(
@@ -6860,6 +7403,7 @@ class App {
           break;
         }
         case 'shot': {
+          this._presentCue(e);
           if (e.fromId === this.myHero()?.id) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
             this.hitFeedback ||= new HitFeedback(this.scene);
@@ -6939,6 +7483,7 @@ class App {
           break;
         }
         case 'zdeath':
+          this._presentCue(e);
           this.spawnCorpse(e);
           if (e.big && this.audio.eventGain > 0 && performance.now() >= (this._eliteImpactAt || 0)) {
             this._eliteImpactAt = performance.now() + 300;
@@ -7123,6 +7668,7 @@ class App {
 
         case 'deny': this.audio.deny(); break;
         case 'cast': {
+          this._presentCue(e);
           const caster = this.unitMeshes.get(e.heroId);
           if (caster) caster.cast = { t: 0.52, dur: 0.52, kind: e.key };
           this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
@@ -7253,12 +7799,14 @@ class App {
           this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
           break;
         case 'victory':
+          if (this.replay) { this._noteReplayEnd(); break; }
           this.audio.victory();
           this.pause();
           this._recordGameEnd(true);
           this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
         case 'defeat':
+          if (this.replay) { this._noteReplayEnd(); break; }
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
@@ -7356,6 +7904,10 @@ class App {
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    const hit = tickHitStop(this._hitFeel, dt);
+    this._hitFeel = { hold: hit.hold, gap: hit.gap };
+    this._hitStop = hit.hold;
+    this._presentHold = hit.present;
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
@@ -7370,7 +7922,7 @@ class App {
     this._updateCamera(dt);
     this._beginCull();
     const hitVision=this.game ? fogVisionSources(this.game) : [];
-    this.hitFeedback?.update(dt,(x,z)=>visibleInFog(hitVision,x,z));
+    this.hitFeedback?.update(this._hitStop > 0 ? 0 : dt,(x,z)=>visibleInFog(hitVision,x,z));
 
     this._audioSceneAt = (this._audioSceneAt || 0) - dt;
     if (this._audioSceneAt <= 0) {
@@ -7389,8 +7941,9 @@ class App {
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
-      if (!this.missionIntro) this._updateHeroInput();
-      if (!this.paused && !this.game.over && !this.missionIntro) {
+      if (!this.missionIntro && !this.replay) this._updateHeroInput();
+      if (this.replay) this._advanceReplay(dt);
+      else if (!this.paused && !this.game.over && !this.missionIntro) {
         const simStarted = performance.now();
         let simTicks = 0;
         if (this.netMode) {
@@ -7411,13 +7964,31 @@ class App {
         if (simTicks > 0) this._simTickMs = (performance.now() - simStarted) / simTicks;
       }
 
+      if (this.replay && (this.replay.speed > 2 || this.replay.seeking) && this.game.events) {
+        const keep = this.game.events.filter((event) => event.type === 'victory' || event.type === 'defeat');
+        this.game.events.length = 0;
+        for (const event of keep) this.game.events.push(event);
+      }
       this._consumeEvents();
+      this._presentHold = this._presentHold || this._hitStop > 0;
+      if (this._orderMarker) {
+        this._orderMarkerLife -= dt;
+        const life = this._orderMarkerLife;
+        this._orderMarker.material.opacity = Math.max(0, life / 0.7);
+        this._orderMarker.scale.setScalar(1 + (0.7 - Math.max(life, 0)) * 0.85);
+        if (life <= 0) {
+          this.scene.remove(this._orderMarker);
+          this._orderMarker.geometry.dispose();
+          this._orderMarker.material.dispose();
+          this._orderMarker = null;
+        }
+      }
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
       // One presentation pass for every animation frame, however many
       // simulation ticks that frame had to catch up. The camera frustum was
       // built once above; props and units reuse it.
-      if (this.impostors) {
+      if (this.impostors && !this._presentHold) {
         this.impostors.begin();
         this._impostorOpen = true;
       }
@@ -7535,7 +8106,7 @@ class App {
       const mh = this.myHero();
       const buildMode = this.controlMode !== 'fight';
       let branchPlot = null;
-      if (buildMode && mh && !mh.dead) {
+      if (!this.replay && buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
@@ -7571,7 +8142,7 @@ class App {
           }
         }
       }
-      this.ui.showBuildHint(hint);
+      this.ui.showBuildHint(this.replay ? null : hint);
 
       this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
       this.ui.updateBoss(this.game);

@@ -29,7 +29,8 @@ import {
 } from './mmo-characters.js';
 import { loadMeta, charge, META_CURRENCY } from './meta.js';
 import {
-  ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, loadBinds, allConflicts, conflictsFor,
+  ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, abilityKeyLabel, bindKey, loadBinds, loadFeel,
+  allConflicts, conflictsFor, setWasdCamera,
 } from './keybinds.js';
 import {
   buildLattice, frontier, pathTo, canAllocate, canDeallocate, latticePoints,
@@ -363,7 +364,7 @@ export class UI {
         </div>
 
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats presentation-empty">Campaign missions open with a short, skippable in-engine arrival. Standalone cinematic films are not available in this build.</div></div>
-        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
+        <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Impact sounds by Kenney (kenney.nl), dedicated to the public domain under CC0.<br><br>Humanity has one city left. The dead have every world.</div></div>
         <div id="screen-share" class="setup share-join hidden">
           <div class="setuphead">
             <button class="tbtn" id="share-back" type="button">← Title</button>
@@ -413,7 +414,7 @@ export class UI {
           </div>
           <div class="steplabel field-label">Battlefield <span id="warstatus" class="warstatus"></span></div>
           <div class="levelrow" id="levelrow"></div>
-          <div class="steplabel hero-label">Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small></div>
+          <div class="steplabel hero-label">Your hero <small>— right-click to move or attack-move. Abilities are <span data-bind-label="ability1"></span> <span data-bind-label="ability2"></span> <span data-bind-label="ability3"></span> <span data-bind-label="ability4"></span>. <span data-bind-label="camera_center"></span> centers the camera.</small></div>
           <div class="herorow" id="herorow"></div>
           <div class="steplabel culture-label">Colony culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
@@ -492,7 +493,7 @@ export class UI {
             <h2>How to play</h2>
           </div>
           <div class="howto">
-            <div><b>🕹️ You are the hero.</b> WASD always moves. In Fight mode, <kbd data-bind-label="dodge"></kbd> dodge-rolls and <kbd data-bind-label="ability1"></kbd> uses your special.</div>
+            <div><b>🕹️ You are the hero.</b> Right-click the ground to move and an enemy to attack-move. In Fight mode, <kbd data-bind-label="ability1"></kbd> <kbd data-bind-label="ability2"></kbd> <kbd data-bind-label="ability3"></kbd> <kbd data-bind-label="ability4"></kbd> cast, and <kbd data-bind-label="dodge"></kbd> dodge-rolls. <kbd data-bind-label="camera_center"></kbd> centers the camera.</div>
             <div><b>🪙 One resource: gold.</b> Income is credited automatically; coins drop from kills, captured nodes and razed hives. Ride through them to collect.</div>
             <div><b>🏗️ The city is pre-planned.</b> Use <kbd data-bind-label="build_mode"></kbd> for Build mode, then hold <kbd data-bind-label="dodge"></kbd> or <kbd data-bind-label="build"></kbd> at a glowing foundation.</div>
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
@@ -554,7 +555,7 @@ export class UI {
                   <input type="checkbox" id="set-sfx">
                   <b id="set-sfx-val"></b>
                 </label>
-                <div class="sethint">Effects are procedural WebAudio; hero barks are pre-recorded. Mute anytime with <kbd>M</kbd>.</div>
+                <div class="sethint">Weapon tones are procedural. Hits and abilities also play CC0 impact samples (Kenney). Mute anytime with <kbd>M</kbd>.</div>
               </div>
               <div id="set-pane-video" class="setpane hidden">
                 <div class="setrow">
@@ -1474,6 +1475,11 @@ export class UI {
     if (!this.root.querySelector('#set-pane-controls').classList.contains('hidden')) this._renderKeybinds();
   }
 
+  setFeel(feel) {
+    this._feel = feel || loadFeel();
+    if (!this.root.querySelector('#set-pane-controls').classList.contains('hidden')) this._renderKeybinds();
+  }
+
   _keyLabel(id) {
     const binds = this._binds || loadBinds();
     return keyLabel(binds[id]);
@@ -1524,11 +1530,31 @@ export class UI {
       : unbound.length
         ? `<p class="bindconflict">${unbound.length} action${unbound.length === 1 ? ' has' : 's have'} no key. Click to bind.</p>`
         : '';
-    box.innerHTML = conflictNote + groups;
+    const feel = this._feel || loadFeel();
+    this._feel = feel;
+    const options = `<div class="bindgroup">
+      <h3>Camera and comfort</h3>
+      <p class="bindgroupdesc">Right-click moves. Right-click an enemy attack-moves. These options stay on this machine.</p>
+      <label class="setrow"><span>Edge pan</span><input type="checkbox" id="set-edge-pan" ${feel.edgePan !== false ? 'checked' : ''}></label>
+      <label class="setrow"><span>WASD camera</span><input type="checkbox" id="set-wasd-camera" ${feel.wasdCamera ? 'checked' : ''}></label>
+      <label class="setrow"><span>Reduce screen shake</span><input type="checkbox" id="set-reduce-shake" ${feel.reduceShake ? 'checked' : ''}></label>
+      <p class="bindgroupdesc">WASD camera pan moves Ability II and attack-move off W and A. Arrow keys keep panning either way. Space centers on your hero.</p>
+    </div>`;
+    box.innerHTML = options + conflictNote + groups;
 
     for (const button of box.querySelectorAll('.bindkey')) {
       button.onclick = () => this._listenForBind(button.dataset.action);
     }
+    const edge = box.querySelector('#set-edge-pan');
+    const wasd = box.querySelector('#set-wasd-camera');
+    const shake = box.querySelector('#set-reduce-shake');
+    if (edge) edge.onchange = () => this.cb.onFeelChange?.({ ...feel, edgePan: edge.checked });
+    if (shake) shake.onchange = () => this.cb.onFeelChange?.({ ...feel, reduceShake: shake.checked });
+    if (wasd) wasd.onchange = () => {
+      const next = setWasdCamera(this._binds || loadBinds(), feel, wasd.checked);
+      this.cb.onKeybindChange?.(next.binds);
+      this.cb.onFeelChange?.(next.feel);
+    };
     const reset = this.root.querySelector('#set-binds-reset');
     if (reset) reset.onclick = () => { this.cb.onKeybindReset && this.cb.onKeybindReset(); };
   }
@@ -1547,7 +1573,7 @@ export class UI {
       event.stopPropagation();
       window.removeEventListener('keydown', this._bindListener, true);
       this._bindListener = null;
-      const key = String(event.key).toLowerCase();
+      const key = bindKey(event);
       this._bindingId = null;
       if (key === 'escape') { this._renderKeybinds(); return; }
       const next = { ...(this._binds || loadBinds()), [actionId]: key };
@@ -2559,7 +2585,7 @@ export class UI {
     const heroLabel = setupScreen.querySelector('.hero-label');
     const diffLabel = setupScreen.querySelector('.diff-label');
     if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : 'Battlefield <span id="warstatus" class="warstatus"></span>';
-    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : 'Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
+    if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : 'Your hero <small>— right-click to move or attack-move. Abilities are <span data-bind-label="ability1"></span> <span data-bind-label="ability2"></span> <span data-bind-label="ability3"></span> <span data-bind-label="ability4"></span>.</small>';
     if (heroLabel && mode === 'campaign' && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
     if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : 'Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
@@ -2793,7 +2819,7 @@ export class UI {
         ...(d.passives || []).map((passive, index) => ({
           kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
         })),
-        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':`${slot>=3?this._keyLabel('second_bar')+'+':''}${this._keyLabel('ability'+(slot%3+1))}`,icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
+        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':abilityKeyLabel(this._binds||loadBinds(),slot),icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
       ].filter(Boolean);
       kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
         <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
@@ -3052,7 +3078,7 @@ export class UI {
         const charge=h.spells?.charges?.[slot];
         const empty=charge?.count===0;
         const noMana=(h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,slot);
-        const label = `${slot >= 3 ? this._keyLabel('second_bar') + '+' : ''}${this._keyLabel('ability' + (slot % 3 + 1))}`;
+        const label = abilityKeyLabel(this._binds || loadBinds(), slot);
         return `<button data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} title="${escapeHtml(ability.desc || '')}">${ability.icon || ''} ${escapeHtml(ability.name)}<small>${ability.passive ? 'Passive' : noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : label}</small></button>`;
       }).join('');
       if (slots.innerHTML !== slotMarkup) slots.innerHTML = slotMarkup;
@@ -3435,7 +3461,8 @@ export class UI {
     const host = this.root.querySelector(selector);
     if (!host) return;
     const hero = HEROES[heroKey] || HEROES.scott;
-    host.innerHTML = abilityBar(hero, Array.from({length:6},(_,slot)=>`${slot>=3?this._keyLabel('second_bar')+'+':''}${this._keyLabel('ability'+(slot%3+1))}`)).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
+    const binds = this._binds || loadBinds();
+    host.innerHTML = abilityBar(hero, [0, 1, 2, 3, 4, 5].map((slot) => abilityKeyLabel(binds, slot))).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
   }
 
   _wireQuickSetup() {
@@ -3913,6 +3940,7 @@ export class UI {
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
   hideStart() {
+    this.root.querySelector('#replay-gate')?.classList.add('hidden');
     this.root.querySelector('#overlay').classList.add('hidden');
     this.pauseOpen = false;
   }
@@ -4014,16 +4042,98 @@ export class UI {
       const mine = board.me;
       host.innerHTML = `
         <h3>Today's board</h3>
-        ${rows.length ? `<table class="daily-board"><thead><tr><th>#</th><th>Commander</th><th>Score</th><th>Run</th></tr></thead><tbody>
-          ${rows.map((row) => `<tr class="${row.mine ? 'mine' : ''}"><td>${row.rank}</td><td>@${this._esc(row.name)}</td><td>${row.score}</td><td>${row.waves} waves</td></tr>`).join('')}
+        ${rows.length ? `<table class="daily-board"><thead><tr><th>#</th><th>Commander</th><th>Score</th><th>Run</th><th>Replay</th></tr></thead><tbody>
+          ${rows.map((row) => {
+            const watch = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/.test(row.replayId || '') ? row.replayId : '';
+            return `<tr class="${row.mine ? 'mine' : ''}"><td>${row.rank}</td><td>@${this._esc(row.name)}</td><td>${row.score}</td><td>${row.waves} waves</td><td>${watch ? `<a href="/r/${watch}">Watch</a>` : ''}</td></tr>`;
+          }).join('')}
         </tbody></table>` : '<p>No scores yet today. Be the first.</p>'}
-        ${mine ? `<p class="${mine.rank <= 50 ? 'daily-mine-note' : 'daily-mine-note outside'}">Your rank: <b>${mine.rank}</b> · ${mine.score}</p>` : ''}`;
+        ${mine ? `<p class="${mine.rank <= 50 ? 'daily-mine-note' : 'daily-mine-note outside'}">Your rank: <b>${mine.rank}</b> · ${mine.score}${/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/.test(mine.replayId || '') ? ` · <a href="/r/${mine.replayId}">Watch</a>` : ''}</p>` : ''}`;
     }
   }
 
   setDailyStatus(text) {
     const el = this.root.querySelector('#daily-status');
     if (el) el.textContent = text;
+  }
+
+  setReplayShareNote(text) {
+    const note = this.root.querySelector('#replay-share-note');
+    if (!note) return;
+    note.textContent = text || '';
+    note.classList.toggle('hidden', !text);
+  }
+
+  showReplayGate(message) {
+    this.root.querySelector('#overlay').classList.add('hidden');
+    let ov = this.root.querySelector('#replay-gate');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'replay-gate';
+      ov.className = 'replay-gate';
+      this.root.appendChild(ov);
+    }
+    ov.classList.remove('hidden');
+    ov.innerHTML = `
+      <div class="panel endpanel">
+        <h1>REPLAY</h1>
+        <p class="tagline">${this._esc(message || 'This replay could not be played.')}</p>
+        <div class="endactions"><button class="startbtn" id="b-replay-home" type="button">Back to title</button></div>
+      </div>`;
+    ov.querySelector('#b-replay-home').onclick = () => { location.href = '/'; };
+  }
+
+  showReplayBar(state) {
+    let bar = this.root.querySelector('#replaybar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'replaybar';
+      bar.innerHTML = `
+        <button type="button" id="replay-play">Pause</button>
+        <button type="button" data-speed="1">1×</button>
+        <button type="button" data-speed="2">2×</button>
+        <button type="button" data-speed="4">4×</button>
+        <button type="button" data-speed="8">8×</button>
+        <input id="replay-scrub" type="range" min="0" value="0" step="1" aria-label="Replay position">
+        <span id="replay-time"></span>
+        <button type="button" id="replay-follow" aria-pressed="true">Follow leader</button>
+        <button type="button" id="replay-seed">Play this seed</button>
+        <button type="button" id="replay-exit">Exit</button>
+        <p id="replay-note"></p>`;
+      this.root.appendChild(bar);
+      bar.querySelector('#replay-play').onclick = () => this.cb.onReplayToggle?.();
+      for (const button of bar.querySelectorAll('[data-speed]')) {
+        button.onclick = () => this.cb.onReplaySpeed?.(+button.dataset.speed);
+      }
+      const scrub = bar.querySelector('#replay-scrub');
+      scrub.oninput = () => this.cb.onReplaySeek?.(Number(scrub.value));
+      bar.querySelector('#replay-follow').onclick = () => this.cb.onReplayFollow?.();
+      bar.querySelector('#replay-seed').onclick = () => this.cb.onReplaySeed?.();
+      bar.querySelector('#replay-exit').onclick = () => this.cb.onReplayExit?.();
+    }
+    bar.classList.remove('hidden');
+    this.setReplayBar(state);
+  }
+
+  setReplayBar(state) {
+    const bar = this.root.querySelector('#replaybar');
+    if (!bar || !state) return;
+    bar.querySelector('#replay-play').textContent = state.seeking ? '…' : (state.paused ? 'Play' : 'Pause');
+    for (const button of bar.querySelectorAll('[data-speed]')) {
+      button.classList.toggle('sel', Number(button.dataset.speed) === state.speed);
+    }
+    const scrub = bar.querySelector('#replay-scrub');
+    scrub.max = String(Math.max(1, state.frames | 0));
+    if (document.activeElement !== scrub) scrub.value = String(state.step | 0);
+    bar.querySelector('#replay-time').textContent = state.label || '';
+    const follow = bar.querySelector('#replay-follow');
+    follow.textContent = state.follow ? 'Follow leader' : 'Free camera';
+    follow.setAttribute('aria-pressed', state.follow ? 'true' : 'false');
+    bar.querySelector('#replay-note').textContent = state.note || '';
+  }
+
+  hideReplayBar() {
+    this.root.querySelector('#replaybar')?.classList.add('hidden');
   }
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
@@ -4072,13 +4182,16 @@ export class UI {
           <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
-        ${daily ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
-        ${daily && extra?.dailyGuest ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
+        ${extra?.seedRun ? '<p class="tagline">Seed run. Rewards are not recorded.</p>' : ''}
+        ${daily && !extra?.seedRun ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
+        ${daily && extra?.dailyGuest && !extra?.seedRun ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
           <form id="b-daily-email" class="email-login"><label for="daily-email">Or save with email</label><input id="daily-email" type="email" placeholder="you@example.com" required><button class="menubtn" type="submit">Email me a sign-in link</button></form>` : ''}
         <div class="endactions">
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
           <button class="startbtn" id="b-restart">${daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
+        <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;
     this.setEndRewards(extra);
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
@@ -4089,6 +4202,8 @@ export class UI {
       event.preventDefault();
       this.cb.onDailyEmail?.(ov.querySelector('#daily-email').value);
     };
+    const share = ov.querySelector('#b-share-replay');
+    if (share) share.onclick = () => this.cb.onShareReplay?.();
     const retry = ov.querySelector('#b-retry');
     if (retry) retry.onclick = () => {
       if (retry.disabled) return;

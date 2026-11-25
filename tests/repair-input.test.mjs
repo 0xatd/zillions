@@ -22,7 +22,7 @@ function fixture(input) {
  const frame=()=>{updateInput.call(app);g._updatePlots(1/60);};
  return {g,p,b,app,commands,held,frame};
 }
-for(const input of ['b',' ','button'])test(`repair + branch selection cannot rearm the same physical ${JSON.stringify(input)} hold`,()=>{
+for(const input of ['b', defaultBinds().dodge, 'button'])test(`repair + branch selection cannot rearm the same physical ${JSON.stringify(input)} hold`,()=>{
  const {g,p,b,commands,held,frame}=fixture(input);
  assert.equal(p.tier,2);assert.equal(g.plotAction(p).mode,'repair');
  held(true);for(let i=0;i<120;i++)frame();

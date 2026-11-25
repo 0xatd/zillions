@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/r/:id", "destination": "/api/replay-page?id=:id" }
+  ],
   "functions": {
     "api/daily.js": {
       "maxDuration": 60
