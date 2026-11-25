@@ -2365,3 +2365,10 @@ body:has(#combat-alert:not(.hidden)) .coach { display:none; }
   #actionbar { grid-template-rows:34px minmax(0,1fr); }
   #stancebar .stance { min-height:30px; }
 }
+
+/* Multi-slot leader previews must remain readable on narrow setup screens. */
+@media(max-width:599px) {
+  .qwer-bar { flex-wrap:wrap; }
+  .qwer-bar .qslot { flex:1 1 120px; min-width:0; }
+  .qwer-bar .qslot b { overflow-wrap:anywhere; }
+}
