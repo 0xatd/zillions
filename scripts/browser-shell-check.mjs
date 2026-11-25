@@ -114,6 +114,32 @@ try {
     const choices=[...document.querySelectorAll('#herorow .herocard')].filter(c=>!c.classList.contains('hidden'));
     return founderScreen && canResumeFounder && selected && !document.querySelector('#screen-setup').classList.contains('hidden') && choices.length===1 && choices[0].querySelector('b').textContent==='Journey Test' && !app.ow && !app.owMap;
   })()`), true, 'new account creates a chapter and founder, then deploys straight to its first conquest');
+  await evaluate("window.__app.ui._showScreen('character-create')");
+  for (const [width, height] of [[390, 844], [844, 390], [1366, 768]]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    const creatorBounds = await evaluate(`(() => {
+      const form = document.querySelector('.creator-form').getBoundingClientRect();
+      return form.width > 0 && [...document.querySelectorAll('.creator-preview, .creator-controls, .creator-form fieldset, .creator-race, .creator-actions button')]
+        .every(e => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= form.left - 1 && r.right <= form.right + 1); });
+    })()`);
+    assert.equal(creatorBounds, true, `founder controls remain inside the form at ${width}px`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  const recruitmentCopy = await evaluate(`(() => {
+    const app = window.__app, original = app.profile.chapter.culture;
+    const copy = {};
+    for (const culture of ['coalition', 'human']) {
+      app.profile.chapter.culture = culture;
+      app.ui.setProfile(app.profile);
+      copy[culture] = document.querySelector('#chapter-objective p').textContent;
+    }
+    app.profile.chapter.culture = original; app.ui.setProfile(app.profile);
+    return copy;
+  })()`);
+  assert.match(recruitmentCopy.coalition, /Sniper/, 'Greenfall advertises its exploration recruit');
+  assert.match(recruitmentCopy.coalition, /Lina/, 'Greenfall advertises its academy recruit');
+  assert.match(recruitmentCopy.human, /Lina/, 'human chapters still see their academy recruit');
+  assert.doesNotMatch(recruitmentCopy.human, /Sniper/, 'human chapters are not promised a restricted recruit');
   await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];

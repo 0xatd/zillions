@@ -3086,6 +3086,10 @@ class App {
     this.mpRole = null;
     this.onlineMode = false;
     this.lobby._clearRoomState();
+    // Match state (lockstep, scene, ticket, input) must not survive room closure.
+    // Use the same clean menu boot as the host's explicit end-match action.
+    // The account and persistent friend party are restored on startup.
+    if (this.netMode) return location.reload();
     this.ui.showLobby();
     const message = reason === 'removed' ? 'You were removed from the lobby.'
       : reason === 'match_ended' ? 'The host ended the match.'
