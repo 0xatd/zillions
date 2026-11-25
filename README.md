@@ -95,6 +95,10 @@ their soft vision circles is almost black, including the minimap.
 - **Co-op** (Play Online) supports up to four players. Each player controls
   one hero; the players share gold, colony buildings, the enemy force, and the
   win condition. Rooms can be created, joined, rejoined, or watched.
+- **Invite link.** From the title, chapter, or battle setup, Invite copies one
+  URL. A friend opens it and joins as the next hero with no account. Join
+  before the host presses Start. The link expires after two hours. A bad link,
+  a full siege, a host who left, or a link opened after the start is refused.
 - **Custom Games** separates Live Games (real rooms) from Arcade (prebuilt
   campaign, Survival, and Labyrinth maps that can be played or hosted).
 

@@ -174,6 +174,11 @@ RLS policy intent:
 10. The host waits for each guest to connect and load before window 0 starts.
 11. In-game team chat writes to `room_chat` with `channel = 'game'`.
 12. The match simulation is peer-to-peer. Watch mode is read-only.
+13. Share links (`/?coop=`) seat a guest with no account. Signaling is a
+    same-browser channel plus Supabase realtime broadcast on the existing anon
+    key. There is no new table and no new environment variable. The link does
+    not write stats, match history, wallets, or items. A guest still has to
+    join before the host starts the siege.
 
 ## Agent Rules
 

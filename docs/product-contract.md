@@ -170,6 +170,12 @@ change. The shared life pool grows by one per extra hero, every living hero
 seeds the horde's flow field, and each player gets their own pick-1-of-3
 blessing choice per razed chamber.
 
+A share link is another way into the same lockstep siege. The host presses
+Invite, copies one URL, and a friend opens it with no account. Campaign and
+Survival links seat four players. A Labyrinth link keeps the three-player cap.
+The friend must join before the host starts. An invalid code, an expired link,
+a full siege, a host who left, or a link opened after the start is refused.
+
 ## Controls
 
 The control scheme follows Path of Exile 2's WASD mode, because that is the
