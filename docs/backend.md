@@ -12,10 +12,12 @@ this file.
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`
 - Match networking: browser WebRTC DataChannels, host-sequenced lockstep
 
-Production is account-first. On `zillions.taborlin.co`, the game shell requires
-Google or passwordless email sign-in through Supabase. Static local play can
-remain for development and offline smoke tests. Do not present static play as
-a production profile.
+Production sign-in is still Google or a passwordless email link through
+Supabase, and signed-in rewards stay server-owned. The title also offers
+Play as a guest. That profile lives in the browser. Signing in later is
+how the player saves progress. Static offline continue remains for local
+smoke tests. Guest play must not write `player_stats`, `match_history`,
+`game_characters`, `item_instances`, or `player_wallets`.
 After Google sign-in, players claim a public username for the email-backed
 account. Public profile, lobby, chat, room, and invite surfaces use that
 username. They must not show the email address or a Google account name.

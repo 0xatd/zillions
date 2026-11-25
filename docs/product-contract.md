@@ -49,6 +49,12 @@ galaxy map, Orbital Lifts, parties, encounters, companies, markets, and region
 workers) was removed. Do not reintroduce a persistent shared world without a
 new product decision.
 
+A new player can press Play on the title and fight as a guest stored in
+this browser. Google or an email magic link is offered to save progress
+and is not required to start. An existing signed-in account still opens
+that account's chapter. Guest play never writes player stats, match
+history, wallets, or items.
+
 The player signs in, picks a character, deploys to a mission, rides a hero,
 founds a fortified city, buys pre-planned plots with coins, and pushes the
 front line outward until the map is taken. Signed-in characters keep their

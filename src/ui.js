@@ -41,6 +41,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
+import { QUICK_DEFAULTS, abilityBar, cultureExplain, leaderRoster } from './first-run.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -77,6 +78,7 @@ export class UI {
         <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
         <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
+        <span class="speed-readout" id="speed-readout">1×</span>
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
@@ -84,6 +86,15 @@ export class UI {
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
       </div>
 
+      <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
+        <div><b>PAUSED</b><span id="pause-veil-speed">Speed 1×</span><small id="pause-veil-hint"></small></div>
+      </div>
+      <aside id="coach" class="coach hidden" role="status">
+        <span id="coach-kicker">FIRST SIEGE</span>
+        <b id="coach-title"></b>
+        <p id="coach-body"></p>
+        <button type="button" id="coach-skip">Skip lesson</button>
+      </aside>
       <div id="banner"></div>
       <div id="invitetoast" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
@@ -164,8 +175,14 @@ export class UI {
             <p class="gamesub">Build your stronghold. Hold against the swarm.</p>
           </div>
           <div class="accountcard title-login">
-            <div class="login-heading"><span>COMMAND DECK</span><h2>Enter the frontier</h2><p>Your commander. Your next siege.</p></div>
-            <div class="accountstatus" id="account-status">Checking account…</div>
+            <div class="login-heading"><span>COMMAND DECK</span><h2>Enter the frontier</h2><p>Play now. Sign in later if you want this siege kept.</p></div>
+            <div class="accountstatus" id="account-status-wrap">
+              <div class="auth-progress" id="auth-progress"><span></span></div>
+              <div id="account-status">Checking account…</div>
+            </div>
+            <button class="menubtn primary play-now" id="a-play" type="button">PLAY</button>
+            <p class="guest-note">Guest on this browser. No account required.</p>
+            <p class="save-progress-label">Save progress</p>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
             <div class="login-divider" id="a-login-divider"><span>OR</span></div>
             <form class="email-login" id="a-email-form">
@@ -333,6 +350,33 @@ export class UI {
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats presentation-empty">Campaign missions open with a short, skippable in-engine arrival. Standalone cinematic films are not available in this build.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
 
+        <div id="screen-quick" class="setup quick-setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="q-back" type="button">← Title</button>
+            <h2>One siege, then you are in</h2>
+          </div>
+          <form id="quick-form" class="quick-form">
+            <label>Chapter name<input id="q-chapter" maxlength="32" autocomplete="off" required></label>
+            <label>Founder name<input id="q-founder" maxlength="18" autocomplete="off" required></label>
+            <div class="steplabel">Culture <small>— the look of the base and the army the camps train</small></div>
+            <div class="diffseg cultureseg" id="q-culture"></div>
+            <div id="q-culture-detail" class="culture-detail"></div>
+            <div class="quick-row">
+              <label>Colors<select id="q-color"></select></label>
+              <label>Insignia<select id="q-emblem"></select></label>
+              <label>Difficulty<select id="q-diff"></select></label>
+            </div>
+            <div class="steplabel">Leaders <small>— Vanguard deploys now. The rest are coming soon.</small></div>
+            <div id="q-leaders" class="leader-grid"></div>
+            <div id="q-abilities" class="qwer-bar" aria-label="Ability bar"></div>
+            <div class="quick-actions">
+              <button type="button" class="utilitybtn" id="q-random">Randomize</button>
+              <button type="submit" class="startbtn" id="q-start">START THE SIEGE</button>
+            </div>
+            <button type="button" class="textlink" id="q-save">Save progress later with Google or email</button>
+          </form>
+        </div>
+
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
             <button class="tbtn roomexit" id="s-back">← Back</button>
@@ -345,6 +389,10 @@ export class UI {
           <div class="herorow" id="herorow"></div>
           <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
+          <div id="culture-detail" class="culture-detail"></div>
+          <div class="steplabel">Leaders <small>— Vanguard deploys now. Locked leaders stay in a compact grid so Start stays on screen.</small></div>
+          <div id="setup-leaders" class="leader-grid"></div>
+          <div id="setup-abilities" class="qwer-bar" aria-label="Ability bar"></div>
           <div class="steplabel diff-label">4 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
@@ -526,9 +574,11 @@ export class UI {
     q('#builder-reserve').onchange = e => {const gold=Number(e.target.value);if(Number.isInteger(gold)&&gold>=0&&gold<=1000)this.cb.onBuilder?.({t:'builderReserve',gold});};
     q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
-    q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    q('#a-play').onclick = () => { this._busy(q('#a-play')); this.cb.onGuestPlay?.(); };
+    q('#a-google').onclick = () => { this._busy(q('#a-google')); this.cb.onSignIn && this.cb.onSignIn(); };
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
+      this._busy(q('#a-email-submit'));
       if (this.cb.onEmailSignIn) this.cb.onEmailSignIn(q('#a-email').value);
     };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
@@ -538,12 +588,20 @@ export class UI {
     q('#a-quit').onclick = () => this.showBanner('Close this browser tab to leave the frontier.', '', 3200);
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
+      this._busy(q('#a-username-form button'));
       const input = q('#a-username');
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
+    this._submitOnEnter('#a-username', () => q('#a-username-form').requestSubmit());
+    this._submitOnEnter('#a-email', () => q('#a-email-form').requestSubmit());
+    this._submitOnEnter('#chapter-name-input', () => q('#chapter-identity').requestSubmit());
+    this._submitOnEnter('#creator-name', () => q('#character-create-form').requestSubmit());
+    this._submitOnEnter('#cu-name', () => q('#cu-confirm').click());
+    this._submitOnEnter('#q-chapter', () => q('#quick-form').requestSubmit());
+    this._submitOnEnter('#q-founder', () => q('#quick-form').requestSubmit());
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#m-create-character').onclick = () => { q('#chapter-identity').classList.toggle('hidden'); q('#chapter-name-input').focus(); };
-    q('#chapter-identity').onsubmit = e => { e.preventDefault(); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value,culture:q('#chapter-culture').value}); };
+    q('#chapter-identity').onsubmit = e => { e.preventDefault(); this._busy(e.submitter); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value,culture:q('#chapter-culture').value}); };
     q('#chapter-culture').innerHTML=Object.entries(CHAPTER_CULTURES).map(([k,v])=>`<option value="${k}">${v.name} — ${v.desc}</option>`).join('');
     q('#chapter-color').innerHTML = Object.keys(CHAPTER_COLORS).map(k=>`<option value="${k}">${k}</option>`).join('');
     q('#chapter-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([k,v])=>`<option value="${k}">${v} ${k}</option>`).join('');
@@ -720,6 +778,7 @@ export class UI {
         if (card.disabled) return;
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
+        this._renderAbilityPreview('#setup-abilities', key);
         if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
@@ -762,10 +821,21 @@ export class UI {
         this.selectedCulture = key;
         try { localStorage.setItem('zillions.culture', key); } catch (e) { /* private mode */ }
         for (const el of cseg.children) el.classList.toggle('sel', el === b);
+        this._showCultureDetail(key, '#culture-detail');
       };
       cseg.appendChild(b);
     }
-    q('#s-start').onclick = () => this.cb.onStart(this.selectedDiff, this.selectedHero);
+    this._showCultureDetail(this.selectedCulture, '#culture-detail');
+    this._renderLeaderPick('#setup-leaders');
+    this._renderAbilityPreview('#setup-abilities', this.selectedHero);
+    q('#s-start').onclick = () => { this._busy(q('#s-start')); this.cb.onStart(this.selectedDiff, this.selectedHero); };
+    this._wireQuickSetup();
+    this.root.addEventListener('pointerdown', (event) => {
+      const button = event.target.closest('button');
+      if (!button || button.disabled) return;
+      button.classList.add('is-pressed');
+      setTimeout(() => button.classList.remove('is-pressed'), 160);
+    }, true);
 
     // ----- toolbar -----
     q('#b-pause').onclick = () => this.cb.onSpeed(0);
@@ -995,7 +1065,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -2397,6 +2467,10 @@ export class UI {
       card.querySelector('.hface')?.classList.toggle('hidden', !!character && !character.chapterLeader);
     }
     if (character && previous !== this.selectedHero) this.cb.onHeroPick?.(this.selectedHero);
+    if (typeof this.root?.querySelector === 'function') {
+      this._renderAbilityPreview('#setup-abilities', this.selectedHero);
+      this._renderLeaderPick('#setup-leaders');
+    }
   }
 
   showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
@@ -3117,6 +3191,17 @@ export class UI {
   setSpeedUI(speed, paused) {
     this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
+    const readout = this.root.querySelector('#speed-readout');
+    if (readout) readout.textContent = paused ? 'PAUSED' : `${speed}×`;
+    const veil = this.root.querySelector('#pause-veil');
+    const menusOpen = !this.root.querySelector('#overlay').classList.contains('hidden');
+    if (veil) {
+      veil.classList.toggle('hidden', !paused || menusOpen || this.pauseOpen);
+      const speedLine = veil.querySelector('#pause-veil-speed');
+      if (speedLine) speedLine.textContent = `Speed ${speed}×`;
+      const hint = veil.querySelector('#pause-veil-hint');
+      if (hint) hint.textContent = `${this._keyLabel('pause')} pauses and resumes · ${this._keyLabel('dodge')} also resumes · ${this._keyLabel('menu')} opens the menu`;
+    }
     for (const b of this.root.querySelectorAll('.speed')) {
       b.classList.toggle('active', !paused && +b.dataset.s === speed);
     }
@@ -3152,7 +3237,135 @@ export class UI {
     button.classList.toggle('active', high);
   }
 
+  noteGuestSession() { this._guestSession = true; }
+
+  _setAuthWait(waiting) {
+    const bar = this.root.querySelector('#auth-progress');
+    if (bar) bar.classList.toggle('hidden', !waiting);
+    if (!waiting) {
+      if (this._authPulse) { clearInterval(this._authPulse); this._authPulse = 0; }
+      return;
+    }
+    if (this._authPulse) return;
+    const lines = ['Checking account…', 'Contacting sign-in…', 'Loading your commander…', 'Preparing the frontier…'];
+    let step = 0;
+    const status = this.root.querySelector('#account-status');
+    if (status) status.textContent = lines[0];
+    this._authPulse = setInterval(() => {
+      step = (step + 1) % lines.length;
+      const live = this.root.querySelector('#account-status');
+      if (live && !this.root.querySelector('#auth-progress')?.classList.contains('hidden')) live.textContent = lines[step];
+    }, 1400);
+  }
+
+  setCoach(step, index, total, extra = '') {
+    const card = this.root.querySelector('#coach');
+    if (!card || !step) { this.hideCoach(); return; }
+    card.classList.remove('hidden');
+    this.root.querySelector('#coach-kicker').textContent = `FIRST SIEGE · ${index + 1}/${total}`;
+    this.root.querySelector('#coach-title').textContent = step.title;
+    this.root.querySelector('#coach-body').textContent = extra ? `${step.body} ${extra}` : step.body;
+  }
+
+  hideCoach() { this.root.querySelector('#coach')?.classList.add('hidden'); }
+
+  _busy(button) { button?.classList?.add('is-busy'); }
+
+  _clearBusy() {
+    for (const button of this.root.querySelectorAll('.is-busy')) button.classList.remove('is-busy');
+  }
+
+  _submitOnEnter(selector, submit) {
+    const input = this.root.querySelector(selector);
+    input?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.repeat) return;
+      event.preventDefault();
+      submit();
+    });
+  }
+
+  _showCultureDetail(key, selector) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    const info = cultureExplain(key);
+    host.innerHTML = `<b>${escapeHtml(info.name)} · ${escapeHtml(info.banner)}</b><p>${escapeHtml(info.summary)}</p><p>${escapeHtml(info.changes)}</p>`;
+  }
+
+  _renderLeaderPick(selector) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    host.innerHTML = leaderRoster().map((leader) => `<button type="button" class="leaderchip${leader.playable ? ' playable sel' : ' locked'}" data-leader="${escapeHtml(leader.key)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? 'Ready' : 'Coming soon'}</small></button>`).join('');
+  }
+
+  _renderAbilityPreview(selector, heroKey) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    const hero = HEROES[heroKey] || HEROES.scott;
+    host.innerHTML = abilityBar(hero).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
+  }
+
+  _wireQuickSetup() {
+    const q = (s) => this.root.querySelector(s);
+    q('#q-color').innerHTML = Object.keys(CHAPTER_COLORS).map((key) => `<option value="${key}">${key}</option>`).join('');
+    q('#q-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([key, mark]) => `<option value="${key}">${mark} ${key}</option>`).join('');
+    q('#q-diff').innerHTML = Object.entries(DIFFICULTY).map(([key, diff]) => `<option value="${key}">${diff.label}</option>`).join('');
+    q('#q-culture').innerHTML = Object.entries(CULTURE_ARMIES).map(([key, culture]) => `<button type="button" class="diffbtn" data-culture="${key}">${culture.name}<small>${culture.banner}</small></button>`).join('');
+    q('#q-back').onclick = () => this._showScreen('account');
+    q('#q-save').onclick = () => { this._showScreen('account'); q('#a-google')?.focus(); };
+    q('#q-random').onclick = () => this.cb.onQuickRandom?.();
+    q('#quick-form').onsubmit = (event) => {
+      event.preventDefault();
+      this._busy(q('#q-start'));
+      this.cb.onQuickStart?.(this._quickDraft());
+    };
+    q('#coach-skip').onclick = () => this.cb.onCoachSkip?.();
+    this._selectQuickCulture(QUICK_DEFAULTS.army);
+    this._renderLeaderPick('#q-leaders');
+    this._renderAbilityPreview('#q-abilities', 'scott');
+  }
+
+  _selectQuickCulture(key) {
+    const culture = cultureKey(key);
+    this._quickArmy = culture;
+    for (const button of this.root.querySelectorAll('#q-culture .diffbtn')) {
+      button.classList.toggle('sel', button.dataset.culture === culture);
+      button.onclick = () => this._selectQuickCulture(button.dataset.culture);
+    }
+    this._showCultureDetail(culture, '#q-culture-detail');
+  }
+
+  _quickDraft() {
+    const q = (s) => this.root.querySelector(s);
+    return {
+      chapterName: q('#q-chapter').value,
+      founderName: q('#q-founder').value,
+      army: this._quickArmy || QUICK_DEFAULTS.army,
+      color: q('#q-color').value,
+      emblem: q('#q-emblem').value,
+      difficulty: q('#q-diff').value,
+    };
+  }
+
+  fillQuickSetup(draft = QUICK_DEFAULTS) {
+    const q = (s) => this.root.querySelector(s);
+    q('#q-chapter').value = draft.chapterName;
+    q('#q-founder').value = draft.founderName;
+    q('#q-color').value = draft.color;
+    q('#q-emblem').value = draft.emblem;
+    q('#q-diff').value = draft.difficulty;
+    this._selectQuickCulture(draft.army);
+    this._renderAbilityPreview('#q-abilities', 'scott');
+  }
+
+  showQuickSetup(draft = QUICK_DEFAULTS) {
+    this.fillQuickSetup(draft);
+    this._clearBusy();
+    this._showScreen('quick');
+    this.root.querySelector('#q-chapter')?.focus();
+  }
+
   setAccount(state = {}) {
+    this._clearBusy();
     const status = this.root.querySelector('#account-status');
     const google = this.root.querySelector('#a-google');
     const emailForm = this.root.querySelector('#a-email-form');
@@ -3162,25 +3375,32 @@ export class UI {
     const usernameInput = this.root.querySelector('#a-username');
     const needsUsername = !!state.signedIn && !!state.needsUsername;
     const offlineAllowed = !state.enabled && state.reason === 'static';
-    if (status) {
-      if (!state.ready) status.textContent = 'Checking account…';
-      else if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
+    const play = this.root.querySelector('#a-play');
+    this._setAuthWait(!state.ready);
+    if (state.signedIn) this._guestSession = false;
+    if (status && state.ready) {
+      if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
       else if (state.signedIn) status.textContent = `Signed in as @${state.username || state.name || 'Commander'}.`;
-      else if (offlineAllowed) status.textContent = 'Static dev build. Continue offline to test locally.';
-      else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. Check the deployment auth config.';
-      else status.textContent = state.error || 'Use your Zillions account to play.';
+      else if (offlineAllowed) status.textContent = 'Static dev build. Play as a guest, or continue offline to test locally.';
+      else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. You can still play as a guest.';
+      else status.textContent = state.error || 'Play as a guest, or sign in to save progress.';
     }
+    if (play) play.classList.toggle('hidden', !!state.signedIn);
+    this.root.querySelector('.save-progress-label')?.classList.toggle('hidden', !!state.signedIn);
+    this.root.querySelector('.guest-note')?.classList.toggle('hidden', !!state.signedIn);
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
     if (emailForm) emailForm.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (this._guestSession && !state.signedIn && !needsUsername) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
+    if (this._lastScreen === 'quick') return;
     if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
       if (this._offlineAccepted && !this._accountAccepted) {
         this._accountAccepted = true;
@@ -3230,6 +3450,7 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._renderAbilityPreview('#setup-abilities', key);
     this._renderSelectedCharacter();
   }
 
@@ -3506,6 +3727,8 @@ export class UI {
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
+    this.root.querySelector('#pause-veil')?.classList.add('hidden');
+    this.hideCoach();
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     const lv = levelById(levelId || 1);
