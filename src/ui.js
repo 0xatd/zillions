@@ -186,7 +186,8 @@ export class UI {
               <div id="account-status">Checking account…</div>
             </div>
             <button class="menubtn primary play-now" id="a-play" type="button">PLAY</button>
-            <p class="guest-note">Guest on this browser. No account required.</p>
+            <button class="menubtn" id="a-invite" type="button">INVITE A FRIEND</button>
+            <p class="guest-note">Guest on this browser. No account required. An invite link needs no account either.</p>
             <p class="save-progress-label">Save progress</p>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
             <div class="login-divider" id="a-login-divider"><span>OR</span></div>
@@ -228,7 +229,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-invite">INVITE</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -354,6 +355,17 @@ export class UI {
 
         <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats presentation-empty">Campaign missions open with a short, skippable in-engine arrival. Standalone cinematic films are not available in this build.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
+        <div id="screen-share" class="setup share-join hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="share-back" type="button">← Title</button>
+            <h2 id="share-title">Join a siege</h2>
+          </div>
+          <div class="share-card" id="share-card">
+            <span class="modeeyebrow">DROP-IN CO-OP</span>
+            <h3 id="share-card-title">Joining</h3>
+            <p class="mphint" id="share-card-copy"></p>
+          </div>
+        </div>
 
         <div id="screen-quick" class="setup quick-setup hidden">
           <div class="setuphead">
@@ -376,6 +388,7 @@ export class UI {
             <div id="q-abilities" class="qwer-bar" aria-label="Ability bar"></div>
             <div class="quick-actions">
               <button type="button" class="utilitybtn" id="q-random">Randomize</button>
+              <button type="button" class="utilitybtn" id="q-invite">Invite a friend</button>
               <button type="submit" class="startbtn" id="q-start">START THE SIEGE</button>
             </div>
             <button type="button" class="textlink" id="q-save">Save progress later with Google or email</button>
@@ -386,6 +399,7 @@ export class UI {
           <div class="setuphead">
             <button class="tbtn roomexit" id="s-back">← Back</button>
             <h2 id="s-title">Choose your battle</h2>
+            <button class="tbtn" id="s-invite" type="button">Invite</button>
             <div id="modeseg" class="modeseg hidden"></div>
           </div>
           <div class="steplabel field-label">Battlefield <span id="warstatus" class="warstatus"></span></div>
@@ -490,6 +504,7 @@ export class UI {
             <button class="menubtn" id="p-help">📜 &nbsp;How to play</button>
             <button class="menubtn" id="p-settings">⚙️ &nbsp;Settings</button>
             <button class="menubtn" id="p-restart">🔄 &nbsp;Restart level</button>
+            <button class="menubtn" id="p-invite">Invite a friend</button>
             <button class="menubtn" id="p-quit">🚪 &nbsp;Quit to menu</button>
           </div>
           <div id="p-note" class="gamesub"></div>
@@ -580,6 +595,7 @@ export class UI {
     q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-play').onclick = () => { this._busy(q('#a-play')); this.cb.onGuestPlay?.(); };
+    q('#a-invite').onclick = () => { this._busy(q('#a-invite')); this.cb.onShareInvite?.(); };
     q('#a-google').onclick = () => { this._busy(q('#a-google')); this.cb.onSignIn && this.cb.onSignIn(); };
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
@@ -611,6 +627,7 @@ export class UI {
     q('#chapter-color').innerHTML = Object.keys(CHAPTER_COLORS).map(k=>`<option value="${k}">${k}</option>`).join('');
     q('#chapter-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([k,v])=>`<option value="${k}">${v} ${k}</option>`).join('');
     q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
+    q('#m-invite').onclick = () => this.cb.onShareInvite?.();
     q('#sheet-close').onclick = () => this._closeCharacterSheet();
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
@@ -681,9 +698,12 @@ export class UI {
     q('#solo-survival').onclick = () => this.showSetup({ mode: 'survival' });
     q('#solo-labyrinth').onclick = () => this.showSetup({ mode: 'labyrinth' });
     q('#s-back').onclick = () => {
+      if (this._shareLive && this.cb.onShareLeave) { this.cb.onShareLeave(); return; }
       if (this._fromLobby) this._confirmRoomExit();
       else this._showScreen('main');
     };
+    q('#s-invite').onclick = () => this.cb.onShareInvite?.();
+    q('#share-back').onclick = () => this.cb.onShareLeave?.();
     q('#room-confirm-cancel').onclick = () => q('#room-confirm').classList.add('hidden');
     q('#room-confirm-leave').onclick = () => {
       q('#room-confirm').classList.add('hidden');
@@ -765,6 +785,7 @@ export class UI {
     q('#p-help').onclick = () => this._showScreen('help');
     q('#p-restart').onclick = () => this.cb.onRestart();
     q('#p-quit').onclick = () => this._confirmMatchExit();
+    q('#p-invite').onclick = () => this.cb.onShareInvite?.();
 
     // ----- setup: hero cards -----
     this.selectedHero = 'alexander';
@@ -1078,7 +1099,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'share']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -3408,6 +3429,7 @@ export class UI {
     q('#q-back').onclick = () => this._showScreen('account');
     q('#q-save').onclick = () => { this._showScreen('account'); q('#a-google')?.focus(); };
     q('#q-random').onclick = () => this.cb.onQuickRandom?.();
+    q('#q-invite').onclick = () => { this._busy(q('#q-invite')); this.cb.onQuickInvite?.(this._quickDraft()); };
     q('#quick-form').onsubmit = (event) => {
       event.preventDefault();
       this._busy(q('#q-start'));
@@ -3472,6 +3494,7 @@ export class UI {
     const needsUsername = !!state.signedIn && !!state.needsUsername;
     const offlineAllowed = !state.enabled && state.reason === 'static';
     const play = this.root.querySelector('#a-play');
+    const titleInvite = this.root.querySelector('#a-invite');
     this._setAuthWait(!state.ready);
     if (state.signedIn) this._guestSession = false;
     if (status && state.ready) {
@@ -3482,6 +3505,7 @@ export class UI {
       else status.textContent = state.error || 'Play as a guest, or sign in to save progress.';
     }
     if (play) play.classList.toggle('hidden', !!state.signedIn);
+    if (titleInvite) titleInvite.classList.toggle('hidden', !!state.signedIn);
     this.root.querySelector('.save-progress-label')?.classList.toggle('hidden', !!state.signedIn);
     this.root.querySelector('.guest-note')?.classList.toggle('hidden', !!state.signedIn);
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
@@ -3489,13 +3513,14 @@ export class UI {
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
-    if (this._guestSession && !state.signedIn && !needsUsername) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
+    if (this._shareLive) return;
+    if (this._guestSession && !state.signedIn && !needsUsername) return;
     if (this._lastScreen === 'quick') return;
     if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
       if (this._offlineAccepted && !this._accountAccepted) {
@@ -3585,6 +3610,99 @@ export class UI {
     el.textContent = deviceBad
       ? `⚠ Device ${fps} FPS`
       : `${networkBad ? '⚠' : '●'} ${diag.route || 'peer'} ${diag.rttMs || 0}ms · J${diag.jitterMs || 0} · B${diag.buffered || 0}/${diag.target || 0}`;
+  }
+
+  // ---------- share-link co-op ----------
+
+  copyShareUrl(url) {
+    const text = String(url || '');
+    const field = this.root.querySelector('#share-url');
+    if (field) field.value = text;
+    const done = () => this.showBanner('Invite link copied.', '', 2200);
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => this.showBanner('Select the invite link and copy it.', '', 3200));
+    else this.showBanner('Select the invite link and copy it.', '', 3200);
+  }
+
+  showShareNotice({ title = 'Join a siege', copy = '', tone = '' } = {}) {
+    this._shareLive = true;
+    this._clearBusy();
+    this._showScreen('share');
+    const heading = this.root.querySelector('#share-title');
+    const cardTitle = this.root.querySelector('#share-card-title');
+    const body = this.root.querySelector('#share-card-copy');
+    const card = this.root.querySelector('#share-card');
+    if (heading) heading.textContent = title;
+    if (cardTitle) cardTitle.textContent = title;
+    if (body) body.textContent = copy;
+    if (card) card.classList.toggle('bad', tone === 'bad');
+  }
+
+  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true } = {}) {
+    this._shareLive = true;
+    this._clearBusy();
+    const mp = this.root.querySelector('#mp-panel');
+    if (!mp) return;
+    mp.classList.remove('hidden');
+    mp.dataset.share = '1';
+    const relayCopy = relay === true
+      ? 'A friend on any device can open it. No account needed.'
+      : relay === false
+        ? 'Another tab of this browser can open it now. The live channel is offline, so a different device cannot.'
+        : 'Another tab can open it immediately. A friend on another device joins through the live channel.';
+    mp.innerHTML = `
+      <div class="share-card">
+        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <h3>Invite a friend</h3>
+        <p class="mphint" id="share-status"></p>
+        <input class="share-link" id="share-url" readonly aria-label="Invite link">
+        <div class="share-actions"><button class="tbtn" id="share-copy" type="button">Copy invite link</button></div>
+        <p class="mphint" id="share-relay"></p>
+        <p class="mphint">Friends join before you press Start. Once the siege begins, this link no longer adds a hero. ${maxPlayers} players maximum.</p>
+      </div>
+      <div id="room-roster" class="roomroster"></div>
+      <div id="mp-sub"></div>`;
+    mp.querySelector('#share-status').textContent = status || 'Link ready.';
+    mp.querySelector('#share-relay').textContent = relayCopy;
+    const field = mp.querySelector('#share-url');
+    field.value = url || '';
+    mp.querySelector('#share-copy').onclick = () => this.copyShareUrl(field.value);
+    this.roomRoster(players || [], { isHost: true, maxPlayers, level, mode, difficulty });
+    const waiting = (players || []).length > 1 && !launchReady;
+    this.setStartButton({
+      text: waiting ? 'WAITING FOR READY' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
+      disabled: waiting,
+      title: waiting
+        ? 'Start unlocks when every friend is connected, has this mission unlocked, and marks Ready.'
+        : 'Friends must join before you start. The link closes when the siege begins.',
+    });
+  }
+
+  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
+    this._shareLive = true;
+    this._clearBusy();
+    const mp = this.root.querySelector('#mp-panel');
+    if (!mp) return;
+    mp.classList.remove('hidden');
+    mp.dataset.share = '1';
+    mp.innerHTML = `
+      <div class="share-card">
+        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <h3>You are in this siege</h3>
+        <p class="mphint" id="share-status"></p>
+        <p class="mphint">Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.</p>
+        <div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>
+      </div>
+      <div id="room-roster" class="roomroster"></div>
+      <div id="mp-sub"></div>`;
+    mp.querySelector('#share-status').textContent = status || 'Connected to the host.';
+    const readyButton = mp.querySelector('#share-ready');
+    if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
+    this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
+    this.setStartButton({
+      text: '⏳  WAITING FOR HOST TO START',
+      disabled: true,
+      title: 'Only the host can launch this siege.',
+    });
   }
 
   // ---------- co-op lobby ----------
