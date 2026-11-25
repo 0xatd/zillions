@@ -10,6 +10,7 @@ import { buildForest, buildLandscapeEdges } from './landscape-art.js';
 import { TILE, TILE_INFO } from './config.js';
 import { TerrainField } from './terrain.js';
 import { tileCorners, cliffSkirt, tileGroundY, tileTris } from './terrace-mesh.js';
+import { bridgeInstances, mergeStaticMeshes } from './static-batch.js';
 
 // Toy-kit props (trees, rocks, cliffs) from the Blender kit, injected by the
 // renderer once assets load (setMapKit). Null in headless tooling, where the
@@ -344,25 +345,32 @@ export class GameMap extends TerrainField {
     const glow = kitGeo('bridge_span', 'glow');
     const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+    const bodyPlaces = [];
+    const glowPlaces = [];
+    const fallback = [];
     for (const b of this.bridges) {
       if (b.base === null) b.base = this.bridgeBase(b);
       const vx = b.x1 - b.x0, vz = b.z1 - b.z0, L = Math.hypot(vx, vz);
-      const node = new THREE.Group();
+      const place = {
+        x: (b.x0 + b.x1) / 2, y: b.base, z: (b.z0 + b.z1) / 2,
+        ry: Math.atan2(vx, vz), sx: b.hw / 1.8, sy: 1, sz: L / 10,
+      };
       if (body) {
-        const m = new THREE.Mesh(body, bodyMat);
-        m.castShadow = true; m.receiveShadow = true;
-        node.add(m);
-        if (glow) node.add(new THREE.Mesh(glow, glowMat));
-      } else {
-        // Headless / kit-less fallback: a plain cambered plank deck.
-        const deck = new THREE.Mesh(new THREE.BoxGeometry(b.hw * 2, 0.3, 10), toyMat({ color: 0xb3a78c }));
-        deck.position.y = 0.1;
-        node.add(deck);
-      }
-      node.position.set((b.x0 + b.x1) / 2, b.base, (b.z0 + b.z1) / 2);
-      node.rotation.y = Math.atan2(vx, vz);
-      node.scale.set(b.hw / 1.8, 1, L / 10);
-      group.add(node);
+        bodyPlaces.push(place);
+        if (glow) glowPlaces.push(place);
+      } else fallback.push(b);
+    }
+    if (bodyPlaces.length) {
+      group.add(bridgeInstances(body, bodyMat, bodyPlaces, { castShadow: true, receiveShadow: true, name: 'bridge-spans' }));
+    }
+    if (glow && glowPlaces.length) group.add(bridgeInstances(glow, glowMat, glowPlaces, { name: 'bridge-glow' }));
+    for (const b of fallback) {
+      const vx = b.x1 - b.x0, vz = b.z1 - b.z0, L = Math.hypot(vx, vz);
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(b.hw * 2, 0.3, 10), toyMat({ color: 0xb3a78c }));
+      deck.position.set((b.x0 + b.x1) / 2, b.base + 0.1, (b.z0 + b.z1) / 2);
+      deck.rotation.y = Math.atan2(vx, vz);
+      deck.scale.set(b.hw / 1.8, 1, L / 10);
+      group.add(deck);
     }
     return group;
   }
@@ -379,11 +387,9 @@ export class GameMap extends TerrainField {
       mesh.castShadow = mesh.receiveShadow = true;
       group.add(mesh);
     };
+    const pillars = [];
     const addPillar = (x, z, mat = stone, h = 3.6) => {
-      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.65, h, 7), mat);
-      mesh.position.set(x, this.groundY(x, z) + h / 2, z);
-      mesh.castShadow = true;
-      group.add(mesh);
+      pillars.push({ x, z, mat, h, y: this.groundY(x, z) + h / 2 });
     };
     const rooms = this.labyrinthLayout.rooms;
     const bridge = rooms[2], reliquary = rooms[3], cells = rooms[5];
@@ -432,6 +438,31 @@ export class GameMap extends TerrainField {
         this.labyrinthDoorMeshes.push(seal);
       }
     }
+    const pillarGeo = new THREE.CylinderGeometry(0.48, 0.65, 1, 7);
+    const byMat = new Map();
+    for (const pillar of pillars) {
+      const list = byMat.get(pillar.mat) || [];
+      list.push(pillar);
+      byMat.set(pillar.mat, list);
+    }
+    for (const [mat, list] of byMat) {
+      const mesh = new THREE.InstancedMesh(pillarGeo.clone(), mat, list.length);
+      mesh.name = 'labyrinth-pillars';
+      mesh.castShadow = true;
+      mesh.frustumCulled = true;
+      const dummy = new THREE.Object3D();
+      list.forEach((pillar, index) => {
+        dummy.position.set(pillar.x, pillar.y, pillar.z);
+        dummy.scale.set(1, pillar.h, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(index, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      group.add(mesh);
+    }
+    pillarGeo.dispose();
+    mergeStaticMeshes(group);
     return group;
   }
 

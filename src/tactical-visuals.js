@@ -7,8 +7,12 @@ import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { Pass, FullScreenQuad } from '../vendor/jsm/postprocessing/Pass.js';
 import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
+import {
+  GRAPHICS_PRESETS, QUALITY_KEY, nextQualityChoice, normalizeQualityChoice,
+  gpuProbeReady, probeGpuSignals, resolveGraphics, stepDownTier,
+} from './graphics-quality.js';
 
-const QUALITY_KEY = 'zillions_graphics_quality';
+export { QUALITY_KEY, stepDownTier };
 
 // Toy grade: picked colours land on screen as picked. No saturation push, no
 // lift, only a faint vignette — plus a split-tone that pulls the darkest
@@ -205,23 +209,33 @@ export function applyRim(mat) {
   return mat;
 }
 
-function initialQuality() {
-  try {
-    const saved = localStorage.getItem(QUALITY_KEY);
-    if (saved === 'high' || saved === 'low') return saved;
-  } catch { /* storage can be blocked */ }
-  return navigator.deviceMemory && navigator.deviceMemory <= 4 ? 'low' : 'high';
+function bootGraphics() {
+  let saved = null;
+  try { saved = localStorage.getItem(QUALITY_KEY); } catch { /* storage can be blocked */ }
+  const choice = normalizeQualityChoice(saved) || 'auto';
+  const probe = choice === 'auto' ? probeGpuSignals() : null;
+  return { ...resolveGraphics(choice, probe), probe };
 }
 
 // Renderer-only tactical feedback. This class never reads or changes simulation
 // state, which keeps lockstep and save determinism isolated from visual quality.
 export class TacticalVisuals {
-  constructor(renderer, scene, camera) {
+  constructor(renderer, scene, camera, boot = null) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
-    this.quality = initialQuality();
+    const resolved = boot || bootGraphics();
+    this.choice = resolved.choice;
+    this.quality = resolved.tier;
+    this.preset = resolved.preset;
+    this._probe = gpuProbeReady(resolved.probe) ? resolved.probe : null;
+    this._scale = 1;
+    this._appliedRatio = 0;
+    this._smoothDt = 0;
+    this._adjustT = 0;
     this.pulses = [];
+    this.onChange = null;
+    this._sun = null;
 
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
@@ -249,21 +263,95 @@ export class TacticalVisuals {
     this.smaa = new SMAAPass(1, 1);
     this.composer.addPass(this.smaa);
     this.composer.addPass(new OutputPass());
-    this.applyQuality(this.quality, false);
+    this._commitTier(this.quality, false);
+  }
+
+  attachSun(sun) {
+    this._sun = sun;
+    this._applyShadowTier();
   }
 
   applyQuality(quality, persist = true) {
-    this.quality = quality === 'low' ? 'low' : 'high';
-    const high = this.quality === 'high';
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, high ? 1.5 : 1);
-    this.renderer.setPixelRatio(pixelRatio);
-    this.composer.setPixelRatio(pixelRatio);
-    this.renderer.shadowMap.enabled = high;
-    if (persist) {
-      try { localStorage.setItem(QUALITY_KEY, this.quality); } catch { /* storage can be blocked */ }
-    }
-    this.resize(window.innerWidth, window.innerHeight);
+    const choice = normalizeQualityChoice(quality) || this.choice || 'auto';
+    if (choice === 'auto' && !gpuProbeReady(this._probe)) this._probe = probeGpuSignals();
+    const resolved = resolveGraphics(choice, this._probe || {});
+    this.choice = resolved.choice;
+    this._commitTier(resolved.tier, persist);
+    return this.choice;
+  }
+
+  // Auto steps the resolved tier down. The saved choice stays "auto".
+  applyTier(tier) {
+    if (this.choice !== 'auto' || !GRAPHICS_PRESETS[tier]) return this.quality;
+    this._commitTier(tier, false);
     return this.quality;
+  }
+
+  _commitTier(tier, persist) {
+    this.quality = GRAPHICS_PRESETS[tier] ? tier : 'high';
+    this.preset = GRAPHICS_PRESETS[this.quality];
+    this._scale = 1;
+    this._smoothDt = 0;
+    this._adjustT = 0;
+    this._appliedRatio = 0;
+    this._applyPixelRatio();
+    this._applyShadowTier();
+    if (persist) {
+      try { localStorage.setItem(QUALITY_KEY, this.choice); } catch { /* storage can be blocked */ }
+    }
+    if (this.onResize) this.onResize();
+    else this.resize(window.innerWidth, window.innerHeight);
+    if (this.onChange) this.onChange(this.choice, this.quality);
+  }
+
+  _applyPixelRatio() {
+    const cap = this.preset?.pixelRatioCap ?? 1;
+    const scale = this.preset?.dynamicResolution ? (this._scale || 1) : 1;
+    const ratio = Math.max(0.5, Math.min(window.devicePixelRatio || 1, cap) * scale);
+    if (Math.abs(ratio - this._appliedRatio) < 0.02) return false;
+    this._appliedRatio = ratio;
+    this.renderer.setPixelRatio(ratio);
+    this.composer.setPixelRatio(ratio);
+    return true;
+  }
+
+  _applyShadowTier() {
+    const shadows = !!this.preset?.shadows;
+    this.renderer.shadowMap.enabled = shadows;
+    const sun = this._sun;
+    if (!sun) return;
+    sun.castShadow = shadows;
+    const size = this.preset.shadowMapSize || 0;
+    if (size && (sun.shadow.mapSize.x !== size || sun.shadow.mapSize.y !== size)) {
+      sun.shadow.mapSize.set(size, size);
+      if (sun.shadow.map) {
+        sun.shadow.map.dispose();
+        sun.shadow.map = null;
+      }
+    }
+    sun.shadow.needsUpdate = true;
+  }
+
+  // Scales the render target inside the preset cap when frames stay slow.
+  // High does not scale, so a machine that can hold the preset keeps it sharp.
+  noteFrame(dt) {
+    if (!this.preset?.dynamicResolution || !(dt > 0)) return;
+    this._smoothDt = this._smoothDt ? this._smoothDt * 0.85 + dt * 0.15 : dt;
+    this._adjustT += dt;
+    if (this._adjustT < 0.75) return;
+    this._adjustT = 0;
+    const fps = 1 / Math.max(0.001, this._smoothDt);
+    const min = this.preset.dynamicMinScale;
+    let scale = this._scale || 1;
+    if (fps < 45 && scale > min + 0.01) scale = Math.max(min, Math.round(scale * 0.85 * 100) / 100);
+    else if (fps > 58 && scale < 0.99) scale = Math.min(1, Math.round(Math.max(scale, min) * 1.12 * 100) / 100);
+    else return;
+    if (Math.abs(scale - (this._scale || 1)) < 0.02) return;
+    this._scale = scale;
+    if (this._applyPixelRatio()) {
+      if (this.onResize) this.onResize();
+      else this.resize(window.innerWidth, window.innerHeight);
+    }
   }
 
   // Per-map shadow colour: drives the grade split-tone and the outline ink.
@@ -273,7 +361,7 @@ export class TacticalVisuals {
   }
 
   toggleQuality() {
-    return this.applyQuality(this.quality === 'high' ? 'low' : 'high');
+    return this.applyQuality(nextQualityChoice(this.choice));
   }
 
   setSelection(objects, color = 0xffdf72) {
@@ -282,7 +370,9 @@ export class TacticalVisuals {
   }
 
   pulse(x, z, { color = 0xff493d, radius = 4, life = 1.4, width = 0.42 } = {}) {
-    const geometry = new THREE.RingGeometry(Math.max(0.1, radius - width), radius, 56);
+    const cap = this.preset?.decals ?? 32;
+    if (this.pulses.length >= cap) return;
+    const geometry = new THREE.RingGeometry(Math.max(0.1, radius - width), radius, this.quality === 'low' ? 24 : 56);
     geometry.rotateX(-Math.PI / 2);
     const material = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.78, depthWrite: false,
@@ -315,7 +405,10 @@ export class TacticalVisuals {
   }
 
   render() {
-    if (this.quality === 'high') this.composer.render();
+    // One present per animation frame. The composer path (high) is the only
+    // place that draws the scene more than once, and that second draw is the
+    // outline prepass. Low and medium draw the scene once.
+    if (this.preset?.post === 'full') this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
 }

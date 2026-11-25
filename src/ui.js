@@ -561,11 +561,13 @@ export class UI {
                 <div class="setrow">
                   <span>Graphics quality</span>
                   <div class="modeseg" id="set-quality">
-                    <button class="diffbtn" data-q="low">Performance</button>
-                    <button class="diffbtn" data-q="high">Quality</button>
+                    <button class="diffbtn" data-q="low">Low</button>
+                    <button class="diffbtn" data-q="medium">Medium</button>
+                    <button class="diffbtn" data-q="high">High</button>
+                    <button class="diffbtn" data-q="auto">Auto</button>
                   </div>
                 </div>
-                <div class="sethint">Quality mode enables shadows and full-resolution rendering. Performance mode halves pixel ratio and disables shadows — for weaker machines and long co-op sessions.</div>
+                <div class="sethint">High gives the most detail. Medium and Low simplify distant units and effects for smoother play. Auto adjusts to your device.</div>
               </div>
               <div id="set-pane-controls" class="setpane hidden">
                 <div class="bindhead">
@@ -789,7 +791,7 @@ export class UI {
     for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
       b.onclick = () => {
         if (this.cb.onSettings) this.cb.onSettings({ quality: b.dataset.q });
-        this._reflectQuality(b.dataset.q);
+        else this._reflectQuality(b.dataset.q);
       };
     }
 
@@ -2527,9 +2529,6 @@ export class UI {
   }
 
   _reflectQuality(q) {
-    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
-      b.classList.toggle('sel', b.dataset.q === q);
-    }
     this.setQualityUI(q);
   }
 
@@ -3358,13 +3357,18 @@ export class UI {
     if (s.quality !== undefined) this._reflectQuality(s.quality);
   }
 
-  setQualityUI(quality) {
+  setQualityUI(quality, tier = quality) {
     const button = this.root.querySelector('#b-quality');
     if (!button) return;
-    const high = quality === 'high';
-    button.textContent = high ? '✨' : '◐';
-    button.title = high ? 'Graphics: high (outlines, high-threshold bloom, SMAA)' : 'Graphics: low (direct rendering, best for co-op or older laptops)';
-    button.classList.toggle('active', high);
+    const names = { low: 'Low', medium: 'Medium', high: 'High', auto: 'Auto' };
+    const choice = names[quality] ? quality : 'auto';
+    const resolved = choice === 'auto' && tier && tier !== 'auto' ? `Auto · ${names[tier] || tier}` : names[choice];
+    button.textContent = choice === 'high' ? '✨' : choice === 'medium' ? '◆' : choice === 'low' ? '▣' : '◐';
+    button.title = `Graphics: ${resolved}. Click to cycle Low, Medium, High, and Auto.`;
+    button.classList.toggle('active', choice === 'high' || (choice === 'auto' && tier === 'high'));
+    for (const b of this.root.querySelectorAll('#set-quality .diffbtn')) {
+      b.classList.toggle('sel', b.dataset.q === choice);
+    }
   }
 
   noteGuestSession() { this._guestSession = true; }

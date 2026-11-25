@@ -435,6 +435,8 @@ body::after {
 
 /* multiplayer war-mode chips in the setup header */
 .modeseg { display: flex; gap: 6px; margin-left: auto; }
+#set-quality { flex-wrap: wrap; justify-content: flex-end; }
+#set-quality .diffbtn { padding: 6px 9px; }
 .modeseg .modechip.sel { background: rgba(222, 186, 96, 0.22); border-color: var(--gold); color: #ffe9a8; }
 .modeseg .modechip:disabled { opacity: 0.6; cursor: default; }
 

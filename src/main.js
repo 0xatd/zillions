@@ -45,6 +45,11 @@ import {
 import { clamp, lerp } from './utils.js';
 import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
+import { normalizeQualityChoice, probeGpuSignals, resolveGraphics, stepDownTier } from './graphics-quality.js';
+import { mergeStaticMeshes } from './static-batch.js';
+import { UnitImpostors, cameraFrustum, sphereVisible } from './unit-impostors.js';
+import { cullInstances, rememberInstances } from './instance-cull.js';
+import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
@@ -162,8 +167,19 @@ class App {
   constructor() {
     this._bootStart = performance.now();
     this.canvas = document.getElementById('game');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
-    this.renderer.shadowMap.enabled = true;
+    let savedChoice = null;
+    try { savedChoice = localStorage.getItem('zillions_graphics_quality'); } catch { /* storage can be blocked */ }
+    const queryChoice = normalizeQualityChoice(new URLSearchParams(location.search).get('quality'));
+    const bootChoice = queryChoice || normalizeQualityChoice(savedChoice) || 'auto';
+    const bootProbe = bootChoice === 'auto' ? probeGpuSignals() : null;
+    const boot = { ...resolveGraphics(bootChoice, bootProbe), probe: bootProbe };
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: boot.preset.antialias,
+      powerPreference: boot.tier === 'high' ? 'high-performance' : 'default',
+    });
+    this.renderer.info.autoReset = false;
+    this.renderer.shadowMap.enabled = boot.preset.shadows;
     // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
     // colour lands on screen as that colour.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -171,7 +187,12 @@ class App {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
-    this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera);
+    this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera, boot);
+    this.tacticalVisuals.onChange = () => this._applyShadowBudget();
+    this.tacticalVisuals.onResize = () => this.resize();
+    if (perfHudWanted()) this.perfHud = mountPerfHud();
+    this._frustum = new THREE.Frustum();
+    this._simTickMs = 0;
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
     this.camDist = 46;           // high, narrow diorama camera (FOV 30)
     this.sky = new SkyGradient();
@@ -244,7 +265,14 @@ class App {
       onSpeed: (s) => this.setSpeed(s),
       onMute: () => { this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); },
       onSettings: (s) => this.applySettings(s),
-      onQuality: () => this.ui.setQualityUI(this.tacticalVisuals.toggleQuality()),
+      onQuality: () => {
+        const choice = this.tacticalVisuals.toggleQuality();
+        try {
+          const cur = JSON.parse(localStorage.getItem('zillions_settings') || '{}');
+          localStorage.setItem('zillions_settings', JSON.stringify({ ...cur, quality: choice }));
+        } catch { /* storage can be blocked */ }
+        this.ui.setQualityUI(choice, this.tacticalVisuals.quality);
+      },
       onHost: () => this.hostGame(),
       onJoin: (code) => this.joinGame(code),
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
@@ -431,10 +459,17 @@ class App {
     this.ui.setProfile(this.profile);
     this.ui.setKeybinds(this.binds());
     this.ui.setFeel(this.feel());
-    this.ui.setQualityUI(this.tacticalVisuals.quality);
-    // Settings restore: volumes apply inside AudioSys before any sound;
-    // UI controls sync to whatever was persisted.
-    this.ui.setSettingsUI(this._restoreSettings());
+    this.ui.setQualityUI(this.tacticalVisuals.choice, this.tacticalVisuals.quality);
+    // Settings restore: volumes apply inside AudioSys before any sound.
+    // The graphics choice lives in its own key. An older settings blob only
+    // fills that key when the player has never picked a preset.
+    const restored = this._restoreSettings();
+    let savedQuality = null;
+    try { savedQuality = localStorage.getItem('zillions_graphics_quality'); } catch { /* storage can be blocked */ }
+    if (!savedQuality && restored.quality) this.tacticalVisuals.applyQuality(restored.quality);
+    if (savedQuality) delete restored.quality;
+    this.ui.setQualityUI(this.tacticalVisuals.choice, this.tacticalVisuals.quality);
+    this.ui.setSettingsUI(restored);
     this.ui.fillHeroGrid(HEROES);
     // Living hub: connect the lobby quietly in the background so the main
     // menu shows live presence/games/chat before the player clicks PLAY.
@@ -925,6 +960,7 @@ class App {
     this.payCoins = [];
     for (const p of this.projectiles) this._destroyProjectile(p);
     this.projectiles = [];
+    if (this._projCore) { this._projCore.count = 0; this._projTrail.count = 0; }
     this.zombieAttacks.clear();
     this.lastPay = false;
     this._endExtras = null;
@@ -964,6 +1000,7 @@ class App {
     if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
+    this._rememberCulledProps(this.terrain);
     this._setupFogOfWar();
     // The plaza and city appear where (and when) the city is founded.
     if (this.plaza) { this.scene.remove(this.plaza); this.plaza = null; }
@@ -1482,6 +1519,7 @@ class App {
         g.add(capMesh);
       }
     }
+    mergeStaticMeshes(g);
     return g;
   }
 
@@ -4749,6 +4787,7 @@ class App {
     this.scene.add(this.amb);
     this.scene.fog = new THREE.Fog(0xa8cfc4, 90, 240);
     this.scene.background = new THREE.Color(0xa8cfc4);
+    this.tacticalVisuals.attachSun(this.sun);
   }
 
   // ---------------- particles ----------------
@@ -4794,11 +4833,13 @@ class App {
   }
 
   burst(x, y, z, { count = 10, color = 0xffffff, speed = 3, life = 0.5, size = 0.5, spread = 0.4, up = 1.5 } = {}) {
-    const fxScale = this.tacticalVisuals?.quality === 'low' ? 0.45 : this.netMode ? 0.75 : 1;
+    const preset = this.tacticalVisuals?.preset;
+    const fxScale = (preset?.fxScale ?? 1) * (this.netMode ? 0.75 : 1);
+    const cap = preset?.particles ?? this.pmax;
     count = Math.max(1, Math.ceil(count * fxScale));
     const c = new THREE.Color(color);
     for (let i = 0; i < count; i++) {
-      if (this.pcount >= this.pmax) return;
+      if (this.pcount >= cap || this.pcount >= this.pmax) return;
       const j = this.pcount++;
       const o = j * 8;
       const a = Math.random() * Math.PI * 2;
@@ -4945,13 +4986,37 @@ class App {
     return { x: tx, y: y + this.map.groundY(tx, tz), z: tz };
   }
 
-  _spawnProjectile(e, extra = {}) {
-    if (this.projectiles.length >= 120) this._destroyProjectile(this.projectiles.shift());
-    if (!this._projCoreGeo) {
-      this._projCoreGeo = new THREE.SphereGeometry(1, 12, 8);
-      this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
-      this._projUp = new THREE.Vector3(0, 1, 0);
+  _ensureProjectiles() {
+    if (this._projCore) return;
+    const max = 120;
+    this._projMax = max;
+    this._projCoreGeo = new THREE.SphereGeometry(1, 8, 6);
+    this._projTrailGeo = new THREE.CylinderGeometry(1, 1, 1, 5);
+    this._projCoreMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false });
+    this._projTrailMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.7, depthWrite: false });
+    this._projCore = new THREE.InstancedMesh(this._projCoreGeo, this._projCoreMat, max);
+    this._projTrail = new THREE.InstancedMesh(this._projTrailGeo, this._projTrailMat, max);
+    this._projUp = new THREE.Vector3(0, 1, 0);
+    this._projHead = new THREE.Vector3();
+    this._projTail = new THREE.Vector3();
+    this._projMid = new THREE.Vector3();
+    this._projDir = new THREE.Vector3();
+    this._projColor = new THREE.Color();
+    this._projDummy = new THREE.Object3D();
+    for (const mesh of [this._projCore, this._projTrail]) {
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.renderOrder = 30;
+      this.scene.add(mesh);
     }
+    this._projTrail.renderOrder = 29;
+  }
+
+  _spawnProjectile(e, extra = {}) {
+    this._ensureProjectiles();
+    const cap = this.tacticalVisuals?.preset?.projectiles ?? this._projMax;
+    if (this.projectiles.length >= cap) this.projectiles.shift();
     const kind = extra.kind || e.kind || 'soldier';
     const spec = { ...this._projectileSpec(kind), ...extra };
     spec.kind = kind;
@@ -4961,27 +5026,14 @@ class App {
     const to = new THREE.Vector3(hit.x, hit.y, hit.z);
     const dist = Math.hypot(to.x - from.x, to.z - from.z);
     const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
-    const core = new THREE.Mesh(
-      this._projCoreGeo,
-      new THREE.MeshBasicMaterial({ color: spec.color, transparent: true, opacity: 1, depthWrite: false }),
-    );
-    core.scale.setScalar(spec.size);
-    const trail = new THREE.Mesh(
-      this._projTrailGeo,
-      new THREE.MeshBasicMaterial({ color: spec.trail, transparent: true, opacity: 0.64, depthWrite: false }),
-    );
-    trail.scale.set(spec.size * 0.26, 1, spec.size * 0.26);
-    core.renderOrder = 30;
-    trail.renderOrder = 29;
-    this.scene.add(trail, core);
-    this.projectiles.push({ core, trail, from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
+    this.projectiles.push({ from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
   }
 
   _destroyProjectile(p) {
-    if (!p) return;
+    if (!p?.core) return;
     this.scene.remove(p.core, p.trail);
-    if (p.core.material) p.core.material.dispose();
-    if (p.trail.material) p.trail.material.dispose();
+    if (p.core.material && p.core.material !== this._projCoreMat) p.core.material.dispose();
+    if (p.trail?.material && p.trail.material !== this._projTrailMat) p.trail.material.dispose();
   }
 
   _projectilePos(p, q, out) {
@@ -4995,35 +5047,64 @@ class App {
   }
 
   _updateProjectiles(dt) {
-    if (!this.projectiles.length) return;
-    const head = new THREE.Vector3();
-    const tail = new THREE.Vector3();
-    const mid = new THREE.Vector3();
-    const dir = new THREE.Vector3();
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+    if (!this.projectiles.length) {
+      if (this._projCore && this._projCore.count) {
+        this._projCore.count = 0;
+        this._projTrail.count = 0;
+      }
+      return;
+    }
+    this._ensureProjectiles();
+    const cap = this.tacticalVisuals?.preset?.projectiles ?? this._projMax;
+    const cull = !!this.tacticalVisuals?.preset?.frustumCull && this._frustum;
+    const head = this._projHead;
+    const tail = this._projTail;
+    const mid = this._projMid;
+    const dir = this._projDir;
+    const dummy = this._projDummy;
+    let write = 0;
+    let n = 0;
+    for (let i = 0; i < this.projectiles.length; i++) {
       const p = this.projectiles[i];
       p.t += dt;
       const q = Math.min(1, p.t / p.dur);
+      if (q >= 1) {
+        this._projectileImpact(p);
+        continue;
+      }
+      this.projectiles[write++] = p;
+      if (n >= this._projMax) continue;
       this._projectilePos(p, q, head);
+      if (cull && !sphereVisible(this._frustum, head.x, head.y, head.z, 0.8)) continue;
       this._projectilePos(p, q - p.spec.tail, tail);
-      p.core.position.copy(head);
-      const pulse = 1 + Math.sin(q * Math.PI * 6) * 0.12;
-      p.core.scale.setScalar(p.spec.size * pulse);
+      const fade = q > 0.82 ? (1 - q) / 0.18 : 1;
+      const pulse = (1 + Math.sin(q * Math.PI * 6) * 0.12) * Math.max(0.04, fade);
+      dummy.position.copy(head);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(p.spec.size * pulse);
+      dummy.updateMatrix();
+      this._projCore.setMatrixAt(n, dummy.matrix);
+      this._projColor.setHex(p.spec.color);
+      this._projCore.setColorAt(n, this._projColor);
       mid.copy(head).add(tail).multiplyScalar(0.5);
       dir.copy(head).sub(tail);
       const len = Math.max(0.04, dir.length());
-      p.trail.position.copy(mid);
-      p.trail.scale.set(p.spec.size * 0.24, len, p.spec.size * 0.24);
-      p.trail.quaternion.setFromUnitVectors(this._projUp, dir.normalize());
-      const fade = q > 0.82 ? (1 - q) / 0.18 : 1;
-      p.core.material.opacity = Math.max(0, fade);
-      p.trail.material.opacity = Math.max(0, 0.64 * fade);
-      if (q >= 1) {
-        this._projectileImpact(p);
-        this._destroyProjectile(p);
-        this.projectiles.splice(i, 1);
-      }
+      dummy.position.copy(mid);
+      dummy.quaternion.setFromUnitVectors(this._projUp, dir.normalize());
+      dummy.scale.set(p.spec.size * 0.24, len, p.spec.size * 0.24);
+      dummy.updateMatrix();
+      this._projTrail.setMatrixAt(n, dummy.matrix);
+      this._projColor.setHex(p.spec.trail);
+      this._projTrail.setColorAt(n, this._projColor);
+      n++;
     }
+    this.projectiles.length = Math.min(write, cap);
+    this._projCore.count = n;
+    this._projTrail.count = n;
+    this._projCore.instanceMatrix.needsUpdate = true;
+    this._projTrail.instanceMatrix.needsUpdate = true;
+    if (this._projCore.instanceColor) this._projCore.instanceColor.needsUpdate = true;
+    if (this._projTrail.instanceColor) this._projTrail.instanceColor.needsUpdate = true;
   }
 
   _projectileImpact(p) {
@@ -5059,7 +5140,9 @@ class App {
   }
 
   _spawnAbilityRing(x, z, { color, radius = 1, to = radius, life = 0.5, opacity = 0.8, width = 0.16, delay = 0 } = {}) {
-    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 64);
+    const cap = this.tacticalVisuals?.preset?.decals ?? 32;
+    if (this.abilityFx.length >= cap) return;
+    const geo = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, this.tacticalVisuals?.quality === 'low' ? 28 : 64);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0, depthWrite: false,
@@ -5134,6 +5217,7 @@ class App {
         if (hasKit('enemy_walker') && this.horde) {
           this.horde.dispose();
           this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+          this._applyShadowBudget();
         }
       });
     }
@@ -5144,8 +5228,54 @@ class App {
     // Per-type authored silhouettes, instanced — see horde-art.js. The menu
     // vignette writes into the same pools, so the menu horde IS the game's.
     this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
+    if (!this.impostors) this.impostors = new UnitImpostors(this.scene, ZMAX);
     this._zdummy = new THREE.Object3D();
     this._zcolor = new THREE.Color();
+    this._applyShadowBudget();
+  }
+
+  _applyShadowBudget() {
+    const preset = this.tacticalVisuals?.preset;
+    if (!preset) return;
+    if (this.horde) {
+      for (const set of Object.values(this.horde.sets)) {
+        set.body.castShadow = !!preset.hordeShadows;
+        set.arms.castShadow = !!preset.hordeShadows;
+        set.eyes.castShadow = false;
+      }
+    }
+    if (this.coinMesh) this.coinMesh.castShadow = !!preset.coinShadows;
+    if (this.corpseMesh) this.corpseMesh.castShadow = !!preset.corpseShadows;
+  }
+
+  _rememberCulledProps(root) {
+    this._culledProps = [];
+    root?.traverse((node) => {
+      if (node.isInstancedMesh && node.count > 24) {
+        rememberInstances(node);
+        this._culledProps.push(node);
+      }
+    });
+  }
+
+  _cullProps() {
+    const props = this._culledProps;
+    if (!props?.length || !this._frustum) return;
+    const preset = this.tacticalVisuals?.preset;
+    const maxDistance = preset?.foliageDistance || 0;
+    const pad = preset?.shadows ? 8 : 0;
+    for (const mesh of props) {
+      if (mesh.userData.keptShadow == null) mesh.userData.keptShadow = mesh.castShadow;
+      mesh.castShadow = !!preset?.shadows && !!mesh.userData.keptShadow && (preset.hordeShadows || !maxDistance);
+      cullInstances(mesh, this._frustum, {
+        maxDistance, focusX: this.focus.x, focusZ: this.focus.z, pad,
+      });
+    }
+  }
+
+  _beginCull() {
+    if (this.camera && this._frustum) cameraFrustum(this.camera, this._frustum);
+    this._cullProps();
   }
 
   _updateZombieMeshes(t, dt = 0) {
@@ -5155,10 +5285,23 @@ class App {
     const c = this._zcolor;
     this.horde.begin();
     const vision=fogVisionSources(g);
+    const preset = this.tacticalVisuals?.preset;
+    const lod = preset?.impostorDistance || 0;
+    const cull = !!preset?.frustumCull && this._frustum;
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
       if(!visibleInFog(vision,zb.x,zb.z))continue;
-      const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
+      const ground = this.map.groundY(zb.x, zb.z);
+      const s0 = zb.def.scale || 1;
+      if (cull && !sphereVisible(this._frustum, zb.x, ground + 0.8, zb.z, 1.5 * s0)) continue;
+      const dx = zb.x - this.focus.x;
+      const dz = zb.z - this.focus.z;
+      if (this._impostorOpen && lod > 0 && (dx * dx + dz * dz) > lod * lod) {
+        const yaw = Math.atan2(zb.dirX, zb.dirZ);
+        this.impostors.write(zb.x, ground, zb.z, yaw, s0, s0, s0, zb.def.color || 0x9aa87a);
+        continue;
+      }
+      const bob = ground + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
       const pulse = zb.hitFlash > 0 ? 1 + zb.hitFlash * 1.4 : 1;
@@ -5261,7 +5404,8 @@ class App {
     const n = e.big ? 7 : 4;
     const gy = this.map.groundY(e.x, e.z);
     for (let k = 0; k < n; k++) {
-      if (this.corpses.length >= 600) this.corpses.shift();
+      const cap = this.tacticalVisuals?.preset?.corpses ?? 600;
+      if (this.corpses.length >= cap) this.corpses.shift();
       const a = (k / n) * Math.PI * 2 + Math.random() * 0.8;
       const sp = (1.6 + Math.random() * 1.8) * (0.7 + 0.3 * f);
       this.corpses.push({
@@ -5337,7 +5481,7 @@ class App {
       d.scale.set(w + (structure ? w * .06 : 0), thickness * (structure ? 1.5 : 1), 1);
       d.updateMatrix();
       this.barBg.setMatrixAt(i, d.matrix);
-      const left = new THREE.Vector3(-w / 2, 0, 0).applyQuaternion(q);
+      const left = (this._barLeft || (this._barLeft = new THREE.Vector3())).set(-w / 2, 0, 0).applyQuaternion(q);
       d.position.set(x + left.x, y + left.y + 0.001, z + left.z);
       d.scale.set(Math.max(0.01, w * frac), thickness, 1);
       d.updateMatrix();
@@ -5362,7 +5506,7 @@ class App {
       if(b.kind==='wall' && wallWorst.get(b.plotId)!==b)continue;
       const height=this.buildingMeshes.get(b.id)?.healthHeight ?? this._buildingHeight(b.kind);
       const y=gy(b.cx,b.cz)+height+.6;
-      const distance=this.camera.position.distanceTo(new THREE.Vector3(b.cx,y,b.cz));
+      const distance=this.camera.position.distanceTo((this._barPoint||(this._barPoint=new THREE.Vector3())).set(b.cx,y,b.cz));
       const pixel=2*Math.tan(this.camera.fov*Math.PI/360)*distance/Math.max(1,this.renderer.domElement.clientHeight);
       add(b.cx,y,b.cz,b.hp/b.maxHp,Math.max(1.6,48*pixel),Math.max(1.5,(b.hp/b.maxHp<=.3?7:5)*pixel/.12),true);
     }
@@ -6085,7 +6229,22 @@ class App {
       const teamRing = rec.mesh.userData.teamRing;
       if (teamRing) teamRing.material.color.setHex(rec.hit ? 0xfff6ee : teamRing.userData.teamColor);
       rec.lastHp = u.hp;
-      rec.mesh.position.set(u.x, this.map.groundY(u.x, u.z), u.z);
+      const ground = this.map.groundY(u.x, u.z);
+      const preset = this.tacticalVisuals?.preset;
+      const lod = preset?.impostorDistance || 0;
+      const dx = u.x - this.focus.x;
+      const dz = u.z - this.focus.z;
+      const far = this._impostorOpen && lod > 0 && !u.hero && (dx * dx + dz * dz) > lod * lod;
+      const hidden = this._impostorOpen && preset?.frustumCull && !sphereVisible(this._frustum, u.x, ground + 0.8, u.z, u.hero ? 2.4 : 1.3);
+      if (far || hidden) {
+        rec.mesh.visible = false;
+        if (far && !hidden) {
+          this.impostors.write(u.x, ground, u.z, u.facing, u.def.scale || 1, u.def.scale || 1, u.def.scale || 1, u.def.color || 0xd8c7a2);
+        }
+        continue;
+      }
+      rec.mesh.visible = true;
+      rec.mesh.position.set(u.x, ground, u.z);
       rec.mesh.rotation.y = u.facing;
       // Hoverbike idle: the hero floats on its wash, bobbing and rocking.
       const bob = rec.mesh.userData.bob;
@@ -6944,7 +7103,10 @@ class App {
     if (s.volume !== undefined) this.audio.setVolume(s.volume);
     if (s.music !== undefined) this.audio.setMusicVolume(s.music);
     if (s.sfx !== undefined) this.audio.setMuted(!s.sfx);
-    if (s.quality !== undefined) this.tacticalVisuals.applyQuality(s.quality);
+    if (s.quality !== undefined) {
+      this.tacticalVisuals.applyQuality(s.quality);
+      this.ui.setQualityUI(this.tacticalVisuals.choice, this.tacticalVisuals.quality);
+    }
   }
 
   _restoreSettings() {
@@ -7446,6 +7608,7 @@ class App {
           this._disposeObject3D(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
+          this._rememberCulledProps(this.terrain);
           if (this.plaza) this.scene.remove(this.plaza);
           this.plaza = this._buildPlaza(e.x, e.z);
           this.scene.add(this.plaza);
@@ -7721,21 +7884,22 @@ class App {
   }
 
   _autoTuneQuality(dt) {
-    // Watch the game while it runs, and the menu while the attract show does —
-    // the vignettes put real load on the backdrop, so the menu gets the same
-    // safety net a live siege has.
+    // Only Auto moves. An explicit Low, Medium, or High choice stays where
+    // the player put it. A sustained stretch under ~40 FPS steps one tier.
+    this.tacticalVisuals.noteFrame(dt);
     const active = this.game ? !this.paused : false;
-    if (!active || this.tacticalVisuals.quality !== 'high') {
+    if (!active || this.tacticalVisuals.choice !== 'auto') {
       this.slowFrameT = 0;
       return;
     }
-    const slow = dt > (this.netMode ? 1 / 28 : 1 / 24);
-    this.slowFrameT = slow ? this.slowFrameT + dt : Math.max(0, this.slowFrameT - dt * 0.75);
-    if (this.slowFrameT < 2.5 || this.autoQualityDropped) return;
-    this.autoQualityDropped = true;
+    const slow = dt > 1 / 40;
+    this.slowFrameT = slow ? this.slowFrameT + dt : Math.max(0, this.slowFrameT - dt * 0.5);
+    if (this.slowFrameT < 2 || this.tacticalVisuals.quality === 'low') return;
     this.slowFrameT = 0;
-    this.ui.setQualityUI(this.tacticalVisuals.applyQuality('low', false));
-    this.ui.showBanner('Graphics lowered for smoother play. Use ◐ to turn high graphics back on.', '', 5500);
+    const next = stepDownTier(this.tacticalVisuals.quality);
+    this.tacticalVisuals.applyTier(next);
+    this.ui.setQualityUI(this.tacticalVisuals.choice, this.tacticalVisuals.quality);
+    this.ui.showBanner(`Graphics stepped to ${next} to hold 40 FPS. Auto is still selected.`, '', 5500);
   }
 
   frame() {
@@ -7756,6 +7920,7 @@ class App {
       if (progress >= 1) this._finishMissionIntro();
     }
     this._updateCamera(dt);
+    this._beginCull();
     const hitVision=this.game ? fogVisionSources(this.game) : [];
     this.hitFeedback?.update(this._hitStop > 0 ? 0 : dt,(x,z)=>visibleInFog(hitVision,x,z));
 
@@ -7779,8 +7944,12 @@ class App {
       if (!this.missionIntro && !this.replay) this._updateHeroInput();
       if (this.replay) this._advanceReplay(dt);
       else if (!this.paused && !this.game.over && !this.missionIntro) {
+        const simStarted = performance.now();
+        let simTicks = 0;
         if (this.netMode) {
+          const before = this.simFrame;
           this._advanceNetSim();
+          simTicks = Math.max(0, this.simFrame - before);
         } else {
           this.acc += dt * this.speed;
           let steps = 0;
@@ -7790,7 +7959,9 @@ class App {
             steps++;
           }
           if (steps === 10) this.acc = 0;
+          simTicks = steps;
         }
+        if (simTicks > 0) this._simTickMs = (performance.now() - simStarted) / simTicks;
       }
 
       if (this.replay && (this.replay.speed > 2 || this.replay.seeking) && this.game.events) {
@@ -7814,6 +7985,13 @@ class App {
       }
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
+      // One presentation pass for every animation frame, however many
+      // simulation ticks that frame had to catch up. The camera frustum was
+      // built once above; props and units reuse it.
+      if (this.impostors && !this._presentHold) {
+        this.impostors.begin();
+        this._impostorOpen = true;
+      }
       this._syncUnits(t, dt);
       this._syncBuilder(t);
       this._syncNests(t);
@@ -7834,6 +8012,10 @@ class App {
       this._updateBlockFx(dt);
       this._updateCoins(t);
       this._updateZombieMeshes(t, dt);
+      if (this._impostorOpen) {
+        this.impostors.commit();
+        this._impostorOpen = false;
+      }
       this._updateBars();
       this._updateNodeMarkers(t);
       this._updateDayNight(dt);
@@ -7872,7 +8054,7 @@ class App {
           if (baseEmissive && material.emissive) material.emissive.copy(baseEmissive);
           const baseIntensity = material.userData.artBaseEmissiveIntensity || 0;
           const flicker = art.phase === 'critical' ? (0.28 + Math.max(0, Math.sin(t * 17 + rec.b.id)) * 0.72) : 1;
-          if (art.phase === 'critical' && material.emissive) material.emissive.lerp(new THREE.Color(0xff321f), 0.72);
+          if (art.phase === 'critical' && material.emissive) material.emissive.lerp(_tmpColA.setHex(0xff321f), 0.72);
           material.emissiveIntensity = art.phase === 'critical' ? Math.max(0.5, baseIntensity) * flicker : baseIntensity;
           material.transparent = art.phase === 'constructing';
           material.opacity = art.phase === 'constructing' ? 0.48 + clamp(age / 0.7, 0, 1) * 0.52 : 1;
@@ -7985,7 +8167,18 @@ class App {
     this._updateProjectiles(dt);
     this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
+    this.renderer.info.reset();
     this.tacticalVisuals.render();
+    if (this.perfHud) {
+      const info = this.renderer.info.render;
+      this.perfHud.update({
+        fps: 1000 / Math.max(1, this._frameMs),
+        drawCalls: info.calls,
+        triangles: info.triangles,
+        simMs: this._simTickMs || 0,
+        label: `${this.tacticalVisuals.choice}${this.tacticalVisuals.choice === 'auto' ? ':' + this.tacticalVisuals.quality : ''}`,
+      });
+    }
     this._renderCharacterPreview(t);
   }
 }
