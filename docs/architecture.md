@@ -15,7 +15,8 @@ The production backend is not server-authoritative for combat. It is
 authoritative for rewards: signed-in XP, levels, loot, Salvage Alloy, and
 stats are granted only by `api/match-result.js`. Daily Siege scores are the
 exception that is checked before they are written: `api/daily.js` replays the
-input log and compares the final lockstep hash.
+input log and compares the final lockstep hash. Shared replays are the same
+input log, stored by `api/replay.js` and played back in the browser.
 
 ## Browser Startup
 
@@ -64,6 +65,7 @@ module already owns that rule.
 | `src/skilltree.js` | The Lattice: sector table, seeded tree generation, allocation rules, and the resolved payload |
 | `src/keybinds.js` | The control scheme: every action, its default key, and rebinding |
 | `src/lockstep-hash.js` | The per-window state hash every peer compares to detect divergence |
+| `src/share-replay.js` | Shareable replay document, simulation version gate, and headless playback |
 | `src/meta.js` | Guest (offline) Alloy ledger, the meta-upgrade tree, and threat tiers |
 | `src/match-rewards.js` | Pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, Alloy, item rows |
 
@@ -129,6 +131,8 @@ procedural renderer and must not stop a match from starting.
 | `api/match-result.js` | The only grant path for signed-in XP, levels, loot, Alloy, and stats; keeps input logs of leaderboard candidates |
 | `api/economy.js` | Market, stash, equipment, and Forge transactions |
 | `api/account-upgrades.js` | Account upgrade tree purchases, one-time local import, paid Lattice rewire |
+| `api/replay.js` | Stores and reads a shared replay. Guests may upload. |
+| `api/replay-page.js` | HTML for `/r/<id>`, including Open Graph tags |
 
 `supabase/schema.sql` defines the durable schema.
 
