@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CHAPTER_LEADERS,chapterIdentity,chapterCities,chapterFounder,leaderAvailable,recruitmentAllowed} from '../src/chapter.js';
-import {makeMmoCharacter,normalizeMmoCharacters,characterCamp,addMmoCharacter} from '../src/mmo-characters.js';
+import {makeMmoCharacter,normalizeMmoCharacters,characterCamp,addMmoCharacter,ensureDeployedLeader} from '../src/mmo-characters.js';
 import {AuthClient} from '../src/auth.js';
 import {HEROES,levelById} from '../src/config.js';
 import {Game} from '../src/game.js';
@@ -41,6 +41,30 @@ test('founder keeps appearance; each companion brings its named hero kit through
  const restored=new Game(terrain(),'normal',l.key,game.snapshot(),1);assert.equal(stateHash(restored),stateHash(game));
  }
 });
+
+test('deploying a leader selects that leader\'s persistent character', () => {
+  const founder = makeMmoCharacter('Herald', 'vanguard', 'cobalt');
+  const profile = { chapter: chapterIdentity({ name: 'First Landing', founderId: founder.id, color: 'cobalt' }), mmoCharacters: [founder], mmoCharacterId: founder.id };
+  assert.equal(ensureDeployedLeader(profile, 'vanguard').id, founder.id);
+  assert.equal(ensureDeployedLeader(profile, 'alexander'), null, 'deployment cannot bypass conquest/recruitment');
+  const recruited=makeMmoCharacter('Alexander Thomas','recon','cobalt');
+  recruited.chapterLeader='alexander'; recruited.proxyHero='alexander'; addMmoCharacter(profile,recruited);
+  const alexander = ensureDeployedLeader(profile, 'alexander');
+  assert.equal(alexander.chapterLeader, 'alexander');
+  assert.equal(alexander.proxyHero, 'alexander');
+  assert.equal(alexander.classKey, 'recon');
+  assert.equal(profile.mmoCharacterId, alexander.id);
+  assert.equal(chapterFounder(profile).id, founder.id, 'the founder stays the chapter founder');
+  assert.equal(ensureDeployedLeader(profile, 'alexander').id, alexander.id, 'a second deployment reuses the companion');
+  assert.equal(profile.mmoCharacters.filter((c) => c.chapterLeader === 'alexander').length, 1);
+  const camp = characterCamp(selectedOr(profile));
+  assert.equal(camp.level, 1);
+  assert.equal(ensureDeployedLeader(profile, 'danny'), null);
+});
+
+function selectedOr(profile) {
+  return profile.mmoCharacters.find((c) => c.id === profile.mmoCharacterId);
+}
 
 test('late auth hydration cannot erase a founder being saved',async()=>{
  const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');

@@ -42,7 +42,7 @@ import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPric
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
 import { firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
-import { QUICK_DEFAULTS, abilityBar, cultureExplain, leaderRoster } from './first-run.js';
+import { QUICK_DEFAULTS, abilityBar, cultureExplain, leaderHeroKey, leaderRoster } from './first-run.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -768,6 +768,7 @@ export class UI {
 
     // ----- setup: hero cards -----
     this.selectedHero = 'alexander';
+    this.selectedLeader = 'alexander';
     const herorow = q('#herorow');
     for (const [key, h] of Object.entries(HEROES)) {
       const card = document.createElement('button');
@@ -781,9 +782,16 @@ export class UI {
         <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
         if (card.disabled) return;
-        this.selectedHero = key;
-        for (const c of herorow.children) c.classList.toggle('sel', c === card);
-        this._renderAbilityPreview('#setup-abilities', key);
+        const choices = leaderRoster(this._profile).filter((entry) => entry.playable && leaderHeroKey(entry.key) === key);
+        const leader = choices.find((entry) => entry.key === this.selectedLeader) || choices[0];
+        if (leader) this._selectLeader(leader.key, { silent: true });
+        else {
+          this.selectedLeader = null;
+          this.selectedHero = key;
+          for (const c of herorow.children) c.classList.toggle('sel', c === card);
+          this._renderLeaderPick('#setup-leaders');
+          this._renderAbilityPreview('#setup-abilities', key);
+        }
         if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
@@ -2474,7 +2482,11 @@ export class UI {
   _syncChapterHeroChoice(mode) {
     const character = mode === 'campaign' ? this._sheetCharacter() : null;
     const previous = this.selectedHero;
-    if (character) this.selectedHero = character.proxyHero;
+    if (character) {
+      this.selectedHero = character.proxyHero;
+      const leader = leaderRoster(this._profile).find((entry) => entry.key === (character.chapterLeader || 'vanguard'));
+      this.selectedLeader = leader ? leader.key : null;
+    }
     for (const card of this.root.querySelectorAll('#herorow .herocard')) {
       const selected = !character || card.dataset.key === character.proxyHero;
       card.classList.toggle('hidden', !selected);
@@ -3042,7 +3054,7 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} MP${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
         big.disabled = h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0);
       }
@@ -3349,7 +3361,33 @@ export class UI {
   _renderLeaderPick(selector) {
     const host = this.root.querySelector(selector);
     if (!host) return;
-    host.innerHTML = leaderRoster(this._profile).map((leader) => `<button type="button" class="leaderchip${leader.key === 'vanguard' ? ' playable sel' : ' locked'}" data-leader="${escapeHtml(leader.key)}" disabled><b>${escapeHtml(leader.name)}</b><small>${escapeHtml(leader.status || 'Your founder')}</small></button>`).join('');
+    const selected = this.selectedLeader;
+    host.innerHTML = leaderRoster(this._profile).map((leader) => {
+      const tip = [leader.role, leader.kit].filter(Boolean).join(' — ');
+      const on = leader.playable && leader.key === selected;
+      return `<button type="button" class="leaderchip${leader.playable ? ' playable' : ' locked'}${on ? ' sel' : ''}" data-leader="${escapeHtml(leader.key)}" title="${escapeHtml(tip)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? escapeHtml(leader.role) : escapeHtml(leader.status)}</small></button>`;
+    }).join('');
+    for (const button of host.querySelectorAll('.leaderchip.playable')) {
+      button.onclick = () => this._selectLeader(button.dataset.leader);
+    }
+  }
+
+  _selectLeader(key, { silent = false } = {}) {
+    const leader = leaderRoster(this._profile).find((entry) => entry.key === key && entry.playable);
+    if (!leader) return;
+    this.selectedLeader = leader.key;
+    const heroKey = leaderHeroKey(leader.key);
+    this.selectedHero = heroKey;
+    if (typeof this.root?.querySelector === 'function') {
+      this._renderLeaderPick('#q-leaders');
+      this._renderLeaderPick('#setup-leaders');
+      this._renderAbilityPreview('#q-abilities', heroKey);
+      this._renderAbilityPreview('#setup-abilities', heroKey);
+      for (const card of this.root.querySelectorAll('#herorow .herocard')) {
+        card.classList.toggle('sel', card.dataset.key === heroKey);
+      }
+    }
+    if (!silent) this.cb.onHeroPick?.(heroKey);
   }
 
   _renderAbilityPreview(selector, heroKey) {
@@ -3376,7 +3414,7 @@ export class UI {
     q('#coach-skip').onclick = () => this.cb.onCoachSkip?.();
     this._selectQuickCulture(QUICK_DEFAULTS.army);
     this._renderLeaderPick('#q-leaders');
-    this._renderAbilityPreview('#q-abilities', 'scott');
+    this._renderAbilityPreview('#q-abilities', leaderHeroKey(this.selectedLeader || QUICK_DEFAULTS.leader));
   }
 
   _selectQuickCulture(key) {
@@ -3398,6 +3436,7 @@ export class UI {
       color: q('#q-color').value,
       emblem: q('#q-emblem').value,
       difficulty: q('#q-diff').value,
+      leader: this.selectedLeader || QUICK_DEFAULTS.leader,
     };
   }
 
@@ -3409,7 +3448,7 @@ export class UI {
     q('#q-emblem').value = draft.emblem;
     q('#q-diff').value = draft.difficulty;
     this._selectQuickCulture(draft.army);
-    this._renderAbilityPreview('#q-abilities', 'scott');
+    this._selectLeader(draft.leader || QUICK_DEFAULTS.leader, { silent: true });
   }
 
   showQuickSetup(draft = QUICK_DEFAULTS) {

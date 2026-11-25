@@ -222,11 +222,14 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
-## Roster expansion — work in progress
+## Playable leaders
 
-The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
-preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
-Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+Vanguard keeps its melee signature. Recruited Alexander Thomas, Tiger Reyes,
+and Aaron Whitlock now have original four-slot kits with mana and cooldowns.
+The chapter's existing conquest and recruitment gates still apply. Other
+recruited companions retain their existing kits. Ability previews show the
+actual configured cast keys; W remains movement. See
+[implementation coverage](docs/roster/implementation.md).
 
 ## Controls
 

@@ -4,6 +4,8 @@ import { CULTURE_ARMIES, cultureKey, HEROES } from './config.js';
 import { heroAbilities } from './hero-abilities.js';
 import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS, leaderRecord, recruitmentAllowed } from './chapter.js';
 
+export const PLAYABLE_LEADER_KEYS = Object.freeze(['vanguard', 'alexander', 'aaron', 'tiger']);
+
 export const QUICK_DEFAULTS = Object.freeze({
   chapterName: 'First Landing',
   founderName: 'Vanguard',
@@ -11,6 +13,7 @@ export const QUICK_DEFAULTS = Object.freeze({
   color: 'cobalt',
   emblem: 'star',
   difficulty: 'casual',
+  leader: 'vanguard',
 });
 
 const CHAPTER_NAMES = ['First Landing', 'Greenfall Host', 'Ash Gate', 'North Watch', 'Low Keep'];
@@ -26,6 +29,7 @@ export function randomizeQuickSetup(rng = Math.random) {
     color: pick(Object.keys(CHAPTER_COLORS)),
     emblem: pick(Object.keys(CHAPTER_EMBLEMS)),
     difficulty: pick(DIFFICULTIES),
+    leader: 'vanguard',
   };
 }
 
@@ -39,7 +43,13 @@ export function normalizeQuickSetup(raw = {}) {
     color: Object.hasOwn(CHAPTER_COLORS, raw.color) ? raw.color : QUICK_DEFAULTS.color,
     emblem: Object.hasOwn(CHAPTER_EMBLEMS, raw.emblem) ? raw.emblem : QUICK_DEFAULTS.emblem,
     difficulty: DIFFICULTIES.includes(raw.difficulty) ? raw.difficulty : QUICK_DEFAULTS.difficulty,
+    leader: PLAYABLE_LEADER_KEYS.includes(raw.leader) ? raw.leader : QUICK_DEFAULTS.leader,
   };
+}
+
+export function leaderHeroKey(key) {
+  if (key === 'vanguard') return 'scott';
+  return HEROES[key] ? key : 'scott';
 }
 
 // What a culture changes on the battlefield. European is the reference line.
@@ -80,7 +90,7 @@ export function leaderRoster(profile = {}) {
   ];
 }
 
-export function abilityBar(hero, labels = ['Q', 'E', 'R']) {
+export function abilityBar(hero, labels = ['Q', 'E', 'R', 'Ctrl+Q']) {
   return [
     { key: 'Auto', name: 'Weapon', icon: '🎯', detail: 'Attacks automatically in range. WASD moves your hero.', state: 'ready' },
     ...heroAbilities(hero).map((ability, slot) => ability && ({

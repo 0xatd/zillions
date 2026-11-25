@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { CULTURE_ARMIES } from '../src/config.js';
+import { HEROES } from '../src/config.js';
 import {
   QUICK_DEFAULTS, TITLE_CLICKS, abilityBar, coachAdvance, coachApply, coachComplete,
   coachStep, cultureExplain, fittedLabel, freshCoach, leaderRoster, normalizeQuickSetup,
@@ -32,7 +33,7 @@ test('each army culture says what it changes', () => {
   assert.match(cultureExplain('middle_eastern').changes, /Longest range/);
 });
 
-test('the leader grid is twelve names and only Vanguard can deploy', () => {
+test('the leader grid preserves chapter recruitment and uses actual cast bindings', () => {
   const roster = leaderRoster();
   assert.equal(roster.length, 12);
   assert.deepEqual(roster.filter((leader) => leader.playable).map((leader) => leader.key), ['vanguard']);
@@ -41,6 +42,10 @@ test('the leader grid is twelve names and only Vanguard can deploy', () => {
   assert.deepEqual(bar.map((slot) => slot.key), ['Auto', 'Q']);
   assert.equal(bar[1].name, 'Gravity Hammer');
   assert.doesNotMatch(bar[0].key, /^W$/, 'movement key is never advertised as firing');
+  for (const key of ['alexander','aaron','tiger']) {
+    const kit=abilityBar(HEROES[key], ['J','K','L','Ctrl+J']);
+    assert.deepEqual(kit.map(s=>s.key), ['Auto','J','K','L','Ctrl+J']);
+  }
 });
 
 test('the opening lesson rewards a real defense, never cycling unsafe orders', () => {

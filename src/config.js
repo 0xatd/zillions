@@ -475,10 +475,11 @@ export function bossWaveCount(level, diffMult = 1) {
 // that replaced nightfall.
 export const SURGE_MULT = 2.0;
 
-// ---------- Heroes: auto-attack + passive AURA + ONE signature ability ----------
-// The whole kit stays Thronefall-simple: you steer, your weapon fires itself,
-// an aura hums around you, and the primary-ability binding fires the special.
-// Rank scales automatically with hero level (1 → 2 at lvl 4 → 3 at lvl 7).
+// ---------- Heroes ----------
+// You steer. The weapon fires itself. An aura hums. Vanguard keeps one special.
+// Alexander, Tiger and Aaron carry four slots: Q, W, E, and an R ultimate.
+// Those slots spend mana and cooldowns inside the simulation. Rank comes from
+// upgrade points, never from the wall clock.
 
 // A hero's ladder runs to 100. The first ten levels are exactly what they
 // always were — the campaign is paced against them — and everything past ten is
@@ -557,19 +558,40 @@ export const HEROES = {
   },
   alexander: {
     key: 'alexander', name: 'Alexander Thomas', icon: '🌿', color: 0x2f8f46, trim: 0xf3c53d,
-    tagline: 'Long range. The horizon is his firing line.',
-    hp: 350, dmg: 32, range: 11, rof: 1.2, speed: 4.5, noise: 16,
-    levelHp: 34, levelDmg: 4.5, regen: 2.2,
+    tagline: 'Ranged carry. Rifle shots hit harder with distance.',
+    hp: 340, dmg: 36, range: 11.5, rof: 1.3, speed: 4.5, noise: 16,
+    levelHp: 32, levelDmg: 4.6, regen: 2.0,
+    mana: 380, manaRegen: 4, resource: 'Focus',
+    distanceDamage: 0.018,
     aura: {
       key: 'nanites', name: 'Nanite Swarm', icon: '🧬', radius: 5.5, regen: 6, color: 0x59c8b8,
       desc: 'A cloud of repair nanites knits the wounds of nearby troops and heroes (+6 hp/s).',
     },
-    ability: {
-      key: 'grenade', name: 'Concussion Grenade', icon: '💣', cd: 11,
-      cast: 'grenade', radius: 4, range: 4.5, hop: 3,
-      dmg: [60, 100, 150], knock: [2.0, 2.6, 3.2], stun: [0.6, 0.7, 0.8],
-      desc: 'Alexander lobs a concussion charge ahead and kicks himself backward — the blast flings the dead away and buys back the range he loves.',
-    },
+    abilities: [
+      {
+        key: 'trueflight', name: 'Trueflight', icon: '🎯', spell: 'bolt', target: 'enemy',
+        cd: [6, 5.5, 5], mana: [50, 55, 60], range: 13, delay: 0.12,
+        damage: [84, 126, 176], stun: [0.15, 0.2, 0.25], types: { kinetic: 1 }, color: 0xf3c53d,
+        desc: 'A precise shot at one visible enemy. It staggers them on the way in.',
+      },
+      {
+        key: 'grenade', name: 'Kickback Charge', icon: '💣', cast: 'grenade',
+        cd: 11, mana: 65, radius: 4, range: 5, hop: 3.2,
+        dmg: [72, 112, 158], knock: [2.2, 2.8, 3.4], stun: [0.55, 0.65, 0.75],
+        desc: 'Lob a concussion charge and hop backward. The blast flings the dead away and gives the rifle its range back.',
+      },
+      {
+        key: 'glass_sight', name: 'Glass Sight', icon: '🔭', spell: 'aim', target: 'self',
+        cd: [16, 14, 12], mana: 40, duration: 4, rangeBonus: [2, 2.5, 3], attackSpeed: [0.35, 0.5, 0.65],
+        desc: 'For four seconds, see farther and fire faster. Movement drops to 35% while the sight is up.',
+      },
+      {
+        key: 'meridian', name: 'Meridian', icon: '✦', spell: 'bolt', target: 'enemy', channel: true,
+        cd: [48, 42, 36], mana: [130, 150, 170], range: 16, delay: 1.35,
+        damage: [280, 400, 540], stun: 0.35, types: { kinetic: 1 }, color: 0xf3c53d,
+        desc: 'Stand still and line up one visible enemy. Moving cancels the shot. It lands as one heavy hit.',
+      },
+    ],
     passives: [
       { key: 'deadeye', name: 'Deadeye Optics', icon: '🎯', mods: { dmg: 0.10, range: 0.55 }, desc: 'Rifle damage and attack range.' },
       { key: 'fieldkit', name: 'Field Kit', icon: '🧪', mods: { regen: 0.8, cdr: 0.06 }, desc: 'More self-repair and faster special recharge.' },
@@ -636,38 +658,79 @@ export const HEROES = {
   },
   tiger: {
     key: 'tiger', name: 'Tiger Reyes', icon: '🐯', color: 0xd8721f, trim: 0x1c1a18,
-    tagline: 'Melee. Fast, brutal, gone before you blink.',
-    hp: 490, dmg: 58, range: 1.9, rof: 1.3, speed: 5.0, noise: 10,
-    levelHp: 45, levelDmg: 7, regen: 2.4, melee: true,
-    critChance: 0.14, critMult: 1.9,
+    tagline: 'Warp caster. He bends a crowd, then breaks it.',
+    hp: 360, dmg: 24, range: 7.5, rof: 1.05, speed: 4.6, noise: 12,
+    levelHp: 34, levelDmg: 3.4, regen: 2.2,
+    mana: 520, manaRegen: 5.2, resource: 'Strain',
     aura: {
       key: 'instinct', name: "Hunter's Instinct", icon: '🐾', radius: 5.5, dmgMult: 0.12, color: 0xffa64d,
-      desc: 'Tiger sets the pace of the fight, and nearby troops hit harder chasing it.',
+      desc: 'The warp around Tiger makes nearby troops hit harder.',
     },
-    ability: {
-      key: 'clone', name: 'Pack Tactics', icon: '🐾', cd: 13,
-      cast: 'clone', count: [1, 1, 2], dur: [8, 10, 12], statMult: [0.40, 0.45, 0.50],
-      desc: 'Tiger calls the rest of the pack — temporary copies fight beside him at reduced strength until they fade.',
-    },
+    abilities: [
+      {
+        key: 'rift_lance', name: 'Rift Lance', icon: '☄️', spell: 'wave', target: 'point',
+        cd: [8, 7, 6], mana: [75, 85, 95], range: 12, radius: 1.55, speed: 15,
+        damage: [64, 98, 142], types: { shock: 1 }, color: 0xd8721f,
+        desc: 'Aim a travelling rift. Each enemy along the line is hit once.',
+      },
+      {
+        key: 'stillpoint', name: 'Stillpoint', icon: '◎', spell: 'blast', target: 'point',
+        cd: [12, 11, 9], mana: [90, 100, 115], range: 9, radius: 2.6, delay: 0.55,
+        stun: [1.15, 1.45, 1.75], damage: [52, 80, 116], types: { shock: 1 }, color: 0xffd27a,
+        desc: 'Aim a delayed burst. Enemies still inside when it opens are damaged and stunned.',
+      },
+      {
+        key: 'dread_well', name: 'Dread Well', icon: '🌀', spell: 'zone', target: 'point',
+        cd: [14, 13, 11], mana: [80, 90, 100], range: 10, radius: 3.6, delay: 0.25, duration: 6,
+        damage: [12, 16, 22], slow: 0.58, types: { shock: 1 }, color: 0x6a4fae,
+        desc: 'Aim a well that slows and wears down enemies who stay inside it.',
+      },
+      {
+        key: 'unmake', name: 'Unmake', icon: '✴️', spell: 'blast', target: 'point',
+        cd: [55, 48, 42], mana: [160, 190, 220], range: 10, radius: 3.8, delay: 0.7,
+        stun: [1.5, 1.8, 2.2], damage: [180, 260, 350], types: { shock: 1 }, color: 0xfff1c9,
+        desc: 'Aim a slow collapse. The burst damages and stuns everything still in the circle.',
+      },
+    ],
     passives: [
-      { key: 'bladework', name: 'Bladework', icon: '🗡️', mods: { dmg: 0.10, critChance: 0.05 }, desc: 'More damage, more crits.' },
-      { key: 'packleader', name: 'Pack Leader', icon: '🐺', mods: { speed: 0.10, cdr: 0.08 }, desc: 'Faster on his feet, faster back into the fight.' },
+      { key: 'attunement', name: 'Rift Attunement', icon: '✴️', mods: { dmg: 0.08, cdr: 0.04 }, desc: 'More warp damage and a shorter recovery between casts.' },
+      { key: 'strainwell', name: 'Strain Well', icon: '🔋', mods: { regen: 0.8, hp: 40 }, desc: 'More health and steadier recovery between fights.' },
     ],
   },
   aaron: {
     key: 'aaron', name: 'Aaron Whitlock', icon: '🔮', color: 0x6a4fae, trim: 0xf0d060,
-    tagline: 'Long range. Wins the fight before it starts.',
-    hp: 300, dmg: 27, range: 12, rof: 1.0, speed: 4.4, noise: 14,
-    levelHp: 29, levelDmg: 3.5, regen: 2.1,
+    tagline: 'Support summoner. He mends the line and fills it.',
+    hp: 330, dmg: 24, range: 10, rof: 1.0, speed: 4.4, noise: 14,
+    levelHp: 30, levelDmg: 3.2, regen: 2.4,
+    mana: 480, manaRegen: 5, resource: 'Conviction',
     aura: {
       key: 'ward', name: 'Warding Field', icon: '✨', radius: 6.5, regen: 5, haste: 0.22, color: 0x8fd6ff,
       desc: 'A shimmering ward keeps nearby allies mended (+5 hp/s) and quickens their hands (+22% attack rate).',
     },
-    ability: {
-      key: 'summon', name: 'Astral Sentinel', icon: '👻', cd: 11,
-      cast: 'summon', dur: [20, 26, 32], hp: [220, 300, 380], dmg: [24, 34, 46],
-      desc: 'Aaron calls a spirit sentinel to fight at his side until its time runs out — or he calls another and the old one fades.',
-    },
+    abilities: [
+      {
+        key: 'summon', name: 'Astral Sentinel', icon: '👻', cast: 'summon',
+        cd: 16, mana: 85, dur: [22, 26, 32], hp: [280, 360, 460], dmg: [28, 38, 50],
+        desc: 'Call one spirit sentinel. Casting again replaces the one already fighting.',
+      },
+      {
+        key: 'mending_pulse', name: 'Mending Pulse', icon: '✚', spell: 'mend', target: 'self',
+        cd: [9, 8, 7], mana: [60, 70, 80], radius: 6.5, heal: [58, 84, 116], color: 0xb7f0c8,
+        desc: 'Mend yourself and every ally standing near you.',
+      },
+      {
+        key: 'still_ward', name: 'Still Ward', icon: '✨', spell: 'ward', target: 'point',
+        cd: [18, 16, 14], mana: [75, 85, 95], range: 10, radius: 4.2, delay: 0.2, duration: 8,
+        slow: 0.62, heal: [10, 13, 17], damage: [6, 8, 11], types: { shock: 1 }, color: 0x8fd6ff,
+        desc: 'Aim a ward. Allies inside recover over time. Enemies inside are slowed and worn down.',
+      },
+      {
+        key: 'choir', name: 'Choir', icon: '🕊️', cast: 'choir',
+        cd: [60, 54, 48], mana: [140, 170, 200], radius: 7,
+        heal: [72, 104, 144], dur: [16, 18, 22], hp: [360, 440, 540], dmg: [36, 46, 58],
+        desc: 'Replace your sentinel with two greater spirits and mend every ally near you.',
+      },
+    ],
     passives: [
       {
         key: 'aegisward', name: 'Aegis Ward', icon: '🛡️', mods: { auraR: 0.06 },
@@ -678,6 +741,8 @@ export const HEROES = {
     ],
   },
 };
+
+for (const key of ['alexander', 'aaron', 'tiger']) HEROES[key].ability = HEROES[key].abilities[0];
 
 HEROES.lina = LINA_KIT;
 HEROES.sniper = SNIPER_KIT;
