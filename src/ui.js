@@ -3414,7 +3414,7 @@ export class UI {
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
-    if (this._lastScreen === 'quick') return;
+    if (this._lastScreen === 'quick' || this._lastScreen === 'daily') return;
     if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
       if (this._offlineAccepted && !this._accountAccepted) {
         this._accountAccepted = true;

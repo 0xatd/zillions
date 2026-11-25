@@ -2128,7 +2128,7 @@ class App {
     // Drop a board response that is still in flight. Play has left the brief.
     this._dailyTicket = (this._dailyTicket || 0) + 1;
     if (this.game) return;
-    const challenge = this._dailyChallenge || dailyChallenge(dailyKey());
+    const challenge = this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey());
     this._dailyChallenge = challenge;
     this.ui.selectedMode = 'daily';
     this.ui.selectedLevel = challenge.levelId;
@@ -2160,8 +2160,12 @@ class App {
     } catch { return null; }
   }
 
-  _dropStashedDaily() {
-    try { localStorage.removeItem(PENDING_DAILY_KEY); } catch { /* ignore */ }
+  _dropStashedDaily(expected) {
+    try {
+      const current = this._readStashedDaily();
+      if (expected && JSON.stringify(current) !== JSON.stringify(expected)) return;
+      localStorage.removeItem(PENDING_DAILY_KEY);
+    } catch { /* ignore */ }
   }
 
   async _finishDailyRun(won) {
@@ -2192,7 +2196,7 @@ class App {
         if (!quiet) this.ui.setDailyStatus('The score server is not available from here. It stays on this browser until you can submit it.');
         return null;
       }
-      this._dropStashedDaily();
+      this._dropStashedDaily(stashed);
       const line = result.improved
         ? `Saved. Rank ${result.rank} with ${result.score}.`
         : `Today's board already has your better score. Rank ${result.rank}.`;
@@ -2201,8 +2205,8 @@ class App {
       return result;
     } catch (error) {
       const code = error?.message || 'daily_unverified';
-      if (code === 'daily_unverified' || code === 'daily_closed' || code === 'invalid_replay' || code === 'sign_in_required') {
-        this._dropStashedDaily();
+      if (code === 'daily_unverified' || code === 'daily_closed' || code === 'invalid_replay') {
+        this._dropStashedDaily(stashed);
       }
       const text = code === 'daily_unverified'
         ? 'The server replay did not match this run, so the score was not saved.'

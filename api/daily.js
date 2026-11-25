@@ -66,8 +66,8 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
   };
   return {
     async displayName(userId) {
-      const found = await rows(`profiles?select=handle&id=eq.${userId}&limit=1`);
-      return found[0]?.handle || '';
+      const found = await rows(`profiles?select=handle,username_set&id=eq.${userId}&limit=1`);
+      return found[0]?.username_set ? found[0].handle || '' : '';
     },
     async board({ day, userId }) {
       const top = await rows(
@@ -84,7 +84,8 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
           const earlier = await count(
             `daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=lt.${created}`,
           );
-          me = entry(mine[0], better + earlier + 1, true);
+          const tied = await count(`daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=eq.${created}&user_id=lt.${userId}`);
+          me = entry(mine[0], better + earlier + tied + 1, true);
         }
       }
       return {
