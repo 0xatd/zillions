@@ -4,7 +4,8 @@
 //
 //   node scripts/playthrough-stuck-check.mjs [levelIds=1,2,3,4,5] [maxMinutes=30] [--report]
 //
-// Asserts per map: no stuck actor, the horde reaches and strikes the base,
+// Asserts per map: no stuck actor, the horde reaches the base (a successful
+// defense may prevent building damage; a loss must include it),
 // the match ends (win or lose) inside the cap, and a snapshot taken 4 min in
 // and restored into a fresh Game runs the next 20 s identically to the live
 // game (real terrain, mid-fight — the flat-map determinism check cannot see
@@ -19,6 +20,8 @@ import { SIM_DT, levelById } from '../src/config.js';
 import { TerrainField } from '../src/terrain.js';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const BUILDERS = process.argv.includes('--builders');
+const HERO_KEYS = (process.env.HEROES || process.env.HERO || 'scott').split(',');
 const REPORT = process.argv.includes('--report');
 const IDS = (args[0] || '1,2,3,4,5').split(',').map(Number);
 const MAX_MIN = Number(args[1] || 30);
@@ -28,10 +31,11 @@ const SAMPLE = 0.5;      // seconds between watcher samples
 function play(targetLevel) {
   const level = levelById(targetLevel);
   const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-  const game = new Game(map, process.env.DIFF || 'normal', 'scott', null, targetLevel, 'campaign', { culture: process.env.CULTURE || 'european' });
+  const game = new Game(map, process.env.DIFF || 'normal', HERO_KEYS, null, targetLevel, 'campaign', { culture: process.env.CULTURE || 'european' });
   const targetSite = 0;
   let restoreSame = null;
-  let plan = null, lastStance = null, route = [], routeGoal = '';
+  let plan = null, lastStance = null;
+  const heroRoutes=new Map();
   const command = (value) => game.exec(value);
   const setStance = (value) => { if (lastStance === value) return; lastStance = value; command({ t: 'stance', s: value, p: 0 }); };
   const builtCount = (kind) => game.plots.filter((plot) => plot.kind === kind && plot.tier > 0 && !plot.ruined).length;
@@ -63,6 +67,8 @@ function play(targetLevel) {
     return reversed.reverse().slice(1);
   }
   function moveHeroToward(hero, x, z, sprint = true, stopRadius = 1) {
+    let {route=[],routeGoal=''}=heroRoutes.get(hero.id)||{};
+    const player=game.heroes.indexOf(hero);
     const goal = `${Math.floor(x)},${Math.floor(z)},${stopRadius}`;
     // A cached route is stale once something was built across it (the hero
     // paid for a wall standing on its line, then walked into the new stone).
@@ -82,7 +88,8 @@ function play(targetLevel) {
     const dx = tx - hero.x;
     const dz = tz - hero.z;
     const distance = Math.hypot(dx, dz) || 1;
-    command({ t: 'hdir', x: dx / distance, z: dz / distance, s: sprint, p: 0 });
+    command({ t: 'hdir', x: dx / distance, z: dz / distance, s: sprint, p: player });
+    heroRoutes.set(hero.id,{route,routeGoal});
     return Math.hypot(x - hero.x, z - hero.z);
   }
 
@@ -174,7 +181,8 @@ function play(targetLevel) {
   setStance('defend');
   const maxTicks = Math.round(MAX_MIN * 60 / SIM_DT);
   const wall0 = Date.now();
-  const RESTORE_AT = Math.round(240 / SIM_DT);
+  let workerMinGold=Infinity;
+  const RESTORE_AT = Math.round((BUILDERS ? 60 : 240) / SIM_DT);
   for (let tick = 0; tick < maxTicks && !game.over; tick++) {
     if (tick === RESTORE_AT) {
       // Mid-match restore on the real terrain, mid-fight: a fresh Game built
@@ -201,7 +209,7 @@ function play(targetLevel) {
       }
       const live = game.snapshot();
       const twin = new Game(new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests }),
-        process.env.DIFF || 'normal', 'scott', saved, targetLevel, 'campaign');
+        process.env.DIFF || 'normal', HERO_KEYS, saved, targetLevel, 'campaign');
       for (let i = 0; i < 600; i++) {
         twin.update(SIM_DT);
         if (marks.length && marks[0][0] === i) {
@@ -213,17 +221,34 @@ function play(targetLevel) {
       restoreSame = stable(live) === stable(twin.snapshot());
       if (!restoreSame && !process.env.RDIFF) console.error('restore diff:', diff(live, twin.snapshot()));
     }
+    if(BUILDERS&&game.builders)workerMinGold=Math.min(workerMinGold,game.gold);
     const hero = game.heroes[0];
+    if(BUILDERS&&process.env.BUILDER_TRACE&&tick%Math.round(30/SIM_DT)===0&&game.builders)console.error(JSON.stringify({trace:true,time:Math.round(game.time),gold:Math.round(game.gold),crew:{status:game.builders.status,hp:game.builders.hp,job:game.builders.job?.id},hq:game.hq?.hp,hero:hero&&{hp:hero.hp,x:hero.x,z:hero.z},built:game.plots.filter(p=>p.tier>0).reduce((a,p)=>(a[p.kind]=(a[p.kind]||[]).concat(p.tier),a),{}),threat:game.hq&&game.zombies.filter(z=>!z.dead&&Math.hypot(z.x-game.hq.cx,z.z-game.hq.cz)<12).length}));
     if (!hero) break;
     if (game.phase === 'found') {
       const site = game.map.sites[targetSite];
       if (moveHeroToward(hero, site.x, site.z, true, 1.8) < 2.2) {
         command({ t: 'hdir', x: 0, z: 0, p: 0 });
         command({ t: 'found', s: targetSite, p: 0 });
+        if(BUILDERS){command({t:'builderOrder',s:'develop',p:0});command({t:'builderDoctrine',kind:'tower',branch:'flame',p:0});command({t:'builderDoctrine',kind:'wall',branch:'bastion',p:0});}
       }
     } else if (!hero.dead) {
-      if (hero.skillPoints > 0) command({ t: 'heroUpgrade', key: 'damage', p: 0 });
-      if (hero.abilCd <= 0) command({ t: 'cast', p: 0 });
+      for (let player = 0; player < game.heroes.length; player++) {
+        const ally = game.heroes[player];
+        if (ally.dead) continue;
+        const upgrade=game.heroUpgradeChoices(ally).filter(c=>c.rank<c.max).sort((a,b)=>a.rank-b.rank)[0];
+        if(ally.skillPoints>0 && upgrade)command({t:'heroUpgrade',key:upgrade.key,p:player});
+        const enemy = game.zombies.filter(z => !z.dead).sort((a,b) =>
+          Math.hypot(a.x-ally.x,a.z-ally.z)-Math.hypot(b.x-ally.x,b.z-ally.z))[0];
+        if (tick % 15 === 0) for (let slot = 0; slot < (ally.def.abilities?.length || 1); slot++) {
+          command({ t:'cast', p:player, slot, ...(enemy ? {id:enemy.id,x:enemy.x,z:enemy.z} : {}) });
+        }
+        if (player > 0) {
+          const dx=hero.x-ally.x,dz=hero.z-ally.z,d=Math.hypot(dx,dz);
+          if(d>2)moveHeroToward(ally,hero.x,hero.z,true,2);
+          else command({t:'hdir',p:player,x:0,z:0,s:false});
+        }
+      }
       const closeThreat = game.hq && game.zombies.some((zombie) => !zombie.dead
         && ((zombie.x - game.hq.cx) ** 2 + (zombie.z - game.hq.cz) ** 2) < 625);
       const underSiege = false ? false
@@ -247,7 +272,7 @@ function play(targetLevel) {
           ? ((pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb) || a.tier - b.tier || da - db)
           : (a.tier - b.tier || (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb) || da - db);
       });
-      if (underSiege) plan = null;
+      if (BUILDERS || underSiege) plan = null;
       else if (!plan || !candidates.includes(plan) || !game.plotAction(plan)) {
         const desired = game.firstSiege?.stage === 'opening' ? 'camp_militia'
           : builtCount('camp_militia') < 2 ? 'camp_militia'
@@ -275,9 +300,14 @@ function play(targetLevel) {
           || (!game.firstSiege && game.time > 180 && builtCount('camp_militia') > 0);
         if (readyToAttack) setStance('attack');
         const target = readyToAttack
-          ? (game.nests.find((nest) => nest.alive) || game.zombies.find((zombie) => !zombie.dead))
+          ? (game.nests.find((nest) => nest.alive) || game.zombies.find((zombie) => !zombie.dead && zombie.boss) || game.zombies.find((zombie) => !zombie.dead))
           : (game.zombies.find((zombie) => !zombie.dead) || game.hq);
-        if (target) moveHeroToward(hero, target.x ?? target.cx, target.z ?? target.cz, true, 1.5);
+        if (target) {
+          const x=target.x??target.cx,z=target.z??target.cz;
+          const range=Math.max(1.5,game.heroRange(hero)*.8);
+          if(Math.hypot(x-hero.x,z-hero.z)<=range) command({t:'hdir',x:0,z:0,p:0});
+          else moveHeroToward(hero,x,z,true,range);
+        }
       }
     }
 
@@ -315,7 +345,8 @@ function play(targetLevel) {
       if (u && tick % 3 === 0) console.error(game.time.toFixed(1), u.x.toFixed(2), u.z.toFixed(2), 'mv', u.moving, 'gx', u.gateExit, 'gc', (u.gateCool || 0).toFixed(1), 'ex', u.exitDx, u.exitDz, 'route', u.route ? u.routeI + '/' + u.route.length : '-', 'gi', u.targetGi, 'tgt', !!u.target, 'nest', !!u.targetNest, 'rp', (u.repathT || 0).toFixed(1), 'wp', u.route ? u.route[u.routeI].map((v) => v.toFixed(1)).join(',') : '', 'reach', u.route ? game._fieldReach(u, u.route[u.routeI][0], u.route[u.routeI][1]) : '', 'fd', u.route ? JSON.stringify(game._fieldDir(u, u.route[u.routeI][0], u.route[u.routeI][1])) : '');
     }
   }
-  return {
+  return { ...(BUILDERS?{builderJobs:game.builders?.completed,builderSpent:game.builders?.spent,workerMinGold}:{}),
+    heroes: HERO_KEYS, culture: game.culture, difficulty: game.diffKey,
     level: `${level.id} ${level.name}`, over: game.over, won: game.won,
     minutes: +(game.time / 60).toFixed(1), wallSec: +((Date.now() - wall0) / 1000).toFixed(0),
     kills: game.stats.kills, built: game.stats.built, lost: game.stats.lost, armyPeak: game.stats.armyPeak,
@@ -330,7 +361,7 @@ for (const id of IDS) {
   console.log(JSON.stringify(REPORT ? r : { ...r, stuck: r.stuck.slice(0, 8), stuckCount: r.stuck.length }));
   try {
     assert.equal(r.stuck.length, 0, `${r.level}: ${r.stuck.length} stuck figure(s)`);
-    assert.ok(r.reached && r.struck, `${r.level}: the horde never reached/struck the base`);
+    assert.ok(r.reached && (r.struck || r.won), `${r.level}: the horde never reached the base, or a loss had no building damage`);
     assert.ok(r.over, `${r.level}: match did not finish inside ${MAX_MIN} min`);
     assert.notEqual(r.restoreSame, false, `${r.level}: snapshot/restore diverged mid-match`);
   } catch (e) { failed++; console.error('FAIL', e.message); }

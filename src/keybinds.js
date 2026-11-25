@@ -60,12 +60,12 @@ export const ACTIONS = [
     desc: 'Your hero special.',
   },
   {
-    id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'e', reserved: true,
-    desc: 'Reserved. Heroes carry one ability today; this slot is where a second lands.',
+    id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'e',
+    desc: 'Cast the second equipped ability.',
   },
   {
-    id: 'ability3', name: 'Ability III', scopes: ['battle'], context: 'combat', default: 'r', reserved: true,
-    desc: 'Reserved, as above.',
+    id: 'ability3', name: 'Ability III', scopes: ['battle'], context: 'combat', default: 'r',
+    desc: 'Cast the third equipped ability.',
   },
   {
     id: 'swap_set', name: 'Swap weapon set', scopes: ['battle'], context: 'combat', default: 'x',
@@ -73,8 +73,7 @@ export const ACTIONS = [
   },
   {
     id: 'second_bar', name: 'Secondary bar (hold)', scopes: ['battle'], context: 'combat', default: 'control', held: true,
-    reserved: true,
-    desc: 'Reserved. Holds a second layer of ability slots once heroes carry more than one.',
+    desc: 'Hold for ability slots four through six.',
   },
   {
     id: 'consumable1', name: 'Consumable I', scopes: ['battle'], context: 'combat', default: '1', reserved: true,
@@ -82,7 +81,7 @@ export const ACTIONS = [
   },
   {
     id: 'consumable2', name: 'Consumable II', scopes: ['battle'], context: 'combat', default: '2', reserved: true,
-    desc: 'Reserved, as above.',
+    desc: 'Cast the third equipped ability.',
   },
 
   // ---- army and colony ----

@@ -2,6 +2,18 @@
 
 Use this file as the entry point for agent work in Zillions.
 
+## Fortress craft
+
+Use the installed `rts-fortress-design` skill for walls, gates, bases and terrain
+junction work. Read `docs/reusable-map-kit.md` for implementation and all-map
+coverage. Passing path checks does not establish visual quality.
+
+## Map composition requirement
+
+Read `docs/reusable-map-kit.md` before map/layout work. Alex rejected the
+streets-only #136 visual result; passing connectivity tests is not design approval.
+Use reusable pieces and purposeful authored compositions, not scattered plots.
+
 ## Read Order
 
 Read these files before you change code:
@@ -10,10 +22,18 @@ Read these files before you change code:
 2. `docs/architecture.md`
 3. `docs/agent-brief.md`
 4. `docs/backend.md` for account, API, or data work
-5. `docs/art-direction.md` and `docs/art-pipeline.md` for 3D asset work
+5. `docs/art-quality-standard.md`, `docs/art-direction.md`, and `docs/art-pipeline.md` for any visual or 3D asset work
 6. The relevant source files and checks
 
 Use `llms.txt` when you need a compact repository index.
+
+## Chapter direction — Alex, 2026-11-22
+
+Chapter-first account progression is now authorized: customizable chapter and
+founder, named hero companions recruited by conquest, five Earth city campaigns,
+then the existing frontier. This supersedes character-first home guidance, not
+the siege simulation or prohibition on persistent shared-world systems. Read
+`docs/chapter-campaign-plan.md` and the updated product contract.
 
 ## Product Boundary
 
@@ -86,6 +106,12 @@ simulation, agreeing lockstep peers, and unbroken saves — decided every trade.
 - Every hero's signature weapon must stay identical to that hero's own stats.
 
 ### Heroes
+
+Alex reduced the Dota-reference expansion to Lina, Sniper, Axe and Sven on
+2026-11-23. Do not implement the remaining reference roster without a new request. The older
+fixed-name roster below is now the legacy compatibility set, not a ban on new
+kits. Preserve legacy character IDs and gear. See `docs/roster/implementation.md`
+for completed mechanics and explicit gaps; a catalog entry is not a playable kit.
 
 - Keep this roster: Scott English, Alexander Thomas, Daniel Donovan, Turtle
   Voss, John Marlowe, Tiger Reyes, and Aaron Whitlock.

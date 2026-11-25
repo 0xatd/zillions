@@ -12,10 +12,12 @@ this file.
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`
 - Match networking: browser WebRTC DataChannels, host-sequenced lockstep
 
-Production is account-first. On `zillions.taborlin.co`, the game shell requires
-Google or passwordless email sign-in through Supabase. Static local play can
-remain for development and offline smoke tests. Do not present static play as
-a production profile.
+Production sign-in is still Google or a passwordless email link through
+Supabase, and signed-in rewards stay server-owned. The title also offers
+Play as a guest. That profile lives in the browser. Signing in later is
+how the player saves progress. Static offline continue remains for local
+smoke tests. Guest play must not write `player_stats`, `match_history`,
+`game_characters`, `item_instances`, or `player_wallets`.
 After Google sign-in, players claim a public username for the email-backed
 account. Public profile, lobby, chat, room, and invite surfaces use that
 username. They must not show the email address or a Google account name.
@@ -364,3 +366,28 @@ the account tree is the server-side ledger they will read from.
   ticket seed and input log; other matches are bounds-checked claims.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
+
+## Chapter metadata
+
+`chapter` in Auth metadata stores bounded cosmetic name/color/emblem and founder
+ID only. Companion identity links live with roster metadata. The roster cap is
+15, reserving capacity for eight pre-existing characters and seven named
+companions. Existing IDs, equipment ownership and authoritative progress are
+unchanged. Conquest and companion availability derive from the hydrated server
+campaign count; no separate client-owned capture list is accepted as authority.
+The Alloy wallet is shared; stashes and equipped loadouts remain per leader
+under the existing economy. This release does not introduce item transfers. New registrations receive no repeat account starter grant.
+
+## Friend parties
+
+Migration `20261123000100_friend_parties.sql` adds `friend_parties` and
+`friend_party_members`. Each account belongs to at most one group. Only
+`friend_party_action` mutates membership; it serializes joins with party row
+locks, enforces four seats and verifies leader-only actions and room ownership.
+`friend_party_snapshot` returns only the caller's group, public handles and its
+active room. Clients have no direct table access. No recursive RLS subqueries.
+Removing a member rotates the invitation code. Leaving as leader transfers the
+group to the earliest remaining member; leaving last deletes it. Room seats
+are separate: leaving a party does not silently terminate a running battle.
+The migration is additive and was applied to the Zillions project for isolated
+account QA on 2026-11-23. No existing account, reward or inventory schema changed.

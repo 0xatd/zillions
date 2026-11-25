@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "file": "marine_kit.glb",
+  "lod": "high",
+  "parts": {
+    "body": [
+      "light",
+      "standard",
+      "heavy"
+    ],
+    "helmet": [
+      "visor",
+      "lenses",
+      "heavy",
+      "crest",
+      "hood"
+    ],
+    "head": [
+      "square",
+      "round",
+      "long",
+      "sculpted"
+    ],
+    "hair": [
+      "buzz",
+      "flattop",
+      "mohawk",
+      "swept",
+      "topknot",
+      "long",
+      "crew"
+    ],
+    "beard": [
+      "stubble",
+      "mustache",
+      "goatee",
+      "full",
+      "braided"
+    ],
+    "face": [
+      "scar",
+      "bionic",
+      "warpaint"
+    ],
+    "pauldron": [
+      "dome",
+      "tiered",
+      "block",
+      "swept"
+    ],
+    "backpack": [
+      "reactor",
+      "jump",
+      "shell",
+      "comms"
+    ],
+    "weapon": [
+      "rifle",
+      "carbine",
+      "sniper",
+      "shotgun",
+      "hammer",
+      "blade"
+    ],
+    "emblem": [
+      "leaf",
+      "crescent",
+      "hex",
+      "paw",
+      "claw",
+      "star",
+      "chevron",
+      "shield"
+    ]
+  },
+  "triangles": {
+    "kit_body_light": 3432,
+    "kit_body_standard": 3432,
+    "kit_body_heavy": 3652,
+    "kit_helmet_visor": 696,
+    "kit_helmet_lenses": 840,
+    "kit_helmet_heavy": 324,
+    "kit_helmet_crest": 740,
+    "kit_helmet_hood": 1414,
+    "kit_head_square": 484,
+    "kit_head_round": 456,
+    "kit_head_long": 420,
+    "kit_head_sculpted": 692,
+    "kit_hair_buzz": 88,
+    "kit_hair_flattop": 112,
+    "kit_hair_mohawk": 112,
+    "kit_hair_swept": 132,
+    "kit_hair_topknot": 216,
+    "kit_hair_long": 132,
+    "kit_hair_crew": 212,
+    "kit_beard_stubble": 44,
+    "kit_beard_mustache": 36,
+    "kit_beard_goatee": 56,
+    "kit_beard_full": 120,
+    "kit_beard_braided": 280,
+    "kit_face_scar": 12,
+    "kit_face_bionic": 40,
+    "kit_face_warpaint": 12,
+    "kit_pauldron_dome": 426,
+    "kit_pauldron_tiered": 686,
+    "kit_pauldron_block": 240,
+    "kit_pauldron_swept": 164,
+    "kit_backpack_reactor": 488,
+    "kit_backpack_jump": 520,
+    "kit_backpack_shell": 884,
+    "kit_backpack_comms": 608,
+    "kit_weapon_rifle": 472,
+    "kit_weapon_carbine": 400,
+    "kit_weapon_sniper": 472,
+    "kit_weapon_shotgun": 392,
+    "kit_weapon_hammer": 352,
+    "kit_weapon_blade": 124,
+    "kit_emblem_leaf": 140,
+    "kit_emblem_crescent": 148,
+    "kit_emblem_hex": 88,
+    "kit_emblem_paw": 120,
+    "kit_emblem_claw": 36,
+    "kit_emblem_star": 76,
+    "kit_emblem_chevron": 36,
+    "kit_emblem_shield": 24
+  },
+  "tintSlots": [
+    "armor",
+    "armor_dark",
+    "trim",
+    "glow",
+    "skin",
+    "hair",
+    "cloth"
+  ],
+  "materials": [
+    "fixed_eye_dark",
+    "fixed_eye_white",
+    "fixed_frame",
+    "fixed_steel",
+    "tint_armor",
+    "tint_armor_dark",
+    "tint_cloth",
+    "tint_glow",
+    "tint_hair",
+    "tint_skin",
+    "tint_trim"
+  ],
+  "sockets": {
+    "body": [
+      "socket_head",
+      "socket_back",
+      "socket_pauldron_l",
+      "socket_pauldron_r",
+      "socket_emblem",
+      "socket_weapon",
+      "socket_hand_l",
+      "socket_hand_r"
+    ],
+    "pauldron": [
+      "socket_emblem"
+    ],
+    "weapon": [
+      "socket_muzzle",
+      "socket_ability"
+    ]
+  },
+  "conventions": "Every node carries extras.role (three.js userData.role). Part roots are kit_<category>_<variant>. Pauldrons are right-handed; mirror x for socket_pauldron_l. head/helmet/hair/beard/face attach at socket_head; weapons at socket_weapon (origin = right-hand grip, barrel forward). Materials tint_* are recoloured at runtime, fixed_* are not."
+}

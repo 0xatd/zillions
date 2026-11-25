@@ -15,6 +15,7 @@ Default branch: main
 - docs/review-guide.md: pull request review gate
 - docs/art-direction.md: 3D shape language, scale, names, sockets, and budgets
 - docs/art-pipeline.md: Blender source, GLB export, runtime fallback, and review
+- tools/art/toy_kit/frontier.py: default sci-fi expedition buildings and defense source
 
 ## Source of truth
 
@@ -32,6 +33,8 @@ Default branch: main
 - src/config.js owns balance, heroes, levels, plots, and items.
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
+- src/landscape-art.js owns the instanced forest and shoreline scenery kit.
+- src/environment-art.js owns terrain materials and animated water.
 - src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.
 - src/crafting.js owns pure recipes, socket rules, component upgrades, and
   authority-ready mutation proposals.
@@ -95,3 +98,28 @@ Run npm run check:postgres (throwaway local Postgres).
 Run git diff --check.
 Run a local Vercel production build.
 Do not call a pull request deployable until all three pass.
+
+- docs/art-quality-standard.md: mandatory visual quality bar; Forsaken Kingdom / Definitive Edition reference, acceptance checklist and Blender workflow.
+
+- src/colony-roads.js connects the built colony court, gates and frontages.
+- src/colony-art.js renders shared paving and cliff defenses without new collision.
+- src/rampart-art-plan.js fits wall panels and gate supports to existing occupancy.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.
+
+- docs/builder-orders.md: colony crew strategy, spending, movement and verification.
+
+- docs/roster/implementation.md — roster scope, working mechanics and remaining gaps
+- src/hero-abilities.js, src/hero-spells.js, src/hero-kits.js — multi-slot spell runtime and authored kits
+- src/friend-party.js — authenticated persistent-group client and invite URLs
+- src/friend-party-ui.js — compact chapter party modal
+
+- src/hit-feedback.js: bounded hero hit numbers and disposable presentation resources.
+
+- src/audio-beds.js: scene score, lazy CC0 music/ambience and ducking.

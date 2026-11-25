@@ -25,11 +25,11 @@ The startup flow is:
 index.html
   -> src/main.js
      -> account gate
-     -> selected character or character creation (Character Select)
+     -> chapter identity + founder creation, or existing chapter campaign
      -> Deploy -> mission select, Custom Games, or an online room
      -> deterministic siege
      -> end screen with server-confirmed rewards
-     -> Character Select
+     -> chapter campaign and recruited companions
      -> Three.js render loop
 ```
 
@@ -47,6 +47,7 @@ module already owns that rule.
 | File | Ownership |
 | --- | --- |
 | `src/game.js` | Deterministic game state, commands, combat, economy, buildings, snapshots, and restore |
+| `src/builders.js` | Shared colony crew orders, job planning, travel, refundable construction escrow and recovery |
 | `src/config.js` | Heroes, levels, plot definitions, items, balance constants, and `levelById()` |
 | `src/lanes.js` | Deterministic lane graph and route data |
 | `src/flowfield.js` | Flow-field pathfinding |
@@ -72,8 +73,13 @@ to snapshots when the state can affect later simulation.
 | File | Ownership |
 | --- | --- |
 | `src/terrain.js` | Deterministic terrain field, elevation, sites, nodes, and chokepoints |
+| `src/colony-roads.js` | Deterministic built-footprint-aware courtyard, gate and frontage street network |
+| `src/colony-art.js` | Ground-following main/service paving and clearance-checked cliff defenses |
+| `src/rampart-art-plan.js` | Presentation-only wall panels, clipped corner joins and gate support fitting |
 | `src/plots.js` | Colony plans, ramparts, gates, districts, and outer works |
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
+| `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |
+| `src/environment-art.js` | Painted world-space materials, terrain control maps and animated shallow/deep water |
 | `src/tactical-visuals.js` | Tactical presentation helpers |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
@@ -84,7 +90,12 @@ to snapshots when the state can affect later simulation.
 Terrain walkability belongs to the simulation. Visual relief must not silently
 change walkability.
 
-Authored unit and building models live under `assets/art-slice/`. Their source
+The default colony GLBs live under `assets/kit/european/`, generated from
+`tools/art/toy_kit/frontier.py` for buildings and defenses. Legacy shared units
+and props still use `european.py`. The culture registry selects builders without
+changing simulation IDs.
+
+Additional authored unit and building models live under `assets/art-slice/`. Their source
 and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.
@@ -302,3 +313,81 @@ When you add a system:
 5. Define failure behavior.
 6. Add a committed check.
 7. Update this document if module ownership changes.
+
+## Reusable map-kit prototype
+
+See `docs/reusable-map-kit.md`. `src/map-kit.js` owns piece/prefab contracts,
+rotation, connections and authored-layout collision/elevation compilation.
+`src/fortress-plan.js` composes Black Vale site0; `map-kit.html` and
+`map-kit-page.js` provide local placement, route testing and JSON roundtrip.
+Campaign loading of workbench exports is not implemented.
+
+### Mission arrival presentation
+
+`main.js` owns the optional fresh-solo campaign arrival and its camera distance.
+`ui.js` renders mission identity and the skip action. The four-second sequence
+blocks local simulation advancement and commands, never multiplayer startup.
+It is not serialized. Resumed games and reduced-motion users bypass it. The
+existing loading screen remains separate and clears on both success and failure.
+
+## Chapter campaign (2026-11-22)
+
+`src/chapter.js` owns cosmetic normalization, five-city presentation and
+leader unlock thresholds. `player_stats.campaign_cleared` remains authority;
+there is no second conquest ledger. Auth metadata stores chapter name, colors,
+insignia and founder ID, plus companion identity links on existing character
+records. Capacity is fifteen: eight legacy characters plus seven companions.
+Recruitment uses the existing server character-registration/economy path;
+repeat recruitment selects the same deterministic per-account character ID.
+Founder models remain customizable; named companions use their named hero kit.
+No new simulation/snapshot format, database migration or reward grant path.
+
+Chapter/founder/recruit writes suspend older auth hydration while in flight;
+otherwise USER_UPDATED can replace a founder just created locally with the
+previous roster. A behavioral regression and live create/reload smoke cover
+this race. Campaign setup binds the chosen roster leader and announces changes
+through the existing multiplayer hero-pick path when switching modes.
+
+## Multi-ability runtime (roster expansion)
+
+`hero-abilities.js` owns the six-slot/cooldown compatibility contract.
+`hero-kits.js` owns authored core kits, registered by `config.js`.
+`hero-spells.js` owns deterministic targeted spell execution and pending effects.
+`game.js` integrates updates, snapshots, upgrades and attack hooks; no DOM timer
+may resolve a spell. Legacy single-ability leaders retain their Q action.
+`lockstep-hash.js` covers cooldowns, mana, charges, pending effects and hit history.
+Protocol 14 rejects older rooms; snapshot 13 is written and snapshot 12 can be
+read with empty additional slots. Old clients reject the new snapshot version.
+
+Point/enemy spells enter a target-selection mode. Pointer selection emits the
+same cast command as other input; Escape cancels before spending resources.
+The sim checks range, visibility for unit targeting, mana and cooldown before
+accepting a cast. The host sanitizes guest slots and target coordinates.
+
+### Persistent friend parties
+
+`src/friend-party.js` owns the guarded Supabase RPC client and invite parsing.
+`src/friend-party-ui.js` owns the compact chapter modal and bounded-lifetime
+refresh loop. Closing it stops polling. `src/main.js` connects its actions to
+existing private-room creation/joining. The party never simulates combat.
+
+Chapter -> private party -> existing room -> Ready -> WebRTC siege -> same party.
+A failed party request leaves the old room system available. A room that finishes
+or becomes stale is no longer offered as the next match; membership survives.
+
+## Hero hit feedback
+
+`src/hit-feedback.js` draws up to 24 short-lived hero damage labels. Gold `!` labels
+identify the existing attack critical roll. Shot metadata reports primary target
+HP loss after mitigation, before follow-up ability damage. It does not add RNG
+rolls, change combat math or pause simulation. Fog hides labels; expired labels
+and match teardown dispose textures/materials. Spell/range indicators and HUD
+layout remain unchanged. This replaces only the hit/crit portion of PR #124.
+
+## Music and ambience
+
+`src/audio-beds.js` owns the lazy-loaded CC0 score salvaged from PR #132.
+`AudioSys` shares its context/master limiter with beds. Existing music and master
+settings control them; combat SFX remain procedural and hero-local. Base warnings
+remain global and duck beds. Failed tracks keep procedural fallback; late loads
+cannot switch the current scene. Source records: `assets/audio/cc0/LICENSES.md`.

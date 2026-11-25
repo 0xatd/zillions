@@ -34,7 +34,7 @@ const profile = await mkdtemp(join(tmpdir(), 'zillions-browser-'));
 const browser = spawn(chrome, [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
-  '--window-size=1440,1000',
+  '--window-size=1440,1000', '--autoplay-policy=no-user-gesture-required',
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, `http://127.0.0.1:${serverPort}/`,
 ], { stdio: 'ignore' });
 
@@ -100,20 +100,20 @@ try {
     create: !!document.querySelector('#m-create-character'),
   })`);
   assert.equal(JSON.parse(entryDom).offline, true, `entry controls missing: ${entryDom}`);
-  assert.equal(await evaluate(`(() => {
+  assert.equal(await evaluate(`(async () => {
     const app = window.__app;
-    const offline = document.querySelector('#a-offline');
-    const create = document.querySelector('#m-create-character');
-    const name = document.querySelector('#creator-name');
-    const form = document.querySelector('#character-create-form');
-    offline.click();
-    create.click();
-    name.value = 'Journey Test';
-    form.requestSubmit();
+    document.querySelector('#a-offline').click();
+    await app._saveChapter({name:'Journey Chapter',color:'cobalt',emblem:'star'});
+    const founderScreen = !document.querySelector('#screen-character-create').classList.contains('hidden');
+    document.querySelector('#creator-cancel').click();
+    const canResumeFounder = [...document.querySelectorAll('#character-list button')].some(b=>b.textContent==='CREATE YOUR FOUNDER');
+    app.ui.showCharacterCreator();
+    await app._createMmoCharacter({name:'Journey Test',appearance:'iron',raceKey:'human'});
     const selected = !document.querySelector('#screen-main').classList.contains('hidden');
-    document.querySelector('#m-enter-world').click();
-    return selected && !document.querySelector('#screen-setup').classList.contains('hidden') && !app.ow && !app.owMap;
-  })()`), true, 'new account must create a character, return to Character Select, and deploy straight to the siege missions');
+    document.querySelector('#chapter-next').click();
+    const choices=[...document.querySelectorAll('#herorow .herocard')].filter(c=>!c.classList.contains('hidden'));
+    return founderScreen && canResumeFounder && selected && !document.querySelector('#screen-setup').classList.contains('hidden') && choices.length===1 && choices[0].querySelector('b').textContent==='Journey Test' && !app.ow && !app.owMap;
+  })()`), true, 'new account creates a chapter and founder, then deploys straight to its first conquest');
   await evaluate(`(() => {
     const app = window.__app;
     const character = app.profile.mmoCharacters[0];
@@ -128,71 +128,21 @@ try {
     await delay(80);
     const geometry = JSON.parse(await evaluate(`(() => {
       const a = document.querySelector('#first-hour-guide').getBoundingClientRect();
-      const b = document.querySelector('.character-roster').getBoundingClientRect();
-      return JSON.stringify({ overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
-        guide: { left:a.left,right:a.right,top:a.top,bottom:a.bottom }, roster: { left:b.left,right:b.right,top:b.top,bottom:b.bottom } });
+      const controls = [...document.querySelectorAll('#character-list, .character-roster > button, .character-footer')].map(e => e.getBoundingClientRect());
+      return JSON.stringify({ overlap: controls.some(b => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top),
+        guide: { left:a.left,right:a.right,top:a.top,bottom:a.bottom } });
     })()`));
-    assert.equal(geometry.overlap, false, `first-hour guide overlaps roster at ${viewport.width}x${viewport.height}: ${JSON.stringify(geometry)}`);
+    assert.equal(geometry.overlap, false, `first-hour guide overlaps usable controls at ${viewport.width}x${viewport.height}: ${JSON.stringify(geometry)}`);
   }
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
-    const app = window.__app;
-    const character = app.profile.mmoCharacters[0];
-    const originalDirty = app.ui.cb.onProfileDirty;
-    const originalAuthority = app.ui.cb.useAuthoritativeEconomy;
-    const originalCampaign = app.ui.cb.onCampaignMap;
-    const original = {
-      items: structuredClone(character.items),
-      equipment: structuredClone(character.equipment),
-      hadDismissal: Object.prototype.hasOwnProperty.call(character, 'firstHourGuideDismissed'),
-      dismissal: character.firstHourGuideDismissed,
-    };
-    let result = false;
-    try {
-      character.firstHourGuideDismissed = false;
-      character.items = [];
-      character.equipment = {};
-      app.ui.setProfile(app.profile);
-      app.ui._showScreen('main');
-      const guide = document.querySelector('#first-hour-guide');
-      const action = guide.querySelector('[data-guide-action]');
-      const skip = guide.querySelector('[data-guide-skip]');
-      let campaignOpened = 0;
-      app.ui.cb.onCampaignMap = () => { campaignOpened++; };
-      const offlineWired = !guide.classList.contains('hidden') && action?.textContent === 'DEPLOY'
-        && /sign in/i.test(guide.textContent) && !!skip;
-      action.click();
-      const offlineRouted = campaignOpened === 1;
-      app.ui.cb.useAuthoritativeEconomy = () => true;
-      app.ui._showScreen('main');
-      app.ui.setProfile(app.profile);
-      const onlineAction = document.querySelector('#first-hour-guide [data-guide-action]');
-      const onlineWired = onlineAction?.textContent === 'OPEN MARKET';
-      onlineAction.click();
-      const routed = !document.querySelector('#screen-character-sheet').classList.contains('hidden')
-        && document.querySelector('#sheet-tab-shop').classList.contains('sel');
-      let dirtied = 0;
-      app.ui.cb.onProfileDirty = () => { dirtied++; };
-      app.ui._showScreen('main');
-      app.ui.setProfile(app.profile);
-      document.querySelector('#first-hour-guide [data-guide-skip]').click();
-      const skipped = character.firstHourGuideDismissed === true
-        && document.querySelector('#first-hour-guide').classList.contains('hidden') && dirtied === 1;
-      result = offlineWired && offlineRouted && onlineWired && routed && skipped;
-    } finally {
-      app.ui.cb.onProfileDirty = originalDirty;
-      app.ui.cb.useAuthoritativeEconomy = originalAuthority;
-      app.ui.cb.onCampaignMap = originalCampaign;
-      character.items = original.items;
-      character.equipment = original.equipment;
-      if (original.hadDismissal) character.firstHourGuideDismissed = original.dismissal;
-      else delete character.firstHourGuideDismissed;
-      app.ui.setProfile(app.profile);
-      if (!original.hadDismissal) delete character.firstHourGuideDismissed;
-      app.ui.hideOverlay();
-    }
-    return result;
-  })()`), true, 'first-deployment guide must route offline players to a mission, signed-in players to Market, and persist its per-character skip');
+    const app=window.__app; app.ui.setProfile(app.profile); app.ui._showScreen('main');
+    const noShoppingGate=document.querySelector('#first-hour-guide').classList.contains('hidden');
+    document.querySelector('#chapter-services [data-service="shop"]').click();
+    const armoryOpen=!document.querySelector('#screen-character-sheet').classList.contains('hidden') && document.querySelector('#sheet-tab-shop').classList.contains('sel');
+    document.querySelector('#sheet-close').click();
+    return noShoppingGate && armoryOpen && !document.querySelector('#chapter-next').disabled;
+  })()`), true, 'chapter permits immediate deployment and optional quartermaster access');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     const noWorld = !document.querySelector('[id^="ow-"]') && !document.querySelector('#living-world-map') && !document.querySelector('#screen-world-menu');
@@ -218,12 +168,33 @@ try {
     return !!live && liveEmpty && maps.length >= 6 && playable && !document.querySelector('#screen-setup').classList.contains('hidden');
   })()`), true, 'Custom Games must separate live rooms from a playable Arcade catalog');
   assert.equal(await evaluate(`(() => {
-    const avatar = document.querySelector('#character-avatar');
-    const loadout = document.querySelectorAll('#character-loadout span');
-    return !!avatar && avatar.dataset.class === 'vanguard'
-      && document.querySelectorAll('#character-avatar .avatar-body > span').length >= 7
-      && loadout.length === 4;
-  })()`), true, 'Character Select must stage a full character silhouette and visible loadout, not only a class icon');
+    const app = window.__app;
+    app.ui._showScreen('main');
+    app._renderCharacterPreview(0);
+    const preview = app.characterPreviews.get('roster-preview-canvas');
+    const canvas = document.querySelector('#roster-preview-canvas');
+    const name = document.querySelector('#character-name');
+    const model = preview?.model;
+    return !!model && model.userData.visualState?.role === 'frontline'
+      && preview.renderer.info.render.calls > 0 && canvas.clientWidth >= 100 && canvas.clientHeight >= 100
+      && !canvas.classList.contains('hidden') && name.textContent.includes('Journey Test')
+      && !document.querySelector('#m-enter-world').disabled;
+  })()`), true, 'Character Select must render the selected gameplay model with its name and usable Deploy action');
+  // Deployment and navigation must be visible, not merely free of overflow.
+  for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await evaluate(`(() => {
+      window.__app.ui._showScreen('main');
+      const screen = document.querySelector('#screen-main');
+      screen.scrollTop = 0;
+      return ['#chapter-map', '#chapter-next'].every(selector => {
+        const button = document.querySelector(selector), r = button.getBoundingClientRect();
+        return !button.disabled && r.width > 30 && r.height >= 28 && r.top >= 0
+          && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+      });
+    })()`), true, `Chapter map and primary deployment must fit above the fold at ${width}x${height}`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
     const room = { join_code: 'ABC123', visibility: 'public', mode: 'campaign', level: 1, difficulty: 'normal', max_players: 4 };
@@ -342,6 +313,37 @@ try {
       head: 'sentinel_helm', chest: 'powered_shell', hands: 'siege_gauntlets', legs: 'bulwark_greaves', boots: 'phase_boots',
     }, -.3);
   }
+  assert.equal(await evaluate(`(async () => {
+    const {Game}=await import('/src/game.js');
+    const {TerrainField}=await import('/src/terrain.js');
+    const {levelById}=await import('/src/config.js');
+    const level=levelById(1),map=new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests});
+    const game=new Game(map,'normal','lina',null,1);
+    const ui=window.__app.ui;
+    ui.initHUD(game,0,{name:'Wrong founder',classKey:'vanguard',proxyHero:'scott'});
+    const correctName=document.querySelector('#a-name').textContent==='Lina';
+    ui.update(game,0,{controlMode:'fight'});
+    ui._renderAbilitiesOverview({classKey:'arcanist',proxyHero:'lina'});
+    const sheet=document.querySelector('#sheet-panel-abilities').textContent;
+    return correctName && ['Dragon Slave','Light Strike Array','Laguna Blade','Fiery Soul'].every(name=>sheet.includes(name)) && !sheet.includes('Unassigned');
+  })()`), true, 'battle identity must match the actual hero and the ability sheet must show its complete core kit');
+  // Check actual spell buttons, not just the command bar's bounding box.
+  for (const [width,height] of [[1366,768],[390,844],[844,390]]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<600});
+    const bounds=await evaluate(`(async()=>{
+      const {Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{levelById}=await import('/src/config.js');
+      const l=levelById(1),bad=[];
+      for(const key of ['lina','sniper','axe','sven']) {
+        const g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal',key,null,1);g.foundCity(0);
+        __app.ui.initHUD(g,0);__app.ui.update(g,0,{controlMode:'fight'});
+        for(const e of document.querySelectorAll('#bigaction,#ability-slots button')) {
+          const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)bad.push({key,slot:e.dataset.abilitySlot,rect:r.toJSON()});
+        }
+      }
+      return bad;
+    })()`);
+    assert.deepEqual(bounds,[],`spell controls must fit ${width}x${height}`);
+  }
   // Runs last: showEnd replaces the overlay markup, as a finished match does.
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
@@ -357,6 +359,38 @@ try {
     const back = document.querySelector('#b-restart').textContent === 'Return to missions';
     return pending && granted && rejected && back;
   })()`), true, 'the end screen must show pending, then exactly the server-granted rewards (or the rejection)');
+  assert.equal(await evaluate(`(async () => {
+    const {HitFeedback}=await import('/src/hit-feedback.js');
+    const feedback=new HitFeedback(__app.scene);
+    for(let i=0;i<40;i++)feedback.show({heroKey:'lina',tx:20,tz:20,damage:57,crit:!!(i%2)});
+    const capped=feedback.active.length===24;
+    feedback.update(.1,()=>false);const fogCleared=feedback.active.length===0;
+    feedback.show({heroKey:'lina',tx:20,tz:20,damage:57,crit:true});feedback.update(.7);
+    return capped && fogCleared && feedback.active.length===0;
+  })()`),true,'hit labels stay bounded, disappear under fog and expire');
+  assert.equal(await evaluate(`(async () => {
+    const app=__app;app.renderer.setAnimationLoop(null);
+    const {AudioSys}=await import('/src/audio.js');const audio=new AudioSys();
+    audio.setMuted(true);audio.setVolume(.4);audio.setMusicVolume(.3);audio.init();
+    if(audio.master.gain.value!==0)return false;
+    audio.setMuted(false);audio.updateScene({});
+    const wait=async(fn)=>{for(let i=0;i<150;i++){if(fn())return;await new Promise(r=>setTimeout(r,100));}throw Error('audio timeout');};
+    await wait(()=>audio.beds.slots.music?.id==='menu');
+    const settings=Math.abs(audio.master.gain.value-.22)<.0001 && Math.abs(audio.beds.output.gain.value-.3)<.0001 && audio.musicGain.gain.value===0;
+    const realFetch=window.fetch;
+    try {
+      window.fetch=async(url,...args)=>{
+        if(String(url).endsWith('music/select.ogg'))throw Error('intentional missing-track fixture');
+        if(String(url).endsWith('music/build.ogg'))await new Promise(r=>setTimeout(r,500));
+        return realFetch(url,...args);
+      };
+      audio.updateScene({select:true});await wait(()=>audio.beds.failed.has('music/select'));
+      const fallback=audio.musicGain.gain.value>0;
+      audio.updateScene({inMatch:true,phase:'found',biome:'fen'});audio.updateScene({});
+      await wait(()=>audio.beds.buffers.has('music/build'));
+      return settings && fallback && audio.beds.slots.music.id==='menu' && audio.beds.slots.ambient===null;
+    } finally {window.fetch=realFetch;audio.beds.dispose();clearInterval(audio.musicTimer);await audio.ctx.close();}
+  })()`),true,'real audio settings, missing-file fallback and stale-load protection');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

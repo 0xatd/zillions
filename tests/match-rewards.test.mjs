@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTY, THREAT, levelById } from '../src/config.js';
+import { DIFFICULTY, THREAT, levelById, threatClockMult } from '../src/config.js';
 import { MATCH_REPORT_VERSION, maxThreatLevel, validateMatchReport, verifyLootKey } from '../src/match-rewards.js';
 import { scatteredLootKeys } from '../src/loot-table.js';
 import { Game } from '../src/game.js';
@@ -17,7 +18,7 @@ const report = (over = {}) => ({
 function simulatedThreat({ seconds, liveNests, diff = 'normal', captures = 0, razes = 0 }) {
   let threat = 0;
   for (let t = 0; t < seconds; t++) {
-    threat = Math.min(THREAT.max, threat + (THREAT.perSecond + THREAT.perNest * Math.min(3, liveNests)) * 1 * DIFFICULTY[diff].mult);
+    threat = Math.min(THREAT.max, threat + (THREAT.perSecond + THREAT.perNest * Math.min(3, liveNests)) * 1 * threatClockMult(DIFFICULTY[diff].mult));
   }
   threat = Math.min(THREAT.max, threat + captures * THREAT.perCapture + razes * THREAT.perNestRazed);
   return Math.max(1, Math.floor(threat) + 1);
@@ -73,4 +74,18 @@ test('the scatter does not depend on the party or culture (so one table serves c
   const table = [...scatteredLootKeys({ levelId: 1, mode: 'campaign', difficulty: 'normal', seed: 4242 })].sort();
   assert.deepEqual(keys(['scott', 'alexander', 'danny', 'turtle']), table);
   assert.deepEqual(keys('aaron', 'asian'), table);
+});
+
+// Captured from production d5d0bd9, not regenerated from the candidate.
+test('balance preserves outstanding production loot proofs', () => {
+  const fixtures = JSON.parse(readFileSync(new URL('./loot-prebalance-fixture.json', import.meta.url)));
+  for (const { keys, ...setup } of fixtures) {
+    const table = scatteredLootKeys(setup);
+    assert.deepEqual([...table].sort(), keys, `${setup.levelId}/${setup.difficulty}`);
+    for (const key of keys) assert.equal(verifyLootKey(key, { ...setup, lootTable: table }), true);
+  }
+});
+test('pending prebalance Brutal reports retain their original threat envelope', () => {
+  assert.equal(validateMatchReport(report({ difficulty: 'brutal', durationSeconds: 600, threatLevel: 11 })).ok, true);
+  assert.equal(validateMatchReport(report({ difficulty: 'brutal', durationSeconds: 600, threatLevel: 30 })).ok, false);
 });

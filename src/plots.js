@@ -30,6 +30,8 @@
 // lockstep match generates the identical city.
 import { TILE, CITY_WALL_R } from './config.js';
 import { makeRNG } from './utils.js';
+import { composeFortress } from './fortress-plan.js';
+import { colonyRoads } from './colony-roads.js';
 import { SITE_FORMS, LEDGE, rimForm, rimRadius, rimOpen, cityFacing as siteFacing } from './site-plan.js';
 
 const TAU = Math.PI * 2;
@@ -203,6 +205,9 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // always opened through whatever the land put there, so a site can never be
   // sealed in with no way to sortie — everything else is left to the ground.
   const cutApproach = (t) => {
+    // Cliff sites already have graded switchbacks. Never bulldoze a second,
+    // straight route through their retaining rock when founding the colony.
+    if (form?.cliffs && anchor?.switchbacks?.length) return;
     const world = t + facing;
     for (let d = -3; d <= 5; d += 0.5) {
       const r = radiusAt(t) + d;
@@ -232,7 +237,9 @@ export function generatePlots(map, anchor = null, opts = {}) {
     if (map.tiles[k] === TILE.GRASS || map.tiles[k] === TILE.PATH) map.tiles[k] = TILE.PATH;
     taken.add(k);
   };
+  const streets = [];
   const markPathLine = (x0, z0, x1, z1) => {
+    streets.push([[x0 + 0.5, z0 + 0.5], [x1 + 0.5, z1 + 0.5]]);
     const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) * 2));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -320,6 +327,16 @@ export function generatePlots(map, anchor = null, opts = {}) {
     }
     if (ringTiles[0]) walkTo(ringTiles[0].x, ringTiles[0].z, ringTiles[0].ang);
 
+    // Preserve secondary war-road crossings as side entrances rather
+    // than sealing them behind an arbitrary two-gate template.
+    if(role==='outer') {
+      gateAngles=[...gateAngles];
+      for(const road of map.roadPaths || [])for(const [x,z] of road.pts) {
+        if(Math.abs(Math.hypot(x-ox,z-oz)-radiusFn(0))>1)continue;
+        const angle=Math.atan2(z-oz,x-ox)-spin;
+        if(gateAngles.every(a=>angDiff(a,angle)>.8))gateAngles.push(angle);
+      }
+    }
     // Each gate angle owns the stretch of ring nearest to it.
     const groups = gateAngles.map(() => []);
     for (const tile of ringTiles) {
@@ -331,6 +348,20 @@ export function generatePlots(map, anchor = null, opts = {}) {
       groups[best].push(tile);
     }
 
+    // Outer gates must actually connect the courtyard to open country.
+    // The desired compass angle alone can put an arch against a cliff.
+    const outerGateOpen = tile => {
+      const arch = new Set(ringTiles.filter(q=>Math.hypot(q.x-tile.x,q.z-tile.z)<=1.5).map(q=>q.z*N+q.x));
+      const visited=new Set(),queue=[[ox,oz]];
+      for(let i=0;i<queue.length;i++) {
+        const [x,z]=queue[i],k=z*N+x;
+        if(visited.has(k)||!map.inBounds(x,z)||!map.isWalkable(x,z)||(seen.has(k)&&!arch.has(k)))continue;
+        visited.add(k);
+        if(Math.hypot(x-ox,z-oz)>radiusFn(0)+3)return true;
+        for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]])queue.push([x+dx,z+dz]);
+      }
+      return false;
+    };
     const made = [];
     let natural = 0;
     gateAngles.forEach((t, i) => {
@@ -344,9 +375,14 @@ export function generatePlots(map, anchor = null, opts = {}) {
       // The gate goes on the tile nearest the plan's gate angle — but only if
       // there is enough open wall here to hang a gatehouse on.
       let gateTile = null;
-      if (open.length >= 4) {
+      // A narrow graded ramp is still an entrance. Requiring four wall
+      // tiles sealed Black Vale's two-tile postern and invented a third gate.
+      const rampTiles = role === 'rampart' && anchor?.switchbacks?.length
+        ? open.filter(tile => map.swRoad?.[tile.z * N + tile.x]) : [];
+      if (open.length >= 4 || rampTiles.length) {
         let bd = Infinity;
-        for (const tile of open) {
+        for (const tile of (rampTiles.length ? rampTiles : open)) {
+          if(role==='outer'&&!outerGateOpen(tile))continue;
           const d = angDiff(tile.ang, t);
           if (d < bd) { bd = d; gateTile = tile; }
         }
@@ -377,7 +413,14 @@ export function generatePlots(map, anchor = null, opts = {}) {
       plots.push(p);
       if (gateTile) made.push({ gate: p.gate, ang: world, t: mid.ang, plot: p });
     });
-    return { gates: made, natural, length: ringTiles.length };
+    const owned = new Map(plots.filter(p => p.kind === 'wall' && p.role === role)
+      .flatMap(p => p.tiles.map(([x,z]) => [z*N+x, p])));
+    const perimeter = ringTiles.map(({x,z}) => {
+      const p = owned.get(z*N+x);
+      const gate = p?.arch?.some(([gx,gz]) => gx===x && gz===z);
+      return {x,z,kind:p ? (gate ? 'gate' : 'wall') : 'terrain',plotId:p?.id ?? null};
+    });
+    return { gates: made, natural, length: ringTiles.length, perimeter };
   };
 
   const gateAngles = [...planGates];
@@ -430,6 +473,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
     }
     for (const g of gates) {
+      if (form?.cliffs && anchor?.switchbacks?.length) continue;
       const gx = g.gate[0] + 0.5, gz = g.gate[1] + 0.5;
       const len = Math.hypot(gx - cx, gz - cz) || 1;
       const ux = (gx - cx) / len, uz = (gz - cz) / len;
@@ -621,12 +665,49 @@ export function generatePlots(map, anchor = null, opts = {}) {
     return camp;
   };
 
+  // Gate defenders are placed against their own entrance, not by the generic
+  // spiral search (which could drift a tower six tiles into another district).
+  // Keep the aperture and approach road reserved; a tower may abut a wall,
+  // but its entire footprint must remain on the interior's buildable ground.
+  const addGateTower = (g, side) => {
+    if (!interior) computeInterior();
+    const gx = g.gate[0] + .5, gz = g.gate[1] + .5;
+    const ix = -Math.cos(g.ang), iz = -Math.sin(g.ang);
+    const candidates = [];
+    for (let z = Math.floor(gz) - 6; z <= gz + 5; z++) {
+      for (let x = Math.floor(gx) - 6; x <= gx + 5; x++) {
+        const dx = x + 1 - gx, dz = z + 1 - gz;
+        const back = dx * ix + dz * iz;
+        const flank = (-dx * iz + dz * ix) * side;
+        const distance = Math.hypot(dx, dz);
+        if (back < .5 || flank < 1.8 || distance > 5.5 || !free(x, z, 2)) continue;
+        if (![0, 1].every(oz => [0, 1].every(ox => interior[(z + oz) * N + x + ox]))) continue;
+        candidates.push({ x, z, score: distance + Math.abs(back - 1.5) * .35 });
+      }
+    }
+    candidates.sort((a, b) => a.score - b.score || a.z - b.z || a.x - b.x);
+    const chosen = candidates[0];
+    const defense = { gateId: g.plot.id, side };
+    if (chosen) return add('tower', chosen.x, chosen.z, 2, { gateDefenses: [defense] }, 0);
+    // Adjacent wetland gates can share the bastion between them. Keep that
+    // explicit instead of inventing a distant defender or blocking the road.
+    const shared = plots.filter(p => p.kind === 'tower' && p.gateDefenses?.length)
+      .filter(p => {
+        const dx = p.cx - gx, dz = p.cz - gz;
+        return Math.hypot(dx, dz) <= 6 && (-dx * iz + dz * ix) * side >= 1.8;
+      }).sort((a, b) => Math.hypot(a.cx-gx,a.cz-gz)-Math.hypot(b.cx-gx,b.cz-gz))[0];
+    if (shared) { shared.gateDefenses.push(defense); return shared; }
+    return (rim ? addInside : add)('tower', ...gateFlank(g, side), 2, { gateDefenses: [defense] }, 6);
+  };
+
   // --- Every entrance is a WARD. Towers flanking the gate, and a muster camp
   // inside it: the squads that hold this gate and the squads that push out of
   // it start here, not on the other side of town. Mycenae's gate bastion, a
   // hillfort's guarded passage, a bailey's barracks — same idea, same reason.
+  // Reserve every gate's defenders before a neighbouring ward's camp can
+  // consume the tight space between two adjacent entrances.
+  for (const g of gates) for (const side of [-1, 1]) addGateTower(g, side);
   gates.forEach((g, i) => {
-    for (const side of [-1, 1]) (rim ? addInside : add)('tower', ...gateFlank(g, side), 2, {}, 6);
     const camp = addCamp(CAMP_KINDS[i % CAMP_KINDS.length], ...gateFlank(g, i % 2 ? 1 : -1, 6.5, 4.2));
     if (camp) { g.camp = camp; g.plot.ward = camp.kind; }
   });
@@ -690,6 +771,7 @@ export function generatePlots(map, anchor = null, opts = {}) {
   // the city gate. Bought in two arcs, so it is paid for the same way a city
   // wall is: gate first, ring second. The wild-choke picker survives only as
   // a fallback for maps that shipped no road anchors at all.
+  const outerPerimeters = [];
   const keepAnchors = pickOutpostKeeps(map, cx, cz, reach);
   for (const a of keepAnchors) {
     const KR = 6.4;
@@ -706,14 +788,26 @@ export function generatePlots(map, anchor = null, opts = {}) {
       }
     }
     const ring = traceRing(() => KR, [0, Math.PI],
-      { role: 'outer', useTerrain: false, ox, oz, spin: a.gateAng });
+      { role: 'outer', useTerrain: true, ox, oz, spin: a.gateAng });
+    outerPerimeters.push({kind:'fort',cx:ox,cz:oz,radius:KR,tiles:ring.perimeter});
     for (const p of plots) {
       if (p.role === 'outer' && !p.keep) { p.keep = [ox, oz]; p.wild = !!a.wild; }
     }
+    for (const g of ring.gates) markPathLine(ox,oz,g.gate[0],g.gate[1]);
     for (const g of ring.gates) {
-      // The tower stands just inside its gate, covering the road through it.
-      add('tower', Math.round(ox + Math.cos(g.ang) * (KR - 3) - 1),
-        Math.round(oz + Math.sin(g.ang) * (KR - 3) - 1), 2, {}, 2);
+      // Side bastion, not a tower planted in the gate's central transit lane.
+      const gx=g.gate[0]+.5,gz=g.gate[1]+.5;
+      const ix=(ox-gx)/Math.hypot(ox-gx,oz-gz), iz=(oz-gz)/Math.hypot(ox-gx,oz-gz);
+      const candidates=[];
+      for(let z=oz-6;z<=oz+5;z++)for(let x=ox-6;x<=ox+5;x++) {
+        const dx=x+1-gx,dz=z+1-gz,back=dx*ix+dz*iz,flank=-dx*iz+dz*ix;
+        if(back<.5 || Math.abs(flank)<2 || Math.hypot(dx,dz)>5 || !free(x,z,2))continue;
+        if(![0,1].every(dz=>[0,1].every(dx=>Math.hypot(x+dx+.5-ox,z+dz+.5-oz)<KR-.5)))continue;
+        candidates.push({x,z,score:Math.hypot(dx,dz)+Math.abs(back-1.4)});
+      }
+      candidates.sort((a,b)=>a.score-b.score||a.z-b.z||a.x-b.x);
+      const best=candidates[0];
+      if(best)add('tower',best.x,best.z,2,{outerDefense:g.plot.id,keep:[ox,oz]},0);
     }
     // A keep is a destination, not a picture: if the flood from the city
     // cannot reach its centre, cut a causeway — a promise is a road.
@@ -810,7 +904,9 @@ export function generatePlots(map, anchor = null, opts = {}) {
     hq.plan = {
       key: plan.key, label: plan.label, blurb: plan.blurb,
       facing, reach, gates: gates.map((g) => g.ang),
+      streets,
       entrances: gates.length,
+      perimeters: [{kind:'base',cx,cz,radius:reach,tiles:rampart.perimeter}, ...outerPerimeters],
       natural: rampart.natural,
       naturalShare: rampart.length ? rampart.natural / rampart.length : 0,
       inner: !!inner,
@@ -851,11 +947,14 @@ export function generatePlots(map, anchor = null, opts = {}) {
     paintPathLine(camp.cx, camp.cz, camp.cx + Math.cos(toward) * 6, camp.cz + Math.sin(toward) * 6);
   }
 
+  composeFortress(map, plots, hq);
+
   if (rim && !form.ring && map.ledgeW) {
     computeInterior();
     raiseTerraces(map, plots, interior, { cx, cz, facing, radiusAt, seed: map.seed + (opts.siteIdx || 0) * 31 });
   }
 
+  if (hq) hq.plan.roads = colonyRoads(map, plots);
   return plots;
 }
 

@@ -3,12 +3,57 @@
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 
+## Chapter-first product decision (Alex, 2026-11-22)
+
+The persistent identity is the player's chapter: name, colors, insignia and
+server-confirmed conquests. A new player creates the chapter and a customizable
+Vanguard founder, then recruits the seven existing named heroes as companions
+through Earth victories. Each companion can lead a mission and keeps its own
+gear/XP. The chapter owns campaign territory and the shared Alloy wallet.
+The five Earth battlefields are presented as city campaigns; clearing Earth
+opens the existing procedural frontier. This is an account campaign, NOT a
+persistent shared world, politics simulator or region-worker system.
+
+The chapter map is the signed-in home. Deploy opens existing mission setup;
+Armory/Quartermaster, Forge and skills are optional between-run services, not
+mandatory NPC errands. Existing character IDs, builds and equipment are kept;
+the first existing character (or explicitly stored founder) is the founder,
+other legacy commanders remain accessible. No destructive migration. New
+companion slots are additive. First-hour shopping is no longer compulsory.
+Only server-confirmed campaign progress determines online conquests/unlocks.
+Cosmetic chapter metadata cannot award victories, currency or items.
+
+This decision supersedes older character-first menu guidance below. Keep the
+siege, co-op, reward and economy invariants unchanged.
+
+## Hero roster expansion (authorized, implementation in progress)
+
+The target is the full Dota-reference roster, not seven renamed kits. The
+127-entry reference inventory in `docs/roster/coverage.json` tracks coverage;
+only actual implemented kits belong in selection. Academy recruitment and
+exploration are distinct acquisition routes. Exploration can discover humans
+and nonhumans. Chapter recruitment culture may exclude new nonhuman recruits;
+changing culture must not delete already-owned companions or their gear.
+Numbered/prime variants are requested but not implemented.
+
+Core-kit implementation is not exact patch parity. Missing talents, facets,
+item-granted abilities and innate mechanics must remain explicit in the coverage
+report. Use our own visuals, not extracted Dota assets. New kit commands and
+all their pending/cooldown/resource state must survive snapshot and lockstep.
+Q/E/R are active slots; the rebindable secondary-bar action exposes three more.
+
 ## Target
 
 Zillions is a browser siege game. The living world (overworld, planet hubs,
 galaxy map, Orbital Lifts, parties, encounters, companies, markets, and region
 workers) was removed. Do not reintroduce a persistent shared world without a
 new product decision.
+
+A new player can press Play on the title and fight as a guest stored in
+this browser. Google or an email magic link is offered to save progress
+and is not required to start. An existing signed-in account still opens
+that account's chapter. Guest play never writes player stats, match
+history, wallets, or items.
 
 The player signs in, picks a character, deploys to a mission, rides a hero,
 founds a fortified city, buys pre-planned plots with coins, and pushes the
@@ -40,8 +85,10 @@ Use continuous siege on a lane graph as the gameplay base:
   income upgrades should pay back inside a few minutes of siege.
 - No day, no night, no bell. Building is always available and never safe.
 - Income is credited automatically; ground coins come from combat and conquest.
-- Nothing repairs itself — damage and ruins are paid for with the same
-  hold-to-build verb.
+- Damage and ruins use the same hold-to-build input with distinct Repair and
+  Rebuild actions. Repair takes priority over upgrades; completing a repair
+  requires a fresh press before upgrading. Paid support infrastructure may
+  repair nearby structures; ruins still require rebuilding.
 - Threat is the clock, and every whole level makes every hive muster at once.
 - Hordes are produced by visible hive nests, continuously.
 - Living allied heroes and troops reveal the battlefield around them. Ground
@@ -329,3 +376,51 @@ Play Online or Custom Games.
 - Do not expose `assets.html` from the game screen.
 - Do not add fake room rows, fake players, fake stats, or fake account labels.
 - Update this document when the product target changes.
+
+## Perimeter and inspection clarification
+
+Main bases and fortified road outposts require one coherent terrain/wall/gate
+perimeter at every tier. Deliberately open satellite positions are not forts.
+Tower placement must protect entrances while leaving troop routes clear.
+Clicking a unit inspects it; it never grants individual-unit commands. Carried
+items must be readable by click/tap, not hover alone.
+
+## Builder orders
+
+A visible shared colony crew can carry out Maintain, Develop, Expand, Fortify,
+Prosper or Mobilize orders. Host-controlled policy, pause and a protected gold
+reserve replace individual worker micro. Manual construction remains available
+and takes precedence. The crew uses existing planned plots and paid actions;
+it does not claim territory, fight or create a separate economy. See
+[Builder orders](builder-orders.md) for spending, specialisations and recovery.
+## Hero-led combat controls
+
+Inspection remains read-only until the player explicitly chooses **Focus
+attacks** in an enemy's details. Focus only prioritizes that enemy for the local
+hero while it remains within weapon range and personal vision (19 tiles).
+It does not move the hero or command troops. **Clear attack focus** returns to
+automatic targeting. Death or lost range clears focus automatically.
+
+Spitters telegraph an interruptible acid impact at a fixed ground position
+before damaging units; brutes wind up a short ground smash. Moving out of the
+ring or stunning/killing the attacker avoids the pending strike. The nearest
+impact victim takes full damage; other victims share a splash budget of 25%
+of that hit, so crowded autonomous troops do not multiply its damage. Existing
+spitter attacks against structures retain their siege behavior. Warning rings
+come from pending simulation state, so pause, saves and Watch preserve them.
+
+Nearby living heroes already share XP from allied kills; distant heroes do not
+receive remote kill XP. Gold remains collectible on the ground, and signed-in
+progression remains server-owned. There is no last-hit requirement or new
+client-side reward authority.
+
+## Friend groups — authorized 2026-11-23
+
+A persistent private party coordinates up to four friends between existing
+sieges. It is not a living world or shared combat server. Invite links/codes,
+leader handoff, removal and another private room are in scope. The chapter's
+selected founder/companion remains the player's leader; the party has no legacy
+seven-hero list or duplicate Ready screen. Existing rooms still enforce seats,
+Ready, campaign eligibility, reconnect and server-owned rewards. Party chat,
+public profiles, ally revival and new social blocking systems are not in this
+release. Existing lobby friends/chat remain available.

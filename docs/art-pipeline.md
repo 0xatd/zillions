@@ -67,3 +67,36 @@ The first slice proves the authored-model pipeline and the visual language.
   only and do not change deterministic simulation state.
 - Destroyed shells, baked skeletal clips, and texture-atlas work remain
   expansion gates. The contract defines them now so later assets do not drift.
+
+## Landscape review captures
+
+Review `src/landscape-art.js` in the actual campaign renderer, not the building
+asset gallery. Use the same level, seed, founded site, built plots, camera,
+viewport and quality for before/after captures. Inspect all five authored
+biomes when changing shared materials.
+
+On a software-rendered review host, stop the animation loop between captures.
+Advance a complete frame after assets load and after moving the camera; finish
+the WebGL work before taking the image. A time delay alone does not prove the
+image reflects the requested state. Include shoreline, built-base, ramp,
+phone landscape, Low quality and an active battle. Keep fog of war enabled.
+
+Three.js resets render counters after each render call. To measure the whole
+frame, disable `renderer.info.autoReset`, reset immediately before the frame,
+and record the counters after the frame. Include shadows and postprocessing
+consistently on both sides. Software-host timing is not a hardware GPU FPS
+measurement. Retain the capture script and its scene settings with the images.
+
+## Default expedition kit (2026-11-21)
+
+`tools/art/toy_kit/frontier.py` owns default human buildings and defenses.
+`cultures.py` selects it while `european.py` retains shared unit/prop builders
+and legacy support for other culture imports. Build with:
+
+```bash
+blender --background --python tools/art/toy_kit/build.py -- --culture european
+```
+
+Do not rename the `european` asset IDs or simulation culture key as an art edit.
+Runtime `armor` material supplies quiet wear, not masonry/shingle texture.
+Changed assets still use body/glow and existing turret/rotor/core bindings.

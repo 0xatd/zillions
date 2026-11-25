@@ -13,6 +13,7 @@
 // Presentation only: nothing here touches simulation state. Variation is
 // keyed off plot ids and tile coords — deterministic, so peers agree.
 import * as THREE from 'three';
+import { rampartPanels } from './rampart-art-plan.js';
 import { toyMat } from './toy-style.js';
 import { assetClone, assetPart, hasKit, kitClone, kitGeometry, kitMaterials } from './assets.js';
 import { culture, kitBuildingKey } from './cultures.js';
@@ -120,6 +121,16 @@ function merger() {
   };
   const api = {
     kit,
+    // Convex vertical prism used for clipped diagonal wall returns. Every
+    // footprint vertex stays inside the owning blocked tile.
+    footprint: (hex, points, bottom, top) => {
+      const positions=[];
+      const triangle=(a,b,c)=>positions.push(...a,...b,...c);
+      const lo=points.map(([x,z])=>[x,bottom,z]),hi=points.map(([x,z])=>[x,top,z]);
+      for(let i=1;i<points.length-1;i++){triangle(lo[0],lo[i+1],lo[i]);triangle(hi[0],hi[i],hi[i+1]);}
+      for(let i=0;i<points.length;i++){const j=(i+1)%points.length;triangle(lo[i],lo[j],hi[j]);triangle(lo[i],hi[j],hi[i]);}
+      const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.computeVertexNormals();add(geo,hex);
+    },
     box: (hex, w, h, d, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) =>
       add(new THREE.BoxGeometry(w, h, d), hex, x, y, z, rx, ry, rz),
     cyl: (hex, r1, r2, h, x = 0, y = 0, z = 0, seg = 10, rx = 0, ry = 0, rz = 0) =>
@@ -321,12 +332,25 @@ function authoredBuildingMesh(b) {
 // model per building kind and tier for the active culture. Each building gets
 // its OWN copy of the two kit materials (damage soot and construction fade are
 // per building); geometry is shared with the template.
-function kitBuildingMesh(b) {
+function kitBuildingMesh(b,ctx={}) {
   if (b.kind === 'wall') return null;
   const key = kitBuildingKey(b.kind, b.plotTier);
   if (!key || !hasKit(key)) return null;
   const model = kitClone(key);
   if (!model) return null;
+  if(ctx.fortressKit && b.kind==='hq')model.scale.set(1,1.35,1);
+  // Stable presentation variation: no RNG consumption, footprint expansion,
+  // layout changes or false building tiers. District roofs stay subordinate.
+  if(b.kind==='house'){
+    const v=((b.id||0)*17)%7;
+    model.scale.set(.94+(v%3)*.02,.94+v*.035,.94+(v%3)*.02);
+  }
+  // Doors address the actual connected street. Cardinal turns keep the
+  // authored footprint inside its square plot; no occupancy or sim edits.
+  if(ctx.frontage && ['house','farm','workshop'].includes(b.kind)){
+    const dx=ctx.frontage[0]-b.cx,dz=ctx.frontage[1]-b.cz;
+    model.rotation.y=Math.abs(dx)>Math.abs(dz)?(dx>0?Math.PI/2:-Math.PI/2):(dz>=0?0:Math.PI);
+  }
   const shared = kitMaterials();
   const body = shared.body.clone(), glow = shared.glow.clone();
   model.traverse((o) => { if (o.isMesh) o.material = o.material === shared.glow ? glow : body; });
@@ -348,7 +372,7 @@ function kitBuildingMesh(b) {
 // plot's principal gate tile and aligned with the local wall run. The other
 // arch tiles draw nothing: they are the gatehouse's open passage.
 function kitWall(b, ctx, tier, K, KG) {
-  const t = Math.min(3, Math.max(1, tier | 0));
+  const t = Math.min(3, Math.max(ctx.armoredWalls || ctx.fortressKit ? 2 : 1, tier | 0));
   const seg = kitGeometry(`wall_t${t}_seg`, 'body');
   const post = kitGeometry(`wall_t${t}_post`, 'body');
   const gate = kitGeometry(`gate_t${t}`, 'body');
@@ -361,7 +385,7 @@ function kitWall(b, ctx, tier, K, KG) {
   const isArch = (x, z) => arch.has(z * N + x);
   const shock = b.branch === 'shock', bastion = b.branch === 'bastion';
   const sy = bastion ? 1.18 : 1, sz = bastion ? 1.3 : 1;
-  const tint = 1 + (((b.x * 7 + b.z * 13) % 5) - 2) * 0.025;
+  const tint = 1; // Continuous armor runs must not alternate checkerboard tones.
   const [cx, cz] = ctx.center || [N / 2, N / 2];
   const ox = b.x + 0.5 - cx, oz = b.z + 0.5 - cz;
   // local +z (the merlon/outside face) after a yaw of ry points at
@@ -369,6 +393,37 @@ function kitWall(b, ctx, tier, K, KG) {
   const faceOut = (ry) => (Math.sin(ry) * ox + Math.cos(ry) * oz < 0 ? ry + Math.PI : ry);
   if (b.gate) {
     if (!(ctx.gateMain && ctx.gateMain.has(b.z * N + b.x))) return true;
+    const supports=ctx.gateSupports?.get(b.z*N+b.x);
+    if(supports){
+      // Jambs stand on the real solid endpoint tiles, not inside a fixed-width
+      // prefab opening. This fits skewed and stair-stepped gates too.
+      const ends=supports.filter(([x,z])=>!ctx.liveWallTiles||!wallTiles.has(z*N+x)||ctx.liveWallTiles.has(z*N+x)).map(([x,z])=>[x-b.x,z-b.z]);
+      const height=2.6+.12*t;
+      for(const [x,z] of ends){
+        K.kit(post.geometry,x,0,z,0,.94,height/(2.03+.27*t),.94,tint);
+        K.box(STEEL,.58,.38,.58,x,height+.19,z);
+        K.box(HULL,.75,.12,.75,x,height+.44,z);
+        for(const side of [-1,1]){
+          K.box(DARK,.38,1.15,.025,x,.96,z+side*.34);
+          KG.box(TRIM,.25,.09,.03,x,.45,z+side*.36);
+        }
+      }
+      if(ends.length<2)return true; // A breached abutment cannot hold a ghost canopy.
+      const [[ax,az],[bx,bz]]=ends,dx=bx-ax,dz=bz-az;
+      const len=Math.hypot(dx,dz),ry=-Math.atan2(dz,dx),x=(ax+bx)/2,z=(az+bz)/2;
+      // Entire horizontal assembly is overhead; no lintel teeth, doors or
+      // trim hang into the hero's passage. The dark recess gives real depth.
+      K.box(STEEL,len+.5,.20,.94,x,height-.10,z,0,ry);
+      K.box(HULL,len+.38,.49,.82,x,height+.245,z,0,ry);
+      K.box(HULL2,len+.66,.13,1.06,x,height+.555,z,0,ry);
+      for(const side of [-1,1]){
+        const nx=Math.sin(ry)*side,nz=Math.cos(ry)*side;
+        K.box(DARK,len*.55,.20,.025,x+nx*.424,height+.23,z+nz*.424,0,ry);
+        KG.box(GLOW,Math.min(1.4,len*.35),.065,.028,x+nx*.442,height+.25,z+nz*.442,0,ry);
+        K.box(TRIM,.52,.10,.03,x+nx*.49,height-.10,z+nz*.49,0,ry);
+      }
+      return true;
+    }
     // the local run: principal axis of the wall chain within 3 tiles
     let sxx = 0, szz = 0, sxz = 0, n = 0;
     for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
@@ -382,17 +437,13 @@ function kitWall(b, ctx, tier, K, KG) {
     if (gg) KG.kit(gg.geometry, 0, 0, 0, ry, 1, sy, 1);
     return true;
   }
-  const nbs = [];
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (has(b.x + dx, b.z + dz)) nbs.push([dx, dz]);
-  let scx = 0, scz = 0;
-  for (const [dx, dz] of nbs) { scx += dx * 0.26; scz += dz * 0.26; }
+  const {nbs,straight,center:[scx,scz],runs,diagonals}=rampartPanels(b.x,b.z,N,wallTiles);
   const sg = glowOf(`wall_t${t}_seg`);
-  for (const [dx, dz] of nbs) {
-    const ex = dx * 0.5, ez = dz * 0.5;
-    const vx = ex - scx, vz = ez - scz;
-    const len = Math.hypot(vx, vz) + 0.05;
-    const yaw = Math.atan2(vz, vx);
-    let ry = -yaw, px = scx, pz = scz;
+  for (const [[sx,sz0],[ex,ez]] of runs) {
+    const vx=ex-sx,vz=ez-sz0;
+    const len=Math.hypot(vx,vz)+.025;
+    const yaw=Math.atan2(vz,vx);
+    let ry = -yaw, px = sx, pz = sz0;
     if (Math.sin(ry) * ox + Math.cos(ry) * oz < 0) { ry += Math.PI; px = ex + (vx / (len || 1)) * 0.05; pz = ez + (vz / (len || 1)) * 0.05; }
     K.kit(seg.geometry, px, 0, pz, ry, len, sy, sz, tint);
     if (sg) KG.kit(sg.geometry, px, 0, pz, ry, len, sy, sz);
@@ -403,9 +454,18 @@ function kitWall(b, ctx, tier, K, KG) {
       }
     }
   }
+  for(const [dx,dz] of diagonals){
+    // A full-width diagonal box cuts the walkable corners. Taper each half
+    // to the shared blocked-cell corner instead; adjacent halves meet there.
+    const points=[[-dz*.20,dx*.20],[dx*.5,dz*.5],[dz*.20,-dx*.20]];
+    // Normalize clockwise XZ order so the cap faces upward.
+    if(points.reduce((sum,p,i)=>sum+p[0]*points[(i+1)%3][1]-points[(i+1)%3][0]*p[1],0)>0)points.reverse();
+    K.footprint(STEEL,points,0,.28);
+    K.footprint(HULL2,points,.28,2.03*sy);
+    K.footprint(HULL,points,2.03*sy,2.18*sy);
+  }
   const nearArch = nbs.some(([dx, dz]) => isArch(b.x + dx, b.z + dz));
-  const straight = nbs.length === 2 && nbs[0][0] === -nbs[1][0] && nbs[0][1] === -nbs[1][1];
-  const joint = nbs.length !== 2 || (((b.x * 3 + b.z * 5) % 4 + 4) % 4 === 0 && !(straight && ((b.x + b.z) & 1)));
+  const joint = !straight || (((b.x * 3 + b.z * 5) % 4 + 4) % 4 === 0 && !(straight && ((b.x + b.z) & 1)));
   if (!nbs.length || (joint && !nearArch)) {
     const run = nbs.length === 2 ? Math.atan2(nbs[0][1] - nbs[1][1], nbs[0][0] - nbs[1][0])
       : nbs.length ? Math.atan2(nbs[0][1], nbs[0][0]) : 0;
@@ -419,7 +479,7 @@ function kitWall(b, ctx, tier, K, KG) {
 }
 
 export function buildBuildingMesh(b, ctx = {}) {
-  const authored = authoredBuildingMesh(b) || kitBuildingMesh(b);
+  const authored = authoredBuildingMesh(b) || kitBuildingMesh(b,ctx);
   if (authored) return authored;
 
   const g = new THREE.Group();

@@ -1,0 +1,274 @@
+[
+  {
+    "levelId": 1,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:vh3r8c:1:1",
+      "chainblade_mk1:w12yma:1:2",
+      "field_greaves:un4y5f:1:2",
+      "flak_plate:x51de6:1:2",
+      "frontier_helm:ud5cgg:1:1",
+      "neural_shunt:ux4jue:1:3",
+      "scatter_mk1:v745jd:1:1",
+      "servo_spine:xf0z35:1:1",
+      "sidearm_mk1:fpxy5k:1:1",
+      "trail_boots:gjwr8h:1:1",
+      "trail_boots:vr3cxb:1:3",
+      "weave_coat:fzxjuj:1:2",
+      "weave_coat:wb2kb9:1:1"
+    ]
+  },
+  {
+    "levelId": 1,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:v745jd:3:1",
+      "buckler:vh3r8c:3:1",
+      "buckler:x51de6:3:1",
+      "chainblade_mk1:ux4jue:3:3",
+      "chainblade_mk1:vr3cxb:3:1",
+      "field_greaves:un4y5f:3:1",
+      "frontier_helm:fzxjuj:3:2",
+      "frontier_helm:gjwr8h:3:1",
+      "marksman_mk1:wb2kb9:3:1",
+      "neural_shunt:w12yma:3:1",
+      "scatter_mk1:ud5cgg:3:1",
+      "trail_boots:fpxy5k:3:2",
+      "trail_boots:xf0z35:3:1"
+    ]
+  },
+  {
+    "levelId": 3,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:189fk5s:15:2",
+      "chainblade_mk1:1b1bl3i:15:1",
+      "field_greaves:1cf9lkd:15:3",
+      "launcher_mk1:1bbb6sh:15:2",
+      "launcher_mk1:1bvae6f:15:2",
+      "neural_shunt:1ahcdpk:15:2",
+      "neural_shunt:5swa9q:15:1",
+      "psifocus_mk1:1arbzej:15:3",
+      "servo_spine:1c59zve:15:3",
+      "servo_spine:5iwokr:15:2",
+      "spotter_drone:18jf5ur:15:1",
+      "spotter_drone:1blashg:15:1",
+      "spotter_drone:62vvyp:15:2"
+    ]
+  },
+  {
+    "levelId": 3,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "arcnode_mk1:1bbb6sh:23:1",
+      "buckler:1b1bl3i:23:2",
+      "chainblade_mk1:1bvae6f:23:2",
+      "field_greaves:1arbzej:23:2",
+      "field_greaves:1blashg:23:1",
+      "frontier_helm:1c59zve:23:3",
+      "marksman_mk1:18jf5ur:23:1",
+      "marksman_mk1:1cf9lkd:23:1",
+      "servo_spine:189fk5s:23:2",
+      "spotter_drone:1ahcdpk:23:3"
+    ]
+  },
+  {
+    "levelId": 4,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "chainblade_mk1:udvfss:26:1",
+      "chainblade_mk2:4l4wgj:26:2",
+      "chainblade_mk2:5543uh:26:1",
+      "field_greaves:5z2wxe:26:2",
+      "ghost_hood:uxun6q:26:1",
+      "marrow_forge:5f3pjg:26:3",
+      "marrow_forge:5p3b8f:26:1",
+      "marrow_forge:v7u8vp:26:2",
+      "neural_shunt:4v4i5i:26:1",
+      "reactor_node:4b5ark:26:2",
+      "servo_spine:731bpa:26:1",
+      "sidearm_mk2:7d0xe9:26:2",
+      "spotter_drone:692imd:26:2"
+    ]
+  },
+  {
+    "levelId": 4,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "bulwark_greaves:7d0xe9:34:2",
+      "capacitor:uxun6q:34:1",
+      "field_gauntlets:5p3b8f:34:1",
+      "field_gauntlets:5z2wxe:34:1",
+      "flak_plate:4v4i5i:34:2",
+      "marksman_mk1:5543uh:34:2",
+      "marksman_mk2:4b5ark:34:1",
+      "reactor_node:4l4wgj:34:3",
+      "scatter_mk1:731bpa:34:2",
+      "sentinel_helm:692imd:34:1",
+      "sidearm_mk1:5f3pjg:34:2",
+      "sidearm_mk1:v7u8vp:34:2"
+    ]
+  },
+  {
+    "levelId": 5,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:x0yi3s:42:1",
+      "bulwark_greaves:xay3sr:42:1",
+      "hunter_drone:wqywet:42:2",
+      "psifocus_mk1:y4wwvo:42:1",
+      "psifocus_mk2:wgzapu:42:2",
+      "sentinel_helm:xkxphq:42:3",
+      "signal_shroud:yyvpyl:42:3",
+      "storm_core:yow49m:42:1",
+      "target_lattice:xuxb6p:42:1",
+      "thermal_core:yewikn:42:2",
+      "void_core:10egu5j:42:2"
+    ]
+  },
+  {
+    "levelId": 5,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:10yg1jh:50:2",
+      "flak_plate:x0yi3s:50:1",
+      "ghost_hood:wqywet:50:1",
+      "launcher_mk1:zuhmrl:50:1",
+      "powered_shell:yow49m:50:1",
+      "powered_shell:yyvpyl:50:1",
+      "psifocus_mk1:zki12m:50:2",
+      "reactor_node:wgzapu:50:1",
+      "reactor_node:y4wwvo:50:1",
+      "relay_gloves:10ogfui:50:1",
+      "sentinel_helm:xay3sr:50:1",
+      "sidearm_mk1:z0itoo:50:1",
+      "siege_boots:10egu5j:50:2",
+      "signal_shroud:xkxphq:50:3",
+      "storm_core:104h8gk:50:1",
+      "storm_core:yewikn:50:2",
+      "target_lattice:xuxb6p:50:1",
+      "void_core:zaifdn:50:2"
+    ]
+  },
+  {
+    "levelId": 6,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "arcnode_mk1:t4didr:51:1",
+      "field_greaves:sudwos:51:1",
+      "flak_plate:ted42q:51:2",
+      "launcher_mk2:tocprp:51:1",
+      "marrow_forge:1f48kj1:51:1",
+      "powered_shell:v2aq8k:51:1",
+      "scatter_mk2:saepau:51:1",
+      "siege_boots:rqfhww:51:3",
+      "signal_shroud:skeazt:51:2",
+      "thermal_core:s0f3lv:51:3",
+      "weave_coat:vcabxj:51:2"
+    ]
+  },
+  {
+    "levelId": 6,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:v2aq8k:59:3",
+      "field_gauntlets:tocprp:59:2",
+      "frontier_helm:saepau:59:1",
+      "launcher_mk1:1f48kj1:59:3",
+      "launcher_mk1:vcabxj:59:2",
+      "marksman_mk2:skeazt:59:2",
+      "marksman_mk2:ted42q:59:2",
+      "scatter_mk3:s0f3lv:59:2",
+      "sidearm_mk1:rqfhww:59:1",
+      "sidearm_mk1:sudwos:59:2",
+      "sidearm_mk1:t4didr:59:2"
+    ]
+  },
+  {
+    "levelId": 11,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "field_greaves:1olqlwt:97:2",
+      "frontier_helm:1mxszqz:97:3",
+      "ghost_hood:1nrrstw:97:1",
+      "marksman_mk1:1mdtsd1:97:1",
+      "marksman_mk1:1obr07u:97:2",
+      "marksman_mk1:ej2icn:97:1",
+      "marksman_mk2:f31pql:97:1",
+      "marksman_mk3:1n7slfy:97:2",
+      "marrow_forge:1m3u6o2:97:3",
+      "resonator:1o1reiv:97:1",
+      "sidearm_mk2:et241m:97:1",
+      "void_core:1nhs74x:97:2",
+      "void_core:e92wno:97:1",
+      "weave_coat:1mnte20:97:2"
+    ]
+  },
+  {
+    "levelId": 11,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "campaign",
+    "keys": [
+      "buckler:1o1reiv:100:2",
+      "bulwark_shield:ej2icn:100:1",
+      "chainblade_mk1:1nhs74x:100:2",
+      "frontier_helm:1mnte20:100:3",
+      "hunter_drone:1olqlwt:100:1",
+      "scatter_mk1:1obr07u:100:2",
+      "scatter_mk3:1m3u6o2:100:1",
+      "sidearm_mk2:1mxszqz:100:2",
+      "signal_shroud:1mdtsd1:100:1",
+      "spotter_drone:1nrrstw:100:1",
+      "strider_greaves:1n7slfy:100:1",
+      "trail_boots:e92wno:100:1"
+    ]
+  },
+  {
+    "levelId": 9002,
+    "difficulty": "normal",
+    "seed": 4242,
+    "mode": "labyrinth",
+    "keys": [
+      "buckler:1kcthex:100:1",
+      "capacitor:1kmt33w:100:2",
+      "scatter_mk1:1kwsosv:100:3",
+      "sentinel_helm:1lgrw6t:100:2",
+      "storm_core:1l6sahu:100:1"
+    ]
+  },
+  {
+    "levelId": 9002,
+    "difficulty": "brutal",
+    "seed": 4242,
+    "mode": "labyrinth",
+    "keys": [
+      "ghost_coat:1l6sahu:100:2",
+      "hunter_drone:1kwsosv:100:2",
+      "launcher_mk2:1lgrw6t:100:2",
+      "scatter_mk3:1kmt33w:100:1"
+    ]
+  }
+]

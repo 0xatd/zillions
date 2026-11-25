@@ -1,17 +1,32 @@
+import { HitFeedback } from './hit-feedback.js';
+import {FriendParty,partyCode} from './friend-party.js';
+import {showFriendParty} from './friend-party-ui.js';
+import {visibleInFog} from './fog-of-war.js';
+import {eventHearingGain, hearingGain} from './audio-distance.js';
+import { spellTarget, spellManaCost } from './hero-spells.js';
+import { heroAbility, abilityCooldown } from './hero-abilities.js';
+import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { guestCommand } from './multiplayer-command.js';
+import { gateSupports } from './rampart-art-plan.js';
+import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
+import { environmentMaterial } from './environment-art.js';
+import { buildColonyStreets, buildFortressBoundary } from './colony-art.js';
 import {
   PLOT_KINDS, SIM_DT, MAP_SIZE, LEVELS, levelById, PAY_RADIUS, THREAT, SIEGE, TOWER_PRIORITY,
   ITEMS, BOSS_DROPS, UNITS, TILE, TILE_INFO, LABYRINTH_LEVELS, HEROES, cultureKey,
 } from './config.js';
-import { setActiveCulture } from './cultures.js';
+import { setActiveCulture, activeCulture } from './cultures.js';
 import { GameMap, setMapKit } from './map.js';
 import { surveySite } from './plots.js';
-import { Game, runScore } from './game.js';
+import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
 import { AuthClient } from './auth.js';
@@ -57,6 +72,7 @@ const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
 const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_SPECTATOR_BUFFER = 1024; // bounded loading backlog (~68 seconds)
 const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
@@ -117,6 +133,7 @@ function addInkOutline(root) {
 
 class App {
   constructor() {
+    this._bootStart = performance.now();
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
@@ -185,7 +202,7 @@ class App {
           this.startGame(d, hero);
         }
       },
-      onCast: () => this.tryCast(),
+      onCast: (slot = 0) => this.tryCast(slot),
       onControlMode: () => this.toggleControlMode(),
       onBuildHold: (on) => { this.buttonPay = !!on; },
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
@@ -199,6 +216,10 @@ class App {
       onHostAccept: (code) => this.pendingPeer && this.pendingPeer.acceptReply(code).catch(() => this.ui.mpStatus('❌ Bad reply code.')),
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
+      onPartyOpen: () => this._openFriendParty(),
+      onChapterSave: (draft) => this._saveChapter(draft),
+      onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
+      onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
       onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
@@ -221,6 +242,8 @@ class App {
       onFound: () => this._tryFound(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
+      onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
+      onFocusEnemy: (id) => this.issue({t:'focus',p:this.myPlayer,id}),
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
@@ -234,6 +257,10 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openCampaignSelect(),
+      onGuestPlay: () => this._playAsGuest(),
+      onQuickStart: (draft) => this._quickStart(draft),
+      onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
+      onCoachSkip: () => this._skipCoach(),
       onSignIn: () => this._signIn(),
       onEmailSignIn: (email) => this._signInWithEmail(email),
       onSignOut: () => this._signOut(),
@@ -266,9 +293,9 @@ class App {
 
     this._setupLights();
     this._setupParticles();
-    this._setupZombieMeshes();
-    // Start pulling the toy kit now so the menu horde swaps to it early.
-    this._loadArt().catch(() => {});
+    // Horde meshes and GLB kits are the heavy title-time work. Paint the
+    // shell first, then build them on the next frame. startGame also calls
+    // this, so a fast Play still has meshes before the first zombie draw.
     this._setupCoins();
     this._setupBars();
     this._setupCorpses();
@@ -323,6 +350,8 @@ class App {
     // a development/offline mirror.
     this.auth = new AuthClient();
     this.authStatus = { ready: false, enabled: false, signedIn: false };
+    const invite=partyCode(location.search);
+    if(invite) sessionStorage.setItem('zillions-party-invite',invite);
     this._authenticatedEntryHandled = false;
     this.profile = this._loadProfile();
     this.meta = loadMeta();
@@ -384,6 +413,20 @@ class App {
     this.scene.fog.color.setHex(0x030711);
     this.frameGuard = new FrameGuard((error) => this._handleFrameError(error));
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
+    this._boot = { shellMs: Math.round(performance.now() - this._bootStart) };
+    window.__zillionsBoot = this._boot;
+    requestAnimationFrame(() => this._ensurePresentation());
+  }
+
+  // Presentation-only. Safe to call more than once. Never touches the sim.
+  _ensurePresentation() {
+    if (this._presentationReady) return;
+    this._presentationReady = true;
+    const started = performance.now();
+    this._setupZombieMeshes();
+    this._loadArt().catch(() => {});
+    this._boot = { ...(this._boot || {}), hordeMs: Math.round(performance.now() - started) };
+    window.__zillionsBoot = this._boot;
   }
 
   // ---------------- title diorama ----------------
@@ -477,8 +520,8 @@ class App {
           + Math.cos(lon * 7.3 + lat * 5.1) * 0.2;
         const polar = Math.abs(lat) > 1.18;
         const land = landNoise > 0.48 && !polar;
-        const daylight = 0.72 + 0.22 * Math.cos(lon + 0.65) * Math.cos(lat);
-        const base = polar ? [170, 199, 213] : land ? [48, 93, 73] : [21, 69, 111];
+        const daylight = 0.92 + 0.12 * Math.cos(lon + 0.65) * Math.cos(lat);
+        const base = polar ? [214, 230, 238] : land ? [78, 148, 96] : [46, 118, 176];
         const i = (y * texW + x) * 4;
         globePixels[i] = Math.round(base[0] * daylight);
         globePixels[i + 1] = Math.round(base[1] * daylight);
@@ -509,7 +552,7 @@ class App {
     orbitalGlobe.add(signals);
     const orbitalGlow = new THREE.Mesh(
       new THREE.SphereGeometry(108, 48, 28),
-      new THREE.MeshBasicMaterial({ color: 0x58bdf2, transparent: true, opacity: 0.34, side: THREE.BackSide, depthWrite: false, fog: false }),
+      new THREE.MeshBasicMaterial({ color: 0x8fd4ff, transparent: true, opacity: 0.55, side: THREE.BackSide, depthWrite: false, fog: false }),
     );
     group.add(orbitalGlow);
 
@@ -569,7 +612,7 @@ class App {
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
     constellations.quaternion.copy(this.camera.quaternion);
-    orbitalGlobe.position.copy(cameraLocal(0, -118, -175));
+    orbitalGlobe.position.copy(cameraLocal(18, -36, -210));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
@@ -632,7 +675,7 @@ class App {
     }
     if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
     const key = style.proxyHero || 'scott';
-    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style }).node;
+    p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style.chapterLeader ? null : style }).node;
     p.model.scale.setScalar(1.45);
     p.model.position.y = -.02;
     p.scene.add(p.model);
@@ -743,6 +786,16 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this.pendingAbility = null;
+    if (snap && !isCompatibleSnapshot(snap)) {
+      this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
+      return;
+    }
+    this._finishMissionIntro();
+    const deploymentLevel = levelById(snap?.level || mp?.level || this.ui.selectedLevel || 1);
+    this.ui.setDeploymentLoading(true, deploymentLevel);
+    this._ensurePresentation();
+    try {
     // The host can finish startup first and send window zero while this guest
     // is still loading assets. Keep the existing Map alive across every await
     // so early windows are not discarded when the sim is initialized.
@@ -750,7 +803,7 @@ class App {
     this.audio.init();
     this._clearMenuBackdrop();
     if (!this.assetsLoaded) {
-      this.ui.showBanner('Loading…', '', 1500);
+      this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
     }
     const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
@@ -763,12 +816,14 @@ class App {
     // muster (sim) and which kit the base is built from (art).
     const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
     setActiveCulture(cultureId);
+    this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
     const soloTicket = !snap && !mp
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
+    this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
     this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
@@ -784,6 +839,7 @@ class App {
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
+    this._gateSupports = null;
     for (const c of this.payCoins) this.scene.remove(c.mesh);
     this.payCoins = [];
     for (const p of this.projectiles) this._destroyProjectile(p);
@@ -821,6 +877,9 @@ class App {
     this.blockFx = [];
     this._blockT = 0;
     this._blockWarned = {};
+    // Rejoin/restore can enter startGame without a page reload. A prior
+    // landform must not remain above the new map and hide its units.
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); }
     this.terrain = this.map.buildTerrain();
     this.scene.add(this.terrain);
     this._setupFogOfWar();
@@ -829,6 +888,8 @@ class App {
     this._clearSiteMarkers();
     this._clearNestMeshes();
     this._clearLootMeshes();
+    this.hitFeedback?.clear();
+    if(this._builderMesh){this.scene.remove(this._builderMesh);this._disposeObject3D(this._builderMesh);this._builderMesh=null;}
     if (this.game.site >= 0) {
       const s = this.map.sites[this.game.site];
       this.plaza = this._buildPlaza(s.x, s.z);
@@ -844,7 +905,7 @@ class App {
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
     this.ui.initHUD(this.game, this.myPlayer,
-      this.game.mode === 'campaign' ? selectedMmoCharacter(this.profile) : null);
+      this.game.mode === 'campaign' && this.mpRole !== 'spectator' ? selectedMmoCharacter(this.profile) : null);
     this.ui.setGameChatEnabled(this.netMode);
     if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
@@ -864,7 +925,30 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
-    if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    const skipIntro = this._skipMissionIntro || (this.profile.games > 0);
+    this._skipMissionIntro = false;
+    if (!snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.missionIntro = { elapsed: 0, distance: this.camDist };
+      this.ui.showMissionIntro(level, () => this._finishMissionIntro());
+    }
+    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign') this._startCoach();
+    else if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    } catch (error) {
+      this._finishMissionIntro();
+      throw error;
+    } finally {
+      this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  // Presentation-only arrival. Never runs for network, Watch or restored games.
+  _finishMissionIntro() {
+    if (this.missionIntro) {
+      this.camDist = this.missionIntro.distance;
+      this.lastDir = { x: 0, z: 0, s: false };
+    }
+    this.missionIntro = null;
+    this.ui?.hideMissionIntro();
   }
 
   // A cobbled plaza + a lane out to every gate this city actually has — the
@@ -878,7 +962,7 @@ class App {
     const g = new THREE.Group();
     const hq = (this.game && this.game.plots || []).find((p) => p.kind === 'hq');
     const plan = hq && hq.plan;
-    const squarePlaza = plan && plan.key === 'fort';
+    const squarePlaza = plan && ['fort', 'keyhole'].includes(plan.key);
     // On a terraced site the pad and walkways are draped over the ground so
     // they follow the steps instead of floating flat over the lower terraces.
     const terraced = !!this.map._tileCH;
@@ -895,41 +979,43 @@ class App {
       return mesh;
     };
     const disc = new THREE.Mesh(
-      squarePlaza ? new THREE.PlaneGeometry(12.6, 12.6, 24, 24) : new THREE.RingGeometry(0.01, terraced ? 4.4 : 7.2, 40, 14),
-      toyMat({ color: 0xa6a091 }),
+      squarePlaza ? new THREE.PlaneGeometry(plan?.kit ? 8 : 9.2, plan?.kit ? 8 : 9.2, 24, 24) : new THREE.RingGeometry(0.01, 4.6, 48, 16),
+      environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xa6a091 }),
     );
     disc.rotation.x = -Math.PI / 2;
-    if (squarePlaza) disc.rotation.z = -plan.facing;
+    if (squarePlaza && plan.key === 'fort') disc.rotation.z = -plan.facing;
     const plazaY = this.map.groundY(cx, cz);
     disc.position.set(cx, plazaY + 0.015, cz);
     drape(disc, 0.03);
     disc.receiveShadow = true;
     g.add(disc);
-    const ringGeo = terraced ? new THREE.RingGeometry(3.9, 4.12, 48) : new THREE.RingGeometry(5.6, 5.85, 48);
+    const ringGeo = new THREE.RingGeometry(4.38, 4.58, 64);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-      color: 0xe8843c, transparent: true, opacity: 0.4, depthWrite: false,
+      color: 0x736d5c, transparent: true, opacity: 0.7, depthWrite: false,
     }));
     ring.position.set(cx, plazaY + 0.03, cz);
     drape(ring, 0.05);
-    g.add(ring);
-    const laneMat = toyMat({ color: 0xb3ad9e });
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0.35, depthWrite: false });
-    const lanes = plan && plan.gates.length ? plan.gates : [0, Math.PI / 2, Math.PI, -Math.PI / 2];
-    const len = plan ? Math.max(9, plan.reach - 4) : 10.5;
-    for (const a of lanes) {
-      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 1, terraced ? Math.ceil(len * 3) : 1), laneMat);
+    if (!squarePlaza) g.add(ring);
+    else { ring.geometry.dispose(); ring.material.dispose(); }
+    const laneMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0x9e998b });
+    // Render the reserved streets, including bent approaches through an inner
+    // ward, rather than guessing radial strips from a generic city radius.
+    const streets = plan?.streets || (plan?.gates || [0, Math.PI / 2, Math.PI, -Math.PI / 2]).map(a =>
+      [[cx, cz], [cx + Math.cos(a) * (plan?.reach || 14), cz + Math.sin(a) * (plan?.reach || 14)]]);
+    if (plan?.roads) g.add(buildColonyStreets(this.map, plan.roads, this.game?.culture));
+    if (plan?.kit) g.add(buildFortressBoundary(this.map, plan, cx, cz));
+    for (const [[ax, az], [bx, bz]] of (plan?.roads ? [] : streets)) {
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.1) continue;
+      const a = Math.atan2(bz - az, bx - ax);
+      const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len, 2, terraced ? Math.ceil(len * 3) : 1), laneMat);
       lane.rotation.x = -Math.PI / 2;
-      lane.rotation.z = -a;
-      lane.position.set(cx + Math.cos(a) * (len / 2 + 4), plazaY + 0.012, cz + Math.sin(a) * (len / 2 + 4));
+      lane.rotation.z = Math.PI / 2 - a;
+      lane.position.set((ax + bx) / 2, plazaY + 0.012, (az + bz) / 2);
       lane.receiveShadow = true;
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.14, len, 1, terraced ? Math.ceil(len * 3) : 1), stripeMat);
-      stripe.rotation.copy(lane.rotation);
-      stripe.position.copy(lane.position);
-      stripe.position.y = plazaY + 0.022;
-      drape(lane, 0.025); drape(stripe, 0.04);
+      drape(lane, 0.025);
       g.add(lane);
-      g.add(stripe);
     }
     // Switchback roads down the cliff face below each gate: a paved ribbon
     // draped over the cut so the zig-zag reads from the game camera.
@@ -988,16 +1074,27 @@ class App {
       // polygon offset keeps the kerb strictly under the bed and the bed
       // under the centre line.
       const layer = (color, o) => toyMat({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: o, polygonOffsetUnits: o * 4 });
-      // Kerb: a mid stone, not near-black, so where the legs of a hairpin
-      // meet and their kerbs overlap it reads as a paved apron, not a hole.
-      const edgeMat = layer(0x8a7658, -1);
-      const roadMat = layer(0xd8c49a, -3);
-      const centreMat = layer(0xf1e4c4, -5);
+      // Graphite edges separate the pale roadbed from both snow and moor;
+      // amber tread bands identify the graded route at normal play zoom.
+      const edgeMat = layer(0x514c55, -1);
+      const roadMat = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'stone', { color: 0xb0a99b, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
+      const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
-        g.add(ribbon(pts, 0.22, 0.075, centreMat));
+        // Broad transverse tread bands make the grade and each turn readable
+        // at play zoom. These are paint, not extra collision obstacles.
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
+          const L = Math.hypot(bx - ax, bz - az);
+          if (L < 0.1) continue;
+          const nx = -(bz - az) / L, nz = (bx - ax) / L;
+          for (let d = 0.65; d < L - 0.3; d += 1.65) {
+            const f = d / L, x = ax + (bx - ax) * f, z = az + (bz - az) * f, h = ah + (bh - ah) * f;
+            g.add(ribbon([[x - nx * 0.55, z - nz * 0.55, h], [x + nx * 0.55, z + nz * 0.55, h]], 0.16, 0.08, centreMat));
+          }
+        }
         for (let q = 1; q < pts.length; q++) {
           const [ax, az, ah] = pts[q - 1], [bx, bz, bh] = pts[q];
           const L = Math.hypot(bx - ax, bz - az);
@@ -1260,6 +1357,43 @@ class App {
     this.issue({ t: 'found', s: best, p: this.myPlayer });
   }
 
+  _startCoach() {
+    this._coach = freshCoach();
+    this._coachOrigin = null;
+    this._coachSawAttack = false;
+    this._paintCoach();
+  }
+
+  _noteCoach(event) {
+    if (!this._coach) return;
+    this._coach = coachAdvance(this._coach, event);
+    this._paintCoach();
+  }
+
+  _paintCoach() {
+    if (!this._coach || coachComplete(this._coach)) {
+      if (this._coach && coachComplete(this._coach)) {
+        this.profile.tutorialDone = true;
+        this._saveProfile();
+      }
+      this._coach = null;
+      this.ui.hideCoach();
+      return;
+    }
+    const step = COACH_STEPS[this._coach.index];
+    const extra = step.id === 'stances'
+      ? `Done: ${['defend', 'guard', 'attack'].filter((stance) => this._coach.stances[stance]).join(', ') || 'none yet'}.`
+      : '';
+    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length, extra);
+  }
+
+  _skipCoach() {
+    this._coach = null;
+    this.profile.tutorialDone = true;
+    this._saveProfile();
+    this.ui.hideCoach();
+  }
+
   _startTutorial() {
     const binds = this.binds();
     const build = keyLabel(binds.build);
@@ -1273,7 +1407,7 @@ class App {
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
       [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
       [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
-      [62, `🔧 Nothing repairs itself — hold ${build} to repair. Press ${tower} beside a tower to change what it shoots.`],
+      [62, `🔧 Damage repairs before upgrades — hold ${build} to restore health. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
   }
@@ -1304,8 +1438,12 @@ class App {
   async _applyAuth(status) {
     this.authStatus = status;
     if (status.signedIn) {
+      // Auth emits USER_UPDATED while chapter/roster writes are in flight.
+      // An older hydration must not replace the founder/companion being saved.
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       await this.auth.ensureProfile(this.profile);
       const cloud = this.auth.profileFromBundle(await this.auth.loadProfileBundle());
+      if (this._chapterSaving || this._founderCreating || this._chapterRecruiting) return;
       if (cloud) {
         this.profile = { ...this.profile, ...cloud, name: cloud.name || this.profile.name };
       }
@@ -1331,9 +1469,11 @@ class App {
       const cloudSave = await this.auth.loadLatestSave();
       if (cloudSave?.snap) {
         try { localStorage.setItem('zillions_save', JSON.stringify(cloudSave)); } catch { /* ignore */ }
-        this.ui.setContinue(cloudSave.snap);
+        const compatible = this._loadSave();
+        this.ui.setContinue(compatible?.snap || null);
       }
     } else if (status.enabled) {
+      document.querySelector('#friend-party-dialog')?.close();
       this.lobby = null;
       this._authenticatedEntryHandled = false;
     }
@@ -1362,16 +1502,22 @@ class App {
       const returning = selectedMmoCharacter(this.profile);
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (returning) setTimeout(() => this._openCampaignSelect(), 0);
+      if (returning) setTimeout(() => this.ui._showScreen('main'), 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
       return;
     }
     // WoW grammar: authentication ends at Character Select. The player chooses
     // who enters; the generic signed-out title never doubles as account home.
+    if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled
+      && this._guestSession && !this._quickCommitted && !selectedMmoCharacter(this.profile)
+      && this.ui._lastScreen === 'quick') {
+      this._authenticatedEntryHandled = true;
+      return;
+    }
     if (status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
       this._authenticatedEntryHandled = true;
       this.ui._accountAccepted = true;
-      if (selectedMmoCharacter(this.profile)) setTimeout(() => this.ui._showScreen('main'), 0);
+      if (selectedMmoCharacter(this.profile)) setTimeout(() => {this.ui._showScreen('main');if(sessionStorage.getItem('zillions-party-invite'))this._openFriendParty();}, 0);
       else setTimeout(() => this.ui.showCharacterCreator(), 0);
     }
   }
@@ -1427,6 +1573,8 @@ class App {
       if (status) status.textContent = 'Sign-in link sent. Check your email to continue.';
     } catch (error) {
       this.ui.showBanner(`Sign-in failed: ${error.message}`, 'bad', 6000);
+    } finally {
+      this.ui._clearBusy();
     }
   }
 
@@ -1465,7 +1613,7 @@ class App {
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
-    if (!this.game) return;
+    if (!this.game || this.missionIntro) return;
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
@@ -1482,10 +1630,65 @@ class App {
     } catch { return { name: '', games: 0, wins: 0, kills: 0, bestDay: 0, lastHero: null, campaignHeroes: {}, relics: [], questsDone: {}, mmoCharacters: [], mmoCharacterId: null }; }
   }
 
+  async _saveChapter(draft) {
+    if (this.game || this._chapterSaving) return;
+    const chapter = chapterIdentity({ ...draft, founderId: chapterFounder(this.profile)?.id });
+    if (!chapter.name) { this.ui.showBanner('Give your chapter a name.', 'bad', 2500); return; }
+    this._chapterSaving = true;
+    try {
+      this.profile.chapter = chapter;
+      const founder = chapterFounder(this.profile);
+      if (founder && this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(founder, { persistProfile: false });
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      if (!chapterFounder(this.profile)) this.ui.showCharacterCreator();
+      else this.ui.showBanner(`${chapter.name} is ready. Choose your next conquest.`, '', 3000);
+    } catch (err) {
+      this.ui.showBanner('Chapter could not sync. Your changes are kept here; save again to retry.', 'bad', 5000);
+    } finally {
+      this._chapterSaving = false;
+      this.ui._clearBusy();
+    }
+  }
+
+  async _recruitChapterLeader(key, { persist = true } = {}) {
+    if (this.game || this._chapterRecruiting) return;
+    if (!(leaderRecord(this.profile,key) ? leaderAvailable(this.profile,key) : recruitmentAllowed(this.profile,key))) { this.ui.showBanner('This recruit needs a compatible chapter culture and the required conquest.', 'bad', 3000); return; }
+    this._chapterRecruiting = true;
+    try {
+      let character = leaderRecord(this.profile, key);
+      if (!character) {
+        const leader = CHAPTER_LEADERS.find(l => l.key === key);
+        character = makeMmoCharacter(HEROES[key].name, leader.classKey, chapterIdentity(this.profile.chapter).color);
+        character.id = `chapter_${key}_v1`;
+        character.chapterLeader = key;
+        character.proxyHero = key;
+        character.firstHourGuideDismissed = true;
+        if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      }
+      this.profile.mmoCharacterId = character.id;
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      if (this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+      if (persist) {
+        this._storeProfileLocally();
+        if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+        this.ui.setProfile(this.profile);
+      }
+      return character;
+    } catch (err) {
+      this.ui.showBanner(err?.message === 'roster_full' ? 'The roster is full. Your existing leaders and equipment have been preserved.' : 'Recruitment could not sync. Select this leader again to retry.', 'bad', 5000);
+      throw err;
+    } finally { this._chapterRecruiting = false; }
+  }
+
   async _selectMmoCharacter(id) {
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
+    if (character.chapterLeader && !leaderAvailable(this.profile, character.chapterLeader)) return;
     this.profile.mmoCharacterId = character.id;
     this.profile.lastHero = character.proxyHero;
     this.ui.selectedHero = character.proxyHero;
@@ -1499,24 +1702,87 @@ class App {
     this.ui.setProfile(this.profile);
   }
 
-  _createMmoCharacter({ name, classKey, appearance, raceKey, customization } = {}) {
-    const clean = String(name || '').trim();
-    if (!clean) {
-      this.ui.showBanner('Choose a character name.', 'bad', 2200);
+  _playAsGuest() {
+    this.audio.init();
+    const signedIn = !!this.auth?.isSignedIn() && !this.auth.status().needsUsername;
+    if (!signedIn) {
+      this._guestSession = true;
+      this.ui.noteGuestSession();
+    }
+    const returning = !!(chapterFounder(this.profile) || this.profile.quickSetupDone);
+    this.ui._accountAccepted = true;
+    if (returning) {
+      this.ui._showScreen('main');
       return;
     }
-    const character = makeMmoCharacter(clean, classKey, appearance, raceKey, customization);
-    if (!addMmoCharacter(this.profile, character)) {
-      this.ui.showBanner('The character roster is full.', 'bad', 2200);
-      return;
+    this.ui.showQuickSetup(normalizeQuickSetup({
+      chapterName: this.profile.chapter?.name || QUICK_DEFAULTS.chapterName,
+      founderName: QUICK_DEFAULTS.founderName,
+      army: this.ui.selectedCulture,
+      color: this.profile.chapter?.color,
+      emblem: this.profile.chapter?.emblem,
+    }));
+  }
+
+  async _quickStart(raw) {
+    if (this.game || this._quickCommitted) return;
+    const draft = normalizeQuickSetup(raw);
+    this._quickCommitted = true;
+    this.ui.selectedCulture = draft.army;
+    this.ui.selectedDiff = draft.difficulty;
+    this.ui.selectedMode = 'campaign';
+    this.ui.selectedLevel = Math.min(LEVELS.length, Math.max(1, Number(this.profile.campaign || 0) + 1));
+    try { localStorage.setItem('zillions.culture', draft.army); } catch { /* private mode */ }
+    try {
+      if (!chapterIdentity(this.profile.chapter).name) {
+        this.profile.chapter = chapterIdentity({ ...this.profile.chapter, name: draft.chapterName, color: draft.color, emblem: draft.emblem });
+      }
+      if (!chapterFounder(this.profile)) {
+        await this._createMmoCharacter({ name: draft.founderName, appearance: draft.color, raceKey: 'human', customization: {}, quiet: true });
+      }
+      if (!chapterFounder(this.profile)) throw new Error('founder_missing');
+      this.profile.quickSetupDone = true;
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
+      this.ui.setProfile(this.profile);
+      this._skipMissionIntro = true;
+      await this.startGame(draft.difficulty, this.ui.selectedHero);
+    } catch (err) {
+      this._quickCommitted = false;
+      this.ui._clearBusy();
+      this.ui.showBanner('The siege could not start. Your names are still here.', 'bad', 3600);
+      console.warn('quick start failed', err);
     }
-    this.profile.lastHero = character.proxyHero;
-    this.ui.selectedHero = character.proxyHero;
-    this._saveProfile();
-    this.ui.setProfile(this.profile);
-    const klass = MMO_CLASSES[character.classKey];
-    this.ui.showBanner(`${klass.icon} ${character.name}, ${klass.name}, is ready for the siege.`, '', 3000);
-    this.ui._showScreen('main');
+  }
+
+  async _createMmoCharacter({ name, appearance, raceKey, customization, quiet = false } = {}) {
+    if (this.game || this._founderCreating) return;
+    const clean = String(name || '').trim().slice(0,18);
+    if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
+    if (chapterFounder(this.profile)) { this.ui._showScreen('main'); return; }
+    this._founderCreating = true;
+    const character = makeMmoCharacter(clean, 'vanguard', appearance, raceKey, customization);
+    try {
+      if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
+      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: character.id });
+      this.profile.lastHero = character.proxyHero;
+      this.ui.selectedHero = character.proxyHero;
+      this._storeProfileLocally();
+      if (this.auth?.isSignedIn()) {
+        await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+        await this.auth.syncLocalProfile(this.profile);
+      }
+      this.ui.setProfile(this.profile);
+      if (!quiet) {
+        this.ui._showScreen('main');
+        this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+      }
+    } catch (err) {
+      this.ui.setProfile(this.profile);
+      this.ui._showScreen('main');
+      this.ui._showCharacterCreator();
+      this.ui.showBanner('Founder could not sync. Your character is preserved here; save the chapter to retry.', 'bad', 5000);
+    } finally { this._founderCreating = false; }
   }
 
   async _ensureAuthoritativeEconomy(character, { persistProfile = true } = {}) {
@@ -1767,7 +2033,13 @@ class App {
   _loadSave() {
     try {
       const s = JSON.parse(localStorage.getItem('zillions_save') || 'null');
-      return s && s.snap && s.snap.v === 5 ? s : null;
+      if (s?.snap && !isCompatibleSnapshot(s.snap)) {
+        // Keep the original before a new siege can replace the active slot.
+        localStorage.setItem(`zillions_save_legacy_v${s.snap.v}`, JSON.stringify(s));
+        this.ui.showBanner('An older siege was archived because the colony layout changed. Start a new siege; account progression is unchanged.', '', 8000);
+        return null;
+      }
+      return s?.snap ? s : null;
     } catch { return null; }
   }
 
@@ -2119,6 +2391,7 @@ class App {
   }
 
   _handleFrameError(error) {
+    this._finishMissionIntro();
     this.paused = true;
     this._netPumpStop();
     console.error('game frame failed', error);
@@ -2185,7 +2458,10 @@ class App {
         this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
       }
     }
-    else if (m.t === 'cmd') this.guestCmdQueues[idx].push(m.c);
+    else if (m.t === 'cmd') {
+      const command = guestCommand(m.c, idx + 1, this.game?.heroes.length || 0);
+      if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
+    }
     else if (m.t === 'needWindow') {
       const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
@@ -2202,7 +2478,29 @@ class App {
     for (const p of this.peers) p.send(msg);
   }
 
+  _startPendingSpectators() {
+    // Called only before commands at a whole lockstep boundary. The snapshot
+    // does not contain that window yet, so the first buffered packet is exact.
+    for (const rec of this.pendingSpectators) {
+      if (rec.started || !rec.peer.open) continue;
+      rec.started = true;
+      rec.frame = this.simFrame;
+      rec.buffer = [];
+      rec.overflow = false;
+      rec.peer.send({ t: 'spectateStart', snap: this.game.snapshot(), frame: rec.frame });
+    }
+  }
+
   _broadcastSpectators(msg) {
+    for (const rec of this.pendingSpectators) {
+      if (!rec.started || rec.overflow) continue;
+      if (rec.buffer.length >= NET_SPECTATOR_BUFFER) {
+        // Do not grow memory indefinitely on a slow-loading watcher. Once its
+        // current restore finishes, Ready requests a fresh boundary snapshot.
+        rec.buffer.length = 0;
+        rec.overflow = true;
+      } else rec.buffer.push(msg);
+    }
     for (const p of this.spectators) p.send(msg);
   }
 
@@ -2275,7 +2573,7 @@ class App {
       await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
       this.simFrame = m.frame;
       this.netPrimed = false;
-      this.net.send({ t: 'spectateReady' });
+      this.net.send({ t: 'spectateReady', frame: m.frame });
       this.ui.showBanner('Watching live — camera controls work, battle controls are read-only.', '', 5000);
     }
     else if (m.t === 'resync') {
@@ -2336,7 +2634,7 @@ class App {
   }
 
   _requestMissingWindow(w) {
-    if (!this.net || this.mpRole !== 'guest') return;
+    if (!this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
     const now = performance.now();
     if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
     this._missingWindow = w;
@@ -2363,7 +2661,7 @@ class App {
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
     // rate a few percent to hold its measured jitter target in the bank.
     // Network jitter then shows up as imperceptible speed drift, not freezes.
-    if (this.mpRole === 'guest') {
+    if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
       const banked = this._windowsBuffered();
       if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
       else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
@@ -2377,6 +2675,7 @@ class App {
         const w = this.simFrame / NET_STEP;
         let bundle;
         if (this.mpRole === 'host') {
+          this._startPendingSpectators();
           bundle = [...this.outbox];
           this.outbox = [];
           for (const q of this.guestCmdQueues) { bundle.push(...q); q.length = 0; }
@@ -2384,6 +2683,7 @@ class App {
           // channel a late/lost packet is healed by the next one instead of
           // freezing every guest.
           this._broadcastFast({ t: 'w', w, c: bundle, p: this._recentWindows.slice() });
+          this._broadcastSpectators({ t: 'w', w, c: bundle, p: [] });
           this._recentWindows.push([w, bundle]);
           if (this._recentWindows.length > NET_REDUNDANCY) this._recentWindows.shift();
           rememberWindow(this._windowHistory, w, bundle, NET_HISTORY);
@@ -2463,6 +2763,36 @@ class App {
   // ---------------- scene setup ----------------
 
   // ---------------- online lobby ----------------
+
+  async _openFriendParty() {
+    try {
+      if (!this.authStatus?.signedIn) throw new Error('Sign in to play with friends.');
+      if (!this.profile.mmoCharacters?.length) throw new Error('Create your chapter founder first.');
+      const lobby=await this._openLobby();
+      if (!lobby?.connected) throw new Error('The lobby is unavailable. Retry when your connection recovers.');
+      const client=new FriendParty(lobby.sb);
+      showFriendParty({client,userId:lobby.me.id,code:partyCode(location.search)||sessionStorage.getItem('zillions-party-invite')||'',
+        onJoined:()=>{sessionStorage.removeItem('zillions-party-invite');const url=new URL(location.href);url.searchParams.delete('party');history.replaceState(null,'',url);},
+        hostRoom:async party=>{
+          if(this.netMode)throw new Error('Finish or leave your current match first.');
+          if(lobby.game)throw new Error('Leave your current room before opening the next match.');
+          await this.createOnlineGame('private');
+          if(!lobby.game || this.mpRole!=='host')throw new Error('Could not open the room. Retry.');
+          try {await party.act('room',{room:lobby.game.id});}
+          catch(error){await this._leaveOnlineRoom();throw error;}
+        },
+        joinRoom:async room=>{
+          if(this.netMode)throw new Error('You are already in a match. Close this panel to return.');
+          if(lobby.game?.id===room.id){this.ui.showSetup({online:lobby.game,mode:lobby.game.mode});this._onRoomUpdate(lobby.game);return;}
+          if(lobby.game)throw new Error('Leave your current room before joining the party room.');
+          const row=await lobby.findByCode(room.code);
+          if(!row)throw new Error('That room has ended. Ask the leader to host the next match.');
+          if(row.host_id===lobby.me.id)throw new Error('Your hosted room belongs to another tab. Return there or close it before hosting again.');
+          await this.joinOnlineGame(row);
+          if(!lobby.game || lobby.game.id!==room.id)throw new Error('Could not join. The match may have started or your game needs a refresh.');
+        }});
+    } catch(error){this.ui.showBanner(error.message||'Could not open your party.','bad',6000);}
+  }
 
   async _openLobby() {
     if (this.lobby) {
@@ -2961,17 +3291,26 @@ class App {
   }
 
   async _acceptSpectator(sig) {
-    if (!this.netMode || this.mpRole !== 'host' || !this.game || !this.onlinePending) return;
+    if (!this.netMode || this.mpRole !== 'host' || !this.game || this.game.over || !this.onlinePending) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession();
+    const peer = new NetSession(this.lobby?.iceServers);
     const rec = { peer, name: sig.name || 'Watcher', started: false, buffer: [] };
+    this._attachNetDiagnostics(peer);
     peer.onOpen = () => {
       this.onlinePending.delete(sig.from);
       this.pendingSpectators.push(rec);
       this.ui.showBanner(`👁️ @${rec.name} is watching.`, '', 2600);
     };
     peer.onMessage = (m) => {
-      if (m.t !== 'spectateReady') return;
+      if (m.t === 'needWindow' && this.spectators.includes(peer)) {
+        const commands = this._windowHistory.get(Number(m.w));
+        if (commands) peer.send({ t: 'w', w: Number(m.w), c: commands, p: [] });
+        return;
+      }
+      // A Watch connection can acknowledge loading or request a lost window;
+      // never send it through the player command/seat handler.
+      if (m.t !== 'spectateReady' || !rec.started || m.frame !== rec.frame) return;
+      if (rec.overflow) { rec.started = false; return; }
       for (const packet of rec.buffer) peer.send(packet);
       rec.buffer.length = 0;
       this.pendingSpectators = this.pendingSpectators.filter((entry) => entry !== rec);
@@ -2982,6 +3321,12 @@ class App {
       this.spectators = this.spectators.filter((entry) => entry !== peer);
     };
     this.onlinePending.set(sig.from, peer);
+    setTimeout(() => {
+      if (this.onlinePending?.get(sig.from) === peer && !peer.open) {
+        this.onlinePending.delete(sig.from);
+        peer.destroy();
+      }
+    }, 20000);
     try {
       const code = await peer.host();
       await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code, role: 'spectator' });
@@ -3065,7 +3410,7 @@ class App {
     clearTimeout(this._reconnectT);
     this._reconnectT = setTimeout(() => {
       if (!this.netMode || !this.game || this.game.over || this.net?.open) return;
-      this.lobby.signal({ t: 'knock', name: this._publicName() })
+      this.lobby.signal({ t: 'knock', name: this._publicName(), ...(this.mpRole === 'spectator' ? { role: 'spectator' } : {}) })
         .catch(() => {})
         .finally(() => {
           // If the host's offer doesn't land, try again with backoff.
@@ -3555,8 +3900,11 @@ class App {
   // Load GLB art once; when the toy kit lands, hand it to the map props and
   // rebuild the horde pools on kit geometry. Presentation only.
   _loadArt() {
+    // Seeded kit marines for colony troops (default on; ?marines=0 opts out).
+    // The kit loads alongside the art so the first troops already use it.
+    const marineKit = MARINE_FLAGS.units ? loadMarineKit().catch(() => false) : null;
     if (!this._artLoading) {
-      this._artLoading = loadAssets().then(() => {
+      this._artLoading = loadAssets().then(() => marineKit).then(() => {
         this.assetsLoaded = true;
         setMapKit(kitGeometry);
         if (hasKit('enemy_walker') && this.horde) {
@@ -3581,8 +3929,10 @@ class App {
     const n = Math.min(g.zombies.length, ZMAX);
     const c = this._zcolor;
     this.horde.begin();
+    const vision=fogVisionSources(g);
     for (let i = 0; i < n; i++) {
       const zb = g.zombies[i];
+      if(!visibleInFog(vision,zb.x,zb.z))continue;
       const bob = this.map.groundY(zb.x, zb.z) + Math.sin(t * 7 + zb.phase) * 0.05;
       const yaw = Math.atan2(zb.dirX, zb.dirZ);
       // Hit pulse: a fast, meaty squash on damage.
@@ -3751,26 +4101,41 @@ class App {
     const MAXB = 300;
     const q = this.camera.quaternion;
 
-    const add = (x, y, z, frac, w) => {
+    const add = (x, y, z, frac, w, thickness = 1, structure = false) => {
       if (i >= MAXB) return;
       d.position.set(x, y, z);
       d.quaternion.copy(q);
-      d.scale.set(w, 1, 1);
+      d.scale.set(w + (structure ? w * .06 : 0), thickness * (structure ? 1.5 : 1), 1);
       d.updateMatrix();
       this.barBg.setMatrixAt(i, d.matrix);
       const left = new THREE.Vector3(-w / 2, 0, 0).applyQuaternion(q);
       d.position.set(x + left.x, y + left.y + 0.001, z + left.z);
-      d.scale.set(Math.max(0.01, w * frac), 1, 1);
+      d.scale.set(Math.max(0.01, w * frac), thickness, 1);
       d.updateMatrix();
       this.barFg.setMatrixAt(i, d.matrix);
-      c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
+      if (structure) c.setHex(frac <= .3 ? 0xff4545 : frac <= .6 ? 0xffbf47 : 0x65e3aa);
+      else c.setHSL(lerp(0, 0.33, frac), 0.9, 0.45);
       this.barFg.setColorAt(i, c);
       i++;
     };
 
     const gy = (x, z) => this.map.groundY(x, z);
-    for (const b of g.buildings) {
-      if (b.hp < b.maxHp) add(b.cx, gy(b.cx, b.cz) + this._buildingHeight(b.kind) + 0.5, b.cz, b.hp / b.maxHp, Math.max(1.2, b.size * 0.8));
+    // World-space bars retain a readable pixel size at normal play zoom.
+    // Wall arcs show their weakest damaged section, not dozens of overlapping
+    // bars or an average that hides the section about to fall.
+    const damaged = g.buildings.filter(b=>b.alive && b.hp < b.maxHp - .5);
+    const wallWorst = new Map();
+    for(const b of damaged)if(b.kind==='wall') {
+      const prior=wallWorst.get(b.plotId);
+      if(!prior || b.hp/b.maxHp < prior.hp/prior.maxHp)wallWorst.set(b.plotId,b);
+    }
+    for (const b of damaged) {
+      if(b.kind==='wall' && wallWorst.get(b.plotId)!==b)continue;
+      const height=this.buildingMeshes.get(b.id)?.healthHeight ?? this._buildingHeight(b.kind);
+      const y=gy(b.cx,b.cz)+height+.6;
+      const distance=this.camera.position.distanceTo(new THREE.Vector3(b.cx,y,b.cz));
+      const pixel=2*Math.tan(this.camera.fov*Math.PI/360)*distance/Math.max(1,this.renderer.domElement.clientHeight);
+      add(b.cx,y,b.cz,b.hp/b.maxHp,Math.max(1.6,48*pixel),Math.max(1.5,(b.hp/b.maxHp<=.3?7:5)*pixel/.12),true);
     }
     for (const n of g.nests) {
       if (n.alive && n.hp < n.maxHp) add(n.x, gy(n.x, n.z) + 2.6, n.z, n.hp / n.maxHp, 2.2);
@@ -3779,7 +4144,7 @@ class App {
       if (u.hp < u.maxHp) add(u.x, gy(u.x, u.z) + 1.45, u.z, Math.max(0, u.hp / u.maxHp), 0.8);
     }
     for (const zb of g.zombies) {
-      if (zb.type === 'brute' && zb.hp < zb.maxHp) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
+      if (zb.type === 'brute' && zb.hp < zb.maxHp && visibleInFog(fogVisionSources(g),zb.x,zb.z)) { add(zb.x, gy(zb.x, zb.z) + 2.1, zb.z, zb.hp / zb.maxHp, 1.1); if (i >= MAXB) break; }
     }
     this.barBg.count = this.barFg.count = i;
     this.barBg.instanceMatrix.needsUpdate = true;
@@ -3795,24 +4160,27 @@ class App {
   // ---------------- plot foundations ----------------
 
   _makeLabelSprite(text, sub = '') {
+    const wide = String(sub || '').length > 10;
+    const fitted = fittedLabel(sub || '', wide ? 496 : 240);
     const cnv = document.createElement('canvas');
-    cnv.width = 256; cnv.height = 128;
+    cnv.width = wide ? 512 : 256;
+    cnv.height = 128;
     const ctx = cnv.getContext('2d');
     ctx.textAlign = 'center';
     ctx.font = '64px serif';
-    ctx.fillText(text, 128, 62);
+    ctx.fillText(text, cnv.width / 2, 62);
     if (sub) {
-      ctx.font = 'bold 34px system-ui, sans-serif';
+      ctx.font = `bold ${fitted.size}px system-ui, sans-serif`;
       ctx.fillStyle = '#ffd75e';
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.lineWidth = 6;
-      ctx.strokeText(sub, 128, 108);
-      ctx.fillText(sub, 128, 108);
+      ctx.strokeText(sub, cnv.width / 2, 108);
+      ctx.fillText(sub, cnv.width / 2, 108);
     }
     const tex = new THREE.CanvasTexture(cnv);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
     const sp = new THREE.Sprite(mat);
-    sp.scale.set(2.4, 1.2, 1);
+    sp.scale.set(wide ? 4.6 : 2.4, 1.2, 1);
     return sp;
   }
 
@@ -3832,7 +4200,14 @@ class App {
       const splash = def.splash ? ' splash' : '';
       roles.push(compact ? `${def.dmg} dmg` : `${def.dmg} damage${splash}, ${def.range} tile range.`);
     }
-    if (def.income) roles.push(compact ? `+${Math.round(def.income)} coin` : `Adds ${Math.round(def.income)} to your income.`);
+    if (def.income) {
+      const perMinute = def.income / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      const current = this.game?.buildings.find(b => b.plotId === plot.id && b.alive);
+      const currentRate = (current?.def.income || 0) / SIEGE.incomePeriod * 60 * (this.game?.economy.income || 1) * (1 + (this.game?.relicMods.income || 0));
+      roles.push(compact ? `+${perMinute.toFixed(1)} gold/min` : currentRate > 0
+        ? `Income ${currentRate.toFixed(1)} → ${perMinute.toFixed(1)} gold/min.`
+        : `Produces ${perMinute.toFixed(1)} gold/min automatically.`);
+    }
     if (def.repairRate) roles.push(compact ? `${def.repairRate}/s repair` : `Automatically repairs ${def.repairRate} HP/s within ${def.repairRadius} tiles.`);
     if (def.heroDmg) roles.push(compact ? `heroes +${Math.round(def.heroDmg * 100)}% dmg` : `All heroes gain +${Math.round(def.heroDmg * 100)}% damage, +${def.heroHp} HP, and ${Math.round(def.heroCdr * 100)}% cooldown reduction.`);
     if (roles.length) return roles.join(compact ? ' · ' : ' ');
@@ -3967,7 +4342,7 @@ class App {
 
     // Glow ring at the pay point + radial progress arc.
     const [px, pz] = this.game.payPoint(plot);
-    const ringGeo = new THREE.RingGeometry(1.35, 1.55, 40);
+    const ringGeo = new THREE.RingGeometry(1.46, 1.55, 40);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.35, depthWrite: false }));
     ring.position.set(px, 0.05, pz);
@@ -4085,13 +4460,14 @@ class App {
         : nt.mode === 'repair' ? 'repair'
         : nt.mode === 'rebuild' ? 'rebuild'
         : this._plotRole(plot, nt, true);
-      const wantKey = (built ? '⬆' : PLOT_KINDS[plot.kind].icon) + '|' + wantSub;
+      const actionIcon = nt.mode === 'repair' ? '🔧' : nt.mode === 'rebuild' ? '🏗️' : built ? '⬆️' : PLOT_KINDS[plot.kind].icon;
+      const wantKey = actionIcon + '|' + wantSub;
       ud.label.visible = active;
       if (ud.label.visible && ud.labelKey !== wantKey) {
         ud.labelKey = wantKey;
         const [lx, lz] = ud.labelPos;
         rec.group.remove(ud.label);
-        ud.label = this._makeLabelSprite(built ? '⬆️' : PLOT_KINDS[plot.kind].icon, wantSub);
+        ud.label = this._makeLabelSprite(actionIcon, wantSub);
         ud.label.position.set(lx, built ? 3.1 : 2.1, lz);
         rec.group.add(ud.label);
       }
@@ -4100,10 +4476,12 @@ class App {
       // Coin pips: cost as slots, filling as gold streams in — shown only
       // when you ride close (a city of floating rings is noise, not info).
       if (ud.pips) {
-        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch;
+        ud.pips.sprite.visible = plot.id === pipPlotId && !nt.branch && nt.mode !== 'repair';
         if (ud.pips.sprite.visible) {
           const total = Math.max(1, Math.min(12, Math.ceil(nt.cost)));
-          const filled = Math.min(total, Math.floor((plot.paid / nt.cost) * total + 1e-6));
+          const hp = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+          const progress = hp ? hp.hp / hp.maxHp : plot.paid / nt.cost;
+          const filled = Math.min(total, Math.floor(progress * total + 1e-6));
           this._drawPips(ud.pips, total, filled);
           ud.pips.sprite.position.y = (built ? 4.1 : 3.0) + Math.sin(t * 2 + plot.id) * 0.12;
         }
@@ -4114,11 +4492,13 @@ class App {
       const affordable = !nt.branch && g.gold + plot.paid >= 1;
       const paying = (plot.payFx || 0) > 0;
       if (paying) plot.payFx -= 1 / 60;
-      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : paying ? 0xfff2c8 : 0xffd75e);
+      ud.ring.material.color.setHex(nt.branch ? 0xb98fdc : nt.mode === 'repair' ? 0x75dfff : paying ? 0xfff2c8 : 0xffd75e);
       ud.ring.material.opacity = paying ? 0.9 : affordable ? 0.35 + Math.sin(t * 3 + plot.id) * 0.15 : 0.12;
 
       // Progress arc.
-      const frac = nt.branch ? 0 : clamp(plot.paid / nt.cost, 0, 1);
+      const health = nt.mode === 'repair' ? g.plotHpState(plot) : null;
+      const frac = nt.branch ? 0 : clamp(health ? health.hp / health.maxHp : plot.paid / nt.cost, 0, 1);
+      ud.prog.material.color.setHex(nt.mode === 'repair' ? 0x75dfff : 0xffd75e);
       ud.prog.visible = frac > 0.002;
       if (Math.abs(frac - ud.progFrac) > 0.02 || (frac === 1) !== (ud.progFrac === 1)) {
         ud.progFrac = frac;
@@ -4143,17 +4523,40 @@ class App {
       this._wallTiles = new Set();
       this._archTiles = new Set();
       this._gateMain = new Set();
+      this._gateSupports = new Map();
       for (const p of plots) {
         if (p.kind !== 'wall') continue;
         for (const [x, z] of p.tiles) this._wallTiles.add(z * N + x);
         for (const [x, z] of p.arch || (p.gate ? [p.gate] : [])) this._archTiles.add(z * N + x);
-        if (p.gate) this._gateMain.add(p.gate[1] * N + p.gate[0]);
+        if (p.gate) {
+          const key=p.gate[1]*N+p.gate[0];
+          this._gateMain.add(key);
+          this._gateSupports.set(key,gateSupports(p,this.game.map));
+        }
       }
     }
     const hq = this.game.buildings.find((o) => o.kind === 'hq');
     const center = hq ? [hq.cx, hq.cz] : null;
-    return buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
-      archTiles: this._archTiles, gateMain: this._gateMain, center });
+    const plan = plots.find(p=>p.kind==='hq')?.plan;
+    const frontageTile = plan?.roads?.connections?.find(c=>c.plotId===b.plotId)?.tile;
+    const frontage = frontageTile == null ? null :
+      [frontageTile % this.map.size + .5, Math.floor(frontageTile / this.map.size) + .5];
+    const mesh = buildBuildingMesh(b, { mapSize: this.game.map.size, wallTiles: this._wallTiles,
+      archTiles: this._archTiles, gateMain: this._gateMain, gateSupports: this._gateSupports, liveWallTiles: b.gate ? new Set(this.game.buildings.filter(o=>o.kind==='wall'&&o.alive).map(o=>o.z*this.map.size+o.x)) : null, center, frontage, fortressKit: !!plan?.kit, armoredWalls: this.game.culture === 'european' });
+    const painted = new Map();
+    mesh.traverse(part => {
+      if (part.isMesh && part.material?.isMeshLambertMaterial && part.geometry.getAttribute('color')) {
+        const original = part.material;
+        if (!painted.has(original)) {
+          const material = environmentMaterial(this.game.culture === 'european' ? 'armor' : 'building', { vertexColors: true, flatShading: true,
+            color: original.color, opacity: original.opacity, transparent: original.transparent, side: original.side });
+          painted.set(original, material);
+        }
+        part.material = painted.get(original);
+      }
+    });
+    for (const original of painted.keys()) original.dispose();
+    return mesh;
   }
 
   _syncBuildings() {
@@ -4162,8 +4565,11 @@ class App {
     for (const b of g.buildings) {
       seen.add(b.id);
       const plot = g.plots.find((p) => p.id === b.plotId);
-      const tierKey = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const artTier = (plot ? plot.tier : 1) + ':' + (plot ? plot.branch || '' : '');
+      const supportKey = b.gate ? (this._gateSupports?.get(b.z*this.map.size+b.x)||[]).map(([x,z])=>!this._wallTiles.has(z*this.map.size+x)||!!g.occ[z*this.map.size+x]).join(',') : '';
+      const tierKey = artTier + ':' + supportKey;
       let rec = this.buildingMeshes.get(b.id);
+      const priorSpawnT = rec?.artTier === artTier ? rec.spawnT : undefined;
       if (rec && rec.tierKey !== tierKey) { // upgraded in place — rebuild the mesh
         this.scene.remove(rec.mesh);
         this._disposeObject3D(rec.mesh);
@@ -4187,7 +4593,8 @@ class App {
             materials.push(material);
           }
         });
-        rec = { mesh, b, tierKey, spawnT: this.clock.elapsedTime, materials };
+        const healthHeight = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y;
+        rec = { mesh, b, tierKey, artTier, healthHeight, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -4211,7 +4618,7 @@ class App {
     if (!obj) return;
     obj.traverse((o) => {
       // Toy-kit geometry is shared with its template — never free it here.
-      if (o.geometry && !o.geometry.userData.kitShared) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData.kitShared && !o.userData.sharedGeometry) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
@@ -4253,14 +4660,25 @@ class App {
 
     if (u.hero) {
       const d = u.def;
-      const kit = !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
-      const authored = !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
-      if (kit) {
+      // Marine heroes (default on, ?marineHeroes=0 opts out): art-marines GLBs.
+      const marineHero = MARINE_FLAGS.heroes && !u.characterStyle ? assetClone(`marineHero_${u.key}`) : null;
+      const kit = !marineHero && !u.characterStyle ? this._kitFigure(`hero_${u.key}`) : null;
+      const authored = !marineHero && !kit && u.key === 'scott' && !u.characterStyle ? assetClone('heroScott') : null;
+      if (marineHero) {
+        marineHero.scale.setScalar(0.6);
+        body.add(marineHero);
+        const weapon = assetPart(marineHero, 'weapon');
+        if (weapon) trackWeapon(weapon);
+        g.userData.limbs = {
+          legL: assetPart(marineHero, 'leg_l'), legR: assetPart(marineHero, 'leg_r'),
+          armL: assetPart(marineHero, 'arm_l'), armR: assetPart(marineHero, 'arm_r'),
+        };
+      } else if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
-        // At the follow camera's distance a hero is only ~40px tall, so it is
-        // drawn a size up from the troops and wears a dark ink outline that
-        // keeps its silhouette off same-coloured ground (Alexander on grass).
-        kit.node.scale.multiplyScalar(1.25);
+        // Mounted heroes remain larger than infantry, not house-sized.
+        // The selection ring and outline carry readability at distance;
+        // the body no longer needs the old 1.25× enlargement.
+        kit.node.scale.multiplyScalar(0.78);
         g.userData.outlines = addInkOutline(kit.node);
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4307,7 +4725,7 @@ class App {
         const auraFill = new THREE.Mesh(auraFillGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.03, depthWrite: false }));
         auraFill.position.y = 0.035;
         g.add(auraFill);
-        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.32) / S, auraR / S, 72);
+        const auraGeo = new THREE.RingGeometry(Math.max(0.2, auraR - 0.12) / S, auraR / S, 72);
         auraGeo.rotateX(-Math.PI / 2);
         const aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: d.aura.color, transparent: true, opacity: 0.16, depthWrite: false }));
         aura.position.y = 0.05;
@@ -4350,9 +4768,17 @@ class App {
       // snipers and hero summons get their own procedural rigs (unit-art.js)
       // so the army reads apart at a glance.
       const d = u.def;
-      const kit = this._kitFigure(`unit_${u.key}`);
-      const authored = !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
-      if (kit) {
+      // Marines (default on, ?marines=0 opts out): a unique seeded marine per unit (same on every peer).
+      const marine = MARINE_FLAGS.units ? marineForUnit(u, { matchSeed: this.game?.rngSeed ?? 0, culture: activeCulture() }) : null;
+      const kit = marine ? null : this._kitFigure(`unit_${u.key}`);
+      const authored = !marine && !kit && u.key === 'soldier' ? assetClone('humanRifleman') : null;
+      if (marine) {
+        marine.node.scale.multiplyScalar(0.42);
+        body.add(marine.node);
+        g.userData.limbs = marine.limbs;
+        g.userData.marineNode = marine.node;
+        if (marine.weapon) trackWeapon(marine.weapon);
+      } else if (kit) {
         // Toy-kit block figurine: YOUR men — shield knights, rangers, marksmen.
         body.add(kit.node);
         g.userData.limbs = kit.limbs;
@@ -4391,6 +4817,12 @@ class App {
   }
 
   _syncUnits(t, dt = 0) {
+    // Marine LOD: full kit near the camera, ~1.5k-tri kit beyond a cut-off
+    // that pulls in as the army grows or the camera zooms out.
+    const marineCount = this._marineCount || 0;
+    const lodFactor = marineCount > 120 ? 1.0 : marineCount > 45 ? 1.12 : 1.35;
+    const marineLodFar = this.camDist > 78 ? 0 : this.camDist * lodFactor;
+    let marinesSeen = 0;
     const g = this.game;
     const seen = new Set();
     for (const u of g.units) {
@@ -4483,6 +4915,17 @@ class App {
         if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
         if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
       }
+      const marineNode = rec.mesh.userData.marineNode;
+      if (marineNode) {
+        marinesSeen++;
+        let low = MARINE_FLAGS.lod === 'lo';
+        if (MARINE_FLAGS.lod === 'auto') {
+          const d = this.camera.position.distanceTo(rec.mesh.position);
+          const wasLow = marineNode.userData.marineLod?.low;
+          low = d > marineLodFar + (wasLow ? -2 : 2); // hysteresis: no flicker at the edge
+        }
+        setMarineLod(marineNode, low);
+      }
       if (weaponParts.length && attackPulse > 0) {
         for (const part of weaponParts) {
           const rp = part.userData.restPos;
@@ -4500,6 +4943,11 @@ class App {
         }
       }
       if (u.hero) {
+        if (u === this.myHero()) {
+          const shells = rec.mesh.userData.occlusionShells ||= installHeroOcclusionShell(rec.mesh.userData.body);
+          const occluded = !u.dead && terrainOccludesHero(this.map, this.camera.position, rec.mesh.position);
+          for (const shell of shells) shell.visible = occluded;
+        }
         const wantOp = u.stealth ? 0.3 : 1;
         if (rec.op !== wantOp) {
           rec.op = wantOp;
@@ -4524,11 +4972,11 @@ class App {
             const base = part.userData.baseRadius || radius;
             part.scale.setScalar(radius / base);
           }
-          aura.material.opacity = 0.14 + rank * 0.045 + Math.sin(t * 2.2 + u.id) * (0.045 + rank * 0.01);
+          aura.material.opacity = 0.10 + rank * 0.018 + Math.sin(t * 2.2 + u.id) * 0.015;
           if (fill) fill.material.opacity = rank ? 0.035 + rank * 0.018 + Math.sin(t * 1.3 + u.id) * 0.01 : 0.02;
           if (pulse) {
             pulse.rotation.z = t * (0.28 + rank * 0.04);
-            pulse.material.opacity = rank ? 0.16 + rank * 0.045 + Math.sin(t * 3.2 + u.id) * 0.06 : 0.08;
+            pulse.material.opacity = rank ? 0.055 + rank * 0.012 : 0.025;
           }
         }
         const weave = rec.mesh.userData.weave;
@@ -4558,6 +5006,7 @@ class App {
         affected.material.opacity = 0.34 + Math.sin(t * 4.6 + u.id) * 0.12;
       }
     }
+    this._marineCount = marinesSeen;
     for (const [id, rec] of this.unitMeshes) {
       if (!seen.has(id)) {
         this.scene.remove(rec.mesh);
@@ -4613,9 +5062,96 @@ class App {
     this.tacticalVisuals.pulse(x, z, { color: 0xff493d, radius: 4.2, life: 1.5 });
   }
 
+  // Small amber construction rig, distinct from armed troops.
+  _syncBuilder(t) {
+    const b=this.game?.builders;
+    if(!b||b.recover>0){if(this._builderMesh)this._builderMesh.visible=false;return;}
+    if(!this._builderMesh){
+      const crew=new THREE.Group();crew.name='colony-builder';
+      const armor=new THREE.MeshStandardMaterial({color:0xe7b44c,roughness:.75});
+      const dark=new THREE.MeshStandardMaterial({color:0x293c4b,roughness:.8});
+      const light=new THREE.MeshBasicMaterial({color:0x8eeaff});
+      const box=(w,h,d,x,y,z,mat)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;crew.add(m);return m;};
+      box(.7,.75,.5,0,.85,0,armor);box(.46,.4,.43,0,1.43,0,armor);box(.4,.12,.04,0,1.46,.23,light);
+      box(.23,.55,.27,-.22,.27,0,dark);box(.23,.55,.27,.22,.27,0,dark);
+      box(.23,.6,.23,-.49,.88,0,armor);box(.23,.6,.23,.49,.88,0,armor);
+      box(.5,.48,.27,0,.94,-.4,dark);crew.userData.tool=box(.2,.18,.7,.5,.62,.3,dark);
+      const ring=new THREE.Mesh(new THREE.RingGeometry(.65,.76,24),new THREE.MeshBasicMaterial({color:0xe7b44c,side:THREE.DoubleSide,transparent:true,opacity:.65,depthWrite:false}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;crew.add(ring);
+      this._builderMesh=crew;
+    }
+    const m=this._builderMesh;if(!m.parent)this.scene.add(m);m.visible=true;
+    m.position.set(b.x,this.map.groundY(b.x,b.z)+(b.status==='Travelling'?Math.abs(Math.sin(t*9))*.06:0),b.z);
+    m.userData.tool.rotation.x=['Building','Repairing','Rebuilding','Upgrading'].includes(b.status)?Math.sin(t*14)*.2:0;
+    if(b.route[0])m.rotation.y=Math.atan2(b.route[0][0]-b.x,b.route[0][1]-b.z);
+  }
+
+  // Outline the one object the local hero can act on; presentation only.
+  _updateCombatCues() {
+    const g=this.game;
+    if(this._combatCueGame!==g) {
+      for(const mesh of this._combatCues||[]) {
+        mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();
+      }
+      this._combatCues=[];this._combatCueGame=g;
+    }
+    for(const mesh of this._combatCues)mesh.visible=false;
+    if(!g)return;
+    const vision=fogVisionSources(g),visible=(x,z)=>vision.some(v=>Math.hypot(v.x-x,v.z-z)<v.radius);
+    let index=0;
+    const cue=(x,z,r,color,opacity=.8)=>{
+      if(index>=48)return;
+      let mesh=this._combatCues[index];
+      if(!mesh) {
+        const geo=new THREE.RingGeometry(.86,1,48);geo.rotateX(-Math.PI/2);
+        mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+        this._combatCues.push(mesh);
+      }
+      if(!mesh.parent)this.scene.add(mesh);
+      mesh.visible=true;mesh.position.set(x,this.map.groundY(x,z)+.13,z);
+      mesh.scale.setScalar(r);mesh.material.color.setHex(color);mesh.material.opacity=opacity;
+      index++;
+    };
+    // Actual pending impacts, not event timers: pause/restore/Watch agree.
+    for(const enemy of g.zombies) {
+      const hit=enemy.windup;
+      if(enemy.dead||!hit||!visible(enemy.x,enemy.z)||!visible(hit.x,hit.z))continue;
+      const p=1-hit.t/hit.duration;
+      cue(hit.x,hit.z,hit.r,hit.kind==='acid'?0xdfff55:0xff7844,.95);
+      cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
+    }
+    const hero=this.myHero(),target=hero?.target;
+    if(hero&&!hero.dead&&this.pendingAbility!=null){
+      const ab=heroAbility(hero.def,this.pendingAbility);if(ab?.range)cue(hero.x,hero.z,ab.range,0x7edac1,.4);
+    }
+    for(const caster of g.heroes)for(const e of caster.spells?.effects||[]){
+      if((e.kind==='blast'||e.kind==='zone')&&visible(e.x,e.z))cue(e.x,e.z,e.radius,e.delay>0?0xffce68:0x7edac1,.65);
+    }
+    if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
+      &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
+      cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
+    }
+  }
+
   // Outline the one object the local hero can act on. This is presentation
   // state only; it must never enter commands, snapshots, or lockstep hashes.
   _updateTacticalSelection() {
+    if(this._inspectRing)this._inspectRing.visible=false;
+    const selected=this.ui._battlePanel;
+    if(selected?.mode==='unit' && selected.game===this.game) {
+      const unit=(selected.enemy?this.game.zombies:this.game.units).find(u=>u.id===selected.id);
+      const visible=unit && !unit.dead && unit.hp>0 && (!selected.enemy || fogVisionSources(this.game).some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius));
+      if(visible) {
+        if(!this._inspectRing){
+          const geometry=new THREE.RingGeometry(.62,.73,32);geometry.rotateX(-Math.PI/2);
+          this._inspectRing=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({color:0x83e8ff,transparent:true,opacity:.9,depthWrite:false}));
+        }
+        if(!this._inspectRing.parent)this.scene.add(this._inspectRing);
+        this._inspectRing.visible=true;this._inspectRing.position.set(unit.x,this.map.groundY(unit.x,unit.z)+.1,unit.z);
+        this._inspectRing.material.color.setHex(selected.enemy?0xff7777:0x83e8ff);
+        this.tacticalVisuals.setSelection(selected.enemy?[]:[this.unitMeshes.get(unit.id)?.mesh],0x83e8ff);
+        return;
+      }
+    }
     const h = this.myHero();
     if (!this.game || !h || h.dead || this.game.phase !== 'live') {
       this.tacticalVisuals.setSelection([]);
@@ -4690,8 +5226,11 @@ class App {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
+      if (e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable)) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
       this.keys.add(k);
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
         this.ui.openGameChat();
@@ -4724,6 +5263,11 @@ class App {
       // Scoped: the battle loop can only ever pick an action that listens in a
       // battle. Conflict detection guarantees no two of those share a key.
       const act = actionFor(binds, k, 'battle');
+      const intent = pauseIntent({ paused: this.paused, menuOpen: this.ui.pauseOpen, action: act });
+      if (intent === 'resume-menu') { e.preventDefault(); this.closePauseMenu(); return; }
+      if (intent === 'resume') { e.preventDefault(); this.setSpeed(0); return; }
+      if (intent === 'open-menu') { this.togglePauseMenu(); return; }
+      if (this.paused) return;
       switch (act) {
         case 'dodge': {
           e.preventDefault();
@@ -4738,8 +5282,9 @@ class App {
           this.issue({ t: 'dodge', p: this.myPlayer, x: dir.x, z: dir.z });
           break;
         }
-        case 'ability1':
-          if (this.controlMode === 'fight') this.tryCast();
+        case 'ability1': case 'ability2': case 'ability3':
+          e.preventDefault();
+          if (this.controlMode === 'fight') this.tryCast(Number(act.slice(-1)) - 1 + (isHeld(binds, this.keys, 'second_bar') ? 3 : 0));
           break;
         case 'build_mode':
           e.preventDefault();
@@ -4748,17 +5293,17 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'defend' }); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
+        case 'stance_follow': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'guard' }); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
+        case 'stance_push': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'attack' }); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
         case 'character_sheet': e.preventDefault(); this.ui.showCharacterSheet('gear'); break;
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
-        case 'pause': this.setSpeed(0); break;
-        case 'menu': this.togglePauseMenu(); break;
+        case 'pause': e.preventDefault(); this.setSpeed(0); break;
+        case 'menu': if (this.pendingAbility != null) {this.pendingAbility=null;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           if (k === 'h') this.togglePauseMenu(true);
           break;
@@ -4774,6 +5319,43 @@ class App {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       this.audio.init();
+      if(e.button!==0 || !this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden'))return;
+      const rect=cv.getBoundingClientRect(),vision=fogVisionSources(this.game);
+      let best=null,closest=26;
+      for(const [actors,enemy] of [[this.game.units,false],[this.game.zombies,true]])for(const unit of actors){
+        if(unit.dead||unit.hp<=0)continue;
+        if(enemy&&!vision.some(v=>Math.hypot(v.x-unit.x,v.z-unit.z)<v.radius))continue;
+        const world=new THREE.Vector3(unit.x,this.map.groundY(unit.x,unit.z)+(unit.hero?1.3:.9),unit.z);
+        const screen=world.clone().project(this.camera);
+        if(screen.z< -1||screen.z>1)continue;
+        const distance=Math.hypot(rect.left+(screen.x+1)*rect.width/2-e.clientX,rect.top+(1-screen.y)*rect.height/2-e.clientY);
+        if(distance<closest){closest=distance;best={unit,enemy,world};}
+      }
+      if (this.pendingAbility != null) {
+        const slot=this.pendingAbility,h=this.myHero(),ab=heroAbility(h?.def,slot);
+        if (!h || h.dead || this.controlMode !== 'fight' || !ab) {this.pendingAbility=null;return;}
+        if (ab.target==='enemy') {
+          if (!best?.enemy) {this.ui.showBanner('Select a visible enemy.', 'info');return;}
+          const target={id:best.unit.id};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Target is out of range or hidden.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        } else {
+          const pointer=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2);
+          const ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
+          const hit=ray.intersectObject(this.terrain,true)[0];
+          if (!hit) return;
+          const target={x:hit.point.x,z:hit.point.z};
+          if (!spellTarget(this.game,h,ab,target)) {this.ui.showBanner('Choose a point closer to your hero.', 'info');return;}
+          this.issue({t:'cast',p:this.myPlayer,slot,...target});
+        }
+        this.pendingAbility=null;return;
+      }
+      if(best){
+        // Do not select an enemy through an occluding terrain ridge.
+        const direction=best.world.clone().sub(this.camera.position),distance=direction.length();
+        const ray=new THREE.Raycaster(this.camera.position,direction.normalize(),0,distance-.2);
+        if(!best.enemy||!ray.intersectObject(this.terrain,true).length)this.ui.inspectUnit(this.game,best.unit,best.enemy);
+      } else {this.ui._battlePanel=null;}
     });
   }
 
@@ -4803,6 +5385,9 @@ class App {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     let dx = 0, dz = 0;
     const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    if (editing) this.keys.clear();
     if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
     if (isHeld(binds, this.keys, 'move_down')) dz += 1;
     if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
@@ -4818,11 +5403,17 @@ class App {
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
     const bindsNow = this.binds();
-    const buttonPays = canPay && this.buttonPay;
     const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
-    const pay = this.controlMode === 'build' && canPay && (buildHeld || buttonPays);
+    const physicalPayHeld = buildHeld || !!this.buttonPay;
+    // Eligibility can disappear after repair (a specialisation is due), then
+    // return while the same key/button remains down. Only a physical release
+    // rearms that press; lastPay alone tracks eligibility, not release.
+    if (!physicalPayHeld) this._payPressUsed = false;
+    const pay = this.controlMode === 'build' && canPay && physicalPayHeld
+      && (!this._payPressUsed || this.lastPay);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
+      if (pay) this._payPressUsed = true;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
     }
   }
@@ -4888,7 +5479,9 @@ class App {
   }
 
   toggleControlMode() {
+    this.pendingAbility = null;
     this.controlMode = this.controlMode === 'build' ? 'fight' : 'build';
+    this._noteCoach({ type: 'mode' });
     this.buttonPay = false;
     if (this.lastPay && this.controlMode === 'fight') {
       this.lastPay = false;
@@ -4898,17 +5491,25 @@ class App {
     this.audio.click();
   }
 
-  tryCast() {
+  tryCast(slot = 0) {
     if (!this.game) return;
     const h = this.myHero();
     if (!h || h.dead) return;
-    if (h.abilCd > 0) { this.audio.deny(); return; }
+    if (!heroAbility(h.def, slot) || heroAbility(h.def, slot).passive || abilityCooldown(h, slot) > 0) { this.audio.deny(); return; }
+    const ab=heroAbility(h.def,slot);
+    if ((h.spells?.mana ?? h.def.mana ?? 0) < spellManaCost(h,slot) || h.spells?.charges?.[slot]?.count === 0) {this.audio.deny();return;}
+    if (ab.target==='point' || ab.target==='enemy') {
+      this.pendingAbility=slot;
+      this.ui.showBanner(`${ab.name}: select ${ab.target==='enemy'?'an enemy':'a point'} · ${keyLabel(this.binds().menu)} cancels`, 'info');
+      return;
+    }
     if (Math.random() < 0.4) this.audio.bark(h.key, 'attack');
-    this.issue({ t: 'cast', p: this.myPlayer });
+    this.issue({ t: 'cast', p: this.myPlayer, slot });
   }
 
   togglePauseMenu(help = false) {
     if (!this.game) return;
+    this._finishMissionIntro();
     if (this.ui.pauseOpen) { this.closePauseMenu(); return; }
     if (!this.netMode) this.pause();
     this.ui.setMatchExit(this.netMode ? this.mpRole : null);
@@ -5052,9 +5653,9 @@ class App {
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
     this.sun.intensity = lerp(1.25, 2.3, b);
-    this.sun.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.35);
+    this.sun.color.setRGB(1, 0.94, 0.83).lerp(shadow, (1 - b) * 0.35);
     this.hemi.intensity = lerp(0.55, 0.75, b);
-    this.hemi.color.setRGB(1, 1, 1).lerp(shadow, (1 - b) * 0.4);
+    this.hemi.color.setRGB(0.83, 0.91, 1).lerp(shadow, (1 - b) * 0.4);
     this.hemi.groundColor.copy(shadow);
     this.amb.intensity = 0.35;
     this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
@@ -5164,9 +5765,27 @@ class App {
       const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
       g.events.splice(0, g.events.length - 30, ...keep);
     }
+    const vision=fogVisionSources(g);
+    const hiddenEffects=new Set(['shot','spit','zdeath','death','groundstrike','cast','stealth']);
     for (const e of g.events) {
+      if(hiddenEffects.has(e.type)) {
+        const x=e.fx??e.x,z=e.fz??e.z;
+        if(Number.isFinite(x) && !visibleInFog(vision,x,z) && !(Number.isFinite(e.tx)&&visibleInFog(vision,e.tx,e.tz)))continue;
+      }
+      this.audio.eventGain=eventHearingGain(this.myHero() || (this.isSpectator ? {x:this.focus.x,z:this.focus.z} : null),e);
       switch (e.type) {
+        case 'groundstrike': {
+          if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
+            this._impactRing(e.x,e.z,{color:e.kind==='acid'?0xdfff55:0xff7844,radius:e.radius,life:.24});
+          }
+          break;
+        }
         case 'shot': {
+          if (e.heroKey) this._coachSawAttack = true;
+          if (visibleInFog(vision,e.tx,e.tz)) {
+            this.hitFeedback ||= new HitFeedback(this.scene);
+            this.hitFeedback.show(e);
+          }
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
             this.audio.melee();
@@ -5350,6 +5969,7 @@ class App {
           // The chosen ground is levelled and the city plan appears — rebuild
           // the terrain mesh (tiles changed), plant the plaza, redraw the map.
           this.scene.remove(this.terrain);
+          this._disposeObject3D(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
           if (this.plaza) this.scene.remove(this.plaza);
@@ -5530,6 +6150,7 @@ class App {
           break;
       }
     }
+    this.audio.eventGain=1;
     g.events.length = 0;
   }
 
@@ -5568,6 +6189,24 @@ class App {
   }
 
   _updateTutorial(dt) {
+    if (this._coach && this.game) {
+      const hero = this.myHero();
+      if (hero) {
+        if (!this._coachOrigin) this._coachOrigin = { x: hero.x, z: hero.z };
+        const events = [];
+        if (Math.hypot(hero.x - this._coachOrigin.x, hero.z - this._coachOrigin.z) > 1.4) events.push({ type: 'move' });
+        if (this.game.phase !== 'found') events.push({ type: 'founded' });
+        if ((this.game.stats?.built || 0) > 0) events.push({ type: 'built' });
+        if (this._coachSawAttack) { events.push({ type: 'attack' }); this._coachSawAttack = false; }
+        if (events.length) {
+          const before = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
+          this._coach = coachApply(this._coach, events);
+          const after = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
+          if (before !== after) this._paintCoach();
+        }
+      }
+      return;
+    }
     if (!this._tut || !this.game) return;
     this._tutT = (this._tutT || 0) + dt;
     const step = this._tut.steps[this._tut.i];
@@ -5602,15 +6241,36 @@ class App {
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
+    if (this.missionIntro) {
+      this.missionIntro.elapsed += dt;
+      const progress = Math.min(1, this.missionIntro.elapsed / 4);
+      const eased = progress * progress * (3 - 2 * progress);
+      this.camDist = this.missionIntro.distance + 16 * (1 - eased);
+      if (progress >= 1) this._finishMissionIntro();
+    }
     this._updateCamera(dt);
+    const hitVision=this.game ? fogVisionSources(this.game) : [];
+    this.hitFeedback?.update(dt,(x,z)=>visibleInFog(hitVision,x,z));
+
+    this._audioSceneAt = (this._audioSceneAt || 0) - dt;
+    if (this._audioSceneAt <= 0) {
+      this._audioSceneAt = 0.25;
+      const g=this.game, listener=this.myHero();
+      const nearby=g?.zombies?.filter(z=>!z.dead && hearingGain(listener,z)>0).length || 0;
+      if (nearby >= 2) this._audioCombatUntil=t+5;
+      this.audio.updateScene({inMatch:!!g,over:g?.over,won:g?.won,phase:g?.phase,
+        biome:g?.level?.theme?.terrain,combat:!!g && t<(this._audioCombatUntil || 0),
+        select:!!document.querySelector('#screen-setup:not(.hidden)')});
+    }
 
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
 
+    if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
-      this._updateHeroInput();
-      if (!this.paused && !this.game.over) {
+      if (!this.missionIntro) this._updateHeroInput();
+      if (!this.paused && !this.game.over && !this.missionIntro) {
         if (this.netMode) {
           this._advanceNetSim();
         } else {
@@ -5629,10 +6289,12 @@ class App {
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
       this._syncUnits(t, dt);
+      this._syncBuilder(t);
       this._syncNests(t);
       this._syncLoot(t);
       this._syncPlots(t);
       this._updateTacticalSelection();
+      this._updateCombatCues();
 
       // Site flags ripple until the city is founded.
       for (const m of this.siteMarkers || []) {
@@ -5701,7 +6363,8 @@ class App {
       }
 
       // Ambient groans when the horde is active.
-      const aggro = this.game.aggroCount();
+      const listener=this.myHero();
+      const aggro = this.game.zombies.filter(z=>!z.dead && hearingGain(listener,z)>0).length;
       if (aggro > 0 && Math.random() < Math.min(0.02, aggro * 0.0004)) this.audio.groan();
 
       // Wave marker pulse.
@@ -5738,7 +6401,7 @@ class App {
       if (buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
-          if (!nt || !nt.branch) continue;
+          if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
           const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
         }
@@ -5757,15 +6420,17 @@ class App {
             const cost = Math.max(1, Math.ceil(act.cost - paid));
             const verb = act.mode === 'repair' ? 'repair' : act.mode === 'rebuild' ? 'rebuild' : plot.tier > 0 ? 'upgrade to' : 'build';
             const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
-            const role = act.mode === 'repair' ? 'Nothing repairs itself any more.' : this._plotRole(plot, nt);
+            const health = this.game.plotHpState(plot);
+            const hpLabel = `${Math.ceil(health.hp)} / ${Math.ceil(health.maxHp)} HP`;
+            const role = act.mode === 'repair' ? 'Restores health; keeps the current tier.' : this._plotRole(plot, nt);
             const buildKey = keyLabel(this.binds().dodge);
             const buildAltKey = keyLabel(this.binds().build);
             const overlayKey = keyLabel(this.binds().build_mode);
             hint = mh.payHold
-              ? (this.game.gold < 1 ? '🪙 Purse empty — kill something, or take a node!' : `🪙 ${cost} to go…`)
+              ? `<div><b>${act.mode === 'repair' ? '🔧 Repairing' : act.mode === 'rebuild' ? '🏗️ Rebuilding' : plot.tier > 0 ? '⬆️ Upgrading' : '🏗️ Building'} ${name}</b> · ${act.mode === 'repair' ? hpLabel + ' · ' : ''}${cost}🪙 remaining</div><div class="buildrole">${this.game.gold < 1 ? 'No gold — work paused.' : 'Release to stop.'}</div>`
               : buildMode
-                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
-                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)</div><div class="buildrole">${role}</div>`;
+                ? `<div>Hold <kbd>${buildKey}</kbd> or <kbd>${buildAltKey}</kbd> — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role} · ${overlayKey} switches to Fight mode.</div>`
+                : `<div><kbd>${overlayKey}</kbd> Build mode — ${verb} <b>${name}</b> (${cost}🪙)${act.mode === 'repair' ? ' · ' + hpLabel : ''}</div><div class="buildrole">${role}</div>`;
           }
         }
       }

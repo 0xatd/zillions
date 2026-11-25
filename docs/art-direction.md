@@ -3,6 +3,24 @@
 This document defines the production target for Zillions 3D art. It applies to
 units, heroes, buildings, and defensive works.
 
+## Reference priority — Alex, 2026-11-21
+
+Read [Art Quality Standard](art-quality-standard.md). StarCraft II now leads
+sci-fi architecture, scale and battlefield readability. Dawn of War IV supplies
+weight and distinct faction silhouettes; Forsaken supplies painterly richness.
+Compare gameplay with gameplay. Label cinematic, loading, menu and promotional
+references separately. Apply one coherent language across those surfaces, not
+only the map. Preserve the original Zillions identity and existing siege rules.
+
+## Sci-fi direction (2026-11-21)
+
+Alex explicitly chose stronger sci-fi. The default human settlement now targets
+armored expedition architecture: ivory ceramic armor, blue-grey panels, steel
+frames, amber markings and sparse cyan sensors. Author gatehouses as deep
+mechanical passages with retracted blast doors. Keep openings visibly clear.
+The reproducible source is `tools/art/toy_kit/frontier.py`; stable European
+asset IDs preserve loading and saves. Other culture kits remain legacy.
+
 ## Target
 
 Use a stylized, chunky science-fiction RTS style.
@@ -208,3 +226,47 @@ Use `tools/preview-shot.mjs`:
 It boots the actual game headless (Chromium + playwright-core), can found
 and fully construct a city instantly, and screenshots true gameplay frames.
 Judge every art change there before pushing.
+
+## Painted frontier environment pass — November 2026
+
+Alex's new reference bar is the terrain/base readability and material richness of
+StarCraft and Warcraft III. This supersedes the previous texture-free environment
+constraint, not the requirement for readable silhouettes or original assets.
+
+- Blend painted grass into worn working earth; keep routes in continuous stone.
+- Dark slate faces and pale ramp beds separate impassable cliffs from entrances.
+- Preserve biome palettes, unit colours, building tiers and collision geometry.
+- Use fuller clustered foliage, restrained roof joints and weathered foundations.
+- Judge the actual playable camera, not a texture sheet or a cinematic close-up.
+
+`assets/materials/frontier-atlas.webp` is an original AI-generated four-material
+atlas (grass, earth, paving, rock), generated for this project on 2026-11-20.
+It contains no extracted Blizzard assets. World-space sampling and shared atlas
+storage keep detail coherent without per-building image downloads. Control maps
+are presentation-only and consume no simulation randomness.
+
+Reference study (composition/material principles only):
+- https://news.blizzard.com/en-us/article/5740267/game-guide-terran-ramp-defense
+- https://news.blizzard.com/en-us/article/23395649/revisiting-the-warcraft-iii-editor
+- https://www.playground.ru/warcraft_3/news/blizzard_vernuli_originalnyj_warcraft_3_v_battle_net-1841635
+
+Cliff contour refinement incorporates the reviewed terrace-mesh changes from
+`cursor/smooth-cliff-rims-0f49` (PR #128), without importing its unrelated files.
+The navigation regression suite remains the authority on actual access.
+
+## Colony crew
+
+The shared builder is a compact amber utility rig with dark feet/backpack, a
+cyan visor, and a work tool. It is smaller than the hero and has no gun. Its
+route bob and working-tool movement reflect simulation status without changing
+collision. The procedural mesh is retained across frames and disposed on a
+new battlefield. High and Low must both keep its silhouette readable.
+## Combat intent cues
+
+A small red ring marks the hero's current automatic attack target; amber marks
+an explicit Focus attacks choice. Inspection retains its larger cyan/red ring.
+Acid impact warnings use yellow-green outlines; heavy smashes use orange.
+A growing white timing ring approaches the fixed impact boundary.
+Only show pending warnings within allied vision, in both High and Low. Render
+from simulation windup state rather than a presentation event timer, and pool
+up to 48 cue meshes to bound cost. Dispose the pool when the game changes.

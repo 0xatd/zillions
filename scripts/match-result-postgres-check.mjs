@@ -5,6 +5,7 @@
 // bookkeeping (kept input logs, flags), and the client-write revokes.
 //   npm run check:postgres
 import assert from 'node:assert/strict';
+import {checkFriendParties} from './friend-party-postgres-cases.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -190,6 +191,7 @@ try {
   eq((await q(`select has_table_privilege('authenticated', 'public.player_stats', 'UPDATE') u`)).rows[0].u, false, 'stats updates revoked');
   eq((await q(`select count(*)::int n from pg_tables where schemaname = 'public' and (tablename like 'world\\_%' or tablename like 'social\\_%')`)).rows[0].n, 0, 'living-world tables dropped');
   eq((await q(`select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and (proname like '%world%' or proname like 'social%')`)).rows[0].n, 0, 'living-world functions dropped');
+  await checkFriendParties(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
 } finally {
   await client.end().catch(() => {});
   try { execFileSync(join(bin, 'pg_ctl'), ['-D', data, '-m', 'immediate', 'stop'], quiet); } catch { /* already down */ }

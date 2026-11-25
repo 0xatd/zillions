@@ -7,6 +7,21 @@ in lockstep co-op.
 
 Production: https://zillions.taborlin.co
 
+## Your chapter
+
+Create a chapter and its founder, then lead continuous sieges. The Earth
+campaign map tracks your chapter's confirmed city captures. Victories recruit
+named companions who can lead later expeditions with their own gear and skills.
+The chapter shares conquered territory and Salvage Alloy. Each leader keeps
+their own equipment and stash; mission gold belongs only to the current siege. Earth opens the existing
+procedural frontier after five captures. This is not a persistent shared world.
+
+Existing characters and equipment are preserved. The chapter starts with a
+customizable Vanguard founder; the seven named heroes become recruitable
+companions, not competing identities for that founder. Quartermaster, Forge and
+skills are optional between-run choices; deploy without shopping first.
+
+
 Repository: https://github.com/0xatd/zillions
 
 ## Start Here
@@ -26,6 +41,12 @@ Choose the document that matches your task:
 | Change gear, weapons, or the Lattice | `docs/weapons-and-items.md` and `docs/skill-tree-integration.md` |
 | Give an agent compact context | `llms.txt` |
 
+Default colony buildings and defenses are authored in
+`tools/art/toy_kit/frontier.py`: an armored expedition kit, exported to the
+existing European asset IDs. See the art quality standard for the sci-fi
+direction and the remaining legacy-culture boundary.
+
+
 Use this source order when documents disagree:
 
 1. Current code and `supabase/schema.sql`.
@@ -34,6 +55,12 @@ Use this source order when documents disagree:
 4. `docs/architecture.md`.
 5. `docs/agent-brief.md`.
 6. Future documents, including `docs/design-vision.md`.
+
+## Map-kit prototype
+
+`map-kit.html` is the reusable placement workbench (rotate, stamp, undo, JSON
+export/import). Black Vale's first city site is its first playable composition.
+Workbench exports are not yet playable missions. See `docs/reusable-map-kit.md`.
 
 ## The Game
 
@@ -187,6 +214,12 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
+## Roster expansion — work in progress
+
+The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
+preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
+Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+
 ## Controls
 
 The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
@@ -199,9 +232,9 @@ which reads the same table the game dispatches through.
 | Shift | Gallop at full health |
 | Space | Build mode: build/pay. Fight mode: dodge roll |
 | Q | Fight mode: primary ability (your hero special) |
-| E, R | Ability II and III — reserved; heroes carry one ability today |
+| E, R | Ability II and III, when available |
 | X | Draw the other weapon set |
-| Ctrl | Secondary ability bar — reserved |
+| Ctrl | Hold for secondary Q/E/R ability slots |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
 | Alt | Switch between Build mode and Fight mode |
@@ -216,6 +249,9 @@ which reads the same table the game dispatches through.
 | Esc | Open the game menu |
 
 Movement is not camera-relative. W always moves north on the minimap.
+Click/tap a unit to inspect it. An in-range enemy offers **Focus attacks**
+for your hero only; **Clear attack focus** restores automatic targeting.
+Inspection alone never changes orders. Use **Items** to read carried gear.
 
 Two places deviate from Path of Exile deliberately. Army stances take F1–F3
 rather than the number row, because Zillions commands squads and Path of Exile
@@ -338,3 +374,35 @@ Three.js terms are in `vendor/THREE-LICENSE.md`.
 Use `assets.html` to review audio assets. Use `art-slice.html` to review
 production GLBs at gameplay distance and in silhouette mode. The production
 game does not link to either page.
+
+### Landscape presentation
+
+The terrain renderer uses a seeded environment kit in `src/landscape-art.js`:
+mixed broadleaf/conifer groves, undergrowth, rock outcrops, fallen trunks and
+shore reeds. `src/environment-art.js` blends painted terrain and animates
+shallow/deep water. Dressing does not change walkability, combat or saved state.
+See [the art quality standard](docs/art-quality-standard.md).
+
+Colony streets connect the keep courtyard, gates and district frontages around
+fully built footprints. Terrain barriers and each map's unique perimeter remain.
+
+### Builder orders
+
+After founding, open **Builders** beside the battlefield controls to select
+Maintain, Develop, Expand, Fortify, Prosper or Mobilize. Pause and a protected
+gold reserve keep spending explicit. Tower/wall preferences authorise crew
+specialisations; Ask me leaves those choices manual. See
+[Builder orders](docs/builder-orders.md).
+
+### Play with friends
+
+Open **Play with friends** from your chapter. Create a party and share its
+invite link or code. The leader opens the next private match; members open that
+room and mark Ready. Your selected chapter leader joins the match. The group
+survives between matches and across sign-ins. Membership is limited to four.
+
+Hero weapon hits show short-lived damage numbers; gold numbers marked `!` denote
+critical hits. Spell aiming indicators and the command bar are unchanged.
+
+Music and biome ambience use the existing music/master settings. Missing tracks
+fall back to the procedural score; local combat sound and global base alerts stay intact.

@@ -9,7 +9,8 @@ space (metres = tiles, +z = front, origin at ground centre).
 """
 import math
 
-from kit import shade
+from kit import shade, xform
+import combat
 
 PALETTE = {
     'stone': 0xe9d8b4, 'stone2': 0xd2bc92, 'stone3': 0xa88f6c, 'roof': 0x3a66c4,
@@ -87,7 +88,12 @@ def timber_front(B, pal, w, y0, y1, z, posts=3):
     for i in range(posts):
         x = -w / 2 + 0.03 + i * (w - 0.06) / (posts - 1)
         B.box(c, 0.05, y1 - y0, 0.03, x, y0, z)
-    B.box(c, 0.04, (y1 - y0) * 1.1, 0.03, -w * 0.25, y0 + 0.02, z, 0, 0, 0.6)
+    # Brace endpoints sit inside one timber bay. Boxes rotate about their
+    # base, not their centre; the former positive tilt escaped the facade.
+    dx = (w - .12) / (posts - 1) - .08
+    dy = y1 - y0 - .16
+    B.box(c, .045, math.hypot(dx, dy), .035, -w/2+.08, y0+.08, z,
+          0, 0, -math.atan2(dx, dy))
 
 
 def ridge(B, pal, w, y, z=0, ry=0.0, length=1.0):
@@ -203,8 +209,32 @@ def castle(k, t, pal):
     B, G = k.B, k.G
     r = 2.0 + min(t, 3) * 0.1
     base = hex_plinth(B, G, pal, r, steps=2 if t < 3 else 3, lamps=False)
+    # Corner buttresses and inset masonry establish weight at gameplay zoom.
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            for course in range(4):
+                B.box(pal['stone2'] if course % 2 else pal['stone3'],
+                      .26, .24, .26, sx*.83, base+course*.27, sz*.78)
     if t == 1:
-        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='pyramid', windows=0)
+        # Asymmetric watch-tower and lower stair turret frame the great hall.
+        # All bases remain inside the original plinth / occupied footprint.
+        round_tower(B, G, pal, -1.12, -.68, .48, 3.45, crest=True)
+        round_tower(B, G, pal, 1.02, -.60, .38, 2.55, crest=True)
+        banner(B, pal, -1.12, -.68, 4.65, .8, big=.65)
+        # A framed porch, not just a colored rectangle on a wall.
+        for sx in (-.33, .33):
+            B.box(pal['stone2'], .16, .9, .34, sx, base, .93)
+        B.gable(pal['roof'], .8, .35, .55, 0, base+.9, .99, overhang=.1)
+        for i in range(3):
+            B.box(pal['stone2'], .7+i*.12, .08, .22, 0, base-.08*i, 1.2+i*.18)
+    if t == 1:
+        keep_block(B, G, pal, 1.7, 1.6, 1.8, base, roof='merlon', windows=0)
+        painted_roof(B, pal, 1.9, .85, 1.8, y=base+1.92, overhang=.12)
+        # Stone entrance gable and deep porch establish a civic front.
+        B.box(pal['stone'], .72, 1.45, .35, 0, base, .83)
+        B.gable(pal['roof'], .86, .52, .62, 0, base+1.45, .86, overhang=.08)
+        for sx in (-.73, .73):
+            B.box(pal['stone2'], .18, 1.7, .24, sx, base, .86)
         door(B, pal, 0.4, 0.6, 0, 0.81, base)
         for x in (-0.5, 0.5):
             window(B, G, pal, x, base + 1.0, 0.81, w=0.16, h=0.22)
@@ -212,220 +242,163 @@ def castle(k, t, pal):
         chimney(B, pal, -0.55, base + 1.9, -0.45, h=0.6, w=0.2)
         banner(B, pal, 1.15, 0.85, base, 1.6, flip=True)
         return
-    # T2+: a chunky square curtain with four round corner towers.
-    half = 1.45 if t == 2 else 1.6
-    wall_h = 0.8 if t == 2 else 1.1
-    thick = 0.34 if t == 2 else 0.42
-    corners = [(-half, -half), (half, -half), (half, half), (-half, half)]
-    for i in range(4):
-        x0, z0 = corners[i]
-        x1, z1 = corners[(i + 1) % 4]
-        if i == 2:  # the front wall leaves a clear gate opening
-            curtain(B, pal, x0, z0, 0.45, z1, wall_h, thick)
-            curtain(B, pal, -0.45, z0, x1, z1, wall_h, thick)
-        else:
-            curtain(B, pal, x0, z0, x1, z1, wall_h, thick)
-    tower_h = 1.6 if t == 2 else 2.2 if t == 3 else 2.5
-    tr = 0.42 if t == 2 else 0.5
-    for (x, z) in corners:
-        round_tower(B, G, pal, x, z, tr, tower_h, crest=False, window=False)
-    # gate: two squat flanking piers and a lintel — a plain dark opening
-    gh = wall_h + 0.35
-    for sx in (-0.55, 0.55):
-        B.box(pal['stone2'], 0.34, gh, 0.52, sx, 0, half)
-    B.box(pal['stone2'], 1.44, 0.24, 0.52, 0, gh - 0.24, half)
-    B.box(pal['dark'], 0.74, gh - 0.3, 0.06, 0, 0, half + 0.24)
-    # the keep: one big block, one smaller crowning block with the roof
-    kw = 1.8 if t == 2 else 2.0
-    kh = 2.1 if t == 2 else 2.6
-    top = keep_block(B, G, pal, kw, kw, kh, base, roof='merlon', windows=0)
-    door(B, pal, 0.42, 0.62, 0, kw / 2 + 0.01, base)
-    for x in (-kw * 0.28, kw * 0.28):
-        window(B, G, pal, x, base + kh * 0.55, kw / 2 + 0.01, w=0.16, h=0.24, shutters=False)
-    B.box(pal['stone2'], kw + 0.06, 0.08, kw + 0.06, 0, base + kh * 0.42, 0)   # string course
-    # portcullis bars in the gate
-    for bx in (-0.24, -0.08, 0.08, 0.24):
-        B.box(pal['steel'], 0.04, gh - 0.34, 0.03, bx, 0.02, half + 0.27)
-    B.box(pal['steel'], 0.7, 0.04, 0.03, 0, (gh - 0.3) * 0.55, half + 0.27)
-    if t >= 3:
-        for (x, z) in corners[:2]:
-            banner(B, pal, x, z, tower_h + 0.18 + tr * 2.1, 0.7, big=0.6)
-    upper_w = kw * 0.6
-    uh = 0.8 if t == 2 else 1.2
-    top2 = keep_block(B, G, pal, upper_w, upper_w, uh, top, roof='pyramid', windows=0)
-    banner(B, pal, 0, kw / 2 + 0.05, top, 1.4, big=1.25)
-    if t >= 4:
-        # citadel spire: a tall slender roofed tower rising from the keep
-        B.prism(pal['stone'], 8, 0.34, 0.26, 1.6, 0, top2 + 0.3, 0)
-        B.prism(pal['roof'], 8, 0.42, 0, 0.9, 0, top2 + 1.9, 0)
-        # gold finial: the renderer's part_core (it turns slowly)
-        core = k.part('part_core', origin=(0, top2 + 2.8, 0))
-        core.prism(pal['trim'], 4, 0.07, 0, 0.4, 0, top2 + 2.8, 0)
+    # Upgrades keep the original hall-and-watchtower identity, then grow
+    # the rear tower and stone wings. No miniature castle inside a castle.
+    hall_h=2.0+.28*(t-2)
+    B.box(pal['stone'],1.95,hall_h,1.85,0,base,0)
+    painted_roof(B,pal,2.05,1.0+.1*t,1.95,y=base+hall_h,overhang=.12)
+    for x,z,r,h in [(-1.12,-.67,.55,3.9+.45*(t-2)),(1.1,-.62,.42,3.0+.4*(t-2))]:
+        round_tower(B,G,pal,x,z,r,h)
+        for j in range(3):
+            B.prism(pal['stone2'],8,r*1.03,r*1.03,.10,x,.7+j*.8,z)
+    for x in (-.91,.91):
+        B.box(pal['stone2'],.22,hall_h+.12,.3,x,base,.85)
+        window(B,G,pal,x*.6,base+1.1,.94,w=.22,h=.42,shutters=False)
+    B.box(pal['stone2'],1.0,1.25,.45,0,base,1.03)
+    painted_roof(B,pal,1.1,.64,.65,y=base+1.25,z=1.02,overhang=.06)
+    door(B,pal,.48,.85,0,1.27,base)
+    for j in range(3):
+        B.box(pal['stone2'],.90+j*.16,.1,.2,0,base-.1-j*.08,1.42+j*.16)
+    banner(B,pal,-1.12,-.67,5.2+.45*(t-2),.9,big=.9)
+    if t>=3:
+        for x in (-1.55,1.55):
+            B.box(pal['stone'],.42,.95,.9,x,base,.45)
+            painted_roof(B,pal,.48,.52,.95,x=x,y=base+.95,z=.45,overhang=.06)
+    if t>=4:
+        core=k.part('part_core',origin=(1.1,5.1,-.62))
+        core.octa(pal['glow'],.15,.35,1.1,5.1,-.62)
 
 
 # ---------------------------------------------------------------- tower
 
 def tower(k, t, pal):
     B, G = k.B, k.G
-    if t == 1:
-        B.box(pal['stone3'], 1.15, 0.16, 1.15, 0, 0, 0)
-        B.box(pal['stone'], 0.9, 1.05, 0.9, 0, 0.16, 0)
-        B.box(pal['wood'], 1.15, 0.1, 1.15, 0, 1.21, 0)
-        for x in (-0.5, 0.5):
-            for z in (-0.5, 0.5):
-                B.box(pal['wood'], 0.08, 0.3, 0.08, x, 1.31, z)
-        top = 1.31
-        s = 0.8
-        banner(B, pal, -0.55, 0.55, 0, 1.5)
-    else:
-        r = {2: 0.6, 3: 0.68, 4: 0.74}[t]
-        h = {2: 1.9, 3: 2.8, 4: 3.6}[t]
-        top = round_tower(B, G, pal, 0, 0, r, h, roof=False)
-        top += 0.12
-        s = {2: 0.95, 3: 1.1, 4: 1.2}[t]
-        if t >= 3:
-            B.prism(pal['trim'], 8, r * 1.02, r * 1.02, 0.08, 0, h * 0.55, 0)
-            banner(B, pal, r + 0.08, 0, h * 0.35, 1.3, big=1.1)
-            banner(B, pal, -r - 0.08, 0, h * 0.35, 1.3, flip=True, big=1.1)
-        if t >= 4:
-            for sx in (-1, 1):
-                bx = sx * (r + 0.18)
-                B.prism(pal['stone'], 6, 0.2, 0.2, 0.55, bx, h - 0.4, -0.15)
-                B.prism(pal['roof'], 6, 0.26, 0, 0.5, bx, h + 0.15, -0.15)
-            G.prism(pal['glow'], 8, r * 1.05, r * 1.05, 0.06, 0, h * 0.8, 0)
+    # A defensive landmark from the first purchase, not a waist-high box.
+    r = .68 + .035 * t
+    h = 2.65 + .48 * (t - 1)
+    top = round_tower(B, G, pal, 0, 0, r, h, roof=False, seg=10)
+    for i in range(4):
+        a = i * math.pi / 2 + math.pi / 4
+        x, z = math.cos(a) * r, math.sin(a) * r
+        B.prism(pal['stone3'], 4, .22, .14, h * .62, x, 0, z, phase=a)
+        B.box(pal['stone2'], .16, .12, .16, x, h*.62, z)
+    B.prism(pal['stone3'], 10, r*1.16, r*1.07, .28, 0, 0, 0)
+    B.prism(pal['stone2'], 10, r*1.16, r*1.12, .18, 0, h-.2, 0)
+    for y in (.75, 1.55):
+        B.box(pal['dark'], .11, .35, .04, 0, y, r+.01)
+        B.box(pal['stone2'], .22, .07, .09, 0, y+.35, r+.02)
+    banner(B, pal, -.46, .58, 1.15, 1.2, big=.85)
+    top += .22
+    s = .95 + .08*t
+    if t >= 3:
+        G.prism(pal['glow'], 10, r*1.03, r*1.03, .06, 0, h*.7, 0)
     head = k.part('part_turret', origin=(0, top, 0))
     turret_head(head, pal, s, twin=t >= 3, coil=t >= 4, oy=top)
+
+
+def painted_roof(B, pal, w, h, d, x=0, y=0, z=0, ry=0, overhang=0.14):
+    """Curved slate courses and dimensional eaves in the shared body mesh."""
+    hw, hd = w / 2 + overhang, d / 2 + overhang
+    c, sn = math.cos(ry), math.sin(ry)
+    def point(px, py, pz):
+        return (x + px*c + pz*sn, y + py, z - px*sn + pz*c)
+    def height(t):
+        return h * (t ** 1.3)
+    def strip(a, ya, b, yb, z0, z1, color, thickness=.055):
+        verts = [point(a,ya,z0),point(b,yb,z0),point(b,yb,z1),point(a,ya,z1),
+                 point(a,ya-thickness,z0),point(b,yb-thickness,z0),
+                 point(b,yb-thickness,z1),point(a,ya-thickness,z1)]
+        B.emit(verts,[(0,1,2,3),(7,6,5,4),(0,4,5,1),(1,5,6,2),
+                      (2,6,7,3),(3,7,4,0)],color,xform())
+    for side in (-1,1):
+        for row in range(5):
+            t0,t1=row/5,min(1,(row+1)/5+.018)
+            a,b=side*hw*(1-t0),side*hw*(1-t1)
+            for col in range(5):
+                z0=-hd+col*2*hd/5
+                # Continuous coverage; seams come from relief, not holes.
+                strip(a,height(t0)+.02,b,height(t1)+.02,z0,z0+2*hd/5,
+                      shade(pal['roof'],.88+((row*7+col*3)%5)*.035))
+            for pz in (-hd,hd):
+                strip(a,height(t0)+.05,b,height(t1)+.05,pz-.035,pz+.035,
+                      shade(pal['wood'],1.12),.09)
+        for pz in (-hd+.01,hd-.01):
+            vs=[point(side*hw,0,pz),point(0,0,pz)]
+            vs += [point(side*hw*(1-i/5),height(i/5),pz) for i in range(5,0,-1)]
+            B.emit(vs,[tuple(range(len(vs)))],pal['wood'],xform())
+    B.box(pal['trim'],.09,.065,2*hd+.08,x,y+h,z,0,ry,0)
 
 
 # ---------------------------------------------------------------- houses
 
 def house(k, t, pal):
-    """Cottages that grow into a timbered townhouse: overhanging roofs,
-    chimneys, framed lit windows with shutters, a flower box."""
+    """Weighty timber-and-stone homes with steep roofs and a front cross gable."""
     B, G = k.B, k.G
-    B.box(pal['stone3'], 1.6, 0.1, 1.5, 0, 0, 0)
-    if t == 1:
-        B.box(pal['stone3'], 1.06, 0.14, 0.91, 0, 0.1, 0)                    # foundation course
-        B.box(pal['stone'], 1.0, 0.55, 0.85, 0, 0.24, 0)
-        for sx in (-1, 1):
-            B.box(pal['wood'], 0.06, 0.55, 0.06, sx * 0.48, 0.24, 0.41)      # corner posts
-        B.gable(pal['roof'], 1.0, 0.52, 0.85, 0, 0.79, 0, ry=math.pi / 2, overhang=0.14)
-        ridge(B, pal, 1.0, 1.29, ry=math.pi / 2, length=1.2)
-        chimney(B, pal, -0.3, 0.95, -0.2, h=0.42)
-        door(B, pal, 0.2, 0.36, 0.2, 0.43, 0.24)
-        window(B, G, pal, -0.22, 0.48, 0.43)
-        flower_box(B, pal, -0.22, 0.39, 0.43)
-        B.box(pal['wood'], 0.26, 0.2, 0.26, 0.6, 0.1, 0.5)                   # woodpile
-        B.box(shade(pal['wood'], 0.8), 0.3, 0.06, 0.3, 0.6, 0.3, 0.5)
-        return
-    if t == 2:
-        B.box(pal['stone3'], 1.21, 0.12, 1.01, 0, 0.1, 0)
-        B.box(pal['stone2'], 1.15, 0.6, 0.95, 0, 0.22, 0)                    # stone ground floor
-        B.box(pal['stone'], 1.25, 0.62, 1.05, 0, 0.82, 0)                    # jettied upper floor
-        timber_front(B, pal, 1.25, 0.82, 1.44, 0.53, posts=4)
-        B.gable(pal['roof'], 1.25, 0.62, 1.05, 0, 1.44, 0, ry=math.pi / 2, overhang=0.15)
-        ridge(B, pal, 1.25, 2.06, ry=math.pi / 2, length=1.45)
-        chimney(B, pal, 0.38, 1.6, -0.25, h=0.62)
-        door(B, pal, 0.22, 0.4, 0, 0.48, 0.22)
-        for x in (-0.36, 0.36):
-            window(B, G, pal, x, 0.36, 0.48, shutters=False)
-            window(B, G, pal, x, 1.04, 0.53)
-        flower_box(B, pal, -0.36, 0.95, 0.53)
-        flower_box(B, pal, 0.36, 0.95, 0.53)
-        return
-    if t == 3:
-        B.box(pal['stone3'], 1.26, 0.12, 0.86, -0.1, 0.1, -0.25)
-        B.box(pal['stone'], 1.2, 1.2, 0.8, -0.1, 0.2, -0.25)
-        timber_front(B, pal, 1.2, 0.78, 1.4, 0.16, posts=3)
-        B.gable(pal['roof'], 1.2, 0.6, 0.8, -0.1, 1.4, -0.25, ry=math.pi / 2, overhang=0.14)
-        ridge(B, pal, 1.2, 2.0, z=-0.25, ry=math.pi / 2, length=1.4)
-        B.box(pal['stone'], 0.6, 0.9, 0.7, 0.35, 0.2, 0.35)
-        B.gable(pal['roof2'], 0.6, 0.45, 0.7, 0.35, 1.1, 0.35, overhang=0.12)
-        chimney(B, pal, -0.5, 1.55, -0.45, h=0.55)
-        round_tower(B, G, pal, -0.6, 0.35, 0.22, 1.6)
-        door(B, pal, 0.22, 0.4, 0.35, 0.71, 0.2)
-        window(B, G, pal, 0.35, 0.82, 0.71, shutters=False)
-        for x in (-0.45, 0.1):
-            window(B, G, pal, x, 0.95, 0.16)
-        flower_box(B, pal, 0.1, 0.86, 0.16)
-        return
-    # t4: tall timbered townhouse — three storeys, a dormer, two chimneys
-    B.box(pal['stone3'], 1.26, 0.14, 1.11, 0, 0.1, 0)
-    B.box(pal['stone2'], 1.2, 0.75, 1.05, 0, 0.24, 0)
-    B.box(pal['stone'], 1.3, 1.4, 1.12, 0, 0.99, 0)
-    timber_front(B, pal, 1.3, 0.99, 1.69, 0.565, posts=4)
-    timber_front(B, pal, 1.3, 1.69, 2.39, 0.565, posts=4)
-    for y in (0.99, 1.69):
-        B.box(pal['stone2'], 1.36, 0.08, 1.18, 0, y - 0.04, 0)
-    for x in (-0.36, 0.0, 0.36):
-        window(B, G, pal, x, 1.2, 0.565)
-        window(B, G, pal, x, 1.9, 0.565, shutters=False)
-    for x in (-0.36, 0.36):
-        window(B, G, pal, x, 0.5, 0.53, shutters=False)
-    B.gable(pal['roof'], 1.3, 0.66, 1.12, 0, 2.39, 0, ry=math.pi / 2, overhang=0.16)
-    ridge(B, pal, 1.3, 3.05, ry=math.pi / 2, length=1.5)
-    B.box(pal['stone'], 0.34, 0.3, 0.3, 0, 2.45, 0.42)                     # dormer
-    B.gable(pal['roof2'], 0.34, 0.2, 0.34, 0, 2.75, 0.42, overhang=0.06)
-    window(B, G, pal, 0, 2.52, 0.575, w=0.12, h=0.14, shutters=False, sill=False)
-    chimney(B, pal, 0.42, 2.55, -0.3, h=0.7)
-    chimney(B, pal, -0.42, 2.55, -0.3, h=0.55)
-    door(B, pal, 0.24, 0.45, 0, 0.53, 0.24)
-    banner(B, pal, 0.72, 0.4, 0.9, 1.0, big=0.7)
+    h = 1.50 + .25*(t-1)
+    B.prism(pal['stone3'], 4, 1.16, 1.10, .22, phase=math.pi/4, sz=.87)
+    B.box(pal['stone'], 1.43, h, 1.23, 0, .22, -.08)
+    B.box(pal['wood'], 1.48, .10, 1.27, 0, .22+h*.56, -.08)
+    for x in (-.69, .69):
+        for z in (-.66, .5):
+            B.box(pal['wood'], .10, h, .10, x, .22, z)
+            for j in range(3):
+                B.box(pal['stone2'], .20, .13, .20, x, .22+j*.16, z)
+    painted_roof(B, pal, 1.46, .88+.08*t, 1.26, y=h+.22, z=-.08, ry=math.pi/2, overhang=.14)
+    # Porch gable breaks the repeated rectangular roof without growing collision.
+    B.box(pal['stone2'], .62, 1.12, .34, .22, .22, .61)
+    painted_roof(B, pal, .66, .48, .50, x=.22, y=1.34, z=.58, overhang=.07)
+    door(B, pal, .34, .86, .22, .80, .22)
+    for j in range(2):
+        B.box(pal['stone2'], .62+j*.1, .10, .13, .22, .12-j*.06, .84+j*.1)
+    window(B, G, pal, -.38, .62, .55, w=.23, h=.27)
+    chimney(B, pal, -.42, h+.54, -.42, h=.85, w=.24)
+    if t >= 2:
+        for x in (-.4, .4):
+            window(B, G, pal, x, h-.1, .55, w=.20, h=.25)
+    if t >= 3:
+        timber_front(B, pal, 1.43, .75, h+.18, .55, posts=4)
+    if t >= 4:
+        banner(B, pal, -.7, .54, .7, 1.35, big=.7)
 
 
 # ---------------------------------------------------------------- farm
 
-def farm(k, t, pal):
-    B, G = k.B, k.G
-    B.box(pal['field'], 1.85, 0.08, 1.85, 0, 0, 0)
-    rows = 4 if t == 1 else 5
-    for i in range(rows):
-        z = -0.75 + i * (1.5 / (rows - 1))
-        c = pal['crop'] if (i + t) % 2 else pal['crop2']
-        B.box(c, 1.1 if t < 3 else 0.9, 0.16, 0.2, -0.3 if t < 3 else -0.45, 0.08, z)
-    # split-rail fence on three sides
-    for x in (-0.88, 0.88):
-        for z in (-0.88, 0, 0.88):
-            B.box(pal['wood'], 0.06, 0.28, 0.06, x, 0.08, z)
-        B.box(shade(pal['wood'], 0.9), 0.04, 0.04, 1.8, x, 0.26, 0)
-    for z in (-0.88,):
-        for x in (-0.44, 0.44):
-            B.box(pal['wood'], 0.06, 0.28, 0.06, x, 0.08, z)
-        B.box(shade(pal['wood'], 0.9), 1.8, 0.04, 0.04, 0, 0.26, z)
-    if t == 1:
-        B.box(pal['wood'], 0.4, 0.35, 0.4, 0.62, 0.08, 0.55)
-        B.gable(pal['roof'], 0.4, 0.24, 0.4, 0.62, 0.43, 0.55, overhang=0.1)
-        B.box(pal['dark'], 0.14, 0.22, 0.03, 0.62, 0.08, 0.76)
-        # scarecrow
-        B.box(pal['wood'], 0.04, 0.6, 0.04, -0.62, 0.08, 0.62)
-        B.box(pal['wood'], 0.4, 0.04, 0.04, -0.62, 0.48, 0.62)
-        B.box(pal['accent'], 0.16, 0.18, 0.08, -0.62, 0.36, 0.62)
-        B.box(0xe9cf8a, 0.12, 0.12, 0.12, -0.62, 0.56, 0.62)
-        B.prism(pal['wood'], 6, 0.12, 0, 0.1, -0.62, 0.68, 0.62)
-        return
-    # barn + silo
-    B.box(pal['accent'], 0.6, 0.55, 0.75, 0.55, 0.08, 0.3)
-    B.gable(pal['roof2'], 0.6, 0.35, 0.75, 0.55, 0.63, 0.3, overhang=0.1)
-    B.box(pal['stone'], 0.26, 0.34, 0.04, 0.55, 0.08, 0.68)                 # barn door + white X
-    B.box(pal['stone'], 0.04, 0.4, 0.05, 0.55, 0.06, 0.69, 0, 0, 0.6)
-    B.box(pal['stone'], 0.04, 0.4, 0.05, 0.55, 0.06, 0.69, 0, 0, -0.6)
-    B.box(pal['dark'], 0.12, 0.12, 0.04, 0.55, 0.5, 0.68)                   # hayloft
-    for (hx, hz) in ((-0.15, 0.72), (0.12, 0.8)):                           # haystacks
-        B.prism(pal['crop2'], 6, 0.14, 0.1, 0.16, hx, 0.08, hz)
-        B.prism(shade(pal['crop2'], 0.9), 6, 0.1, 0, 0.1, hx, 0.24, hz)
-    B.prism(pal['stone'], 8, 0.22, 0.22, 1.0, 0.6, 0.08, -0.5)
-    B.prism(pal['roof'], 8, 0.25, 0, 0.3, 0.6, 1.08, -0.5)
-    if t >= 3:
-        for (x, z) in ((0.15, -0.55), (0.15, 0.55)):
-            G.ico(pal['glow'], 0.3, x, 0.08, z, 1, 0.9, 1, sub=1)
-            B.prism(pal['steel'], 8, 0.34, 0.34, 0.06, x, 0.06, z)
+def farm(k,t,pal):
+    B,G=k.B,k.G
+    B.box(pal['field'],1.85,.07,1.85)
+    # A barn and silo form one agricultural silhouette beside real crop rows.
+    for row in range(4):
+        z=-.68+row*.44
+        B.box(shade(pal['field'],.8),.8,.05,.20,-.48,.07,z)
+        for j in range(5):
+            x=-.82+j*.16;h=.22+((j+row)%3)*.045
+            B.prism(pal['crop'],4,.03,.01,h,x,.12,z)
+            B.ico(pal['crop2'],.065,x,.12+h,z,sx=.7,sy=1.4,sz=.7,sub=0)
+    h=.8+.18*t
+    B.box(pal['stone3'],.77,.16,1.50,.48,.07,0)
+    B.box(pal['wood'],.65,h,1.35,.48,.23,0)
+    fp=dict(pal,roof=0xb09a62)
+    painted_roof(B,fp,.72,.62,1.4,x=.48,y=.23+h,overhang=.07)
+    B.box(pal['dark'],.35,.62,.035,.48,.23,.69)
+    for x in (.28,.68):
+        B.box(pal['stone2'],.07,.68,.06,x,.23,.71)
+    B.box(pal['stone2'],.48,.07,.06,.48,.89,.71)
+    if t>=2:
+        B.prism(pal['stone'],8,.20,.20,1.4+.2*t,.75,.07,-.68)
+        B.prism(pal['roof'],8,.23,0,.4,.75,1.47+.2*t,-.68)
+    if t>=3:
+        G.box(pal['glow'],.52,.06,.04,.48,1.1,.70)
+    for z in (-.88,.88):
+        for x in (-.88,-.12):
+            B.box(pal['wood'],.06,.38,.06,x,.07,z)
+        B.box(pal['wood'],.82,.06,.05,-.5,.33,z)
 
 
 # ---------------------------------------------------------------- mill
 
 def mill(k, t, pal):
     B, G = k.B, k.G
-    h = {1: 1.4, 2: 1.9, 3: 2.4}[t]
+    h = {1: 2.1, 2: 2.65, 3: 3.2}[t]
     B.prism(pal['stone3'], 8, 0.7, 0.7, 0.12, 0, 0, 0)
     B.prism(pal['stone'], 8, 0.56, 0.4, h, 0, 0.12, 0)
     B.prism(pal['roof'], 8, 0.5, 0, 0.55, 0, h + 0.12, 0)
@@ -438,7 +411,7 @@ def mill(k, t, pal):
     hub_y = h - 0.05
     rotor = k.part('part_rotor', origin=(0, hub_y, 0.52))
     rotor.box(pal['steel'], 0.16, 0.16, 0.14, 0, hub_y - 0.08, 0.52)
-    blade = {1: 0.75, 2: 0.95, 3: 1.1}[t]
+    blade = {1: 1.05, 2: 1.20, 3: 1.35}[t]
     for i in range(4):
         a = i * math.pi / 2 + math.pi / 4
         dx, dy = math.cos(a), math.sin(a)
@@ -481,44 +454,36 @@ CAMP_COLORS = {'militia': 0x3f70c8, 'ranger': 0x4f9a52, 'sniper': 0x7a5cc0}
 
 
 def camp(k, t, pal, trade='militia'):
+    """Muster hall, side watch chamber and open front drill apron."""
     B, G = k.B, k.G
     col = CAMP_COLORS[trade]
-    B.box(pal['stone3'], 1.9, 0.1, 1.9, 0, 0, 0)
-    hall_w = 1.1 if t == 1 else 1.3
-    B.box(pal['stone'], hall_w, 0.7 if t == 1 else 0.95, 0.75, 0, 0.1, -0.45)
-    rh = 0.8 if t == 1 else 1.05
-    B.box(pal['stone3'], hall_w + 0.06, 0.12, 0.81, 0, 0.1, -0.45)          # foundation course
-    B.gable(col, hall_w, 0.42, 0.75, 0, rh, -0.45, ry=math.pi / 2, overhang=0.14)
-    B.box(shade(col, 0.7), 0.06, 0.05, hall_w + 0.3, 0, rh + 0.42, -0.45, 0, math.pi / 2, 0)
-    chimney(B, pal, hall_w * 0.32, rh + 0.1, -0.62, h=0.4, w=0.16)
-    door(B, pal, 0.26, 0.45, 0, -0.07, 0.1)
-    for sx in (-1, 1):
-        window(B, G, pal, sx * hall_w * 0.32, 0.42, -0.07, w=0.12, h=0.14, shutters=False)
-    # shield over the door in the trade colour
-    B.box(pal['trim'], 0.2, 0.2, 0.03, 0, rh - 0.2, -0.065)
-    B.box(col, 0.15, 0.15, 0.04, 0, rh - 0.175, -0.06)
-    banner(B, pal, -0.8, -0.1, 0.1, 1.3, color=col)
-    # training yard: weapon rack + dummies
-    B.box(pal['wood'], 0.5, 0.06, 0.08, -0.45, 0.4, 0.55)
-    for x in (-0.65, -0.25):
-        B.box(pal['wood'], 0.06, 0.4, 0.06, x, 0.1, 0.55)
-    if trade == 'ranger':
-        B.prism(0xe9e0cc, 10, 0.2, 0.2, 0.04, 0.45, 0.35, 0.6, rx=math.pi / 2)
-        B.prism(0xc4473b, 10, 0.1, 0.1, 0.05, 0.45, 0.35, 0.62, rx=math.pi / 2)
-        B.box(pal['wood'], 0.05, 0.4, 0.05, 0.45, 0.1, 0.56)
+    cp = dict(pal, roof=col)
+    B.prism(pal['stone3'], 4, 1.34, 1.28, .22, phase=math.pi/4)
+    h=1.15+.24*t
+    B.box(pal['stone'], 1.45, h, 1.02, -.1, .22, -.30)
+    painted_roof(B, cp, 1.5, .85, 1.08, x=-.1, y=h+.22, z=-.30, ry=math.pi/2, overhang=.12)
+    for x in (-.78,.55):
+        B.box(pal['stone2'], .17, h, .22, x, .22, .23)
+    door(B, pal, .48, .82, -.1, .24, .22)
+    # Different silhouette for each corps, not merely three roof colors.
+    if trade=='militia':
+        round_tower(B,G,pal,.58,-.54,.28,h+.65,roof=False)
+    elif trade=='ranger':
+        B.box(pal['wood'], .52, .12, .60, .52, h+.52, -.52)
+        painted_roof(B,cp,.52,.65,.6,x=.52,y=h+.64,z=-.52,overhang=.05)
     else:
-        B.box(pal['wood'], 0.06, 0.55, 0.06, 0.45, 0.1, 0.55)
-        B.box(0xd9c9a3, 0.28, 0.25, 0.16, 0.45, 0.4, 0.55)
-    if t >= 2:
-        B.prism(col, 4, 0.35, 0, 0.5, 0.7, 0.1, 0.0, phase=math.pi / 4)
-        B.prism(shade(col, 0.8), 4, 0.3, 0, 0.42, -0.7, 0.1, 0.25, phase=math.pi / 4)
-        banner(B, pal, 0.8, -0.1, 0.1, 1.3, color=col, flip=True)
-    if t >= 3:
-        top = round_tower(B, G, pal, 0.75, -0.75, 0.24, 1.6)
-        banner(B, pal, 0.75, -0.75, top + 0.5, 0.9, color=col)
-        guard(B, pal, 0.0, 0.1, 0.4, 0.0, s=0.75)
-        guard(B, pal, 0.25, 0.1, 0.75, 0.3, s=0.75)
-        G.box(pal['glow'], hall_w, 0.05, 0.05, 0, 0.75, -0.06)
+        round_tower(B,G,cp,.58,-.54,.25,h+1.0)
+    for x in (-.64,.48):
+        window(B,G,pal,x,.68,.24,w=.16,h=.28,shutters=False)
+    banner(B,pal,-.80,.62,.22,1.8,color=col,big=.85)
+    B.box(pal['wood'],.55,.08,.09,.38,.70,.65)
+    for x in (.15,.62):
+        B.box(pal['wood'],.07,.7,.07,x,.22,.65)
+        B.box(pal['steel'],.04,.48,.05,x,.43,.68,0,0,.16)
+    if t>=2:
+        B.box(pal['steel'],.35,.35,.35,-.55,.22,.63)
+    if t>=3:
+        G.box(pal['glow'],1.2,.06,.05,-.1,1.1,.24)
 
 
 # ---------------------------------------------------------------- outpost
@@ -547,7 +512,7 @@ def workshop(k, t, pal):
     B, G = k.B, k.G
     B.box(pal['stone3'], 1.9, 0.1, 1.9, 0, 0, 0)
     B.box(pal['stone'], 1.3, 0.85, 0.9, -0.1, 0.1, -0.3)
-    B.gable(pal['roof2'], 1.3, 0.4, 0.9, -0.1, 0.95, -0.3, ry=math.pi / 2)
+    painted_roof(B, pal, 1.3, .72, .9, -.1, .95, -.3, ry=math.pi/2)
     B.box(pal['stone2'], 0.3, 1.5 + t * 0.2, 0.3, 0.4, 0.1, -0.55)
     G.box(0xff9a3c, 0.22, 0.08, 0.22, 0.4, 1.6 + t * 0.2, -0.55)
     G.box(0xff9a3c, 0.5, 0.3, 0.04, -0.1, 0.12, 0.16)
@@ -584,83 +549,18 @@ def hero_forge(k, t, pal):
 
 # ---------------------------------------------------------------- figures
 #
-# Chunky block figurines, ~0.95 tall, facing +z. Limbs are separate parts
-# with their origin at the hip / shoulder so the runtime stride swings them.
-
-def _legs(k, pal, col, boot, hip=0.36, w=0.1, s=1.0):
-    for name, x in (('leg_l', -w), ('leg_r', w)):
-        L = k.part(name, origin=(x * s, hip * s, 0))
-        L.box(col, 0.14 * s, (hip - 0.08) * s, 0.16 * s, x * s, 0.08 * s, 0)
-        L.box(boot, 0.16 * s, 0.1 * s, 0.22 * s, x * s, 0, 0.02 * s)
-
-
-def _torso(B, pal, armor, cloth, s=1.0, wide=1.0):
-    B.box(armor, 0.36 * s * wide, 0.36 * s, 0.24 * s, 0, 0.34 * s, 0)
-    B.box(cloth, 0.38 * s * wide, 0.3 * s, 0.26 * s, 0, 0.3 * s, 0)
-    B.box(pal['trim'], 0.39 * s * wide, 0.05 * s, 0.27 * s, 0, 0.42 * s, 0)
-
+# Sculpted infantry keeps separate hip/shoulder pivots for runtime stride.
 
 def trooper(k, pal):
-    """Shield knight with a rifle-lance — the line soldier."""
-    B, G = k.B, k.G
-    steel, cloth = 0xc9d3df, pal['cloth']
-    _legs(k, pal, 0x8d98a8, pal['dark'])
-    _torso(B, pal, steel, cloth)
-    B.box(steel, 0.42, 0.14, 0.28, 0, 0.62, 0)              # pauldrons
-    B.box(steel, 0.3, 0.28, 0.3, 0, 0.72, 0)                # helm
-    B.box(pal['dark'], 0.24, 0.07, 0.04, 0, 0.83, 0.15)     # visor slit
-    G.box(pal['glow'], 0.18, 0.03, 0.02, 0, 0.845, 0.17)
-    B.box(pal['trim'], 0.06, 0.16, 0.28, 0, 1.0, -0.01)     # crest
-    A = k.part('arm_l', origin=(-0.24, 0.66, 0))
-    A.box(steel, 0.11, 0.3, 0.13, -0.25, 0.38, 0)
-    A.box(cloth, 0.06, 0.42, 0.34, -0.33, 0.3, 0.06)        # kite shield
-    A.box(pal['trim'], 0.07, 0.42, 0.06, -0.335, 0.3, 0.06)
-    A.box(pal['trim'], 0.07, 0.06, 0.3, -0.335, 0.48, 0.06)
-    R = k.part('arm_r', origin=(0.24, 0.66, 0))
-    R.box(steel, 0.11, 0.3, 0.13, 0.25, 0.38, 0)
-    R.box(pal['dark'], 0.07, 0.07, 0.62, 0.27, 0.42, 0.22)  # rifle-lance
-    R.box(pal['trim'], 0.09, 0.09, 0.07, 0.27, 0.41, 0.52)
-    G.box(pal['glow'], 0.04, 0.04, 0.1, 0.27, 0.43, 0.58)
+    combat.infantry(k, pal, 'soldier')
 
 
 def ranger(k, pal):
-    """Hooded scout with an energy bow."""
-    B, G = k.B, k.G
-    green, leather = 0x4f9a52, 0x8a6342
-    _legs(k, pal, leather, pal['dark'])
-    _torso(B, pal, leather, green)
-    B.box(green, 0.44, 0.12, 0.3, 0, 0.6, 0)                # cape shoulders
-    B.box(green, 0.36, 0.42, 0.06, 0, 0.24, -0.15)          # cape
-    B.box(pal['skin'], 0.24, 0.22, 0.24, 0, 0.7, 0)
-    B.prism(green, 4, 0.22, 0, 0.32, 0, 0.84, 0, phase=math.pi / 4)  # hood
-    B.box(pal['dark'], 0.2, 0.05, 0.03, 0, 0.78, 0.125)
-    A = k.part('arm_l', origin=(-0.22, 0.64, 0))
-    A.box(leather, 0.1, 0.3, 0.12, -0.23, 0.36, 0.02)
-    A.box(pal['wood'], 0.05, 0.62, 0.05, -0.27, 0.16, 0.18)  # bow stave
-    G.box(pal['glow'], 0.02, 0.56, 0.02, -0.27, 0.19, 0.14)  # string
-    R = k.part('arm_r', origin=(0.22, 0.64, 0))
-    R.box(leather, 0.1, 0.3, 0.12, 0.23, 0.36, 0)
-    B.box(leather, 0.12, 0.34, 0.12, 0.12, 0.42, -0.17)     # quiver
-    G.box(pal['glow'], 0.1, 0.06, 0.1, 0.12, 0.76, -0.17)
+    combat.infantry(k, pal, 'ranger')
 
 
 def marksman(k, pal):
-    """Cloaked sniper with a long rail rifle."""
-    B, G = k.B, k.G
-    violet, dark = 0x7a5cc0, 0x3d3560
-    _legs(k, pal, dark, pal['dark'])
-    _torso(B, pal, dark, violet)
-    B.box(violet, 0.4, 0.5, 0.06, 0, 0.18, -0.15)
-    B.box(dark, 0.27, 0.27, 0.27, 0, 0.68, 0)
-    G.box(0xc8a8ff, 0.08, 0.06, 0.03, 0.06, 0.79, 0.14)      # scope eye
-    B.box(violet, 0.31, 0.08, 0.31, 0, 0.93, 0)
-    A = k.part('arm_l', origin=(-0.22, 0.64, 0))
-    A.box(dark, 0.1, 0.3, 0.12, -0.23, 0.36, 0.04)
-    R = k.part('arm_r', origin=(0.22, 0.64, 0))
-    R.box(dark, 0.1, 0.3, 0.12, 0.23, 0.36, 0)
-    R.box(pal['dark'], 0.06, 0.08, 0.95, 0.18, 0.44, 0.3)
-    R.box(pal['steel'], 0.08, 0.08, 0.16, 0.18, 0.52, 0.18)
-    G.box(0xc8a8ff, 0.03, 0.03, 0.1, 0.18, 0.45, 0.8)
+    combat.infantry(k, pal, 'sniper')
 
 
 # ---------------------------------------------------------------- heroes
@@ -692,10 +592,10 @@ def _bike(B, G, look, length, width, height, nose, style):
     dk = pal_dark()
     hl = length / 2
     # hull, tapered: a wide mid block and a narrower tail
-    B.box(look['bike'], width, height, length * 0.62, 0, y0, 0.02)
+    combat.armor(B, look['bike'], width, height, length * 0.72, 0, y0, 0.02)
     B.box(shade(look['bike'], 0.82), width * 0.78, height * 0.86, length * 0.4, 0, y0 + 0.02, -hl + length * 0.2)
     # fairing + nose
-    B.box(look['main'], width * 0.86, height * 0.7, nose, 0, y0 + height * 0.22, hl - nose / 2 + 0.04)
+    combat.armor(B, look['main'], width * 0.86, height * 0.7, nose, 0, y0 + height * 0.22, hl - nose / 2 + 0.04)
     B.prism(look['main'], 4, width * 0.42, 0, nose * 0.8, 0, y0 + height * 0.55, hl + nose * 0.32,
             rx=math.pi / 2, phase=math.pi / 4)
     G.box(0xfff4c8, width * 0.34, 0.07, 0.03, 0, y0 + height * 0.5, hl + 0.06)      # headlamp
@@ -771,9 +671,7 @@ def _head(B, pal, y, z, r=HEAD_R, eyes=0x1b1d24, skin=None):
 
 
 def _cape(B, look, top, z, w, length, sway=0.0):
-    """Two-panel cape from the shoulders, flaring back."""
-    B.box(look['cape'], w, length * 0.55, 0.035, 0, top - length * 0.55, z, -0.18, 0, sway)
-    B.box(shade(look['cape'], 0.85), w * 1.12, length * 0.5, 0.035, 0, top - length * 1.0, z - 0.1, -0.42, 0, sway)
+    combat.cloth(B, look['cape'], top, z, w, length)
 
 
 def _pauldron(B, c, x, y, z, r):
@@ -884,84 +782,8 @@ def hero(k, key, pal):
 # rides the spines and plates so the roster reads apart. Arms are pivot-
 # relative (origin at the shoulder line) for the instanced swing.
 
-HIVE = 0x4b3d63
-HIVE2 = 0x6a5888
-HIVE3 = 0x2f2742
-
-
 def enemy(k, key, accent):
-    B, A, E = k.B, k.part('arms', origin=(0, 0.72, 0.02)), k.part('eyes', glow=True)
-    pv = 0.72
-    if key == 'walker':
-        for x in (-0.1, 0.1):
-            B.box(HIVE3, 0.13, 0.32, 0.15, x, 0, 0)
-        B.box(HIVE, 0.4, 0.38, 0.28, 0, 0.32, 0, 0.18, 0, 0)
-        B.box(accent, 0.3, 0.1, 0.12, 0, 0.62, -0.12, 0.3, 0, 0)
-        B.box(HIVE2, 0.28, 0.24, 0.26, 0, 0.7, 0.08, 0.25, 0, 0)
-        eyes = [(-0.06, 0.82, 0.22), (0.06, 0.82, 0.22)]
-        arm_len, arm_w = 0.42, 0.1
-    elif key == 'runner':
-        pv = 0.66
-        for x, z in ((-0.08, 0.1), (0.08, -0.12)):
-            B.box(HIVE3, 0.1, 0.34, 0.12, x, 0, z)
-        B.box(HIVE, 0.3, 0.3, 0.24, 0, 0.32, 0.03, 0.55, 0, 0)
-        B.box(accent, 0.08, 0.18, 0.28, 0, 0.55, -0.05, 0.55, 0, 0)
-        B.box(HIVE2, 0.22, 0.2, 0.28, 0, 0.56, 0.2, 0.4, 0, 0)
-        eyes = [(-0.05, 0.66, 0.36), (0.05, 0.66, 0.36)]
-        arm_len, arm_w = 0.38, 0.08
-    elif key == 'brute':
-        pv = 0.8
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.2, 0.34, 0.22, x, 0, 0)
-        B.box(HIVE, 0.66, 0.5, 0.44, 0, 0.32, 0)
-        B.box(accent, 0.7, 0.14, 0.3, 0, 0.78, -0.08)
-        B.box(HIVE2, 0.24, 0.18, 0.22, 0, 0.82, 0.18)
-        eyes = [(-0.06, 0.9, 0.3), (0.06, 0.9, 0.3)]
-        arm_len, arm_w = 0.5, 0.18
-    elif key == 'spitter':
-        for x in (-0.1, 0.1):
-            B.box(HIVE3, 0.12, 0.3, 0.14, x, 0, 0)
-        B.box(HIVE, 0.36, 0.34, 0.26, 0, 0.3, 0)
-        B.ico(accent, 0.24, 0, 0.62, -0.18, 1, 1, 1, sub=1)
-        B.box(HIVE2, 0.12, 0.26, 0.12, 0, 0.6, 0.1, -0.4, 0, 0)
-        B.box(HIVE2, 0.2, 0.16, 0.24, 0, 0.82, 0.2)
-        eyes = [(-0.05, 0.94, 0.33), (0.05, 0.94, 0.33)]
-        arm_len, arm_w = 0.32, 0.08
-    elif key == 'burrower':
-        pv = 0.5
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.14, 0.2, 0.3, x, 0, 0)
-        B.box(HIVE, 0.48, 0.3, 0.46, 0, 0.18, -0.04)
-        B.prism(accent, 6, 0.2, 0, 0.42, 0, 0.35, 0.2, rx=math.pi / 2)
-        B.box(HIVE2, 0.36, 0.12, 0.3, 0, 0.48, -0.08)
-        eyes = [(-0.12, 0.42, 0.18), (0.12, 0.42, 0.18)]
-        arm_len, arm_w = 0.3, 0.12
-    elif key == 'sieger':
-        pv = 0.78
-        for x in (-0.16, 0.16):
-            B.box(HIVE3, 0.18, 0.32, 0.22, x, 0, 0)
-        B.box(HIVE, 0.58, 0.46, 0.5, 0, 0.3, 0)
-        for i in range(3):
-            B.box(accent, 0.62 - i * 0.1, 0.1, 0.34 - i * 0.04, 0, 0.62 + i * 0.1, -0.06 - i * 0.04)
-        B.box(HIVE2, 0.42, 0.3, 0.2, 0, 0.36, 0.3)
-        eyes = [(-0.12, 0.6, 0.41), (0.12, 0.6, 0.41)]
-        arm_len, arm_w = 0.44, 0.16
-    else:  # caller
-        pv = 0.86
-        for x in (-0.08, 0.08):
-            B.box(HIVE3, 0.1, 0.42, 0.12, x, 0, 0)
-        B.box(HIVE, 0.28, 0.46, 0.22, 0, 0.4, 0)
-        B.box(HIVE2, 0.24, 0.22, 0.22, 0, 0.88, 0.02)
-        for i, a in enumerate((-0.5, 0, 0.5)):
-            E.prism(accent, 4, 0.04, 0, 0.3, math.sin(a) * 0.1, 1.08, 0, rz=-a)
-        eyes = [(-0.05, 1.0, 0.13), (0.05, 1.0, 0.13)]
-        arm_len, arm_w = 0.5, 0.07
-    A.origin.y = pv
-    for sx in (-1, 1):
-        A.box(HIVE2, arm_w, arm_w, arm_len, sx * (0.2 + arm_w), pv - arm_w, 0.06 + arm_len / 2 - 0.12)
-        A.box(accent, arm_w * 1.1, arm_w * 0.5, 0.08, sx * (0.2 + arm_w), pv - arm_w * 0.4, arm_len - 0.1)
-    for (x, y, z) in eyes:
-        E.box(0xffffff, 0.06, 0.05, 0.04, x, y, z)
+    combat.enemy(k, key, accent)
 
 
 # ---------------------------------------------------------------- props

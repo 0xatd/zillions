@@ -1,3 +1,6 @@
+import { spellManaCost } from './hero-spells.js';
+import { heroAbilities, abilityCooldown } from './hero-abilities.js';
+import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
 // DOM HUD and menus. The outer shell is multiplayer-first: Play Online leads
 // to the lobby, while Play Solo contains Story Campaign and Survival. Both
 // paths reuse the same battle setup screen. In-game, the compact action bar
@@ -11,13 +14,14 @@ import {
   PLOT_KINDS, DIFFICULTY, LEVELS, levelById, isGalaxyLevel, ITEMS, itemInfo, itemMods, PACK_SLOTS,
   HEROES, HERO_MAX_LEVEL, xpForLevel, abilityRank, LABYRINTH_LEVELS, CULTURE_ARMIES, cultureKey,
 } from './config.js';
+import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
 import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
-import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources } from './fog-of-war.js';
+import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources, visibleInFog } from './fog-of-war.js';
 import {
-  MMO_CLASSES, MMO_RACES, CLASS_ATTRS, CREATOR_PARTS, APPEARANCES, MAX_MMO_CHARACTERS, xpToMmoLevel, STASH_SLOTS,
+  MMO_CLASSES, MMO_RACES, CLASS_ATTRS, CREATOR_PARTS, APPEARANCES, xpToMmoLevel, STASH_SLOTS,
   allocateLatticeNode, deallocateLatticeNode, rewireLattice, normalizeEquipment, characterAttributes,
   setLatticeNodeSet, canEquip, legalEquipment,
 } from './mmo-characters.js';
@@ -36,7 +40,8 @@ import { ShellState, SHELL_BASES } from './shell-state.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
-import { firstHourGuidance, firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
+import { firstHourStep, equipmentPreview, compactDeltas, missionRewardSummary } from './first-hour.js';
+import { QUICK_DEFAULTS, abilityBar, cultureExplain, leaderRoster } from './first-run.js';
 
 const CRAFT_VENDOR_PRICES = { alloy_shard: 8, phase_flux: 18, prism_dust: 32, ascendant_core: 120 };
 const modImpact = (mods = {}) => Object.entries(mods).filter(([, value]) => value).map(([key, value]) =>
@@ -73,6 +78,7 @@ export class UI {
         <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
         <div class="sep"></div>
         <button class="tbtn" id="b-pause" title="Pause (P)">⏸</button>
+        <span class="speed-readout" id="speed-readout">1×</span>
         <button class="tbtn speed" data-s="1">1×</button>
         <button class="tbtn speed" data-s="2">2×</button>
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
@@ -80,12 +86,35 @@ export class UI {
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
       </div>
 
+      <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
+        <div><b>PAUSED</b><span id="pause-veil-speed">Speed 1×</span><small id="pause-veil-hint"></small></div>
+      </div>
+      <aside id="coach" class="coach hidden" role="status">
+        <span id="coach-kicker">FIRST SIEGE</span>
+        <b id="coach-title"></b>
+        <p id="coach-body"></p>
+        <button type="button" id="coach-skip">Skip lesson</button>
+      </aside>
       <div id="banner"></div>
       <div id="invitetoast" class="hidden"></div>
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
       <div id="messages"></div>
+      <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
+        <button id="battle-details-close" aria-label="Close details">×</button>
+        <div id="battle-details-content"></div>
+      </aside>
+      <section id="builder-controls" class="builder-controls hidden" aria-label="Builder orders">
+        <button id="builder-toggle" aria-expanded="false">Builders</button><span id="builder-status"></span>
+        <div id="builder-options" class="hidden">
+          <label>Order <select id="builder-order">${Object.entries(BUILDER_ORDERS).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label>
+          <button id="builder-pause">Resume</button>
+          <label>Keep gold <input id="builder-reserve" type="number" min="0" max="1000" step="5" value="10"></label>
+          <label>Towers <select id="builder-tower"><option value="ask">Ask me</option><option value="ballista">Long range</option><option value="flame">Anti-horde</option></select></label>
+          <label>Walls <select id="builder-wall"><option value="ask">Ask me</option><option value="bastion">Armor</option><option value="shock">Shock</option></select></label><p id="builder-help"></p>
+        </div>
+      </section>
       <div id="gamechat" class="gamechat hidden">
         <div class="gamechatlog" id="gamechat-log"></div>
         <div class="gamechatrow hidden" id="gamechat-row">
@@ -117,6 +146,7 @@ export class UI {
           <div id="fight-kit" class="fight-kit hidden" aria-label="Hero abilities"></div>
           <div id="upgradepanel" class="hidden"></div>
           <button id="bigaction" class="bigaction"></button>
+          <div id="ability-slots" class="ability-slots" aria-label="Additional abilities"></div>
         </div>
         <div id="branchpanel" class="hidden"></div>
         <div id="blessingpanel" class="hidden"></div>
@@ -130,16 +160,29 @@ export class UI {
 
       <div id="tooltip" class="hidden"></div>
 
+      <div id="deployment-screen" class="deployment-screen hidden" role="status" aria-live="polite" aria-label="Preparing mission">
+        <div class="deployment-card"><span class="deployment-kicker">EXPEDITION COMMAND</span><h2 id="deployment-title"></h2><p id="deployment-detail"></p><div class="deployment-track" aria-hidden="true"><span></span></div><small id="deployment-phase">Preparing the battlefield</small></div>
+      </div>
+      <section id="mission-intro" class="mission-intro hidden" aria-label="Mission introduction">
+        <div class="mission-intro-copy"><span>EXPEDITION / ARRIVAL</span><h2 id="mission-intro-title"></h2><p>Establish your colony. Secure the lanes. Destroy the hives.</p></div>
+        <button id="mission-intro-skip" class="tbtn">Enter battlefield</button>
+      </section>
       <div id="overlay" class="screen">
         <div id="screen-account" class="accountscreen title-screen">
           <div class="title-lockup">
-            <div class="brandeyebrow">THE LAST WAR CROSSES THE STARS</div>
+            <div class="brandeyebrow">HERO-LED SIEGE WARFARE</div>
             <h1 class="gametitle">ZILLIONS</h1>
-            <p class="gamesub">Every world is a battlefield.</p>
+            <p class="gamesub">Build your stronghold. Hold against the swarm.</p>
           </div>
           <div class="accountcard title-login">
-            <div class="login-heading"><span>ACCOUNT LOGIN</span><h2>Welcome to Zillions</h2><p>Sign in to continue to your characters and worlds.</p></div>
-            <div class="accountstatus" id="account-status">Checking account…</div>
+            <div class="login-heading"><span>COMMAND DECK</span><h2>Enter the frontier</h2><p>Play now. Sign in later if you want this siege kept.</p></div>
+            <div class="accountstatus" id="account-status-wrap">
+              <div class="auth-progress" id="auth-progress"><span></span></div>
+              <div id="account-status">Checking account…</div>
+            </div>
+            <button class="menubtn primary play-now" id="a-play" type="button">PLAY</button>
+            <p class="guest-note">Guest on this browser. No account required.</p>
+            <p class="save-progress-label">Save progress</p>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
             <div class="login-divider" id="a-login-divider"><span>OR</span></div>
             <form class="email-login" id="a-email-form">
@@ -165,28 +208,22 @@ export class UI {
             <button id="a-settings">SETTINGS</button>
             <button id="a-quit">QUIT</button>
           </nav>
-          <div class="planet-status"><span class="online-pip"></span> EARTH FRONT · STARSHIP ONLINE <small>BUILD 0.1</small></div>
         </div>
 
         <div id="screen-main" class="mainmenu character-select">
-          <div class="character-heading"><span>ROSTER</span><h1>SELECT CHARACTER</h1><small>Your class, equipment and level persist between sieges. Press C from the main menu to return here.</small></div>
-          <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
+          <div class="character-heading"><h1 id="chapter-title">Your chapter</h1><span id="chapter-territory"></span></div>
+          <form id="chapter-identity" class="chapter-identity hidden"><label>Chapter name<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Recruitment culture<select id="chapter-culture"></select></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">SAVE CHAPTER</button></form>
+          <div class="chapter-campaign"><div class="chapter-map-heading"><h2>Earth</h2><span id="chapter-earth-status"></span></div><div id="chapter-map" aria-label="Earth conquest map"></div><div id="chapter-objective"></div><div id="chapter-services"></div></div>
           <div id="character-stage" class="character-stage">
             <div id="character-avatar" class="character-avatar" aria-label="Selected character">
               <div class="avatar-backlight"></div>
-              <div class="avatar-body">
-                <span class="avatar-head"></span><span class="avatar-torso"></span>
-                <span class="avatar-arm left"></span><span class="avatar-arm right"></span>
-                <span class="avatar-leg left"></span><span class="avatar-leg right"></span>
-                <span class="avatar-weapon" id="character-weapon"></span>
-                <span id="character-sigil" class="character-sigil"></span>
-              </div>
-              <div class="avatar-loadout" id="character-loadout"></div>
+              <canvas id="roster-preview-canvas" aria-label="Commander preview"></canvas>
+              <span class="roster-stage-label">EXPEDITION PERSONNEL</span>
             </div>
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
-          <aside class="character-roster"><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CREATE NEW CHARACTER</button><button class="character-sheet-open danger" id="m-delete-character">DELETE CHARACTER</button></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">CHARACTER INFO</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -196,7 +233,7 @@ export class UI {
             <div class="sheet-tabs">
               <button class="sheet-tab sel" id="sheet-tab-character" data-tab="character">CHARACTER</button>
               <button class="sheet-tab" id="sheet-tab-gear" data-tab="gear">EQUIPMENT</button>
-              <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">MARKET</button>
+              <button class="sheet-tab" id="sheet-tab-shop" data-tab="shop">QUARTERMASTER</button>
               <button class="sheet-tab" id="sheet-tab-crafting" data-tab="crafting">FORGE</button>
               <button class="sheet-tab" id="sheet-tab-abilities" data-tab="abilities">ABILITIES</button>
               <button class="sheet-tab" id="sheet-tab-lattice" data-tab="lattice">THE LATTICE</button>
@@ -213,14 +250,14 @@ export class UI {
           </div>
 
           <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
-            <section class="market-head"><div><span class="modeeyebrow">ORBITAL EXCHANGE</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p><div id="sheet-guide-market" class="sheet-guide"></div></div><strong id="market-balance"></strong></section>
+            <section class="market-head"><div><span class="modeeyebrow">CHAPTER ARMORY</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p><div id="sheet-guide-market" class="sheet-guide"></div></div><strong id="market-balance"></strong></section>
             <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
             <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
             <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
           </div>
 
           <div id="sheet-panel-crafting" class="sheet-panel crafting-panel hidden">
-            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>All actions use the online ledger. Failed or repeated requests never consume resources.</p><div id="sheet-guide-forge" class="sheet-guide"></div><div id="craft-resources"></div><div id="craft-vendor"></div></section>
+            <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>Modify your leader’s equipment with sockets and components.</p><div id="sheet-guide-forge" class="sheet-guide"></div><div id="craft-resources"></div><div id="craft-vendor"></div></section>
             <section><h3>SELECT ITEM</h3><div id="craft-items" class="market-grid"></div></section>
             <section><h3>WORKBENCH</h3><div id="craft-workbench"><p>Select an item.</p></div><div id="craft-status" role="status"></div></section>
           </div>
@@ -241,7 +278,7 @@ export class UI {
         </div>
 
         <div id="screen-character-create" class="character-create-screen hidden">
-          <div class="creator-head"><span>NEW CHARACTER</span><h1>BUILD YOUR HERO</h1><p>Choose who you are, then choose how you fight. Every launch option is free.</p></div>
+          <div class="creator-head"><span>CHAPTER FOUNDER</span><h1>CREATE YOUR FOUNDER</h1><p>You lead the first landing. Companions join your chapter as you conquer.</p></div>
           <form id="character-create-form" class="creator-form creator-xl">
             <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>The same procedural model appears in the world and in combat.</span></section>
             <div class="creator-controls">
@@ -252,7 +289,7 @@ export class UI {
               <fieldset><legend>CLASS</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
             </div>
             <div id="creator-summary" class="creator-summary"></div>
-            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">CREATE CHARACTER</button></div>
+            <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="submit" class="enter-world">FOUND THE CHAPTER</button></div>
           </form>
         </div>
 
@@ -310,8 +347,35 @@ export class UI {
           </div>
         </div>
 
-        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats">The opening transmission and campaign cinematics will appear here as they are recovered.</div></div>
+        <div id="screen-cinematics" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Cinematics</h2></div><div class="howto stats presentation-empty">Campaign missions open with a short, skippable in-engine arrival. Standalone cinematic films are not available in this build.</div></div>
         <div id="screen-credits" class="setup hidden"><div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Credits</h2></div><div class="howto stats"><b>ZILLIONS</b><br>Created by 0xatd and the Taborlin agent crew.<br><br>Humanity has one city left. The dead have every world.</div></div>
+
+        <div id="screen-quick" class="setup quick-setup hidden">
+          <div class="setuphead">
+            <button class="tbtn" id="q-back" type="button">← Title</button>
+            <h2>One siege, then you are in</h2>
+          </div>
+          <form id="quick-form" class="quick-form">
+            <label>Chapter name<input id="q-chapter" maxlength="32" autocomplete="off" required></label>
+            <label>Founder name<input id="q-founder" maxlength="18" autocomplete="off" required></label>
+            <div class="steplabel">Culture <small>— the look of the base and the army the camps train</small></div>
+            <div class="diffseg cultureseg" id="q-culture"></div>
+            <div id="q-culture-detail" class="culture-detail"></div>
+            <div class="quick-row">
+              <label>Colors<select id="q-color"></select></label>
+              <label>Insignia<select id="q-emblem"></select></label>
+              <label>Difficulty<select id="q-diff"></select></label>
+            </div>
+            <div class="steplabel">Leaders <small>— Vanguard deploys now. The rest are coming soon.</small></div>
+            <div id="q-leaders" class="leader-grid"></div>
+            <div id="q-abilities" class="qwer-bar" aria-label="Ability bar"></div>
+            <div class="quick-actions">
+              <button type="button" class="utilitybtn" id="q-random">Randomize</button>
+              <button type="submit" class="startbtn" id="q-start">START THE SIEGE</button>
+            </div>
+            <button type="button" class="textlink" id="q-save">Save progress later with Google or email</button>
+          </form>
+        </div>
 
         <div id="screen-setup" class="setup hidden">
           <div class="setuphead">
@@ -325,6 +389,10 @@ export class UI {
           <div class="herorow" id="herorow"></div>
           <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
+          <div id="culture-detail" class="culture-detail"></div>
+          <div class="steplabel">Leaders <small>— Vanguard deploys now. Locked leaders stay in a compact grid so Start stays on screen.</small></div>
+          <div id="setup-leaders" class="leader-grid"></div>
+          <div id="setup-abilities" class="qwer-bar" aria-label="Ability bar"></div>
           <div class="steplabel diff-label">4 · Difficulty</div>
           <div class="diffseg" id="diffseg"></div>
           <div id="mp-panel" class="hidden"></div>
@@ -494,9 +562,23 @@ export class UI {
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
-    q('#a-google').onclick = () => this.cb.onSignIn && this.cb.onSignIn();
+    q('#battle-details-content').onclick = event => {
+      const button=event.target.closest('[data-focus-enemy]');
+      if(button && !button.disabled)this.cb.onFocusEnemy?.(button.dataset.focusEnemy==='clear'?null:Number(button.dataset.focusEnemy));
+    };
+    q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
+    q('#builder-toggle').onclick = () => {const open=q('#builder-options').classList.toggle('hidden')===false;q('#builder-toggle').setAttribute('aria-expanded',String(open));};
+    q('#builder-order').onchange = e => this.cb.onBuilder?.({t:'builderOrder',s:e.target.value});
+    for(const kind of ['tower','wall'])q('#builder-'+kind).onchange=e=>this.cb.onBuilder?.({t:'builderDoctrine',kind,branch:e.target.value});
+    q('#builder-pause').onclick = () => this.cb.onBuilder?.({t:'builderPause',on:!this._builderPaused});
+    q('#builder-reserve').onchange = e => {const gold=Number(e.target.value);if(Number.isInteger(gold)&&gold>=0&&gold<=1000)this.cb.onBuilder?.({t:'builderReserve',gold});};
+    q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
+    q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
+    q('#a-play').onclick = () => { this._busy(q('#a-play')); this.cb.onGuestPlay?.(); };
+    q('#a-google').onclick = () => { this._busy(q('#a-google')); this.cb.onSignIn && this.cb.onSignIn(); };
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
+      this._busy(q('#a-email-submit'));
       if (this.cb.onEmailSignIn) this.cb.onEmailSignIn(q('#a-email').value);
     };
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
@@ -506,16 +588,29 @@ export class UI {
     q('#a-quit').onclick = () => this.showBanner('Close this browser tab to leave the frontier.', '', 3200);
     q('#a-username-form').onsubmit = (e) => {
       e.preventDefault();
+      this._busy(q('#a-username-form button'));
       const input = q('#a-username');
       if (this.cb.onUsername) this.cb.onUsername(input.value);
     };
+    this._submitOnEnter('#a-username', () => q('#a-username-form').requestSubmit());
+    this._submitOnEnter('#a-email', () => q('#a-email-form').requestSubmit());
+    this._submitOnEnter('#chapter-name-input', () => q('#chapter-identity').requestSubmit());
+    this._submitOnEnter('#creator-name', () => q('#character-create-form').requestSubmit());
+    this._submitOnEnter('#cu-name', () => q('#cu-confirm').click());
+    this._submitOnEnter('#q-chapter', () => q('#quick-form').requestSubmit());
+    this._submitOnEnter('#q-founder', () => q('#quick-form').requestSubmit());
     q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
-    q('#m-create-character').onclick = () => this._showCharacterCreator();
+    q('#m-create-character').onclick = () => { q('#chapter-identity').classList.toggle('hidden'); q('#chapter-name-input').focus(); };
+    q('#chapter-identity').onsubmit = e => { e.preventDefault(); this._busy(e.submitter); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value,culture:q('#chapter-culture').value}); };
+    q('#chapter-culture').innerHTML=Object.entries(CHAPTER_CULTURES).map(([k,v])=>`<option value="${k}">${v.name} — ${v.desc}</option>`).join('');
+    q('#chapter-color').innerHTML = Object.keys(CHAPTER_COLORS).map(k=>`<option value="${k}">${k}</option>`).join('');
+    q('#chapter-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([k,v])=>`<option value="${k}">${v} ${k}</option>`).join('');
     q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
     q('#sheet-close').onclick = () => this._closeCharacterSheet();
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
     }
+    q('#m-party').onclick = () => this.cb.onPartyOpen?.();
     q('#m-custom').onclick = () => { this._customFrom = 'main'; this.cb.onCustomOpen && this.cb.onCustomOpen(); };
     q('#m-delete-character').onclick = () => {
       const character = this._sheetCharacter();
@@ -523,7 +618,6 @@ export class UI {
       if (window.confirm(`Delete ${character.name}? This cannot be undone.`)) this.cb.onCharacterDelete?.(character.id);
     };
     q('#creator-cancel').onclick = () => {
-      if (!(this._profile?.mmoCharacters || []).length) return;
       this._backOverlay('main');
     };
     q('#character-create-form').onsubmit = (event) => {
@@ -681,8 +775,10 @@ export class UI {
         <small>${h.tagline}</small>
         <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
+        if (card.disabled) return;
         this.selectedHero = key;
         for (const c of herorow.children) c.classList.toggle('sel', c === card);
+        this._renderAbilityPreview('#setup-abilities', key);
         if (this.cb.onHeroPick) this.cb.onHeroPick(key);
       };
       card.onmouseenter = (e) => this._showTip(e, this._heroTip(h));
@@ -725,10 +821,21 @@ export class UI {
         this.selectedCulture = key;
         try { localStorage.setItem('zillions.culture', key); } catch (e) { /* private mode */ }
         for (const el of cseg.children) el.classList.toggle('sel', el === b);
+        this._showCultureDetail(key, '#culture-detail');
       };
       cseg.appendChild(b);
     }
-    q('#s-start').onclick = () => this.cb.onStart(this.selectedDiff, this.selectedHero);
+    this._showCultureDetail(this.selectedCulture, '#culture-detail');
+    this._renderLeaderPick('#setup-leaders');
+    this._renderAbilityPreview('#setup-abilities', this.selectedHero);
+    q('#s-start').onclick = () => { this._busy(q('#s-start')); this.cb.onStart(this.selectedDiff, this.selectedHero); };
+    this._wireQuickSetup();
+    this.root.addEventListener('pointerdown', (event) => {
+      const button = event.target.closest('button');
+      if (!button || button.disabled) return;
+      button.classList.add('is-pressed');
+      setTimeout(() => button.classList.remove('is-pressed'), 160);
+    }, true);
 
     // ----- toolbar -----
     q('#b-pause').onclick = () => this.cb.onSpeed(0);
@@ -911,6 +1018,7 @@ export class UI {
   applySetupMode(mode) {
     if ((this.selectedMode || 'campaign') === mode) return;
     this.selectedMode = mode;
+    this._syncChapterHeroChoice(mode);
     this._renderModeSeg(mode, !this.root.querySelector('#modeseg').classList.contains('hidden'));
     this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
     this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
@@ -944,6 +1052,9 @@ export class UI {
   }
 
   _showScreen(name) {
+    this._battlePanel = null;
+    this.root.querySelector('#builder-controls').classList.add('hidden');
+    this.root.querySelector('#battle-details').classList.add('hidden');
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     this._lastScreen = name;
@@ -954,7 +1065,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -1115,6 +1226,7 @@ export class UI {
       races.appendChild(button);
     }
     for (const [key, klass] of Object.entries(MMO_CLASSES)) {
+      if (!klass.ready) continue;
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `creator-class${key === this._creatorClass ? ' sel' : ''}`;
@@ -1198,80 +1310,87 @@ export class UI {
   }
 
   _showCharacterCreator() {
-    if ((this._profile?.mmoCharacters || []).length >= MAX_MMO_CHARACTERS) return;
-    const name = this.root.querySelector('#creator-name');
-    const cancel = this.root.querySelector('#creator-cancel');
-    if (cancel) cancel.classList.toggle('hidden', !(this._profile?.mmoCharacters || []).length);
-    if (name) name.value = '';
-    this._showScreen('character-create');
-    setTimeout(() => name?.focus(), 0);
+    this._showScreen('main');
+    this.root.querySelector('#chapter-identity').classList.remove('hidden');
+    this.root.querySelector('#chapter-name-input').focus();
   }
 
   showCharacterCreator() {
-    this._showCharacterCreator();
+    if (!chapterIdentity(this._profile?.chapter).name) return this._showCharacterCreator();
+    if (chapterFounder(this._profile)) return this._showScreen('main');
+    this.root.querySelector('#creator-name').value='';
+    this._creatorAppearance=chapterIdentity(this._profile?.chapter).color;
+    for(const swatch of this.root.querySelectorAll('.creator-swatch'))swatch.classList.toggle('sel',swatch.dataset.key===this._creatorAppearance);
+    this._renderCreatorSummary();
+    this.root.querySelector('#creator-cancel').classList.remove('hidden');
+    this._showScreen('character-create');
+  }
+
+  _renderChapter() {
+    const q = s => this.root.querySelector(s), p = this._profile || {};
+    const identity = chapterIdentity(p.chapter), count = conquestCount(p);
+    q('#chapter-title').textContent = `${CHAPTER_EMBLEMS[identity.emblem]} ${identity.name || 'Found your chapter'}`;
+    q('#screen-main').style.setProperty('--chapter-color', CHAPTER_COLORS[identity.color]);
+    q('#chapter-territory').textContent = `${Math.min(count,5)}/5 Earth cities held${count>5 ? ` · ${count-5} frontier victories` : ''}`;
+    q('#chapter-earth-status').textContent = count>=5 ? 'SECURED · FRONTIER OPEN' : 'LIBERATION CAMPAIGN';
+    if (document.activeElement?.closest('#chapter-identity') == null) {
+      q('#chapter-name-input').value = identity.name;
+      q('#chapter-color').value = identity.color;
+      q('#chapter-emblem').value = identity.emblem;
+      q('#chapter-culture').value = identity.culture;
+    }
+    q('#chapter-identity').classList.toggle('hidden', !!identity.name);
+    const cities = chapterCities(p);
+    q('#chapter-map').innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M15 68 L34 40 L53 66 L73 36 L87 62" /></svg>` + cities.map(c=>`<button class="chapter-city ${c.status}" data-city="${c.level}" style="--x:${c.x}%;--y:${c.y}%" ${c.status==='locked'?'disabled':''} aria-label="${c.name}: ${c.status}"><i>${c.status==='held'?'✓':c.status==='frontier'?'⚑':'○'}</i><b>${c.name}</b><small>${c.status==='held'?'Held':c.status==='frontier'?'Next conquest':'Locked'}</small></button>`).join('');
+    for(const button of q('#chapter-map').querySelectorAll('[data-city]')) button.onclick=()=>this.cb.onChapterMission?.(Number(button.dataset.city));
+    const next=cities.find(c=>c.status==='frontier');
+    q('#chapter-objective').innerHTML=next ? `<b>${next.kind} · ${next.name}</b><p>${next.reward}</p><button class="menubtn primary" id="chapter-next">ASSAULT ${next.name.toUpperCase()}</button>` : `<b>Earth belongs to your chapter.</b><p>Your spaceport opens expeditions beyond Earth. Revisit a held city or push into the frontier.</p><button class="menubtn primary" id="chapter-next">FRONTIER EXPEDITION</button>`;
+    q('#chapter-next').disabled=!(p.mmoCharacters||[]).length;
+    q('#chapter-next').onclick=()=>this.cb.onChapterMission?.(next?.level || count+1);
+    q('#chapter-services').innerHTML=`<button data-service="shop"><b>Quartermaster</b><span>Armory · shared Alloy</span></button><button data-service="crafting"><b>Forge</b><span>Equipment & sockets</span></button><button data-service="lattice"><b>War council</b><span>Leader skills</span></button>`;
+    for(const b of q('#chapter-services').querySelectorAll('button')){b.disabled=!(p.mmoCharacters||[]).length;b.onclick=()=>this.showCharacterSheet(b.dataset.service);}
   }
 
   _buildCharacterSelect() {
     const list = this.root.querySelector('#character-list');
     if (!list) return;
+    this._renderChapter();
     list.innerHTML = '';
-    const characters = this._profile?.mmoCharacters || [];
-    for (const character of characters) {
-      const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
-      const appearance = APPEARANCES[character.appearance] || APPEARANCES.iron;
-      const button = document.createElement('button');
-      button.className = 'character-row';
-      button.dataset.id = character.id;
-      button.innerHTML = `<span style="--character-color:${appearance.color}">${klass.icon}</span><span><b>${escapeHtml(character.name)}</b><small>${klass.name} · Level ${character.level || 1}</small></span>`;
-      button.onclick = () => {
-        if (this.cb.onCharacterSelect) this.cb.onCharacterSelect(character.id);
-        this.selectedHero = character.proxyHero || klass.proxy;
-        this._renderSelectedCharacter();
-      };
-      list.appendChild(button);
+    const p=this._profile||{}, characters=p.mmoCharacters||[];
+    const founder=chapterFounder(p);
+    if(founder){const b=document.createElement('button');b.className='character-row';b.dataset.id=founder.id;b.innerHTML=`<span>⚑</span><span><b>${escapeHtml(founder.name)}</b><small>Founder · Level ${founder.level||1}</small></span>`;b.onclick=()=>this.cb.onCharacterSelect?.(founder.id);list.appendChild(b);}
+    else if(chapterIdentity(p.chapter).name){const b=document.createElement('button');b.className='character-row';b.textContent='CREATE YOUR FOUNDER';b.onclick=()=>this.showCharacterCreator();list.appendChild(b);}
+    for(const leader of CHAPTER_LEADERS){
+      const c=leaderRecord(p,leader.key),available=leaderRecord(p,leader.key)?leaderAvailable(p,leader.key):recruitmentAllowed(p,leader.key),h=HEROES[leader.key];
+      const button=document.createElement('button');button.className='character-row';
+      button.dataset.id=c?.id||'';button.disabled=!available;
+      button.innerHTML=`<span>${h.icon}</span><span><b>${escapeHtml(h.name)}</b><small>${c?`Level ${c.level||1} · ${leader.role}`:available?`${leader.source==='academy'?(leader.discovery && p.campaign>=leader.discovery?'Academy / exploration · ':'Academy · '):leader.source==='exploration'?'Exploration · ':leader.source==='encounter'?'Cinder encounter · ':''}Recruit to your chapter`:!leaderAvailable(p,leader.key)?`Capture ${chapterCities(p)[leader.capture-1]?.name}`:'Restricted by chapter culture'}</small></span>`;
+      button.onclick=()=>this.cb.onChapterRecruit?.(leader.key);list.appendChild(button);
     }
-    list.classList.toggle('empty', !characters.length);
-    if (!characters.length) list.innerHTML = '<div class="character-empty"><b>NO CHARACTERS</b><span>Create your first commander to begin the siege.</span></div>';
-    const enter = this.root.querySelector('#m-enter-world');
-    if (enter) enter.disabled = !characters.length;
-    const create = this.root.querySelector('#m-create-character');
-    if (create) create.disabled = characters.length >= MAX_MMO_CHARACTERS;
+    const legacy=characters.filter(c=>!c.chapterLeader && c.id!==founder?.id);
+    if(legacy.length){const section=document.createElement('details');section.className='chapter-legacy';section.innerHTML='<summary>Legacy commanders · equipment preserved</summary>';
+      for(const c of legacy){const b=document.createElement('button');b.className='character-row';b.dataset.id=c.id;b.textContent=`${c.name} · Level ${c.level||1}`;b.onclick=()=>this.cb.onCharacterSelect?.(c.id);section.appendChild(b);}list.appendChild(section);}
+    list.classList.remove('empty');
+    this.root.querySelector('#m-enter-world').disabled=!characters.length;
+    this.root.querySelector('#m-create-character').disabled=false;
+    this.root.querySelector('#m-delete-character').classList.toggle('hidden',!this._sheetCharacter()||!!this._sheetCharacter()?.chapterLeader||this._sheetCharacter()?.id===founder?.id);
     this._renderSelectedCharacter();
     this._renderFirstHourGuide();
   }
 
   _renderFirstHourGuide() {
-    const root = this.root.querySelector('#first-hour-guide');
-    if (!root) return;
-    const character = this._sheetCharacter();
-    const guide = firstHourGuidance(character, { online: !!this.cb.useAuthoritativeEconomy?.() });
-    if (guide.step === 'complete') { root.classList.add('hidden'); root.innerHTML = ''; return; }
-    root.classList.remove('hidden');
-    root.innerHTML = `<span>FIRST DEPLOYMENT · ${guide.step.toUpperCase()}</span><b>${guide.title}</b><p>${guide.body}</p><div><button class="menubtn primary" data-guide-action>${guide.action}</button>${character ? '<button class="utilitybtn" data-guide-skip>SKIP GUIDE</button>' : ''}</div>`;
-    root.querySelector('[data-guide-action]').onclick = () => {
-      if (guide.step === 'create') this._showCharacterCreator();
-      else if (guide.step === 'market') this.showCharacterSheet('shop');
-      else if (guide.step === 'equip') this.showCharacterSheet('gear');
-      else if (guide.step === 'forge') this.showCharacterSheet('crafting');
-      else this.cb.onCampaignMap?.();
-    };
-    root.querySelector('[data-guide-skip]')?.addEventListener('click', () => {
-      character.firstHourGuideDismissed = true;
-      this.cb.onProfileDirty?.();
-      this._renderFirstHourGuide();
-    });
+    const root=this.root.querySelector('#first-hour-guide');
+    if(root){root.classList.add('hidden');root.innerHTML='';}
   }
 
   _renderSelectedCharacter() {
     const characters = this._profile?.mmoCharacters || [];
     const character = characters.find((entry) => entry.id === this._profile?.mmoCharacterId) || characters[0];
     if (!character) {
-      this.root.querySelector('#character-name').textContent = 'CREATE YOUR FIRST CHARACTER';
-      this.root.querySelector('#character-tagline').textContent = 'Choose a class and take the field.';
+      this.root.querySelector('#character-name').textContent = 'CREATE YOUR FOUNDER';
+      this.root.querySelector('#character-tagline').textContent = 'Name your chapter, then create the leader of its first expedition.';
       this.root.querySelector('#character-gear').innerHTML = '<span class="empty-gear">No persistent equipment yet</span>';
-      this.root.querySelector('#character-sigil').textContent = '✦';
-      this.root.querySelector('#character-loadout').innerHTML = '';
-      this.root.querySelector('#character-weapon').textContent = '';
+      this.root.querySelector('#roster-preview-canvas').classList.add('hidden');
       return;
     }
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
@@ -1280,26 +1399,15 @@ export class UI {
     const gear = EQUIP_SLOTS.map((slot) => equipped[slot] ? itemInfo(equipped[slot]) : null).filter(Boolean);
     for (const row of this.root.querySelectorAll('.character-row')) {
       row.classList.toggle('sel', row.dataset.id === character.id);
+      row.setAttribute('aria-pressed', String(row.dataset.id === character.id));
     }
-    const sigil = this.root.querySelector('#character-sigil');
-    sigil.textContent = klass.icon;
-    sigil.style.backgroundImage = '';
-    sigil.classList.remove('has-portrait');
-    sigil.style.setProperty('--hero-color', appearance.color);
-    const avatar = this.root.querySelector('#character-avatar');
-    avatar.style.setProperty('--hero-color', appearance.color);
-    avatar.dataset.class = character.classKey || 'vanguard';
-    const weapon = equipped[character.activeSet === 1 ? 'weapon2' : 'weapon'];
-    const weaponItem = weapon ? itemInfo(weapon) : null;
-    this.root.querySelector('#character-weapon').textContent = weaponItem?.icon || '⚔';
-    this.root.querySelector('#character-loadout').innerHTML = [
-      ['HEAD', klass.icon],
-      ['ARMOUR', equipped.armor ? itemInfo(equipped.armor)?.icon : '◇'],
-      ['WEAPON', weaponItem?.icon || '◇'],
-      ['IMPLANT', equipped.implant1 ? itemInfo(equipped.implant1)?.icon : '◇'],
-    ].map(([label, icon]) => `<span><i>${icon}</i><small>${label}</small></span>`).join('');
+    this.root.querySelector('#roster-preview-canvas').classList.remove('hidden');
+    this.root.querySelector('#character-avatar').style.setProperty('--hero-color', appearance.color);
+    this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
+      customization: character.customization, equipment: character.equipment,
+      chapterLeader: character.chapterLeader, proxyHero: character.proxyHero || klass.proxy, classKey: character.classKey, canvasId: 'roster-preview-canvas' });
     this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
-    this.root.querySelector('#character-tagline').textContent = `${klass.name} — ${klass.role} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP · ${character.talentPoints || 0} talent points`;
+    this.root.querySelector('#character-tagline').textContent = `${character.chapterLeader ? CHAPTER_LEADERS.find(l=>l.key===character.chapterLeader)?.role : klass.name} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
       ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
       : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';
@@ -1447,7 +1555,7 @@ export class UI {
     this.root.querySelector('#sheet-sigil').textContent = klass.icon;
     this.root.querySelector('#sheet-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
     this.root.querySelector('#sheet-sub').textContent =
-      `${klass.name} — ${klass.role} · ${budget - spent} of ${budget} Lattice points unspent`;
+      `${character.chapterLeader ? CHAPTER_LEADERS.find(l=>l.key===character.chapterLeader)?.role : klass.name} · ${budget - spent} of ${budget} skill points unspent`;
 
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
       button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
@@ -1470,18 +1578,18 @@ export class UI {
     const attrs = characterAttributes(character);
     const stats = character.stats || {};
     this.root.querySelector('#sheet-panel-character').innerHTML = `
-      <section class="character-paperdoll" style="--character-color:${appearance.color}"><canvas id="paperdoll-preview-canvas"></canvas><div class="paperdoll-aura"></div><b>${escapeHtml(character.name)}</b><span>${klass.name} · Level ${character.level || 1}</span></section>
-      <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${klass.role}</h2><p>${klass.resource} is this class's combat resource. Equipment and Lattice choices persist between worlds.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
+      <section class="character-paperdoll" style="--character-color:${appearance.color}"><canvas id="paperdoll-preview-canvas"></canvas><div class="paperdoll-aura"></div><b>${escapeHtml(character.name)}</b><span>${character.chapterLeader ? 'Chapter companion' : character.id === chapterFounder(this._profile)?.id ? 'Chapter founder' : 'Legacy commander'} · Level ${character.level || 1}</span></section>
+      <section class="character-summary"><span class="modeeyebrow">CLASS ROLE</span><h2>${character.chapterLeader ? HEROES[character.proxyHero].tagline : klass.role}</h2><p>Equipment and skills stay with this leader between expeditions. Captured territory and Alloy belong to the chapter.</p><div class="character-attributes">${Object.values(ATTRIBUTES).map((attr) => `<div><span>${attr.icon} ${attr.name}</span><b>${Math.round(attrs[attr.key] || 0)}</b></div>`).join('')}</div></section>
       <section class="character-career"><span class="modeeyebrow">CAREER</span><div><span>Victories</span><b>${stats.victories || 0}</b></div><div><span>Sieges</span><b>${stats.instances || 0}</b></div><div><span>Kills</span><b>${stats.kills || 0}</b></div></section>`;
     this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
       customization: character.customization, equipment: character.equipment,
-      proxyHero: character.proxyHero, classKey: character.classKey, canvasId: 'paperdoll-preview-canvas' });
+      chapterLeader: character.chapterLeader, proxyHero: character.proxyHero, classKey: character.classKey, canvasId: 'paperdoll-preview-canvas' });
   }
 
   _renderAbilitiesOverview(character) {
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
     const hero = HEROES[character.proxyHero || klass.proxy] || HEROES.scott;
-    const cards = [
+    const cards = hero.abilities ? hero.abilities.map(a=>[a.passive?'PASSIVE':'ACTIVE ABILITY',a]) : [
       ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
     ];
     this.root.querySelector('#sheet-panel-abilities').innerHTML = cards.map(([kind, ability]) => `<article><span>${kind}</span><i>${ability?.icon || '✦'}</i><h3>${ability?.name || 'Unassigned'}</h3><p>${ability?.desc || 'This class kit is still being authored.'}</p></article>`).join('');
@@ -2258,8 +2366,8 @@ export class UI {
           <div><b>${h.name}</b><small>${h.tagline}</small></div>
         </div>
         <div class="hc-stats">HP ${h.hp} · DMG ${h.dmg} · RANGE ${h.range} · SPEED ${h.speed}</div>
-        <div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>
-        <div class="hc-row"><span class="hc-k">Special</span><b>${h.ability.icon} ${h.ability.name}</b><p>${h.ability.desc}</p><small class="hc-cd">Cooldown ${h.ability.cd}s · damage ${h.ability.dmg ? h.ability.dmg.join(' / ') : '—'}</small></div>
+        ${h.aura ? `<div class="hc-row"><span class="hc-k">Aura</span><b>${h.aura.icon} ${h.aura.name}</b><p>${h.aura.desc}</p></div>` : ''}
+        ${heroAbilities(h).filter(Boolean).map(ab=>`<div class="hc-row"><span class="hc-k">${ab.passive ? 'Passive' : 'Ability'}</span><b>${ab.icon} ${ab.name}</b><p>${ab.desc}</p></div>`).join('')}
         ${h.passives.map((p) => `<div class="hc-row"><span class="hc-k">Passive</span><b>${p.icon} ${p.name}</b><p>${p.desc}</p></div>`).join('')}
     `;
       grid.appendChild(card);
@@ -2346,9 +2454,29 @@ export class UI {
     }
   }
 
+  _syncChapterHeroChoice(mode) {
+    const character = mode === 'campaign' ? this._sheetCharacter() : null;
+    const previous = this.selectedHero;
+    if (character) this.selectedHero = character.proxyHero;
+    for (const card of this.root.querySelectorAll('#herorow .herocard')) {
+      const selected = !character || card.dataset.key === character.proxyHero;
+      card.classList.toggle('hidden', !selected);
+      card.disabled = !selected;
+      card.classList.toggle('sel', card.dataset.key === this.selectedHero);
+      card.querySelector('b').textContent = character && selected ? character.name : HEROES[card.dataset.key].name;
+      card.querySelector('.hface')?.classList.toggle('hidden', !!character && !character.chapterLeader);
+    }
+    if (character && previous !== this.selectedHero) this.cb.onHeroPick?.(this.selectedHero);
+    if (typeof this.root?.querySelector === 'function') {
+      this._renderAbilityPreview('#setup-abilities', this.selectedHero);
+      this._renderLeaderPick('#setup-leaders');
+    }
+  }
+
   showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
+    this._syncChapterHeroChoice(mode);
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
@@ -2366,6 +2494,7 @@ export class UI {
     const diffLabel = setupScreen.querySelector('.diff-label');
     if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : '1 · Battlefield <span id="warstatus" class="warstatus"></span>';
     if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : '2 · Your hero <small>— move with WASD; in Fight mode dodge with <span data-bind-label="dodge"></span> and use the special with <span data-bind-label="ability1"></span></small>';
+    if (heroLabel && mode === 'campaign' && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
     if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : '3 · Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
@@ -2420,6 +2549,9 @@ export class UI {
   _buildLevelRow(cleared, allUnlocked = false, mode = 'campaign') {
     this._campaignCleared = cleared;
     const row = this.root.querySelector('#levelrow');
+    // showEnd replaces the setup overlay before the server receipt arrives.
+    // Keep campaign state, but render the roster only when setup exists again.
+    if (!row) return;
     row.innerHTML = '';
     const labyrinth = mode === 'labyrinth';
     // The war, in one line: Earth first, then the stars — and every world you
@@ -2550,6 +2682,7 @@ export class UI {
 
   _heroTip(h) {
     const a = h.ability;
+    if (h.abilities) return `<b>${escapeHtml(h.name)}</b><br>` + h.abilities.map(ab=>`<b>${escapeHtml(ab.name)}</b><br>${escapeHtml(ab.desc)}<br>`).join('');
     const au = h.aura;
     const passives = (h.passives || [])
       .map((p) => `<span class="tfx">${p.icon} <b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
@@ -2574,6 +2707,7 @@ export class UI {
     const mode = this.root.querySelector('#mode-toggle');
     if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
+    if (character && character.proxyHero !== h.key) character = null;
     const d = h.def;
     const kit = this.root.querySelector('#fight-kit');
     if (kit) {
@@ -2582,7 +2716,7 @@ export class UI {
         ...(d.passives || []).map((passive, index) => ({
           kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
         })),
-        { kind: this._keyLabel('ability1'), icon: d.ability.icon, name: d.ability.name, desc: d.ability.desc, active: true },
+        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':`${slot>=3?this._keyLabel('second_bar')+'+':''}${this._keyLabel('ability'+(slot%3+1))}`,icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
       ].filter(Boolean);
       kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
         <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
@@ -2590,9 +2724,13 @@ export class UI {
     }
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
-    face.innerHTML = character ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
-    this.root.querySelector('#a-name').textContent = character ? `${character.name} · ${klass.name}` : d.name;
+    face.innerHTML = character && !character.chapterLeader ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
+    this.root.querySelector('#a-name').textContent = character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name;
     const big = this.root.querySelector('#bigaction');
+    this.root.querySelector('#ability-slots').onclick = e => {
+      const button = e.target.closest('[data-ability-slot]');
+      if (button && !button.disabled) this.cb.onCast(Number(button.dataset.abilitySlot));
+    };
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
       else if (this._bigMode === 'cast') this.cb.onCast();
@@ -2620,22 +2758,72 @@ export class UI {
     const chip = this.root.querySelector('#mode-toggle');
     if (!chip) return;
     const fighting = mode === 'fight';
+    this.root.querySelector('#actionbar')?.classList.toggle('multi-kit', fighting && !!this._game?.heroes[this._p]?.def.abilities);
     chip.classList.toggle('fight', fighting);
     chip.classList.toggle('build', !fighting);
     const label = chip.querySelector('span');
     if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
-    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting);
+    this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting || !!this._game?.heroes[this._p]?.def.abilities);
     this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
     chip.title = fighting
       ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
   }
 
+  inspectUnit(game, unit, enemy = false) {
+    this._battlePanel = {mode:'unit',game,id:unit.id,enemy};
+  }
+
+  _updateBattleDetails(game, player) {
+    const panel=this.root.querySelector('#battle-details'),body=this.root.querySelector('#battle-details-content');
+    const selection=this._battlePanel;
+    if(!selection){panel.classList.add('hidden');return;}
+    let html='';
+    if(selection.mode==='items') {
+      const hero=game.heroes[player];
+      const rows=keys=>keys.map(key=>{const item=itemInfo(key);return item ? `<article class="battle-item"><b>${escapeHtml(item.icon||'')} ${escapeHtml(item.name)}</b><p>${escapeHtml(item.desc||itemLines(item).join(' · '))}</p></article>`:'';}).join('');
+      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows([...new Set([...(hero?.items||[]),...Object.values(hero?.equipment||{}).filter(Boolean)])])||'<p>No additional gear equipped.</p>'}`;
+    } else {
+      const unit=(selection.enemy?game.zombies:game.units).find(u=>u.id===selection.id);
+      const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
+      if(selection.game!==game||!unit||unit.dead||unit.hp<=0||!visible){this._battlePanel=null;panel.classList.add('hidden');return;}
+      const def=unit.def||{},stats=unit.hero?game.heroStats(unit):null;
+      const activity=unit.windup?(unit.windup.kind==='acid'?'Aiming acid — move out of the ring':'Winding up a smash — move or interrupt'):unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
+      const hp=Math.max(0,Math.ceil(unit.hp)),max=Math.ceil(unit.maxHp);
+      html=`<h3>${escapeHtml(def.name||(unit.type?unit.type[0].toUpperCase()+unit.type.slice(1):'Unit'))}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.ranged??def.range??.75).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??(selection.enemy?def.chase:def.speed)??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
+    }
+    if(selection.mode==='unit' && selection.enemy) {
+      const hero=game.heroes[player],enemy=game.zombies.find(z=>z.id===selection.id);
+      const focused=hero?.focusId===enemy?.id,canFocus=game.canFocusEnemy(hero,enemy);
+      const focusAction=`<button class="focus-enemy" data-focus-enemy="${focused?'clear':enemy?.id}" ${!focused&&!canFocus?'disabled':''}>${focused?'Clear attack focus':'Focus attacks'}</button><p>${focused?'Your hero prioritizes this enemy.':canFocus?'Prioritize this enemy; movement stays manual.':'Move your hero into weapon range to focus.'}</p>`;
+      html=html.replace('<dl>',focusAction+'<dl>');
+    }
+    panel.classList.remove('hidden');
+    if(body.innerHTML!==html)body.innerHTML=html;
+  }
+
   update(game, p = 0, controls = {}) {
+    if(this._battleGame!==game){this._battleGame=game;this._battlePanel=null;}
+    this._updateBattleDetails(game,p);
+    const builder=this.root.querySelector('#builder-controls'),b=game.builders;
+    builder.classList.toggle('hidden',!b||game.mode==='labyrinth'||game.over||!!this._battlePanel);
+    if(b){
+      this._builderPaused=b.paused;
+      this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
+      this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
+      const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
+      if(document.activeElement!==order)order.value=b.order;
+      if(document.activeElement!==reserve)reserve.value=b.reserve;
+      for(const control of [order,reserve,pause])control.disabled=p!==0;
+      pause.textContent=b.paused?'Resume':'Pause';
+      for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+    }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
-    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b>`;
+    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b><small class="income-rate">+${((game.incomeRate || 0) * 60).toFixed(1)}/min</small>`;
+    q('#r-gold').title = 'Gold · automatic income every 4 seconds. Fractional gold carries forward. Building and repair spending reduces the balance.';
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
@@ -2736,17 +2924,8 @@ export class UI {
       const packKey = (h.pack || []).join(',');
       if (this._packKey !== packKey) {
         this._packKey = packKey;
-        const slots = [];
-        for (let i = 0; i < PACK_SLOTS; i++) {
-          const key = (h.pack || [])[i];
-          const it = key ? itemInfo(key) : null;
-          slots.push(it
-            ? `<span class="pslot has" title="${it.name} — ${it.desc}">${it.icon}</span>`
-            : '<span class="pslot"></span>');
-        }
         const full = (h.pack || []).length >= PACK_SLOTS;
-        q('#a-pack').innerHTML = slots.join('')
-          + `<span class="pkey${full ? ' urgent' : ''}">${full ? 'FULL · G drops' : 'G drops'}</span>`;
+        q('#a-pack').innerHTML = `<button class="pack-open${full ? ' full' : ''}" aria-label="View carried items">Items · Pack ${(h.pack || []).length}/${PACK_SLOTS}${full ? ' FULL' : ''}</button>`;
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;
@@ -2758,10 +2937,23 @@ export class UI {
           <span><b>${stats.speed.toFixed(1)}</b><small>SPD</small></span>
           <span><b>${stats.regen.toFixed(1)}</b><small>REG</small></span>
           <span class="aurastat"><b>${stats.auraRadius.toFixed(1)}</b><small>AURA</small></span>
-          <em>${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected</em>`;
+          <em>${h.def.aura ? `${h.def.aura.icon} ${stats.auraAllies} ally · ${stats.auraEnemies} enemy affected` : 'Abilities · select a target to cast'}</em>`;
       }
 
       this._updateUpgradePanel(game, h);
+
+      const slots = q('#ability-slots');
+      slots.hidden = controlMode !== 'fight' || game.phase === 'found';
+      const slotMarkup = heroAbilities(h.def).map((ability, slot) => {
+        if (!ability || ability.passive || slot === 0) return '';
+        const cd = abilityCooldown(h, slot);
+        const charge=h.spells?.charges?.[slot];
+        const empty=charge?.count===0;
+        const noMana=(h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,slot);
+        const label = `${slot >= 3 ? this._keyLabel('second_bar') + '+' : ''}${this._keyLabel('ability' + (slot % 3 + 1))}`;
+        return `<button data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} title="${escapeHtml(ability.desc || '')}">${ability.icon || ''} ${escapeHtml(ability.name)}<small>${ability.passive ? 'Passive' : noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : label}</small></button>`;
+      }).join('');
+      if (slots.innerHTML !== slotMarkup) slots.innerHTML = slotMarkup;
 
       // The one big contextual button: found the city, build in Build mode, or cast.
       const big = q('#bigaction');
@@ -2796,9 +2988,9 @@ export class UI {
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
         big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3 · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
+        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} MP${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
-        big.disabled = h.dead;
+        big.disabled = h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0);
       }
     }
 
@@ -2945,6 +3137,33 @@ export class UI {
   }
   _hideTip() { this.tooltip.classList.add('hidden'); }
 
+  showMissionIntro(level, onSkip) {
+    this.root.querySelector('#mission-intro-title').textContent = level.name;
+    this.root.querySelector('#mission-intro-skip').onclick = onSkip;
+    this.root.querySelector('#mission-intro').classList.remove('hidden');
+    this.root.classList.add('mission-arrival');
+    this.banner.classList.remove('show');
+    this.root.querySelector('#mission-intro-skip').focus({ preventScroll: true });
+  }
+
+  hideMissionIntro() {
+    this.root.querySelector('#mission-intro')?.classList.add('hidden');
+    this.root.classList.remove('mission-arrival');
+    const skip = this.root.querySelector('#mission-intro-skip');
+    if (skip) { skip.onclick = null; skip.blur(); }
+  }
+
+  setDeploymentLoading(on, level = null, phase = 'Preparing the battlefield') {
+    const el = this.root.querySelector('#deployment-screen');
+    if (!el) return;
+    if (level) {
+      this.root.querySelector('#deployment-title').textContent = level.name;
+      this.root.querySelector('#deployment-detail').textContent = level.blurb || 'Establish a colony. Hold the approaches. Push the siege outward.';
+    }
+    this.root.querySelector('#deployment-phase').textContent = phase;
+    el.classList.toggle('hidden', !on);
+  }
+
   showBanner(text, cls = '', dur = 3500) {
     this.banner.textContent = text;
     this.banner.className = 'show ' + cls;
@@ -2972,6 +3191,17 @@ export class UI {
   setSpeedUI(speed, paused) {
     this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
+    const readout = this.root.querySelector('#speed-readout');
+    if (readout) readout.textContent = paused ? 'PAUSED' : `${speed}×`;
+    const veil = this.root.querySelector('#pause-veil');
+    const menusOpen = !this.root.querySelector('#overlay').classList.contains('hidden');
+    if (veil) {
+      veil.classList.toggle('hidden', !paused || menusOpen || this.pauseOpen);
+      const speedLine = veil.querySelector('#pause-veil-speed');
+      if (speedLine) speedLine.textContent = `Speed ${speed}×`;
+      const hint = veil.querySelector('#pause-veil-hint');
+      if (hint) hint.textContent = `${this._keyLabel('pause')} pauses and resumes · ${this._keyLabel('dodge')} also resumes · ${this._keyLabel('menu')} opens the menu`;
+    }
     for (const b of this.root.querySelectorAll('.speed')) {
       b.classList.toggle('active', !paused && +b.dataset.s === speed);
     }
@@ -3007,7 +3237,135 @@ export class UI {
     button.classList.toggle('active', high);
   }
 
+  noteGuestSession() { this._guestSession = true; }
+
+  _setAuthWait(waiting) {
+    const bar = this.root.querySelector('#auth-progress');
+    if (bar) bar.classList.toggle('hidden', !waiting);
+    if (!waiting) {
+      if (this._authPulse) { clearInterval(this._authPulse); this._authPulse = 0; }
+      return;
+    }
+    if (this._authPulse) return;
+    const lines = ['Checking account…', 'Contacting sign-in…', 'Loading your commander…', 'Preparing the frontier…'];
+    let step = 0;
+    const status = this.root.querySelector('#account-status');
+    if (status) status.textContent = lines[0];
+    this._authPulse = setInterval(() => {
+      step = (step + 1) % lines.length;
+      const live = this.root.querySelector('#account-status');
+      if (live && !this.root.querySelector('#auth-progress')?.classList.contains('hidden')) live.textContent = lines[step];
+    }, 1400);
+  }
+
+  setCoach(step, index, total, extra = '') {
+    const card = this.root.querySelector('#coach');
+    if (!card || !step) { this.hideCoach(); return; }
+    card.classList.remove('hidden');
+    this.root.querySelector('#coach-kicker').textContent = `FIRST SIEGE · ${index + 1}/${total}`;
+    this.root.querySelector('#coach-title').textContent = step.title;
+    this.root.querySelector('#coach-body').textContent = extra ? `${step.body} ${extra}` : step.body;
+  }
+
+  hideCoach() { this.root.querySelector('#coach')?.classList.add('hidden'); }
+
+  _busy(button) { button?.classList?.add('is-busy'); }
+
+  _clearBusy() {
+    for (const button of this.root.querySelectorAll('.is-busy')) button.classList.remove('is-busy');
+  }
+
+  _submitOnEnter(selector, submit) {
+    const input = this.root.querySelector(selector);
+    input?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.repeat) return;
+      event.preventDefault();
+      submit();
+    });
+  }
+
+  _showCultureDetail(key, selector) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    const info = cultureExplain(key);
+    host.innerHTML = `<b>${escapeHtml(info.name)} · ${escapeHtml(info.banner)}</b><p>${escapeHtml(info.summary)}</p><p>${escapeHtml(info.changes)}</p>`;
+  }
+
+  _renderLeaderPick(selector) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    host.innerHTML = leaderRoster().map((leader) => `<button type="button" class="leaderchip${leader.playable ? ' playable sel' : ' locked'}" data-leader="${escapeHtml(leader.key)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? 'Ready' : 'Coming soon'}</small></button>`).join('');
+  }
+
+  _renderAbilityPreview(selector, heroKey) {
+    const host = this.root.querySelector(selector);
+    if (!host) return;
+    const hero = HEROES[heroKey] || HEROES.scott;
+    host.innerHTML = abilityBar(hero).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
+  }
+
+  _wireQuickSetup() {
+    const q = (s) => this.root.querySelector(s);
+    q('#q-color').innerHTML = Object.keys(CHAPTER_COLORS).map((key) => `<option value="${key}">${key}</option>`).join('');
+    q('#q-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([key, mark]) => `<option value="${key}">${mark} ${key}</option>`).join('');
+    q('#q-diff').innerHTML = Object.entries(DIFFICULTY).map(([key, diff]) => `<option value="${key}">${diff.label}</option>`).join('');
+    q('#q-culture').innerHTML = Object.entries(CULTURE_ARMIES).map(([key, culture]) => `<button type="button" class="diffbtn" data-culture="${key}">${culture.name}<small>${culture.banner}</small></button>`).join('');
+    q('#q-back').onclick = () => this._showScreen('account');
+    q('#q-save').onclick = () => { this._showScreen('account'); q('#a-google')?.focus(); };
+    q('#q-random').onclick = () => this.cb.onQuickRandom?.();
+    q('#quick-form').onsubmit = (event) => {
+      event.preventDefault();
+      this._busy(q('#q-start'));
+      this.cb.onQuickStart?.(this._quickDraft());
+    };
+    q('#coach-skip').onclick = () => this.cb.onCoachSkip?.();
+    this._selectQuickCulture(QUICK_DEFAULTS.army);
+    this._renderLeaderPick('#q-leaders');
+    this._renderAbilityPreview('#q-abilities', 'scott');
+  }
+
+  _selectQuickCulture(key) {
+    const culture = cultureKey(key);
+    this._quickArmy = culture;
+    for (const button of this.root.querySelectorAll('#q-culture .diffbtn')) {
+      button.classList.toggle('sel', button.dataset.culture === culture);
+      button.onclick = () => this._selectQuickCulture(button.dataset.culture);
+    }
+    this._showCultureDetail(culture, '#q-culture-detail');
+  }
+
+  _quickDraft() {
+    const q = (s) => this.root.querySelector(s);
+    return {
+      chapterName: q('#q-chapter').value,
+      founderName: q('#q-founder').value,
+      army: this._quickArmy || QUICK_DEFAULTS.army,
+      color: q('#q-color').value,
+      emblem: q('#q-emblem').value,
+      difficulty: q('#q-diff').value,
+    };
+  }
+
+  fillQuickSetup(draft = QUICK_DEFAULTS) {
+    const q = (s) => this.root.querySelector(s);
+    q('#q-chapter').value = draft.chapterName;
+    q('#q-founder').value = draft.founderName;
+    q('#q-color').value = draft.color;
+    q('#q-emblem').value = draft.emblem;
+    q('#q-diff').value = draft.difficulty;
+    this._selectQuickCulture(draft.army);
+    this._renderAbilityPreview('#q-abilities', 'scott');
+  }
+
+  showQuickSetup(draft = QUICK_DEFAULTS) {
+    this.fillQuickSetup(draft);
+    this._clearBusy();
+    this._showScreen('quick');
+    this.root.querySelector('#q-chapter')?.focus();
+  }
+
   setAccount(state = {}) {
+    this._clearBusy();
     const status = this.root.querySelector('#account-status');
     const google = this.root.querySelector('#a-google');
     const emailForm = this.root.querySelector('#a-email-form');
@@ -3017,25 +3375,32 @@ export class UI {
     const usernameInput = this.root.querySelector('#a-username');
     const needsUsername = !!state.signedIn && !!state.needsUsername;
     const offlineAllowed = !state.enabled && state.reason === 'static';
-    if (status) {
-      if (!state.ready) status.textContent = 'Checking account…';
-      else if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
+    const play = this.root.querySelector('#a-play');
+    this._setAuthWait(!state.ready);
+    if (state.signedIn) this._guestSession = false;
+    if (status && state.ready) {
+      if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
       else if (state.signedIn) status.textContent = `Signed in as @${state.username || state.name || 'Commander'}.`;
-      else if (offlineAllowed) status.textContent = 'Static dev build. Continue offline to test locally.';
-      else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. Check the deployment auth config.';
-      else status.textContent = state.error || 'Use your Zillions account to play.';
+      else if (offlineAllowed) status.textContent = 'Static dev build. Play as a guest, or continue offline to test locally.';
+      else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. You can still play as a guest.';
+      else status.textContent = state.error || 'Play as a guest, or sign in to save progress.';
     }
+    if (play) play.classList.toggle('hidden', !!state.signedIn);
+    this.root.querySelector('.save-progress-label')?.classList.toggle('hidden', !!state.signedIn);
+    this.root.querySelector('.guest-note')?.classList.toggle('hidden', !!state.signedIn);
     if (google) google.classList.toggle('hidden', !state.enabled || !!state.signedIn);
     if (emailForm) emailForm.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (this._guestSession && !state.signedIn && !needsUsername) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;
     }
+    if (this._lastScreen === 'quick') return;
     if (state.ready && (state.signedIn || (offlineAllowed && this._offlineAccepted))) {
       if (this._offlineAccepted && !this._accountAccepted) {
         this._accountAccepted = true;
@@ -3085,6 +3450,7 @@ export class UI {
     if (!card) return;
     this.selectedHero = key;
     for (const c of this.root.querySelectorAll('.herocard')) c.classList.toggle('sel', c === card);
+    this._renderAbilityPreview('#setup-abilities', key);
     this._renderSelectedCharacter();
   }
 
@@ -3361,6 +3727,8 @@ export class UI {
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
+    this.root.querySelector('#pause-veil')?.classList.add('hidden');
+    this.hideCoach();
     const ov = this.root.querySelector('#overlay');
     ov.classList.remove('hidden');
     const lv = levelById(levelId || 1);
@@ -3669,8 +4037,9 @@ export class UI {
       else ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
     }
     ctx.fillStyle = '#e6493a';
-    for (const zb of game.zombies) ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
-    if (game.boss && !game.boss.dead) {
+    const contactVision=fogVisionSources(game);
+    for (const zb of game.zombies) if(visibleInFog(contactVision,zb.x,zb.z))ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
+    if (game.boss && !game.boss.dead && visibleInFog(contactVision,game.boss.x,game.boss.z)) {
       ctx.fillStyle = '#ff2d1f';
       ctx.fillRect(game.boss.x - 2.5, game.boss.z - 2.5, 5, 5);
       ctx.strokeStyle = '#ffd75e';
@@ -3809,7 +4178,7 @@ export class UI {
         ctx.fillRect(u.x - 0.7, u.z - 0.7, 1.6, 1.6);
       }
     }
-    if (game.boss && !game.boss.dead) {
+    if (game.boss && !game.boss.dead && visibleInFog(contactVision,game.boss.x,game.boss.z)) {
       const bossPulse = (performance.now() / 700) % 1;
       ctx.fillStyle = '#ff2d1f';
       ctx.fillRect(game.boss.x - 3, game.boss.z - 3, 6, 6);

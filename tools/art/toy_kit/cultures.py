@@ -6,6 +6,8 @@ farms, mills, workshops and line troops. Mines, outposts, hero forges,
 heroes, the horde and props are shared builders re-coloured by the palette.
 """
 import european
+import frontier
+import frontier_units
 import asian
 import south_american
 import middle_eastern
@@ -14,8 +16,9 @@ CULTURES = {
     'european': {
         'status': 'built',
         'palette': european.PALETTE,
-        'buildings': european,     # castle, tower, house, farm, mill, mine, camp, outpost, workshop, hero_forge
-        'units': european,         # trooper, ranger, marksman, hero(), enemy()
+        'walls': frontier,
+        'buildings': frontier,     # castle, tower, house, farm, mill, mine, camp, outpost, workshop, hero_forge
+        'units': frontier_units,   # reusable expedition role rigs; legacy props/horde
     },
     'asian': {
         'status': 'built',
