@@ -3,8 +3,9 @@
 An original sci-fi take on desert citadel architecture: warm sandstone,
 turquoise tiled domes and bands, pointed-arch portals, slender minaret
 towers with balconies, gold finials, cool cyan energy. The keep grows from
-a domed hall into a walled citadel whose central spire wears a floating
-astrolabe ring. Its army: lancers in tall turban-helms, dune riders on
+a domed hall into a wide tier-3 palace, then a tier-4 spire citadel: one
+tall onion tower, four minarets, and a floating astrolabe. Its army: lancers
+in tall turban-helms, dune riders on
 hover skiffs with recurve bows, astrolabe longgun marksmen.
 
 Same conventions as european.py: (kit, tier, pal), game space, +z front.
@@ -79,6 +80,41 @@ def minaret(B, G, pal, x, z, r, h, y=0.0, balcony=True, onion=True):
     return domed(B, G, pal, x, z, r * 0.8, top, onion=onion, drum=0.04, tiles=False)
 
 
+def _spire_citadel(k, pal, half):
+    """Tier-4 keep crown: one tall onion spire and four minarets.
+
+    The tier-3 keep is a wide three-dome palace. This replaces that mass so
+    the two tiers do not read as the same shell."""
+    B, G = k.B, k.G
+    frustum(B, pal['stone2'], 2.3, 2.1, 2.1, 1.9, 0.24, y=0.16, z=-0.16)
+    shaft_y, shaft_h = 0.4, 3.05
+    B.box(pal['stone'], 1.0, shaft_h, 1.0, 0, shaft_y, -0.18)
+    B.box(pal['roof'], 1.04, 0.08, 1.04, 0, shaft_y + 1.05, -0.18)
+    B.box(pal['roof2'], 1.04, 0.07, 1.04, 0, shaft_y + 2.15, -0.18)
+    arch(B, pal, 0.32, 0.58, 0, 0.33, y=shaft_y + 0.28)
+    G.box(pal['warm'], 0.14, 0.2, 0.03, 0, shaft_y + 1.5, 0.33)
+    bal_y = shaft_y + shaft_h
+    B.prism(pal['stone2'], 8, 0.72, 0.72, 0.1, 0, bal_y, -0.18, phase=math.pi / 8)
+    for i in range(8):
+        a = i / 8 * TAU + math.pi / 8
+        B.box(pal['stone'], 0.1, 0.16, 0.08, math.cos(a) * 0.66, bal_y + 0.1, math.sin(a) * 0.66 - 0.18,
+              0, -a, 0)
+    G.prism(pal['glow'], 8, 0.66, 0.66, 0.045, 0, bal_y + 0.02, -0.18, phase=math.pi / 8)
+    tip = domed(B, G, pal, 0, -0.18, 0.48, bal_y + 0.1, onion=True, drum=0.16)
+    for (x, z) in ((-half, -half), (half, -half), (half, half), (-half, half)):
+        minaret(B, G, pal, x, z, 0.15, 2.55, y=0.16, balcony=True, onion=True)
+    # The astrolabe sits on the onion, close enough to read as its crown.
+    cy = tip + 0.28
+    core = k.part('part_core', origin=(0, cy, -0.18))
+    for i in range(10):
+        a = i / 10 * TAU
+        core.box(pal['trim'], 0.06, 0.06, 0.18, math.cos(a) * 0.32, cy - 0.03, math.sin(a) * 0.32 - 0.18, 0, -a, 0)
+    for i in range(8):
+        a = i / 8 * TAU
+        core.box(pal['trim'], 0.045, 0.2, 0.045, math.cos(a) * 0.22, cy + math.sin(a) * 0.22 - 0.1, -0.18)
+    G.octa(pal['glow'], 0.12, 0.18, 0, cy, -0.18)
+
+
 def castle(k, t, pal):
     B, G = k.B, k.G
     frustum(B, pal['stone3'], 4.2, 4.2, 4.0, 4.0, 0.16)
@@ -92,8 +128,8 @@ def castle(k, t, pal):
             minaret(B, G, pal, sx * 0.86, 0.6, 0.14, 1.25, y=0.16, balcony=False)
         eu.banner(B, pal, -0.95, -0.7, 0.16, 1.6)
         return
-    half = 1.55 if t == 2 else 1.7
-    wh = 0.95 if t == 2 else 1.2
+    half = {2: 1.55, 3: 1.7, 4: 1.82}[t]
+    wh = {2: 0.95, 3: 1.2, 4: 1.55}[t]
     th = 0.3
     # curtain with stepped merlons, a turquoise tile band
     for (x0, z0, x1, z1) in ((-half, -half, half, -half), (half, -half, half, half), (-half, half, -half, -half)):
@@ -109,12 +145,13 @@ def castle(k, t, pal):
     merlons(B, pal, 2 * half, 0.16 + wh, th, 9, x0=0, z0=-half)
     merlons(B, pal, 2 * half, 0.16 + wh, th, 9, axis='z', x0=half)
     merlons(B, pal, 2 * half, 0.16 + wh, th, 9, axis='z', x0=-half)
-    # round corner towers with small domes
-    for (x, z) in ((-half, -half), (half, -half), (half, half), (-half, half)):
-        r = 0.36 if t == 2 else 0.4
-        B.prism(pal['stone2'], 8, r, r * 0.95, wh + 0.4, x, 0.16, z, phase=math.pi / 8)
-        B.prism(pal['roof'], 8, r + 0.01, r + 0.01, 0.07, x, 0.16 + wh, z, phase=math.pi / 8)
-        domed(B, G, pal, x, z, r * 0.8, 0.16 + wh + 0.4, onion=t >= 3, drum=0.06)
+    # round corner towers with small domes. Tier 4 stands minarets here instead.
+    if t < 4:
+        for (x, z) in ((-half, -half), (half, -half), (half, half), (-half, half)):
+            r = 0.36 if t == 2 else 0.4
+            B.prism(pal['stone2'], 8, r, r * 0.95, wh + 0.4, x, 0.16, z, phase=math.pi / 8)
+            B.prism(pal['roof'], 8, r + 0.01, r + 0.01, 0.07, x, 0.16 + wh, z, phase=math.pi / 8)
+            domed(B, G, pal, x, z, r * 0.8, 0.16 + wh + 0.4, onion=t >= 3, drum=0.06)
     # the iwan portal: a tall framed pointed arch over the gap
     for s in (-1, 1):
         B.box(pal['stone2'], 0.22, wh + 0.6, 0.42, s * 0.6, 0.16, half)
@@ -123,32 +160,25 @@ def castle(k, t, pal):
     merlons(B, pal, 1.42, 0.16 + wh + 0.68, 0.3, 5, x0=0, z0=half)
     arch(B, pal, 0.7, 0.62, 0, half + 0.22, y=0.16 + wh - 0.2)
     G.box(pal['glow'], 0.5, 0.04, 0.02, 0, 0.16 + wh + 0.45, half + 0.22)
-    # the palace and its domes
-    pw = 1.6 if t == 2 else 1.8
-    B.box(pal['stone'], pw, 1.1, pw * 0.85, 0, 0.16, -0.25)
-    B.box(pal['roof'], pw + 0.02, 0.08, pw * 0.85 + 0.02, 0, 0.16 + 0.9, -0.25)
-    for x in (-0.45, 0, 0.45):
-        arch(B, pal, 0.26, 0.5, x, -0.25 + pw * 0.425 + 0.01, y=0.3, fill=shade(pal['dark'], 1.4) if x else pal['dark'])
-    for x in (-0.45, 0.45):
-        G.box(pal['warm'], 0.12, 0.12, 0.02, x, 0.42, -0.25 + pw * 0.425 + 0.04)
-    tip = domed(B, G, pal, 0, -0.25, 0.62 if t == 2 else 0.7, 1.26, onion=t >= 3, drum=0.22)
-    if t >= 3:
-        for sx in (-1, 1):
-            domed(B, G, pal, sx * 0.62, 0.2, 0.26, 1.26, drum=0.08)
-            minaret(B, G, pal, sx * 0.78, -0.9, 0.16, 1.8 if t == 3 else 2.2, y=0.16)
+    if t < 4:
+        # the palace and its domes. Tier 3 is this wide hall; tier 4 is the spire.
+        pw = 1.6 if t == 2 else 1.8
+        B.box(pal['stone'], pw, 1.1, pw * 0.85, 0, 0.16, -0.25)
+        B.box(pal['roof'], pw + 0.02, 0.08, pw * 0.85 + 0.02, 0, 0.16 + 0.9, -0.25)
+        for x in (-0.45, 0, 0.45):
+            arch(B, pal, 0.26, 0.5, x, -0.25 + pw * 0.425 + 0.01, y=0.3, fill=shade(pal['dark'], 1.4) if x else pal['dark'])
+        for x in (-0.45, 0.45):
+            G.box(pal['warm'], 0.12, 0.12, 0.02, x, 0.42, -0.25 + pw * 0.425 + 0.04)
+        domed(B, G, pal, 0, -0.25, 0.62 if t == 2 else 0.7, 1.26, onion=t >= 3, drum=0.22)
+        if t >= 3:
+            for sx in (-1, 1):
+                domed(B, G, pal, sx * 0.62, 0.2, 0.26, 1.26, drum=0.08)
+                minaret(B, G, pal, sx * 0.78, -0.9, 0.16, 1.8, y=0.16)
+    else:
+        _spire_citadel(k, pal, half)
     eu.banner(B, pal, -half + 0.35, -half + 0.3, 0.16 + wh, 1.2, big=0.9)
     if t >= 3:
         eu.banner(B, pal, half - 0.35, -half + 0.3, 0.16 + wh, 1.2, big=0.9, flip=True)
-    if t >= 4:
-        # the astrolabe: twin brass rings around a glowing star, over the spire
-        cy = tip + 0.55
-        core = k.part('part_core', origin=(0, cy, 0))
-        for i in range(12):
-            a = i / 12 * TAU
-            core.box(pal['trim'], 0.06, 0.06, 0.2, math.cos(a) * 0.36, cy - 0.03, math.sin(a) * 0.36, 0, -a, 0)
-            core.box(pal['trim'], 0.05, 0.2, 0.05, math.cos(a) * 0.3, cy + math.sin(a) * 0.3 - 0.1, 0, 0, 0,
-                     0)
-        G.octa(pal['glow'], 0.14, 0.2, 0, cy, 0)
 
 
 def tower(k, t, pal):
@@ -438,5 +468,154 @@ def marksman(k, pal):
     G.prism(pal['glow'], 6, 0.03, 0.03, 0.03, 0.22, 0.62, 0.9, rx=math.pi / 2)
 
 
-farm, mill, mine, workshop, hero_forge, outpost = eu.farm, eu.mill, eu.mine, eu.workshop, eu.hero_forge, eu.outpost
+# ---------------------------------------------------------------- economy
+#
+# A walled garden, a lateen-sail mill and an iwan forge. Original shapes on
+# the sandstone, turquoise and pointed-arch language of the keep.
+
+def _palm(B, x, z, h=0.7, y=0.08):
+    B.prism(0x8a5a36, 6, 0.04, 0.028, h, x, y, z)
+    for i in range(5):
+        a = i / 5 * TAU
+        B.box(0x3e8a48, 0.06, 0.025, 0.28, x + math.cos(a) * 0.1, y + h, z + math.sin(a) * 0.1,
+              -0.4, -a + math.pi / 2, 0)
+
+
+def _bed(B, pal, x, z, w, d, y=0.08, gold=False):
+    B.box(pal['stone2'], w + 0.06, 0.08, d + 0.06, x, y, z)
+    B.box(0xc6a24a if gold else 0x6a9a48, w, 0.06, d, x, y + 0.06, z)
+
+
+def _court_walls(B, pal, w, d, h, z=0.0):
+    """Three sandstone walls and a front gate gap."""
+    B.box(pal['stone'], w, h, 0.1, 0, 0.06, z - d / 2)
+    B.box(pal['stone'], 0.1, h, d, -w / 2, 0.06, z)
+    B.box(pal['stone'], 0.1, h, d, w / 2, 0.06, z)
+    B.box(pal['stone'], w * 0.28, h, 0.1, -w * 0.32, 0.06, z + d / 2)
+    B.box(pal['stone'], w * 0.28, h, 0.1, w * 0.32, 0.06, z + d / 2)
+    B.box(pal['roof'], w, 0.04, 0.12, 0, 0.06 + h, z - d / 2)
+
+
+def farm(k, t, pal):
+    """Mirage gardens. Tier 1 is a walled plot; tier 3 is a four-bed charbagh
+    with a cyan water cross and a small onion pavilion."""
+    B, G = k.B, k.G
+    B.box(pal['stone3'], 1.75, 0.06, 1.65, 0, 0, 0)
+    if t == 1:
+        _court_walls(B, pal, 1.55, 1.4, 0.32)
+        _bed(B, pal, -0.28, -0.1, 0.55, 0.7)
+        _bed(B, pal, 0.32, -0.1, 0.55, 0.7, gold=True)
+        _palm(B, -0.55, 0.48, h=0.55)
+        B.box(pal['stone'], 0.4, 0.32, 0.36, 0.4, 0.06, 0.42)
+        domed(B, G, pal, 0.4, 0.42, 0.16, 0.38, drum=0.04, tiles=False)
+        B.prism(0xa34a2a, 8, 0.08, 0.07, 0.14, -0.15, 0.06, 0.55)
+        return
+    if t == 2:
+        _court_walls(B, pal, 1.6, 1.45, 0.42)
+        _bed(B, pal, -0.32, -0.28, 0.5, 0.45)
+        _bed(B, pal, 0.32, -0.28, 0.5, 0.45, gold=True)
+        _bed(B, pal, -0.32, 0.22, 0.5, 0.38)
+        B.prism(pal['stone2'], 8, 0.18, 0.18, 0.1, 0, 0.06, -0.02, phase=math.pi / 8)
+        G.prism(pal['glow'], 8, 0.1, 0.1, 0.04, 0, 0.14, -0.02, phase=math.pi / 8)
+        B.box(pal['stone'], 0.55, 0.4, 0.45, 0.4, 0.06, 0.4)
+        domed(B, G, pal, 0.4, 0.4, 0.2, 0.46, drum=0.05)
+        _windcatcher(B, pal, -0.55, -0.5, 0.48, h=0.4)
+        _palm(B, -0.6, 0.45, h=0.65)
+        _palm(B, 0.62, -0.45, h=0.5)
+        _awning(B, pal, 0.4, -0.15, 0.48, 0.55)
+        return
+    # tier 3 charbagh: four beds, a glowing water cross, an onion pavilion
+    for sx in (-1, 1):
+        for sz, gold in ((-1, False), (1, True)):
+            _bed(B, pal, sx * 0.38, sz * 0.32, 0.55, 0.42, gold=gold and sx > 0)
+    G.box(pal['glow'], 1.35, 0.03, 0.1, 0, 0.1, 0)
+    G.box(pal['glow'], 0.1, 0.03, 1.15, 0, 0.1, 0)
+    B.prism(pal['stone2'], 8, 0.16, 0.16, 0.08, 0, 0.08, 0, phase=math.pi / 8)
+    B.box(pal['stone'], 0.5, 0.45, 0.45, 0, 0.08, -0.55)
+    domed(B, G, pal, 0, -0.55, 0.22, 0.53, onion=True, drum=0.06)
+    _palm(B, -0.7, 0.55, h=0.75)
+    _palm(B, 0.7, 0.55, h=0.6)
+    _windcatcher(B, pal, 0.55, -0.55, 0.55, h=0.45)
+    eu.banner(B, pal, -0.75, -0.6, 0.06, 1.2, big=0.75)
+
+
+def _lateen_rotor(k, pal, hub_y, z, length):
+    """Four white lateen sails on turquoise spars. Spins in XY."""
+    rotor = k.part('part_rotor', origin=(0, hub_y, z))
+    rotor.prism(pal['trim'], 8, 0.12, 0.12, 0.07, 0, hub_y - 0.035, z, rx=math.pi / 2)
+    rotor.prism(pal['roof'], 8, 0.06, 0.06, 0.04, 0, hub_y - 0.02, z + 0.05, rx=math.pi / 2)
+    for i in range(4):
+        a = i * math.pi / 2 + 0.35
+        dx, dy = math.cos(a), math.sin(a)
+        rotor.box(pal['roof'], 0.045, length, 0.03, 0, hub_y, z, 0, 0, a - math.pi / 2)
+        along, aside = length * 0.26, 0.12
+        rotor.box(pal['cloth'], 0.32, length * 0.66, 0.02,
+                  dx * along - dy * aside, hub_y + dy * along + dx * aside, z + 0.03, 0, 0, a - math.pi / 2)
+        rotor.box(pal['roof2'], 0.32, 0.03, 0.025,
+                  dx * (along + length * 0.52) - dy * aside,
+                  hub_y + dy * (along + length * 0.52) + dx * aside - 0.015,
+                  z + 0.04, 0, 0, a - math.pi / 2)
+    return rotor
+
+
+def mill(k, t, pal):
+    """Sandstone mill tower, turquoise band, dome cap and lateen sails.
+    A windcatcher joins at tier 2; tier 3 wears an onion dome and a second one."""
+    B, G = k.B, k.G
+    h = {1: 1.05, 2: 1.4, 3: 1.65}[t]
+    B.box(pal['stone3'], 1.15, 0.14, 1.05, 0, 0, -0.05)
+    B.box(pal['stone'], 0.9, h, 0.8, 0, 0.14, -0.05)
+    B.box(pal['roof'], 0.92, 0.07, 0.82, 0, 0.14 + h * 0.55, -0.05)
+    arch(B, pal, 0.26, 0.42, 0, 0.36, y=0.14)
+    G.box(pal['warm'], 0.12, 0.14, 0.03, 0.22, 0.14 + h * 0.45, 0.36)
+    domed(B, G, pal, 0, -0.05, 0.34 if t < 3 else 0.38, 0.14 + h, onion=t >= 3, drum=0.08)
+    if t >= 2:
+        _windcatcher(B, pal, 0.62, -0.32, 0.14 + h * 0.72, h=0.5 if t == 2 else 0.7)
+    if t >= 3:
+        _windcatcher(B, pal, -0.62, -0.28, 0.14 + h * 0.55, h=0.48)
+        eu.banner(B, pal, -0.7, 0.45, 0.14, 1.2, big=0.7)
+        G.prism(pal['glow'], 8, 0.48, 0.48, 0.04, 0, 0.14 + h * 0.72, -0.05, phase=math.pi / 8)
+    _lateen_rotor(k, pal, 0.14 + h * 0.62, 0.5, {1: 0.78, 2: 0.95, 3: 1.08}[t])
+
+
+def workshop(k, t, pal):
+    """Iwan smithy. The forge sits in the pointed arch; the windcatcher is
+    the flue. Tier 3 caps the hall with an onion dome and a second catcher."""
+    B, G = k.B, k.G
+    B.box(pal['stone3'], 1.8, 0.1, 1.65, 0, 0, 0)
+    if t == 1:
+        _cube(B, G, pal, 1.15, 0.8, 0.7, -0.05, -0.1, y=0.1)
+        arch(B, pal, 0.46, 0.55, -0.05, 0.31, y=0.1)
+        G.box(0xff7a3c, 0.28, 0.16, 0.04, -0.05, 0.22, 0.34)
+        _windcatcher(B, pal, 0.4, -0.35, 0.86, h=0.45)
+        _awning(B, pal, 0.55, -0.05, 0.72, 0.28)
+        B.box(pal['dark'], 0.22, 0.14, 0.14, 0.45, 0.1, 0.45)
+        B.box(pal['trim'], 0.28, 0.05, 0.12, 0.45, 0.24, 0.45)
+        return
+    h = 0.85 if t == 2 else 0.95
+    _cube(B, G, pal, 1.35, 0.9, h, 0, -0.15, y=0.1)
+    arch(B, pal, 0.55, 0.7 if t == 3 else 0.6, 0, 0.31, y=0.1)
+    G.box(0xff7a3c, 0.32, 0.2, 0.04, 0, 0.28, 0.34)
+    if t == 2:
+        domed(B, G, pal, 0, -0.15, 0.32, 0.1 + h, drum=0.06)
+    else:
+        domed(B, G, pal, 0, -0.15, 0.4, 0.1 + h, onion=True, drum=0.1)
+        G.prism(pal['glow'], 8, 0.55, 0.55, 0.04, 0, 0.1 + h - 0.02, -0.15, phase=math.pi / 8)
+    _windcatcher(B, pal, 0.62, -0.45, 0.1 + h * 0.55, h=0.55 if t == 2 else 0.75)
+    if t >= 3:
+        _windcatcher(B, pal, -0.62, -0.42, 0.1 + h * 0.4, h=0.5)
+    B.box(pal['dark'], 0.24, 0.16, 0.16, 0.55, 0.1, 0.5)
+    B.box(pal['trim'], 0.3, 0.05, 0.12, 0.55, 0.26, 0.5)
+    # hoist
+    B.prism(pal['wood'], 6, 0.04, 0.035, 1.05, -0.7, 0.1, 0.5)
+    B.box(pal['wood'], 0.55, 0.05, 0.05, -0.42, 1.1, 0.5)
+    B.box(pal['trim'], 0.08, 0.18, 0.06, -0.18, 0.92, 0.5)
+    if t >= 3:
+        eu.banner(B, pal, 0.8, 0.5, 0.1, 1.3, flip=True)
+        B.prism(pal['trim'], 8, 0.1, 0.1, 0.04, 0.15, 1.35, 0.35, rx=math.pi / 2)
+        G.prism(pal['glow'], 8, 0.05, 0.05, 0.03, 0.15, 1.35, 0.38, rx=math.pi / 2)
+
+
+# Mines, hero forges and outposts stay shared European builders, recoloured.
+mine, hero_forge, outpost = eu.mine, eu.hero_forge, eu.outpost
 hero, enemy, tree_round, tree_pine, rock, cliff = eu.hero, eu.enemy, eu.tree_round, eu.tree_pine, eu.rock, eu.cliff

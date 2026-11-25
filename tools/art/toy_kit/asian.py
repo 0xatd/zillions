@@ -451,7 +451,169 @@ def marksman(k, pal):
     G.prism(0xff7a3c, 8, 0.05, 0.05, 0.03, 0.2, 0.74, 0.5, rx=math.pi / 2)
 
 
-# Shared with the European kit (re-coloured by the palette): the economy
-# buildings, outposts, heroes, the horde and the terrain props.
-farm, mill, mine, workshop, hero_forge, outpost = eu.farm, eu.mill, eu.mine, eu.workshop, eu.hero_forge, eu.outpost
+# ---------------------------------------------------------------- economy
+#
+# Rice terraces, a junk-sail mill and an open lacquer forge. Original shapes:
+# the European barn, stone windmill and gabled workshop are not recoloured.
+
+def _rice_bed(B, x, z, w, d, y=0.06, rows=3):
+    """A flooded terrace: dark bund, jade water, rows of rice."""
+    B.box(0x3a3a44, w + 0.1, 0.1, d + 0.1, x, y, z)
+    B.box(0x2a7a74, w, 0.05, d, x, y + 0.08, z)
+    span = d * 0.68
+    for i in range(rows):
+        zz = z - span / 2 + (0 if rows == 1 else i * span / (rows - 1))
+        B.box(0x7ec24a if i % 2 == 0 else 0xc5dc62, w * 0.84, 0.1, 0.05, x, y + 0.12, zz)
+
+
+def _scarecrow(B, pal, x, z):
+    B.prism(0x9cbf5c, 5, 0.03, 0.025, 0.52, x, 0.1, z)
+    B.box(0x9cbf5c, 0.34, 0.03, 0.03, x, 0.4, z)
+    B.box(pal['cloth'], 0.14, 0.15, 0.05, x, 0.3, z)
+    B.prism(0xc6a15a, 6, 0.11, 0.0, 0.09, x, 0.5, z)
+
+
+def _sheaf(B, pal, x, y, z, s=1.0):
+    B.prism(0xd2b15a, 6, 0.09 * s, 0.03 * s, 0.2 * s, x, y, z)
+    B.box(pal['wood'], 0.1 * s, 0.04 * s, 0.1 * s, x, y + 0.08 * s, z)
+
+
+def farm(k, t, pal):
+    """Jade paddies. Tier 1 is one flood bed and a shed; tier 3 is a
+    lantern-lit hydroponic terrace with a two-roof granary."""
+    B, G = k.B, k.G
+    B.box(pal['stone3'], 1.75, 0.06, 1.7, 0, 0, 0)
+    if t == 1:
+        _rice_bed(B, -0.12, -0.02, 1.15, 1.25, rows=4)
+        B.box(pal['stone'], 0.48, 0.38, 0.4, 0.55, 0.06, 0.5)
+        hip_roof(B, pal['roof'], 0.5, 0.42, 0.44, 0.3, tip=pal['trim'], flare=0.1, x=0.55, z=0.5)
+        B.box(pal['wood'], 0.16, 0.26, 0.04, 0.55, 0.06, 0.71)
+        lantern(B, G, pal, 0.78, 0.36, 0.68, s=0.7)
+        _scarecrow(B, pal, -0.62, 0.48)
+        return
+    if t == 2:
+        _rice_bed(B, 0, -0.42, 1.4, 0.62, y=0.22, rows=3)
+        B.box(pal['stone2'], 1.5, 0.16, 0.72, 0, 0.06, -0.42)
+        _rice_bed(B, -0.15, 0.38, 1.15, 0.62, rows=3)
+        B.box(pal['stone'], 0.7, 0.55, 0.55, 0.42, 0.06, 0.42)
+        B.box(pal['wood'], 0.72, 0.06, 0.57, 0.42, 0.52, 0.42)
+        hip_roof(B, pal['roof'], 0.72, 0.58, 0.61, 0.38, tip=pal['trim'], flare=0.12, x=0.42, z=0.42)
+        B.box(pal['wood'], 0.22, 0.36, 0.04, 0.42, 0.06, 0.7)
+        _sheaf(B, pal, -0.55, 0.1, 0.62)
+        _sheaf(B, pal, -0.32, 0.1, 0.7, s=0.8)
+        lantern(B, G, pal, 0.72, 0.48, 0.68, s=0.8)
+        return
+    # tier 3: three flood steps and a glowing nutrient rill
+    B.box(pal['stone2'], 1.55, 0.28, 0.48, 0, 0.06, -0.55)
+    _rice_bed(B, 0, -0.55, 1.4, 0.38, y=0.34, rows=2)
+    B.box(pal['stone2'], 1.45, 0.14, 0.42, 0.05, 0.06, -0.05)
+    _rice_bed(B, 0.05, -0.05, 1.3, 0.32, y=0.2, rows=2)
+    _rice_bed(B, -0.2, 0.42, 1.05, 0.48, rows=2)
+    G.box(0x7dffe0, 1.35, 0.03, 0.06, 0, 0.36, -0.28)
+    G.box(0x7dffe0, 0.06, 0.03, 0.7, -0.55, 0.16, 0.15)
+    B.box(pal['stone'], 0.72, 0.5, 0.5, 0.42, 0.06, 0.45)
+    hip_roof(B, pal['roof'], 0.74, 0.52, 0.56, 0.18, top=0.48, tip=pal['trim'], flare=0.1, x=0.42, z=0.45)
+    B.box(pal['stone'], 0.46, 0.32, 0.36, 0.42, 0.74, 0.45)
+    hip_roof(B, pal['roof'], 0.48, 0.38, 1.06, 0.32, tip=pal['trim'], flare=0.1, x=0.42, z=0.45)
+    B.box(pal['wood'], 0.2, 0.32, 0.04, 0.42, 0.06, 0.71)
+    lantern(B, G, pal, 0.78, 0.7, 0.62, s=0.85)
+    lantern(B, G, pal, -0.72, 0.4, 0.62, s=0.7)
+    eu.banner(B, pal, -0.78, -0.55, 0.06, 1.15, big=0.7)
+
+
+def _junk_rotor(k, pal, hub_y, z, length):
+    """Four broad cloth sails on gold spars. Spins in XY about part_rotor."""
+    rotor = k.part('part_rotor', origin=(0, hub_y, z))
+    rotor.box(pal['trim'], 0.18, 0.18, 0.1, 0, hub_y - 0.09, z)
+    rotor.box(pal['wood'], 0.1, 0.1, 0.06, 0, hub_y - 0.05, z + 0.08)
+    for i in range(4):
+        a = i * math.pi / 2 + math.pi / 5
+        dx, dy = math.cos(a), math.sin(a)
+        rotor.box(pal['trim'], 0.04, length, 0.03, 0, hub_y, z, 0, 0, a - math.pi / 2)
+        along, aside = length * 0.28, 0.1
+        rotor.box(pal['cloth'], 0.28, length * 0.62, 0.02,
+                  dx * along - dy * aside, hub_y + dy * along + dx * aside, z + 0.03, 0, 0, a - math.pi / 2)
+        rotor.box(pal['roof'], 0.28, 0.035, 0.025,
+                  dx * (along + length * 0.5) - dy * aside,
+                  hub_y + dy * (along + length * 0.5) + dx * aside - 0.02,
+                  z + 0.04, 0, 0, a - math.pi / 2)
+    return rotor
+
+
+def mill(k, t, pal):
+    """A plaster mill house under a jade hip roof, with junk sails on the face.
+    Tier 3 stacks a second storey so the crown changes, not just the sails."""
+    B, G = k.B, k.G
+    w = {1: 0.95, 2: 1.05, 3: 1.15}[t]
+    h = {1: 0.7, 2: 0.95, 3: 0.72}[t]
+    B.box(pal['stone3'], w + 0.24, 0.12, w * 0.9 + 0.16, 0, 0, -0.05)
+    if t < 3:
+        B.box(pal['stone'], w, h, w * 0.8, 0, 0.12, -0.05)
+        B.box(pal['wood'], w + 0.02, 0.06, w * 0.82, 0, 0.12 + h - 0.1, -0.05)
+        hip_roof(B, pal['roof'], w, w * 0.8, 0.12 + h, 0.4 if t == 1 else 0.48, tip=pal['trim'], flare=0.14, z=-0.05)
+        B.box(pal['trim'], w * 0.45, 0.04, 0.04, 0, 0.12 + h + (0.36 if t == 1 else 0.44), -0.05)
+    else:
+        y = _storey(B, G, pal, w, w * 0.82, h, 0.12, w * 0.7, roof_h=0.2, windows=True)
+        _storey(B, G, pal, w * 0.7, w * 0.58, 0.46, y, 0.0, roof_h=0.38, windows=False, pillars=False)
+    front = -0.05 + (w * 0.82 if t == 3 else w * 0.8) / 2
+    B.box(pal['wood'], 0.26, 0.38, 0.04, 0, 0.12, front + 0.02)
+    G.box(pal['warm'], 0.16, 0.14, 0.03, 0.22, 0.12 + h * 0.55, front + 0.02)
+    if t >= 2:
+        B.box(pal['stone'], 0.4, 0.38, 0.38, -w * 0.55, 0.12, 0.22)
+        hip_roof(B, pal['roof2'], 0.42, 0.4, 0.5, 0.26, tip=pal['trim'], flare=0.08, x=-w * 0.55, z=0.22)
+        lantern(B, G, pal, w * 0.48, 0.5, 0.28, s=0.75)
+    if t >= 3:
+        eu.banner(B, pal, w * 0.62, -0.55, 0.12, 1.25, flip=True)
+        G.box(pal['glow'], w * 0.7, 0.04, 0.04, 0, 0.5, front)
+    _junk_rotor(k, pal, 0.12 + h * 0.7, front + 0.16, {1: 0.78, 2: 0.95, 3: 1.08}[t])
+
+
+def workshop(k, t, pal):
+    """Lacquer forge. The fire and the anvil are the readable job; tier 3
+    adds a second roof and a hovering repair drone."""
+    B, G = k.B, k.G
+    B.box(pal['stone3'], 1.8, 0.08, 1.65, 0, 0, 0)
+    if t == 1:
+        for sx in (-1, 1):
+            for sz in (-0.35, 0.4):
+                B.prism(pal['wood'], 6, 0.055, 0.05, 0.82, sx * 0.52, 0.08, sz)
+                B.box(pal['trim'], 0.11, 0.04, 0.11, sx * 0.52, 0.86, sz)
+        hip_roof(B, pal['roof'], 1.2, 0.9, 0.9, 0.4, tip=pal['trim'], flare=0.14)
+        B.box(pal['stone2'], 0.46, 0.28, 0.34, -0.12, 0.08, -0.05)
+        G.box(0xff7a3c, 0.32, 0.1, 0.2, -0.12, 0.36, -0.05)
+        B.box(pal['dark'], 0.22, 0.16, 0.14, 0.38, 0.08, 0.32)
+        B.box(pal['steel'], 0.28, 0.05, 0.12, 0.38, 0.24, 0.32)
+        lantern(B, G, pal, 0.0, 0.62, 0.52, s=0.8)
+        return
+    h = 0.78
+    B.box(pal['stone'], 1.3, h, 0.85, -0.05, 0.08, -0.12)
+    B.box(pal['wood'], 1.32, 0.06, 0.87, -0.05, 0.08 + h - 0.12, -0.12)
+    if t == 2:
+        hip_roof(B, pal['roof'], 1.3, 0.85, 0.08 + h, 0.42, tip=pal['trim'], flare=0.14, z=-0.12)
+        stack = 0.08 + h
+    else:
+        hip_roof(B, pal['roof'], 1.3, 0.85, 0.08 + h, 0.2, top=0.78, tip=pal['trim'], flare=0.12, z=-0.12)
+        B.box(pal['stone'], 0.72, 0.38, 0.5, -0.05, 0.08 + h + 0.2, -0.12)
+        hip_roof(B, pal['roof'], 0.72, 0.5, 0.08 + h + 0.58, 0.34, tip=pal['trim'], flare=0.1, x=-0.05, z=-0.12)
+        stack = 0.08 + h + 0.58
+    B.box(pal['wood'], 0.32, 0.42, 0.04, -0.05, 0.08, 0.32)
+    B.box(pal['stone2'], 0.26, 0.85 if t == 3 else 0.55, 0.26, 0.55, stack, -0.4)
+    G.box(0xff7a3c, 0.14, 0.08, 0.14, 0.55, stack + (0.85 if t == 3 else 0.55), -0.4)
+    B.box(pal['dark'], 0.22, 0.16, 0.14, 0.55, 0.08, 0.48)
+    B.box(pal['steel'], 0.28, 0.05, 0.12, 0.55, 0.24, 0.48)
+    B.prism(pal['wood'], 6, 0.045, 0.04, 1.05, -0.72, 0.08, 0.5)
+    B.box(pal['wood'], 0.62, 0.05, 0.05, -0.42, 1.08, 0.5)
+    B.box(pal['steel'], 0.1, 0.16, 0.08, -0.14, 0.92, 0.5)
+    if t >= 3:
+        G.box(pal['glow'], 1.15, 0.04, 0.04, -0.05, 0.55, 0.32)
+        B.box(pal['steel'], 0.22, 0.06, 0.22, 0.12, 1.28, 0.42)
+        G.box(0x7dffe0, 0.1, 0.04, 0.1, 0.12, 1.22, 0.42)
+        B.box(pal['dark'], 0.04, 0.04, 0.04, 0.12, 1.34, 0.42)
+        eu.banner(B, pal, 0.82, 0.55, 0.08, 1.3, flip=True)
+        lantern(B, G, pal, -0.72, 0.62, 0.1, s=0.75)
+
+
+# Mines, hero forges and outposts stay shared European builders, recoloured.
+# Heroes, the horde and the terrain props do too.
+mine, hero_forge, outpost = eu.mine, eu.hero_forge, eu.outpost
 hero, enemy, tree_round, tree_pine, rock, cliff = eu.hero, eu.enemy, eu.tree_round, eu.tree_pine, eu.rock, eu.cliff
