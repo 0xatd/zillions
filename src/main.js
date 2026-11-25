@@ -55,7 +55,8 @@ import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResul
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import {
-  PENDING_DAILY_KEY, acceptableDay, buildDailyReplay, dailyChallenge, dailyKey, dailyScore, formatDailyStanding,
+  PENDING_DAILY_KEY, acceptDailyBoardPaint, acceptableDay, buildDailyReplay, dailyChallenge, dailyKey, dailyScore,
+  formatDailyStanding,
 } from './daily.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
@@ -2086,7 +2087,19 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
+  _dailyBoardCurrent() {
+    const overlay = this.ui.root?.querySelector?.('#overlay');
+    return {
+      ticket: this._dailyTicket,
+      current: this._dailyTicket,
+      screen: this.ui._lastScreen,
+      overlayHidden: !overlay || overlay.classList.contains('hidden'),
+      inGame: !!this.game,
+    };
+  }
+
   async _openDaily() {
+    const ticket = (this._dailyTicket = (this._dailyTicket || 0) + 1);
     const challenge = dailyChallenge(dailyKey());
     this._dailyChallenge = challenge;
     const level = levelById(challenge.levelId);
@@ -2096,18 +2109,24 @@ class App {
       localSeed: challenge.seed,
     };
     this.ui.showDaily(view, { loading: true });
+    const paint = (board) => {
+      const here = this._dailyBoardCurrent();
+      if (!acceptDailyBoardPaint({ ...here, ticket, current: this._dailyTicket })) return;
+      this.ui.showDaily(view, board, { navigate: false });
+    };
     try {
       const board = await dailyBoardRequest(challenge.day);
-      if (!board) this.ui.showDaily(view, { unavailable: true });
-      else if (board.challenge && (board.challenge.seed >>> 0) !== (challenge.seed >>> 0)) {
-        this.ui.showDaily(view, { ...board, staleClient: true });
-      } else this.ui.showDaily(view, board);
+      if (!board) paint({ unavailable: true });
+      else if (board.challenge && (board.challenge.seed >>> 0) !== (challenge.seed >>> 0)) paint({ ...board, staleClient: true });
+      else paint(board);
     } catch (error) {
-      this.ui.showDaily(view, { error: error?.message || 'board_unavailable' });
+      paint({ error: error?.message || 'board_unavailable' });
     }
   }
 
   async _startDaily() {
+    // Drop a board response that is still in flight. Play has left the brief.
+    this._dailyTicket = (this._dailyTicket || 0) + 1;
     if (this.game) return;
     const challenge = this._dailyChallenge || dailyChallenge(dailyKey());
     this._dailyChallenge = challenge;

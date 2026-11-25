@@ -6,8 +6,8 @@ import { SIM_DT, TILE, ZOMBIES, levelById } from '../src/config.js';
 import { stateHash } from '../src/lockstep-hash.js';
 import { processDailySubmit } from '../api/daily.js';
 import {
-  DAILY_HEROES, DAILY_MODIFIERS, DAILY_WAVE_COUNT, acceptableDay, buildDailyReplay, dailyChallenge,
-  dailyKey, dailyScore, dailySeed, replayDaily, validateDailyReplay, verifyDailySubmission,
+  DAILY_HEROES, DAILY_MODIFIERS, DAILY_WAVE_COUNT, acceptDailyBoardPaint, acceptableDay, buildDailyReplay,
+  dailyChallenge, dailyKey, dailyScore, dailySeed, replayDaily, validateDailyReplay, verifyDailySubmission,
 } from '../src/daily.js';
 
 const DAY = '2026-11-25';
@@ -63,6 +63,15 @@ function fakeMap() {
     isWalkable: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
   };
 }
+
+test('a late daily board paints only while that same brief is still open', () => {
+  const open = { ticket: 1, current: 1, screen: 'daily', overlayHidden: false, inGame: false };
+  assert.equal(acceptDailyBoardPaint(open), true);
+  assert.equal(acceptDailyBoardPaint({ ...open, current: 2 }), false, 'a newer open or Play supersedes it');
+  assert.equal(acceptDailyBoardPaint({ ...open, screen: 'account' }), false, 'Back left the brief');
+  assert.equal(acceptDailyBoardPaint({ ...open, overlayHidden: true }), false, 'the menu is no longer showing');
+  assert.equal(acceptDailyBoardPaint({ ...open, inGame: true }), false, 'the siege has started');
+});
 
 test('the daily seed is a pure function of the UTC day', () => {
   assert.equal(dailyKey(NOW), DAY);

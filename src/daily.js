@@ -165,6 +165,12 @@ export function formatDailyStanding(standing) {
   return `${standing?.waves | 0} waves survived · city ${pct}% · ${minutes}:${rest}`;
 }
 
+// A board response may arrive after Back or after Play. Paint it only while
+// that same open is still the visible daily brief.
+export function acceptDailyBoardPaint({ ticket, current, screen, overlayHidden, inGame }) {
+  return ticket === current && screen === 'daily' && !overlayHidden && !inGame;
+}
+
 export function publicHandle(handle) {
   const clean = String(handle || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 32);
   return clean.length >= 3 ? clean : 'commander';

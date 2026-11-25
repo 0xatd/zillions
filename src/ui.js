@@ -3743,8 +3743,17 @@ export class UI {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   }
 
-  showDaily(challenge, board = {}) {
-    this._showScreen('daily');
+  dailyBriefOpen() {
+    const screen = this.root.querySelector('#screen-daily');
+    const overlay = this.root.querySelector('#overlay');
+    return this._lastScreen === 'daily'
+      && !!screen && !screen.classList.contains('hidden')
+      && !!overlay && !overlay.classList.contains('hidden');
+  }
+
+  showDaily(challenge, board = {}, { navigate = true } = {}) {
+    if (!navigate && !this.dailyBriefOpen()) return;
+    if (navigate) this._showScreen('daily');
     const hero = HEROES[challenge.hero];
     const culture = CULTURE_ARMIES[challenge.culture];
     const mods = (challenge.modifiers || []).map((id) => modifierInfo(id)).filter(Boolean);
