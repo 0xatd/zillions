@@ -149,6 +149,12 @@ export function frameStats(frameMs) {
 }
 
 // One throwaway context, released before the game renderer is created.
+// An explicit preset boots without a GPU read. {} is not a probe: Auto must
+// still sample the GPU the first time the player selects it.
+export function gpuProbeReady(probe) {
+  return !!(probe && String(probe.renderer || probe.vendor || '').trim());
+}
+
 export function probeGpuSignals() {
   const signals = {
     renderer: '',

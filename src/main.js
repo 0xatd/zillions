@@ -155,7 +155,7 @@ class App {
     try { savedChoice = localStorage.getItem('zillions_graphics_quality'); } catch { /* storage can be blocked */ }
     const queryChoice = normalizeQualityChoice(new URLSearchParams(location.search).get('quality'));
     const bootChoice = queryChoice || normalizeQualityChoice(savedChoice) || 'auto';
-    const bootProbe = bootChoice === 'auto' ? probeGpuSignals() : {};
+    const bootProbe = bootChoice === 'auto' ? probeGpuSignals() : null;
     const boot = { ...resolveGraphics(bootChoice, bootProbe), probe: bootProbe };
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -7063,6 +7063,7 @@ class App {
           this._disposeObject3D(this.terrain);
           this.terrain = this.map.buildTerrain();
           this.scene.add(this.terrain);
+          this._rememberCulledProps(this.terrain);
           if (this.plaza) this.scene.remove(this.plaza);
           this.plaza = this._buildPlaza(e.x, e.z);
           this.scene.add(this.plaza);

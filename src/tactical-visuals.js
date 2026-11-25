@@ -9,7 +9,7 @@ import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 import {
   GRAPHICS_PRESETS, QUALITY_KEY, nextQualityChoice, normalizeQualityChoice,
-  probeGpuSignals, resolveGraphics, stepDownTier,
+  gpuProbeReady, probeGpuSignals, resolveGraphics, stepDownTier,
 } from './graphics-quality.js';
 
 export { QUALITY_KEY, stepDownTier };
@@ -213,7 +213,7 @@ function bootGraphics() {
   let saved = null;
   try { saved = localStorage.getItem(QUALITY_KEY); } catch { /* storage can be blocked */ }
   const choice = normalizeQualityChoice(saved) || 'auto';
-  const probe = choice === 'auto' ? probeGpuSignals() : {};
+  const probe = choice === 'auto' ? probeGpuSignals() : null;
   return { ...resolveGraphics(choice, probe), probe };
 }
 
@@ -228,7 +228,7 @@ export class TacticalVisuals {
     this.choice = resolved.choice;
     this.quality = resolved.tier;
     this.preset = resolved.preset;
-    this._probe = resolved.probe || null;
+    this._probe = gpuProbeReady(resolved.probe) ? resolved.probe : null;
     this._scale = 1;
     this._appliedRatio = 0;
     this._smoothDt = 0;
@@ -273,7 +273,7 @@ export class TacticalVisuals {
 
   applyQuality(quality, persist = true) {
     const choice = normalizeQualityChoice(quality) || this.choice || 'auto';
-    if (choice === 'auto' && !this._probe) this._probe = probeGpuSignals();
+    if (choice === 'auto' && !gpuProbeReady(this._probe)) this._probe = probeGpuSignals();
     const resolved = resolveGraphics(choice, this._probe || {});
     this.choice = resolved.choice;
     this._commitTier(resolved.tier, persist);

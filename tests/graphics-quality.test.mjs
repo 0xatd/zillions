@@ -5,6 +5,7 @@ import {
   frameStats,
   nextQualityChoice,
   normalizeQualityChoice,
+  gpuProbeReady,
   probeGraphicsTier,
   resolveGraphics,
   stepDownTier,
@@ -31,6 +32,13 @@ test('GPU probe sends software renderers to low and discrete GPUs to high', () =
   assert.equal(probeGraphicsTier({
     renderer: 'NVIDIA GeForce GTX 1050', vendor: 'NVIDIA', deviceMemory: 4, hardwareConcurrency: 4,
   }), 'medium');
+});
+
+test('an empty probe is not a GPU reading', () => {
+  assert.equal(gpuProbeReady(null), false);
+  assert.equal(gpuProbeReady({}), false);
+  assert.equal(gpuProbeReady({ renderer: '   ' }), false);
+  assert.equal(gpuProbeReady({ renderer: 'NVIDIA GeForce RTX 4070' }), true);
 });
 
 test('auto resolves from the probe and an explicit choice stays put', () => {
