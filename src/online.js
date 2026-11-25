@@ -18,7 +18,9 @@ const CURRENT_RULES = 'survival-plots';
 // v12: shared perimeters, repair-first payment, and hero corner collision.
 // v13: physical colony crew and corrected movement (snapshot v12).
 // v15: gradual siege pressure and boss-wave balance.
-export const LOBBY_PROTOCOL_VERSION = 15;
+// v16: Alexander, Tiger and Aaron carry multi-slot kits. A stale client still
+// resolves their old single specials, so the two simulations diverge.
+export const LOBBY_PROTOCOL_VERSION = 16;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

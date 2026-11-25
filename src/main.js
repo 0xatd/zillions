@@ -58,7 +58,7 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
-  addMmoCharacter, characterCamp, recordMmoInstance, rewireLattice,
+  addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
 } from './mmo-characters.js';
 import {
   FOG_DARKNESS,
@@ -197,9 +197,9 @@ class App {
               return;
             }
           }
-          this._launchHostMatch(d, hero, mode);
+          this._launchPrepared(d, hero, mode, true);
         } else {
-          this.startGame(d, hero);
+          this._launchPrepared(d, hero, mode, false);
         }
       },
       onCast: (slot = 0) => this.tryCast(slot),
@@ -1741,15 +1741,16 @@ class App {
         await this._createMmoCharacter({ name: draft.founderName, appearance: draft.color, raceKey: 'human', customization: {}, quiet: true });
       }
       if (!chapterFounder(this.profile)) throw new Error('founder_missing');
+      const character = await this._bindDeployedLeader(draft.leader);
+      if (!character?.proxyHero) throw new Error('leader_missing');
       this.profile.quickSetupDone = true;
       this._storeProfileLocally();
       if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
       this.ui.setProfile(this.profile);
       this._skipMissionIntro = true;
-      const heroKey = leaderHeroKey(draft.leader);
       this.ui.selectedLeader = draft.leader;
-      this.ui.selectedHero = heroKey;
-      await this.startGame(draft.difficulty, heroKey);
+      this.ui.selectedHero = character.proxyHero;
+      await this.startGame(draft.difficulty, character.proxyHero);
     } catch (err) {
       this._quickCommitted = false;
       this.ui._clearBusy();
@@ -1928,6 +1929,44 @@ class App {
     this.ui.showBanner(`${removed.name} was deleted.`, '', 2400);
   }
 
+  // Campaign deployment and the character who keeps its level, gear and rewards
+  // are one identity. Vanguard is the founder. The other playable leaders are
+  // their own companions, created the first time they deploy.
+  async _bindDeployedLeader(leaderKey) {
+    const character = ensureDeployedLeader(this.profile, leaderKey);
+    if (!character) return null;
+    this.profile.mmoCharacterId = character.id;
+    this.profile.lastHero = character.proxyHero;
+    this.ui.selectedLeader = leaderKey;
+    this.ui.selectedHero = character.proxyHero;
+    if (this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+    return selectedMmoCharacter(this.profile) || character;
+  }
+
+  async _launchPrepared(difficulty, hero, mode, hostMatch) {
+    if (this._startLock) return;
+    this._startLock = true;
+    try {
+      if (mode === 'campaign' && this.ui.selectedLeader) {
+        const character = await this._bindDeployedLeader(this.ui.selectedLeader);
+        if (!character?.proxyHero) {
+          this.ui._clearBusy();
+          this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+          return;
+        }
+        hero = character.proxyHero;
+      }
+      if (hostMatch) await this._launchHostMatch(difficulty, hero, mode);
+      else await this.startGame(difficulty, hero);
+    } catch (err) {
+      this.ui._clearBusy();
+      this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+      console.warn('leader deploy failed', err);
+    } finally {
+      this._startLock = false;
+    }
+  }
+
   // The WC3-style persistent campaign hero this profile brings into a run.
   campFor(key) {
     const character = selectedMmoCharacter(this.profile);
@@ -1951,7 +1990,17 @@ class App {
     return { t: 'hero', k: key, camp: this.campFor(key), name: this._publicName() };
   }
 
-  _pickHero(key) {
+  async _pickHero(key) {
+    if ((this.ui.selectedMode || 'campaign') === 'campaign' && this.ui.selectedLeader && leaderHeroKey(this.ui.selectedLeader) === key) {
+      try {
+        const character = await this._bindDeployedLeader(this.ui.selectedLeader);
+        if (character?.proxyHero) key = character.proxyHero;
+      } catch (err) {
+        this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+        console.warn('leader deploy failed', err);
+        return;
+      }
+    }
     const msg = this._heroPayload(key);
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
