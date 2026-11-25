@@ -350,7 +350,9 @@ export function decideReplayPublish({ bytes, recentUser = 0, recentIp = 0, exist
   return { ok: true, duplicate: false };
 }
 
-export function boardReplayId(links, userId) {
-  const id = links?.get?.(userId) || null;
+export function boardReplayId(links, userId, hash) {
+  const value = links?.get?.(userId);
+  if (hash !== undefined && (!value || value.hash !== hash)) return null;
+  const id = typeof value === 'string' ? value : value?.id;
   return REPLAY_ID.test(id || '') ? id : null;
 }

@@ -826,6 +826,8 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this._seedRun = !!this._startingSeedRun;
+    this._startingSeedRun = false;
     this.pendingAbility = null;
     this._keepPeek = null;
     if (snap && !isCompatibleSnapshot(snap)) {
@@ -1142,10 +1144,10 @@ class App {
   }
 
   _noteReplayEnd() {
-    if (!this.replay || this.replay.checked || this.replay.step < this.replay.replay.frames) return;
+    if (!this.replay || this.replay.checked || (this.replay.step < this.replay.replay.frames && !this.game.over)) return;
     this.replay.checked = true;
     this.replay.paused = true;
-    this.replay.hashOk = (stateHash(this.game) | 0) === (this.replay.replay.hash | 0);
+    this.replay.hashOk = this.replay.step === this.replay.replay.frames && (stateHash(this.game) | 0) === (this.replay.replay.hash | 0);
     this.ui.setReplayBar(this._replayBarState());
   }
 
@@ -1162,7 +1164,7 @@ class App {
       if (result.done) {
         session.seeking = false;
         session.acc = 0;
-        if (session.step >= session.replay.frames) this._noteReplayEnd();
+        if (session.step >= session.replay.frames || session.game.over) this._noteReplayEnd();
       }
       this.ui.setReplayBar(this._replayBarState());
       return;
@@ -1181,6 +1183,7 @@ class App {
     }
     if (session.acc > SIM_DT * 4) session.acc = 0;
     if (session.step >= session.replay.frames || session.game.over) this._noteReplayEnd();
+    this.ui.setReplayBar(this._replayBarState());
   }
 
   _flushReplayPresentation() {
@@ -1221,7 +1224,7 @@ class App {
       }
       const url = `${location.origin}${shareReplayPath(result.id)}`;
       let copied = false;
-      try { await navigator.clipboard?.writeText(url); copied = true; } catch { copied = false; }
+      try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url); copied = true; } } catch { copied = false; }
       if (button) button.textContent = copied ? 'Link copied' : 'Share replay';
       this.ui.setReplayShareNote(copied ? url : `Copy this link: ${url}`);
     } catch (error) {
@@ -1244,7 +1247,7 @@ class App {
     this.paused = true;
     this.ui.hideReplayBar();
     this._clearWorldMeshes();
-    this._seedRun = true;
+    this._startingSeedRun = true;
     this._forcedSeed = spec.mode === 'daily' ? null : (spec.seed >>> 0);
     this.ui.selectedCulture = spec.culture;
     setActiveCulture(cultureKey(spec.culture));

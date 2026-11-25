@@ -3909,6 +3909,7 @@ export class UI {
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
   hideStart() {
+    this.root.querySelector('#replay-gate')?.classList.add('hidden');
     this.root.querySelector('#overlay').classList.add('hidden');
     this.pauseOpen = false;
   }
@@ -4033,7 +4034,14 @@ export class UI {
   }
 
   showReplayGate(message) {
-    const ov = this.root.querySelector('#overlay');
+    this.root.querySelector('#overlay').classList.add('hidden');
+    let ov = this.root.querySelector('#replay-gate');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'replay-gate';
+      ov.className = 'replay-gate';
+      this.root.appendChild(ov);
+    }
     ov.classList.remove('hidden');
     ov.innerHTML = `
       <div class="panel endpanel">

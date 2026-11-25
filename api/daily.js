@@ -75,13 +75,13 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
     async replayLinks(day) {
       try {
         const response = await fetchImpl(
-          `${url}/rest/v1/replays?select=id,user_id&day=eq.${day}&board=eq.true&mode=eq.daily`,
+          `${url}/rest/v1/replays?select=id,user_id,sim_hash&day=eq.${day}&board=eq.true&mode=eq.daily`,
           { headers },
         );
         if (!response.ok) return new Map();
         const found = await response.json();
         const links = new Map();
-        for (const row of found || []) links.set(row.user_id, row.id);
+        for (const row of found || []) links.set(row.user_id, { id: row.id, hash: row.sim_hash });
         return links;
       } catch {
         return new Map();
@@ -89,13 +89,13 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
     },
     async board({ day, userId }) {
       const top = await rows(
-        `daily_scores?select=user_id,display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero&day=eq.${day}&order=score.desc,created_at.asc,user_id.asc&limit=${BOARD_LIMIT}`,
+        `daily_scores?select=user_id,display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,sim_hash&day=eq.${day}&order=score.desc,created_at.asc,user_id.asc&limit=${BOARD_LIMIT}`,
       );
       const links = await this.replayLinks(day);
       let me = null;
       if (userId && UUID.test(userId)) {
         const mine = await rows(
-          `daily_scores?select=display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,created_at&user_id=eq.${userId}&day=eq.${day}&limit=1`,
+          `daily_scores?select=display_name,score,waves,city_hp,city_max_hp,duration_seconds,won,hero,sim_hash,created_at&user_id=eq.${userId}&day=eq.${day}&limit=1`,
         );
         if (mine[0]) {
           const better = await count(`daily_scores?select=user_id&day=eq.${day}&score=gt.${mine[0].score}`);
@@ -104,11 +104,11 @@ export function supabaseDailyStore({ url, serviceKey, fetchImpl = fetch }) {
             `daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=lt.${created}`,
           );
           const tied = await count(`daily_scores?select=user_id&day=eq.${day}&score=eq.${mine[0].score}&created_at=eq.${created}&user_id=lt.${userId}`);
-          me = entry(mine[0], better + earlier + tied + 1, true, boardReplayId(links, userId));
+          me = entry(mine[0], better + earlier + tied + 1, true, boardReplayId(links, userId, mine[0].sim_hash));
         }
       }
       return {
-        entries: top.map((row, index) => entry(row, index + 1, userId && row.user_id === userId, boardReplayId(links, row.user_id))),
+        entries: top.map((row, index) => entry(row, index + 1, userId && row.user_id === userId, boardReplayId(links, row.user_id, row.sim_hash))),
         me,
       };
     },

@@ -61,7 +61,7 @@ create index if not exists replays_recent_ip_idx
   on public.replays (ip_hash, created_at desc);
 create index if not exists replays_recent_user_idx
   on public.replays (user_id, created_at desc) where user_id is not null;
-create index if not exists replays_board_day_idx
+create unique index if not exists replays_board_day_idx
   on public.replays (user_id, day) where board;
 
 alter table public.replays enable row level security;
@@ -130,31 +130,26 @@ begin
   if v_level is null or v_frames is null or v_frames < 1 or v_frames > 500000 then raise exception 'invalid_replay'; end if;
   if v_hash is null or v_sim is null then raise exception 'invalid_replay'; end if;
 
-  perform pg_advisory_xact_lock(hashtextextended('replay:' || coalesce(p_actor::text, '') || ':' || p_ip_hash, 44021));
+  -- Serialize each quota independently: different accounts can share an IP,
+  -- and one account can upload from multiple IPs.
+  perform pg_advisory_xact_lock(hashtextextended('replay-ip:' || p_ip_hash, 44021));
+  if p_actor is not null then
+    perform pg_advisory_xact_lock(hashtextextended('replay-user:' || p_actor::text, 44021));
+  end if;
 
-  if coalesce(p_board, false) and p_actor is not null and v_day is not null then
-    select * into existing from public.replays
-    where user_id = p_actor and day = v_day and board
-    for update;
-    if found then
-      update public.replays set
-        ip_hash = p_ip_hash,
-        digest = p_digest,
-        sim_version = v_sim,
-        mode = v_mode,
-        seed = v_seed,
-        level_id = v_level,
-        difficulty = p_body->>'difficulty',
-        culture = p_body->>'culture',
-        hero = v_hero,
-        won = coalesce((p_body->>'won')::boolean, false),
-        frames = v_frames,
-        sim_hash = v_hash,
-        bytes = p_bytes,
-        body = p_body
-      where id = existing.id;
-      return jsonb_build_object('id', existing.id, 'duplicate', false, 'replaced', true);
-    end if;
+  if coalesce(p_board, false) then
+    if p_actor is null or v_mode <> 'daily' or v_day is null then raise exception 'invalid_replay'; end if;
+    -- Share the score writer's lock. A slower earlier submission cannot attach
+    -- its replay to a newer best score after the two HTTP requests cross.
+    perform pg_advisory_xact_lock(hashtextextended(p_actor::text || ':' || v_day::text, 90210));
+    perform 1 from public.daily_scores where user_id = p_actor and day = v_day
+      and sim_hash = v_hash and seed = v_seed
+      and replay_log->'frames' = p_body->'frames' and replay_log->'log' = p_body->'log';
+    if not found then raise exception 'stale_daily_replay'; end if;
+    -- A shared URL is immutable. Move the board pointer, never rewrite a run
+    -- somebody already shared. Failure rolls this change back with the insert.
+    update public.replays set board = false
+      where user_id = p_actor and day = v_day and board and digest <> p_digest;
   end if;
 
   select * into existing from public.replays
@@ -197,4 +192,6 @@ end;
 $$;
 
 revoke all on function public.publish_replay(text, uuid, text, text, integer, boolean, jsonb) from public, anon, authenticated;
+grant select on public.replays to service_role;
+
 grant execute on function public.publish_replay(text, uuid, text, text, integer, boolean, jsonb) to service_role;

@@ -5,6 +5,7 @@
 // bookkeeping (kept input logs, flags), and the client-write revokes.
 //   npm run check:postgres
 import assert from 'node:assert/strict';
+import {checkSharedReplays} from './share-replay-postgres-cases.mjs';
 import {checkFriendParties} from './friend-party-postgres-cases.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -215,6 +216,7 @@ try {
   eq((await q(`select count(*)::int n from daily_scores`)).rows[0].n, 1, 'the daily migration is safe to re-run');
 
   await checkFriendParties(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
+  await checkSharedReplays(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
 } finally {
   await client.end().catch(() => {});
   try { execFileSync(join(bin, 'pg_ctl'), ['-D', data, '-m', 'immediate', 'stop'], quiet); } catch { /* already down */ }
