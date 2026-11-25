@@ -1,4 +1,4 @@
-import { chapterLeaderStyle, CHAPTER_ROSTER_LIMIT } from './chapter.js';
+import { chapterLeaderStyle, chapterFounder, chapterIdentity, leaderRecord, CHAPTER_LEADERS, CHAPTER_ROSTER_LIMIT } from './chapter.js';
 // Persistent player-created siege characters. Named Zillions heroes remain in
 // Custom Games; created characters carry their own class, level, equipment and
 // appearance between sieges. For signed-in players level, XP, stats and loot
@@ -11,7 +11,7 @@ import {
   pruneAlloc, latticePoints, treeBonuses, treeBonusesForSet, normalizeSetSpec,
   canAllocate, canDeallocate, LATTICE_VERSION,
 } from './skilltree.js';
-import { itemInfo, itemMods } from './config.js';
+import { HEROES, itemInfo, itemMods } from './config.js';
 import { xpToNextLevel } from './match-rewards.js';
 
 export const MAX_MMO_CHARACTERS = CHAPTER_ROSTER_LIMIT; // eight legacy characters plus implemented chapter leaders
@@ -306,6 +306,20 @@ export function addMmoCharacter(profile, character) {
   normalizeMmoCharacters(profile);
   if (!character || profile.mmoCharacters.length >= MAX_MMO_CHARACTERS) return null;
   profile.mmoCharacters.push(character);
+  profile.mmoCharacterId = character.id;
+  return character;
+}
+
+// The leader on the setup grid and the character that keeps that run's level,
+// gear and Lattice are the same record. Vanguard is the chapter founder.
+// Alexander, Aaron and Tiger are their named companions, created on first
+// deployment so a match cannot credit a different identity.
+export function ensureDeployedLeader(profile, leaderKey) {
+  normalizeMmoCharacters(profile);
+  const character = leaderKey === 'vanguard' ? chapterFounder(profile) : leaderRecord(profile, leaderKey);
+  // Deployment is selection, not a second recruitment path. Existing companions
+  // remain available after a culture change; only chapter recruitment adds one.
+  if (!character) return null;
   profile.mmoCharacterId = character.id;
   return character;
 }

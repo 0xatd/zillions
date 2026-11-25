@@ -300,9 +300,11 @@ body::after {
 
 /* army stance chips */
 #stancebar .stance {
+  font: inherit; color: inherit; background: transparent; margin: 0;
   cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
   transition: all 0.12s; white-space: nowrap;
 }
+#stancebar .stance:focus-visible { outline: 2px solid #8acbff; outline-offset: 1px; }
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
 #stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
 
@@ -1315,7 +1317,7 @@ body::after {
 .creator-head p { color: #9eb3c7; line-height: 1.5; }
 .creator-form { display: grid; gap: 18px; max-width: 1080px; }
 .creator-form.creator-xl { grid-template-columns: minmax(250px, .72fr) minmax(520px, 1.6fr); align-items: start; }
-.creator-controls { display: grid; gap: 18px; }
+.creator-controls { display: grid; gap: 18px; min-width: 0; }
 .creator-preview { position: sticky; top: 20px; display: grid; place-items: center; min-height: 560px; overflow: hidden; border: 1px solid rgba(128,207,255,.22); border-radius: 8px; background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--creator-color, #8493a6) 25%, transparent), transparent 40%), linear-gradient(180deg, rgba(12,27,44,.96), rgba(3,8,15,.98)); box-shadow: inset 0 0 80px rgba(0,0,0,.5); }
 .creator-preview::before { content: ''; position: absolute; inset: 10% -30%; opacity: .3; background: repeating-linear-gradient(90deg, transparent 0 46px, rgba(128,207,255,.12) 47px 48px), repeating-linear-gradient(0deg, transparent 0 46px, rgba(128,207,255,.1) 47px 48px); transform: perspective(500px) rotateX(66deg) translateY(34%); }
 .creator-preview strong,.creator-preview>span { position: relative; z-index: 2; align-self: end; color: #dff4ff; letter-spacing: .18em; }
@@ -1335,7 +1337,7 @@ body::after {
 .creator-part.sel { color: #fff1b8; border-color: #e4bf55; background: rgba(228,191,85,.12); }
 .creator-form > label { display: grid; gap: 6px; max-width: 420px; color: #80cfff; font-size: 10px; font-weight: 900; letter-spacing: .18em; }
 .creator-form input { padding: 13px 15px; color: #fff; font: 700 16px inherit; border: 1px solid rgba(128,207,255,.35); border-radius: 4px; background: rgba(4,12,23,.9); }
-.creator-form fieldset { padding: 0; border: 0; }
+.creator-form fieldset { min-width: 0; padding: 0; border: 0; }
 .creator-form legend { margin-bottom: 8px; color: #80cfff; font-size: 10px; font-weight: 900; letter-spacing: .18em; }
 .creator-classes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .creator-class { position: relative; display: grid; grid-template-columns: 42px 1fr; gap: 9px; min-height: 68px; padding: 9px; color: #dcecff; text-align: left; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(10,18,29,.82); cursor: pointer; }
@@ -1390,10 +1392,11 @@ body::after {
 .market-item small { color: #7690a6; }
 .market-item button { padding: 8px 10px; color: #fff1b8; border: 1px solid rgba(228,191,85,.42); background: rgba(228,191,85,.1); }
 .market-item button:hover { background: rgba(228,191,85,.2); }
-.creator-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.creator-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .creator-actions button { min-width: 190px; }
 
-@media (max-width: 820px) { .creator-form.creator-xl,.market-panel,.crafting-panel { grid-template-columns: 1fr; } .creator-preview { position: relative; top: 0; min-height: 380px; } .creator-avatar { transform: scale(.78); } .creator-classes { grid-template-columns: repeat(2, minmax(0, 1fr)); } .creator-parts { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .creator-form.creator-xl { grid-template-columns: minmax(0, 1fr); } .creator-preview { position: relative; top: 0; min-height: 380px; } }
+@media (max-width: 820px) { .market-panel,.crafting-panel { grid-template-columns: 1fr; } .creator-avatar { transform: scale(.78); } .creator-classes { grid-template-columns: repeat(2, minmax(0, 1fr)); } .creator-parts { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .first-hour-guide { left:12px; right:auto; top:96px; width:calc(55vw - 28px); max-height:calc(100% - 112px); padding:11px 12px; } .first-hour-guide>b { font-size:14px; } .first-hour-guide p { font-size:11px; } }
 
 @media (max-width: 760px) {
@@ -2270,6 +2273,7 @@ button.is-busy { opacity:.72; pointer-events:none; }
 .leaderchip b { white-space:normal; line-height:1.15; font-size:12px; }
 .leaderchip small { color:#9fb0ba; font-size:10px; }
 .leaderchip.playable { border-color:#e0b15a; }
+.leaderchip.sel { background:#1c3344; box-shadow:inset 0 0 0 2px #e0b15a; }
 .leaderchip.locked { opacity:.62; }
 .qwer-bar { display:flex; gap:8px; margin:8px 0 14px; }
 .qslot { flex:1; min-width:0; padding:8px; background:#101c26; border:1px solid #456070; }
@@ -2293,4 +2297,63 @@ body:has(.friend-party-dialog[open]){overflow:hidden}
  .friend-party-dialog .menubtn{font-size:.85rem;margin:2px;min-height:36px}
  .friend-party-dialog .party-status:empty{display:none}
  .friend-party-dialog small{font-size:.75rem}
+}
+
+/* Campaign HUD: fixed-height hero plate; signature overflow never pushes Pack offscreen. */
+#heroplate .hpinfo { min-width:0; }
+#a-name { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#a-items { flex-wrap:nowrap; overflow:hidden; max-height:22px; }
+#a-items .hitem { flex:none; }
+#a-pack .pack-open { max-width:100%; white-space:nowrap; font-size:11px; }
+#upgradepanel:not(.hidden) { display:block !important; height:auto; max-height: min(240px, 45vh); overflow:auto; }
+#upgradepanel .uphead { width:100%; border:0; background:#142933; color:#f4df9c; cursor:pointer; padding:6px; }
+#upgradepanel .uprow:not(.hidden) { min-height:106px; }
+#actionbar:has(#upgradepanel:not(.hidden)) #buildhint { bottom:calc(100% + 48px); }
+#actionbar:has(#upgradepanel .uprow:not(.hidden)) #buildhint { display:none; }
+@media(max-width:599px), (max-height:650px) {
+  #a-items { display:none; } /* All bonuses remain accessible in Pack. */
+  #a-name { font-size:10px; }
+  .hplvl { font-size:9px; margin-left:0; }
+}
+#actionbar { min-height:140px; }
+#heroplate { min-height:0; padding:4px; }
+#heroplate .hpinfo { font-size:11px; }
+#heroplate .hpbar.herohp { height:4px; margin-top:2px; }
+#heroplate .hpbar.heroxp { height:3px; margin-top:2px; }
+#heroplate .hplvl { font-size:10px; }
+#heroplate .packrow { margin-top:2px; }
+#heroplate #a-items { max-height:18px; margin-top:1px; }
+#heroplate #a-items .hitem { font-size:10px; padding:1px 2px; }
+#actionbar .fight-kit { min-height:0; }
+/* First-run coach shares the HUD: never cover controls or a chosen detail panel. */
+.coach { top:64px; bottom:auto; left:auto; right:16px; padding:9px 12px; background:#10202b; }
+.coach b { font-size:15px; }
+.coach p { font-size:12px; }
+body:has(#upgradepanel .uprow:not(.hidden)) .coach,
+body:has(#battle-details:not(.hidden)) .coach,
+body:has(#combat-alert:not(.hidden)) .coach { display:none; }
+@media(max-width:800px) { .coach { top:110px; bottom:auto; } }
+
+@media(max-width:599px) {
+  .abilities-overview { grid-template-columns:minmax(0,1fr); }
+  .abilities-overview article { min-width:0; }
+  .abilities-overview p { overflow-wrap:anywhere; }
+}
+
+/* One compact objective, with a quiet dismiss action instead of a second panel. */
+.coach p { margin-bottom:0; }
+#coach-skip { position:absolute; top:7px; right:8px; padding:4px 6px; border:0; background:transparent; color:#aebfc9; font:inherit; font-size:11px; cursor:pointer; }
+#coach-skip:hover, #coach-skip:focus-visible { color:#fff; text-decoration:underline; }
+#coach-kicker { display:block; padding-right:70px; }
+@media(max-width:599px) {
+  .coach { top:130px; }
+  #actionbar { grid-template-rows:38px minmax(0,1fr); min-height:150px; }
+  #stancebar .stance { min-height:32px; flex:1; }
+}
+@media(max-height:500px) and (min-width:600px) {
+  .coach { top:42px; width:330px; padding:7px 10px; }
+  .coach b { font-size:13px; }
+  .coach p { font-size:11px; line-height:1.3; }
+  #actionbar { grid-template-rows:34px minmax(0,1fr); }
+  #stancebar .stance { min-height:30px; }
 }

@@ -11,7 +11,7 @@
 // is a rift with two passes through it. The archetype decides the pattern; the
 // coverage quantiles decide how much of it there is, so a map is playable no
 // matter how the noise landed.
-import { MAP_SIZE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R, CITY_WALL_R } from './config.js';
+import { MAP_SIZE, SIEGE, TILE, TILE_INFO, CITY_PAD_R, OUTPOST_PAD_R, CITY_WALL_R } from './config.js';
 import { SITE_FORMS, LEDGE, makeRim, rimRadius, rimOpen, rimMaxRadius, cityFacing, angDiff } from './site-plan.js';
 import { makeRNG, makeNoise, clamp } from './utils.js';
 
@@ -1465,7 +1465,7 @@ export class TerrainField {
     const spots = [];
     const taken = {};
     const MIN_SEP = 15;
-    const MAX_NODES = 12;
+    const MAX_NODES = SIEGE.maxNodes;
     const place = (c) => {
       const settled = this._settleSpot(c.x, c.z);
       if (!settled) return false;

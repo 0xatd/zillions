@@ -139,7 +139,8 @@ const canonicalHeroes = {
   tiger: { name: 'Tiger Reyes', color: 0xd8721f, trim: 0x1c1a18 },
   aaron: { name: 'Aaron Whitlock', color: 0x6a4fae, trim: 0xf0d060 },
 };
-assert.deepEqual(Object.keys(HEROES).filter(key=>!HEROES[key].abilities), Object.keys(canonicalHeroes), 'canonical hero roster or order changed');
+const prototypeKits = new Set(['lina', 'sniper', 'axe', 'sven']);
+assert.deepEqual(Object.keys(HEROES).filter((key) => !prototypeKits.has(key)), Object.keys(canonicalHeroes), 'canonical hero roster or order changed');
 for (const [key, expected] of Object.entries(canonicalHeroes)) {
   assert.equal(HEROES[key]?.name, expected.name, `${key} canonical hero name changed`);
   assert.equal(HEROES[key]?.color, expected.color, `${key} hero model armor color changed`);

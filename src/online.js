@@ -18,7 +18,9 @@ const CURRENT_RULES = 'survival-plots';
 // v12: shared perimeters, repair-first payment, and hero corner collision.
 // v13: physical colony crew and corrected movement (snapshot v12).
 // v15: gradual siege pressure and boss-wave balance.
-export const LOBBY_PROTOCOL_VERSION = 15;
+// v16: bounded opening encounter and immediate order/encounter state hashing.
+// v17: original multi-slot leader kits; incompatible with either v16 preview.
+export const LOBBY_PROTOCOL_VERSION = 17;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

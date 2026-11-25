@@ -430,3 +430,28 @@ seven-hero list or duplicate Ready screen. Existing rooms still enforce seats,
 Ready, campaign eligibility, reconnect and server-owned rewards. Party chat,
 public profiles, ally revival and new social blocking systems are not in this
 release. Existing lobby friends/chat remain available.
+
+## Opening siege (2026-11-25)
+
+Greenfall keeps site choice and Economy/Defense/Army openings. Its existing
+first-siege encounter is bounded: after the first paid build, one named hive
+launches the introductory wave from that hive, not unrelated forward nodes.
+Other hive reinforcements and time-driven Threat wait until that wave ends,
+for at most 180 seconds after the opening build. This deadline survives reload;
+keeping one enemy alive cannot create unlimited safe income.
+Existing world enemies still fight; this is not invulnerability or a new
+build/day phase. Breaking the wave pays the existing 24 mission gold once and
+leaves at least 20 seconds on living hive muster timers. Continuous siege then
+resumes. Other missions and Survival keep their existing pacing.
+
+The skippable coach teaches movement, founding, building, Defend Keep, actual
+combat, the first-wave victory, then Push. It never requires Follow during a
+base attack. Bindings come from the player's settings. Army orders remain
+global; there is no individual squad micro. Confirming an already-active order
+acknowledges the input without resetting squad routes. Keep danger exposes a
+Recall army action through the same stance command.
+
+Opening stage/wave state remains in existing snapshots. Multiplayer protocol
+16 prevents protocol-15 rooms from accepting the changed simulation. The hash
+includes opening state and army stance. Signed-in rewards, account progression,
+map generation, and combat authority are unchanged.

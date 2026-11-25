@@ -35,6 +35,8 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - One opening hive produces at least 1.5 times the units per second of the
   fastest single human producer, then accelerates with Threat. Humans overcome
   that deficit with multiple camps, captured outposts, and hive destruction.
+- Greenfall begins with a bounded first-siege encounter before the normal
+  Threat clock and hive reinforcement loop. See [Opening siege](product-contract.md#opening-siege-2026-11-25). Existing world enemies remain dangerous.
 - Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
   your own conquests. Casual and Normal scale that clock by the full
   difficulty multiplier. Brutal uses `threatClockMult()`, a fraction of its
