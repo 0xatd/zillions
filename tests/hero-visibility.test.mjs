@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../scripts/resolve-three.mjs';
-const {terrainOccludesHero,installHeroOcclusionShell}=await import('../src/hero-visibility.js');
+const {terrainOccludesHero,structuresOccludeHero,installHeroOcclusionShell}=await import('../src/hero-visibility.js');
 const T=await import('three');
 test('foreground cliff triggers a hero cue; open ground and cliffs behind the hero do not',()=>{
  const tiles=new Uint8Array(40*40),m={size:40,tiles,groundY:()=>0};
@@ -20,4 +20,14 @@ test('occlusion silhouette follows animated geometry and draws only obscured fra
  assert.equal(shell.material.depthFunc,T.GreaterDepth);assert.equal(shell.material.depthWrite,false);
  assert.equal(shell.geometry,limb.geometry);assert.equal(shell.visible,false);
  limb.geometry.dispose();limb.material.dispose();shell.material.dispose();
+});
+
+test('building cue only activates between camera and hero, not for dead or distant structures',()=>{
+ const camera={x:0,y:8,z:20},hero={x:0,y:0,z:0};
+ const record=(min,max,alive=true)=>({b:{alive},occlusionBounds:new T.Box3(new T.Vector3(...min),new T.Vector3(...max))});
+ assert.equal(structuresOccludeHero([],camera,hero),false);
+ assert.equal(structuresOccludeHero([record([-2,0,3],[2,5,7])],camera,hero),true);
+ assert.equal(structuresOccludeHero([record([-2,0,3],[2,5,7],false)],camera,hero),false);
+ assert.equal(structuresOccludeHero([record([-2,0,-7],[2,5,-3])],camera,hero),false);
+ assert.equal(structuresOccludeHero([record([10,0,3],[14,5,7])],camera,hero),false);
 });

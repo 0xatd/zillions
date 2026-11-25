@@ -1,3 +1,4 @@
+import { heroCopy, bearing } from './campaign-presentation.js';
 import { spellManaCost } from './hero-spells.js';
 import { heroAbilities, abilityCooldown } from './hero-abilities.js';
 import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
@@ -64,6 +65,9 @@ export class UI {
     this.cb = cb;
     this.shell = new ShellState();
     this.msgSeen = 0;
+    this._contactTime = -1;
+    this._nearestContact = null;
+    this._upgradesOpen = false;
     this.pauseOpen = false;
     this._buildDOM();
   }
@@ -366,7 +370,7 @@ export class UI {
               <label>Insignia<select id="q-emblem"></select></label>
               <label>Difficulty<select id="q-diff"></select></label>
             </div>
-            <div class="steplabel">Leaders <small>— Vanguard deploys now. The rest are coming soon.</small></div>
+            <div class="steplabel">Leaders <small>— Your founder leads first. Recruit companions through your chapter.</small></div>
             <div id="q-leaders" class="leader-grid"></div>
             <div id="q-abilities" class="qwer-bar" aria-label="Ability bar"></div>
             <div class="quick-actions">
@@ -390,7 +394,7 @@ export class UI {
           <div class="steplabel culture-label">3 · Your culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
           <div id="culture-detail" class="culture-detail"></div>
-          <div class="steplabel">Leaders <small>— Vanguard deploys now. Locked leaders stay in a compact grid so Start stays on screen.</small></div>
+          <div class="steplabel">Leaders <small>— Recruit more leaders through your chapter.</small></div>
           <div id="setup-leaders" class="leader-grid"></div>
           <div id="setup-abilities" class="qwer-bar" aria-label="Ability bar"></div>
           <div class="steplabel diff-label">4 · Difficulty</div>
@@ -1588,7 +1592,7 @@ export class UI {
 
   _renderAbilitiesOverview(character) {
     const klass = MMO_CLASSES[character.classKey] || MMO_CLASSES.vanguard;
-    const hero = HEROES[character.proxyHero || klass.proxy] || HEROES.scott;
+    const hero = heroCopy(HEROES[character.proxyHero || klass.proxy] || HEROES.scott, character);
     const cards = hero.abilities ? hero.abilities.map(a=>[a.passive?'PASSIVE':'ACTIVE ABILITY',a]) : [
       ['AURA', hero.aura], ['PASSIVE I', hero.passives?.[0]], ['PASSIVE II', hero.passives?.[1]], ['ACTIVE ABILITY', hero.ability],
     ];
@@ -1768,13 +1772,17 @@ export class UI {
     if (gearGuide) {
       const step = firstHourStep(character);
       gearGuide.innerHTML = step === 'equip'
-        ? 'Next: select a stash item to preview its exact attribute changes, then equip it. Nothing is equipped automatically.'
-        : `Your mission loadout uses only legally equipped items.${step === 'forge' ? ' <button data-next-forge>OPEN FORGE →</button>' : ''}`;
+        ? 'Next: select a stash item to preview its exact attribute changes, then equip it. Equipment must be equipped; signature bonuses are always active.'
+        : `Equipped gear and owned signature bonuses are active in battle.${step === 'forge' ? ' <button data-next-forge>OPEN FORGE →</button>' : ''}`;
       gearGuide.querySelector('[data-next-forge]')?.addEventListener('click', () => { this._sheetTab = 'crafting'; this._renderCharacterSheet(); });
     }
     // What the run will actually use. A slot holding something the character
     // cannot legally wield is shown as illegal rather than quietly counted.
     const worn = legalEquipment(character);
+    if (gearGuide) {
+      const signatures = (character.items || []).filter(key => { const item=itemInfo(key); return item && !item.slot; });
+      if (signatures.length) gearGuide.innerHTML += `<details><summary>${signatures.length} automatic signature bonuses</summary>${signatures.map(key=>{const it=itemInfo(key);return `<p><b>${escapeHtml(it.name)}</b> · ${escapeHtml(it.desc || itemLines(it).join(' · '))}</p>`;}).join('')}</details>`;
+    }
     const label = {
       weapon: 'SET I · WEAPON', offhand: 'SET I · OFF-HAND',
       weapon2: 'SET II · WEAPON', offhand2: 'SET II · OFF-HAND',
@@ -2273,6 +2281,14 @@ export class UI {
         ctx.lineWidth = 2 / view.scale;
         ctx.stroke();
       }
+      if (mine || reachable.has(node.id) || view.hover?.id === node.id || view.selected?.id === node.id) {
+        ctx.fillStyle = '#f4ecd3'; ctx.font = `${11 / view.scale}px system-ui`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.strokeStyle = '#101922'; ctx.lineWidth = 3 / view.scale;
+        const labelY = mine ? node.y - r - 16 / view.scale : node.y + r + 3 / view.scale;
+        ctx.strokeText(node.name, node.x, labelY);
+        ctx.fillText(node.name, node.x, labelY);
+      }
       // Only the big nodes carry a glyph — traces would be unreadable soup.
       if (node.kind === 'doctrine' || node.kind === 'origin' || node.kind === 'relay') {
         ctx.fillStyle = isOwned ? '#1a1712' : 'rgba(230, 236, 246, 0.8)';
@@ -2302,7 +2318,7 @@ export class UI {
       box.innerHTML = `<h3>THE LATTICE</h3>
         <p class="lattice-blurb">One tree, thirteen doors into it. Your class decides where you start, not what you can become.</p>
         <p class="lattice-blurb"><b>Click</b> a node to buy the whole route to it. <b>Shift-click</b> to sell one back. Drag to pan, scroll to zoom.</p>
-        <h4>THIS BUILD</h4>
+        <p class="lattice-blurb">Start at your class emblem. Bright neighboring nodes are available; their labels describe the upgrade. Each node costs one point. Distant nodes buy the whole route.</p><h4>THIS BUILD</h4>
         ${lines.length ? `<ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : '<p class="empty-gear">Nothing allocated yet.</p>'}`;
       return;
     }
@@ -2463,7 +2479,10 @@ export class UI {
       card.classList.toggle('hidden', !selected);
       card.disabled = !selected;
       card.classList.toggle('sel', card.dataset.key === this.selectedHero);
-      card.querySelector('b').textContent = character && selected ? character.name : HEROES[card.dataset.key].name;
+      const displayHero = heroCopy(HEROES[card.dataset.key], selected ? character : null);
+      card.querySelector('b').textContent = displayHero.name;
+      card.querySelector('small').textContent = displayHero.tagline;
+      card.onmouseenter = e => this._showTip(e, this._heroTip(displayHero));
       card.querySelector('.hface')?.classList.toggle('hidden', !!character && !character.chapterLeader);
     }
     if (character && previous !== this.selectedHero) this.cb.onHeroPick?.(this.selectedHero);
@@ -2473,7 +2492,7 @@ export class UI {
     }
   }
 
-  showSetup({ coop = false, mode = 'campaign', online = null } = {}) {
+  showSetup({ coop = false, mode = 'campaign', online = null, level = null } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._syncChapterHeroChoice(mode);
@@ -2500,6 +2519,10 @@ export class UI {
     // Play Solo card, so the chips would be a second, contradictory entrance.
     this._renderModeSeg(mode, coop || !!online);
     this._buildLevelRow(this._campaignCleared || 0, mode !== 'campaign', mode);
+    if (!online && level != null) {
+      const card = this.root.querySelector(`#levelrow [data-level="${Number(level)}"]`);
+      if (card && !card.disabled) card.click();
+    }
     this.setStartButton({ text: this._startCopyFor(mode), disabled: false, title: '' });
     const mp = this.root.querySelector('#mp-panel');
     mp.classList.toggle('hidden', !coop && !online);
@@ -2687,7 +2710,7 @@ export class UI {
     const passives = (h.passives || [])
       .map((p) => `<span class="tfx">${p.icon} <b>${p.name}</b> — passive upgrade</span><br><span class="tdesc">${p.desc}</span>`)
       .join('<br>');
-    return `<b>${h.icon} ${h.name}</b><br><span class="tdesc">${h.tagline}</span><br>` +
+    return `<b>${h.icon} ${escapeHtml(h.name)}</b><br><span class="tdesc">${h.tagline}</span><br>` +
       (au ? `<span class="tfx">${au.icon} <b>${au.name}</b> — passive aura</span><br><span class="tdesc">${au.desc}</span><br>` : '') +
       (passives ? `${passives}<br>` : '') +
       `<span class="tfx">${a.icon} <b>${a.name}</b> — ${this._keyLabel('ability1')}, ${a.cd}s cooldown</span><br><span class="tdesc">${a.desc}</span>` +
@@ -2698,6 +2721,11 @@ export class UI {
 
   initHUD(game, p, character = null) {
     this.msgSeen = 0;
+    this._contactTime = -1;
+    this._nearestContact = null;
+    this._upgradesOpen = false;
+    this._upgradePanelKey = null;
+    this._combatAlertKey = null;
     this.root.querySelector('#topbar').classList.remove('hidden');
     this.root.querySelector('#actionbar').classList.remove('hidden');
     this.root.querySelector('#minimap-wrap').classList.remove('hidden');
@@ -2708,7 +2736,8 @@ export class UI {
     if (mode) mode.onclick = () => this.cb.onControlMode && this.cb.onControlMode();
     const h = game.heroes[p];
     if (character && character.proxyHero !== h.key) character = null;
-    const d = h.def;
+    this._hudCharacter = character;
+    const d = heroCopy(h.def, character);
     const kit = this.root.querySelector('#fight-kit');
     if (kit) {
       const entries = [
@@ -2746,7 +2775,7 @@ export class UI {
     big.onpointerleave = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
     big.onmouseenter = (e) => {
       const hh = this._game ? this._game.heroes[this._p] : null;
-      if (hh) this._showTip(e, this._heroTip(hh.def));
+      if (hh) this._showTip(e, this._heroTip(heroCopy(hh.def, this._hudCharacter)));
     };
     big.onmousemove = (e) => this._moveTip(e);
     big.onmouseleave = () => this._hideTip();
@@ -2782,12 +2811,12 @@ export class UI {
     if(selection.mode==='items') {
       const hero=game.heroes[player];
       const rows=keys=>keys.map(key=>{const item=itemInfo(key);return item ? `<article class="battle-item"><b>${escapeHtml(item.icon||'')} ${escapeHtml(item.name)}</b><p>${escapeHtml(item.desc||itemLines(item).join(' · '))}</p></article>`:'';}).join('');
-      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Equipped gear</h4>${rows([...new Set([...(hero?.items||[]),...Object.values(hero?.equipment||{}).filter(Boolean)])])||'<p>No additional gear equipped.</p>'}`;
+      html=`<h3>Carried items</h3><h4>Field pack · ${(hero?.pack||[]).length}/${PACK_SLOTS}</h4>${rows(hero?.pack||[])||'<p>No field finds yet. Walk over loot to collect it.</p>'}<h4>Automatic signature bonuses</h4>${rows(hero?.items||[])||'<p>No signature bonuses yet.</p>'}<h4>Equipped gear</h4>${rows(Object.values(hero?.equipment||{}).filter(Boolean))||'<p>No additional gear equipped.</p>'}`;
     } else {
       const unit=(selection.enemy?game.zombies:game.units).find(u=>u.id===selection.id);
       const visible=!selection.enemy||fogVisionSources(game).some(s=>Math.hypot(s.x-unit?.x,s.z-unit?.z)<s.radius);
       if(selection.game!==game||!unit||unit.dead||unit.hp<=0||!visible){this._battlePanel=null;panel.classList.add('hidden');return;}
-      const def=unit.def||{},stats=unit.hero?game.heroStats(unit):null;
+      const def=heroCopy(unit.def||{},unit===game.heroes[player]?this._hudCharacter:null),stats=unit.hero?game.heroStats(unit):null;
       const activity=unit.windup?(unit.windup.kind==='acid'?'Aiming acid — move out of the ring':'Winding up a smash — move or interrupt'):unit.target?'Engaging a target':unit.moving?'Moving':selection.enemy?'Holding position':({defend:'Defending the city',guard:'Following the hero',attack:'Pushing the lanes'}[game.stance]||'Holding position');
       const hp=Math.max(0,Math.ceil(unit.hp)),max=Math.ceil(unit.maxHp);
       html=`<h3>${escapeHtml(def.name||(unit.type?unit.type[0].toUpperCase()+unit.type.slice(1):'Unit'))}</h3><p>${selection.enemy?'Enemy':unit.hero?'Allied hero':'Allied troop'} · ${escapeHtml(activity)}</p><div class="inspect-health"><span style="width:${Math.max(0,Math.min(100,unit.hp/unit.maxHp*100))}%"></span></div><b>${hp} / ${max} HP</b><dl><dt>Damage</dt><dd>${Math.round(stats?.damage??def.dmg??0)}</dd><dt>Range</dt><dd>${(stats?.range??def.ranged??def.range??.75).toFixed(1)}</dd><dt>Speed</dt><dd>${(stats?.speed??(selection.enemy?def.chase:def.speed)??0).toFixed(1)}</dd></dl>${def.desc?`<p>${escapeHtml(def.desc)}</p>`:''}`;
@@ -2817,7 +2846,7 @@ export class UI {
       for(const control of [order,reserve,pause])control.disabled=p!==0;
       pause.textContent=b.paused?'Resume':'Pause';
       for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
-      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':(b.paused ? 'Paused — choose an order or Resume to start the crew. ' : b.status==='No eligible work' ? 'Current order is complete. Choose another order or capture more ground. ' : '')+({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
     }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
@@ -2886,15 +2915,32 @@ export class UI {
         ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
     }
-    q('#r-z').innerHTML = `🧟 ${game.zombies.length}`;
+    q('#r-z').textContent = `🧟 ${game.zombies.length}`;
+    if (game.time - (this._contactTime ?? -1) >= .5) {
+      this._contactTime = game.time;
+      const sources = fogVisionSources(game), hero = game.heroes[p];
+      let nearest = null, distance = Infinity;
+      for (const enemy of game.zombies) {
+        if (enemy.dead || !visibleInFog(sources, enemy.x, enemy.z)) continue;
+        const d = Math.hypot(enemy.x - hero?.x, enemy.z - hero?.z);
+        if (d < distance) { distance = d; nearest = enemy; }
+      }
+      q('#r-z').title = nearest ? `Nearest visible enemy: ${bearing(hero, nearest)} · ${Math.round(distance)} tiles` : 'No enemies currently in allied sight. Scout the marked lanes.';
+      q('#r-z').setAttribute('aria-label', q('#r-z').title);
+      this._nearestContact = nearest ? bearing(hero, nearest) : '';
+    }
+    if (this._nearestContact) q('#r-z').textContent += ` · ${this._nearestContact}`;
     const alert = combatAlert(game, p);
     const alertBox = q('#combat-alert');
-    const alertKey = alert?.key || '';
+    const keep = game.buildings?.find(b => b.kind === 'hq' && b.alive);
+    const keepStatus = keep ? `${Math.ceil(keep.hp)} / ${keep.maxHp} HP · ${bearing(game.heroes[p], {x:keep.cx, z:keep.cz})}` : '';
+    const alertKey = (alert?.key || '') + (alert?.key.startsWith('keep') ? keepStatus : '');
     if (alertKey !== this._combatAlertKey) {
       this._combatAlertKey = alertKey;
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
-        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}</small></div>`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ` · ${keepStatus}` : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}</div>`;
+        alertBox.querySelector('#locate-keep')?.addEventListener('click', () => this.cb.onLocateKeep?.());
       } else {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
@@ -2904,7 +2950,8 @@ export class UI {
     // Hero plate.
     const h = game.heroes[p];
     if (h) {
-      q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Lv ${h.level}`;
+      q('#a-lvl').title = this._hudCharacter ? `Leader level ${this._hudCharacter.level} is permanent. Match upgrades apply during this siege.` : 'Level during this siege';
+      q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Match Lv ${h.level}`;
       q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
       q('#a-hp').parentElement.classList.toggle('critical', !h.dead && h.hp / h.maxHp <= 0.25);
       const need = xpForLevel(h.level);
@@ -2915,8 +2962,8 @@ export class UI {
       if (this._itemsKey !== itemsKey) {
         this._itemsKey = itemsKey;
         q('#a-items').innerHTML = (h.items || [])
-          .map((k) => { const it = itemInfo(k); return it ? `<span class="hitem" title="${it.name} — ${it.desc || itemLines(it).join(', ')}">${it.icon}</span>` : ''; })
-          .join('');
+          .slice(0, 4).map((k) => { const it = itemInfo(k); return it ? `<span class="hitem" title="${it.name} — ${it.desc || itemLines(it).join(', ')}">${it.icon}</span>` : ''; })
+          .join('') + ((h.items || []).length > 4 ? `<button class="hitem" aria-label="View all automatic bonuses">+${h.items.length - 4}</button>` : '');
       }
 
       // Pack: what this hero has picked up off the field, and how much room is
@@ -3024,7 +3071,8 @@ export class UI {
     }
     if (this._upgradePanelKey === key) return;
     this._upgradePanelKey = key;
-    panel.innerHTML = `<div class="uphead"><b>${points}</b> upgrade point${points === 1 ? '' : 's'} available</div><div class="uprow"></div>`;
+    panel.innerHTML = `<button class="uphead" aria-expanded="${!!this._upgradesOpen}"><b>${points}</b> upgrade point${points === 1 ? '' : 's'} · ${this._upgradesOpen ? 'Close' : 'Choose'}</button><div class="uprow${this._upgradesOpen ? '' : ' hidden'}"></div>`;
+    panel.querySelector('.uphead').onclick = () => { this._upgradesOpen = !this._upgradesOpen; this._upgradePanelKey = null; this._updateUpgradePanel(game, h); };
     const row = panel.querySelector('.uprow');
     for (const choice of choices) {
       const button = document.createElement('button');
@@ -3034,7 +3082,7 @@ export class UI {
       button.innerHTML = `
         <span class="upicon">${choice.icon}</span>
         <b>${choice.name}</b>
-        <small>${choice.desc}</small>
+        <small>${escapeHtml(heroCopy({ name: h.def.name, desc: choice.desc }, this._hudCharacter).desc)}</small>
         <span class="uppips">${'●'.repeat(choice.rank)}${'○'.repeat(choice.max - choice.rank)}</span>`;
       button.onclick = () => this.cb.onHeroUpgrade && this.cb.onHeroUpgrade(choice.key);
       row.appendChild(button);
@@ -3294,14 +3342,14 @@ export class UI {
   _renderLeaderPick(selector) {
     const host = this.root.querySelector(selector);
     if (!host) return;
-    host.innerHTML = leaderRoster().map((leader) => `<button type="button" class="leaderchip${leader.playable ? ' playable sel' : ' locked'}" data-leader="${escapeHtml(leader.key)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? 'Ready' : 'Coming soon'}</small></button>`).join('');
+    host.innerHTML = leaderRoster(this._profile).map((leader) => `<button type="button" class="leaderchip${leader.key === 'vanguard' ? ' playable sel' : ' locked'}" data-leader="${escapeHtml(leader.key)}" disabled><b>${escapeHtml(leader.name)}</b><small>${escapeHtml(leader.status || 'Your founder')}</small></button>`).join('');
   }
 
   _renderAbilityPreview(selector, heroKey) {
     const host = this.root.querySelector(selector);
     if (!host) return;
     const hero = HEROES[heroKey] || HEROES.scott;
-    host.innerHTML = abilityBar(hero).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
+    host.innerHTML = abilityBar(hero, Array.from({length:6},(_,slot)=>`${slot>=3?this._keyLabel('second_bar')+'+':''}${this._keyLabel('ability'+(slot%3+1))}`)).map((slot) => `<div class="qslot ${slot.state}" title="${escapeHtml(slot.detail)}"><kbd>${slot.key}</kbd><span>${slot.icon}</span><b>${escapeHtml(slot.name)}</b></div>`).join('');
   }
 
   _wireQuickSetup() {
@@ -3713,16 +3761,30 @@ export class UI {
     }).join('');
     const quests = questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : '';
     if (extra.pending) return `${quests}<p class="tagline">⏳ Reporting the siege to command — rewards are granted by the server…</p>`;
-    if (extra.error) return `${quests}<p class="tagline">⚠️ ${extra.error}</p>`;
+    if (extra.error) return `${quests}<p class="tagline">⚠️ ${escapeHtml(extra.error)}</p>`;
     const grants = (extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
     const full = (extra.skipped || []).filter((entry) => entry.reason === 'stash_full').length;
-    return `${quests}${extra.heroName ? `<p class="tagline">⭐ <b>${extra.heroName}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${extra.alloy ? ` · +${extra.alloy} ${META_CURRENCY.short}` : ''}${grants.length
+    return `${quests}${extra.heroName ? `<p class="tagline">⭐ <b>${escapeHtml(extra.heroName)}</b> marches on at level ${extra.level}${extra.xp ? ` · +${extra.xp} XP` : ''}${(extra.levels || []).length ? ` · LEVEL UP ${extra.levels.join(', ')}` : ''}${extra.alloy ? ` · +${extra.alloy} ${META_CURRENCY.short}` : ''}${grants.length
       ? ` — gained ${grants.map((it) => `${it.icon} <b>${it.name}</b>`).join(', ')}` : ''}.</p>` : ''}${full ? `<p class="tagline">📦 Stash full — ${full} item${full === 1 ? '' : 's'} could not be stored.</p>` : ''}`;
   }
 
   setEndRewards(extra) {
     const host = this.root.querySelector('#end-rewards');
-    if (host) host.innerHTML = this._endRewardsHtml(extra);
+    if (host) {
+      host.innerHTML = this._endRewardsHtml(extra);
+      if (extra?.retry && extra.error) {
+        const retry = document.createElement('button'); retry.className = 'tbtn'; retry.textContent = 'Retry saving rewards';
+        retry.onclick = () => { retry.disabled = true; extra.retry(); }; host.appendChild(retry);
+      }
+    }
+    const unlock = this.root.querySelector('#end-unlock');
+    const mission = this._endMission;
+    if (unlock) {
+      const confirmed = extra?.saved && !extra.pending && !extra.error && mission?.won && mission.mode === 'campaign'
+        && Number(extra.campaignCleared) >= mission.levelId;
+      unlock.classList.toggle('hidden', !confirmed);
+      unlock.textContent = confirmed ? `${extra.local ? 'Saved in this browser' : 'Progress saved'} · Next front: ${levelById(mission.levelId + 1).name}` : '';
+    }
   }
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
@@ -3735,6 +3797,7 @@ export class UI {
     const survival = mode === 'survival';
     const labyrinth = mode === 'labyrinth';
     const review = runReview({ won, stats, threat, mode, game });
+    this._endMission = { won, mode, levelId: lv.id };
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
@@ -3748,11 +3811,13 @@ export class UI {
           : won
           ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
+        <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
+        <p id="end-unlock" class="tagline hidden"></p>
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
           <div>${labyrinth ? `🌀 Chambers razed: <b>${stats.nests || 0}</b>` : `🔥 Hive nests razed: <b>${stats.nests || 0}</b>`}</div>
-          ${labyrinth ? `<div>☠️ Heroes fallen: <b>${stats.heroDeaths || 0}</b></div>` : `<div>🏗️ Structures raised: <b>${stats.built}</b></div>`}
+          ${labyrinth ? `<div>☠️ Heroes fallen: <b>${stats.heroDeaths || 0}</b></div>` : `<div>🏗️ Structures raised: <b>${stats.built}</b> (includes upgrades)</div>`}
           ${labyrinth ? '' : `<div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>`}
           <div>☠️ Threat reached: <b>${threat}</b></div>
         </div>
@@ -3761,13 +3826,12 @@ export class UI {
           <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
-        <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
-        ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the war' : ''}</p>` : ''}
         <div class="endactions">
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
           <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
       </div>`;
+    this.setEndRewards(extra);
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
     const retry = ov.querySelector('#b-retry');
     if (retry) retry.onclick = () => {

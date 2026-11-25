@@ -33,7 +33,9 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
   if (mode === 'labyrinth' && safe.heroDeaths > 0) return { cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero falls exhausted the shared life pool.` }, action: 'Slow down before sealed encounters and save abilities for the largest wave.' };
   if (game?.defeatCause === 'keep_destroyed' || (keep && n(keep.hp) <= 0)) return {
     cause: { icon: '🏰', title: 'The Keep was destroyed', detail: safe.lost > 0 ? `${safe.lost} structures fell before the city collapsed.` : 'The enemy reached the heart of the city.' },
-    action: safe.bestHeld === 0 ? 'Take and hold a lane node early, then return before the final counterattack.' : safe.lost >= Math.max(3, safe.built / 2) ? 'Build a tighter inner defense and switch the army to Defend when the champion walks.' : 'Return when the Keep warning appears and focus siegers or the marked champion.',
+    action: !game?.finalStand
+      ? 'Keep the army on Defend while building income and camps. Stabilize the city before pushing a lane.'
+      : 'Recall the army to Defend before the champion reaches the city; repair the Keep and focus the champion.',
   };
   if (remainingNests != null && remainingNests > 0) return { cause: { icon: '🔥', title: `${remainingNests} ${remainingNests === 1 ? 'hive remained' : 'hives remained'}`, detail: 'Uncleared hives kept adding pressure to the battlefield.' }, action: safe.bestHeld === 0 ? 'Capture a lane node before pushing the nearest hive.' : 'Push one lane at a time and destroy its hive before the next Threat surge.' };
   return { cause: { icon: '☠️', title: 'The army was overwhelmed', detail: `${safe.kills} enemies slain; ${safe.lost} structures lost by Threat ${n(threat)}.` }, action: safe.heroDeaths > 1 ? 'Disengage earlier when hero health turns red; a dead hero leaves the army without its aura.' : 'Concentrate structures around one defensible lane and use the mission warnings to regroup.' };

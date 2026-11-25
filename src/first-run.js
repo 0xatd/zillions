@@ -1,7 +1,8 @@
 // First-run presentation rules. This module never touches the simulation,
 // the lockstep hash, or the seeded sim random source.
 import { CULTURE_ARMIES, cultureKey, HEROES } from './config.js';
-import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS } from './chapter.js';
+import { heroAbilities } from './hero-abilities.js';
+import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS, leaderRecord, recruitmentAllowed } from './chapter.js';
 
 export const QUICK_DEFAULTS = Object.freeze({
   chapterName: 'First Landing',
@@ -58,8 +59,8 @@ export function cultureExplain(key) {
   };
 }
 
-// Vanguard plus the eleven chapter leaders. Only Vanguard can deploy today.
-export function leaderRoster() {
+// A new chapter starts with its founder; companions are recruited, not unfinished kits.
+export function leaderRoster(profile = {}) {
   return [
     {
       key: 'vanguard',
@@ -72,19 +73,20 @@ export function leaderRoster() {
       key: leader.key,
       name: HEROES[leader.key]?.name || leader.key,
       role: leader.role,
-      playable: false,
-      soon: true,
+      playable: !!leaderRecord(profile, leader.key),
+      soon: false,
+      status: leaderRecord(profile, leader.key) ? 'Ready in chapter' : recruitmentAllowed(profile, leader.key) ? 'Recruit in chapter' : 'Unlock through exploration or conquest',
     })),
   ];
 }
 
-export function abilityBar(hero) {
-  const special = hero?.ability;
+export function abilityBar(hero, labels = ['Q', 'E', 'R']) {
   return [
-    { key: 'Q', name: special?.name || 'Special', icon: special?.icon || '✦', detail: special?.desc || 'Fight-mode special.', state: 'ready' },
-    { key: 'W', name: 'Weapon', icon: hero?.shotgun ? '💥' : '🎯', detail: hero?.tagline || 'The hero fires while you move.', state: 'ready' },
-    { key: 'E', name: 'Reserved', icon: '·', detail: 'The second ability slot stays visible so the bar does not move.', state: 'reserved' },
-    { key: 'R', name: 'Reserved', icon: '·', detail: 'The third ability slot stays visible so the bar does not move.', state: 'reserved' },
+    { key: 'Auto', name: 'Weapon', icon: '🎯', detail: 'Attacks automatically in range. WASD moves your hero.', state: 'ready' },
+    ...heroAbilities(hero).map((ability, slot) => ability && ({
+      key: ability.passive ? 'Passive' : labels[slot] || `Slot ${slot + 1}`, name: ability.name,
+      icon: ability.icon || '✦', detail: ability.desc || '', state: ability.passive ? 'passive' : 'ready',
+    })).filter(Boolean),
   ];
 }
 

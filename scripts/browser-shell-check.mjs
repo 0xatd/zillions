@@ -344,18 +344,40 @@ try {
     })()`);
     assert.deepEqual(bounds,[],`spell controls must fit ${width}x${height}`);
   }
+  // Campaign UI regressions: explicit replay selection and maximum earned-item pressure.
+  assert.equal(await evaluate(`(() => {
+    const ui=__app.ui;ui.setCampaign(5);ui.showSetup({mode:'campaign',level:1});
+    const explicit=ui.selectedLevel===1 && document.querySelector('[data-level="1"]').classList.contains('sel');
+    ui.setCampaign(0);ui.showSetup({mode:'campaign',level:5});
+    return explicit && ui.selectedLevel===1;
+  })()`),true,'a clicked held city survives setup; a locked requested city cannot launch');
+  for(const [width,height] of [[1366,768],[390,844],[844,390]]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<800});
+    const result=await evaluate(`(async()=>{
+      const {Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{ITEMS}=await import('/src/config.js');
+      const g=new Game(new TerrainField(),'normal','scott',null,1),h=g.heroes[0],ui=__app.ui;
+      h.items=Object.keys(ITEMS).filter(k=>!ITEMS[k].slot).slice(0,15);h.pack=h.items.slice(0,4);h.skillPoints=3;
+      ui.hideOverlay();ui.initHUD(g,0);ui._itemsKey=null;ui._packKey=null;ui.update(g,0,{controlMode:'fight'});
+      const pack=document.querySelector('.pack-open'),r=pack.getBoundingClientRect();
+      const reachable=r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;
+      pack.click();ui.update(g,0,{controlMode:'fight'});
+      const opened=!document.querySelector('#battle-details').classList.contains('hidden')&&document.querySelector('#battle-details').textContent.includes('Automatic signature bonuses');
+      return reachable&&opened;
+    })()`);
+    assert.equal(result,true,`earned items retain a reachable Pack at ${width}x${height}`);
+  }
   // Runs last: showEnd replaces the overlay markup, as a finished match does.
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
     const stats = { kills: 10, built: 2, lost: 0, coins: 50, nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null };
     ui.showEnd(true, stats, 3, 1, 'campaign', 0, { heroName: 'Journey Test', level: 1, pending: true, grants: [], quests: [] }, null);
-    const pending = /Reporting the siege/.test(document.querySelector('#end-rewards').textContent);
+    const pending = /Reporting the siege/.test(document.querySelector('#end-rewards').textContent) && document.querySelector('#end-unlock').classList.contains('hidden');
     ui.setEndRewards({ heroName: 'Journey Test', level: 2, xp: 300, levels: [2], alloy: 12, grants: ['targeting_optic'], skipped: [{ key: 'x', reason: 'stash_full' }],
-      quests: [{ id: 'l1q1', name: 'First Blood', desc: 'Slay 150', reward: 'targeting_optic', done: true }], pending: false });
+      saved:true,campaignCleared:1, quests: [{ id: 'l1q1', name: 'First Blood', desc: 'Slay 150', reward: 'targeting_optic', done: true }], pending: false });
     const text = document.querySelector('#end-rewards').textContent;
-    const granted = /level 2/.test(text) && text.includes('+300 XP') && text.includes('+12') && /First Blood/.test(text) && /Stash full/.test(text) && !/Reporting/.test(text);
+    const granted = !document.querySelector('#end-unlock').classList.contains('hidden') && /level 2/.test(text) && text.includes('+300 XP') && text.includes('+12') && /First Blood/.test(text) && /Stash full/.test(text) && !/Reporting/.test(text);
     ui.setEndRewards({ pending: false, error: 'Command rejected this report (level_locked). No rewards were granted.', grants: [], quests: [] });
-    const rejected = /No rewards were granted/.test(document.querySelector('#end-rewards').textContent);
+    const rejected = document.querySelector('#end-unlock').classList.contains('hidden') && /No rewards were granted/.test(document.querySelector('#end-rewards').textContent);
     const back = document.querySelector('#b-restart').textContent === 'Return to missions';
     return pending && granted && rejected && back;
   })()`), true, 'the end screen must show pending, then exactly the server-granted rewards (or the rejection)');

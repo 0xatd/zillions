@@ -36,11 +36,11 @@ test('the leader grid is twelve names and only Vanguard can deploy', () => {
   const roster = leaderRoster();
   assert.equal(roster.length, 12);
   assert.deepEqual(roster.filter((leader) => leader.playable).map((leader) => leader.key), ['vanguard']);
-  assert.ok(roster.every((leader) => leader.playable || leader.soon));
+  assert.ok(roster.every((leader) => !leader.soon), 'implemented companions are recruited, not coming soon');
   const bar = abilityBar({ ability: { name: 'Gravity Hammer', icon: '🔨', desc: 'A circle.' }, tagline: 'Short range.', shotgun: true });
-  assert.deepEqual(bar.map((slot) => slot.key), ['Q', 'W', 'E', 'R']);
-  assert.equal(bar[0].name, 'Gravity Hammer');
-  assert.equal(bar[2].state, 'reserved');
+  assert.deepEqual(bar.map((slot) => slot.key), ['Auto', 'Q']);
+  assert.equal(bar[1].name, 'Gravity Hammer');
+  assert.doesNotMatch(bar[0].key, /^W$/, 'movement key is never advertised as firing');
 });
 
 test('the coach waits for the current lesson', () => {
