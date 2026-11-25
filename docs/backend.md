@@ -398,7 +398,12 @@ sends the same bearer token, and the row records that account. The document
 is the seed, mode, leaders, command log, final lockstep hash, and
 `sim` (`SIM_VERSION` in `src/share-replay.js`). The route caps a body at
 1.2 MB and 12 new replays an hour for the account and for the hashed client
-IP. The same document returns the existing id.
+IP. The same document returns the existing id. Account and IP limits are locked
+independently so concurrent uploads cannot exceed either quota.
+
+Daily Watch links point only to the replay matching the stored best score. A new
+best gets its own immutable document; previously shared URLs keep their original
+recording. Stale submissions cannot replace the current leaderboard link.
 
 `GET /api/replay?id=` returns the document. A simulation mismatch is a 409.
 The viewer does not play it.

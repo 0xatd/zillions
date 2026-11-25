@@ -2408,3 +2408,6 @@ body:has(#combat-alert:not(.hidden)) .coach { display:none; }
 
 .replay-gate { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; background:#101820ee; pointer-events:auto; }
 .replay-gate.hidden { display:none; }
+
+/* Watching a recording exposes transport controls, not live match orders. */
+.replay-view :is(#actionbar, #builder-controls, #coach, #b-pause, #speed-readout, #topbar .speed, #banner.location) { display: none !important; }
