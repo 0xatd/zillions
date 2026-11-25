@@ -4084,6 +4084,7 @@ export class UI {
   }
 
   showReplayBar(state) {
+    this.root.classList.add('replay-view');
     let bar = this.root.querySelector('#replaybar');
     if (!bar) {
       bar = document.createElement('div');
@@ -4133,6 +4134,7 @@ export class UI {
   }
 
   hideReplayBar() {
+    this.root.classList.remove('replay-view');
     this.root.querySelector('#replaybar')?.classList.add('hidden');
   }
 
