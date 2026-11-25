@@ -183,7 +183,9 @@ export async function processDailySubmit({
     replay: parsed.replay,
   });
   let replayId = null;
-  if (typeof store.publishReplay === 'function') {
+  // A worse or equal run keeps the stored score. Leave that score's Watch
+  // link alone so the board does not start playing a different siege.
+  if (saved.improved && typeof store.publishReplay === 'function') {
     try {
       const shared = shareReplayFromDaily(parsed.replay, { won: !!verdict.standing.won });
       if (shared) {

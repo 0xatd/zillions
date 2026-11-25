@@ -10,7 +10,7 @@ import {
   openReplay, playReplayTo, replayProblem, replayShare, shareReplayFromDaily, validateShareReplay,
 } from '../src/share-replay.js';
 import { processReplayPublish, processReplayRead } from '../api/replay.js';
-import { replayPageModel } from '../api/replay-page.js';
+import { replayPageHtml, replayPageModel } from '../api/replay-page.js';
 
 function play({ heroes = [{ k: 'scott', camp: { level: 2, xp: 0, items: [], upgrades: { aura: 1 }, relics: [] } }], mode = 'campaign', levelId = 1, difficulty = 'normal', culture = 'european', seed = 123456, frames = 36, daily = null } = {}) {
   const level = levelById(levelId);
@@ -101,7 +101,8 @@ test('the share route stores a guest replay once and refuses a stale simulation'
   const replay = buildShareReplay(game);
   const rows = [];
   const store = {
-    async publish({ digest, replay: body }) {
+    async publish({ digest, replay: body, board }) {
+      assert.equal(board, false);
       const found = rows.find((row) => row.digest === digest);
       if (found) return { id: found.id, duplicate: true };
       const decision = decideReplayPublish({ bytes: 10, recentUser: 0, recentIp: rows.length >= 12 ? 12 : 0 });
@@ -118,7 +119,7 @@ test('the share route stores a guest replay once and refuses a stale simulation'
       return rows.find((row) => row.id === id)?.body || null;
     },
   };
-  const saved = await processReplayPublish({ userId: null, ipHash: 'a'.repeat(64), body: { replay }, store });
+  const saved = await processReplayPublish({ userId: null, ipHash: 'a'.repeat(64), body: { replay, board: true }, store });
   assert.equal(saved.path, '/r/ABCDEFGH');
   const again = await processReplayPublish({ userId: null, ipHash: 'a'.repeat(64), body: { replay }, store });
   assert.equal(again.duplicate, true);
@@ -138,6 +139,7 @@ test('the share route stores a guest replay once and refuses a stale simulation'
   assert.equal(page.status, 200);
   assert.match(page.title, /Scott/);
   assert.equal(page.url, 'https://zillions.taborlin.co/r/ABCDEFGH');
+  assert.match(replayPageHtml(page), /<base href="\/">/);
   assert.equal(replayPageModel({ id: 'nope', origin: 'https://zillions.taborlin.co', row: null }).status, 404);
 });
 

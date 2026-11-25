@@ -382,9 +382,11 @@ lets anon and authenticated read the board columns, and grants
 are not readable by clients. Apply that file by hand. It does not add
 environment variables.
 
-A verified daily score also publishes a shareable replay. Board rows link to
-`/r/<id>` when that publish succeeds. A missing replay table does not reject
-the score.
+A verified daily score publishes a shareable replay only when it improves
+that account's stored best. A worse or equal run leaves the Watch link on
+the retained score. Board rows link to `/r/<id>` when that publish succeeds.
+A missing replay table does not reject the score. `POST /api/replay` cannot
+mark a document as the board replay.
 
 ## Shareable replays
 

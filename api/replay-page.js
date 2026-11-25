@@ -15,6 +15,10 @@ function originOf(req) {
   return `${proto === 'http' ? 'http' : 'https'}://${host}`;
 }
 
+export function replayPageHtml(model) {
+  return page(model).html;
+}
+
 function page({ status = 200, title, description, url, replayId }) {
   const safeTitle = esc(title);
   const safeDescription = esc(description);
@@ -25,6 +29,7 @@ function page({ status = 200, title, description, url, replayId }) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base href="/">
   <title>${safeTitle}</title>
   <meta name="description" content="${safeDescription}">
   <link rel="canonical" href="${safeUrl}">

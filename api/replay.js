@@ -151,12 +151,14 @@ export async function processReplayPublish({ userId = null, ipHash, body, store 
     existingId: null,
   });
   if (!decision.ok && decision.error === 'replay_too_large') throw httpError(decision.error, decision.status);
+  // Board rows are published only after /api/daily verifies the score.
+  // A client cannot mark a document as the board replay from this route.
   const saved = await store.publish({
     userId: userId && UUID.test(userId) ? userId : null,
     ipHash,
     digest: replayDigest(replay),
     bytes,
-    board: body?.board === true,
+    board: false,
     replay,
   });
   if (!saved?.id || !REPLAY_ID.test(saved.id)) throw httpError('replay_store_failed', 503);
