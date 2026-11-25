@@ -213,9 +213,54 @@ export class Game {
     this.labyrinthChoices = {};
     this.labyrinthEncounters = [];
 
+    // Daily Siege only. Other modes leave these null so their snapshots and
+    // lockstep hashes stay what they were.
+    this.daily = null;
+    this.dailyWave = 0;
+    this.dailyCleared = 0;
+    this.dailyMods = null;
+    this.dailyResult = null;
+
     if (snap) this._restore(snap);
-    else if (this.mode === 'labyrinth') this._setupLabyrinth();
-    else this._setupStart();
+    else {
+      if (this.mode === 'daily') this._installDaily(opts?.daily);
+      if (this.mode === 'labyrinth') this._setupLabyrinth();
+      else this._setupStart();
+    }
+  }
+
+  // The day's spec is data. Gold modifiers apply once, before the opening.
+  _installDaily(spec) {
+    if (!spec || !Array.isArray(spec.waves)) return;
+    this.daily = {
+      day: String(spec.day || ''),
+      seed: Number(spec.seed) >>> 0,
+      waves: spec.waves.map((wave) => ({
+        at: Number(wave.at) || 0,
+        count: Math.max(0, wave.count | 0),
+        kind: typeof wave.kind === 'string' ? wave.kind : 'walker',
+      })),
+      timeCap: Number(spec.timeCap) > 0 ? Number(spec.timeCap) : 600,
+    };
+    this.dailyMods = new Set(Array.isArray(spec.modifiers) ? spec.modifiers.filter((id) => typeof id === 'string') : []);
+    if (this.dailyMods.has('fat_purse')) this.gold = Math.round(this.gold * 1.4);
+    else if (this.dailyMods.has('thin_purse')) this.gold = Math.round(this.gold * 0.75);
+  }
+
+  _dailySnap() {
+    return {
+      day: this.daily.day,
+      seed: this.daily.seed >>> 0,
+      waves: this.daily.waves.map((wave) => ({ at: wave.at, count: wave.count, kind: wave.kind })),
+      timeCap: this.daily.timeCap,
+      mods: this.dailyMods ? [...this.dailyMods] : [],
+      wave: this.dailyWave,
+      cleared: this.dailyCleared,
+    };
+  }
+
+  _campEvery(every) {
+    return this.dailyMods?.has('slow_camps') ? every * 1.25 : every;
   }
 
   // ---------- save / restore (v6: protected cliff approaches and aligned posterns) ----------
@@ -228,6 +273,7 @@ export class Game {
     return {
       v: SNAPSHOT_VERSION, seed: this.map.seed, diff: this.diffKey, heroKeys: this.heroKeys, level: this.levelId, mode: this.mode,
       culture: this.culture,
+      ...(this.mode === 'daily' && this.daily ? { daily: this._dailySnap() } : {}),
       time: snapNum(this.time), threat: snapNum(this.threat), threatLevel: this.threatLevel,
       phase: this.phase, finalStand: this.finalStand ? 1 : 0,
       gold: snapNum(this.gold),
@@ -349,6 +395,8 @@ export class Game {
         routeBest: Number.isFinite(z.routeBest) ? snapNum(z.routeBest) : null, repathT: snapNum(z.repathT || 0),
         frenzy: snapNum(z.frenzy || 0), speedMul: snapNum(z.speedMul || 1), raider: !!z.raider,
         armor: snapNum(z.armor || 0), maxHp: snapNum(z.maxHp || 0),
+        ...(z.dailyWave != null ? { dailyWave: z.dailyWave } : {}),
+        ...(z.stride ? { stride: snapNum(z.stride) } : {}),
         spawnT: snapNum(z.spawnT || 0), roarT: snapNum(z.roarT || 0), bossPhase: z.bossPhase || 0,
         // A spitter mid-volley holds still while _spitTarget is set.
         spit: z._spitTarget ? z._spitTarget.id : null,
@@ -357,6 +405,18 @@ export class Game {
   }
 
   _restore(snap) {
+    if (snap.daily && this.mode === 'daily') {
+      const saved = snap.daily;
+      this.daily = {
+        day: saved.day,
+        seed: Number(saved.seed) >>> 0,
+        waves: (saved.waves || []).map((wave) => ({ at: wave.at, count: wave.count, kind: wave.kind })),
+        timeCap: saved.timeCap,
+      };
+      this.dailyMods = new Set(saved.mods || []);
+      this.dailyWave = saved.wave || 0;
+      this.dailyCleared = saved.cleared || 0;
+    }
     this.time = snap.time;
     this.threat = snap.threat || 0;
     this.threatLevel = snap.threatLevel || 1;
@@ -581,6 +641,8 @@ export class Game {
       if (meta.id) zb.id = meta.id;
       zb.x = x; zb.z = z; zb.hp = hp; zb.state = state;
       if (meta.maxHp) zb.maxHp = meta.maxHp;
+      if (meta.dailyWave != null) zb.dailyWave = meta.dailyWave;
+      if (meta.stride) zb.stride = meta.stride;
       zb.dirX = meta.dx || 0; zb.dirZ = meta.dz || 0;
       zb.timer = meta.timer || 0; zb.atkT = meta.atk || 0;
       zb.windup = meta.windup ? { ...meta.windup } : null;zb.killCount=meta.killCount||0;
@@ -856,7 +918,10 @@ export class Game {
       const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
       const closest = live.sort((a, b) => dist2(a.x, a.z, site.x, site.z) - dist2(b.x, b.z, site.x, site.z))[0];
       this.firstSiege.nestId = closest?.id ?? null;
-      for (const nest of live) nest.musterT = nest === closest ? 24 : Math.max(nest.musterT, 38 + nest.id * 3);
+      for (const nest of live) {
+        nest.musterT = nest === closest ? 24 : Math.max(nest.musterT, 38 + nest.id * 3);
+        if (this.dailyMods?.has('eager_nests')) nest.musterT *= 0.8;
+      }
     }
     this.flowDirty = true;
     this.emit({ type: 'founded', site: siteIdx, x: site.x, z: site.z });
@@ -1321,7 +1386,7 @@ export class Game {
       this.emit({ type: 'build', kind: plot.kind, plotId: plot.id, tier: plot.tier, x: plot.cx, z: plot.cz });
     }
     plot.ruined = false;
-    if (PLOT_KINDS[plot.kind].unit) plot.musterT = def.every;
+    if (PLOT_KINDS[plot.kind].unit) plot.musterT = this._campEvery(def.every);
     this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} stands again.`, 'info');
   }
 
@@ -1349,21 +1414,21 @@ export class Game {
         }
       } else {
         for (const b of this.buildings) {
-          if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def); b.hp = b.maxHp; }
+          if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def, plot.kind); b.hp = b.maxHp; }
         }
       }
     } else if (plot.tier === 1) {
       this._addBuilding(plot, plot.x, plot.z, def, false);
     } else {
       for (const b of this.buildings) {
-        if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def); b.hp = b.maxHp; }
+        if (b.plotId === plot.id) { b.def = def; b.maxHp = this._bhp(def, plot.kind); b.hp = b.maxHp; }
       }
     }
 
     // Camps are faucets: they muster a squad now, then again on their timer.
     const unitKey = PLOT_KINDS[plot.kind].unit;
     if (unitKey) {
-      plot.musterT = def.every;
+      plot.musterT = this._campEvery(def.every);
       this._muster(plot, def);
     }
     if (plot.kind === 'hero_forge') {
@@ -1390,11 +1455,18 @@ export class Game {
   }
 
   // Structure HP through the civilization's relics (Masonry Codex et al).
-  _bhp(def) { return Math.round(def.hp * (1 + this.relicMods.buildingHp)); }
+  _bhp(def, kind) {
+    let hp = Math.round(def.hp * (1 + this.relicMods.buildingHp));
+    if (this.dailyMods) {
+      if (kind === 'hq' && this.dailyMods.has('brittle_keep')) hp = Math.round(hp * 0.7);
+      else if (kind && kind !== 'hq' && this.dailyMods.has('iron_walls')) hp = Math.round(hp * 1.2);
+    }
+    return hp;
+  }
 
   _addBuilding(plot, x, z, def, gate, id = null, hp = null) {
     const size = plot.kind === 'wall' ? 1 : plot.size;
-    const maxHp = this._bhp(def);
+    const maxHp = this._bhp(def, plot.kind);
     const b = {
       id: id || nextId++, plotId: plot.id, kind: plot.kind, key: plot.kind,
       def, x, z, size,
@@ -1663,9 +1735,10 @@ export class Game {
       if (!def || !def.every) continue;
       const standing = this.buildings.some((b) => b.plotId === plot.id && b.alive);
       if (!standing) continue;
-      plot.musterT = (plot.musterT != null ? plot.musterT : def.every) - step;
+      const every = this._campEvery(def.every);
+      plot.musterT = (plot.musterT != null ? plot.musterT : every) - step;
       if (plot.musterT <= 0) {
-        plot.musterT = def.every;
+        plot.musterT = every;
         this._muster(plot, def);
       }
     }
@@ -1790,7 +1863,7 @@ export class Game {
     if (this.mode === 'labyrinth' && !this.finalStand) this._updatePursuit(dt);
 
     // Campaign: raze every hive and the survivors call one last counterattack.
-    if (!this.finalStand && this.nests.length && !this.liveNests()) {
+    if (this.mode !== 'daily' && !this.finalStand && this.nests.length && !this.liveNests()) {
       this.finalStand = true;
       if (this.mode === 'labyrinth') {
         // No Keep to hold. The champion rises from the deepest razed chamber
@@ -2060,6 +2133,7 @@ export class Game {
       n.musterT -= dt;
       if (n.musterT <= 0) {
         n.musterT = hiveInterval(this.threat);
+        if (this.dailyMods?.has('eager_nests')) n.musterT *= 0.8;
         const first = this.firstSiege?.stage === 'warning' && n.id === this.firstSiege.nestId;
         this._hiveMuster(n, 1, first);
       }
@@ -3632,6 +3706,11 @@ export class Game {
       atkT: 0, targetU: null, phase: this.rng() * Math.PI * 2,
       wave, hitFlash: 0, route: null, routeI: 0, frenzy: 0,
     };
+    if (this.dailyMods?.has('thick_hide')) {
+      zb.hp = Math.round(d.hp * 1.25);
+      zb.maxHp = zb.hp;
+    }
+    if (this.dailyMods?.has('long_stride')) zb.stride = 1.12;
     this.zombies.push(zb);
     return zb;
   }
@@ -4019,6 +4098,17 @@ export class Game {
     if (this.over) return;
     this.over = true;
     this.won = won;
+    if (this.mode === 'daily') {
+      this._refreshDailyCleared();
+      const hq = this.hq;
+      this.dailyResult = {
+        waves: this.dailyCleared | 0,
+        cityHp: hq && hq.alive ? Math.max(0, Math.round(hq.hp)) : 0,
+        cityMaxHp: hq ? Math.max(1, Math.round(hq.maxHp)) : 1,
+        seconds: Math.max(0, Math.round(this.time)),
+        won: !!won,
+      };
+    }
     // Side quests are judged at the end of a campaign run; rewards persist
     // (the renderer grants them to the profile — WC3-style loot that stays).
     const quests = this.mode === 'campaign' ? this.level.quests || [] : [];
@@ -4059,6 +4149,69 @@ export class Game {
     this._updateTowers(dt);
     this._updateHero(dt);
     this._cleanup();
+    if (this.mode === 'daily') this._tickDaily();
+  }
+
+  _refreshDailyCleared() {
+    if (!this.daily) return;
+    let cleared = 0;
+    for (let i = 0; i < this.dailyWave; i++) {
+      let alive = false;
+      for (const zombie of this.zombies) {
+        if (!zombie.dead && zombie.dailyWave === i) { alive = true; break; }
+      }
+      if (!alive) cleared++;
+    }
+    this.dailyCleared = cleared;
+  }
+
+  _spawnDailyWave(wave, index) {
+    const kind = ZOMBIES[wave.kind] ? wave.kind : 'walker';
+    const nests = this.nests.filter((nest) => nest.alive && !nest.offMap);
+    let spawned = 0;
+    let guard = 0;
+    while (spawned < wave.count && guard++ < wave.count * 40) {
+      let x;
+      let z;
+      if (nests.length) {
+        const nest = nests[guard % nests.length];
+        const angle = this.rng() * Math.PI * 2;
+        const radius = 1.5 + this.rng() * 5;
+        x = nest.x + Math.cos(angle) * radius;
+        z = nest.z + Math.sin(angle) * radius;
+      } else {
+        [x, z] = this._edgeSpawnPoint();
+      }
+      if (!this.map.isWalkable(x | 0, z | 0)) continue;
+      const zombie = this._spawnZombie(kind, x, z, true, true);
+      if (!zombie) continue;
+      zombie.dailyWave = index;
+      spawned++;
+    }
+    this.msg(`Wave ${index + 1} of ${this.daily.waves.length}. ${spawned} of the dead are on the field.`, 'bad');
+    this.emit({ type: 'dailywave', wave: index + 1, total: this.daily.waves.length, n: spawned });
+  }
+
+  // Scripted waves are the daily clock. Razing every hive does not end the day.
+  _tickDaily() {
+    if (!this.daily || this.over) return;
+    if (this.phase === 'live') {
+      const waves = this.daily.waves;
+      while (this.dailyWave < waves.length && this.time >= waves[this.dailyWave].at) {
+        this._spawnDailyWave(waves[this.dailyWave], this.dailyWave);
+        this.dailyWave++;
+      }
+      this._refreshDailyCleared();
+      if (this.dailyWave >= waves.length && this.dailyCleared >= waves.length) {
+        this.msg('The last wave is broken. The city still stands.', 'good');
+        this._gameOver(true);
+        return;
+      }
+    }
+    if (this.time >= this.daily.timeCap) {
+      this.msg('The day is spent. The siege is scored where it stands.', 'bad');
+      this._gameOver(false);
+    }
   }
 
   // Hero auras — the passive third of the kit (auto-attack, aura, special).
@@ -4487,6 +4640,7 @@ export class Game {
   }
 
   _moveZombie(zb, dx, dz, speed, dt, canAttack) {
+    if (zb.stride) speed *= zb.stride;
     const nx = zb.x + dx * speed * dt;
     const nz = zb.z + dz * speed * dt;
     const tx = nx | 0, tz = nz | 0;

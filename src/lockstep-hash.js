@@ -72,5 +72,14 @@ export function stateHash(g) {
       }
     }
   }
+  // Daily Siege only. Campaign and co-op hashes must not move when this is absent.
+  if (g.mode === 'daily') {
+    h = (h * 31 + (g.dailyWave | 0)) | 0;
+    h = (h * 31 + (g.dailyCleared | 0)) | 0;
+    h = (h * 31 + Math.round((g.time || 0) * 10)) | 0;
+    const keep = g.hq;
+    h = (h * 31 + (keep && keep.alive ? Math.round(keep.hp) : 0)) | 0;
+    for (const enemy of g.zombies) if (enemy.dailyWave != null) h = (h * 31 + (enemy.dailyWave | 0)) | 0;
+  }
   return h;
 }

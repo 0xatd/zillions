@@ -13,7 +13,9 @@ Zillions has three runtime layers:
 
 The production backend is not server-authoritative for combat. It is
 authoritative for rewards: signed-in XP, levels, loot, Salvage Alloy, and
-stats are granted only by `api/match-result.js`.
+stats are granted only by `api/match-result.js`. Daily Siege scores are the
+exception that is checked before they are written: `api/daily.js` replays the
+input log and compares the final lockstep hash.
 
 ## Browser Startup
 

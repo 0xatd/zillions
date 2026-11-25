@@ -58,9 +58,13 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
-import { accountUpgradeRequest, matchResultRequest, matchStartRequest } from './backend.js';
+import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
+import {
+  PENDING_DAILY_KEY, acceptDailyBoardPaint, acceptableDay, buildDailyReplay, dailyChallenge, dailyKey, dailyScore,
+  formatDailyStanding,
+} from './daily.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import {
@@ -271,6 +275,10 @@ class App {
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openCampaignSelect(),
       onGuestPlay: () => this._playAsGuest(),
+      onDailyOpen: () => this._openDaily(),
+      onDailyPlay: () => this._startDaily(),
+      onDailySignIn: () => { this._stashDaily(); this._signIn(); },
+      onDailyEmail: (email) => { this._stashDaily(); this._signInWithEmail(email); },
       onQuickStart: (draft) => this._quickStart(draft),
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
@@ -827,34 +835,37 @@ class App {
       this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
     }
-    const levelId = snap ? snap.level || 1 : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const mode = snap ? snap.mode || 'campaign' : mp ? mp.mode || 'campaign' : this.ui.selectedMode || 'campaign';
+    const daily = mode === 'daily' ? (this._dailyChallenge || dailyChallenge(dailyKey())) : null;
+    const levelId = snap ? snap.level || 1 : daily ? daily.levelId : mp ? mp.level || 1 : this.ui.selectedLevel || 1;
     const level = levelById(levelId);
-    const seed = snap ? snap.seed : level.seed;
-    const heroKeys = snap ? snap.heroKeys : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
+    const seed = snap ? snap.seed : daily ? daily.mapSeed : level.seed;
+    const heroKeys = snap ? snap.heroKeys : daily ? daily.hero : mp ? mp.heroes : { k: heroKey, camp: this.campFor(heroKey) };
     // The base culture: a resumed run keeps its own, a guest takes the host's,
     // a fresh solo/host run uses the setup pick. It sets which army the camps
     // muster (sim) and which kit the base is built from (art).
-    const cultureId = cultureKey(snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
+    const cultureId = cultureKey(daily ? daily.culture : snap ? snap.culture : mp ? mp.culture : this.ui.selectedCulture);
     setActiveCulture(cultureId);
     this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
     // Solo signed-in runs fetch their ticket (and match seed) first.
-    const soloTicket = !snap && !mp
+    const soloTicket = !snap && !mp && mode !== 'daily'
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    this.game = new Game(this.map, difficulty, heroKeys, snap, levelId, mode,
-      Number.isInteger(this._match.seed) ? { rngSeed: this._match.seed, culture: cultureId } : { culture: cultureId });
+    const matchSeed = daily ? daily.seed : this._match.seed;
+    this.game = new Game(this.map, daily ? 'normal' : difficulty, heroKeys, snap, levelId, mode,
+      Number.isInteger(matchSeed) ? { rngSeed: matchSeed, culture: cultureId, ...(daily ? { daily } : {}) } : { culture: cultureId });
     // Record inputs for leaderboard verification. A resumed run continues the
     // log it saved; a resume without one cannot be verified (it still pays).
-    if (this.auth?.isSignedIn() && mp?.role !== 'spectator') {
+    // Daily runs always record, including guests, so a later sign-in can submit.
+    if (mode === 'daily' || (this.auth?.isSignedIn() && mp?.role !== 'spectator')) {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
-    if (this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
+    if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
     this.slowFrameT = 0;
@@ -868,7 +879,7 @@ class App {
     this.zombieAttacks.clear();
     this.lastPay = false;
     this._endExtras = null;
-    if (!snap && heroKey) { this.profile.lastHero = heroKey; this._saveProfile(); }
+    if (!snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
     this._netPumpStop();
@@ -939,7 +950,9 @@ class App {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
     }
-    this.ui.showBanner(mode === 'survival'
+    this.ui.showBanner(mode === 'daily'
+      ? `${level.name} — DAILY SIEGE. Same map, same waves, same modifiers for every commander today.`
+      : mode === 'survival'
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
       : mode === 'labyrinth'
       ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
@@ -953,7 +966,7 @@ class App {
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
     if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
-    else if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
+    else if (!this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
     } catch (error) {
       this._finishMissionIntro();
       throw error;
@@ -1496,6 +1509,7 @@ class App {
       }
       // Claim any match the server never confirmed (closed tab, offline).
       this._flushPendingMatches().catch((err) => console.warn('pending match flush failed', err));
+      this._flushPendingDaily().catch((err) => console.warn('pending daily flush failed', err));
       this._syncAccountUpgrades().catch((err) => console.warn('account upgrade sync failed', err));
       // Auth events are read/hydration boundaries. Persisting account metadata
       // here calls auth.updateUser(), which emits another auth event and used
@@ -2159,7 +2173,7 @@ class App {
   // host frame hitch becomes a stall broadcast to all guests, and stringify +
   // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
-    if (!this.game || this.game.over || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
+    if (!this.game || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -2183,8 +2197,146 @@ class App {
     } catch { /* snapshot failed */ }
   }
 
+  _dailyBoardCurrent() {
+    const overlay = this.ui.root?.querySelector?.('#overlay');
+    return {
+      ticket: this._dailyTicket,
+      current: this._dailyTicket,
+      screen: this.ui._lastScreen,
+      overlayHidden: !overlay || overlay.classList.contains('hidden'),
+      inGame: !!this.game,
+    };
+  }
+
+  async _openDaily() {
+    const ticket = (this._dailyTicket = (this._dailyTicket || 0) + 1);
+    const challenge = dailyChallenge(dailyKey());
+    this._dailyChallenge = challenge;
+    const level = levelById(challenge.levelId);
+    const view = {
+      ...challenge,
+      levelName: level?.name || 'Frontier',
+      localSeed: challenge.seed,
+    };
+    this.ui.showDaily(view, { loading: true });
+    const paint = (board) => {
+      const here = this._dailyBoardCurrent();
+      if (!acceptDailyBoardPaint({ ...here, ticket, current: this._dailyTicket })) return;
+      this.ui.showDaily(view, board, { navigate: false });
+    };
+    try {
+      const board = await dailyBoardRequest(challenge.day);
+      if (!board) paint({ unavailable: true });
+      else if (board.challenge && (board.challenge.seed >>> 0) !== (challenge.seed >>> 0)) paint({ ...board, staleClient: true });
+      else paint(board);
+    } catch (error) {
+      paint({ error: error?.message || 'board_unavailable' });
+    }
+  }
+
+  async _startDaily() {
+    // Drop a board response that is still in flight. Play has left the brief.
+    this._dailyTicket = (this._dailyTicket || 0) + 1;
+    if (this.game) return;
+    const challenge = this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey());
+    this._dailyChallenge = challenge;
+    this.ui.selectedMode = 'daily';
+    this.ui.selectedLevel = challenge.levelId;
+    this.ui.selectedDiff = 'normal';
+    this._skipMissionIntro = true;
+    try {
+      await this.startGame('normal', challenge.hero);
+    } catch (error) {
+      this.ui.selectedMode = 'campaign';
+      this.ui._clearBusy();
+      this.ui.showBanner('Today\'s siege could not start.', 'bad', 3600);
+      console.warn('daily start failed', error);
+    }
+  }
+
+  _stashDaily() {
+    const replay = this._dailyReplay;
+    if (!replay) return;
+    try {
+      localStorage.setItem(PENDING_DAILY_KEY, JSON.stringify({ v: 1, replay, savedAt: Date.now() }));
+    } catch { /* private mode or a full disk; the end screen still explains it */ }
+  }
+
+  _readStashedDaily() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(PENDING_DAILY_KEY) || 'null');
+      if (!raw?.replay || !acceptableDay(raw.replay.day, new Date())) return null;
+      return raw;
+    } catch { return null; }
+  }
+
+  _dropStashedDaily(expected) {
+    try {
+      const current = this._readStashedDaily();
+      if (expected && JSON.stringify(current) !== JSON.stringify(expected)) return;
+      localStorage.removeItem(PENDING_DAILY_KEY);
+    } catch { /* ignore */ }
+  }
+
+  async _finishDailyRun(won) {
+    const challenge = this._dailyChallenge || dailyChallenge(dailyKey());
+    const standing = this.game?.dailyResult || { waves: 0, cityHp: 0, cityMaxHp: 1, seconds: 0, won: !!won };
+    const score = dailyScore(standing);
+    this._dailyReplay = buildDailyReplay(this.game, challenge);
+    const guest = !(this.auth?.isSignedIn() && !this.auth.status().needsUsername);
+    this._stashDaily();
+    // The victory/defeat handler paints the end screen with this extra as soon
+    // as we return. Submitting waits until that screen exists.
+    this._endExtras = { dailyGuest: guest, dailyScore: score, dailyLine: formatDailyStanding(standing) };
+    if (!guest) queueMicrotask(() => { this._submitStashedDaily().catch((err) => console.warn('daily submit failed', err)); });
+  }
+
+  async _flushPendingDaily() {
+    if (!this.auth?.isSignedIn() || this.auth.status().needsUsername) return;
+    if (!this._readStashedDaily()) return;
+    await this._submitStashedDaily({ quiet: true });
+  }
+
+  async _submitStashedDaily({ quiet = false } = {}) {
+    const stashed = this._readStashedDaily();
+    if (!stashed) return null;
+    try {
+      const result = await dailyScoreRequest({ replay: stashed.replay });
+      if (!result) {
+        if (!quiet) this.ui.setDailyStatus('The score server is not available from here. It stays on this browser until you can submit it.');
+        return null;
+      }
+      this._dropStashedDaily(stashed);
+      const line = result.improved
+        ? `Saved. Rank ${result.rank} with ${result.score}.`
+        : `Today's board already has your better score. Rank ${result.rank}.`;
+      if (!quiet) this.ui.setDailyStatus(line);
+      else this.ui.showBanner(line, '', 5000);
+      return result;
+    } catch (error) {
+      const code = error?.message || 'daily_unverified';
+      if (code === 'daily_unverified' || code === 'daily_closed' || code === 'invalid_replay') {
+        this._dropStashedDaily(stashed);
+      }
+      const text = code === 'daily_unverified'
+        ? 'The server replay did not match this run, so the score was not saved.'
+        : code === 'daily_timeout'
+          ? 'The server could not finish checking this run in time. It is still saved on this browser.'
+          : code === 'sign_in_required'
+            ? 'Sign in to save your score.'
+            : 'The score could not be saved.';
+      if (!quiet) this.ui.setDailyStatus(text);
+      else if (code !== 'daily_closed') this.ui.showBanner(text, 'bad', 5000);
+      return null;
+    }
+  }
+
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if (this.game?.mode === 'daily') {
+      this._finishDailyRun(won);
+      return;
+    }
     persistRunTelemetry(this.game);
     this._endExtras = null;
     const h = this.game.heroes[this.myPlayer];

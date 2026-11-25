@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/daily.js": {
+      "maxDuration": 60
+    }
+  },
   "headers": [
     {
       "source": "/(assets|vendor)/(.*)",

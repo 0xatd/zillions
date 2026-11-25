@@ -2,6 +2,7 @@ const ECONOMY_API = '/api/economy';
 const MATCH_RESULT_API = '/api/match-result';
 const MATCH_START_API = '/api/match-start';
 const ACCOUNT_UPGRADES_API = '/api/account-upgrades';
+const DAILY_API = '/api/daily';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -64,6 +65,31 @@ export async function matchStartRequest(payload = {}) {
 
 // Signed-in account upgrade tree: state, buy, the one-time import of the local
 // tree, and the paid Lattice rewire. Costs are the server's, never these.
+// Public board. A signed-in caller also receives their own rank.
+export async function dailyBoardRequest(day) {
+  if (!backendEnabled()) return null;
+  const query = day ? `?day=${encodeURIComponent(day)}` : '';
+  const response = await fetch(`${DAILY_API}${query}`, {
+    headers: accountHeaders({ accept: 'application/json' }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'daily_board_unavailable'), { status: response.status, result });
+  return result;
+}
+
+// Signed-in score. The server replays the log and stores the score it gets.
+export async function dailyScoreRequest(payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) return null;
+  const response = await fetch(DAILY_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'daily_submit_failed'), { status: response.status, result });
+  return result;
+}
+
 export async function accountUpgradeRequest(action, payload = {}) {
   if (!backendEnabled() || !accountSession?.access_token) return null;
   const response = await fetch(ACCOUNT_UPGRADES_API, {

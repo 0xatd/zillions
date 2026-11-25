@@ -1,7 +1,19 @@
-# Leaderboards: anti-cheat plan
+# Leaderboards
 
-Zillions has no leaderboard yet. This note records how one should work, so the
-match pipeline keeps what it will need.
+Daily Siege is the shipped board. Each UTC day has one seed. A signed-in
+player submits the input log. `api/daily.js` replays that log and stores the
+score only when the final lockstep hash matches. The top 50 are shown, and
+the player's own rank is marked. Guests can play and are asked to sign in
+before a score is kept. See `src/daily.js` and
+`supabase/migrations/20261125000100_daily_siege.sql`.
+
+The rest of this note is the plan for campaign, survival, and labyrinth
+boards. Those rewards are still not replayed on the grant path.
+
+## Anti-cheat plan for match rewards
+
+Match rewards have no public board yet. This note records how one should
+work, so the match pipeline keeps what it will need.
 
 ## What comparable games do
 

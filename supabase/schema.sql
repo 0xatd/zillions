@@ -1077,3 +1077,5 @@ revoke insert, update, delete on public.player_wallets from anon, authenticated;
 
 -- Persistent friend groups and guarded RPCs are defined in
 -- migrations/20261123000100_friend_parties.sql. Apply migrations after schema.
+-- Daily Siege scores are defined in
+-- migrations/20261125000100_daily_siege.sql. Apply that file by hand.
