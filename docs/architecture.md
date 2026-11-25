@@ -188,8 +188,14 @@ broadcast. WebRTC lockstep is unchanged.
 A link admits players only before the host starts the siege. After that it
 answers `started`. The hero list is fixed at lockstep window 0, so a new hero
 mid-fight is refused. The link also refuses an invalid code, a link older than
-two hours, a fifth player, and a host who has left or gone quiet. A dropped
-hero is not given to someone else.
+two hours, a fifth player, a different protocol or client version, and a host
+who has left or gone quiet. A dropped hero is not given to someone else.
+
+Each seat carries the campaign level that browser has unlocked. The host
+cannot start a later mission while any seat is short of it. Guests mark Ready
+after choosing a hero. A hero change or a host setup change clears Ready.
+Start stays disabled until every friend is connected and Ready. Share sessions
+load TURN servers from `/api/auth-config` even when the player is not signed in.
 
 ## State Ownership
 

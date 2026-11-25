@@ -224,8 +224,10 @@ History worth keeping, so old mistakes are not repeated:
 - Invite copies `/?coop=<code>`. A friend opens it with no account and joins
   the same lockstep siege before the host starts. The link expires after two
   hours, caps at four players, and refuses a full lobby, a dead host, a bad
-  code, and a late join. `src/share-link.js` owns those rules.
-  `src/share-bus.js` carries the WebRTC handshake.
+  code, a protocol or client mismatch, and a late join. Guests mark Ready.
+  Campaign seats carry an unlocked level, and Start waits until every seat
+  can play the chosen mission. `src/share-link.js` owns those rules.
+  `src/share-bus.js` carries the WebRTC handshake and the deployment ICE list.
 
 Key multiplayer files:
 

@@ -14,6 +14,7 @@
 // the room limit. A host heartbeat older than eight seconds means the host left.
 
 import { HEROES } from './config.js';
+import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 
 export const SHARE_MAX_PLAYERS = 4;
 export const SHARE_TTL_MS = 2 * 60 * 60 * 1000;
@@ -74,7 +75,7 @@ export function shareMessageId(now = Date.now()) {
   return `${now.toString(36)}-${shareSeq}`;
 }
 
-export function createLobby({ code, hostId, hostName, hero, now, mode = 'campaign', level = 1, difficulty = 'normal' }) {
+export function createLobby({ code, hostId, hostName, hero, now, mode = 'campaign', level = 1, difficulty = 'normal', unlockedLevel = 1 }) {
   if (!CODE_RE.test(code)) throw new Error('invalid_share_code');
   const id = shareId(hostId);
   if (!id) throw new Error('invalid_share_host');
@@ -93,7 +94,12 @@ export function createLobby({ code, hostId, hostName, hero, now, mode = 'campaig
     level: Math.max(1, Number(level) || 1),
     difficulty: typeof difficulty === 'string' ? difficulty : 'normal',
     maxPlayers: mode === 'labyrinth' ? 3 : SHARE_MAX_PLAYERS,
-    seats: [{ id, name: shareName(hostName), hero: shareHero(hero), host: true }],
+    protocolVersion: LOBBY_PROTOCOL_VERSION,
+    clientVersion: CLIENT_VERSION,
+    seats: [{
+      id, name: shareName(hostName), hero: shareHero(hero), host: true, ready: true,
+      unlockedLevel: shareUnlocked(unlockedLevel),
+    }],
   };
 }
 
@@ -112,12 +118,53 @@ export function publicShareLobby(lobby) {
     level: lobby.level,
     difficulty: lobby.difficulty,
     maxPlayers: lobby.maxPlayers === 3 ? 3 : SHARE_MAX_PLAYERS,
+    protocolVersion: Number(lobby.protocolVersion) || 0,
+    clientVersion: String(lobby.clientVersion || ''),
     seats: (lobby.seats || []).map((seat) => ({
       id: seat.id,
       name: shareName(seat.name),
       hero: shareHero(seat.hero),
       host: !!seat.host,
+      ready: !!seat.host || !!seat.ready,
+      unlockedLevel: shareUnlocked(seat.unlockedLevel),
     })),
+  };
+}
+
+export function shareUnlocked(value) {
+  const level = Math.floor(Number(value));
+  return Number.isFinite(level) && level >= 1 && level < 1000000 ? level : 1;
+}
+
+// The lobby and the joining client must be this build. A missing claim is a
+// heartbeat, not a new seat. A claim without both versions is an old tab.
+export function shareClientMatch(lobby, guest = {}) {
+  const lobbyOk = Number(lobby?.protocolVersion) === LOBBY_PROTOCOL_VERSION
+    && String(lobby?.clientVersion || '') === CLIENT_VERSION;
+  if (!lobbyOk) return { ok: false, reason: 'incompatible' };
+  if (!guest.claim) return { ok: true };
+  const guestOk = Number(guest.protocolVersion) === LOBBY_PROTOCOL_VERSION
+    && String(guest.clientVersion || '') === CLIENT_VERSION;
+  return guestOk ? { ok: true } : { ok: false, reason: 'incompatible' };
+}
+
+export function shareBlockers(lobby) {
+  if ((lobby?.mode || 'campaign') !== 'campaign') return [];
+  const level = Math.max(1, Math.floor(Number(lobby?.level) || 1));
+  return (lobby?.seats || [])
+    .filter((seat) => shareUnlocked(seat.unlockedLevel) < level)
+    .map((seat) => ({ id: seat.id, name: seat.name, unlockedLevel: shareUnlocked(seat.unlockedLevel) }));
+}
+
+export function shareLaunchReady(lobby, openIds = new Set()) {
+  const guests = (lobby?.seats || []).filter((seat) => !seat.host);
+  const waiting = guests.filter((seat) => !seat.ready || !openIds.has(seat.id));
+  const blockers = shareBlockers(lobby);
+  return {
+    ready: waiting.length === 0 && blockers.length === 0,
+    waiting,
+    blockers,
+    connecting: waiting.some((seat) => !openIds.has(seat.id)),
   };
 }
 
@@ -141,6 +188,8 @@ export function admitGuest(lobby, guest, now) {
       ? { ok: true, seat: seatNumber(lobby, id), seated: true, started: true }
       : { ok: false, reason: 'started' };
   }
+  const versions = shareClientMatch(lobby, guest);
+  if (!versions.ok) return versions;
   if (seated) return { ok: true, seat: seatNumber(lobby, id), rejoining: true };
   const cap = lobby.maxPlayers === 3 ? 3 : SHARE_MAX_PLAYERS;
   if (lobby.seats.length >= cap) return { ok: false, reason: 'full' };
@@ -159,6 +208,8 @@ export function seatGuest(lobby, guest, now) {
     name: shareName(guest.name),
     hero: shareHero(guest.hero),
     host: false,
+    ready: false,
+    unlockedLevel: shareUnlocked(guest.unlockedLevel),
   }];
   return { lobby: touchLobby({ ...lobby, seats }, now), ...decision, seat: seats.length };
 }
@@ -167,9 +218,16 @@ export function withSeatHero(lobby, id, hero, name, now) {
   if (!lobby?.seats?.some((seat) => seat.id === id)) return lobby;
   return touchLobby({
     ...lobby,
-    seats: lobby.seats.map((seat) => (seat.id === id
-      ? { ...seat, hero: shareHero(hero), name: name ? shareName(name) : seat.name }
-      : seat)),
+    seats: lobby.seats.map((seat) => {
+      if (seat.id !== id) return seat;
+      const nextHero = shareHero(hero);
+      return {
+        ...seat,
+        hero: nextHero,
+        name: name ? shareName(name) : seat.name,
+        ready: seat.host ? true : nextHero !== seat.hero ? false : !!seat.ready,
+      };
+    }),
   }, now);
 }
 
@@ -190,6 +248,20 @@ export function closeLobby(lobby, now) {
   return touchLobby({ ...lobby, closed: true }, now);
 }
 
+export function clearGuestReady(lobby, now) {
+  return touchLobby({
+    ...lobby,
+    seats: (lobby?.seats || []).map((seat) => (seat.host ? { ...seat, ready: true } : { ...seat, ready: false })),
+  }, now);
+}
+
+export function setSeatReady(lobby, id, ready, now) {
+  return touchLobby({
+    ...lobby,
+    seats: (lobby?.seats || []).map((seat) => (seat.id === id && !seat.host ? { ...seat, ready: !!ready } : seat)),
+  }, now);
+}
+
 export function shareRoster(lobby, selfId) {
   return (lobby?.seats || []).map((seat, index) => ({
     seat: index + 1,
@@ -197,6 +269,8 @@ export function shareRoster(lobby, selfId) {
     hero: seat.hero,
     host: !!seat.host,
     you: seat.id === selfId,
+    ready: !!seat.host || !!seat.ready,
+    unlockedLevel: shareUnlocked(seat.unlockedLevel),
     state: 'connected',
   }));
 }
@@ -206,6 +280,7 @@ export function shareFailureCopy(reason) {
     case 'invalid': return 'This invite link is not valid.';
     case 'expired': return 'This invite has expired. Ask the host for a new link.';
     case 'full': return 'This siege is full.';
+    case 'incompatible': return 'This invite is from a different game version. Refresh both browsers and make a new link.';
     case 'host_left': return 'The host left this siege.';
     case 'started': return 'This siege has already started. Friends join before the host launches, not mid-fight.';
     default: return 'Could not join this siege.';

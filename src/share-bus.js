@@ -9,6 +9,19 @@
 // SDP and ICE ride the live channel only. localStorage keeps the latest lobby
 // so a tab that opens after the host copied the link still sees it.
 
+// TURN and STUN from the deployment. Works without a signed-in lobby. A
+// missing or offline auth config leaves the session on NetSession's STUN list.
+export async function loadShareIceServers(fetchImpl = globalThis.fetch) {
+  try {
+    const response = await fetchImpl('/api/auth-config', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    if (!response?.ok) return null;
+    const config = await response.json();
+    return Array.isArray(config?.iceServers) && config.iceServers.length ? config.iceServers : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createMemoryChannelFactory() {
   const rooms = new Map();
   return function MemoryChannel(name) {

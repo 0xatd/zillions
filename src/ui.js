@@ -3541,7 +3541,7 @@ export class UI {
     if (card) card.classList.toggle('bad', tone === 'bad');
   }
 
-  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4 } = {}) {
+  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true } = {}) {
     this._shareLive = true;
     this._clearBusy();
     const mp = this.root.querySelector('#mp-panel');
@@ -3571,14 +3571,17 @@ export class UI {
     field.value = url || '';
     mp.querySelector('#share-copy').onclick = () => this.copyShareUrl(field.value);
     this.roomRoster(players || [], { isHost: true, maxPlayers, level, mode, difficulty });
+    const waiting = (players || []).length > 1 && !launchReady;
     this.setStartButton({
-      text: (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
-      disabled: false,
-      title: 'Friends must join before you start. The link closes when the siege begins.',
+      text: waiting ? 'WAITING FOR READY' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
+      disabled: waiting,
+      title: waiting
+        ? 'Start unlocks when every friend is connected, has this mission unlocked, and marks Ready.'
+        : 'Friends must join before you start. The link closes when the siege begins.',
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4 } = {}) {
+  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
     const mp = this.root.querySelector('#mp-panel');
@@ -3590,11 +3593,14 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">Pick your hero. The host starts for everyone. A link opened after that cannot add another hero.</p>
+        <p class="mphint">Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.</p>
+        <div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>
       </div>
       <div id="room-roster" class="roomroster"></div>
       <div id="mp-sub"></div>`;
     mp.querySelector('#share-status').textContent = status || 'Connected to the host.';
+    const readyButton = mp.querySelector('#share-ready');
+    if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
     this.setStartButton({
       text: '⏳  WAITING FOR HOST TO START',

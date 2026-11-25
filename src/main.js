@@ -30,12 +30,12 @@ import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './mari
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
-  admitGuest, closeLobby, createLobby, markStarted, parseShareLocation, publicShareLobby,
-  randomShareCode, releaseGuest, seatGuest, shareFailureCopy, shareHero, shareId, shareMessageId,
+  admitGuest, clearGuestReady, closeLobby, createLobby, markStarted, parseShareLocation, publicShareLobby,
+  randomShareCode, releaseGuest, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
   shareName, shareRoster, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, withSeatHero,
 } from './share-link.js';
-import { createBrowserHub, createSupabaseHub } from './share-bus.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
+import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
 import {
   applyEconomySnapshotToProfile, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
@@ -187,6 +187,7 @@ class App {
         this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
+          if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
           if (this.onlineMode && this.lobby?.game) {
             const eligibility = roomLevelEligibility(this.lobby.game);
             if (!eligibility.eligible) {
@@ -270,6 +271,7 @@ class App {
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
       onShareLeave: () => this._leaveShareLink(),
+      onShareReady: (ready) => this._setShareReady(ready),
       onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
       onCoachSkip: () => this._skipCoach(),
       onSignIn: () => this._signIn(),
@@ -733,6 +735,7 @@ class App {
     if (this._hostLaunching) return;
     this._hostLaunching = true;
     try {
+      if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
       this._sealShareLobby();
       const level = this.ui.selectedLevel || 1;
       const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
@@ -1974,8 +1977,12 @@ class App {
       this._sharePublishLobby();
       this._renderShareHost();
     }
-    if (this._shareLobby && this.mpRole === 'guest' && !this.net?.open) {
-      this._sharePublish({ t: 'join', name: this._publicName(), hero: key });
+    if (this._shareLobby && this.mpRole === 'guest') {
+      this._sharePublish({
+        t: 'join', name: this._publicName(), hero: key, claim: true,
+        protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
+        unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+      });
     }
     if (this.lobby?.game) {
       this.lobby.updateRoomPlayer({ hero: key, ...(this.mpRole === 'guest' ? { ready: false } : {}) }).catch((e) => {
@@ -2658,6 +2665,7 @@ class App {
       hostId: id,
       hostName: this._publicName(),
       hero: this.ui.selectedHero || 'scott',
+      unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
       now: Date.now(),
       mode: this.ui.selectedMode || 'campaign',
       level: this.ui.selectedLevel || 1,
@@ -2671,6 +2679,7 @@ class App {
       isHost: true,
       mode: this._shareLobby.mode,
     });
+    this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
     this._bindShareTransport('host');
     this._sharePublishLobby();
     clearInterval(this._shareBeat);
@@ -2692,6 +2701,7 @@ class App {
     this._shareGuestShown = false;
     this._shareLobby = null;
     this.mpRole = 'guest';
+    this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
     this.ui._shareLive = true;
     this.ui.showShareNotice({ title: 'Joining siege', copy: 'Looking for the host…' });
     this._bindShareTransport('guest');
@@ -2753,13 +2763,13 @@ class App {
       this._renderShareHost();
       return;
     }
-    this._shareLobby = {
+    this._shareLobby = clearGuestReady({
       ...this._shareLobby,
       mode: this.ui.selectedMode || 'campaign',
       level: this.ui.selectedLevel || 1,
       difficulty: this.ui.selectedDiff || 'normal',
       maxPlayers: (this.ui.selectedMode || 'campaign') === 'labyrinth' ? 3 : 4,
-    };
+    }, Date.now());
     this._shareSig = '';
     this._sharePublishLobby();
     this._renderShareHost();
@@ -2788,22 +2798,60 @@ class App {
         hero: seat.hero,
         host: !!seat.host,
         you: seat.id === this._shareSelf,
+        ready: !!seat.host || !!seat.ready,
+        unlockedLevel: seat.unlockedLevel || 1,
         state: 'connected',
       };
     });
   }
 
+  _shareOpenIds() {
+    const openIds = new Set();
+    for (const [id, peer] of this._shareHands || []) if (peer?.open) openIds.add(id);
+    return openIds;
+  }
+
+  _shareCanLaunch() {
+    if (!this._shareLobby || this._shareLobby.started) return true;
+    const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
+    if (gate.ready) return true;
+    if (gate.blockers.length) {
+      const names = gate.blockers.map((seat) => seat.name).join(', ');
+      this.ui.showBanner(`Level ${this._shareLobby.level} is still locked for ${names}.`, 'bad', 5200);
+    } else if (gate.connecting) {
+      this.ui.showBanner('Start unlocks when every friend is connected.', '', 4200);
+    } else {
+      this.ui.showBanner('Start unlocks when every friend marks Ready.', '', 4200);
+    }
+    this._shareSig = '';
+    this._renderShareHost();
+    return false;
+  }
+
+  _setShareReady(ready) {
+    if (this.mpRole !== 'guest' || !this._shareCode) return;
+    this._sharePublish({ t: 'ready', ready: !!ready });
+  }
+
   _renderShareHost() {
     if (this.mpRole !== 'host' || !this._shareLobby || this.netMode) return;
     const players = this._shareRoster();
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.maxPlayers}:${String(this._shareRelay)}`;
+    const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
+    const blocked = players.length > 1 && !gate.ready;
+    const status = gate.blockers.length
+      ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
+      : !gate.ready && players.length > 1
+        ? (gate.connecting ? 'Waiting for every friend to connect.' : 'Waiting for every friend to mark Ready.')
+        : players.length > 1
+          ? `${players.length} commanders in this siege. Start when you are ready.`
+          : 'Link copied. Waiting for friends.';
     this.ui.showShareHost({
       url: this._shareUrl,
-      status: players.length > 1
-        ? `${players.length} commanders in this siege. Start when you are ready.`
-        : 'Link copied. Waiting for friends.',
+      status,
+      launchReady: !blocked,
       players,
       relay: this._shareRelay,
       level: this._shareLobby.level,
@@ -2827,6 +2875,12 @@ class App {
     else if (message.t === 'answer' && this.mpRole === 'host') this._acceptShareAnswer(message);
     else if (message.t === 'ice') this._acceptShareIce(message);
     else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'ready' && this.mpRole === 'host') {
+      this._shareLobby = setSeatReady(this._shareLobby, message.from, message.ready, Date.now());
+      this._shareSig = '';
+      this._sharePublishLobby();
+      this._renderShareHost();
+    }
     else if (message.t === 'leave' && this.mpRole === 'host') this._dropShareGuest(message.from);
   }
 
@@ -2843,7 +2897,11 @@ class App {
     if (!this._shareAnnounced) {
       this._shareAnnounced = true;
       this.audio?.init();
-      this._sharePublish({ t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott' });
+      this._sharePublish({
+        t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
+        protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
+        unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+      });
     }
     if (!this._shareGuestShown) {
       this._shareGuestShown = true;
@@ -2858,21 +2916,19 @@ class App {
       });
     }
     const players = shareRoster(lobby, this._shareSelf);
-    const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
+    const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
     if (this._shareGuestShown && sig === this._shareSig) return;
     this._shareSig = sig;
-    if (this.net?.open) {
-      this.ui.roomRoster(players, {
-        isHost: false, maxPlayers: lobby.maxPlayers || 4, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
-      });
-    } else {
-      const mine = lobby.seats.some((seat) => seat.id === this._shareSelf);
-      this.ui.showShareGuest({
-        status: mine ? 'Seat saved. Connecting to the host…' : 'Asking the host for a seat…',
-        players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
-        maxPlayers: lobby.maxPlayers || 4,
-      });
-    }
+    const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
+    const locked = (lobby.mode || 'campaign') === 'campaign' && (mine?.unlockedLevel || 1) < (lobby.level || 1);
+    this.ui.showShareGuest({
+      status: locked
+        ? 'This mission is still locked for you. The host can pick an earlier one.'
+        : mine ? 'Seat saved. Pick your hero, then mark Ready.' : 'Asking the host for a seat…',
+      players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
+      maxPlayers: lobby.maxPlayers || 4,
+      ready: !!mine?.ready,
+    });
   }
 
   async _acceptShareGuest(message) {
@@ -2890,19 +2946,25 @@ class App {
       this._renderShareHost();
       return;
     }
-    const decision = admitGuest(this._shareLobby, { id: message.from }, Date.now());
+    const decision = admitGuest(this._shareLobby, {
+      id: message.from, claim: true,
+      protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
+    }, Date.now());
     if (!decision.ok) {
       this._sharePublish({ t: 'reject', to: message.from, reason: decision.reason });
       return;
     }
     if (!decision.rejoining) {
       this._shareLobby = seatGuest(this._shareLobby, {
-        id: message.from, name: message.name, hero: message.hero,
+        id: message.from, name: message.name, hero: message.hero, claim: true,
+        protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
+        unlockedLevel: message.unlockedLevel,
       }, Date.now()).lobby;
     } else {
       this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
     }
-    const peer = new NetSession(this.lobby?.iceServers);
+    const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    const peer = new NetSession(ice);
     peer.shareId = message.from;
     this._shareHands.set(message.from, peer);
     this._attachNetDiagnostics(peer);
@@ -2962,7 +3024,8 @@ class App {
     if (this.net) {
       try { this.net.destroy(); } catch { /* replace a dead handshake */ }
     }
-    const net = new NetSession(this.lobby?.iceServers);
+    const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    const net = new NetSession(ice);
     this.net = net;
     this._attachNetDiagnostics(net);
     net.onOpen = () => net.send(this._heroPayload());

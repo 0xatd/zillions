@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
-  admitGuest, closeLobby, createLobby, createShareCode, markStarted, parseShareLocation,
-  publicShareLobby, releaseGuest, seatGuest, shareFailureCopy, shareRoster, shareUrl, touchLobby, withSeatHero,
+  admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, markStarted, parseShareLocation,
+  publicShareLobby, releaseGuest, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareLaunchReady, shareRoster, shareUrl, touchLobby, withSeatHero,
 } from '../src/share-link.js';
-import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub } from '../src/share-bus.js';
+import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
+import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
 
 const NOW = 1_700_000_000_000;
 const HOST = '11111111-1111-4111-8111-111111111111';
@@ -58,6 +59,36 @@ test('a second hero is seated, a duplicate keeps that seat, and the fourth is th
   const roster = shareRoster(room, GUEST);
   assert.equal(roster[1].you, true);
   assert.equal(roster[0].host, true);
+});
+
+const claim = { claim: true, protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION, unlockedLevel: 1 };
+
+test('an old client cannot take a share seat, and a locked mission cannot launch', () => {
+  const room = lobby({ unlockedLevel: 5 });
+  assert.equal(admitGuest(room, { id: GUEST, claim: true }, NOW + 10).reason, 'incompatible');
+  assert.match(shareFailureCopy('incompatible'), /different game version/);
+  const stale = { ...room, protocolVersion: LOBBY_PROTOCOL_VERSION - 1 };
+  assert.equal(admitGuest(stale, { id: GUEST, ...claim }, NOW + 10).reason, 'incompatible');
+  const seated = seatGuest(room, { id: GUEST, name: 'Bea', hero: 'scott', ...claim, unlockedLevel: 1 }, NOW + 10).lobby;
+  const later = { ...seated, level: 3 };
+  assert.equal(shareBlockers(later).length, 1);
+  assert.equal(shareBlockers({ ...later, mode: 'survival' }).length, 0);
+  const open = new Set([GUEST]);
+  assert.equal(shareLaunchReady(seated, open).ready, false);
+  const ready = setSeatReady(seated, GUEST, true, NOW + 20);
+  assert.equal(shareLaunchReady(ready, open).ready, true);
+  assert.equal(shareLaunchReady(ready, new Set()).connecting, true);
+  const changed = withSeatHero(ready, GUEST, 'alexander', 'Bea', NOW + 30);
+  assert.equal(changed.seats[1].ready, false);
+  assert.equal(clearGuestReady(setSeatReady(seated, GUEST, true, NOW + 20), NOW + 40).seats[1].ready, false);
+  assert.equal(shareLaunchReady({ ...ready, level: 4 }, open).ready, false);
+});
+
+test('share ice prefers the deployment relay list', async () => {
+  const turn = [{ urls: 'turn:example.test:3478', username: 'siege', credential: 'secret' }];
+  const servers = await loadShareIceServers(async () => ({ ok: true, json: async () => ({ iceServers: turn }) }));
+  assert.deepEqual(servers, turn);
+  assert.equal(await loadShareIceServers(async () => ({ ok: false, json: async () => ({}) })), null);
 });
 
 test('expired, closed, stale, and already-started links refuse a new hero', () => {
