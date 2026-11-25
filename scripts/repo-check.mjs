@@ -68,7 +68,8 @@ assert.ok(index.includes('three/addons/'), 'index.html must map vendored Three.j
 
 const tacticalVisuals = read('src/tactical-visuals.js');
 assert.ok(tacticalVisuals.includes('class TacticalVisuals'), 'tactical visual pipeline must exist');
-assert.ok(tacticalVisuals.includes("QUALITY_KEY = 'zillions_graphics_quality'"), 'graphics quality must persist locally');
+assert.ok(read('src/graphics-quality.js').includes("QUALITY_KEY = 'zillions_graphics_quality'"), 'graphics quality must persist locally');
+assert.ok(tacticalVisuals.includes('QUALITY_KEY'), 'tactical visuals must use the persisted graphics choice');
 assert.ok(tacticalVisuals.includes('new OutputPass()'), 'postprocessing must preserve tone mapping and output color space');
 assert.ok(read('src/main.js').includes('this.tacticalVisuals.render()'), 'main renderer must use the tactical visual pipeline');
 

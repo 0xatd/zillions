@@ -82,7 +82,12 @@ to snapshots when the state can affect later simulation.
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |
 | `src/environment-art.js` | Painted world-space materials, terrain control maps and animated shallow/deep water |
-| `src/tactical-visuals.js` | Tactical presentation helpers |
+| `src/tactical-visuals.js` | Tactical presentation helpers and graphics presets |
+| `src/graphics-quality.js` | Low, medium, high, and auto graphics presets. Render-only |
+| `src/instance-cull.js` | Per-instance frustum cull for static instanced props |
+| `src/unit-impostors.js` | Distant-unit stand-ins |
+| `src/static-batch.js` | Merged static meshes and instanced bridges |
+| `src/perf-hud.js` | Dev-only frame, draw, triangle, and sim-time overlay |
 | `src/horde-art.js` | Per-type instanced zombie models and the shared horde writer |
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
