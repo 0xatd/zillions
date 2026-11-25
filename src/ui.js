@@ -66,6 +66,7 @@ export class UI {
     this.shell = new ShellState();
     this.msgSeen = 0;
     this._contactTime = -1;
+    this._stance = null;
     this._nearestContact = null;
     this._upgradesOpen = false;
     this.pauseOpen = false;
@@ -130,7 +131,7 @@ export class UI {
       <div id="actionbar" class="hidden">
         <div class="commandtop">
           <div class="rallyhints" id="stancebar">
-            <span class="stance" data-st="defend" data-bind="stance_defend" title="Hold the current city line"><b></b> 🛡️ Defend city</span><span class="stance" data-st="guard" data-bind="stance_follow" title="Escort the hero"><b></b> 🚩 Follow hero</span><span class="stance" data-st="attack" data-bind="stance_push" title="Push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</span>
+            <button type="button" class="stance" data-st="defend" data-bind="stance_defend" aria-pressed="false" title="Recall all squads to defend the Keep"><b></b> 🛡️ Defend Keep</button><button type="button" class="stance" data-st="guard" data-bind="stance_follow" aria-pressed="false" title="All squads escort the heroes; they leave the Keep"><b></b> 🚩 Follow heroes</button><button type="button" class="stance" data-st="attack" data-bind="stance_push" aria-pressed="false" title="All squads push the lanes: take nodes, then siege the hives"><b></b> ⚔️ Push lanes</button>
           </div>
           <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
           <div class="armystatus" id="army-status">Build camps to raise squads.</div>
@@ -2722,6 +2723,7 @@ export class UI {
   initHUD(game, p, character = null) {
     this.msgSeen = 0;
     this._contactTime = -1;
+    this._stance = null;
     this._nearestContact = null;
     this._upgradesOpen = false;
     this._upgradePanelKey = null;
@@ -2889,6 +2891,7 @@ export class UI {
       this._stance = game.stance;
       for (const chip of this.root.querySelectorAll('#stancebar .stance')) {
         chip.classList.toggle('sel', chip.dataset.st === game.stance);
+        chip.setAttribute('aria-pressed', String(chip.dataset.st === game.stance));
       }
     }
     if (labyrinth) {
@@ -2906,7 +2909,7 @@ export class UI {
       const squads = new Set(game.units.filter((u) => !u.hero && !u.dead && u.squadId).map((u) => u.squadId)).size;
       const stanceText = {
         defend: 'holding the city line',
-        guard: 'following your hero',
+        guard: 'escorting heroes · Keep not garrisoned',
         attack: 'pushing the lanes',
       }[game.stance] || 'awaiting orders';
       q('#army-status').innerHTML = firstSiege
@@ -2934,18 +2937,22 @@ export class UI {
     const alertBox = q('#combat-alert');
     const keep = game.buildings?.find(b => b.kind === 'hq' && b.alive);
     const keepStatus = keep ? `${Math.ceil(keep.hp)} / ${keep.maxHp} HP · ${bearing(game.heroes[p], {x:keep.cx, z:keep.cz})}` : '';
-    const alertKey = (alert?.key || '') + (alert?.key.startsWith('keep') ? keepStatus : '');
+    const alertKey = (alert?.key || '') + (alert?.key.startsWith('keep') ? game.stance : '');
     if (alertKey !== this._combatAlertKey) {
       this._combatAlertKey = alertKey;
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
-        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ` · ${keepStatus}` : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}</div>`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
+        alertBox.querySelector('#recall-army')?.addEventListener('click', () => this.cb.onStance?.('defend'));
         alertBox.querySelector('#locate-keep')?.addEventListener('click', () => this.cb.onLocateKeep?.());
       } else {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
       }
     }
+
+    const keepLabel = alertBox.querySelector('[data-keep-status]');
+    if (keepLabel) keepLabel.textContent = keepStatus;
 
     // Hero plate.
     const h = game.heroes[p];
@@ -4102,7 +4109,12 @@ export class UI {
     }
     ctx.fillStyle = '#e6493a';
     const contactVision=fogVisionSources(game);
-    for (const zb of game.zombies) if(visibleInFog(contactVision,zb.x,zb.z))ctx.fillRect(zb.x - 0.5, zb.z - 0.5, 1.2, 1.2);
+    const openingWave = new Set(game.firstSiege?.stage === 'defend' ? game.firstSiege.waveIds : []);
+    for (const zb of game.zombies) if (!zb.dead && visibleInFog(contactVision, zb.x, zb.z)) {
+      const marked = openingWave.has(zb.id);
+      ctx.fillStyle = marked ? '#ffd75e' : '#e6493a';
+      ctx.fillRect(zb.x - (marked ? 1 : 0.5), zb.z - (marked ? 1 : 0.5), marked ? 2 : 1.2, marked ? 2 : 1.2);
+    }
     if (game.boss && !game.boss.dead && visibleInFog(contactVision,game.boss.x,game.boss.z)) {
       ctx.fillStyle = '#ff2d1f';
       ctx.fillRect(game.boss.x - 2.5, game.boss.z - 2.5, 5, 5);

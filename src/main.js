@@ -6,7 +6,7 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
-import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, structuresOccludeHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -151,6 +151,7 @@ class App {
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
+    this.motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     this.speed = 1;
     this.paused = true;        // starts paused behind the menu
@@ -936,7 +937,7 @@ class App {
       this.missionIntro = { elapsed: 0, distance: this.camDist };
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
-    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign') this._startCoach();
+    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
     else if (!this.profile.games && this.mpRole !== 'spectator') this._startTutorial();
     } catch (error) {
       this._finishMissionIntro();
@@ -1375,6 +1376,7 @@ class App {
 
   _startCoach() {
     this._coach = freshCoach();
+    this._coachPaintKey = null;
     this._coachOrigin = null;
     this._coachSawAttack = false;
     this._paintCoach();
@@ -1396,11 +1398,16 @@ class App {
       this.ui.hideCoach();
       return;
     }
-    const step = COACH_STEPS[this._coach.index];
-    const extra = step.id === 'stances'
-      ? `Done: ${['defend', 'guard', 'attack'].filter((stance) => this._coach.stances[stance]).join(', ') || 'none yet'}.`
-      : '';
-    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length, extra);
+    const binds = this.binds();
+    const labels = Object.fromEntries(Object.entries({ build: 'build', defend: 'stance_defend',
+      push: 'stance_push', north: 'move_up', west: 'move_left', south: 'move_down', east: 'move_right', mode: 'build_mode', ability: 'ability1' }).map(([label, action]) => [label, keyLabel(binds[action])]));
+    const step = coachStep(this._coach, labels);
+    const siege = this.game?.firstSiege;
+    if (['stances', 'attack', 'victory'].includes(step.id)) {
+      if (siege?.stage === 'warning') step.title += ` · ${Math.max(0, Math.ceil(this.game.nests[siege.nestId]?.musterT || 0))}s`;
+      if (siege?.stage === 'defend') step.title += ` · ${siege.waveIds.length} left`;
+    }
+    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length);
   }
 
   _skipCoach() {
@@ -5277,6 +5284,8 @@ class App {
         if (e.key === 'Escape') e.target.blur();
         return;
       }
+      // Let native buttons handle activation without also building/dodging or opening chat.
+      if (e.target?.tagName === 'BUTTON' && (k === ' ' || k === 'enter')) return;
       this.keys.add(k);
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
@@ -5340,9 +5349,9 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'defend' }); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'guard' }); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'attack' }); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
+        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
+        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
@@ -5415,12 +5424,14 @@ class App {
   setBinds(next) {
     this._binds = saveBinds(next);
     this.ui.setKeybinds(this._binds);
+    if (this._coach) this._paintCoach();
     return this._binds;
   }
 
   resetKeybinds() {
     this._binds = resetBinds();
     this.ui.setKeybinds(this._binds);
+    if (this._coach) this._paintCoach();
     return this._binds;
   }
 
@@ -5658,7 +5669,7 @@ class App {
     let sx = 0, sz = 0;
     if (this.shake > 0) {
       this.shake -= dt;
-      const s = Math.min(this.shake, 0.4);
+      const s = this.motionPreference.matches ? 0 : Math.max(0, Math.min(this.shake, 0.25));
       sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
     }
     this.camera.position.set(
@@ -5809,8 +5820,11 @@ class App {
     // co-op pump). Replaying hundreds of stale FX events in one frame is a
     // hitch and an air-raid of sounds — keep only the freshest burst.
     if (g.events.length > 90) {
-      // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
-      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      // Keep world changes, the earned opening payoff and the latest local
+      // order acknowledgement, in their original order. Never replay old combat FX.
+      const older = g.events.slice(0, g.events.length - 30);
+      const lastOrder = older.findLastIndex(e => e.player === this.myPlayer && ['hold', 'rally', 'orderconfirmed'].includes(e.type));
+      const keep = older.filter((e, i) => e.type === 'founded' || e.type === 'firstsiege' || i === lastOrder);
       g.events.splice(0, g.events.length - 30, ...keep);
     }
     const vision=fogVisionSources(g);
@@ -5829,10 +5843,17 @@ class App {
           break;
         }
         case 'shot': {
-          if (e.heroKey) this._coachSawAttack = true;
+          if (e.fromId === this.myHero()?.id) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
             this.hitFeedback ||= new HitFeedback(this.scene);
             this.hitFeedback.show(e);
+            if (e.fromId === this.myHero()?.id && e.damage > 0) {
+              this.audio.hitConfirm(e.crit);
+              if (e.crit && performance.now() >= (this._criticalImpactAt || 0)) {
+                this._criticalImpactAt = performance.now() + 90;
+                this._impactRing(e.tx, e.tz, { color: 0xffe39a, radius: 1.0, count: 8, life: 0.16 });
+              }
+            }
           }
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
@@ -5902,6 +5923,11 @@ class App {
         }
         case 'zdeath':
           this.spawnCorpse(e);
+          if (e.big && this.audio.eventGain > 0 && performance.now() >= (this._eliteImpactAt || 0)) {
+            this._eliteImpactAt = performance.now() + 300;
+            this.audio.eliteBreak();
+            this._impactRing(e.x, e.z, { color: 0xb9dfff, radius: 2.2, count: 16, life: 0.35 });
+          }
           this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
           this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
           this.deathSfxT -= 1;
@@ -6036,11 +6062,27 @@ class App {
           this.burst(e.x, 0.8, e.z, { count: 40, color: 0xb44dff, speed: 3.4, life: 0.9, size: 0.7, up: 3 });
           this.burst(e.x, 0.5, e.z, { count: 24, color: 0x3a2a4a, speed: 2.6, life: 0.8, size: 0.7, up: 2.4 });
           break;
+        case 'orderconfirmed':
+          if (e.player === this.myPlayer) {
+            this._noteCoach({ type: 'stance', stance: e.stance });
+            this.audio.eventGain = 1;
+            this.audio.click();
+          }
+          break;
+        case 'firstsiege':
+          this.audio.eventGain = 1;
+          this.audio.levelup();
+          this.ui.showBanner(`FIRST SIEGE BROKEN · +${e.reward} gold. Repair, reinforce, then push the lanes.`, 'good', 3200);
+          this._noteCoach({ type: 'firstsiege' });
+          break;
         case 'rally':
+          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
           this.audio.train();
           this.burst(e.x, 0.3, e.z, { count: 10, color: 0x59ff9c, speed: 1.4, life: 0.5, size: 0.45, up: 1.6 });
           break;
         case 'hold':
+          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          this._impactRing(e.x, e.z, { color: 0x8acbff, radius: 5.5, count: 20, life: 0.55 });
           this.audio.click();
           break;
         case 'bhit':
@@ -6244,13 +6286,14 @@ class App {
         const events = [];
         if (Math.hypot(hero.x - this._coachOrigin.x, hero.z - this._coachOrigin.z) > 1.4) events.push({ type: 'move' });
         if (this.game.phase !== 'found') events.push({ type: 'founded' });
-        if ((this.game.stats?.built || 0) > 0) events.push({ type: 'built' });
+        if (this.game.plots.some(plot => plot.kind !== 'hq' && plot.tier > 0)) events.push({ type: 'built' });
+        if (this.game.firstSiege?.stage === 'complete') events.push({ type: 'firstsiege' });
         if (this._coachSawAttack) { events.push({ type: 'attack' }); this._coachSawAttack = false; }
         if (events.length) {
-          const before = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
           this._coach = coachApply(this._coach, events);
-          const after = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
-          if (before !== after) this._paintCoach();
+          const siege = this.game.firstSiege;
+          const paintKey = `${this._coach.index}|${siege?.stage}|${siege?.waveIds.length}|${Math.ceil(this.game.nests[siege?.nestId]?.musterT || 0)}`;
+          if (paintKey !== this._coachPaintKey) { this._coachPaintKey = paintKey; this._paintCoach(); }
         }
       }
       return;
