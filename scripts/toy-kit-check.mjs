@@ -59,8 +59,12 @@ for (const c of Object.values(CULTURES)) {
       assert.ok(key && c.assets.includes(key), `${kind} T${t} has no kit model`);
     }
   }
-  own[c.key] = Object.fromEntries(['castle_t4', 'tower_t2', 'house_t2', 'gate_t2', 'wall_t2_seg', 'unit_soldier', 'unit_ranger', 'unit_sniper', 'camp_militia_t2']
-    .map((n) => [n, fs.readFileSync(path.join(dir, `${n}.glb`)).length]));
+  own[c.key] = Object.fromEntries([
+    'castle_t4', 'tower_t2', 'house_t2', 'gate_t2', 'wall_t2_seg',
+    'unit_soldier', 'unit_ranger', 'unit_sniper', 'camp_militia_t2',
+    'farm_t1', 'farm_t2', 'farm_t3', 'mill_t1', 'mill_t2', 'mill_t3',
+    'workshop_t1', 'workshop_t2', 'workshop_t3',
+  ].map((n) => [n, fs.readFileSync(path.join(dir, `${n}.glb`)).length]));
   report.push(`${c.key} ${c.assets.length} assets ~${Math.round(tris / 1000)}k tris`);
 }
 // Each culture's signature pieces are its own geometry, not a re-tint.
@@ -69,4 +73,19 @@ for (const a of Object.keys(own)) for (const b of Object.keys(own)) {
   for (const n of Object.keys(own[a])) assert.notEqual(own[a][n], own[b][n], `${a} and ${b} share the same ${n} — author a culture piece`);
 }
 assert.ok(SHARED_KIT.has('hero_danny') && !SHARED_KIT.has('castle_t1'), 'shared kit is heroes/horde/props only');
+
+// Mirage Court tier 4 is a spire, not the tier-3 palace with a trinket on top.
+function meshYMax(file) {
+  const j = readGlb(file);
+  let ymax = -Infinity;
+  for (const m of j.meshes) for (const p of m.primitives) {
+    const a = j.accessors[p.attributes.POSITION];
+    if (a.max) ymax = Math.max(ymax, a.max[1]);
+  }
+  return ymax;
+}
+const meDir = path.join(root, CULTURES.middle_eastern.kitPath);
+const meT3 = meshYMax(path.join(meDir, 'castle_t3.glb'));
+const meT4 = meshYMax(path.join(meDir, 'castle_t4.glb'));
+assert.ok(meT4 - meT3 >= 1.5, `Mirage Court keep t4 (${meT4.toFixed(2)}) must stand clearly above t3 (${meT3.toFixed(2)})`);
 console.log(`toy-kit-check: ${report.join(', ')}, ok`);

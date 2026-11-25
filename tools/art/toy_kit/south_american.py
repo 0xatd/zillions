@@ -445,5 +445,151 @@ def marksman(k, pal):
     G.octa(pal['glow'], 0.04, 0.09, 0.24, 1.08, 0.08)
 
 
-farm, mill, mine, workshop, hero_forge, outpost = eu.farm, eu.mill, eu.mine, eu.workshop, eu.hero_forge, eu.outpost
+# ---------------------------------------------------------------- economy
+#
+# Maize terraces, a sun-wheel mill and a clay-kiln workshop. Original shapes
+# on the same limestone, teal and thatch language as the keep.
+
+def _maize(B, pal, x, z, w, n, y):
+    span = w * 0.72
+    for i in range(n):
+        zz = z - span / 2 + (0 if n == 1 else i * span / (n - 1))
+        B.box(pal['crop'] if i % 2 == 0 else pal['crop2'], w * 0.92, 0.14, 0.07, x, y, zz)
+
+
+def _store_hut(B, pal, x, z, r, y=0.16):
+    B.prism(pal['stone'], 8, r, r * 0.94, r * 1.15, x, y, z, phase=math.pi / 8)
+    B.prism(pal['roof'], 8, r + 0.01, r + 0.01, 0.05, x, y + r * 0.7, z, phase=math.pi / 8)
+    B.prism(pal['thatch'], 8, r + 0.12, 0.0, r * 1.15, x, y + r * 1.15, z, phase=math.pi / 8)
+
+
+def farm(k, t, pal):
+    """Sun-terrace fields. Tier 1 is one maize platform and a thatched store;
+    tier 3 is a three-step estate with a solar rill and a roof-comb granary."""
+    B, G = k.B, k.G
+    if t == 1:
+        frustum(B, pal['stone3'], 1.7, 1.55, 1.55, 1.4, 0.16)
+        _maize(B, pal, -0.05, -0.05, 1.15, 4, 0.2)
+        _store_hut(B, pal, 0.48, 0.42, 0.26)
+        B.prism(0xa34a2a, 8, 0.1, 0.08, 0.16, -0.58, 0.16, 0.48)
+        B.prism(pal['wood'], 5, 0.03, 0.025, 0.38, -0.2, 0.16, 0.68)
+        sun_disc(B, G, pal, -0.2, 0.58, 0.68, r=0.1)
+        return
+    if t == 2:
+        top = stepped(B, pal, 1.65, 2, 0.18, 0.14, d=1.5)
+        _maize(B, pal, -0.15, -0.15, 1.05, 3, top + 0.02)
+        B.box(pal['stone'], 0.7, 0.48, 0.55, 0.35, top, 0.28)
+        B.box(pal['roof'], 0.72, 0.06, 0.57, 0.35, top + 0.32, 0.28)
+        trap_door(B, pal, 0.22, 0.32, 0.28 + 0.28, x=0.35, y=top)
+        thatch_roof(B, pal, 0.72, 0.58, top + 0.48, 0.36, x=0.35, z=0.28)
+        sun_disc(B, G, pal, 0.35, top + 0.7, 0.58, r=0.1)
+        B.prism(pal['crop2'], 6, 0.1, 0.03, 0.2, -0.5, top, 0.4)
+        B.prism(pal['crop2'], 6, 0.08, 0.02, 0.16, -0.32, top, 0.5)
+        return
+    top = stepped(B, pal, 1.7, 3, 0.16, 0.1, d=1.55)
+    _maize(B, pal, 0, -0.1, 0.95, 3, top + 0.02)
+    G.box(pal['glow'], 1.15, 0.03, 0.05, 0, top + 0.02, 0.22)
+    B.box(pal['stone'], 0.62, 0.42, 0.48, 0.32, top, 0.35)
+    B.box(pal['roof'], 0.64, 0.06, 0.5, 0.32, top + 0.28, 0.35)
+    trap_door(B, pal, 0.2, 0.3, 0.35 + 0.25, x=0.32, y=top)
+    B.box(pal['stone2'], 0.36, 0.28, 0.1, 0.32, top + 0.42, 0.22)
+    thatch_roof(B, pal, 0.66, 0.52, top + 0.42, 0.3, x=0.32, z=0.35)
+    sun_disc(B, G, pal, -0.35, top + 0.42, 0.42, r=0.14)
+    _torch(B, G, pal, -0.7, 0.0, 0.6, h=0.45)
+    eu.banner(B, pal, 0.72, -0.55, 0.16, 1.2, flip=True, big=0.75)
+
+
+def _sun_rotor(k, pal, hub_y, z, length):
+    """A gold sun-wheel: disc hub and four long rays. Spins in XY."""
+    rotor = k.part('part_rotor', origin=(0, hub_y, z))
+    rotor.prism(pal['trim'], 10, 0.16, 0.16, 0.06, 0, hub_y - 0.03, z, rx=math.pi / 2)
+    rotor.prism(pal['accent'], 10, 0.07, 0.07, 0.04, 0, hub_y - 0.02, z + 0.04, rx=math.pi / 2)
+    for i in range(4):
+        a = i * math.pi / 2 + math.pi / 4
+        dx, dy = math.cos(a), math.sin(a)
+        rotor.box(pal['trim'], 0.1, length, 0.04, 0, hub_y, z, 0, 0, a - math.pi / 2)
+        tip = length * 0.78
+        rotor.box(pal['accent'], 0.2, 0.16, 0.045, dx * tip, hub_y + dy * tip - 0.08, z + 0.02, 0, 0, a - math.pi / 2)
+    return rotor
+
+
+def mill(k, t, pal):
+    """Round limestone tower, teal band, thatched cap, sun-wheel on the face."""
+    B, G = k.B, k.G
+    h = {1: 1.0, 2: 1.35, 3: 1.15}[t]
+    r = {1: 0.4, 2: 0.44, 3: 0.4}[t]
+    if t < 3:
+        B.prism(pal['stone3'], 8, r + 0.16, r + 0.1, 0.16, 0, 0, 0, phase=math.pi / 8)
+        base = 0.16
+    else:
+        base = stepped(B, pal, 1.3, 2, 0.2, 0.1)
+    B.prism(pal['stone'], 8, r, r * 0.9, h, 0, base, 0, phase=math.pi / 8)
+    B.prism(pal['roof'], 8, r + 0.02, r + 0.02, 0.07, 0, base + h * 0.6, 0, phase=math.pi / 8)
+    trap_door(B, pal, 0.2, 0.36, r * 0.88, y=base)
+    G.box(pal['warm'], 0.12, 0.12, 0.03, 0.16, base + h * 0.62, r * 0.9)
+    thatch_roof(B, pal, r * 2.15, r * 2.15, base + h, 0.42 if t < 3 else 0.5)
+    if t >= 2:
+        B.box(pal['stone'], 0.42, 0.48, 0.38, r + 0.22, base, 0.22)
+        B.box(pal['roof'], 0.44, 0.05, 0.4, r + 0.22, base + 0.28, 0.22)
+        thatch_roof(B, pal, 0.48, 0.42, base + 0.48, 0.36, x=r + 0.22, z=0.22)
+    if t >= 3:
+        sun_disc(B, G, pal, 0, base + h * 0.45, r + 0.02, r=0.11)
+        eu.banner(B, pal, -0.7, -0.45, base, 1.15, big=0.7)
+        G.box(pal['glow'], r * 1.6, 0.04, 0.04, 0, base + h * 0.35, r * 0.5)
+    _sun_rotor(k, pal, base + h * 0.55, r + 0.2, {1: 0.72, 2: 0.92, 3: 1.05}[t])
+
+
+def workshop(k, t, pal):
+    """Kiln yard. The clay furnace mouth is the job; tier 3 raises a solar
+    furnace — a sun disc over a stepped hearth — in place of a taller kiln."""
+    B, G = k.B, k.G
+    B.box(pal['stone3'], 1.75, 0.1, 1.6, 0, 0, 0)
+    if t == 1:
+        B.box(pal['stone'], 0.9, 0.5, 0.65, -0.15, 0.1, -0.15)
+        B.box(pal['roof'], 0.92, 0.06, 0.67, -0.15, 0.46, -0.15)
+        trap_door(B, pal, 0.24, 0.36, 0.18, x=-0.15, y=0.1)
+        thatch_roof(B, pal, 0.95, 0.7, 0.6, 0.38, x=-0.15, z=-0.15)
+        B.prism(pal['stone2'], 8, 0.22, 0.18, 0.55, 0.55, 0.1, 0.15, phase=math.pi / 8)
+        B.prism(pal['dark'], 8, 0.12, 0.12, 0.08, 0.55, 0.28, 0.28, rx=math.pi / 2)
+        G.box(0xff7a3c, 0.1, 0.1, 0.04, 0.55, 0.28, 0.34)
+        B.prism(pal['stone3'], 8, 0.24, 0.06, 0.16, 0.55, 0.65, 0.15, phase=math.pi / 8)
+        B.box(pal['dark'], 0.2, 0.12, 0.12, 0.15, 0.1, 0.5)
+        B.box(0x1c1a24, 0.26, 0.04, 0.1, 0.15, 0.22, 0.5)
+        return
+    hall_y = 0.1
+    if t >= 3:
+        hall_y = stepped(B, pal, 1.55, 2, 0.14, 0.08, d=1.4)
+    B.box(pal['stone'], 1.05, 0.55, 0.7, -0.1, hall_y, -0.2)
+    B.box(pal['roof'], 1.07, 0.06, 0.72, -0.1, hall_y + 0.4, -0.2)
+    trap_door(B, pal, 0.26, 0.4, 0.16, x=-0.1, y=hall_y)
+    if t >= 3:
+        B.box(pal['stone2'], 0.5, 0.32, 0.12, -0.1, hall_y + 0.55, -0.28)
+        thatch_roof(B, pal, 1.05, 0.72, hall_y + 0.55, 0.28, x=-0.1, z=-0.2)
+    else:
+        thatch_roof(B, pal, 1.1, 0.75, hall_y + 0.55, 0.4, x=-0.1, z=-0.2)
+    kiln_h = 1.35 if t == 2 else 0.45
+    B.prism(pal['stone2'], 8, 0.26, 0.2, kiln_h, 0.55, hall_y, 0.05, phase=math.pi / 8)
+    B.prism(pal['roof'], 8, 0.28, 0.28, 0.07, 0.55, hall_y + kiln_h * 0.55, 0.05, phase=math.pi / 8)
+    B.prism(pal['dark'], 8, 0.12, 0.12, 0.08, 0.55, hall_y + 0.28, 0.24, rx=math.pi / 2)
+    G.box(0xff7a3c, 0.1, 0.12, 0.04, 0.55, hall_y + 0.28, 0.3)
+    B.prism(pal['stone3'], 8, 0.28, 0.04, 0.2, 0.55, hall_y + kiln_h, 0.05, phase=math.pi / 8)
+    if t == 2:
+        for x in (-0.72, -0.42):
+            B.prism(pal['wood'], 5, 0.035, 0.03, 0.7, x, hall_y, 0.42)
+        B.box(pal['wood'], 0.46, 0.05, 0.06, -0.57, hall_y + 0.62, 0.42)
+        B.box(pal['thatch'], 0.4, 0.04, 0.16, -0.57, hall_y + 0.67, 0.42)
+    B.box(pal['dark'], 0.22, 0.14, 0.14, 0.1, hall_y, 0.5)
+    B.box(0x1c1a24, 0.28, 0.05, 0.1, 0.1, hall_y + 0.14, 0.5)
+    if t >= 3:
+        # solar furnace: a raised hearth under a large sun
+        B.box(pal['stone'], 0.4, 0.22, 0.32, -0.45, hall_y, 0.4)
+        sun_disc(B, G, pal, -0.45, hall_y + 0.55, 0.4, r=0.2)
+        B.prism(pal['trim'], 6, 0.04, 0.04, 0.28, -0.45, hall_y + 0.22, 0.4)
+        G.box(pal['glow'], 0.22, 0.04, 0.16, -0.45, hall_y + 0.22, 0.4)
+        eu.banner(B, pal, 0.75, -0.5, hall_y, 1.2, flip=True, big=0.75)
+        G.box(pal['glow'], 0.9, 0.04, 0.04, -0.1, hall_y + 0.4, 0.16)
+
+
+# Mines, hero forges and outposts stay shared European builders, recoloured.
+mine, hero_forge, outpost = eu.mine, eu.hero_forge, eu.outpost
 hero, enemy, tree_round, tree_pine, rock, cliff = eu.hero, eu.enemy, eu.tree_round, eu.tree_pine, eu.rock, eu.cliff
