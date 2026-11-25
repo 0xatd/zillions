@@ -1,3 +1,14 @@
+# Music, ambience, and impact provenance
+
+## Impacts
+
+| File | Plays | Licence | Author | Source |
+| --- | --- | --- | --- | --- |
+| `audio/cc0/impact/impact_punch_medium_000.ogg` | Light hit | CC0 | Kenney | https://kenney.nl/assets/impact-sounds |
+| `audio/cc0/impact/impact_punch_heavy_000.ogg` | Heavy hit and kill | CC0 | Kenney | https://kenney.nl/assets/impact-sounds |
+| `audio/cc0/impact/impact_plate_heavy_000.ogg` | Ultimate | CC0 | Kenney | https://kenney.nl/assets/impact-sounds |
+| `audio/cc0/impact/impact_metal_medium_000.ogg` | Ability cast | CC0 | Kenney | https://kenney.nl/assets/impact-sounds |
+
 # Music and ambience provenance
 
 Salvaged from PR #132. No sampled SFX are included in this replacement.

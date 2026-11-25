@@ -186,29 +186,36 @@ a full siege, a host who left, or a link opened after the start is refused.
 
 ## Controls
 
-The control scheme follows Path of Exile 2's WASD mode, because that is the
-grammar a player arriving from an action RPG already has in their hands.
+Right-click is the order. Q, W, E, and R are the four ability keys. The camera
+is free to pan, and Space brings it back to the hero.
 
-- Movement is WASD and is never camera-relative.
-- Build and Fight are explicit input contexts. WASD movement is shared.
-- In Build mode, Space builds, upgrades, repairs, or rebuilds. B is a secondary
-  accessible build binding. Space cannot dodge and Q cannot cast.
-- In Fight mode, Space is the dodge roll. It is a committed burst with a short
+- Right-click on ground issues a move order. Right-click on an enemy issues an
+  attack-move onto that enemy. A shows a marker and the next click attack-moves.
+  Orders are lockstep commands. Remapping keys does not change the command.
+- Direct hero movement remains bindable and is never camera-relative. The
+  default keys are Num8, Num4, Num2, and Num6, so they do not take QWER.
+- The camera follows the hero until the player pans. Arrow keys pan. Edge pan
+  is on by default. Space centers on the hero and follows again. Settings can
+  turn on WASD camera pan; that parks Ability II and attack-move on free keys.
+- Build and Fight are explicit input contexts.
+- In Build mode, V and B build, upgrade, repair, or rebuild. V cannot dodge
+  and the ability keys cannot cast.
+- In Fight mode, V is the dodge roll. It is a committed burst with a short
   invulnerable window and a cooldown longer than the roll, issued as a lockstep
   command and carried in the snapshot. Construction input is disabled.
-- Q, E and R are the Fight-mode ability slots. Only Q is used today, because a hero has
-  one controlled ability; E and R are declared and shown as reserved rather
-  than hidden, so the layout does not shift when a second ability lands.
+- Q, W, E, and R cast ability slots one through four in Fight mode. Ctrl with
+  Q or W reaches slots five and six when a kit has them.
 - X draws the other weapon set.
-- Alt toggles Build and Fight mode. Founding and funding a colony is the half of
-  this game an action-RPG layout has no opinion about, and it keeps its key.
-- Army stances take F1–F3. They moved off 1/2/3 deliberately: Path of Exile
-  puts consumables there, Zillions commands squads and Path of Exile does not,
-  and 1/2 are now reserved for a consumable system that does not exist yet.
+- Alt toggles Build and Fight mode.
+- Army stances take F1–F3. They stay off 1/2/3. 1 and 2 remain reserved for a
+  consumable system that does not exist yet.
+- Screen shake can be reduced from Settings → Controls. That toggle is
+  presentation only.
 - Every binding is rebindable in Settings → Controls, which reads the same
-  table `src/keybinds.js` dispatches through. The code, the Settings screen,
-  the in-game help and the README controls table cannot drift apart:
-  `scripts/keybind-check.mjs` fails the build if they do.
+  table `src/keybinds.js` dispatches through and persists in localStorage.
+  The code, the Settings screen, the in-game help and the README controls
+  table cannot drift apart: `scripts/keybind-check.mjs` fails the build if
+  they do.
 
 Two actions that can be listening at the same moment may not share a key. That
 is decided by scope — where an action is live — and not by the group it is

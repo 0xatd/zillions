@@ -1,5 +1,5 @@
-// Shared slot contract. Legacy leaders keep their original Q ability while
-// authored multi-ability kits use six slots (Q/E/R and Ctrl+Q/E/R).
+// Shared slot contract. Legacy leaders keep their original first ability.
+// Authored kits use six slots: Q W E R, then the secondary bar with Q and W.
 export const ABILITY_SLOT_COUNT = 6;
 export const validAbilitySlot = slot => Number.isInteger(slot) && slot >= 0 && slot < ABILITY_SLOT_COUNT;
 export function heroAbilities(def) {
