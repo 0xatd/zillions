@@ -5,19 +5,20 @@ import * as THREE from 'three';
 export class HitFeedback {
   constructor(scene) { this.scene=scene;this.active=[]; }
   show(event) {
-    if (!event.heroKey || !(event.damage>0) || !Number.isFinite(event.damage)) return;
+    if (!(event.damage>0) || !Number.isFinite(event.damage)) return;
     while(this.active.length>=24)this._remove(this.active[0]);
     const canvas=document.createElement('canvas');canvas.width=256;canvas.height=96;
     const ctx=canvas.getContext('2d');
     ctx.font='bold 52px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.lineWidth=7;ctx.strokeStyle='#111820';ctx.fillStyle=event.crit?'#ffd75e':'#edf3ff';
+    const hero=!!event.heroKey;
+    ctx.lineWidth=7;ctx.strokeStyle='#111820';ctx.fillStyle=event.crit?'#ffd75e':hero?'#edf3ff':'#ffd0c4';
     const amount=Math.round(event.damage);
     const text=`${amount>9999 ? (amount/1000).toFixed(1)+'k' : Math.max(1,amount)}${event.crit?'!':''}`;
     ctx.strokeText(text,128,48);ctx.fillText(text,128,48);
     const texture=new THREE.CanvasTexture(canvas);
     const material=new THREE.SpriteMaterial({map:texture,transparent:true,depthWrite:false});
     const sprite=new THREE.Sprite(material);
-    const scale=event.crit?1.4:1;
+    const scale=event.crit?1.35:hero?1:0.82;
     sprite.scale.set(2.4*scale,.9*scale,1);
     sprite.position.set(event.tx,1.8,event.tz);
     this.scene.add(sprite);

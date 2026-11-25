@@ -36,10 +36,14 @@ ok(clashes.length === 0, `the default scheme has conflicts: ${JSON.stringify(cla
 // These are product decisions, not implementation details. Changing one is a
 // choice someone should have to make deliberately.
 const EXPECTED = {
-  move_up: 'w', move_left: 'a', move_down: 's', move_right: 'd', sprint: 'shift',
-  dodge: ' ',                 // Path of Exile 2 puts the dodge roll on Space
-  ability1: 'q', ability2: 'e', ability3: 'r',
-  swap_set: 'x',              // and the weapon swap on X
+  camera_up: 'arrowup', camera_left: 'arrowleft', camera_down: 'arrowdown', camera_right: 'arrowright',
+  camera_center: ' ',
+  move_up: 'numpad8', move_left: 'numpad4', move_down: 'numpad2', move_right: 'numpad6',
+  sprint: 'shift',
+  dodge: 'v',
+  ability1: 'q', ability2: 'w', ability3: 'e', ability4: 'r',
+  attack_move: 'a',
+  swap_set: 'x',
   second_bar: 'control',
   consumable1: '1', consumable2: '2',
   build: 'b', build_mode: 'alt',
@@ -64,19 +68,22 @@ for (const bad of [null, undefined, 42, 'nope', [], { move_up: 42 }, { nonsense:
 }
 ok(normalizeBinds({ menu: 'z' }).menu === 'escape', 'a fixed action was rebound');
 ok(normalizeBinds({ move_up: 'K' }).move_up === 'k', 'a rebound key was not lower-cased');
-ok(normalizeBinds({ __proto__: 'x' }).move_up === 'w', 'a prototype key disturbed the scheme');
+ok(normalizeBinds({ __proto__: 'x' }).ability2 === 'w', 'a prototype key disturbed the scheme');
 ok(Object.keys(normalizeBinds({})).length === ACTIONS.length, 'normalize did not return the full scheme');
 
 // ---------- lookup ----------
-ok(actionFor(defaults, ' ') === 'dodge', 'Space does not resolve to the dodge roll');
+ok(actionFor(defaults, ' ') === 'camera_center', 'Space does not center the camera');
+ok(actionFor(defaults, 'v') === 'dodge', 'V does not resolve to the dodge roll');
+ok(actionFor(defaults, 'w', 'battle') === 'ability2', 'W does not resolve to ability II');
+ok(actionFor(defaults, 'r', 'battle') === 'ability4', 'R does not resolve to ability IV');
 ok(actionFor(defaults, 'x') === 'swap_set', 'X does not resolve to the weapon swap');
-ok(actionFor(defaults, 'arrowup') === 'move_up', 'the arrow key alternate was lost');
+ok(actionFor(defaults, 'arrowup') === 'camera_up', 'the arrow key does not pan the camera');
 ok(actionFor(defaults, 'ß') === null, 'an unbound key resolved to an action');
 ok(actionFor(defaults, 'c', 'battle') === 'character_sheet', 'scoped lookup failed in battle');
 ok(actionFor(defaults, 'c', 'hub') === 'character_sheet', 'scoped lookup failed in the hub');
 ok(actionFor(defaults, 'b', 'hub') === null, 'a battle-only action answered in the hub');
-ok(isHeld(defaults, new Set(['w']), 'move_up'), 'isHeld missed a held key');
-ok(isHeld(defaults, new Set(['arrowup']), 'move_up'), 'isHeld missed the alternate');
+ok(isHeld(defaults, new Set(['numpad8']), 'move_up'), 'isHeld missed a held key');
+ok(isHeld(defaults, new Set(['arrowup']), 'camera_up'), 'isHeld missed a camera key');
 ok(!isHeld(defaults, new Set(['j']), 'move_up'), 'isHeld matched the wrong key');
 
 // Rebinding must be able to displace, and the screen must be told about it.
@@ -98,6 +105,7 @@ ok(!isHeld(defaults, new Set(['j']), 'move_up'), 'isHeld matched the wrong key')
 // answered first and the sheet never opened. Scope, not group, decides.
 {
   ok(defaults.ability1 === 'q', 'test fixture: ability1 should hold Q');
+  ok(defaults.ability2 === 'w', 'test fixture: ability2 should hold W');
   const collided = { ...defaults, character_sheet: 'q' };
 
   const reported = conflictsFor(collided, 'character_sheet', 'q');
@@ -142,13 +150,13 @@ for (const a of ACTIONS) {
 // action bound to one is shadowed forever. Detection ignored them.
 {
   const collided = { ...defaults, tower_priority: 'arrowup' };
-  ok(conflictsFor(collided, 'tower_priority', 'arrowup').some((a) => a.id === 'move_up'),
-    'binding to an arrow key must conflict with movement');
-  ok(allConflicts(collided).length > 0, 'allConflicts ignored an alternate');
+  ok(conflictsFor(collided, 'tower_priority', 'arrowup').some((a) => a.id === 'camera_up'),
+    'binding to an arrow key must conflict with camera pan');
+  ok(allConflicts(collided).length > 0, 'allConflicts ignored a shared key');
   const resolved = normalizeBinds(collided);
-  ok(resolved.tower_priority !== 'arrowup', 'a scheme shadowed by an alternate was stored');
-  ok(allConflicts(resolved).length === 0, 'normalising left an alternate conflict in place');
-  ok(actionFor(resolved, 'arrowup', 'battle') === 'move_up', 'the arrow key stopped meaning movement');
+  ok(resolved.tower_priority !== 'arrowup', 'a scheme shadowed by camera pan was stored');
+  ok(allConflicts(resolved).length === 0, 'normalising left a camera conflict in place');
+  ok(actionFor(resolved, 'arrowup', 'battle') === 'camera_up', 'the arrow key stopped panning the camera');
 }
 
 // ---------- every scope is internally unambiguous ----------
@@ -175,7 +183,7 @@ ok(/actionFor\(this\.binds\(\), k, 'hub'\)/.test(main), 'the hub dispatcher must
 // ---------- nothing dispatches on a literal any more ----------
 ok(!/this\.keys\.has\('[a-z ]'\)/.test(main), 'main.js still reads a hard-coded key');
 ok(/actionFor\(binds, k, 'battle'\)/.test(main), 'the keydown handler must dispatch through the binding table');
-for (const id of ['dodge', 'ability1', 'swap_set', 'stance_defend', 'build_mode', 'character_sheet', 'lattice_panel']) {
+for (const id of ['dodge', 'ability1', 'ability4', 'attack_move', 'camera_center', 'swap_set', 'stance_defend', 'build_mode', 'character_sheet', 'lattice_panel']) {
   ok(main.includes(`case '${id}'`), `main.js does not handle the ${id} action`);
 }
 ok(/isHeld\(binds, this\.keys, 'move_up'\)/.test(main), 'movement must read the binding table');

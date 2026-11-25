@@ -281,20 +281,22 @@ maps are built and shipped. A persistent shared world is out of scope.
 - Scott, Alexander, and Danny have portrait and voice assets. The other four
   heroes intentionally use emoji portrait fallbacks and procedural sound until
   approved character assets exist. Do not invent asset paths for them.
-- Movement is fixed to world/minimap orientation, not camera-relative.
-- W moves north/up, A west/left, S south/down, D east/right.
+- Movement orders are fixed to world/minimap orientation, not camera-relative.
+- Right-click moves or attack-moves. Q, W, E, and R are the four abilities.
+  Space centers the camera on the hero. Arrow keys and edge pan move the camera.
+  WASD camera pan is an option in Settings → Controls.
 - Camera yaw stays fixed during gameplay.
-- Alt toggles Space between Build mode and Fight mode. In Build mode, hold
-  Space/B to build, upgrade, repair, or rebuild. In Fight mode, Space casts and
-  B still builds. Build mode does not fire the special with Space; auto-attacks
-  still run. Fight mode hides vacant plot rings/dots so combat stays clean, but
-  actual buildings remain visible.
+- Alt toggles Build mode and Fight mode. In Build mode, hold V or B to build,
+  upgrade, repair, or rebuild. In Fight mode, V dodges and Q, W, E, R cast.
+  Auto-attacks still run. Fight mode hides vacant plot rings/dots so combat
+  stays clean, but actual buildings remain visible.
+- Army stances are F1, F2, and F3. They stay off the number row.
 - Upgrades must work from all sides of a building footprint.
 - City camps/barracks must stay visually road-connected. The balance check
   verifies all three city camps exist and each has a dirt road edge.
 - Army control is blended: squads fight automatically, but the player sets the
-  global stance. `1 Defend` holds the city line, `2 Follow` escorts the hero,
-  and `3 Push` walks the lanes. Do not add individual unit micro.
+  global stance. F1 defends the city, F2 follows the hero, and F3 pushes the
+  lanes. Do not add individual unit micro.
 - Everything new must stay deterministic: seeded RNG and commands through
   `exec()`, or lockstep co-op desyncs. The lane graph is built from the map
   alone, with no RNG.

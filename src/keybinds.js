@@ -6,14 +6,22 @@
 // context it belongs to; the handler dispatches through this table and the
 // Settings screen reads the same table to draw and rebind.
 //
-// The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
-// system PoE2 does not (army stances) or lacks one PoE2 has (there is one hero
-// ability, not nine skill gems). Deviations are noted on the actions.
+// The battle scheme is right-click orders plus four ability keys. Camera pan,
+// edge pan, and the optional WASD camera live beside that scheme. Direct hero
+// movement stays bindable for players who want it, on the numpad by default
+// so it does not take Q, W, E, or R.
 //
 // Headless and three-free — `scripts/keybind-check.mjs` drives it in Node.
 
 export const KEYBIND_KEY = 'zillions_keybinds';
-export const KEYBIND_VERSION = 1;
+export const KEYBIND_VERSION = 2;
+
+export const DEFAULT_FEEL = Object.freeze({
+  wasdCamera: false,
+  edgePan: true,
+  reduceShake: false,
+  parked: null,
+});
 
 // WHERE an action is actually listening. This is not the same thing as the
 // group it is displayed under, and conflating the two was a real bug: the
@@ -30,8 +38,8 @@ export const SCOPES = {
 
 // Display groups for the Settings screen. These carry no meaning at dispatch.
 export const BIND_CONTEXTS = {
-  movement: { key: 'movement', name: 'Movement', desc: 'Getting around the battlefield.' },
-  combat: { key: 'combat', name: 'Combat', desc: 'Abilities, dodging, and your weapon sets.' },
+  movement: { key: 'movement', name: 'Movement', desc: 'Orders, camera pan, and optional direct movement.' },
+  combat: { key: 'combat', name: 'Combat', desc: 'Four abilities, attack-move, dodging, and weapon sets.' },
   army: { key: 'army', name: 'Army & Colony', desc: 'Orders to your squads and your city.' },
   interface: { key: 'interface', name: 'Interface', desc: 'Screens, panels and the game menu.' },
 };
@@ -40,11 +48,22 @@ export const BIND_CONTEXTS = {
 // browser or the game grammar owns it. It is still listed, so the Settings
 // screen shows the complete scheme rather than a filtered one.
 export const ACTIONS = [
-  // ---- movement ----
-  { id: 'move_up', name: 'Move north', scopes: ['battle', 'hub'], context: 'movement', default: 'w', alt: 'arrowup', held: true },
-  { id: 'move_left', name: 'Move west', scopes: ['battle', 'hub'], context: 'movement', default: 'a', alt: 'arrowleft', held: true },
-  { id: 'move_down', name: 'Move south', scopes: ['battle', 'hub'], context: 'movement', default: 's', alt: 'arrowdown', held: true },
-  { id: 'move_right', name: 'Move east', scopes: ['battle', 'hub'], context: 'movement', default: 'd', alt: 'arrowright', held: true },
+  // ---- movement and camera ----
+  { id: 'camera_up', name: 'Pan camera north', scopes: ['battle'], context: 'movement', default: 'arrowup', held: true },
+  { id: 'camera_left', name: 'Pan camera west', scopes: ['battle'], context: 'movement', default: 'arrowleft', held: true },
+  { id: 'camera_down', name: 'Pan camera south', scopes: ['battle'], context: 'movement', default: 'arrowdown', held: true },
+  { id: 'camera_right', name: 'Pan camera east', scopes: ['battle'], context: 'movement', default: 'arrowright', held: true },
+  {
+    id: 'camera_center', name: 'Center camera on hero', scopes: ['battle'], context: 'movement', default: ' ',
+    desc: 'Pulls the view back onto your hero.',
+  },
+  {
+    id: 'move_up', name: 'Move hero north', scopes: ['battle'], context: 'movement', default: 'numpad8', held: true,
+    desc: 'Optional direct move. Right-click is the main order.',
+  },
+  { id: 'move_left', name: 'Move hero west', scopes: ['battle'], context: 'movement', default: 'numpad4', held: true },
+  { id: 'move_down', name: 'Move hero south', scopes: ['battle'], context: 'movement', default: 'numpad2', held: true },
+  { id: 'move_right', name: 'Move hero east', scopes: ['battle'], context: 'movement', default: 'numpad6', held: true },
   {
     id: 'sprint', name: 'Gallop', scopes: ['battle', 'hub'], context: 'movement', default: 'shift', held: true,
     desc: 'Full speed, and only at full health.',
@@ -52,20 +71,28 @@ export const ACTIONS = [
 
   // ---- combat ----
   {
-    id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: ' ',
+    id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: 'v',
     desc: 'Build mode: hold to build. Fight mode: dodge with brief invulnerability.',
   },
   {
-    id: 'ability1', name: 'Primary ability', scopes: ['battle'], context: 'combat', default: 'q',
-    desc: 'Your hero special.',
+    id: 'ability1', name: 'Ability I', scopes: ['battle'], context: 'combat', default: 'q',
+    desc: 'First ability.',
   },
   {
-    id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'e',
-    desc: 'Cast the second equipped ability.',
+    id: 'ability2', name: 'Ability II', scopes: ['battle'], context: 'combat', default: 'w',
+    desc: 'Second ability.',
   },
   {
-    id: 'ability3', name: 'Ability III', scopes: ['battle'], context: 'combat', default: 'r',
-    desc: 'Cast the third equipped ability.',
+    id: 'ability3', name: 'Ability III', scopes: ['battle'], context: 'combat', default: 'e',
+    desc: 'Third ability.',
+  },
+  {
+    id: 'ability4', name: 'Ability IV', scopes: ['battle'], context: 'combat', default: 'r',
+    desc: 'Fourth ability.',
+  },
+  {
+    id: 'attack_move', name: 'Arm attack-move', scopes: ['battle'], context: 'combat', default: 'a',
+    desc: 'The next click attack-moves. Right-click already attacks an enemy.',
   },
   {
     id: 'swap_set', name: 'Swap weapon set', scopes: ['battle'], context: 'combat', default: 'x',
@@ -73,7 +100,7 @@ export const ACTIONS = [
   },
   {
     id: 'second_bar', name: 'Secondary bar (hold)', scopes: ['battle'], context: 'combat', default: 'control', held: true,
-    desc: 'Hold for ability slots four through six.',
+    desc: 'Hold with Ability I or II for slots five and six.',
   },
   {
     id: 'consumable1', name: 'Consumable I', scopes: ['battle'], context: 'combat', default: '1', reserved: true,
@@ -125,7 +152,75 @@ const KEY_LABELS = {
   ' ': 'Space', arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→',
   escape: 'Esc', enter: 'Enter', control: 'Ctrl', shift: 'Shift', alt: 'Alt',
   tab: 'Tab', backspace: 'Backspace', delete: 'Del', capslock: 'Caps',
+  numpad8: 'Num8', numpad4: 'Num4', numpad2: 'Num2', numpad6: 'Num6',
 };
+
+const ABILITY_LABELS = [
+  [0, 'ability1', false],
+  [1, 'ability2', false],
+  [2, 'ability3', false],
+  [3, 'ability4', false],
+  [4, 'ability1', true],
+  [5, 'ability2', true],
+];
+
+export function abilityKeyLabel(binds, slot) {
+  const row = ABILITY_LABELS.find((entry) => entry[0] === slot);
+  if (!row || !binds) return '';
+  const prefix = row[2] ? `${keyLabel(binds.second_bar)}+` : '';
+  return prefix + keyLabel(binds[row[1]]);
+}
+
+const PARK_KEYS = ['f', 'y', 'u', 'h', 'j', 'k', 'l', 'n', 'i', 'o'];
+
+function firstFree(binds, id, prefer = PARK_KEYS) {
+  for (const key of prefer) {
+    if (!conflictsFor({ ...binds, [id]: key }, id, key).length) return key;
+  }
+  return binds[id];
+}
+
+// WASD camera pan is optional because W and A are Ability II and attack-move.
+// Turning it on parks those two actions on free keys. Turning it off puts them back
+// when the player has not rebound them since.
+export function setWasdCamera(binds, feel, on) {
+  const next = { ...defaultBinds(), ...(binds || {}) };
+  const options = normalizeFeel(feel);
+  const parked = { ...(options.parked || {}) };
+  if (on) {
+    if (next.ability2 === 'w') {
+      const to = firstFree(next, 'ability2');
+      parked.ability2 = { from: 'w', to };
+      next.ability2 = to;
+    }
+    if (next.attack_move === 'a') {
+      const to = firstFree(next, 'attack_move');
+      parked.attack_move = { from: 'a', to };
+      next.attack_move = to;
+    }
+    options.wasdCamera = true;
+    options.parked = parked;
+  } else {
+    for (const [id, move] of Object.entries(parked)) {
+      if (!move || next[id] !== move.to) continue;
+      if (!conflictsFor({ ...next, [id]: move.from }, id, move.from).length) next[id] = move.from;
+    }
+    options.wasdCamera = false;
+    options.parked = null;
+  }
+  return { binds: normalizeBinds(next), feel: normalizeFeel(options) };
+}
+
+export function normalizeFeel(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const parked = src.parked && typeof src.parked === 'object' ? { ...src.parked } : null;
+  return {
+    wasdCamera: !!src.wasdCamera,
+    edgePan: src.edgePan !== false,
+    reduceShake: !!src.reduceShake,
+    parked,
+  };
+}
 
 export function keyLabel(key) {
   if (!key) return '—';
@@ -235,33 +330,65 @@ export function isHeld(binds, keys, id) {
 
 let _backend = null;
 let _cache = null;
+let _feel = null;
 
 export function setKeybindBackend(backend) {
   _backend = backend;
   _cache = null;
+  _feel = null;
 }
 
-export function loadBinds({ force = false } = {}) {
-  if (_cache && !force) return _cache;
-  let raw = null;
+function readStore() {
   try {
-    if (_backend) raw = _backend.load();
-    else if (typeof localStorage !== 'undefined') raw = JSON.parse(localStorage.getItem(KEYBIND_KEY) || 'null');
-  } catch { raw = null; }
-  _cache = normalizeBinds(raw && raw.binds ? raw.binds : raw);
-  return _cache;
+    if (_backend) return _backend.load();
+    if (typeof localStorage !== 'undefined') return JSON.parse(localStorage.getItem(KEYBIND_KEY) || 'null');
+  } catch { /* a blocked store loads the defaults */ }
+  return null;
 }
 
-export function saveBinds(binds) {
-  _cache = normalizeBinds(binds);
-  const payload = { v: KEYBIND_VERSION, binds: _cache };
+function hydrate(force = false) {
+  if (_cache && _feel && !force) return;
+  const raw = readStore();
+  const current = !!(raw && raw.v === KEYBIND_VERSION);
+  _cache = normalizeBinds(current ? raw.binds : null);
+  _feel = normalizeFeel(current ? raw.feel : null);
+}
+
+function persist() {
+  const payload = { v: KEYBIND_VERSION, binds: _cache, feel: _feel };
   try {
     if (_backend) _backend.save(payload);
     else if (typeof localStorage !== 'undefined') localStorage.setItem(KEYBIND_KEY, JSON.stringify(payload));
   } catch { /* a full or blocked store must never cost the player their game */ }
+}
+
+export function loadBinds({ force = false } = {}) {
+  hydrate(force);
   return _cache;
 }
 
+export function loadFeel({ force = false } = {}) {
+  hydrate(force);
+  return _feel;
+}
+
+export function saveBinds(binds) {
+  hydrate();
+  _cache = normalizeBinds(binds);
+  persist();
+  return _cache;
+}
+
+export function saveFeel(feel) {
+  hydrate();
+  _feel = normalizeFeel(feel);
+  persist();
+  return _feel;
+}
+
 export function resetBinds() {
-  return saveBinds(defaultBinds());
+  _cache = normalizeBinds(null);
+  _feel = normalizeFeel(null);
+  persist();
+  return _cache;
 }

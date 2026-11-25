@@ -359,6 +359,8 @@ export class Game {
         level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd), abilityCds: abilityCooldowns(h), spells: h.spells ? structuredClone(h.spells) : null,
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
         mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
+        ox: h.orderX == null ? null : snapNum(h.orderX), oz: h.orderZ == null ? null : snapNum(h.orderZ),
+        ok: h.orderKind || null, oi: h.orderId ?? null,
         coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
         focusId: h.focusId ?? null,
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
@@ -604,6 +606,10 @@ export class Game {
       h.facing = hs.facing || 0;
       h.mx = hs.mx || 0;
       h.mz = hs.mz || 0;
+      h.orderX = hs.ox == null ? null : hs.ox;
+      h.orderZ = hs.oz == null ? null : hs.oz;
+      h.orderKind = hs.ok === 'attack' || hs.ok === 'move' ? hs.ok : null;
+      h.orderId = Number.isInteger(hs.oi) ? hs.oi : null;
       h.sprint = !!hs.sprint;
       h.payHold = !!hs.pay;
       h._coinAcc = hs.coinAcc || 0;
@@ -2866,6 +2872,7 @@ export class Game {
       id: nextId++, key, def: d, hero: true, x, z,
       hp: d.hp, maxHp: d.hp,
       mx: 0, mz: 0, sprint: false,
+      orderX: null, orderZ: null, orderKind: null, orderId: null,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0, abilityCds: Array(6).fill(0),
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
@@ -3055,7 +3062,26 @@ export class Game {
     switch (c.t) {
       case 'hdir': { // hero movement input: direction + sprint flag
         const h = this.heroes[c.p || 0];
-        if (h) { h.mx = c.x; h.mz = c.z; h.sprint = !!c.s; }
+        if (h) {
+          h.mx = c.x; h.mz = c.z; h.sprint = !!c.s;
+          // A real stick direction cancels a click order. Sprint alone does not.
+          if (c.x || c.z) { h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null; }
+        }
+        break;
+      }
+      case 'horder': {
+        const h = this.heroes[c.p || 0];
+        if (!h || h.dead) break;
+        const size = this.map?.size || 512;
+        const q = (n) => Math.round(Number(n) * 64) / 64;
+        const x = q(c.x), z = q(c.z);
+        if (!Number.isFinite(x) || !Number.isFinite(z)) break;
+        h.orderX = Math.max(0, Math.min(size - 0.01, x));
+        h.orderZ = Math.max(0, Math.min(size - 0.01, z));
+        h.orderKind = c.k === 'attack' ? 'attack' : 'move';
+        h.orderId = Number.isInteger(c.id) ? c.id : null;
+        h.mx = 0; h.mz = 0;
+        if (h.orderKind === 'move') h.focusId = null;
         break;
       }
       case 'cast': this.castAbility(c.p ?? 0, c.slot ?? 0, c); break;
@@ -3349,6 +3375,7 @@ export class Game {
     tickAbilityCooldowns(h, dt);
     updateSpells(this,h,dt);
     if (h.dead) {
+      h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null;
       if (h.fallen) return; // out of lives — this fall is final
       h.reviveT -= dt;
       if (h.reviveT <= 0) {
@@ -3423,9 +3450,42 @@ export class Game {
         * (h.weaveT > 0 ? h.def.ability.speed || 1.5 : 1);
       h.moving = this._moveActor(h, h.mx / len, h.mz / len, spd, dt);
       h.facing = Math.atan2(h.mx, h.mz);
+    } else if (h.orderX != null && h.orderZ != null) {
+      this._followHeroOrder(h, baseSpeed, dt);
     } else {
       h.moving = false;
     }
+  }
+
+  // Click orders. The destination is part of the snapshot, so every peer
+  // walks the same line. Attack-move onto a unit chases that id until it dies.
+  _followHeroOrder(h, baseSpeed, dt) {
+    let tx = h.orderX, tz = h.orderZ, stop = 0.45;
+    if (h.orderKind === 'attack' && h.orderId != null) {
+      const target = this.zombies.find((z) => z.id === h.orderId && !z.dead && z.hp > 0);
+      if (!target) {
+        h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null;
+        h.focusId = null;
+        h.moving = false;
+        return;
+      }
+      tx = target.x; tz = target.z;
+      stop = Math.max(1.15, this.heroRange(h) * 0.86);
+    }
+    const dx = tx - h.x, dz = tz - h.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist <= stop) {
+      if (h.orderKind === 'attack' && h.orderId != null) h.focusId = h.orderId;
+      else { h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null; }
+      h.moving = false;
+      if (dist > 0.05) h.facing = Math.atan2(dx, dz);
+      return;
+    }
+    const canSprint = h.sprint && h.hp >= h.maxHp - 0.5;
+    const spd = baseSpeed * (canSprint ? 1.5 : 1)
+      * (h.weaveT > 0 ? h.def.ability?.speed || 1.5 : 1);
+    h.moving = this._moveActor(h, dx / dist, dz / dist, spd, dt);
+    h.facing = Math.atan2(dx, dz);
   }
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
