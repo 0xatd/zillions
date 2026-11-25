@@ -782,7 +782,8 @@ export class UI {
         <span class="habils">${h.aura ? `${h.aura.icon} ${h.aura.name} · ` : ''}${(h.passives || []).map((p) => `${p.icon} ${p.name}`).join(' · ')} · ${h.ability.icon} ${h.ability.name}</span>`;
       card.onclick = () => {
         if (card.disabled) return;
-        const leader = leaderRoster(this._profile).find((entry) => entry.playable && leaderHeroKey(entry.key) === key);
+        const choices = leaderRoster(this._profile).filter((entry) => entry.playable && leaderHeroKey(entry.key) === key);
+        const leader = choices.find((entry) => entry.key === this.selectedLeader) || choices[0];
         if (leader) this._selectLeader(leader.key, { silent: true });
         else {
           this.selectedLeader = null;
