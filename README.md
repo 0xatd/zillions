@@ -361,6 +361,8 @@ Vercel serves the static game and these same-origin API routes:
 - `api/economy.js` — Market, stash, equipment, and Forge transactions
 - `api/account-upgrades.js` — account upgrade tree, one-time local import,
   paid Lattice rewire
+- `api/replay.js` — shared replay upload and read. Guests may share.
+- `api/replay-page.js` — `/r/<id>` replay page and link preview
 
 There are no scheduled crons. `.env.example` lists every environment
 variable. Do not commit credentials or environment values. See

@@ -3,6 +3,7 @@ const MATCH_RESULT_API = '/api/match-result';
 const MATCH_START_API = '/api/match-start';
 const ACCOUNT_UPGRADES_API = '/api/account-upgrades';
 const DAILY_API = '/api/daily';
+const REPLAY_API = '/api/replay';
 let accountSession = null;
 
 export function setBackendSession(session) {
@@ -87,6 +88,41 @@ export async function dailyScoreRequest(payload = {}) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(result?.error || 'daily_submit_failed'), { status: response.status, result });
+  return result;
+}
+
+function replayTransportEnabled() {
+  if (location.protocol === 'file:') return false;
+  if (location.hostname.endsWith('github.io')) return false;
+  return true;
+}
+
+// Public replay document. Guests can read a shared link. A version mismatch
+// comes back as a 409 with the recorded simulation version so the viewer can
+// explain it instead of playing a desynced run.
+export async function replayReadRequest(id) {
+  if (!replayTransportEnabled()) return null;
+  const response = await fetch(`${REPLAY_API}?id=${encodeURIComponent(id)}`, {
+    headers: { accept: 'application/json' },
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409) {
+    throw Object.assign(new Error(result?.error || 'replay_unavailable'), { status: response.status, result });
+  }
+  return result;
+}
+
+// Upload the run and return { id, path }. Guests are allowed. The bearer
+// token is sent when the player is signed in so the row can be tied to them.
+export async function replayPublishRequest(replay) {
+  if (!replayTransportEnabled()) return null;
+  const response = await fetch(REPLAY_API, {
+    method: 'POST',
+    headers: accountHeaders({ 'content-type': 'application/json', accept: 'application/json' }),
+    body: JSON.stringify({ replay }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(result?.error || 'replay_share_failed'), { status: response.status, result });
   return result;
 }
 

@@ -58,13 +58,17 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
-import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest } from './backend.js';
+import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest, replayPublishRequest, replayReadRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import {
   PENDING_DAILY_KEY, acceptDailyBoardPaint, acceptableDay, buildDailyReplay, dailyChallenge, dailyKey, dailyScore,
   formatDailyStanding,
 } from './daily.js';
+import {
+  buildShareReplay, leaderKey, openReplay, playReplayTo, replayIdFromLocation,
+  replayProblem, shareReplayPath,
+} from './share-replay.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import {
@@ -279,6 +283,13 @@ class App {
       onDailyPlay: () => this._startDaily(),
       onDailySignIn: () => { this._stashDaily(); this._signIn(); },
       onDailyEmail: (email) => { this._stashDaily(); this._signInWithEmail(email); },
+      onShareReplay: () => this._shareReplay(),
+      onReplayToggle: () => this.setSpeed(0),
+      onReplaySpeed: (speed) => this.setSpeed(speed),
+      onReplaySeek: (step) => this._seekReplay(step),
+      onReplayFollow: () => this._toggleReplayFollow(),
+      onReplaySeed: () => this._playReplaySeed(),
+      onReplayExit: () => { location.href = '/'; },
       onQuickStart: (draft) => this._quickStart(draft),
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
@@ -421,6 +432,7 @@ class App {
       }).catch(() => {});
     }, 1500);
     this._consumeShareLink();
+    this._bootReplay();
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -848,26 +860,40 @@ class App {
     setActiveCulture(cultureId);
     this.ui.setDeploymentLoading(true, null, 'Loading colony kit');
     await loadKitCulture(cultureId);
+    // A seed run uses the shared match seed and does not take a reward ticket.
+    const forcedSeed = Number.isInteger(this._forcedSeed) ? this._forcedSeed >>> 0 : null;
+    this._forcedSeed = null;
     // Solo signed-in runs fetch their ticket (and match seed) first.
-    const soloTicket = !snap && !mp && mode !== 'daily'
+    const soloTicket = !snap && !mp && mode !== 'daily' && forcedSeed == null
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
     this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
-    const matchSeed = daily ? daily.seed : this._match.seed;
+    const matchSeed = daily ? daily.seed : (forcedSeed != null ? forcedSeed : this._match.seed);
     this.game = new Game(this.map, daily ? 'normal' : difficulty, heroKeys, snap, levelId, mode,
       Number.isInteger(matchSeed) ? { rngSeed: matchSeed, culture: cultureId, ...(daily ? { daily } : {}) } : { culture: cultureId });
-    // Record inputs for leaderboard verification. A resumed run continues the
-    // log it saved; a resume without one cannot be verified (it still pays).
-    // Daily runs always record, including guests, so a later sign-in can submit.
-    if (mode === 'daily' || (this.auth?.isSignedIn() && mp?.role !== 'spectator')) {
+    // Every played run keeps an input log so it can be shared. A resumed run
+    // continues the log it saved. A resume without one, and a spectator, cannot
+    // be replayed from the first step.
+    if (mp?.role !== 'spectator') {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
     if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
+    this._mountMatchView({ mode, level, snap, mp, heroKey, matchInbox });
+    } catch (error) {
+      this._finishMissionIntro();
+      throw error;
+    } finally {
+      this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  // Shared battlefield presentation for a live match and a replay.
+  _mountMatchView({ mode, level, snap = null, mp = null, heroKey = null, matchInbox = null, replay = false }) {
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -879,7 +905,7 @@ class App {
     this.zombieAttacks.clear();
     this.lastPay = false;
     this._endExtras = null;
-    if (!snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
+    if (!replay && !snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
     this.myPlayer = mp ? mp.myPlayer : 0;
     this.netMode = !!mp;
     this._netPumpStop();
@@ -905,6 +931,7 @@ class App {
       this._netPumpStart();
       if (this.onlineMode && this.lobby) this.lobby.setMatchActive(true);
     }
+    this._clearWorldMeshes();
     for (const f of this.blockFx) { this.scene.remove(f.mesh); this._disposeObject3D(f.mesh); }
     this.blockFx = [];
     this._blockT = 0;
@@ -950,7 +977,9 @@ class App {
       this.controlMode = 'fight';
       if (this.ui.setControlMode) this.ui.setControlMode('fight');
     }
-    this.ui.showBanner(mode === 'daily'
+    this.ui.showBanner(replay
+      ? `${level.name} — replay. Pause, change speed, or scrub. Follow the leader, or fly the camera.`
+      : mode === 'daily'
       ? `${level.name} — DAILY SIEGE. Same map, same waves, same modifiers for every commander today.`
       : mode === 'survival'
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
@@ -959,19 +988,284 @@ class App {
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
-    const skipIntro = this._skipMissionIntro || (this.profile.games > 0);
+    const skipIntro = replay || this._skipMissionIntro || (this.profile.games > 0);
     this._skipMissionIntro = false;
-    if (!snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!replay && !snap && !mp && mode === 'campaign' && !skipIntro && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       this.missionIntro = { elapsed: 0, distance: this.camDist };
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
-    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
-    else if (!this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
+    if (!replay && !this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
+    else if (!replay && !this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
+  }
+
+  _clearWorldMeshes() {
+    for (const rec of this.buildingMeshes?.values() || []) {
+      this.scene.remove(rec.mesh);
+      this._disposeObject3D(rec.mesh);
+    }
+    this.buildingMeshes?.clear();
+    for (const rec of this.unitMeshes?.values() || []) {
+      this.scene.remove(rec.mesh);
+      this._disposeObject3D(rec.mesh);
+    }
+    this.unitMeshes?.clear();
+    for (const rec of this.plotMeshes?.values() || []) {
+      this.scene.remove(rec.group);
+      this._disposeObject3D(rec.group);
+    }
+    this.plotMeshes?.clear();
+    this._ghostMat = null;
+    this._clearNestMeshes();
+    this._clearLootMeshes();
+    this._clearSiteMarkers();
+    if (this.plaza) { this.scene.remove(this.plaza); this._disposeObject3D(this.plaza); this.plaza = null; }
+    for (const p of this.projectiles || []) this._destroyProjectile?.(p);
+    this.projectiles = [];
+    for (const c of this.payCoins || []) this.scene.remove(c.mesh);
+    this.payCoins = [];
+    this.coinBorn?.clear();
+  }
+
+  _replayClock(steps) {
+    const seconds = Math.max(0, Math.round(steps * SIM_DT));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  }
+
+  _replayBarState() {
+    const session = this.replay;
+    if (!session?.replay) return null;
+    const frames = session.replay.frames;
+    let note = '';
+    if (session.seeking) note = 'Simulating…';
+    else if (session.checked) note = session.hashOk
+      ? 'Replay matches the recorded result.'
+      : 'This replay does not match the recorded result.';
+    return {
+      paused: !!session.paused,
+      seeking: !!session.seeking,
+      speed: session.speed,
+      frames,
+      step: session.step,
+      follow: session.follow !== false,
+      label: `${this._replayClock(session.step)} / ${this._replayClock(frames)}`,
+      note,
+    };
+  }
+
+  async _bootReplay() {
+    const id = replayIdFromLocation(location.pathname, location.search, window.__ZILLIONS_REPLAY__ || '');
+    if (!id) return;
+    this._replayBoot = id;
+    this.ui.showReplayGate('Loading replay…');
+    try {
+      const result = await replayReadRequest(id);
+      if (!result) {
+        this.ui.showReplayGate('Replay links need the game server.');
+        return;
+      }
+      if (!result.ok || !result.replay?.log) {
+        this.ui.showReplayGate(replayProblem(result));
+        return;
+      }
+      await this.startReplay(result.replay);
     } catch (error) {
-      this._finishMissionIntro();
-      throw error;
+      this.ui.showReplayGate(error?.message === 'not_found'
+        ? replayProblem({ error: 'not_found' })
+        : 'This replay could not be loaded.');
+    }
+  }
+
+  async startReplay(raw) {
+    const opened = openReplay(raw, {
+      mapFactory: (mapSeed, theme, opts) => new GameMap(mapSeed, theme, opts),
+    });
+    if (opened.status !== 'ready') {
+      this.ui.showReplayGate(replayProblem(opened));
+      return;
+    }
+    const level = levelById(opened.replay.levelId);
+    this.ui.setDeploymentLoading(true, level, 'Loading replay');
+    this._finishMissionIntro();
+    try {
+      this.audio.init();
+      this._clearMenuBackdrop();
+      if (!this.assetsLoaded) {
+        this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
+        await this._loadArt();
+      }
+      setActiveCulture(cultureKey(opened.replay.culture));
+      await loadKitCulture(cultureKey(opened.replay.culture));
+      this._match = null;
+      this.netMode = false;
+      this.mpRole = null;
+      this.myPlayer = 0;
+      this.paused = false;
+      this.map = opened.map;
+      this.pal = level.theme.palette;
+      this.game = opened.game;
+      this.replay = {
+        ...opened,
+        speed: 1,
+        paused: false,
+        follow: true,
+        acc: 0,
+        seeking: false,
+        seekTo: 0,
+        checked: false,
+        hashOk: false,
+      };
+      this._mountMatchView({ mode: opened.replay.mode, level, replay: true });
+      this.ui.hideStart();
+      this.ui.showReplayBar(this._replayBarState());
+    } catch (error) {
+      this.replay = null;
+      this.ui.showReplayGate('This replay could not be played.');
+      console.warn('replay failed', error);
     } finally {
       this.ui.setDeploymentLoading(false);
+    }
+  }
+
+  _seekReplay(step) {
+    if (!this.replay) return;
+    const frames = this.replay.replay.frames;
+    this.replay.seekTo = Math.max(0, Math.min(frames, step | 0));
+    this.replay.seeking = this.replay.seekTo !== this.replay.step;
+    this.replay.checked = false;
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _toggleReplayFollow() {
+    if (!this.replay) return;
+    this.replay.follow = !this.replay.follow;
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _noteReplayEnd() {
+    if (!this.replay || this.replay.checked || this.replay.step < this.replay.replay.frames) return;
+    this.replay.checked = true;
+    this.replay.paused = true;
+    this.replay.hashOk = (stateHash(this.game) | 0) === (this.replay.replay.hash | 0);
+    this.ui.setReplayBar(this._replayBarState());
+  }
+
+  _advanceReplay(dt) {
+    const session = this.replay;
+    if (!session) return;
+    if (session.seeking) {
+      const before = session.game;
+      const result = playReplayTo(session, session.seekTo, { maxSteps: 240 });
+      if (session.game !== before) {
+        this.game = session.game;
+        this._flushReplayPresentation();
+      } else this.game = session.game;
+      if (result.done) {
+        session.seeking = false;
+        session.acc = 0;
+        if (session.step >= session.replay.frames) this._noteReplayEnd();
+      }
+      this.ui.setReplayBar(this._replayBarState());
+      return;
+    }
+    if (session.paused || session.step >= session.replay.frames) {
+      if (session.step >= session.replay.frames) this._noteReplayEnd();
+      return;
+    }
+    session.acc += dt * session.speed;
+    let guard = 0;
+    while (session.acc >= SIM_DT && guard < 64 && session.step < session.replay.frames && !session.game.over) {
+      playReplayTo(session, session.step + 1, { maxSteps: 1 });
+      this.game = session.game;
+      session.acc -= SIM_DT;
+      guard++;
+    }
+    if (session.acc > SIM_DT * 4) session.acc = 0;
+    if (session.step >= session.replay.frames || session.game.over) this._noteReplayEnd();
+  }
+
+  _flushReplayPresentation() {
+    this._clearWorldMeshes();
+    for (const marker of this.nodeMarkers || []) this._disposeObject3D(marker);
+    this._clearNodeMarkers();
+    this._wallTiles = null;
+    this._gateSupports = null;
+    if (!this.game || !this.map) return;
+    if (this.game.site >= 0) {
+      const site = this.map.sites[this.game.site];
+      if (site) {
+        this.plaza = this._buildPlaza(site.x, site.z);
+        this.scene.add(this.plaza);
+      }
+    } else if (this.game.mode !== 'labyrinth') this._makeSiteMarkers();
+  }
+
+  async _shareReplay() {
+    const button = this.ui.root.querySelector('#b-share-replay');
+    const replay = buildShareReplay(this.game, {
+      leaders: this._match?.heroes || this.game?.heroSetups,
+      difficulty: this.game?.diffKey,
+    });
+    if (!replay) {
+      this.ui.setReplayShareNote(Array.isArray(this.game?.inputLog)
+        ? 'This replay is too large to share.'
+        : 'This run has no complete input log to share.');
+      return;
+    }
+    if (button) { button.disabled = true; button.textContent = 'Sharing…'; }
+    try {
+      const result = await replayPublishRequest(replay);
+      if (!result?.id) {
+        if (button) { button.disabled = false; button.textContent = 'Share replay'; }
+        this.ui.setReplayShareNote('Replay links need the game server.');
+        return;
+      }
+      const url = `${location.origin}${shareReplayPath(result.id)}`;
+      let copied = false;
+      try { await navigator.clipboard?.writeText(url); copied = true; } catch { copied = false; }
+      if (button) button.textContent = copied ? 'Link copied' : 'Share replay';
+      this.ui.setReplayShareNote(copied ? url : `Copy this link: ${url}`);
+    } catch (error) {
+      if (button) { button.disabled = false; button.textContent = 'Share replay'; }
+      const code = error?.message || '';
+      const text = code === 'rate_limited' ? 'Too many shared replays this hour. Try again later.'
+        : code === 'replay_too_large' ? 'This replay is too large to share.'
+        : code === 'sim_version_mismatch' ? 'This build cannot share a replay the server would accept.'
+        : code === 'replay_not_configured' ? 'Replay storage is not set up on the server yet.'
+        : 'The replay could not be shared.';
+      this.ui.setReplayShareNote(text);
+    }
+  }
+
+  async _playReplaySeed() {
+    const spec = this.replay?.replay;
+    if (!spec) return;
+    const hero = leaderKey(spec.leaders[0]);
+    this.replay = null;
+    this.paused = true;
+    this.ui.hideReplayBar();
+    this._clearWorldMeshes();
+    this._seedRun = true;
+    this._forcedSeed = spec.mode === 'daily' ? null : (spec.seed >>> 0);
+    this.ui.selectedCulture = spec.culture;
+    setActiveCulture(cultureKey(spec.culture));
+    this._skipMissionIntro = true;
+    try {
+      if (spec.mode === 'daily') {
+        this.game = null;
+        this._dailyChallenge = dailyChallenge(spec.day);
+        await this._startDaily(this._dailyChallenge);
+        return;
+      }
+      this.game = null;
+      this.ui.selectedMode = spec.mode;
+      this.ui.selectedLevel = spec.levelId;
+      this.ui.selectedDiff = spec.difficulty;
+      this.ui.selectedHero = hero;
+      await this.startGame(spec.difficulty, hero);
+    } catch (error) {
+      this._seedRun = false;
+      this.ui.showBanner('That seed could not be started.', 'bad', 4000);
+      console.warn('seed run failed', error);
     }
   }
 
@@ -1531,6 +1825,8 @@ class App {
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    // A shared replay owns the screen. Account hydration above still ran.
+    if (this._replayBoot) return;
     if (status.signedIn && !status.needsUsername) {
       const character = selectedMmoCharacter(this.profile);
       const retry = consumeRetry(sessionStorage, {
@@ -1665,6 +1961,7 @@ class App {
   // ---------------- co-op networking ----------------
 
   issue(cmd) {
+    if (this.replay) return;
     if (!this.game || this.missionIntro) return;
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
@@ -2173,7 +2470,7 @@ class App {
   // host frame hitch becomes a stall broadcast to all guests, and stringify +
   // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
-    if (!this.game || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
+    if (!this.game || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -2234,11 +2531,13 @@ class App {
     }
   }
 
-  async _startDaily() {
+  async _startDaily(requested = null) {
     // Drop a board response that is still in flight. Play has left the brief.
     this._dailyTicket = (this._dailyTicket || 0) + 1;
     if (this.game) return;
-    const challenge = this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey());
+    const challenge = requested?.day
+      ? requested
+      : (this._dailyChallenge?.day === dailyKey() ? this._dailyChallenge : dailyChallenge(dailyKey()));
     this._dailyChallenge = challenge;
     this.ui.selectedMode = 'daily';
     this.ui.selectedLevel = challenge.levelId;
@@ -2307,9 +2606,11 @@ class App {
         return null;
       }
       this._dropStashedDaily(stashed);
-      const line = result.improved
+      const watch = shareReplayPath(result.replayId || '');
+      const link = watch ? ` Replay ${location.origin}${watch}` : '';
+      const line = (result.improved
         ? `Saved. Rank ${result.rank} with ${result.score}.`
-        : `Today's board already has your better score. Rank ${result.rank}.`;
+        : `Today's board already has your better score. Rank ${result.rank}.`) + link;
       if (!quiet) this.ui.setDailyStatus(line);
       else this.ui.showBanner(line, '', 5000);
       return result;
@@ -2333,6 +2634,11 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if (this._seedRun) {
+      this._seedRun = false;
+      this._endExtras = { seedRun: true, local: true };
+      return;
+    }
     if (this.game?.mode === 'daily') {
       this._finishDailyRun(won);
       return;
@@ -6226,8 +6532,25 @@ class App {
       this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 22, 95);
     }, { passive: false });
 
+    cv.addEventListener('pointermove', (e) => {
+      if (!this._replayDrag || e.pointerId !== this._replayDrag.id) return;
+      this._replayDrag.dx += e.clientX - this._replayDrag.x;
+      this._replayDrag.dy += e.clientY - this._replayDrag.y;
+      this._replayDrag.x = e.clientX;
+      this._replayDrag.y = e.clientY;
+    });
+    cv.addEventListener('pointerup', (e) => {
+      if (this._replayDrag && e.pointerId === this._replayDrag.id) this._replayDrag = null;
+    });
+    cv.addEventListener('pointercancel', (e) => {
+      if (this._replayDrag && e.pointerId === this._replayDrag.id) this._replayDrag = null;
+    });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
+      if (this.replay && this.replay.follow === false && (e.button === 2 || e.button === 1)) {
+        this._replayDrag = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, id: e.pointerId };
+        return;
+      }
       this.audio.init();
       if(e.button!==0 || !this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden'))return;
       const rect=cv.getBoundingClientRect(),vision=fogVisionSources(this.game);
@@ -6447,6 +6770,18 @@ class App {
   // setSpeed(0) toggles pause; 1/2 set speed and unpause.
   // Co-op runs locked at 1x — the lockstep would stall otherwise.
   setSpeed(s) {
+    if (this.replay) {
+      if (s === 0) this.replay.paused = !this.replay.paused;
+      else if (s === 1 || s === 2 || s === 4 || s === 8) {
+        this.replay.speed = s;
+        this.replay.paused = false;
+      }
+      this.speed = this.replay.speed;
+      this.paused = !!this.replay.paused;
+      this.ui.setSpeedUI(this.replay.speed, this.replay.paused);
+      this.ui.setReplayBar(this._replayBarState());
+      return;
+    }
     if (s === 0) this.paused = !this.paused;
     else if (this.netMode) { this.paused = false; }
     else { this.speed = s; this.paused = false; }
@@ -6491,12 +6826,39 @@ class App {
     this.tacticalVisuals.resize(w, h);
   }
 
+  _panReplayCamera(dt) {
+    let dx = 0;
+    let dz = 0;
+    const binds = this.binds();
+    const active = document.activeElement;
+    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    if (!editing) {
+      if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+      if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+      if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+      if (isHeld(binds, this.keys, 'move_right')) dx += 1;
+    }
+    const speed = 22 * (this.camDist / 46);
+    this.focus.x += dx * speed * dt;
+    this.focus.z += dz * speed * dt;
+    if (this._replayDrag) {
+      const scale = this.camDist * 0.012;
+      this.focus.x += this._replayDrag.dx * scale;
+      this.focus.z += this._replayDrag.dy * scale;
+      this._replayDrag.dx = 0;
+      this._replayDrag.dy = 0;
+    }
+  }
+
   _updateCamera(dt) {
     if (!this.game) return;
 
     // Camera glued to the hero with a soft lag + movement lookahead.
+    if (this.replay && this.replay.follow === false) this._panReplayCamera(dt);
     const h = this.myHero();
-    if (h) {
+    if (this.replay?.follow === false) {
+      // Free camera: the block below still frames whatever focus the pan set.
+    } else if (h) {
       const lead = 1.6;
       const peek = this._keepPeek?.until > performance.now() && !h.mx && !h.mz ? this._keepPeek : null;
       const tx = peek ? peek.x : h.x + (h.mx || 0) * lead;
@@ -7090,12 +7452,14 @@ class App {
           this.burst(e.x, 0.3, e.z, { count: 24, color: 0x9fd6ff, speed: 1.4, life: 0.8, size: 0.55, up: 2.8 });
           break;
         case 'victory':
+          if (this.replay) { this._noteReplayEnd(); break; }
           this.audio.victory();
           this.pause();
           this._recordGameEnd(true);
           this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;
         case 'defeat':
+          if (this.replay) { this._noteReplayEnd(); break; }
           this.audio.defeat();
           this.shake = 1.5;
           this.pause();
@@ -7224,8 +7588,9 @@ class App {
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
-      if (!this.missionIntro) this._updateHeroInput();
-      if (!this.paused && !this.game.over && !this.missionIntro) {
+      if (!this.missionIntro && !this.replay) this._updateHeroInput();
+      if (this.replay) this._advanceReplay(dt);
+      else if (!this.paused && !this.game.over && !this.missionIntro) {
         if (this.netMode) {
           this._advanceNetSim();
         } else {
@@ -7240,6 +7605,11 @@ class App {
         }
       }
 
+      if (this.replay && (this.replay.speed > 2 || this.replay.seeking) && this.game.events) {
+        const keep = this.game.events.filter((event) => event.type === 'victory' || event.type === 'defeat');
+        this.game.events.length = 0;
+        for (const event of keep) this.game.events.push(event);
+      }
       this._consumeEvents();
       this.map.syncLabyrinthDoors?.(this.game);
       this._syncBuildings();
@@ -7353,7 +7723,7 @@ class App {
       const mh = this.myHero();
       const buildMode = this.controlMode !== 'fight';
       let branchPlot = null;
-      if (buildMode && mh && !mh.dead) {
+      if (!this.replay && buildMode && mh && !mh.dead) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
@@ -7389,7 +7759,7 @@ class App {
           }
         }
       }
-      this.ui.showBuildHint(hint);
+      this.ui.showBuildHint(this.replay ? null : hint);
 
       this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
       this.ui.updateBoss(this.game);

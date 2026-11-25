@@ -4010,16 +4010,91 @@ export class UI {
       const mine = board.me;
       host.innerHTML = `
         <h3>Today's board</h3>
-        ${rows.length ? `<table class="daily-board"><thead><tr><th>#</th><th>Commander</th><th>Score</th><th>Run</th></tr></thead><tbody>
-          ${rows.map((row) => `<tr class="${row.mine ? 'mine' : ''}"><td>${row.rank}</td><td>@${this._esc(row.name)}</td><td>${row.score}</td><td>${row.waves} waves</td></tr>`).join('')}
+        ${rows.length ? `<table class="daily-board"><thead><tr><th>#</th><th>Commander</th><th>Score</th><th>Run</th><th>Replay</th></tr></thead><tbody>
+          ${rows.map((row) => {
+            const watch = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/.test(row.replayId || '') ? row.replayId : '';
+            return `<tr class="${row.mine ? 'mine' : ''}"><td>${row.rank}</td><td>@${this._esc(row.name)}</td><td>${row.score}</td><td>${row.waves} waves</td><td>${watch ? `<a href="/r/${watch}">Watch</a>` : ''}</td></tr>`;
+          }).join('')}
         </tbody></table>` : '<p>No scores yet today. Be the first.</p>'}
-        ${mine ? `<p class="${mine.rank <= 50 ? 'daily-mine-note' : 'daily-mine-note outside'}">Your rank: <b>${mine.rank}</b> · ${mine.score}</p>` : ''}`;
+        ${mine ? `<p class="${mine.rank <= 50 ? 'daily-mine-note' : 'daily-mine-note outside'}">Your rank: <b>${mine.rank}</b> · ${mine.score}${/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/.test(mine.replayId || '') ? ` · <a href="/r/${mine.replayId}">Watch</a>` : ''}</p>` : ''}`;
     }
   }
 
   setDailyStatus(text) {
     const el = this.root.querySelector('#daily-status');
     if (el) el.textContent = text;
+  }
+
+  setReplayShareNote(text) {
+    const note = this.root.querySelector('#replay-share-note');
+    if (!note) return;
+    note.textContent = text || '';
+    note.classList.toggle('hidden', !text);
+  }
+
+  showReplayGate(message) {
+    const ov = this.root.querySelector('#overlay');
+    ov.classList.remove('hidden');
+    ov.innerHTML = `
+      <div class="panel endpanel">
+        <h1>REPLAY</h1>
+        <p class="tagline">${this._esc(message || 'This replay could not be played.')}</p>
+        <div class="endactions"><button class="startbtn" id="b-replay-home" type="button">Back to title</button></div>
+      </div>`;
+    ov.querySelector('#b-replay-home').onclick = () => { location.href = '/'; };
+  }
+
+  showReplayBar(state) {
+    let bar = this.root.querySelector('#replaybar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'replaybar';
+      bar.innerHTML = `
+        <button type="button" id="replay-play">Pause</button>
+        <button type="button" data-speed="1">1×</button>
+        <button type="button" data-speed="2">2×</button>
+        <button type="button" data-speed="4">4×</button>
+        <button type="button" data-speed="8">8×</button>
+        <input id="replay-scrub" type="range" min="0" value="0" step="1" aria-label="Replay position">
+        <span id="replay-time"></span>
+        <button type="button" id="replay-follow" aria-pressed="true">Follow leader</button>
+        <button type="button" id="replay-seed">Play this seed</button>
+        <button type="button" id="replay-exit">Exit</button>
+        <p id="replay-note"></p>`;
+      this.root.appendChild(bar);
+      bar.querySelector('#replay-play').onclick = () => this.cb.onReplayToggle?.();
+      for (const button of bar.querySelectorAll('[data-speed]')) {
+        button.onclick = () => this.cb.onReplaySpeed?.(+button.dataset.speed);
+      }
+      const scrub = bar.querySelector('#replay-scrub');
+      scrub.oninput = () => this.cb.onReplaySeek?.(Number(scrub.value));
+      bar.querySelector('#replay-follow').onclick = () => this.cb.onReplayFollow?.();
+      bar.querySelector('#replay-seed').onclick = () => this.cb.onReplaySeed?.();
+      bar.querySelector('#replay-exit').onclick = () => this.cb.onReplayExit?.();
+    }
+    bar.classList.remove('hidden');
+    this.setReplayBar(state);
+  }
+
+  setReplayBar(state) {
+    const bar = this.root.querySelector('#replaybar');
+    if (!bar || !state) return;
+    bar.querySelector('#replay-play').textContent = state.seeking ? '…' : (state.paused ? 'Play' : 'Pause');
+    for (const button of bar.querySelectorAll('[data-speed]')) {
+      button.classList.toggle('sel', Number(button.dataset.speed) === state.speed);
+    }
+    const scrub = bar.querySelector('#replay-scrub');
+    scrub.max = String(Math.max(1, state.frames | 0));
+    if (document.activeElement !== scrub) scrub.value = String(state.step | 0);
+    bar.querySelector('#replay-time').textContent = state.label || '';
+    const follow = bar.querySelector('#replay-follow');
+    follow.textContent = state.follow ? 'Follow leader' : 'Free camera';
+    follow.setAttribute('aria-pressed', state.follow ? 'true' : 'false');
+    bar.querySelector('#replay-note').textContent = state.note || '';
+  }
+
+  hideReplayBar() {
+    this.root.querySelector('#replaybar')?.classList.add('hidden');
   }
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
@@ -4068,13 +4143,16 @@ export class UI {
           <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
-        ${daily ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
-        ${daily && extra?.dailyGuest ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
+        ${extra?.seedRun ? '<p class="tagline">Seed run. Rewards are not recorded.</p>' : ''}
+        ${daily && !extra?.seedRun ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
+        ${daily && extra?.dailyGuest && !extra?.seedRun ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
           <form id="b-daily-email" class="email-login"><label for="daily-email">Or save with email</label><input id="daily-email" type="email" placeholder="you@example.com" required><button class="menubtn" type="submit">Email me a sign-in link</button></form>` : ''}
         <div class="endactions">
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
           <button class="startbtn" id="b-restart">${daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
+        <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;
     this.setEndRewards(extra);
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
@@ -4085,6 +4163,8 @@ export class UI {
       event.preventDefault();
       this.cb.onDailyEmail?.(ov.querySelector('#daily-email').value);
     };
+    const share = ov.querySelector('#b-share-replay');
+    if (share) share.onclick = () => this.cb.onShareReplay?.();
     const retry = ov.querySelector('#b-retry');
     if (retry) retry.onclick = () => {
       if (retry.disabled) return;

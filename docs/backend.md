@@ -33,6 +33,8 @@ Vercel serves the game and same-origin API routes:
   and calls the atomic Supabase economy function. The service key stays on the server.
 - `api/match-result.js` is the only route that grants signed-in XP, levels,
   loot, Alloy, and stats. See "Server-Authoritative Match Results" below.
+- `api/replay.js` stores a shared replay. `api/replay-page.js` serves `/r/<id>`.
+  Guests may upload. See "Shareable replays" below.
 
 There are no Vercel crons. Environment variables are listed in `.env.example`.
 
@@ -380,13 +382,45 @@ lets anon and authenticated read the board columns, and grants
 are not readable by clients. Apply that file by hand. It does not add
 environment variables.
 
+A verified daily score also publishes a shareable replay. Board rows link to
+`/r/<id>` when that publish succeeds. A missing replay table does not reject
+the score.
+
+## Shareable replays
+
+Every played run keeps an input log: solo, co-op, and Daily Siege. Spectators
+and a resumed run that has no saved log do not.
+
+`POST /api/replay` stores `{ replay }`. Guests may post. A signed-in player
+sends the same bearer token, and the row records that account. The document
+is the seed, mode, leaders, command log, final lockstep hash, and
+`sim` (`SIM_VERSION` in `src/share-replay.js`). The route caps a body at
+1.2 MB and 12 new replays an hour for the account and for the hashed client
+IP. The same document returns the existing id.
+
+`GET /api/replay?id=` returns the document. A simulation mismatch is a 409.
+The viewer does not play it.
+
+`/r/<id>` is `api/replay-page.js`. The HTML carries Open Graph and Twitter
+card tags, then loads the game. The viewer plays, pauses, runs at 1×, 2×,
+4×, and 8×, scrubs by resimulating from the start or from snapshots, follows
+the leader or flies a free camera, and can start a new run on that seed.
+A seed run does not grant rewards.
+
+The table is `public.replays`. Migration
+`supabase/migrations/20261125000200_share_replays.sql` enables RLS and grants
+nothing to `anon` or `authenticated`. Only the service role reads and writes,
+through `publish_replay()`. Apply that file by hand. It does not add
+environment variables.
+
 ## Known Limits
 
 - Room browser data, player rosters, and host setup are real Supabase data.
 - Mid-game Join as a new controlling player is not supported. Use Watch.
 - Combat runs in the browser. Daily Siege scores are replayed before they are
   stored. Other match rewards are bounds-checked claims; their input logs are
-  kept for a later review, not replayed on the reward path.
+  kept for a later review, not replayed on the reward path. A shared replay
+  is stored as the client recorded it and checked again when someone watches.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
 

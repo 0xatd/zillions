@@ -53,6 +53,7 @@ Default branch: main
 - src/match-rewards.js owns the pure match-reward rules shared by client and server: report validation, loot-key proofs, quest re-evaluation, XP, and Alloy.
 - src/match-outbox.js keeps unconfirmed signed-in match reports and resends them with the same requestId.
 - src/daily.js owns the UTC daily seed, waves, modifiers, score, and headless replay check. api/daily.js stores a score only after that replay matches.
+- src/share-replay.js owns the shareable replay document and the simulation version gate. api/replay.js stores it. /r/<id> plays it. Old simulation versions are refused.
 - src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.

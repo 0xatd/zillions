@@ -4,7 +4,9 @@ Daily Siege is the shipped board. Each UTC day has one seed. A signed-in
 player submits the input log. `api/daily.js` replays that log and stores the
 score only when the final lockstep hash matches. The top 50 are shown, and
 the player's own rank is marked. Guests can play and are asked to sign in
-before a score is kept. See `src/daily.js` and
+before a score is kept. A verified score also publishes a shareable replay,
+and each board row links to `/r/<id>` when that replay exists. See `src/daily.js`,
+`src/share-replay.js`, and
 `supabase/migrations/20261125000100_daily_siege.sql`.
 
 The rest of this note is the plan for campaign, survival, and labyrinth
