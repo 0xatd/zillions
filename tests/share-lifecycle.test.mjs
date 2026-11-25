@@ -21,8 +21,10 @@ test('a guest sees subsequent host difficulty and mission changes',()=>{
  const id='22222222-2222-4222-8222-222222222222';
  let room=links.createLobby({code:'abc2345678',hostId:'11111111-1111-4111-8111-111111111111',hostName:'Host',hero:'scott',now:Date.now()});
  room=links.seatGuest(room,{id,name:'Guest'},Date.now()).lobby;
- let settings;
- const app={_shareCode:room.code,_shareSelf:id,_shareAnnounced:true,_shareGuestShown:true,net:{open:true},ui:{setRoomSettings(s){settings=s},showShareGuest(){}}};
+ let settings,rendered;
+ const app={_shareCode:room.code,_shareSelf:id,_shareAnnounced:true,_shareGuestShown:true,net:{open:true},ui:{setRoomSettings(s){settings=s},showShareGuest(s){rendered=s}}};
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'hard'});
  assert.equal(settings.level,2);assert.equal(settings.difficulty,'hard');
+ method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'brutal'});
+ assert.equal(rendered.difficulty,'brutal','difficulty-only update must refresh the visible room summary');
 });

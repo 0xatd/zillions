@@ -2840,7 +2840,7 @@ class App {
     if (this.mpRole !== 'host' || !this._shareLobby || this.netMode) return;
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
     const blocked = players.length > 1 && !gate.ready;
@@ -2921,7 +2921,7 @@ class App {
       });
     }
     const players = shareRoster(lobby, this._shareSelf);
-    const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
+    const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
     if (this._shareGuestShown && sig === this._shareSig) return;
     this._shareSig = sig;
     const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
