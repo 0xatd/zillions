@@ -90,6 +90,7 @@ export function createBrowserHub({
       return () => {
         entry.listeners.delete(listener);
         if (globalThis.window?.removeEventListener) globalThis.window.removeEventListener('storage', onStorage);
+        if (!entry.listeners.size) { entry.channel?.close(); channels.delete(code); }
       };
     },
   };
@@ -131,7 +132,13 @@ export function createSupabaseHub(client) {
     subscribe(code, listener) {
       const entry = entryFor(code);
       entry.listeners.add(listener);
-      return () => entry.listeners.delete(listener);
+      return () => {
+        entry.listeners.delete(listener);
+        if (!entry.listeners.size) {
+          entry.pending.length = 0; channels.delete(code);
+          Promise.resolve(client.removeChannel(entry.channel)).catch(() => {});
+        }
+      };
     },
   };
 }

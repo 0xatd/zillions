@@ -2720,11 +2720,13 @@ class App {
   _bindShareTransport(role) {
     this._shareHubList = [createBrowserHub()];
     this._shareUnsubs = [];
-    const onMessage = (message) => this._onShareMessage(message);
+    const code = this._shareCode;
+    const generation = this._shareGeneration = (this._shareGeneration || 0) + 1;
+    const onMessage = (message) => { if (generation === this._shareGeneration) this._onShareMessage(message); };
     this._shareUnsubs.push(this._shareHubList[0].subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }));
     this._shareRelay = undefined;
     getSupabaseClient().then((client) => {
-      if (!this._shareCode) return;
+      if (generation !== this._shareGeneration || code !== this._shareCode) return;
       const hub = createSupabaseHub(client);
       this._shareHubList.push(hub);
       this._shareRelay = true;
@@ -2733,6 +2735,7 @@ class App {
       this._shareSig = '';
       this._renderShareHost();
     }).catch(() => {
+      if (generation !== this._shareGeneration) return;
       this._shareRelay = false;
       this._renderShareHost();
     });
@@ -2906,6 +2909,8 @@ class App {
     if (!this._shareGuestShown) {
       this._shareGuestShown = true;
       this.ui.showSetup({ mode: lobby.mode || 'campaign' });
+    }
+    if (!this.netMode) {
       this.ui.selectedLevel = lobby.level || 1;
       this.ui.selectedDiff = lobby.difficulty || 'normal';
       this.ui.setRoomSettings({
@@ -2963,7 +2968,13 @@ class App {
     } else {
       this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
     }
+    this._sharePendingJoins ||= new Set();
+    if (this._sharePendingJoins.has(message.from)) return;
+    this._sharePendingJoins.add(message.from);
+    const generation = this._shareGeneration;
     const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    this._sharePendingJoins.delete(message.from);
+    if (generation !== this._shareGeneration || !this._shareLobby || this._shareLobby.started || !this._shareLobby.seats.some(s => s.id === message.from)) return;
     const peer = new NetSession(ice);
     peer.shareId = message.from;
     this._shareHands.set(message.from, peer);
@@ -3020,11 +3031,14 @@ class App {
 
   async _acceptShareOffer(message) {
     if (message.to !== this._shareSelf || this.net?.open || this._shareOffered === message.id) return;
+    if (!this._shareLobby || message.from !== this._shareLobby.hostId || this._shareLobby.started) return;
+    const generation = this._shareGeneration;
     this._shareOffered = message.id;
     if (this.net) {
       try { this.net.destroy(); } catch { /* replace a dead handshake */ }
     }
     const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    if (generation !== this._shareGeneration || this._shareOffered !== message.id) return;
     const net = new NetSession(ice);
     this.net = net;
     this._attachNetDiagnostics(net);
@@ -3127,6 +3141,8 @@ class App {
   }
 
   _teardownShare() {
+    this._shareGeneration = (this._shareGeneration || 0) + 1;
+    this._sharePendingJoins?.clear();
     clearInterval(this._shareBeat);
     clearTimeout(this._shareDiscover);
     this._shareBeat = null;
