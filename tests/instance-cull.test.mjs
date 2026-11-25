@@ -39,3 +39,13 @@ test('instance cull keeps a canopy whose bounds sit above the mesh origin', () =
   cullInstances(mesh, frustum, { pad: 0 });
   assert.equal(mesh.count, 1);
 });
+
+test('culling uses a camera rotation made this frame, not the previous render', async () => {
+ const {cameraFrustum,sphereVisible}=await import('../src/unit-impostors.js');
+ const camera=new THREE.PerspectiveCamera(30,1,.1,100);
+ camera.updateMatrixWorld();
+ camera.rotation.y=Math.PI;
+ const frustum=cameraFrustum(camera,new THREE.Frustum());
+ assert.equal(sphereVisible(frustum,0,0,10,1),true);
+ assert.equal(sphereVisible(frustum,0,0,-10,1),false);
+});

@@ -566,7 +566,7 @@ export class UI {
                     <button class="diffbtn" data-q="auto">Auto</button>
                   </div>
                 </div>
-                <div class="sethint">High keeps outlines, bloom, SMAA and crisp shadows. Medium and Low cap the pixel ratio, shrink shadows, and stand in distant units with impostors. Auto picks from the GPU and steps down if the frame rate stays under 40.</div>
+                <div class="sethint">High gives the most detail. Medium and Low simplify distant units and effects for smoother play. Auto adjusts to your device.</div>
               </div>
               <div id="set-pane-controls" class="setpane hidden">
                 <div class="bindhead">

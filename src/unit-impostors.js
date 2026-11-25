@@ -56,6 +56,8 @@ const _proj = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
 
 export function cameraFrustum(camera, frustum) {
+  // The renderer has not updated matrices yet for this frame.
+  camera.updateMatrixWorld();
   _proj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   frustum.setFromProjectionMatrix(_proj);
   return frustum;
