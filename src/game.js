@@ -1,5 +1,5 @@
 import { tickUnitBuffs, unitBuffMod } from './combat-buffs.js';
-import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, SPELL_UPGRADE_KEYS } from './hero-spells.js';
+import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, spellManaCost, spellRank, SPELL_UPGRADE_KEYS } from './hero-spells.js';
 import { heroAbility, abilityCooldown, abilityCooldowns, setAbilityCooldown, tickAbilityCooldowns } from './hero-abilities.js';
 // Core simulation — continuous siege.
 //
@@ -45,6 +45,7 @@ const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const POCKET_CAP = 150;           // reachable-tile flood-fill cap: below this, it's a sealed pocket
 const FIRST_SIEGE_KINDS = new Set(['house', 'farm', 'tower', 'camp_militia']);
 const FIRST_SIEGE_REWARD = 24;
+const FIRST_SIEGE_RELIEF = 180; // seconds after the opening build; no indefinite economy shelter
 
 let nextId = 1000;
 const getNextId = () => nextId;
@@ -164,7 +165,7 @@ export class Game {
     // It narrows the first build choice, names the first attack before it
     // arrives, and pays off the first defense. The state is lockstep-safe.
     this.firstSiege = this.mode === 'campaign' && this.levelId === 1
-      ? { stage: 'opening', nestId: null, waveIds: [], reward: FIRST_SIEGE_REWARD }
+      ? { stage: 'opening', nestId: null, waveIds: [], reward: FIRST_SIEGE_REWARD, startedAt: null }
       : null;
     this.phase = 'found';
     this.finalStand = false;     // every hive razed — the counterattack is coming
@@ -235,7 +236,7 @@ export class Game {
       builders: this.builders ? JSON.parse(JSON.stringify(this.builders)) : null,
       firstSiege: this.firstSiege ? {
         stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
-        waveIds: [...this.firstSiege.waveIds], reward: this.firstSiege.reward,
+        waveIds: [...this.firstSiege.waveIds], reward: this.firstSiege.reward, startedAt: this.firstSiege.startedAt,
       } : null,
       relics: [...this.relics],
       // Labyrinth run state. Offers are snapshotted so a save restored
@@ -368,6 +369,7 @@ export class Game {
     this.firstSiege = snap.firstSiege ? {
       stage: snap.firstSiege.stage || 'opening', nestId: snap.firstSiege.nestId ?? null,
       waveIds: [...(snap.firstSiege.waveIds || [])], reward: snap.firstSiege.reward || FIRST_SIEGE_REWARD,
+      startedAt: Number.isFinite(snap.firstSiege.startedAt) ? snap.firstSiege.startedAt : snap.firstSiege.stage === 'opening' ? null : this.time,
     } : null;
     if (this.site >= 0) {
       this.plots = generatePlots(this.map, this.map.sites[this.site], { levelId: this.levelId, siteIdx: this.site });
@@ -865,6 +867,12 @@ export class Game {
     this.msg(`🏰 ${founder ? founder.def.name : 'The company'} founds the city${where}!${shape} Choose your opening: Economy, Defense, or Army.`, 'info');
   }
 
+  firstSiegeRelief() {
+    const siege = this.firstSiege;
+    return !!siege && siege.stage !== 'complete'
+      && (siege.startedAt == null || this.time - siege.startedAt < FIRST_SIEGE_RELIEF);
+  }
+
   firstSiegePlotVisible(plot) {
     if (!this.firstSiege || this.firstSiege.stage !== 'opening' || plot.tier > 0) return true;
     return FIRST_SIEGE_KINDS.has(plot.kind);
@@ -891,7 +899,7 @@ export class Game {
     }
     if (this.firstSiege.stage === 'defend') return {
       title: `DEFEND THE CITY · ${this.firstSiege.waveIds.length} remain`,
-      detail: 'Break the marked wave. Your army fights automatically.',
+      detail: 'Gold contacts mark the wave in sight on your minimap. Protect the Keep.',
     };
     return null;
   }
@@ -1368,12 +1376,13 @@ export class Game {
       if (unitKey) {
         const unit = this.unitDef(unitKey);
         const guard = def.dmg ? ` Short-range guns add ${def.dmg} damage at ${def.range} tiles.` : '';
-        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s.${guard} 1 holds, 2 escorts, 3 pushes the lanes.`, 'info');
+        this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} raised: ${def.count} ${unit.name}${def.count === 1 ? '' : 's'} every ${def.every}s.${guard} Defend holds the Keep; Follow escorts heroes; Push takes the lanes.`, 'info');
       } else {
         this.msg(`${PLOT_KINDS[plot.kind].icon} ${def.name} ${plot.tier > 1 ? 'upgraded' : 'raised'}!`, 'info');
       }
       if (this.firstSiege?.stage === 'opening' && plot.tier === 1 && FIRST_SIEGE_KINDS.has(plot.kind)) {
         this.firstSiege.stage = 'warning';
+        this.firstSiege.startedAt = this.time;
         this.msg('⚠️ Opening chosen. The first hive is marked — watch its countdown and prepare the gate.', 'warn');
       }
     }
@@ -1767,7 +1776,7 @@ export class Game {
     // Nest count is capped for the clock: a five-hive map should mean MORE
     // sieges, not a faster clock on top of more sieges. Razing below three
     // still visibly slows it, which is the reward for pushing.
-    this.threat = Math.min(THREAT.max, this.threat
+    if (!this.firstSiegeRelief()) this.threat = Math.min(THREAT.max, this.threat
       + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * dt * threatClockMult(this.diff.mult));
     this.threatLevel = Math.max(1, Math.floor(this.threat) + 1);
     if (this.threatLevel > before) this._surge();
@@ -1983,7 +1992,7 @@ export class Game {
   }
 
   _surge() {
-    if (!this.liveNests()) return;
+    if (!this.liveNests() || this.firstSiegeRelief()) return;
     this.msg(`☠️ THREAT ${this.threatLevel}. Every hive musters at once — they are coming from all sides.`, 'bad');
     for (const n of this.nests) {
       if (!n.alive) continue;
@@ -2037,7 +2046,16 @@ export class Game {
     // The first decision is safe. The countdown starts only after the player
     // commits to Economy, Defense, or Army; no unseen wave can invalidate it.
     if (this.firstSiege?.stage === 'opening') return;
+    // If the warned hive was razed before launch, choose a surviving source.
+    // If none remain, release the normal final counterattack, not a fake reward.
+    if (this.firstSiege?.stage === 'warning' && !this.nests[this.firstSiege.nestId]?.alive) {
+      const next = this.nests.find(n => n.alive && !n.offMap);
+      if (next) this.firstSiege.nestId = next.id;
+      else this.firstSiege.stage = 'complete';
+    }
     for (const n of this.nests) {
+      if (this.firstSiege?.stage === 'defend' && this.firstSiegeRelief()) break;
+      if (this.firstSiege?.stage === 'warning' && this.firstSiegeRelief() && n.id !== this.firstSiege.nestId) continue;
       if (!n.alive) continue;
       n.musterT -= dt;
       if (n.musterT <= 0) {
@@ -2052,6 +2070,8 @@ export class Game {
         this.gold += this.firstSiege.reward;
         this.stats.coins += this.firstSiege.reward;
         this.firstSiege.stage = 'complete';
+        // A short earned recovery before the full continuous siege resumes.
+        for (const nest of this.nests) if (nest.alive) nest.musterT = Math.max(nest.musterT, 20);
         this.msg(`🏆 FIRST SIEGE BROKEN · +${this.firstSiege.reward} gold. The full city plan is revealed — build your war.`, 'good');
         this.emit({ type: 'firstsiege', x: this.hq?.cx || 0, z: this.hq?.cz || 0, reward: this.firstSiege.reward });
       }
@@ -2068,7 +2088,7 @@ export class Game {
     const staging = this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
     let fromNest = w.size;
     let spawned = 0;
-    if (staging.length) {
+    if (staging.length && !firstSiege) {
       const forward = Math.floor(w.size * 0.4);
       fromNest -= forward;
       for (let i = 0; i < forward; i++) {
@@ -2714,7 +2734,11 @@ export class Game {
   setStance(st, p = 0) {
     if (!['defend', 'guard', 'attack'].includes(st)) return;
     const h = this.heroes[p];
-    if (st === this.stance && st !== 'defend') return;
+    if (st === this.stance && st !== 'defend') {
+      // A repeated order is acknowledged without resetting the squads' routes.
+      this.emit({ type: 'orderconfirmed', stance: st, player: p });
+      return;
+    }
     this.stance = st;
     if (st === 'defend') this._anchorDefense();
     if (st !== 'attack') for (const u of this.units) if (!u.hero) { u.route = null; u.targetGi = -1; u.gateExit = false; }
@@ -2724,7 +2748,11 @@ export class Game {
       : st === 'guard'
       ? `🚩 ${who ? who + ' forms the army around ' + h.def.name : 'The army forms up around the heroes'}.`
       : `⚔️ ${who ? who + ' pushes' : 'The army pushes'} the lanes — take the nodes, then the hives!`, 'info');
-    this.emit({ type: st === 'defend' ? 'hold' : 'rally', x: h ? h.x : 0, z: h ? h.z : 0 });
+    this.emit({
+      type: st === 'defend' ? 'hold' : 'rally', stance: st, player: p,
+      x: st === 'defend' ? this.hq?.cx ?? h?.x ?? 0 : h?.x ?? 0,
+      z: st === 'defend' ? this.hq?.cz ?? h?.z ?? 0 : h?.z ?? 0,
+    });
   }
 
   // ---------- hero ----------
@@ -2997,6 +3025,31 @@ export class Game {
     if (h.level >= HERO_MAX_LEVEL) h.xp = 0;
   }
 
+  _fadeSentinels(h) {
+    for (const u of this.units) {
+      if (u.dead || !u.temp || u.ownerHeroId !== h.id || u.key !== 'aaron_spirit') continue;
+      u.dead = true;
+      this.emit({ type: 'expire', x: u.x, z: u.z });
+    }
+    h._summonId = null;
+  }
+
+  _spawnSentinel(h, stats, x, z) {
+    const u = this._spawnUnit('aaron_spirit', x, z, null);
+    const hp = Math.max(1, Math.round(stats.hp));
+    const dmg = Math.max(1, Math.round(stats.dmg));
+    u.def = { ...UNITS.aaron_spirit, hp, dmg };
+    u.hp = hp;
+    u.maxHp = hp;
+    u.holdX = x;
+    u.holdZ = z;
+    u.temp = true;
+    u.expireT = stats.dur;
+    u.ownerHeroId = h.id;
+    h._summonId = u.id;
+    return u;
+  }
+
   castAbility(p = 0, slot = 0, input = {}) {
     if (!Number.isInteger(p) || p < 0) return;
     const h = this.heroes[p];
@@ -3006,11 +3059,14 @@ export class Game {
     if (ab.spell) { if (!castSpell(this,h,slot,input)) this.emit({type:'deny'}); return; }
     if (!ab.cast) return;
     if (abilityCooldown(h, slot) > 0) { this.emit({ type: 'deny' }); return; }
-    if (ab.mana && spellState(h).mana < ab.mana) {this.emit({type:'deny'});return;}
-    if (ab.mana) spellState(h).mana -= ab.mana;
-    const r = abilityRank(h.level, h.upgrades) - 1;
-    const ultMult = this.heroUltDamageMult(h);
-    setAbilityCooldown(h, slot, ab.cd * Math.max(0.15, 1 - h.mods.cdr));
+    const ranked = !!h.def.abilities;
+    const r = ranked ? spellRank(h, slot) : abilityRank(h.level, h.upgrades) - 1;
+    const cost = spellManaCost(h, slot);
+    if (cost && spellState(h).mana < cost) {this.emit({type:'deny'});return;}
+    if (cost) spellState(h).mana -= cost;
+    const ultMult = ranked ? 1 : this.heroUltDamageMult(h);
+    const cdBase = Array.isArray(ab.cd) ? ab.cd[Math.min(ab.cd.length - 1, r)] : ab.cd;
+    setAbilityCooldown(h, slot, cdBase * Math.max(0.15, 1 - h.mods.cdr));
 
     switch (ab.cast) {
       case 'aoeDmg': {
@@ -3114,22 +3170,32 @@ export class Game {
         break;
       }
       case 'summon': {
-        // Aaron: a single spirit sentinel that fights until its time runs out
-        // — recasting replaces it instead of stacking summons.
-        if (h._summonId != null) {
-          const old = this.units.find((u) => u.id === h._summonId && !u.dead);
-          if (old) { old.dead = true; this.emit({ type: 'expire', x: old.x, z: old.z }); }
-        }
+        // One spirit sentinel. Recasting replaces every sentinel this hero owns.
+        this._fadeSentinels(h);
         const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
         const sx = h.x + dirX * 1.6, sz = h.z + dirZ * 1.6;
-        const u = this._spawnUnit('aaron_spirit', sx, sz, null);
-        const hp = ab.hp[r];
-        u.def = { ...UNITS.aaron_spirit, hp, dmg: Math.round(ab.dmg[r] * ultMult) };
-        u.hp = hp; u.maxHp = hp;
-        u.holdX = sx; u.holdZ = sz;
-        u.temp = true; u.expireT = ab.dur[r]; u.ownerHeroId = h.id;
-        h._summonId = u.id;
+        this._spawnSentinel(h, { hp: ab.hp[r], dmg: ab.dmg[r] * ultMult, dur: ab.dur[r] }, sx, sz);
         this.emit({ type: 'summon', x: sx, z: sz });
+        break;
+      }
+      case 'choir': {
+        this._fadeSentinels(h);
+        const dirX = Math.sin(h.facing), dirZ = Math.cos(h.facing);
+        const sideX = dirZ, sideZ = -dirX;
+        for (const side of [-1.3, 1.3]) {
+          const sx = h.x + dirX * 1.5 + sideX * side, sz = h.z + dirZ * 1.5 + sideZ * side;
+          this._spawnSentinel(h, { hp: ab.hp[r], dmg: ab.dmg[r] * ultMult, dur: ab.dur[r] }, sx, sz);
+        }
+        const radius = ab.radius || 7;
+        const heal = ab.heal[r];
+        const r2 = radius * radius;
+        for (const ally of this.units) {
+          if (ally.dead || ally.hp <= 0) continue;
+          if (dist2(h.x, h.z, ally.x, ally.z) > r2) continue;
+          ally.hp = Math.min(ally.maxHp, ally.hp + heal);
+        }
+        this.emit({ type: 'summon', x: h.x, z: h.z, count: 2 });
+        this.emit({ type: 'mend', x: h.x, z: h.z, radius, color: 0xf0d060 });
         break;
       }
     }

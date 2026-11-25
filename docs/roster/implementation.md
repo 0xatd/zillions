@@ -1,8 +1,11 @@
-# Four-hero implementation — in progress
+# Roster implementation
 
-Alex reduced scope on 2026-11-23 to Lina, Sniper, Axe and Sven.
-and the roster expansion is not approved for production. The chapter candidate
-is PR140; expanded combat work is isolated on `codex/hero-roster` above it.
+Recruited Alexander Thomas is the ranged carry (Trueflight, Kickback Charge,
+Glass Sight, Meridian). Recruited Tiger Reyes is the warp caster (Rift Lance,
+Stillpoint, Dread Well, Unmake). Recruited Aaron Whitlock is the support summoner
+(Astral Sentinel, Mending Pulse, Still Ward, Choir). Vanguard and other companions
+retain their existing kits. Deployment selects an already-recruited character;
+it does not bypass conquest, recruitment, or culture restrictions.
 
 Reference inventory: 127 names/ability identifiers retrieved from OpenDota's
 `dotaconstants` on 2026-11-22. This is an auditable inventory, not proof of the

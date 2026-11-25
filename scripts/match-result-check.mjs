@@ -64,6 +64,13 @@ eq(validateMatchReport(report({ bossKillT: 5000 })).detail, 'bossKillT', 'boss k
 eq(validateMatchReport(report({ difficulty: 'godmode' })).error, 'invalid_difficulty', 'unknown difficulty rejected');
 eq(valid({ mode: 'survival', won: true }).won, false, 'survival cannot be reported as a win');
 
+ok(validateMatchReport(report({ nodes: 65 })).ok, 'long runs may recapture more than 64 nodes');
+eq(validateMatchReport(report({ nodes: 100000 })).detail, 'nodes', 'captures remain bounded by elapsed capture time');
+
+// Real capstone victories must remain payable; impossible tiers still fail closed.
+ok(validateMatchReport(report({ hqTier: 4 })).ok, 'Citadel Nexus victory accepted');
+eq(validateMatchReport(report({ hqTier: 5 })).detail, 'hqTier', 'nonexistent Keep tier rejected');
+
 // ---- loot proofs ------------------------------------------------------------
 const legit = [...table][0];
 ok(table.size > 0 && verifyLootKey(legit, { levelId: 1, lootTable: table }), 'a key the match really scattered verifies');
@@ -231,6 +238,8 @@ eq(auth.profileFromBundle({ profile: { handle: 't', username_set: true }, stats:
     && !retryableMatchError({ status: 409, message: 'duplicate_room_report' }), 'only stale CAS conflicts and in-flight duplicates retry');
   ok(retryableMatchError({ status: 0, message: 'account_changed' }), "another account's report is kept, not dropped");
   ok(!retryableMatchError({ status: 422 }) && !retryableMatchError({ status: 403 }), 'rejected reports are dropped');
+  globalThis.localStorage.setItem = () => { throw new Error("quota exceeded"); };
+  ok(!queuePendingMatch({ userId: A, requestId: "unsaved", report: {} }), "storage failure never claims the report was queued");
   delete globalThis.localStorage;
 }
 
