@@ -20,7 +20,10 @@ const CURRENT_RULES = 'survival-plots';
 // v15: gradual siege pressure and boss-wave balance.
 // v16: bounded opening encounter and immediate order/encounter state hashing.
 // v17: original multi-slot leader kits; incompatible with either v16 preview.
-export const LOBBY_PROTOCOL_VERSION = 17;
+// v18: click orders (`horder`) participate in movement and the lockstep hash.
+// A v17 tab drops the command and hashes a different hero, so it cannot share
+// a room or a Watch session with this build.
+export const LOBBY_PROTOCOL_VERSION = 18;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

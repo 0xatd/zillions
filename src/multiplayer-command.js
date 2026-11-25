@@ -13,6 +13,20 @@ export function guestCommand(input, player, playerCount) {
     case 'hdir':
       return axis(input.x) && axis(input.z) && typeof input.s === 'boolean'
         ? { ...command, x: input.x, z: input.z, s: input.s } : null;
+    case 'horder': {
+      const coord = (value) => Number.isFinite(value) && value >= 0 && value <= 512;
+      const kind = input.k === 'attack' ? 'attack' : input.k === 'move' ? 'move' : null;
+      if (!kind || !coord(input.x) || !coord(input.z)) return null;
+      if (input.id !== undefined && input.id !== null && !integer(input.id)) return null;
+      const order = {
+        ...command,
+        x: Math.round(input.x * 64) / 64,
+        z: Math.round(input.z * 64) / 64,
+        k: kind,
+      };
+      if (input.id != null) order.id = input.id;
+      return order;
+    }
     case 'dodge':
       return axis(input.x) && axis(input.z) ? { ...command, x: input.x, z: input.z } : null;
     case 'pay':

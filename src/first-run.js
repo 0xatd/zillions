@@ -90,9 +90,9 @@ export function leaderRoster(profile = {}) {
   ];
 }
 
-export function abilityBar(hero, labels = ['Q', 'E', 'R', 'Ctrl+Q']) {
+export function abilityBar(hero, labels = ['Q', 'W', 'E', 'R']) {
   return [
-    { key: 'Auto', name: 'Weapon', icon: '🎯', detail: 'Attacks automatically in range. WASD moves your hero.', state: 'ready' },
+    { key: 'Auto', name: 'Weapon', icon: '🎯', detail: 'Attacks automatically in range. Right-click to move or attack-move.', state: 'ready' },
     ...heroAbilities(hero).map((ability, slot) => ability && ({
       key: ability.passive ? 'Passive' : labels[slot] || `Slot ${slot + 1}`, name: ability.name,
       icon: ability.icon || '✦', detail: ability.desc || '', state: ability.passive ? 'passive' : 'ready',
@@ -101,11 +101,11 @@ export function abilityBar(hero, labels = ['Q', 'E', 'R', 'Ctrl+Q']) {
 }
 
 export const COACH_STEPS = Object.freeze([
-  { id: 'move', title: 'Lead the landing', body: '{north}/{west}/{south}/{east} moves your hero toward a gold flag. Choose the ground your expedition will defend.' },
+  { id: 'move', title: 'Lead the landing', body: 'Right-click the ground to move. Right-click an enemy to attack-move. A marker shows the order. Ride toward a gold flag.' },
   { id: 'found', title: 'Establish your outpost', body: 'Stand by a gold flag and press {build}. The Keep rises here.' },
   { id: 'build', title: 'Prepare your first defense', body: 'Hold {build} at a Tower or Militia Camp foundation. Economy is another opening choice, but you will need to fight beside it.' },
   { id: 'stances', title: 'Hold the Keep', body: 'Choose Defend Keep below or press {defend}. Your squads stay home while you intercept the attackers.' },
-  { id: 'attack', title: 'Meet the incoming wave', body: 'Move into weapon range: attacks are automatic. {mode} switches to Fight mode; {ability} casts your special.' },
+  { id: 'attack', title: 'Meet the incoming wave', body: 'Right-click the wave, or walk into range and the weapon fires on its own. {ability}, {ability2}, {ability3} and {ability4} are your four abilities. {center} recenters the camera. {mode} switches Build and Fight.' },
   { id: 'victory', title: 'Break the first siege', body: 'Protect the Keep and defeat the marked wave. Hold {build} beside damaged defenses to repair them.' },
   { id: 'push', title: 'Take the initiative', body: 'First siege broken. Choose Push lanes below or press {push}. Escort your squads to a node to claim income and new defenses.' },
 ]);

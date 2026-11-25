@@ -76,6 +76,42 @@ export class AudioSys {
     });
     this.beds.setVolume(this.musicMult);
     this.startMusic();
+    this._loadImpacts();
+  }
+
+  // Kenney Impact Sounds (CC0). Procedural tones stay; these add the transient.
+  _loadImpacts() {
+    if (!this.ctx || this._impactBuffers) return;
+    this._impactBuffers = {};
+    const files = {
+      hit: 'assets/audio/cc0/impact/impact_punch_medium_000.ogg',
+      heavy: 'assets/audio/cc0/impact/impact_punch_heavy_000.ogg',
+      ultimate: 'assets/audio/cc0/impact/impact_plate_heavy_000.ogg',
+      cast: 'assets/audio/cc0/impact/impact_metal_medium_000.ogg',
+    };
+    for (const [kind, url] of Object.entries(files)) {
+      fetch(url)
+        .then((response) => response.arrayBuffer())
+        .then((bytes) => this.ctx.decodeAudioData(bytes))
+        .then((buffer) => { this._impactBuffers[kind] = buffer; })
+        .catch(() => {});
+    }
+  }
+
+  impactSample(kind) {
+    this.init();
+    if (!this.ctx || this.muted || this.eventGain <= 0) return;
+    const buffer = this._impactBuffers?.[kind];
+    if (!buffer) return;
+    const now = this.now();
+    if (now < (this._nextImpact || 0)) return;
+    this._nextImpact = now + 0.05;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = this.ctx.createGain();
+    gain.gain.value = (kind === 'ultimate' || kind === 'heavy' ? 0.5 : 0.34) * this.eventGain;
+    src.connect(gain).connect(this.master);
+    src.start(now);
   }
 
   setMuted(m) {

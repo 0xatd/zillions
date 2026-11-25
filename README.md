@@ -235,26 +235,30 @@ Vanguard keeps its melee signature. Recruited Alexander Thomas, Tiger Reyes,
 and Aaron Whitlock now have original four-slot kits with mana and cooldowns.
 The chapter's existing conquest and recruitment gates still apply. Other
 recruited companions retain their existing kits. Ability previews show the
-actual configured cast keys; W remains movement. See
+actual configured cast keys, Q W E R by default. See
 [implementation coverage](docs/roster/implementation.md).
 
 ## Controls
 
-The layout follows Path of Exile 2's WASD mode, adapted where Zillions has a
-system it does not. Every key below can be rebound in **Settings → Controls**,
-which reads the same table the game dispatches through.
+Right-click orders the hero. Q, W, E, and R are the four abilities. Every key
+below can be rebound in **Settings → Controls**, which reads the same table
+the game dispatches through and stores the scheme in localStorage.
+
+Right-click on open ground moves, and shows a gold marker. Right-click on an
+enemy attack-moves onto that enemy and shows a red marker.
 
 | Input | Action |
 | --- | --- |
-| W, A, S, D | Move in map and minimap directions |
+| A | Arm attack-move, then click |
+| Q, W, E, R | Abilities I–IV in Fight mode |
+| Space | Center the camera on your hero |
+| ↑, ↓, ←, → | Pan the camera. Edge pan is on by default |
 | Shift | Gallop at full health |
-| Space | Build mode: build/pay. Fight mode: dodge roll |
-| Q | Fight mode: primary ability (your hero special) |
-| E, R | Ability II and III, when available |
+| V | Build mode: build/pay. Fight mode: dodge roll |
 | X | Draw the other weapon set |
-| Ctrl | Hold for secondary Q/E/R ability slots |
+| Ctrl | Hold with Q or W for ability slots five and six |
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
-| B | Secondary Build-mode key: build, upgrade, repair, or rebuild |
+| B | Build, upgrade, repair, or rebuild |
 | Alt | Switch between Build mode and Fight mode |
 | F1, F2, F3 | Set Defend, Follow, or Push stance |
 | T | Change the nearest tower target rule |
@@ -266,17 +270,19 @@ which reads the same table the game dispatches through.
 | M | Mute audio |
 | Esc | Open the game menu |
 
-Movement is not camera-relative. W always moves north on the minimap.
+The camera starts on the hero. Panning or edge-scrolling lets go of that
+follow; Space pins it again. Settings → Controls can also pan with WASD.
+That option moves Ability II and attack-move off W and A. Direct hero movement
+stays on the numpad (Num8, Num4, Num2, Num6) and always matches the minimap:
+north is north. Rebinding a key does not change the command it sends.
+
 Click/tap a unit to inspect it. An in-range enemy offers **Focus attacks**
 for your hero only; **Clear attack focus** restores automatic targeting.
 Inspection alone never changes orders. Use **Items** to read carried gear.
 
-Two places deviate from Path of Exile deliberately. Army stances take F1–F3
-rather than the number row, because Zillions commands squads and Path of Exile
-does not — that freed 1 and 2 for a future consumable system. Alt switches the
-action context because founding and funding a colony is the half of this game
-an action-RPG layout has no opinion about. WASD remains shared. In Build mode,
-Space and B build. In Fight mode, Space dodges and Q uses the primary ability.
+Army stances take F1–F3 rather than the number row, so 1 and 2 stay reserved
+for a future consumable system. Alt switches Build and Fight. In Build mode,
+V and B fund construction. In Fight mode, V dodges and Q, W, E, R cast.
 
 ## Local Development
 
