@@ -39,6 +39,7 @@ export const SIEGE = {
   repairHpPerGold: 45,    // structure HP restored per gold when repairing
   rebuildDiscount: 0.5,   // fraction of tier cost to raise a ruin again
   captureRadius: 7.0,     // presence radius around a lane node
+  maxNodes: 12,          // maximum distinct lane nodes generated on a map
   captureTime: 6.0,       // seconds of uncontested presence to flip a node
   nodeIncome: 14,         // income a held node contributes, same period as buildings
   laneMaxDist: 46,        // longest lane the graph will connect
@@ -977,7 +978,7 @@ export const LEVELS = [
     economy: { startGold: 72, income: 1.08, pressure: 1.0 },
     quests: [
       { id: 'l3q1', name: 'Swift Execution', desc: 'Kill the Shrieker within 90s', reward: 'stim_rig', check: (g) => g.stats.bossKillT != null && g.stats.bossKillT <= 90 },
-      { id: 'l3q2', name: 'High Keep', desc: 'Upgrade the Keep to its final tier', reward: 'banner_keep', check: (g) => { const hq = g.plots.find((p) => p.kind === 'hq'); return hq && hq.tier >= 3; } },
+      { id: 'l3q2', name: 'High Keep', desc: 'Upgrade to High Keep or better', reward: 'banner_keep', check: (g) => { const hq = g.plots.find((p) => p.kind === 'hq'); return hq && hq.tier >= 3; } },
       { id: 'l3q3', name: 'Ashes to Ashes', desc: 'Slay 600 of the dead', reward: 'medicae', check: (g) => g.stats.kills >= 600 },
     ],
     blurb: 'Ash plains cut by crag canyons. Whoever holds the passes holds the war.',

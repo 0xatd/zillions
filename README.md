@@ -24,6 +24,14 @@ skills are optional between-run choices; deploy without shopping first.
 
 Repository: https://github.com/0xatd/zillions
 
+## Your first siege
+
+Choose a site and build your opening defense, army camp, or economy. One hive
+warns you before launching the first wave. Defend the Keep, fight beside your
+squads, then use the earned gold and breathing room to reinforce and push out.
+Army buttons work with mouse, touch, or your configured keys; Recall army is
+available when the Keep is threatened. The lesson is skippable.
+
 ## Start Here
 
 Choose the document that matches your task:
@@ -216,11 +224,12 @@ hero always had.
 
 ## Playable leaders
 
-The setup screen deploys four leaders. Vanguard is the melee frontliner. Alexander
-Thomas is the ranged carry. Tiger Reyes is the warp caster. Aaron Whitlock is the
-support summoner. Each of those three has a QWER kit with cooldowns and a mana
-pool. The other eight names stay locked. W still moves the hero, so the bar's
-W, E and R casts are E, R and Ctrl+Q. See [implementation coverage](docs/roster/implementation.md).
+Vanguard keeps its melee signature. Recruited Alexander Thomas, Tiger Reyes,
+and Aaron Whitlock now have original four-slot kits with mana and cooldowns.
+The chapter's existing conquest and recruitment gates still apply. Other
+recruited companions retain their existing kits. Ability previews show the
+actual configured cast keys; W remains movement. See
+[implementation coverage](docs/roster/implementation.md).
 
 ## Controls
 

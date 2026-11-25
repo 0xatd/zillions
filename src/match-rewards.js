@@ -16,7 +16,7 @@
 //     candidates keep their input log so a future leaderboard can replay its
 //     top entries (docs/leaderboards.md); rewards never wait on a replay.
 import {
-  BOSS_DROPS, DIFFICULTY, FIELD_LOOT, ITEMS, LEVELS, PACK_SLOTS, THREAT, threatClockMult,
+  BOSS_DROPS, DIFFICULTY, FIELD_LOOT, ITEMS, LEVELS, PACK_SLOTS, PLOT_KINDS, SIEGE, THREAT, threatClockMult,
   isLabyrinthLevel, itemInfo, levelById,
 } from './config.js';
 import { ITEM_BASES, hashString, parseItemKey, resolveItem, worldItemLevel } from './items.js';
@@ -37,7 +37,7 @@ export const MATCH_LIMITS = Object.freeze({
   coinsPerSecond: 60, coinSlack: 1000,
   builtPerSecond: 2, builtSlack: 40,
   startingBuildings: 200,
-  maxNodes: 64,
+  maxNodes: 64, // minimum capture-count allowance; long runs also get the timed bound
   maxHeld: 32,
   threatSlack: 2,
   maxLootSerial: 256,
@@ -199,11 +199,12 @@ export function validateMatchReport(raw, { campaignCleared = 0, lootTable = null
     kills: n('kills', durationSeconds * L.killsPerSecond + L.killSlack),
     coins: n('coins', durationSeconds * L.coinsPerSecond + L.coinSlack),
     nests: n('nests', Math.max(0, level.nests | 0)),
-    nodes: n('nodes', L.maxNodes),
+    // Captures include retakes, not just unique map nodes. Each capture needs time.
+    nodes: n('nodes', Math.max(L.maxNodes, SIEGE.maxNodes * Math.ceil(durationSeconds / SIEGE.captureTime))),
     built: n('built', durationSeconds * L.builtPerSecond + L.builtSlack),
     bestHeld: n('bestHeld', L.maxHeld),
     heroDeaths: n('heroDeaths', durationSeconds),
-    hqTier: n('hqTier', 3),
+    hqTier: n('hqTier', PLOT_KINDS.hq.tiers.length),
     hero: typeof raw.hero === 'string' ? raw.hero.replace(/[^a-z0-9_]/gi, '').slice(0, 32) || null : null,
   };
   // Threat depends on the (already bounded) captures and razes.

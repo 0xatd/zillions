@@ -28,6 +28,16 @@ const base = { level: 20, items: [], equipment: { weapon: rifle }, lattice: [], 
 ok(stateHash(peer(base)) === stateHash(peer({ ...base })), 'two identical peers disagree');
 ok(stateHash(peer(base)) === stateHash(peer(JSON.parse(JSON.stringify(base)))), 'a round-tripped camp changed the hash');
 
+// Orders and opening-wave state change future simulation even before units move.
+{
+  const a = peer(base), b = peer(base);
+  b.stance = 'attack';
+  ok(stateHash(a) !== stateHash(b), 'a new army order must reach the hash immediately');
+  b.stance = a.stance;
+  b.firstSiege.stage = 'warning';
+  ok(stateHash(a) !== stateHash(b), 'opening stage must reach the hash');
+}
+
 // ---------- every way to differ must be caught ----------
 const differs = (label, camp) => {
   ok(stateHash(peer(base)) !== stateHash(peer(camp)), `${label}: peers differ but the hash does not`);

@@ -314,28 +314,12 @@ export function addMmoCharacter(profile, character) {
 // gear and Lattice are the same record. Vanguard is the chapter founder.
 // Alexander, Aaron and Tiger are their named companions, created on first
 // deployment so a match cannot credit a different identity.
-const DEPLOYED_COMPANIONS = new Set(['alexander', 'aaron', 'tiger']);
-
 export function ensureDeployedLeader(profile, leaderKey) {
   normalizeMmoCharacters(profile);
-  if (leaderKey === 'vanguard') {
-    const founder = chapterFounder(profile);
-    if (founder) profile.mmoCharacterId = founder.id;
-    return founder || null;
-  }
-  if (!DEPLOYED_COMPANIONS.has(leaderKey)) return null;
-  const leader = CHAPTER_LEADERS.find((entry) => entry.key === leaderKey);
-  if (!leader || !HEROES[leader.key]) return null;
-  let character = leaderRecord(profile, leaderKey);
-  if (!character) {
-    character = makeMmoCharacter(HEROES[leader.key].name, leader.classKey, chapterIdentity(profile?.chapter).color);
-    character.id = `chapter_${leaderKey}_v1`;
-    character.chapterLeader = leaderKey;
-    character.proxyHero = leaderKey;
-    character.firstHourGuideDismissed = true;
-    if (!addMmoCharacter(profile, character)) return null;
-    return character;
-  }
+  const character = leaderKey === 'vanguard' ? chapterFounder(profile) : leaderRecord(profile, leaderKey);
+  // Deployment is selection, not a second recruitment path. Existing companions
+  // remain available after a culture change; only chapter recruitment adds one.
+  if (!character) return null;
   profile.mmoCharacterId = character.id;
   return character;
 }

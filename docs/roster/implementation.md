@@ -1,13 +1,11 @@
 # Roster implementation
 
-The setup screen deploys four leaders with original names. Vanguard is the melee
-frontliner. Alexander Thomas is the ranged carry (Trueflight, Kickback Charge,
-Glass Sight, Meridian). Tiger Reyes is the warp caster (Rift Lance, Stillpoint,
-Dread Well, Unmake). Aaron Whitlock is the support summoner (Astral Sentinel,
-Mending Pulse, Still Ward, Choir). The other eight grid names stay locked.
-
-Reference-named prototypes remain in the simulation and stay off the setup
-grid. They are not the playable leaders.
+Recruited Alexander Thomas is the ranged carry (Trueflight, Kickback Charge,
+Glass Sight, Meridian). Recruited Tiger Reyes is the warp caster (Rift Lance,
+Stillpoint, Dread Well, Unmake). Recruited Aaron Whitlock is the support summoner
+(Astral Sentinel, Mending Pulse, Still Ward, Choir). Vanguard and other companions
+retain their existing kits. Deployment selects an already-recruited character;
+it does not bypass conquest, recruitment, or culture restrictions.
 
 Reference inventory: 127 names/ability identifiers retrieved from OpenDota's
 `dotaconstants` on 2026-11-22. This is an auditable inventory, not proof of the

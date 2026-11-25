@@ -1,7 +1,8 @@
 // First-run presentation rules. This module never touches the simulation,
 // the lockstep hash, or the seeded sim random source.
 import { CULTURE_ARMIES, cultureKey, HEROES } from './config.js';
-import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS } from './chapter.js';
+import { heroAbilities } from './hero-abilities.js';
+import { CHAPTER_COLORS, CHAPTER_EMBLEMS, CHAPTER_LEADERS, leaderRecord, recruitmentAllowed } from './chapter.js';
 
 export const PLAYABLE_LEADER_KEYS = Object.freeze(['vanguard', 'alexander', 'aaron', 'tiger']);
 
@@ -28,7 +29,7 @@ export function randomizeQuickSetup(rng = Math.random) {
     color: pick(Object.keys(CHAPTER_COLORS)),
     emblem: pick(Object.keys(CHAPTER_EMBLEMS)),
     difficulty: pick(DIFFICULTIES),
-    leader: pick(PLAYABLE_LEADER_KEYS),
+    leader: 'vanguard',
   };
 }
 
@@ -68,121 +69,66 @@ export function cultureExplain(key) {
   };
 }
 
-const LEADER_KITS = {
-  alexander: { role: 'Ranged carry', kit: 'Trueflight, Kickback Charge, Glass Sight, Meridian.' },
-  tiger: { role: 'Warp caster', kit: 'Rift Lance, Stillpoint, Dread Well, Unmake.' },
-  aaron: { role: 'Support summoner', kit: 'Astral Sentinel, Mending Pulse, Still Ward, Choir.' },
-};
-
-// Vanguard plus the eleven chapter leaders. Four can deploy.
-export function leaderRoster() {
+// A new chapter starts with its founder; companions are recruited, not unfinished kits.
+export function leaderRoster(profile = {}) {
   return [
     {
       key: 'vanguard',
       name: 'Vanguard',
-      role: 'Melee frontliner',
-      kit: 'Gravity Hammer. The other three slots stay open.',
+      role: 'Your founder. Frontline command.',
       playable: true,
       soon: false,
     },
-    ...CHAPTER_LEADERS.map((leader) => {
-      const ready = Object.hasOwn(LEADER_KITS, leader.key);
-      return {
-        key: leader.key,
-        name: HEROES[leader.key]?.name || leader.key,
-        role: ready ? LEADER_KITS[leader.key].role : leader.role,
-        kit: ready ? LEADER_KITS[leader.key].kit : '',
-        playable: ready,
-        soon: !ready,
-      };
-    }),
+    ...CHAPTER_LEADERS.map((leader) => ({
+      key: leader.key,
+      name: HEROES[leader.key]?.name || leader.key,
+      role: leader.role,
+      playable: !!leaderRecord(profile, leader.key),
+      soon: false,
+      status: leaderRecord(profile, leader.key) ? 'Ready in chapter' : recruitmentAllowed(profile, leader.key) ? 'Recruit in chapter' : 'Unlock through exploration or conquest',
+    })),
   ];
 }
 
-const BAR_KEYS = ['Q', 'W', 'E', 'R'];
-const CAST_WITH = [
-  'Press Q.',
-  'Press E. W moves the hero.',
-  'Press R.',
-  'Press Ctrl+Q.',
-];
-
-export function abilityBar(hero) {
-  const active = Array.isArray(hero?.abilities) ? hero.abilities.filter((ability) => ability && !ability.passive) : [];
-  if (active.length >= 4) {
-    const resource = hero.resource || 'mana';
-    return BAR_KEYS.map((key, index) => {
-      const ability = active[index];
-      const cd = Array.isArray(ability.cd) ? ability.cd[0] : ability.cd;
-      const mana = Array.isArray(ability.mana) ? ability.mana[0] : ability.mana;
-      const cost = mana ? ` Costs ${mana} ${resource}.` : '';
-      return {
-        key,
-        name: ability.name,
-        icon: ability.icon || '✦',
-        detail: `${ability.desc} ${CAST_WITH[index]} Cooldown ${cd}s.${cost}`,
-        state: 'ready',
-      };
-    });
-  }
-  const special = hero?.ability;
+export function abilityBar(hero, labels = ['Q', 'E', 'R', 'Ctrl+Q']) {
   return [
-    { key: 'Q', name: special?.name || 'Special', icon: special?.icon || '✦', detail: special?.desc || 'Fight-mode special.', state: 'ready' },
-    { key: 'W', name: 'Weapon', icon: hero?.shotgun ? '💥' : '🎯', detail: hero?.tagline || 'The hero fires while you move.', state: 'ready' },
-    { key: 'E', name: 'Reserved', icon: '·', detail: 'The second ability slot stays visible so the bar does not move.', state: 'reserved' },
-    { key: 'R', name: 'Reserved', icon: '·', detail: 'The third ability slot stays visible so the bar does not move.', state: 'reserved' },
+    { key: 'Auto', name: 'Weapon', icon: '🎯', detail: 'Attacks automatically in range. WASD moves your hero.', state: 'ready' },
+    ...heroAbilities(hero).map((ability, slot) => ability && ({
+      key: ability.passive ? 'Passive' : labels[slot] || `Slot ${slot + 1}`, name: ability.name,
+      icon: ability.icon || '✦', detail: ability.desc || '', state: ability.passive ? 'passive' : 'ready',
+    })).filter(Boolean),
   ];
 }
 
 export const COACH_STEPS = Object.freeze([
-  { id: 'move', title: 'Move', body: 'WASD moves your hero. The camera stays fixed, so W is always north on the minimap.' },
-  { id: 'found', title: 'Found the city', body: 'Ride onto a gold flag and press your Build key. The city rises on that ground.' },
-  { id: 'build', title: 'Build', body: 'Hold the Build key on a glowing foundation. Gold streams in until the plot is paid.' },
-  { id: 'mode', title: 'Build mode', body: 'Alt toggles Build and Fight. Build mode spends gold. Fight mode dodges and casts.' },
-  { id: 'attack', title: 'Attack', body: 'In Fight mode, walk toward the dead. Your hero fires alone. Q is the special.' },
-  { id: 'stances', title: 'Command the army', body: 'F1 defends the city. F2 follows you. F3 pushes the lanes. Press each one.' },
+  { id: 'move', title: 'Lead the landing', body: '{north}/{west}/{south}/{east} moves your hero toward a gold flag. Choose the ground your expedition will defend.' },
+  { id: 'found', title: 'Establish your outpost', body: 'Stand by a gold flag and press {build}. The Keep rises here.' },
+  { id: 'build', title: 'Prepare your first defense', body: 'Hold {build} at a Tower or Militia Camp foundation. Economy is another opening choice, but you will need to fight beside it.' },
+  { id: 'stances', title: 'Hold the Keep', body: 'Choose Defend Keep below or press {defend}. Your squads stay home while you intercept the attackers.' },
+  { id: 'attack', title: 'Meet the incoming wave', body: 'Move into weapon range: attacks are automatic. {mode} switches to Fight mode; {ability} casts your special.' },
+  { id: 'victory', title: 'Break the first siege', body: 'Protect the Keep and defeat the marked wave. Hold {build} beside damaged defenses to repair them.' },
+  { id: 'push', title: 'Take the initiative', body: 'First siege broken. Choose Push lanes below or press {push}. Escort your squads to a node to claim income and new defenses.' },
 ]);
 
 export function freshCoach() {
-  return {
-    index: 0,
-    moved: false,
-    founded: false,
-    built: false,
-    mode: false,
-    attacked: false,
-    stances: { defend: false, guard: false, attack: false },
-  };
-}
-
-function stepSatisfied(coach) {
-  const id = COACH_STEPS[coach.index]?.id;
-  if (id === 'move') return coach.moved;
-  if (id === 'found') return coach.founded;
-  if (id === 'build') return coach.built;
-  if (id === 'mode') return coach.mode;
-  if (id === 'attack') return coach.attacked;
-  if (id === 'stances') return coach.stances.defend && coach.stances.guard && coach.stances.attack;
-  return false;
+  return { index: 0, moved: false, founded: false, built: false, attacked: false,
+    defended: false, won: false, pushed: false };
 }
 
 export function coachAdvance(coach, event) {
-  if (!coach || coach.index >= COACH_STEPS.length) return coach;
-  const current = COACH_STEPS[coach.index].id;
-  const next = {
-    ...coach,
-    stances: { ...coach.stances },
+  if (!coach || coachComplete(coach)) return coach;
+  const next = { ...coach,
     moved: coach.moved || event.type === 'move',
     founded: coach.founded || event.type === 'founded',
     built: coach.built || event.type === 'built',
-    mode: coach.mode || (event.type === 'mode' && current === 'mode'),
-    attacked: coach.attacked || (event.type === 'attack' && current === 'attack'),
+    attacked: coach.attacked || event.type === 'attack',
+    defended: coach.defended || (event.type === 'stance' && event.stance === 'defend'),
+    won: coach.won || event.type === 'firstsiege',
+    pushed: coach.pushed || (coach.won && event.type === 'stance' && event.stance === 'attack'),
   };
-  if (event.type === 'stance' && current === 'stances' && next.stances[event.stance] !== undefined) {
-    next.stances[event.stance] = true;
-  }
-  let guard = 0;
-  while (guard++ < COACH_STEPS.length && next.index < COACH_STEPS.length && stepSatisfied(next)) next.index += 1;
+  const satisfied = { move: next.moved, found: next.founded, build: next.built,
+    stances: next.defended, attack: next.attacked, victory: next.won, push: next.pushed };
+  while (next.index < COACH_STEPS.length && satisfied[COACH_STEPS[next.index].id]) next.index++;
   return next;
 }
 
@@ -192,6 +138,12 @@ export function coachApply(coach, events) {
 
 export function coachComplete(coach) {
   return !coach || coach.index >= COACH_STEPS.length;
+}
+
+export function coachStep(coach, labels = {}) {
+  const step = COACH_STEPS[coach?.index];
+  if (!step) return null;
+  return { ...step, body: step.body.replace(/\{(\w+)\}/g, (_, key) => labels[key] || key) };
 }
 
 // Pause follows the bound action. The mode action (build / dodge) can resume

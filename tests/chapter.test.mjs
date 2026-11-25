@@ -46,6 +46,9 @@ test('deploying a leader selects that leader\'s persistent character', () => {
   const founder = makeMmoCharacter('Herald', 'vanguard', 'cobalt');
   const profile = { chapter: chapterIdentity({ name: 'First Landing', founderId: founder.id, color: 'cobalt' }), mmoCharacters: [founder], mmoCharacterId: founder.id };
   assert.equal(ensureDeployedLeader(profile, 'vanguard').id, founder.id);
+  assert.equal(ensureDeployedLeader(profile, 'alexander'), null, 'deployment cannot bypass conquest/recruitment');
+  const recruited=makeMmoCharacter('Alexander Thomas','recon','cobalt');
+  recruited.chapterLeader='alexander'; recruited.proxyHero='alexander'; addMmoCharacter(profile,recruited);
   const alexander = ensureDeployedLeader(profile, 'alexander');
   assert.equal(alexander.chapterLeader, 'alexander');
   assert.equal(alexander.proxyHero, 'alexander');
