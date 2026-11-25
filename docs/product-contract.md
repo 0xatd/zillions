@@ -153,7 +153,15 @@ sustained zombie flood. The run is won only by killing the final boss.
 Survival mode is endless; the score is the Threat level reached. The backend's
 `best_day` column carries that number.
 
-The Labyrinth is the third solo mode: a hero gauntlet with no colony, no
+Daily Siege is a solo challenge, one per UTC day. The date hashes to a seed
+that fixes the landform, the terrain, the scripted waves, and two modifiers.
+Every player that day faces that same hero, culture, and level-1 loadout.
+The score is waves cleared, then Keep health on a win, then time. Guests can
+play. A score is submitted only by a signed-in account, and only after the
+server replays the input log. A daily run does not advance the campaign, grant
+loot, or write a match reward.
+
+The Labyrinth is a solo mode: a hero gauntlet with no colony, no
 economy, and no army. Three authored trials (level ids 9001+) use the
 `labyrinth` landform — a serpentine canyon of chambers. Every chamber holds a
 hive brood nest; razing it advances the revive checkpoint and offers each

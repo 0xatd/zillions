@@ -16,6 +16,7 @@ import {
 } from './config.js';
 import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
+import { dailyScore, formatDailyStanding, modifierInfo } from './daily.js';
 import { combatAlert, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
@@ -181,6 +182,7 @@ export class UI {
               <div id="account-status">Checking account…</div>
             </div>
             <button class="menubtn primary play-now" id="a-play" type="button">PLAY</button>
+            <button class="menubtn" id="a-daily" type="button">DAILY SIEGE</button>
             <p class="guest-note">Guest on this browser. No account required.</p>
             <p class="save-progress-label">Save progress</p>
             <button class="menubtn primary login-provider" id="a-google"><span class="google-mark">G</span><span>Continue with Google</span></button>
@@ -210,6 +212,13 @@ export class UI {
           </nav>
         </div>
 
+        <div id="screen-daily" class="setup daily-screen hidden">
+          <div class="setuphead"><button class="tbtn info-back">← Back</button><h2>Daily Siege</h2></div>
+          <div id="daily-brief"></div>
+          <div class="daily-actions"><button class="startbtn primary" id="daily-play" type="button">Play today's siege</button></div>
+          <div id="daily-board"></div>
+        </div>
+
         <div id="screen-main" class="mainmenu character-select">
           <div class="character-heading"><h1 id="chapter-title">Your chapter</h1><span id="chapter-territory"></span></div>
           <form id="chapter-identity" class="chapter-identity hidden"><label>Chapter name<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Recruitment culture<select id="chapter-culture"></select></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">SAVE CHAPTER</button></form>
@@ -223,7 +232,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-daily">DAILY SIEGE</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -575,6 +584,9 @@ export class UI {
     q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-play').onclick = () => { this._busy(q('#a-play')); this.cb.onGuestPlay?.(); };
+    q('#a-daily').onclick = () => this.cb.onDailyOpen?.();
+    q('#m-daily').onclick = () => this.cb.onDailyOpen?.();
+    q('#daily-play').onclick = () => { this._busy(q('#daily-play')); this.cb.onDailyPlay?.(); };
     q('#a-google').onclick = () => { this._busy(q('#a-google')); this.cb.onSignIn && this.cb.onSignIn(); };
     q('#a-email-form').onsubmit = (event) => {
       event.preventDefault();
@@ -1065,7 +1077,7 @@ export class UI {
   }
 
   _paintScreen(name) {
-    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits']) {
+    for (const id of ['account', 'main', 'character-create', 'character-sheet', 'solo', 'custom', 'quick', 'setup', 'help', 'pause', 'lobby', 'settings', 'heroes', 'cinematics', 'credits', 'daily']) {
       this.root.querySelector('#screen-' + id).classList.toggle('hidden', id !== name);
     }
   }
@@ -2837,7 +2849,9 @@ export class UI {
         ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
         : labyrinth
           ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
-          : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+          : game.mode === 'daily'
+            ? `⚔️ <b>Wave ${game.dailyCleared || 0}/${game.daily?.waves?.length || 0}</b>`
+            : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
     // In the labyrinth the front is chambers and lives, not nodes and camps.
     if (labyrinth) {
@@ -3725,6 +3739,52 @@ export class UI {
     if (host) host.innerHTML = this._endRewardsHtml(extra);
   }
 
+  _esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+
+  showDaily(challenge, board = {}) {
+    this._showScreen('daily');
+    const hero = HEROES[challenge.hero];
+    const culture = CULTURE_ARMIES[challenge.culture];
+    const mods = (challenge.modifiers || []).map((id) => modifierInfo(id)).filter(Boolean);
+    const brief = this.root.querySelector('#daily-brief');
+    if (brief) {
+      brief.innerHTML = `
+        <p class="tagline">${this._esc(challenge.day)} UTC · ${this._esc(challenge.levelName || '')}</p>
+        <p>${hero ? `${hero.icon} ${this._esc(hero.name)}` : ''} · ${culture ? this._esc(culture.name) : ''} · ${challenge.waves?.length || challenge.waves || 0} waves</p>
+        <ul class="daily-mods">${mods.map((mod) => `<li><b>${this._esc(mod.name)}</b> — ${this._esc(mod.detail)}</li>`).join('')}</ul>
+        <p class="guest-note">Guests can play. Sign in to submit a score.</p>`;
+    }
+    const host = this.root.querySelector('#daily-board');
+    if (!host) return;
+    if (board.loading) {
+      host.innerHTML = '<p>Loading the board…</p>';
+      return;
+    }
+    if (board.staleClient) {
+      host.innerHTML = '<p>This client is out of date, so a score from it would not match today\'s seed.</p>';
+    } else if (board.unavailable) {
+      host.innerHTML = '<p>The leaderboard needs the game server. You can still play today\'s siege on this browser.</p>';
+    } else if (board.error) {
+      host.innerHTML = `<p>The leaderboard is not available yet (${this._esc(board.error)}). You can still play.</p>`;
+    } else {
+      const rows = Array.isArray(board.board) ? board.board : [];
+      const mine = board.me;
+      host.innerHTML = `
+        <h3>Today's board</h3>
+        ${rows.length ? `<table class="daily-board"><thead><tr><th>#</th><th>Commander</th><th>Score</th><th>Run</th></tr></thead><tbody>
+          ${rows.map((row) => `<tr class="${row.mine ? 'mine' : ''}"><td>${row.rank}</td><td>@${this._esc(row.name)}</td><td>${row.score}</td><td>${row.waves} waves</td></tr>`).join('')}
+        </tbody></table>` : '<p>No scores yet today. Be the first.</p>'}
+        ${mine ? `<p class="${mine.rank <= 50 ? 'daily-mine-note' : 'daily-mine-note outside'}">Your rank: <b>${mine.rank}</b> · ${mine.score}</p>` : ''}`;
+    }
+  }
+
+  setDailyStatus(text) {
+    const el = this.root.querySelector('#daily-status');
+    if (el) el.textContent = text;
+  }
+
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this.pauseOpen = false;
     this.root.querySelector('#pause-veil')?.classList.add('hidden');
@@ -3734,12 +3794,19 @@ export class UI {
     const lv = levelById(levelId || 1);
     const survival = mode === 'survival';
     const labyrinth = mode === 'labyrinth';
+    const daily = mode === 'daily';
+    const standing = daily && game?.dailyResult ? game.dailyResult : null;
+    const points = standing ? (extra?.dailyScore ?? dailyScore(standing)) : 0;
+    const dailyLine = extra?.dailyLine || (standing ? formatDailyStanding(standing) : '');
     const review = runReview({ won, stats, threat, mode, game });
     ov.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
-        <h1>${labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
+        <h1>${daily ? (won ? 'THE DAY IS HELD' : 'THE DAY IS LOST')
+          : labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
           : survival ? `💀 THREAT ${threat}` : won ? '🏆 PLANET TAKEN' : '💀 THE CITY HAS FALLEN'}</h1>
-        <p class="tagline">${labyrinth
+        <p class="tagline">${daily
+          ? `${dailyLine}. Score <b>${points}</b>.`
+          : labyrinth
           ? (won
             ? `${lv.name} is behind you. Every chamber is silent and the champion is dead — you walked out.`
             : `${lv.name} claimed the whole company. The chambers keep what falls in them.`)
@@ -3754,7 +3821,7 @@ export class UI {
           <div>${labyrinth ? `🌀 Chambers razed: <b>${stats.nests || 0}</b>` : `🔥 Hive nests razed: <b>${stats.nests || 0}</b>`}</div>
           ${labyrinth ? `<div>☠️ Heroes fallen: <b>${stats.heroDeaths || 0}</b></div>` : `<div>🏗️ Structures raised: <b>${stats.built}</b></div>`}
           ${labyrinth ? '' : `<div>🚩 Lane nodes taken: <b>${stats.nodes || 0}</b> (held at once: ${stats.bestHeld || 0})</div>`}
-          <div>☠️ Threat reached: <b>${threat}</b></div>
+          <div>${daily ? `⚔️ Waves survived: <b>${standing?.waves || 0}</b>` : `☠️ Threat reached: <b>${threat}</b>`}</div>
         </div>
         <div class="runreview ${won ? 'success' : 'failure'}">
           <div class="steplabel">${won ? 'WHAT WORKED' : 'WHY THE RUN ENDED'}</div>
@@ -3762,13 +3829,23 @@ export class UI {
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
         <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
-        ${!survival && !labyrinth && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the war' : ''}</p>` : ''}
+        ${!survival && !labyrinth && !daily && won ? `<p class="tagline">🔓 Unlocked: <b>${levelById(lv.id + 1).name}</b>${lv.id >= LEVELS.length ? ' — deeper into the war' : ''}</p>` : ''}
+        ${daily ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
+        ${daily && extra?.dailyGuest ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
+          <form id="b-daily-email" class="email-login"><label for="daily-email">Or save with email</label><input id="daily-email" type="email" placeholder="you@example.com" required><button class="menubtn" type="submit">Email me a sign-in link</button></form>` : ''}
         <div class="endactions">
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
-          <button class="startbtn" id="b-restart">${mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
+          <button class="startbtn" id="b-restart">${daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
         </div>
       </div>`;
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+    const save = ov.querySelector('#b-daily-save');
+    if (save) save.onclick = () => { save.disabled = true; this.cb.onDailySignIn?.(); };
+    const email = ov.querySelector('#b-daily-email');
+    if (email) email.onsubmit = (event) => {
+      event.preventDefault();
+      this.cb.onDailyEmail?.(ov.querySelector('#daily-email').value);
+    };
     const retry = ov.querySelector('#b-retry');
     if (retry) retry.onclick = () => {
       if (retry.disabled) return;

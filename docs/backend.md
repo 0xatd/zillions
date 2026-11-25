@@ -358,12 +358,30 @@ The tree's node effects are not yet read by the simulation (neither the guest
 tree nor the account tree changes a match), and there is no tree screen yet;
 the account tree is the server-side ledger they will read from.
 
+## Daily Siege
+
+`GET /api/daily` returns the UTC day's challenge and the top 50 scores.
+`POST /api/daily` accepts `{ replay }` from a signed-in player. The handler
+recomputes the challenge from the day, replays the input log headlessly
+(`verifyDailySubmission` in `src/daily.js`), and stores the score the replay
+produces when the final lockstep hash matches. A guest has no token, so the
+route answers `sign_in_required`. The client keeps that log in
+`localStorage` until sign-in, then sends it.
+
+The table is `public.daily_scores` (one best row per account per day).
+Migration `supabase/migrations/20261125000100_daily_siege.sql` enables RLS,
+lets anon and authenticated read the board columns, and grants
+`submit_daily_score()` to `service_role` only. The replay log and sim hash
+are not readable by clients. Apply that file by hand. It does not add
+environment variables.
+
 ## Known Limits
 
 - Room browser data, player rosters, and host setup are real Supabase data.
 - Mid-game Join as a new controlling player is not supported. Use Watch.
-- Combat runs in the browser. The server replays required matches from the
-  ticket seed and input log; other matches are bounds-checked claims.
+- Combat runs in the browser. Daily Siege scores are replayed before they are
+  stored. Other match rewards are bounds-checked claims; their input logs are
+  kept for a later review, not replayed on the reward path.
 - Cross-device identity depends on Google sign-in. Guest identity is per
   browser/localStorage.
 

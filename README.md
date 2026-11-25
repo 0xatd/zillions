@@ -91,6 +91,9 @@ their soft vision circles is almost black, including the minimap.
   derived from its level number alone, so every player and every co-op peer
   gets the same map.
 - **Survival** is an endless siege with a boss every fifth Threat level.
+- **Daily Siege** is one shared challenge per UTC day. The date fixes the map,
+  the waves, and the modifiers. Guests can play. A score is stored only after
+  sign-in, and only after the server replays the run.
 - **Labyrinth** trials are hero gauntlets with no colony.
 - **Co-op** (Play Online) supports up to four players. Each player controls
   one hero; the players share gold, colony buildings, the enemy force, and the

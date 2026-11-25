@@ -2287,3 +2287,11 @@ body:has(.friend-party-dialog[open]){overflow:hidden}
  .friend-party-dialog .party-status:empty{display:none}
  .friend-party-dialog small{font-size:.75rem}
 }
+.daily-screen { max-width: 760px; }
+.daily-screen .daily-mods { margin: 8px 0 12px; padding-left: 18px; color: #d5e3f0; }
+.daily-screen .daily-actions { margin: 8px 0 16px; }
+.daily-board { width: 100%; border-collapse: collapse; font-size: 13px; }
+.daily-board th, .daily-board td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(147,190,255,.18); }
+.daily-board tr.mine { background: rgba(255, 211, 107, .16); box-shadow: inset 3px 0 0 #ffd36b; }
+.daily-mine-note { color: #ffe7a3; }
+.endpanel .email-login { margin: 10px 0; }

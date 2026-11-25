@@ -191,6 +191,29 @@ try {
   eq((await q(`select has_table_privilege('authenticated', 'public.player_stats', 'UPDATE') u`)).rows[0].u, false, 'stats updates revoked');
   eq((await q(`select count(*)::int n from pg_tables where schemaname = 'public' and (tablename like 'world\\_%' or tablename like 'social\\_%')`)).rows[0].n, 0, 'living-world tables dropped');
   eq((await q(`select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and (proname like '%world%' or proname like 'social%')`)).rows[0].n, 0, 'living-world functions dropped');
+  const day = '2026-11-25';
+  const submitDaily = (score, waves = 3) => q(
+    `select public.submit_daily_score($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb) r`,
+    [uid, day, 99, score, waves, waves ? 40 : 0, 100, 120, false, 'scott', 'commander', 7, JSON.stringify({ v: 1, day })],
+  ).then((r) => r.rows[0].r);
+  const firstDaily = await submitDaily(3000000, 3);
+  eq([firstDaily.improved, firstDaily.rank, firstDaily.score], [true, 1, 3000000], 'the first daily score is rank 1');
+  const worseDaily = await submitDaily(1000000, 1);
+  eq([worseDaily.improved, worseDaily.score], [false, 3000000], 'a worse daily score does not replace the best');
+  const betterDaily = await submitDaily(8000000, 8);
+  eq([betterDaily.improved, betterDaily.score, betterDaily.rank], [true, 8000000, 1], 'a better daily score replaces the row');
+  eq((await q(`select count(*)::int n from daily_scores where user_id = $1`, [uid])).rows[0].n, 1, 'one daily row per account per day');
+  await rejects(submitDaily(-1, 1), /invalid_daily_score/, 'a negative daily score is refused');
+  eq((await q(`select has_column_privilege('anon', 'public.daily_scores', 'score', 'SELECT') s`)).rows[0].s, true, 'the board score is readable');
+  eq((await q(`select has_column_privilege('anon', 'public.daily_scores', 'replay_log', 'SELECT') s`)).rows[0].s, false, 'the daily replay log is not readable');
+  eq((await q(`select has_column_privilege('authenticated', 'public.daily_scores', 'sim_hash', 'SELECT') s`)).rows[0].s, false, 'the daily sim hash is not readable');
+  eq((await q(`select has_table_privilege('authenticated', 'public.daily_scores', 'INSERT') i`)).rows[0].i, false, 'clients cannot insert a daily score');
+  eq((await q(`select has_function_privilege('authenticated', 'public.submit_daily_score(uuid,date,bigint,integer,integer,integer,integer,integer,boolean,text,text,integer,jsonb)', 'EXECUTE') f`)).rows[0].f, false, 'daily submit is not a client RPC');
+  eq((await q(`select has_function_privilege('service_role', 'public.submit_daily_score(uuid,date,bigint,integer,integer,integer,integer,integer,boolean,text,text,integer,jsonb)', 'EXECUTE') f`)).rows[0].f, true, 'daily submit is granted to the service role');
+  eq((await q(`select policyname from pg_policies where tablename = 'daily_scores'`)).rows.map((r) => r.policyname), ['daily_scores_read_board'], 'daily scores have a read policy only');
+  await q(read('supabase/migrations/20261125000100_daily_siege.sql'));
+  eq((await q(`select count(*)::int n from daily_scores`)).rows[0].n, 1, 'the daily migration is safe to re-run');
+
   await checkFriendParties(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
 } finally {
   await client.end().catch(() => {});
