@@ -78,3 +78,30 @@ export function scaledShake(amount, { reduceShake = false, reduceMotion = false 
   if (!Number.isFinite(n) || n <= 0 || reduceMotion) return 0;
   return n * (reduceShake ? 0.22 : 1);
 }
+
+// One freeze, then a gap. A fresh impact during either does not renew the hold,
+// so a stream of deaths cannot pin actor rendering in place.
+export const HIT_STOP_CAP = 0.08;
+export const HIT_STOP_GAP = 0.14;
+
+export function armHitStop(state = {}, seconds = 0) {
+  const hold = Math.max(0, Number(state.hold) || 0);
+  const gap = Math.max(0, Number(state.gap) || 0);
+  if (hold > 0 || gap > 0) return { hold, gap };
+  const next = Math.min(HIT_STOP_CAP, Math.max(0, Number(seconds) || 0));
+  return { hold: next, gap: 0 };
+}
+
+export function tickHitStop(state = {}, dt = 0) {
+  let hold = Math.max(0, Number(state.hold) || 0);
+  let gap = Math.max(0, Number(state.gap) || 0);
+  const present = hold > 0;
+  const step = Math.max(0, Number(dt) || 0);
+  if (hold > 0) {
+    hold = Math.max(0, hold - step);
+    if (hold === 0) gap = HIT_STOP_GAP;
+  } else if (gap > 0) {
+    gap = Math.max(0, gap - step);
+  }
+  return { hold, gap, present };
+}

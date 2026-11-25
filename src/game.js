@@ -3481,16 +3481,28 @@ export class Game {
       if (dist > 0.05) h.facing = Math.atan2(dx, dz);
       return;
     }
+    const localReach = this._fieldReach(h, tx, tz, false);
+    const reach = localReach < 0 ? this._fieldReach(h, tx, tz, true) : localReach;
+    if (reach < 0) {
+      h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null;
+      h.moving = false;
+      return;
+    }
     const canSprint = h.sprint && h.hp >= h.maxHp - 0.5;
     const spd = baseSpeed * (canSprint ? 1.5 : 1)
       * (h.weaveT > 0 ? h.def.ability?.speed || 1.5 : 1);
-    h.moving = this._moveActor(h, dx / dist, dz / dist, spd, dt);
-    h.facing = Math.atan2(dx, dz);
+    const x0 = h.x, z0 = h.z;
+    h.moving = this._moveActor(h, dx / dist, dz / dist, spd, dt, tx, tz);
+    const sx = h.x - x0, sz = h.z - z0;
+    h.facing = (sx || sz) ? Math.atan2(sx, sz) : Math.atan2(dx, dz);
   }
 
   // Shared friendly movement: walkable check + axis slide, gates passable.
   _moveActor(a, dx, dz, speed, dt, gx = null, gz = null, laneWaypoint = false) {
     const step = speed * (1 + unitBuffMod(a,'speed')) * dt;
+    // A held direction still slides. A click order names a goal, so the hero
+    // uses the same walk-distance field as a squad and goes around the wall.
+    const directHero = a.hero && gx == null;
     // If somehow inside a building footprint, any walkable step out is legal.
     const occupied = this.occ[(a.z | 0) * this.map.size + (a.x | 0)];
     const trapped = (occupied > 0 && !this.gateIds.has(occupied))
@@ -3511,7 +3523,7 @@ export class Game {
     // Standing in rock or inside a footprint (a wall raised on top of us, a
     // doorstep on a cliff lip): walk straight to the nearest open tile first.
     // Sliding about inside the footprint used to pin squads in wall tiles.
-    if (trapped && !a.hero && !this._safeTile(a.x, a.z)) {
+    if (trapped && !directHero && !this._safeTile(a.x, a.z)) {
       const seat = this._reseat(a.x, a.z, 4);
       if (seat) {
         const cx = seat[0] - a.x, cz = seat[1] - a.z, c = Math.hypot(cx, cz);
@@ -3523,11 +3535,11 @@ export class Game {
     // A failed local flood is not proof that no route exists. Share the cached
     // whole-map field in that case (Widow Bluff escort across the cliff).
     const far = gx != null && (Math.max(Math.abs(gx - a.x), Math.abs(gz - a.z)) > 34
-      || (!a.hero && this._fieldReach(a, gx, gz) < 0));
+      || (!directHero && this._fieldReach(a, gx, gz) < 0));
     // Keep the planned detour until the entire direct line is clear. Looking
     // only six tiles ahead made a returning escort turn toward the cliff again
     // as soon as it stepped away from it, endlessly undoing its own detour.
-    if (gx != null && !a.hero && !trapped) {
+    if (gx != null && !directHero && !trapped) {
       // A lane route already supplies intermediate waypoints. Its formation
       // slot is not the route destination; keep the established local steering.
       const L = Math.hypot(gx - a.x, gz - a.z), M = laneWaypoint ? Math.min(L, 6) : L;
@@ -3545,7 +3557,7 @@ export class Game {
     // Everyone but a player-steered hero first plans a short way round
     // (a building corner, a cliff notch, a hold point on the far side of a
     // house) — plain axis-sliding there flip-flops against the detour.
-    if (!a.hero) {
+    if (!directHero) {
       // With a known destination, descend a walk-distance field to it (it
       // knows the way between houses and round crags); otherwise plan a
       // short way round along the heading.
@@ -3562,7 +3574,7 @@ export class Game {
     if (Math.abs(dz) > 0.2 && pass(a.x, nz)) { a.z = nz; return true; }
     // Pinned against a corner with a known way round: drift to the middle
     // of our own tile, from where the field's straight lines are clear.
-    if (gx != null && !a.hero && !trapped) {
+    if (gx != null && !directHero && !trapped) {
       const cx = (a.x | 0) + 0.5 - a.x, cz = (a.z | 0) + 0.5 - a.z, c = Math.hypot(cx, cz);
       if (c > 0.05) {
         const k = Math.min(step, c) / c;

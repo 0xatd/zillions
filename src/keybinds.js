@@ -222,6 +222,23 @@ export function normalizeFeel(raw) {
   };
 }
 
+// Browsers report the numpad as `8` or `ArrowUp` depending on NumLock.
+// `e.code` is stable. Digit row `8` stays `8`, so it does not steal hero movement.
+const NUMPAD_CODES = {
+  Numpad0: 'numpad0', Numpad1: 'numpad1', Numpad2: 'numpad2', Numpad3: 'numpad3',
+  Numpad4: 'numpad4', Numpad5: 'numpad5', Numpad6: 'numpad6', Numpad7: 'numpad7',
+  Numpad8: 'numpad8', Numpad9: 'numpad9',
+  NumpadDecimal: 'numpaddecimal', NumpadAdd: 'numpadadd', NumpadSubtract: 'numpadsubtract',
+  NumpadMultiply: 'numpadmultiply', NumpadDivide: 'numpaddivide',
+};
+
+export function bindKey(event) {
+  const code = String(event?.code || '');
+  if (NUMPAD_CODES[code]) return NUMPAD_CODES[code];
+  if (code === 'NumpadEnter') return 'enter';
+  return String(event?.key || '').toLowerCase();
+}
+
 export function keyLabel(key) {
   if (!key) return '—';
   const k = String(key).toLowerCase();

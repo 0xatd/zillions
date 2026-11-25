@@ -6,10 +6,11 @@ import { stateHash } from '../src/lockstep-hash.js';
 import { guestCommand } from '../src/multiplayer-command.js';
 import {
   pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake,
+  armHitStop, tickHitStop,
 } from '../src/combat-input.js';
 import {
   defaultBinds, actionFor, isHeld, allConflicts, normalizeBinds, setWasdCamera,
-  loadBinds, loadFeel, saveBinds, setKeybindBackend, KEYBIND_VERSION,
+  loadBinds, loadFeel, saveBinds, setKeybindBackend, KEYBIND_VERSION, bindKey,
 } from '../src/keybinds.js';
 
 const map = () => {
@@ -135,6 +136,62 @@ test('a click order moves the hero, restores, and changes the lockstep hash', ()
   restored.exec({ t: 'hdir', p: 0, x: 0, z: 1, s: false });
   assert.equal(restored.heroes[0].orderX, null);
   assert.equal(restored.heroes[0].mz, 1);
+});
+
+test('numpad events resolve to the direct-move bindings with or without NumLock', () => {
+  const binds = defaultBinds();
+  assert.equal(bindKey({ code: 'Numpad8', key: '8' }), 'numpad8');
+  assert.equal(bindKey({ code: 'Numpad8', key: 'ArrowUp' }), 'numpad8');
+  assert.equal(bindKey({ code: 'Numpad4', key: 'ArrowLeft' }), 'numpad4');
+  assert.equal(bindKey({ code: 'Numpad2', key: 'ArrowDown' }), 'numpad2');
+  assert.equal(bindKey({ code: 'Numpad6', key: 'ArrowRight' }), 'numpad6');
+  assert.equal(bindKey({ code: 'Digit8', key: '8' }), '8');
+  assert.equal(actionFor(binds, bindKey({ code: 'Numpad8', key: 'ArrowUp' }), 'battle'), 'move_up');
+  assert.equal(actionFor(binds, bindKey({ code: 'Numpad8', key: 'ArrowUp' }), 'battle') === 'camera_up', false);
+  assert.equal(actionFor(binds, 'arrowup', 'battle'), 'camera_up');
+});
+
+test('a stream of deaths cannot hold the picture frozen', () => {
+  let state = { hold: 0, gap: 0 };
+  let frozen = 0;
+  const dt = 1 / 60;
+  for (let frame = 0; frame < 600; frame++) {
+    const stepped = tickHitStop(state, dt);
+    state = { hold: stepped.hold, gap: stepped.gap };
+    if (frame % 2 === 0) state = armHitStop(state, 0.045);
+    if (stepped.present || state.hold > stepped.hold) frozen += 1;
+  }
+  assert.ok(frozen < 250, `hit-stop held ${frozen} of 600 frames`);
+  const once = armHitStop({ hold: 0, gap: 0 }, 0.07);
+  assert.ok(once.hold > 0 && once.hold <= 0.08);
+  assert.equal(armHitStop(once, 0.07).hold, once.hold);
+});
+
+test('a click order walks around a barrier instead of grinding into it', () => {
+  const size = 48;
+  const blocked = (x, z) => (x | 0) === 24 && (z | 0) >= 18 && (z | 0) <= 22;
+  const game = new Game({
+    size, seed: 7, sites: [], nestSpots: [], nodeSpots: [],
+    tiles: new Uint8Array(size * size).fill(TILE.GRASS),
+    idx: (x, z) => z * size + x,
+    inBounds: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
+    isBuildable: (x, z) => !blocked(x, z),
+    isWalkable: (x, z) => x >= 0 && z >= 0 && x < size && z < size && !blocked(x, z),
+  }, 'normal', 'alexander', null, 1);
+  const hero = game.heroes[0];
+  hero.x = 20.5; hero.z = 20.5; hero.mx = 0; hero.mz = 0;
+  game.exec({ t: 'horder', p: 0, x: 28.5, z: 20.5, k: 'move' });
+  for (let i = 0; i < 240; i++) game.update(1 / 30);
+  assert.ok(hero.x > 26, `hero stuck at ${hero.x.toFixed(2)}, ${hero.z.toFixed(2)}`);
+  const peer = new Game({
+    size, seed: 7, sites: [], nestSpots: [], nodeSpots: [],
+    tiles: new Uint8Array(size * size).fill(TILE.GRASS),
+    idx: (x, z) => z * size + x,
+    inBounds: (x, z) => x >= 0 && z >= 0 && x < size && z < size,
+    isBuildable: (x, z) => !blocked(x, z),
+    isWalkable: (x, z) => x >= 0 && z >= 0 && x < size && z < size && !blocked(x, z),
+  }, 'normal', 'alexander', game.snapshot(), 1);
+  assert.equal(stateHash(peer), stateHash(game));
 });
 
 test('impact cues stay presentation-only and the shake toggle scales them', () => {

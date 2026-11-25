@@ -29,7 +29,7 @@ import {
 } from './mmo-characters.js';
 import { loadMeta, charge, META_CURRENCY } from './meta.js';
 import {
-  ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, abilityKeyLabel, loadBinds, loadFeel,
+  ACTIONS, ACTIONS_BY_ID, BIND_CONTEXTS, keyLabel, abilityKeyLabel, bindKey, loadBinds, loadFeel,
   allConflicts, conflictsFor, setWasdCamera,
 } from './keybinds.js';
 import {
@@ -1571,7 +1571,7 @@ export class UI {
       event.stopPropagation();
       window.removeEventListener('keydown', this._bindListener, true);
       this._bindListener = null;
-      const key = String(event.key).toLowerCase();
+      const key = bindKey(event);
       this._bindingId = null;
       if (key === 'escape') { this._renderKeybinds(); return; }
       const next = { ...(this._binds || loadBinds()), [actionId]: key };

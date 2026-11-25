@@ -66,8 +66,8 @@ import {
   formatDailyStanding,
 } from './daily.js';
 import { persistRunTelemetry } from './run-telemetry.js';
-import { loadBinds, loadFeel, saveBinds, saveFeel, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
-import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake } from './combat-input.js';
+import { loadBinds, loadFeel, saveBinds, saveFeel, resetBinds, actionFor, isHeld, keyLabel, bindKey } from './keybinds.js';
+import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop } from './combat-input.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
@@ -175,6 +175,7 @@ class App {
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
     this._hitStop = 0;
+    this._hitFeel = { hold: 0, gap: 0 };
     this._presentHold = false;
     this._cameraPinned = true;
     this._attackMoveArmed = false;
@@ -6166,7 +6167,7 @@ class App {
   _setupInput() {
     const cv = this.canvas;
     window.addEventListener('keydown', (e) => {
-      const k = e.key.toLowerCase();
+      const k = bindKey(e);
       if (e.repeat) {
         const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
         if (this.game && !typing) {
@@ -6272,7 +6273,7 @@ class App {
           break;
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('keyup', (e) => this.keys.delete(bindKey(e)));
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -6422,7 +6423,10 @@ class App {
     const cue = impactCue(event);
     if (!cue) return;
     if (cue.shake) this.shake = Math.max(this.shake, cue.shake);
-    if (cue.hitStop) this._hitStop = Math.max(this._hitStop || 0, cue.hitStop);
+    if (cue.hitStop) {
+      this._hitFeel = armHitStop(this._hitFeel, cue.hitStop);
+      this._hitStop = this._hitFeel.hold;
+    }
     if (cue.sample) this.audio.impactSample(cue.sample);
   }
 
@@ -7368,8 +7372,10 @@ class App {
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
-    this._presentHold = this._hitStop > 0;
-    if (this._hitStop > 0) this._hitStop = Math.max(0, this._hitStop - dt);
+    const hit = tickHitStop(this._hitFeel, dt);
+    this._hitFeel = { hold: hit.hold, gap: hit.gap };
+    this._hitStop = hit.hold;
+    this._presentHold = hit.present;
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
