@@ -1,0 +1,45 @@
+<!--
+  Branded magic-link email for the Zillions Supabase project.
+  This file is not applied. Do not upload it, and do not change the live
+  Supabase project from the repository. Paste it by hand in
+  Authentication → Email Templates → Magic Link if you want the brand.
+  The template uses Supabase's {{ .ConfirmationURL }} variable.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Zillions sign-in</title>
+</head>
+<body style="margin:0;background:#071018;color:#e7eef2;font-family:Georgia,serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#071018;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:480px;background:#10202b;border:1px solid #3d5362;border-top:3px solid #dbac63;">
+          <tr>
+            <td style="padding:28px 28px 8px;letter-spacing:.18em;font-size:11px;color:#dbac63;">ZILLIONS</td>
+          </tr>
+          <tr>
+            <td style="padding:0 28px 8px;font-size:26px;color:#f4ead2;">Your sign-in link</td>
+          </tr>
+          <tr>
+            <td style="padding:0 28px 20px;font-size:15px;line-height:1.5;color:#c5d5de;">
+              Use this link to save the siege on your Zillions account. It expires soon and only works once.
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 28px 28px;">
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#e0b15a;color:#1a140c;text-decoration:none;font-weight:700;letter-spacing:.04em;padding:12px 18px;">ENTER THE FRONTIER</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 28px 28px;font-size:12px;line-height:1.5;color:#8ea3ae;">
+              If you did not ask for this, ignore the message. Guest play on this browser is unchanged.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
