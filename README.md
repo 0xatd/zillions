@@ -24,6 +24,14 @@ skills are optional between-run choices; deploy without shopping first.
 
 Repository: https://github.com/0xatd/zillions
 
+## Your first siege
+
+Choose a site and build your opening defense, army camp, or economy. One hive
+warns you before launching the first wave. Defend the Keep, fight beside your
+squads, then use the earned gold and breathing room to reinforce and push out.
+Army buttons work with mouse, touch, or your configured keys; Recall army is
+available when the Keep is threatened. The lesson is skippable.
+
 ## Start Here
 
 Choose the document that matches your task:

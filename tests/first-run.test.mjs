@@ -4,7 +4,7 @@ import test from 'node:test';
 import { CULTURE_ARMIES } from '../src/config.js';
 import {
   QUICK_DEFAULTS, TITLE_CLICKS, abilityBar, coachAdvance, coachApply, coachComplete,
-  cultureExplain, fittedLabel, freshCoach, leaderRoster, normalizeQuickSetup,
+  coachStep, cultureExplain, fittedLabel, freshCoach, leaderRoster, normalizeQuickSetup,
   pauseIntent, randomizeQuickSetup,
 } from '../src/first-run.js';
 
@@ -43,17 +43,22 @@ test('the leader grid is twelve names and only Vanguard can deploy', () => {
   assert.doesNotMatch(bar[0].key, /^W$/, 'movement key is never advertised as firing');
 });
 
-test('the coach waits for the current lesson', () => {
-  let coach = freshCoach();
-  coach = coachApply(coach, [{ type: 'founded' }, { type: 'attack' }, { type: 'stance', stance: 'attack' }]);
-  assert.equal(coach.index, 0, 'founding early does not skip movement');
+test('the opening lesson rewards a real defense, never cycling unsafe orders', () => {
+  let coach = coachApply(freshCoach(), [{ type: 'founded' }, { type: 'attack' }]);
+  assert.equal(coach.index, 0);
   coach = coachAdvance(coach, { type: 'move' });
-  assert.equal(coach.index, 2, 'an early founding satisfies the next lesson');
+  assert.equal(coachStep(coach).id, 'build');
   coach = coachAdvance(coach, { type: 'built' });
-  assert.equal(coach.index, 3);
-  coach = coachAdvance(coach, { type: 'mode' });
-  coach = coachAdvance(coach, { type: 'attack' });
-  for (const stance of ['defend', 'guard', 'attack']) coach = coachAdvance(coach, { type: 'stance', stance });
+  assert.equal(coachStep(coach).id, 'stances');
+  coach = coachApply(coach, [{ type: 'stance', stance: 'guard' }, { type: 'stance', stance: 'attack' }]);
+  assert.equal(coachStep(coach).id, 'stances', 'follow/push never substitutes for defending');
+  coach = coachAdvance(coach, { type: 'stance', stance: 'defend' });
+  assert.equal(coachStep(coach).id, 'victory', 'an earlier real hit is remembered');
+  assert.equal(coachComplete(coach), false, 'pressing controls is not a victory');
+  coach = coachAdvance(coach, { type: 'firstsiege' });
+  assert.equal(coachStep(coach).id, 'push', 'an early push does not skip the counterattack lesson');
+  assert.match(coachStep(coach, { push: 'J' }).body, /press J/);
+  coach = coachAdvance(coach, { type: 'stance', stance: 'attack' });
   assert.equal(coachComplete(coach), true);
 });
 

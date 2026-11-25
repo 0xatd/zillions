@@ -300,9 +300,11 @@ body::after {
 
 /* army stance chips */
 #stancebar .stance {
+  font: inherit; color: inherit; background: transparent; margin: 0;
   cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
   transition: all 0.12s; white-space: nowrap;
 }
+#stancebar .stance:focus-visible { outline: 2px solid #8acbff; outline-offset: 1px; }
 #stancebar .stance:hover { background: rgba(255, 255, 255, 0.08); }
 #stancebar .stance.sel { background: rgba(255, 215, 94, 0.14); border-color: rgba(255, 215, 94, 0.55); color: #ffe9a8; }
 
@@ -2327,4 +2329,22 @@ body:has(#combat-alert:not(.hidden)) .coach { display:none; }
   .abilities-overview { grid-template-columns:minmax(0,1fr); }
   .abilities-overview article { min-width:0; }
   .abilities-overview p { overflow-wrap:anywhere; }
+}
+
+/* One compact objective, with a quiet dismiss action instead of a second panel. */
+.coach p { margin-bottom:0; }
+#coach-skip { position:absolute; top:7px; right:8px; padding:4px 6px; border:0; background:transparent; color:#aebfc9; font:inherit; font-size:11px; cursor:pointer; }
+#coach-skip:hover, #coach-skip:focus-visible { color:#fff; text-decoration:underline; }
+#coach-kicker { display:block; padding-right:70px; }
+@media(max-width:599px) {
+  .coach { top:130px; }
+  #actionbar { grid-template-rows:38px minmax(0,1fr); min-height:150px; }
+  #stancebar .stance { min-height:32px; flex:1; }
+}
+@media(max-height:500px) and (min-width:600px) {
+  .coach { top:42px; width:330px; padding:7px 10px; }
+  .coach b { font-size:13px; }
+  .coach p { font-size:11px; line-height:1.3; }
+  #actionbar { grid-template-rows:34px minmax(0,1fr); }
+  #stancebar .stance { min-height:30px; }
 }

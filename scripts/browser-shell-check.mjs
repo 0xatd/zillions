@@ -413,6 +413,48 @@ try {
       return settings && fallback && audio.beds.slots.music.id==='menu' && audio.beds.slots.ambient===null;
     } finally {window.fetch=realFetch;audio.beds.dispose();clearInterval(audio.musicTimer);await audio.ctx.close();}
   })()`),true,'real audio settings, missing-file fallback and stale-load protection');
+  assert.equal(await evaluate(`(async () => {
+    const {AudioSys}=await import('/src/audio.js');
+    async function render(muted=false,crit=false,calls=1) {
+      const audio=new AudioSys();audio.ctx=new OfflineAudioContext(1,24000,48000);
+      audio.master=audio.ctx.createGain();audio.master.connect(audio.ctx.destination);audio.setMuted(muted);
+      for(let i=0;i<calls;i++)audio.hitConfirm(crit);
+      const buffer=await audio.ctx.startRendering();
+      return buffer.getChannelData(0).reduce((sum,sample)=>sum+sample*sample,0);
+    }
+    const normal=await render(),critical=await render(false,true),silent=await render(true),burst=await render(false,false,100);
+    return normal>0 && critical>normal && silent===0 && burst===normal;
+  })()`),true,'rendered hit confirmation obeys mute and bounds catch-up bursts');
+  // Exercise the real HUD callback -> App.issue -> simulation boundary.
+  assert.equal(await evaluate(`(async () => {
+    const app=__app,{Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{levelById}=await import('/src/config.js');
+    const level=levelById(1),g=new Game(new TerrainField(level.seed,level.theme,{size:level.size,nests:level.nests}),'normal','scott',null,1);
+    g.foundCity(0);app.game=g;app.missionIntro=null;app.netMode=false;app.mpRole=null;
+    app.ui.initHUD(g,0);app.ui.update(g,0);
+    for(const stance of ['guard','attack','defend']) {
+      const button=document.querySelector('[data-st="'+stance+'"]');
+      if(button.tagName!=='BUTTON')return false;
+      button.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));
+      if(app.keys.has(' '))return false; // native activation cannot also hold Build/Dodge
+      button.click();app.ui.update(g,0);
+      if(g.stance!==stance||button.getAttribute('aria-pressed')!=='true')return false;
+    }
+    app.issue({t:'stance',s:'guard',p:0});g.hq.hp=g.hq.maxHp*.2;app.ui.update(g,0);
+    const recall=document.querySelector('#recall-army');recall.focus();
+    g.hq.hp-=1;app.ui.update(g,0);
+    if(document.activeElement!==recall)return false; // live HP updates preserve the actionable button
+    recall.click();if(g.stance!=='defend')return false;
+    app.mpRole='spectator';document.querySelector('[data-st="attack"]').click();
+    const readonly=g.stance==='defend';app.mpRole=null;
+    const {freshCoach,coachApply}=await import('/src/first-run.js');
+    app._coach=coachApply(freshCoach(),[{type:'move'},{type:'founded'},{type:'built'},
+      {type:'stance',stance:'defend'},{type:'attack'},{type:'firstsiege'}]);
+    g.stance='attack';g.events.length=0;
+    document.querySelector('[data-st="attack"]').click();app._consumeEvents();
+    const confirmed=app._coach===null;
+    app.game=null;
+    return readonly && confirmed;
+  })()`),true,'army buttons dispatch orders, preserve focus under damage and respect spectator read-only mode');
   console.log('browser shell check passed');
 } finally {
   try { socket?.close(); } catch { /* closed */ }

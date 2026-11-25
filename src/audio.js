@@ -171,6 +171,22 @@ export class AudioSys {
     }
   }
 
+  // Short local-hit confirmation, bounded even during lockstep catch-up.
+  // Uses the same master bus, mute, volume and hearing rules as weapon SFX.
+  hitConfirm(critical = false) {
+    if (!this.ctx || this.muted || this.eventGain <= 0) return;
+    const now = this.now();
+    if (now < (this.nextHitConfirm || 0)) return;
+    this.nextHitConfirm = now + 0.09;
+    this._tone(critical ? 0.12 : 0.045, { freq: critical ? 1100 : 730,
+      type: 'triangle', gain: critical ? 0.075 : 0.035, slide: critical ? 350 : -180 });
+  }
+
+  eliteBreak() {
+    this._noise(0.22, { freq: 260, q: 0.8, gain: 0.18, sweep: -160 });
+    this._tone(0.18, { freq: 95, type: 'triangle', gain: 0.10, slide: -50 });
+  }
+
   melee() {
     this._noise(0.1, { freq: 900, q: 1.5, gain: 0.14, sweep: -500 });
     this._tone(0.07, { freq: 180, type: 'square', gain: 0.07, slide: -90 });
