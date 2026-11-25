@@ -24,6 +24,14 @@ skills are optional between-run choices; deploy without shopping first.
 
 Repository: https://github.com/0xatd/zillions
 
+## Your first siege
+
+Choose a site and build your opening defense, army camp, or economy. One hive
+warns you before launching the first wave. Defend the Keep, fight beside your
+squads, then use the earned gold and breathing room to reinforce and push out.
+Army buttons work with mouse, touch, or your configured keys; Recall army is
+available when the Keep is threatened. The lesson is skippable.
+
 ## Start Here
 
 Choose the document that matches your task:
@@ -98,6 +106,10 @@ their soft vision circles is almost black, including the minimap.
 - **Co-op** (Play Online) supports up to four players. Each player controls
   one hero; the players share gold, colony buildings, the enemy force, and the
   win condition. Rooms can be created, joined, rejoined, or watched.
+- **Invite link.** From the title, chapter, or battle setup, Invite copies one
+  URL. A friend opens it and joins as the next hero with no account. Join
+  before the host presses Start. The link expires after two hours. A bad link,
+  a full siege, a host who left, or a link opened after the start is refused.
 - **Custom Games** separates Live Games (real rooms) from Arcade (prebuilt
   campaign, Survival, and Labyrinth maps that can be played or hosted).
 
@@ -217,11 +229,14 @@ hero always had.
 
 `src/items.js` owns gear and weapons. `src/skilltree.js` owns the Lattice.
 
-## Roster expansion — work in progress
+## Playable leaders
 
-The chapter branch now includes Lina, Sniper, Axe and Sven core-kit prototypes alongside
-preserved legacy leaders. Scope is these four heroes, not the full reference roster or exact
-Dota patch parity. See [implementation coverage](docs/roster/implementation.md).
+Vanguard keeps its melee signature. Recruited Alexander Thomas, Tiger Reyes,
+and Aaron Whitlock now have original four-slot kits with mana and cooldowns.
+The chapter's existing conquest and recruitment gates still apply. Other
+recruited companions retain their existing kits. Ability previews show the
+actual configured cast keys; W remains movement. See
+[implementation coverage](docs/roster/implementation.md).
 
 ## Controls
 

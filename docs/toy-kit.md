@@ -32,8 +32,9 @@ A culture = palette + building shape set + unit set (`src/cultures.js`,
 `asian.py`, `south_american.py`, `middle_eastern.py`, shared parts in
 `common.py`). All four are built (`assets/kit/<culture>/`) and playable; the
 player picks one on the level screen (European is the default). Each culture
-has its own keep, walls, gate, towers, houses and three unit models; farms,
-mills and workshops are still shared European shapes recoloured.
+has its own keep, walls, gate, towers, houses, farms, mills, workshops and
+three unit models. Mines, outposts and hero forges are still shared European
+shapes recoloured.
 
 Gameplay: every culture musters the same three trades from the same camps
 (militia / ranger / sniper), but `CULTURE_ARMIES` in `src/config.js`

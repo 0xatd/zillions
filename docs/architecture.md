@@ -120,6 +120,8 @@ procedural renderer and must not stop a match from starting.
 | `src/supabase.js` | One shared Supabase client and write timeout |
 | `src/auth.js` | Google sign-in, username, profile, cloud saves, and read-only hydration of server stats and character progress |
 | `src/online.js` | Rooms, seats, roster refresh, chat, presence, and signaling |
+| `src/share-link.js` | Invite-link seats: expiry, full lobby, host left, and late join |
+| `src/share-bus.js` | Share-link signaling: same-browser channel and realtime broadcast |
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
@@ -177,6 +179,25 @@ The host must cancel startup if a player disconnects or becomes ineligible.
 
 Watch mode does not create a player seat. Mid-match Rejoin only restores a
 seat that the same account owned before disconnect.
+
+## Share link
+
+Invite copies one URL (`/?coop=` plus a code). The friend opens it with no
+account and takes the next hero seat. Signaling uses a same-browser channel
+and, when the account backend is reachable, the existing Supabase realtime
+broadcast. WebRTC lockstep is unchanged.
+
+A link admits players only before the host starts the siege. After that it
+answers `started`. The hero list is fixed at lockstep window 0, so a new hero
+mid-fight is refused. The link also refuses an invalid code, a link older than
+two hours, a fifth player, a different protocol or client version, and a host
+who has left or gone quiet. A dropped hero is not given to someone else.
+
+Each seat carries the campaign level that browser has unlocked. The host
+cannot start a later mission while any seat is short of it. Guests mark Ready
+after choosing a hero. A hero change or a host setup change clears Ready.
+Start stays disabled until every friend is connected and Ready. Share sessions
+load TURN servers from `/api/auth-config` even when the player is not signed in.
 
 ## State Ownership
 

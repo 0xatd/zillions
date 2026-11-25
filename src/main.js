@@ -6,10 +6,10 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
-import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, freshCoach, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, leaderHeroKey, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
-import { terrainOccludesHero, installHeroOcclusionShell } from './hero-visibility.js';
+import { terrainOccludesHero, structuresOccludeHero, installHeroOcclusionShell } from './hero-visibility.js';
 // Rendering, input and orchestration — Thronefall-style direct hero control.
 import * as THREE from 'three';
 import { toyMat, SkyGradient, paletteShadow, paletteSkyTop } from './toy-style.js';
@@ -28,7 +28,14 @@ import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
 import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
-import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame } from './online.js';
+import { getSupabaseClient } from './supabase.js';
+import {
+  admitGuest, clearGuestReady, closeLobby, createLobby, markStarted, parseShareLocation, publicShareLobby,
+  randomShareCode, releaseGuest, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
+  shareName, shareRoster, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, withSeatHero,
+} from './share-link.js';
+import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
+import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
 import {
   applyEconomySnapshotToProfile, archiveLegacyOfflineEconomy, buyAuthoritativeItem, equipAuthoritativeItem,
@@ -62,7 +69,7 @@ import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, saveBinds, resetBinds, actionFor, isHeld, keyLabel } from './keybinds.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
-  addMmoCharacter, characterCamp, recordMmoInstance, rewireLattice,
+  addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
 } from './mmo-characters.js';
 import {
   FOG_DARKNESS,
@@ -155,6 +162,7 @@ class App {
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
     this.shake = 0;
+    this.motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     this.speed = 1;
     this.paused = true;        // starts paused behind the menu
@@ -184,6 +192,7 @@ class App {
         this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
         if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
+          if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
           if (this.onlineMode && this.lobby?.game) {
             const eligibility = roomLevelEligibility(this.lobby.game);
             if (!eligibility.eligible) {
@@ -201,9 +210,9 @@ class App {
               return;
             }
           }
-          this._launchHostMatch(d, hero, mode);
+          this._launchPrepared(d, hero, mode, true);
         } else {
-          this.startGame(d, hero);
+          this._launchPrepared(d, hero, mode, false);
         }
       },
       onCast: (slot = 0) => this.tryCast(slot),
@@ -223,7 +232,7 @@ class App {
       onPartyOpen: () => this._openFriendParty(),
       onChapterSave: (draft) => this._saveChapter(draft),
       onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
-      onChapterMission: (level) => { this.ui.selectedLevel = level; this._openCampaignSelect(); },
+      onChapterMission: (level) => this._openCampaignSelect(level),
       onCharacterSelect: (id) => this._selectMmoCharacter(id),
       onCharacterDelete: (id) => this._deleteMmoCharacter(id),
       // The sheet edits the character object the profile owns, so persisting is
@@ -244,6 +253,10 @@ class App {
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
+      onLocateKeep: () => {
+        const keep = this.game?.buildings.find(b => b.kind === 'hq' && b.alive);
+        if (keep) { this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 }; }
+      },
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
@@ -267,6 +280,10 @@ class App {
       onDailySignIn: () => { this._stashDaily(); this._signIn(); },
       onDailyEmail: (email) => { this._stashDaily(); this._signInWithEmail(email); },
       onQuickStart: (draft) => this._quickStart(draft),
+      onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
+      onShareInvite: () => this._requestShareInvite(),
+      onShareLeave: () => this._leaveShareLink(),
+      onShareReady: (ready) => this._setShareReady(ready),
       onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
       onCoachSkip: () => this._skipCoach(),
       onSignIn: () => this._signIn(),
@@ -289,8 +306,8 @@ class App {
       onInviteFriend: (userId) => this._inviteFriend(userId),
       onCreateGame: (visibility) => this.createOnlineGame(visibility),
       onJoinCode: (code) => this.joinByCode(code),
-      onLevelPick: (id) => { this._updateRoomSettings({ level: id }); },
-      onDifficultyPick: (difficulty) => this._updateRoomSettings({ difficulty }),
+      onLevelPick: (id) => { this._updateRoomSettings({ level: id }); this._noteShareSetup(); },
+      onDifficultyPick: (difficulty) => { this._updateRoomSettings({ difficulty }); this._noteShareSetup(); },
       onModePick: (m) => this._pickSetupMode(m),
       onRoomReady: (ready) => this._setRoomReady(ready),
       onRoomLeave: () => this._leaveOnlineRoom(),
@@ -371,7 +388,7 @@ class App {
       this.profile.lastHero = initialCharacter.proxyHero;
     }
     this.autosaveT = 20;
-    window.addEventListener('beforeunload', () => this._autosave(true));
+    window.addEventListener('beforeunload', () => { this._autosave(true); this._abandonShareLink(); });
 
     this.groanAcc = 0;
     this.deathSfxT = 0;
@@ -403,6 +420,7 @@ class App {
         }).catch(() => {});
       }).catch(() => {});
     }, 1500);
+    this._consumeShareLink();
     this.ui.setAccount(this.authStatus);
     this.ui.setCampaign(this.profile.campaign || 0);
     if (this.profile.lastHero) this.ui.preselectHero(this.profile.lastHero);
@@ -655,13 +673,13 @@ class App {
   // ---------------- mission select ----------------
   // "Enter World" opens the campaign mission select for the selected
   // character. The game is a siege game: every run starts from here.
-  _openCampaignSelect() {
+  _openCampaignSelect(level = null) {
     if (this.game) return;
     if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
       this.ui.showCharacterCreator();
       return;
     }
-    this.ui.showSetup({ mode: 'campaign' });
+    this.ui.showSetup({ mode: 'campaign', level });
   }
 
   _setCharacterPreview(style) {
@@ -729,6 +747,8 @@ class App {
     if (this._hostLaunching) return;
     this._hostLaunching = true;
     try {
+      if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
+      this._sealShareLobby();
       const level = this.ui.selectedLevel || 1;
       const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
       const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
@@ -795,6 +815,7 @@ class App {
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
     this.pendingAbility = null;
+    this._keepPeek = null;
     if (snap && !isCompatibleSnapshot(snap)) {
       this.ui.showBanner('This saved siege uses an older colony layout. Start a new siege; account progression is unchanged.', 'bad', 8000);
       return;
@@ -944,7 +965,7 @@ class App {
       this.missionIntro = { elapsed: 0, distance: this.camDist };
       this.ui.showMissionIntro(level, () => this._finishMissionIntro());
     }
-    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign') this._startCoach();
+    if (!this.profile.games && !this.profile.tutorialDone && this.mpRole !== 'spectator' && mode === 'campaign' && this.game.firstSiege) this._startCoach();
     else if (!this.profile.games && this.mpRole !== 'spectator' && mode !== 'daily') this._startTutorial();
     } catch (error) {
       this._finishMissionIntro();
@@ -1094,6 +1115,10 @@ class App {
       const centreMat = layer(plan?.kit ? 0xb5b0a2 : 0xc5b078, -5);
       const posts = [];
       for (const pts of site.switchbacks) {
+        const entrance = pts.reduce((low, p) => p[2] < low[2] ? p : low, pts[0]);
+        const marker = this._makeLabelSprite('↗', 'RAMP');
+        marker.position.set(entrance[0], entrance[2] + 1.3, entrance[1]);
+        g.add(marker);
         g.add(ribbon(pts, 1.85, 0.04, edgeMat));
         g.add(ribbon(pts, 1.55, 0.06, roadMat));
         // Broad transverse tread bands make the grade and each turn readable
@@ -1167,6 +1192,12 @@ class App {
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
       gr.position.y = this.map.groundY(s.x, s.z);
+      for (const path of s.switchbacks || []) {
+        const entrance = path.reduce((low, p) => p[2] < low[2] ? p : low, path[0]);
+        const marker = this._makeLabelSprite('↗', 'RAMP');
+        marker.position.set(entrance[0], entrance[2] + 1.3 - gr.position.y, entrance[1]);
+        gr.add(marker);
+      }
       this.scene.add(gr);
       this.siteMarkers.push(gr);
     }
@@ -1200,7 +1231,7 @@ class App {
           : 'Open on nearly every side: you will be building the whole wall.';
       // The survey is the authoritative claim about this ground, so drop the
       // generic "open on every side" flavour when the wall line says otherwise.
-      const hint = (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
+      const hint = s.switchbacks?.length ? 'Raised site — enter by the marked switchback ramps. ' : (s.kind === 'crossroads' && pct >= 30) ? '' : `${s.hint || ''} `;
       const siteName = s.name || `Site ${i + 1}`;
       this.ui.showLocationBanner(
         `🏳️ ${siteName}`,
@@ -1367,11 +1398,13 @@ class App {
       this.audio.deny();
       return;
     }
+    this._payPressUsed = true; // Founding consumes this press; release before buying an upgrade.
     this.issue({ t: 'found', s: best, p: this.myPlayer });
   }
 
   _startCoach() {
     this._coach = freshCoach();
+    this._coachPaintKey = null;
     this._coachOrigin = null;
     this._coachSawAttack = false;
     this._paintCoach();
@@ -1393,11 +1426,16 @@ class App {
       this.ui.hideCoach();
       return;
     }
-    const step = COACH_STEPS[this._coach.index];
-    const extra = step.id === 'stances'
-      ? `Done: ${['defend', 'guard', 'attack'].filter((stance) => this._coach.stances[stance]).join(', ') || 'none yet'}.`
-      : '';
-    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length, extra);
+    const binds = this.binds();
+    const labels = Object.fromEntries(Object.entries({ build: 'build', defend: 'stance_defend',
+      push: 'stance_push', north: 'move_up', west: 'move_left', south: 'move_down', east: 'move_right', mode: 'build_mode', ability: 'ability1' }).map(([label, action]) => [label, keyLabel(binds[action])]));
+    const step = coachStep(this._coach, labels);
+    const siege = this.game?.firstSiege;
+    if (['stances', 'attack', 'victory'].includes(step.id)) {
+      if (siege?.stage === 'warning') step.title += ` · ${Math.max(0, Math.ceil(this.game.nests[siege.nestId]?.musterT || 0))}s`;
+      if (siege?.stage === 'defend') step.title += ` · ${siege.waveIds.length} left`;
+    }
+    this.ui.setCoach(step, this._coach.index, COACH_STEPS.length);
   }
 
   _skipCoach() {
@@ -1738,7 +1776,7 @@ class App {
     }));
   }
 
-  async _quickStart(raw) {
+  async _quickStart(raw, { invite = false } = {}) {
     if (this.game || this._quickCommitted) return;
     const draft = normalizeQuickSetup(raw);
     this._quickCommitted = true;
@@ -1755,12 +1793,20 @@ class App {
         await this._createMmoCharacter({ name: draft.founderName, appearance: draft.color, raceKey: 'human', customization: {}, quiet: true });
       }
       if (!chapterFounder(this.profile)) throw new Error('founder_missing');
+      const character = await this._bindDeployedLeader(draft.leader);
+      if (!character?.proxyHero) throw new Error('leader_missing');
       this.profile.quickSetupDone = true;
       this._storeProfileLocally();
       if (this.auth?.isSignedIn()) await this.auth.syncLocalProfile(this.profile);
       this.ui.setProfile(this.profile);
       this._skipMissionIntro = true;
-      await this.startGame(draft.difficulty, this.ui.selectedHero);
+      this.ui.selectedLeader = draft.leader;
+      this.ui.selectedHero = character.proxyHero;
+      if (invite) {
+        await this._openShareLobby();
+        return;
+      }
+      await this.startGame(draft.difficulty, character.proxyHero);
     } catch (err) {
       this._quickCommitted = false;
       this.ui._clearBusy();
@@ -1939,6 +1985,47 @@ class App {
     this.ui.showBanner(`${removed.name} was deleted.`, '', 2400);
   }
 
+  // Campaign deployment and the character who keeps its level, gear and rewards
+  // are one identity. Vanguard is the founder. The other playable leaders are
+  // their own companions, created the first time they deploy.
+  async _bindDeployedLeader(leaderKey) {
+    const character = ensureDeployedLeader(this.profile, leaderKey);
+    if (!character) return null;
+    this.profile.mmoCharacterId = character.id;
+    this.profile.lastHero = character.proxyHero;
+    this.ui.selectedLeader = leaderKey;
+    this.ui.selectedHero = character.proxyHero;
+    if (this.auth?.isSignedIn()) await this._ensureAuthoritativeEconomy(character, { persistProfile: false });
+    return selectedMmoCharacter(this.profile) || character;
+  }
+
+  async _launchPrepared(difficulty, hero, mode, hostMatch) {
+    if (this._startLock) return;
+    this._startLock = true;
+    try {
+      if (mode === 'campaign' && this.ui.selectedLeader) {
+        const character = await this._bindDeployedLeader(this.ui.selectedLeader);
+        if (!character?.proxyHero) {
+          this.ui._clearBusy();
+          this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+          return;
+        }
+        hero = character.proxyHero;
+      }
+      if (hostMatch) await this._launchHostMatch(difficulty, hero, mode);
+      else {
+        this._sealShareLobby();
+        await this.startGame(difficulty, hero);
+      }
+    } catch (err) {
+      this.ui._clearBusy();
+      this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+      console.warn('leader deploy failed', err);
+    } finally {
+      this._startLock = false;
+    }
+  }
+
   // The WC3-style persistent campaign hero this profile brings into a run.
   campFor(key) {
     const character = selectedMmoCharacter(this.profile);
@@ -1962,10 +2049,32 @@ class App {
     return { t: 'hero', k: key, camp: this.campFor(key), name: this._publicName() };
   }
 
-  _pickHero(key) {
+  async _pickHero(key) {
+    if ((this.ui.selectedMode || 'campaign') === 'campaign' && this.ui.selectedLeader && leaderHeroKey(this.ui.selectedLeader) === key) {
+      try {
+        const character = await this._bindDeployedLeader(this.ui.selectedLeader);
+        if (character?.proxyHero) key = character.proxyHero;
+      } catch (err) {
+        this.ui.showBanner('That leader could not be readied.', 'bad', 3000);
+        console.warn('leader deploy failed', err);
+        return;
+      }
+    }
     const msg = this._heroPayload(key);
     if (this.mpRole === 'guest' && this.net?.open) this.net.send(msg);
     if (this.mpRole === 'host') this._syncSetupRoster();
+    if (this._shareLobby && this.mpRole === 'host') {
+      this._shareLobby = withSeatHero(this._shareLobby, this._shareSelf, key, this._publicName(), Date.now());
+      this._sharePublishLobby();
+      this._renderShareHost();
+    }
+    if (this._shareLobby && this.mpRole === 'guest') {
+      this._sharePublish({
+        t: 'join', name: this._publicName(), hero: key, claim: true,
+        protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
+        unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+      });
+    }
     if (this.lobby?.game) {
       this.lobby.updateRoomPlayer({ hero: key, ...(this.mpRole === 'guest' ? { ready: false } : {}) }).catch((e) => {
         console.warn('room hero update failed', e);
@@ -2034,14 +2143,15 @@ class App {
   }
 
   _storeProfileLocally() {
-    try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); } catch { /* full/blocked */ }
+    try { localStorage.setItem('zillions_profile', JSON.stringify(this.profile)); return true; } catch { return false; }
   }
 
   _saveProfile() {
-    this._storeProfileLocally();
+    const stored = this._storeProfileLocally();
     if (this.auth?.isSignedIn()) {
       this.auth.syncLocalProfile(this.profile).catch((err) => console.warn('profile sync failed', err));
     }
+    return stored;
   }
 
   _loadSave() {
@@ -2244,7 +2354,9 @@ class App {
       this._submitMatchResult(won, h, character);
     } else {
       this._recordGuestGameEnd(won, h);
-      this._saveProfile();
+      const saved = this._saveProfile();
+      this._endExtras = { ...this._endExtras, saved, local: true, campaignCleared: this.profile.campaign,
+        ...(!saved ? { error: 'Browser storage is unavailable. Progress remains in this tab but is not saved.' } : {}) };
     }
     this._netPumpStop();
     if (this.lobby) this.lobby.setMatchActive(false);
@@ -2300,22 +2412,34 @@ class App {
       report,
       ...(replay ? { replay } : {}),
     };
-    queuePendingMatch(pending);
-    try {
-      const result = await this._sendMatchResult(pending);
-      this._applyMatchResult(character, result, quests);
-    } catch (error) {
-      console.warn('match result failed', error);
-      const retryable = retryableMatchError(error);
-      if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
-      this._endExtras = {
-        ...(this._endExtras || {}), pending: false, grants: [], quests,
-        error: retryable
-          ? 'Command could not confirm your rewards yet. They will be claimed automatically next time you sign in.'
-          : `Command rejected this report (${error?.message || 'invalid'}). No rewards were granted.`,
-      };
-      this.ui.setEndRewards?.(this._endExtras);
-    }
+    const queued = queuePendingMatch(pending);
+    const endGame = this.game;
+    let sending = false;
+    const submit = async () => {
+      if (sending) return;
+      sending = true;
+      const active = () => this.game === endGame && this.auth?.user?.id === pending.userId;
+      if (active()) { this._endExtras = { pending: true, grants: [], quests }; this.ui.setEndRewards?.(this._endExtras); }
+      try {
+        const result = await this._sendMatchResult(pending);
+        if (this.auth?.user?.id === pending.userId) this._applyMatchResult(character, result, quests, { quiet: !active() });
+      } catch (error) {
+        console.warn('match result failed', { requestId: pending.requestId, status: error?.status, code: error?.message });
+        const retryable = retryableMatchError(error);
+        if (!retryable) dropPendingMatch(pending.requestId, pending.userId);
+        if (active()) {
+          this._endExtras = {
+            pending: false, saved: false, grants: [], quests,
+            retry: retryable ? submit : null,
+            error: retryable
+              ? `Rewards are not confirmed yet. Retry now.${queued ? ' This report is saved for retry when you sign in again.' : ' Keep this tab open until confirmation.'}`
+              : 'Rewards could not be saved because this match report was rejected. Your previous progress is unchanged.',
+          };
+          this.ui.setEndRewards?.(this._endExtras);
+        }
+      } finally { sending = false; }
+    };
+    await submit();
   }
 
   async _sendMatchResult(pending) {
@@ -2388,7 +2512,7 @@ class App {
           return { ...authored, ...q, desc: authored.desc || q.desc || '', done: !!q.done, claimed: serverQuests.has(q.id) };
         }),
         xp: result.xpGained, levels: result.levelsGained || [], alloy: result.alloyGained || 0,
-        skipped: result.skippedItems || [], pending: false,
+        skipped: result.skippedItems || [], pending: false, saved: true, campaignCleared: st.campaignCleared,
       };
       this.ui.setEndRewards?.(this._endExtras);
     }
@@ -2593,6 +2717,12 @@ class App {
       this.guestNames[idx] = m.name || this.guestNames[idx] || `Player ${idx + 2}`;
       if (this.netMode) return; // reconnecting player mid-game — roster is locked
       this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
+      const shareIdForPeer = this.peers[idx]?.shareId;
+      if (shareIdForPeer && this._shareLobby) {
+        this._shareLobby = withSeatHero(this._shareLobby, shareIdForPeer, m.k, m.name, Date.now());
+        this._sharePublishLobby();
+        this._renderShareHost();
+      }
       const players = this._manualRosterPlayers();
       this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
       this._syncSetupRoster();
@@ -2684,6 +2814,611 @@ class App {
     } catch (e) {
       this.ui.mpStatus('❌ Bad invite code.');
     }
+  }
+
+  // Share-link co-op. The link only exchanges WebRTC signaling. Command
+  // windows, the load barrier, and the hash stay on the existing lockstep path.
+  // Friends join before Start. After that the link refuses a new hero.
+  _shareSelfId() {
+    if (shareId(this._shareSelf)) return this._shareSelf;
+    let id = '';
+    try { id = sessionStorage.getItem('zillions.share.self') || ''; } catch { /* private mode */ }
+    if (!shareId(id)) {
+      id = crypto.randomUUID();
+      try { sessionStorage.setItem('zillions.share.self', id); } catch { /* private mode */ }
+    }
+    this._shareSelf = id;
+    return id;
+  }
+
+  _consumeShareLink() {
+    let parsed = null;
+    try { parsed = parseShareLocation(location.search); } catch { parsed = null; }
+    if (!parsed) return;
+    this._guestSession = true;
+    this.ui.noteGuestSession();
+    this.ui._accountAccepted = true;
+    this.ui._shareLive = true;
+    if (!parsed.ok) {
+      this.ui.showShareNotice({ title: 'Invite link', copy: shareFailureCopy('invalid'), tone: 'bad' });
+      return;
+    }
+    this._joinShareLink(parsed.code);
+  }
+
+  _requestShareInvite() {
+    this.ui._clearBusy();
+    if (this.game && !this.game.over) {
+      this.ui.showBanner(shareFailureCopy('started'), 'bad', 5200);
+      return;
+    }
+    if (this.onlineMode && this.lobby?.game) {
+      this.ui.showBanner('Leave this room before creating an invite link.', 'bad', 4000);
+      return;
+    }
+    if (this.mpRole === 'guest' && this._shareCode) {
+      this.ui.showBanner('You are already in this siege. The host shares the invite.', '', 3200);
+      return;
+    }
+    if (!this.auth?.isSignedIn()) {
+      this._guestSession = true;
+      this.ui.noteGuestSession();
+      this.ui._accountAccepted = true;
+    }
+    const ready = !!(chapterFounder(this.profile) || this.profile.quickSetupDone);
+    if (!ready) {
+      this.ui.showQuickSetup(normalizeQuickSetup({
+        chapterName: this.profile.chapter?.name || QUICK_DEFAULTS.chapterName,
+        founderName: QUICK_DEFAULTS.founderName,
+        army: this.ui.selectedCulture,
+        color: this.profile.chapter?.color,
+        emblem: this.profile.chapter?.emblem,
+      }));
+      this.ui.showBanner('Name your chapter, then invite a friend. No account needed.', '', 3400);
+      return;
+    }
+    this._openShareLobby();
+  }
+
+  _openShareLobby() {
+    this.ui._clearBusy();
+    if (this._shareLobby && !this._shareLobby.closed && !this._shareLobby.started) {
+      this.ui._shareLive = true;
+      this.ui.showSetup({ mode: this._shareLobby.mode });
+      this.ui.setRoomSettings({
+        level: this._shareLobby.level,
+        difficulty: this._shareLobby.difficulty,
+        isHost: true,
+        mode: this._shareLobby.mode,
+      });
+      this._shareSig = '';
+      this._renderShareHost();
+      this.ui.copyShareUrl(this._shareUrl);
+      return;
+    }
+    const id = this._shareSelfId();
+    const code = randomShareCode();
+    this._shareCode = code;
+    this._shareUrl = shareUrl(location.origin, code);
+    this._shareSeen = new Set();
+    this._shareHands = new Map();
+    this._shareFailed = false;
+    this.mpRole = 'host';
+    this._shareLobby = createLobby({
+      code,
+      hostId: id,
+      hostName: this._publicName(),
+      hero: this.ui.selectedHero || 'scott',
+      unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+      now: Date.now(),
+      mode: this.ui.selectedMode || 'campaign',
+      level: this.ui.selectedLevel || 1,
+      difficulty: this.ui.selectedDiff || 'normal',
+    });
+    this.ui._shareLive = true;
+    this.ui.showSetup({ mode: this._shareLobby.mode });
+    this.ui.setRoomSettings({
+      level: this._shareLobby.level,
+      difficulty: this._shareLobby.difficulty,
+      isHost: true,
+      mode: this._shareLobby.mode,
+    });
+    this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
+    this._bindShareTransport('host');
+    this._sharePublishLobby();
+    clearInterval(this._shareBeat);
+    this._shareBeat = setInterval(() => {
+      if (this._shareLobby && this.mpRole === 'host') this._sharePublishLobby();
+    }, SHARE_HEARTBEAT_MS);
+    this._shareSig = '';
+    this._renderShareHost();
+    this.ui.copyShareUrl(this._shareUrl);
+  }
+
+  _joinShareLink(code) {
+    this._shareFailed = false;
+    this._shareCode = code;
+    this._shareSelf = this._shareSelfId();
+    this._shareSeen = new Set();
+    this._shareHands = new Map();
+    this._shareAnnounced = false;
+    this._shareGuestShown = false;
+    this._shareLobby = null;
+    this.mpRole = 'guest';
+    this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
+    this.ui._shareLive = true;
+    this.ui.showShareNotice({ title: 'Joining siege', copy: 'Looking for the host…' });
+    this._bindShareTransport('guest');
+    clearTimeout(this._shareDiscover);
+    this._shareDiscover = setTimeout(() => {
+      if (!this._shareLobby) this._failShare('invalid');
+    }, SHARE_DISCOVER_MS);
+    clearInterval(this._shareBeat);
+    this._shareBeat = setInterval(() => {
+      if (this.mpRole !== 'guest' || !this._shareLobby || this.netMode) return;
+      const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now());
+      if (!decision.ok) this._failShare(decision.reason);
+    }, 1000);
+  }
+
+  _bindShareTransport(role) {
+    this._shareHubList = [createBrowserHub()];
+    this._shareUnsubs = [];
+    const code = this._shareCode;
+    const generation = this._shareGeneration = (this._shareGeneration || 0) + 1;
+    const onMessage = (message) => { if (generation === this._shareGeneration) this._onShareMessage(message); };
+    this._shareUnsubs.push(this._shareHubList[0].subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }));
+    this._shareRelay = undefined;
+    getSupabaseClient().then((client) => {
+      if (generation !== this._shareGeneration || code !== this._shareCode) return;
+      const hub = createSupabaseHub(client);
+      this._shareHubList.push(hub);
+      this._shareRelay = true;
+      this._shareUnsubs.push(hub.subscribe(this._shareCode, onMessage));
+      if (this.mpRole === 'host') this._sharePublishLobby();
+      this._shareSig = '';
+      this._renderShareHost();
+    }).catch(() => {
+      if (generation !== this._shareGeneration) return;
+      this._shareRelay = false;
+      this._renderShareHost();
+    });
+  }
+
+  _sharePublish(partial) {
+    if (!this._shareCode || !this._shareSelf) return;
+    const message = { v: 1, id: shareMessageId(), at: Date.now(), from: this._shareSelf, ...partial };
+    for (const hub of this._shareHubList || []) {
+      try { hub.publish(this._shareCode, message); } catch { /* one transport can fail */ }
+    }
+  }
+
+  _sharePublishLobby() {
+    if (!this._shareLobby) return;
+    this._shareLobby = touchLobby(this._shareLobby, Date.now());
+    this._sharePublish({ t: 'lobby', lobby: publicShareLobby(this._shareLobby) });
+  }
+
+  _noteShareSetup() {
+    if (!this._shareLobby || this.mpRole !== 'host' || this._shareLobby.started || this.netMode) return;
+    const nextMode = this.ui.selectedMode || 'campaign';
+    const cap = nextMode === 'labyrinth' ? 3 : 4;
+    if (this._shareLobby.seats.length > cap) {
+      this.ui.showBanner('The Labyrinth holds three commanders. Free a seat before switching.', 'bad', 4200);
+      this.ui.applySetupMode(this._shareLobby.mode);
+      this._shareSig = '';
+      this._renderShareHost();
+      return;
+    }
+    this._shareLobby = clearGuestReady({
+      ...this._shareLobby,
+      mode: this.ui.selectedMode || 'campaign',
+      level: this.ui.selectedLevel || 1,
+      difficulty: this.ui.selectedDiff || 'normal',
+      maxPlayers: (this.ui.selectedMode || 'campaign') === 'labyrinth' ? 3 : 4,
+    }, Date.now());
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+  }
+
+  _sealShareLobby() {
+    if (!this._shareLobby || this.mpRole !== 'host' || this._shareLobby.started) return;
+    for (const [id, peer] of [...(this._shareHands || [])]) {
+      if (peer.open) continue;
+      peer.shareDropped = true;
+      this._shareHands.delete(id);
+      try { peer.destroy(); } catch { /* handshake already dead */ }
+      this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
+      this._sharePublish({ t: 'reject', to: id, reason: 'started' });
+    }
+    this._shareLobby = markStarted(this._shareLobby, Date.now());
+    this._sharePublishLobby();
+  }
+
+  _shareRoster() {
+    return (this._shareLobby?.seats || []).map((seat, index) => {
+      const open = !!seat.host || !!this._shareHands?.get(seat.id)?.open || (this.mpRole === 'guest' && seat.id === this._shareSelf && !!this.net?.open);
+      return {
+        seat: index + 1,
+        name: open ? seat.name : `${seat.name} · connecting`,
+        hero: seat.hero,
+        host: !!seat.host,
+        you: seat.id === this._shareSelf,
+        ready: !!seat.host || !!seat.ready,
+        unlockedLevel: seat.unlockedLevel || 1,
+        state: 'connected',
+      };
+    });
+  }
+
+  _shareOpenIds() {
+    const openIds = new Set();
+    for (const [id, peer] of this._shareHands || []) if (peer?.open) openIds.add(id);
+    return openIds;
+  }
+
+  _shareCanLaunch() {
+    if (!this._shareLobby || this._shareLobby.started) return true;
+    const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
+    if (gate.ready) return true;
+    if (gate.blockers.length) {
+      const names = gate.blockers.map((seat) => seat.name).join(', ');
+      this.ui.showBanner(`Level ${this._shareLobby.level} is still locked for ${names}.`, 'bad', 5200);
+    } else if (gate.connecting) {
+      this.ui.showBanner('Start unlocks when every friend is connected.', '', 4200);
+    } else {
+      this.ui.showBanner('Start unlocks when every friend marks Ready.', '', 4200);
+    }
+    this._shareSig = '';
+    this._renderShareHost();
+    return false;
+  }
+
+  _setShareReady(ready) {
+    if (this.mpRole !== 'guest' || !this._shareCode) return;
+    this._sharePublish({ t: 'ready', ready: !!ready });
+  }
+
+  _renderShareHost() {
+    if (this.mpRole !== 'host' || !this._shareLobby || this.netMode) return;
+    const players = this._shareRoster();
+    const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
+    if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
+    this._shareSig = sig;
+    const blocked = players.length > 1 && !gate.ready;
+    const status = gate.blockers.length
+      ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
+      : !gate.ready && players.length > 1
+        ? (gate.connecting ? 'Waiting for every friend to connect.' : 'Waiting for every friend to mark Ready.')
+        : players.length > 1
+          ? `${players.length} commanders in this siege. Start when you are ready.`
+          : 'Link copied. Waiting for friends.';
+    this.ui.showShareHost({
+      url: this._shareUrl,
+      status,
+      launchReady: !blocked,
+      players,
+      relay: this._shareRelay,
+      level: this._shareLobby.level,
+      mode: this._shareLobby.mode,
+      difficulty: this._shareLobby.difficulty,
+      maxPlayers: this._shareLobby.maxPlayers || 4,
+    });
+  }
+
+  _onShareMessage(message) {
+    if (!message || typeof message !== 'object') return;
+    if (message.t !== 'lobby' && message.id) {
+      if (this._shareSeen?.has(message.id)) return;
+      this._shareSeen = this._shareSeen || new Set();
+      this._shareSeen.add(message.id);
+    }
+    if (message.from && message.from === this._shareSelf && message.t !== 'lobby') return;
+    if (message.t === 'lobby' && message.lobby && this.mpRole !== 'host') this._onShareLobby(message.lobby);
+    else if (message.t === 'join' && this.mpRole === 'host') this._acceptShareGuest(message);
+    else if (message.t === 'offer' && this.mpRole === 'guest') this._acceptShareOffer(message);
+    else if (message.t === 'answer' && this.mpRole === 'host') this._acceptShareAnswer(message);
+    else if (message.t === 'ice') this._acceptShareIce(message);
+    else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'ready' && this.mpRole === 'host') {
+      this._shareLobby = setSeatReady(this._shareLobby, message.from, message.ready, Date.now());
+      this._shareSig = '';
+      this._sharePublishLobby();
+      this._renderShareHost();
+    }
+    else if (message.t === 'leave' && this.mpRole === 'host') this._dropShareGuest(message.from);
+  }
+
+  _onShareLobby(lobby) {
+    if (!lobby || lobby.code !== this._shareCode) return;
+    this._shareLobby = lobby;
+    const decision = admitGuest(lobby, { id: this._shareSelf }, Date.now());
+    if (!decision.ok) {
+      if (this.net?.open || this.netMode) return;
+      this._failShare(decision.reason);
+      return;
+    }
+    clearTimeout(this._shareDiscover);
+    if (!this._shareAnnounced) {
+      this._shareAnnounced = true;
+      this.audio?.init();
+      this._sharePublish({
+        t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
+        protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
+        unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+      });
+    }
+    if (!this._shareGuestShown) {
+      this._shareGuestShown = true;
+      this.ui.showSetup({ mode: lobby.mode || 'campaign' });
+    }
+    if (!this.netMode) {
+      this.ui.selectedLevel = lobby.level || 1;
+      this.ui.selectedDiff = lobby.difficulty || 'normal';
+      this.ui.setRoomSettings({
+        level: lobby.level || 1,
+        difficulty: lobby.difficulty || 'normal',
+        isHost: false,
+        mode: lobby.mode || 'campaign',
+      });
+    }
+    const players = shareRoster(lobby, this._shareSelf);
+    const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
+    if (this._shareGuestShown && sig === this._shareSig) return;
+    this._shareSig = sig;
+    const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
+    const locked = (lobby.mode || 'campaign') === 'campaign' && (mine?.unlockedLevel || 1) < (lobby.level || 1);
+    this.ui.showShareGuest({
+      status: locked
+        ? 'This mission is still locked for you. The host can pick an earlier one.'
+        : mine ? 'Seat saved. Pick your hero, then mark Ready.' : 'Asking the host for a seat…',
+      players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
+      maxPlayers: lobby.maxPlayers || 4,
+      ready: !!mine?.ready,
+    });
+  }
+
+  async _acceptShareGuest(message) {
+    if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
+    if (this._shareHands?.has(message.from)) {
+      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
+      const peer = this._shareHands.get(message.from);
+      const idx = this.peers.indexOf(peer);
+      if (idx >= 0) {
+        this.guestHeroes[idx] = shareHero(message.hero);
+        this.guestNames[idx] = shareName(message.name);
+      }
+      this._shareSig = '';
+      this._sharePublishLobby();
+      this._renderShareHost();
+      return;
+    }
+    const decision = admitGuest(this._shareLobby, {
+      id: message.from, claim: true,
+      protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
+    }, Date.now());
+    if (!decision.ok) {
+      this._sharePublish({ t: 'reject', to: message.from, reason: decision.reason });
+      return;
+    }
+    if (!decision.rejoining) {
+      this._shareLobby = seatGuest(this._shareLobby, {
+        id: message.from, name: message.name, hero: message.hero, claim: true,
+        protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
+        unlockedLevel: message.unlockedLevel,
+      }, Date.now()).lobby;
+    } else {
+      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
+    }
+    this._sharePendingJoins ||= new Set();
+    if (this._sharePendingJoins.has(message.from)) return;
+    this._sharePendingJoins.add(message.from);
+    const generation = this._shareGeneration;
+    const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    this._sharePendingJoins.delete(message.from);
+    if (generation !== this._shareGeneration || !this._shareLobby || this._shareLobby.started || !this._shareLobby.seats.some(s => s.id === message.from)) return;
+    const peer = new NetSession(ice);
+    peer.shareId = message.from;
+    this._shareHands.set(message.from, peer);
+    this._attachNetDiagnostics(peer);
+    peer.onOpen = () => this._bindSharePeer(peer, message.from);
+    peer.onMessage = (incoming) => {
+      const idx = this.peers.indexOf(peer);
+      if (idx >= 0) this._onHostMsg(idx, incoming);
+    };
+    peer.onClose = () => this._dropShareGuest(message.from);
+    peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
+    try {
+      const sdp = await peer.hostTrickle();
+      if (this._shareLobby?.started || !this._shareHands?.has(message.from)) return;
+      this._sharePublish({ t: 'offer', to: message.from, sdp });
+      this._shareSig = '';
+      this._sharePublishLobby();
+      this._renderShareHost();
+    } catch {
+      this._shareHands.delete(message.from);
+      this._shareLobby = releaseGuest(this._shareLobby, message.from, Date.now());
+      this._sharePublish({ t: 'reject', to: message.from, reason: 'invalid' });
+      try { peer.destroy(); } catch { /* ignore */ }
+    }
+  }
+
+  _bindSharePeer(peer, id) {
+    if (this._shareLobby?.started || this.netMode || this.peers.includes(peer)) {
+      if (!this.peers.includes(peer)) {
+        this._shareHands?.delete(id);
+        try { peer.destroy(); } catch { /* ignore */ }
+      }
+      return;
+    }
+    const previous = this.peers.findIndex((entry) => entry.shareId === id && entry !== peer);
+    if (previous >= 0) {
+      this.peers.splice(previous, 1);
+      this.guestHeroes.splice(previous, 1);
+      this.guestNames.splice(previous, 1);
+      this.guestCmdQueues.splice(previous, 1);
+      this.peerUserIds.splice(previous, 1);
+    }
+    const seat = this._shareLobby.seats.find((entry) => entry.id === id);
+    this.peers.push(peer);
+    this.guestHeroes.push(shareHero(seat?.hero));
+    this.guestNames.push(seat?.name || 'Commander');
+    this.guestCmdQueues.push([]);
+    this.peerUserIds.push(null);
+    peer.send({ t: 'lobby', n: this.peers.length + 1, players: this._shareRoster() });
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+  }
+
+  async _acceptShareOffer(message) {
+    if (message.to !== this._shareSelf || this.net?.open || this._shareOffered === message.id) return;
+    if (!this._shareLobby || message.from !== this._shareLobby.hostId || this._shareLobby.started) return;
+    const generation = this._shareGeneration;
+    this._shareOffered = message.id;
+    if (this.net) {
+      try { this.net.destroy(); } catch { /* replace a dead handshake */ }
+    }
+    const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
+    if (generation !== this._shareGeneration || this._shareOffered !== message.id) return;
+    const net = new NetSession(ice);
+    this.net = net;
+    this._attachNetDiagnostics(net);
+    net.onOpen = () => net.send(this._heroPayload());
+    net.onMessage = (incoming) => this._onGuestMsg(incoming);
+    net.onClose = () => {
+      if (this.net !== net) return;
+      if (this.netMode && this.game && !this.game.over) {
+        this.pause();
+        this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
+        return;
+      }
+      if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+    };
+    net.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
+    try {
+      const sdp = await net.joinTrickle(message.sdp);
+      if (this.net !== net) return;
+      this._sharePublish({ t: 'answer', to: message.from, sdp });
+    } catch {
+      if (this.net === net) this._failShare('invalid');
+    }
+  }
+
+  _acceptShareAnswer(message) {
+    if (message.to !== this._shareSelf) return;
+    const peer = this._shareHands?.get(message.from);
+    if (peer) peer.acceptReply(message.sdp).catch(() => {});
+  }
+
+  _acceptShareIce(message) {
+    if (message.to !== this._shareSelf) return;
+    const peer = this.mpRole === 'host' ? this._shareHands?.get(message.from) : this.net;
+    if (peer) peer.addIce(message.cand);
+  }
+
+  _dropShareGuest(id) {
+    if (!this._shareLobby) return;
+    if (this._shareLobby.started || this.netMode) {
+      const peer = this._shareHands?.get(id);
+      const idx = peer ? this.peers.indexOf(peer) : -1;
+      if (idx >= 0 && this.game && !this.game.over && peer && !peer.shareNotified) {
+        peer.shareNotified = true;
+        this.game.msg(`⚠️ ${this.guestNames[idx] || `Player ${idx + 2}`} disconnected — their hero fights on.`, 'warn');
+      }
+      return;
+    }
+    const peer = this._shareHands?.get(id);
+    if (peer?.shareDropped) return;
+    if (peer) {
+      peer.shareDropped = true;
+      this._shareHands.delete(id);
+      const idx = this.peers.indexOf(peer);
+      if (idx >= 0) {
+        this.peers.splice(idx, 1);
+        this.guestHeroes.splice(idx, 1);
+        this.guestNames.splice(idx, 1);
+        this.guestCmdQueues.splice(idx, 1);
+        this.peerUserIds.splice(idx, 1);
+      }
+      try { peer.destroy(); } catch { /* already closed */ }
+    }
+    this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+  }
+
+  _failShare(reason) {
+    if (this._shareFailed) return;
+    this._shareFailed = true;
+    this._teardownShare();
+    this.mpRole = null;
+    this.ui.showShareNotice({ title: 'Could not join', copy: shareFailureCopy(reason), tone: 'bad' });
+  }
+
+  _leaveShareLink() {
+    if (this.netMode && this.game && !this.game.over) return;
+    if (this.mpRole === 'host' && this._shareLobby && !this._shareLobby.started) {
+      this._shareLobby = closeLobby(this._shareLobby, Date.now());
+      this._sharePublishLobby();
+    } else if (this.mpRole === 'guest' && this._shareCode) {
+      this._sharePublish({ t: 'leave' });
+    }
+    this._teardownShare();
+    this.ui._shareLive = false;
+    if (!this.netMode) this.mpRole = null;
+    if (this.auth?.isSignedIn() || chapterFounder(this.profile) || this.profile.quickSetupDone) this.ui._showScreen('main');
+    else this.ui._showScreen('account');
+  }
+
+  _abandonShareLink() {
+    if (!this._shareLobby || !this._shareCode) return;
+    try {
+      if (this.mpRole === 'host') {
+        this._shareLobby = closeLobby(this._shareLobby, Date.now());
+        this._sharePublishLobby();
+      } else this._sharePublish({ t: 'leave' });
+    } catch { /* the page is going away */ }
+  }
+
+  _teardownShare() {
+    this._shareGeneration = (this._shareGeneration || 0) + 1;
+    this._sharePendingJoins?.clear();
+    clearInterval(this._shareBeat);
+    clearTimeout(this._shareDiscover);
+    this._shareBeat = null;
+    this._shareDiscover = null;
+    for (const unsub of this._shareUnsubs || []) {
+      try { unsub(); } catch { /* ignore */ }
+    }
+    this._shareUnsubs = [];
+    this._shareHubList = [];
+    if (!this.netMode) {
+      for (const peer of this._shareHands?.values() || []) {
+        peer.shareDropped = true;
+        try { peer.destroy(); } catch { /* ignore */ }
+      }
+      this._shareHands = new Map();
+      if (this.net && !this.game) {
+        try { this.net.destroy(); } catch { /* ignore */ }
+        this.net = null;
+      }
+      if (!this.game) {
+        this.peers = [];
+        this.guestHeroes = [];
+        this.guestNames = [];
+        this.guestCmdQueues = [];
+        this.peerUserIds = [];
+      }
+    }
+    this._shareLobby = null;
+    this._shareCode = null;
+    this._shareAnnounced = false;
+    this._shareGuestShown = false;
+    this._shareSig = '';
   }
 
   async _onGuestMsg(m) {
@@ -3148,6 +3883,10 @@ class App {
     this.mpRole = null;
     this.onlineMode = false;
     this.lobby._clearRoomState();
+    // Match state (lockstep, scene, ticket, input) must not survive room closure.
+    // Use the same clean menu boot as the host's explicit end-match action.
+    // The account and persistent friend party are restored on startup.
+    if (this.netMode) return location.reload();
     this.ui.showLobby();
     const message = reason === 'removed' ? 'You were removed from the lobby.'
       : reason === 'match_ended' ? 'The host ended the match.'
@@ -3216,6 +3955,7 @@ class App {
     this.ui.applySetupMode(m);
     this._updateRoomSettings({ mode: m, level: this.ui.selectedLevel || 1 });
     this._syncSetupRoster();
+    this._noteShareSetup();
   }
 
   async _sendRoomChat(text, channel = 'room') {
@@ -4139,7 +4879,11 @@ class App {
     const g = this.game;
     const d = this._zdummy;
     let i = 0;
+    const occupied = new Set();
     for (const cn of g.coins) {
+      const cell = `${Math.floor(cn.x * 2)},${Math.floor(cn.z * 2)}`;
+      if (occupied.has(cell)) continue;
+      occupied.add(cell);
       if (i >= 400) break;
       if (!this.coinBorn.has(cn.id)) this.coinBorn.set(cn.id, t);
       const age = t - this.coinBorn.get(cn.id);
@@ -4414,7 +5158,7 @@ class App {
   // any zoom, and a small holo-gem floats above it. Cost + icon ride a tag
   // sprite (see _syncPlots), so every free spot says what goes there and
   // what it costs without opening a menu.
-  _makeBeacon(x, z, r = 1.15) {
+  _makeBeacon(x, z, r = 1.15, role = 'defense') {
     const grp = new THREE.Group();
     if (!this._padMats) {
       this._padMats = {
@@ -4424,20 +5168,25 @@ class App {
         gem: new THREE.MeshBasicMaterial({ color: 0xbff8ff }),
       };
     }
-    const m = this._padMats;
-    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, 6), m.plate);
+    this._rolePadMats ||= {};
+    const colors = { economy: 0xe0be68, army: 0x83c6eb, defense: 0xe3997b, support: 0xb8a4e5 };
+    const m = this._rolePadMats[role] ||= Object.fromEntries(Object.entries(this._padMats).map(([key,mat])=>{
+      const copy=mat.clone(); if(key!=='plate')copy.color.setHex(colors[role]); return [key,copy];
+    }));
+    const segments = { economy: 4, army: 3, defense: 6, support: 8 }[role];
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.08, segments), m.plate);
     plate.position.set(x, 0.04, z);
     plate.rotation.y = Math.PI / 6;
     plate.receiveShadow = true;
     grp.add(plate);
-    const fillGeo = new THREE.CircleGeometry(r * 0.86, 6);
+    const fillGeo = new THREE.CircleGeometry(r * 0.86, segments);
     fillGeo.rotateX(-Math.PI / 2);
     const fill = new THREE.Mesh(fillGeo, m.fill);
     fill.position.set(x, 0.09, z);
     fill.rotation.y = Math.PI / 6;
     fill.userData.noOutline = true;
     grp.add(fill);
-    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, 6);
+    const rimGeo = new THREE.RingGeometry(r * 0.86, r * 0.98, segments);
     rimGeo.rotateX(-Math.PI / 2);
     const rim = new THREE.Mesh(rimGeo, m.rim);
     rim.position.set(x, 0.095, z);
@@ -4458,7 +5207,8 @@ class App {
     const anchor = plot.anchor || plot.gate;
     const [mx, mz] = plot.kind === 'wall' && anchor ? [anchor[0] + 0.5, anchor[1] + 0.5] : [plot.cx, plot.cz];
     const padR = plot.kind === 'wall' ? 0.5 : plot.kind === 'hq' ? 2.3 : 1.2;
-    const beacon = this._makeBeacon(mx, mz, padR);
+    const role = kind.unit ? 'army' : ['house','farm','mill','mine'].includes(plot.kind) ? 'economy' : ['workshop','hero_forge'].includes(plot.kind) ? 'support' : 'defense';
+    const beacon = this._makeBeacon(mx, mz, padR, role);
     g.add(beacon);
     g.userData.beacon = beacon;
     const label = this._makeLabelSprite(kind.icon, '');
@@ -4745,8 +5495,9 @@ class App {
             materials.push(material);
           }
         });
-        const healthHeight = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y;
-        rec = { mesh, b, tierKey, artTier, healthHeight, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
+        const occlusionBounds = new THREE.Box3().setFromObject(mesh);
+        const healthHeight = occlusionBounds.max.y - mesh.position.y;
+        rec = { mesh, b, tierKey, artTier, healthHeight, occlusionBounds, spawnT: priorSpawnT ?? this.clock.elapsedTime, materials };
         this.buildingMeshes.set(b.id, rec);
       }
     }
@@ -5097,8 +5848,13 @@ class App {
       if (u.hero) {
         if (u === this.myHero()) {
           const shells = rec.mesh.userData.occlusionShells ||= installHeroOcclusionShell(rec.mesh.userData.body);
-          const occluded = !u.dead && terrainOccludesHero(this.map, this.camera.position, rec.mesh.position);
-          for (const shell of shells) shell.visible = occluded;
+          // Bound checks are presentation-only and cached at 10 Hz, not a scene raycast.
+          if (t >= (rec.occlusionCheckAt || 0)) {
+            rec.occlusionCheckAt = t + .1;
+            rec.occluded = terrainOccludesHero(this.map, this.camera.position, rec.mesh.position)
+              || structuresOccludeHero(this.buildingMeshes.values(), this.camera.position, rec.mesh.position);
+          }
+          for (const shell of shells) shell.visible = !u.dead && !!rec.occluded;
         }
         const wantOp = u.stealth ? 0.3 : 1;
         if (rec.op !== wantOp) {
@@ -5382,6 +6138,8 @@ class App {
         if (e.key === 'Escape') e.target.blur();
         return;
       }
+      // Let native buttons handle activation without also building/dodging or opening chat.
+      if (e.target?.tagName === 'BUTTON' && (k === ' ' || k === 'enter')) return;
       this.keys.add(k);
       if (this.game && k === 'enter' && this.netMode) {
         e.preventDefault();
@@ -5445,9 +6203,9 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'defend' }); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'guard' }); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this._noteCoach({ type: 'stance', stance: 'attack' }); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
+        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
+        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
@@ -5520,12 +6278,14 @@ class App {
   setBinds(next) {
     this._binds = saveBinds(next);
     this.ui.setKeybinds(this._binds);
+    if (this._coach) this._paintCoach();
     return this._binds;
   }
 
   resetKeybinds() {
     this._binds = resetBinds();
     this.ui.setKeybinds(this._binds);
+    if (this._coach) this._paintCoach();
     return this._binds;
   }
 
@@ -5738,8 +6498,9 @@ class App {
     const h = this.myHero();
     if (h) {
       const lead = 1.6;
-      const tx = h.x + (h.mx || 0) * lead;
-      const tz = h.z + (h.mz || 0) * lead;
+      const peek = this._keepPeek?.until > performance.now() && !h.mx && !h.mz ? this._keepPeek : null;
+      const tx = peek ? peek.x : h.x + (h.mx || 0) * lead;
+      const tz = peek ? peek.z : h.z + (h.mz || 0) * lead;
       const k = 1 - Math.exp(-6 * dt);
       this.focus.x += (tx - this.focus.x) * k;
       this.focus.z += (tz - this.focus.z) * k;
@@ -5762,7 +6523,7 @@ class App {
     let sx = 0, sz = 0;
     if (this.shake > 0) {
       this.shake -= dt;
-      const s = Math.min(this.shake, 0.4);
+      const s = this.motionPreference.matches ? 0 : Math.max(0, Math.min(this.shake, 0.25));
       sx = (Math.random() - 0.5) * s; sz = (Math.random() - 0.5) * s;
     }
     this.camera.position.set(
@@ -5913,8 +6674,11 @@ class App {
     // co-op pump). Replaying hundreds of stale FX events in one frame is a
     // hitch and an air-raid of sounds — keep only the freshest burst.
     if (g.events.length > 90) {
-      // ...but never drop a world-changing event: 'founded' rebuilds the terrain.
-      const keep = g.events.slice(0, g.events.length - 30).filter((e) => e.type === 'founded');
+      // Keep world changes, the earned opening payoff and the latest local
+      // order acknowledgement, in their original order. Never replay old combat FX.
+      const older = g.events.slice(0, g.events.length - 30);
+      const lastOrder = older.findLastIndex(e => e.player === this.myPlayer && ['hold', 'rally', 'orderconfirmed'].includes(e.type));
+      const keep = older.filter((e, i) => e.type === 'founded' || e.type === 'firstsiege' || i === lastOrder);
       g.events.splice(0, g.events.length - 30, ...keep);
     }
     const vision=fogVisionSources(g);
@@ -5928,15 +6692,23 @@ class App {
       switch (e.type) {
         case 'groundstrike': {
           if(fogVisionSources(g).some(v=>Math.hypot(v.x-e.x,v.z-e.z)<v.radius)) {
-            this._impactRing(e.x,e.z,{color:e.kind==='acid'?0xdfff55:0xff7844,radius:e.radius,life:.24});
+            this._impactRing(e.x,e.z,{color:e.color||(e.kind==='acid'?0xdfff55:0xff7844),radius:e.radius,life:.28});
+            this.burst(e.x, 0.35, e.z, { count: 16, color: e.color || 0xff7844, speed: 2.2, life: 0.4, size: 0.5, up: 1.6 });
           }
           break;
         }
         case 'shot': {
-          if (e.heroKey) this._coachSawAttack = true;
+          if (e.fromId === this.myHero()?.id) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
             this.hitFeedback ||= new HitFeedback(this.scene);
             this.hitFeedback.show(e);
+            if (e.fromId === this.myHero()?.id && e.damage > 0) {
+              this.audio.hitConfirm(e.crit);
+              if (e.crit && performance.now() >= (this._criticalImpactAt || 0)) {
+                this._criticalImpactAt = performance.now() + 90;
+                this._impactRing(e.tx, e.tz, { color: 0xffe39a, radius: 1.0, count: 8, life: 0.16 });
+              }
+            }
           }
           this._unitAttackCue(e);
           if (e.kind === 'melee') {
@@ -6006,6 +6778,11 @@ class App {
         }
         case 'zdeath':
           this.spawnCorpse(e);
+          if (e.big && this.audio.eventGain > 0 && performance.now() >= (this._eliteImpactAt || 0)) {
+            this._eliteImpactAt = performance.now() + 300;
+            this.audio.eliteBreak();
+            this._impactRing(e.x, e.z, { color: 0xb9dfff, radius: 2.2, count: 16, life: 0.35 });
+          }
           this.burst(e.x, 0.5, e.z, { count: e.big ? 22 : 10, color: 0xd9c8ff, speed: e.big ? 3.2 : 2.4, life: 0.4, size: e.big ? 0.7 : 0.5, up: 2 });
           this.burst(e.x, 0.55, e.z, { count: e.big ? 6 : 3, color: 0xffffff, speed: 0.6, life: 0.16, size: e.big ? 1.3 : 0.9, up: 0.4 });
           this.deathSfxT -= 1;
@@ -6140,11 +6917,27 @@ class App {
           this.burst(e.x, 0.8, e.z, { count: 40, color: 0xb44dff, speed: 3.4, life: 0.9, size: 0.7, up: 3 });
           this.burst(e.x, 0.5, e.z, { count: 24, color: 0x3a2a4a, speed: 2.6, life: 0.8, size: 0.7, up: 2.4 });
           break;
+        case 'orderconfirmed':
+          if (e.player === this.myPlayer) {
+            this._noteCoach({ type: 'stance', stance: e.stance });
+            this.audio.eventGain = 1;
+            this.audio.click();
+          }
+          break;
+        case 'firstsiege':
+          this.audio.eventGain = 1;
+          this.audio.levelup();
+          this.ui.showBanner(`FIRST SIEGE BROKEN · +${e.reward} gold. Repair, reinforce, then push the lanes.`, 'good', 3200);
+          this._noteCoach({ type: 'firstsiege' });
+          break;
         case 'rally':
+          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
           this.audio.train();
           this.burst(e.x, 0.3, e.z, { count: 10, color: 0x59ff9c, speed: 1.4, life: 0.5, size: 0.45, up: 1.6 });
           break;
         case 'hold':
+          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          this._impactRing(e.x, e.z, { color: 0x8acbff, radius: 5.5, count: 20, life: 0.55 });
           this.audio.click();
           break;
         case 'bhit':
@@ -6170,7 +6963,12 @@ class App {
           const caster = this.unitMeshes.get(e.heroId);
           if (caster) caster.cast = { t: 0.52, dur: 0.52, kind: e.key };
           this.audio.cast({ weave: 'smoke', grenade: 'shrapnel', hammer: 'sunstrike', fortify: 'shieldup', brew: 'splash', clone: 'shimmer', summon: 'shimmer' }[e.key] || e.key);
-          const CAST_COLORS = { hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff };
+          const CAST_COLORS = {
+            hammer: 0x7a9cf0, grenade: 0xd8b45e, weave: 0x7fd85e, fortify: 0x8fd0ff, brew: 0xffb347, clone: 0xffa64d, summon: 0x8fd6ff, choir: 0xf0d060,
+            trueflight: 0xf3c53d, glass_sight: 0x9dffc2, meridian: 0xfff1c2,
+            rift_lance: 0xd8721f, stillpoint: 0xffd27a, dread_well: 0x6a4fae, unmake: 0xfff1c9,
+            mending_pulse: 0xb7f0c8, still_ward: 0x8fd6ff,
+          };
           const col = CAST_COLORS[e.key] || 0xffe9a8;
           const R = e.radius;
           const n = Math.min(40, Math.round(R * 6));
@@ -6213,7 +7011,11 @@ class App {
           this.burst(e.x, 1.0, e.z, { count: 10, color: 0x9fd6ff, speed: 1.0, life: 0.4, size: 0.42, up: 1.4 });
           break;
         case 'brewzone':
-          this.burst(e.x, 0.2, e.z, { count: 6, color: 0xffb347, speed: 0.4, life: 0.5, size: 0.6, spread: 1.6, up: 0.4 });
+          this.burst(e.x, 0.2, e.z, { count: 6, color: e.color || 0xffb347, speed: 0.4, life: 0.5, size: 0.6, spread: 1.6, up: 0.4 });
+          break;
+        case 'mend':
+          this._spawnAbilityRing(e.x, e.z, { color: e.color || 0xb7f0c8, radius: 0.4, to: e.radius || 4, life: 0.45, opacity: 0.8, width: 0.18 });
+          this.burst(e.x, 0.8, e.z, { count: 14, color: e.color || 0xb7f0c8, speed: 1.2, life: 0.5, size: 0.45, up: 1.8 });
           break;
         case 'zap':
           this.burst(e.x, 0.6, e.z, { count: 5, color: 0x4dd8c8, speed: 1.8, life: 0.25, size: 0.4, up: 1.4 });
@@ -6348,13 +7150,14 @@ class App {
         const events = [];
         if (Math.hypot(hero.x - this._coachOrigin.x, hero.z - this._coachOrigin.z) > 1.4) events.push({ type: 'move' });
         if (this.game.phase !== 'found') events.push({ type: 'founded' });
-        if ((this.game.stats?.built || 0) > 0) events.push({ type: 'built' });
+        if (this.game.plots.some(plot => plot.kind !== 'hq' && plot.tier > 0)) events.push({ type: 'built' });
+        if (this.game.firstSiege?.stage === 'complete') events.push({ type: 'firstsiege' });
         if (this._coachSawAttack) { events.push({ type: 'attack' }); this._coachSawAttack = false; }
         if (events.length) {
-          const before = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
           this._coach = coachApply(this._coach, events);
-          const after = `${this._coach.index}|${this._coach.stances.defend}|${this._coach.stances.guard}|${this._coach.stances.attack}`;
-          if (before !== after) this._paintCoach();
+          const siege = this.game.firstSiege;
+          const paintKey = `${this._coach.index}|${siege?.stage}|${siege?.waveIds.length}|${Math.ceil(this.game.nests[siege?.nestId]?.musterT || 0)}`;
+          if (paintKey !== this._coachPaintKey) { this._coachPaintKey = paintKey; this._paintCoach(); }
         }
       }
       return;

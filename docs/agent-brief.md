@@ -35,6 +35,8 @@ Day, night, dawn and the bell are gone. `game.phase` is only `found` or `live`.
 - One opening hive produces at least 1.5 times the units per second of the
   fastest single human producer, then accelerates with Threat. Humans overcome
   that deficit with multiple camps, captured outposts, and hive destruction.
+- Greenfall begins with a bounded first-siege encounter before the normal
+  Threat clock and hive reinforcement loop. See [Opening siege](product-contract.md#opening-siege-2026-11-25). Existing world enemies remain dangerous.
 - Threat is the clock (`THREAT` in `src/config.js`): time + living hives +
   your own conquests. Casual and Normal scale that clock by the full
   difficulty multiplier. Brutal uses `threatClockMult()`, a fraction of its
@@ -221,6 +223,13 @@ History worth keeping, so old mistakes are not repeated:
   device frame time. Use it to separate network catch-up from device stalls.
 - Mid-game Rejoin is only for a previously seated guest. A stranger cannot
   create a seat after the match starts. A watcher never creates a seat.
+- Invite copies `/?coop=<code>`. A friend opens it with no account and joins
+  the same lockstep siege before the host starts. The link expires after two
+  hours, caps at four players, and refuses a full lobby, a dead host, a bad
+  code, a protocol or client mismatch, and a late join. Guests mark Ready.
+  Campaign seats carry an unlocked level, and Start waits until every seat
+  can play the chosen mission. `src/share-link.js` owns those rules.
+  `src/share-bus.js` carries the WebRTC handshake and the deployment ICE list.
 
 Key multiplayer files:
 

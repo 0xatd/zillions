@@ -62,7 +62,7 @@ export function queuePendingMatch(pending, now = Date.now()) {
   const list = readAll(now).filter((entry) => !(entry.userId === pending.userId && entry.requestId === pending.requestId));
   list.push({ ...pending, queuedAt: now });
   write(list);
-  return true;
+  return readAll(now).some(entry => entry.userId === pending.userId && entry.requestId === pending.requestId);
 }
 
 // Drops a report only if it belongs to `userId`.

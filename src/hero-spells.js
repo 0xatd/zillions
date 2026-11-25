@@ -49,7 +49,8 @@ export function castSpell(g,h,slot,input={}) {
   const effect={kind:ab.spell,slot,x:target.x,z:target.z,sx:h.x,sz:h.z,
     targetId:ab.target==='enemy'?target.id:null,delay:ab.delay||0,channel:!!ab.channel,
     damage:value(ab.damage,rank),stun:value(ab.stun,rank),radius:ab.radius||0,
-    slow:ab.slow||0,types:ab.types||null,pure:!!ab.pure,t:ab.duration||0,hit:[],kills:target.killCount||0};
+    slow:ab.slow||0,heal:value(ab.heal,rank),types:ab.types||null,pure:!!ab.pure,
+    t:ab.duration||0,hit:[],kills:target.killCount||0,key:ab.key,color:ab.color||0};
   if(ab.projectileSpeed)effect.delay+=Math.sqrt(d2(h,target))/ab.projectileSpeed;
   if(ab.spell==='taunt'){effect.targets=g.zombies.filter(z=>!z.dead&&d2(h,z)<=ab.radius**2).map(z=>z.id);}
   if(ab.spell==='wave') {
@@ -65,7 +66,7 @@ export function castSpell(g,h,slot,input={}) {
     const mods=Object.fromEntries(Object.entries(ab.mods).map(([key,v])=>[key,value(v,rank)]));
     for(const ally of g.units)if(!ally.dead&&(ab.selfOnly?ally.id===h.id:d2(h,ally)<=ab.radius**2))applyUnitBuff(ally,ab.key,h.id,ab.duration,mods);
   }
-  if(ab.spell==='aim'){s.aimT=ab.duration;s.aimRange=value(ab.rangeBonus,rank);}
+  if(ab.spell==='aim'){s.aimT=ab.duration;s.aimRange=value(ab.rangeBonus,rank);s.aimRate=value(ab.attackSpeed,rank)||0;}
   setAbilityCooldown(h,slot,value(ab.cd,rank)*Math.max(.15,1-h.mods.cdr));
   if(!['aim','buff'].includes(ab.spell))s.effects.push(effect);
   g.emit({type:'cast',heroId:h.id,x:h.x,z:h.z,radius:ab.radius||3,icon:ab.icon,key:ab.key});
@@ -107,8 +108,20 @@ export function updateSpells(g,h,dt) {
         const along=Math.max(0,Math.min(travel,(z.x-ax)*e.dx+(z.z-az)*e.dz));
         if((z.x-ax-e.dx*along)**2+(z.z-az-e.dz*along)**2<=e.radius**2){e.hit.push(z.id);hit(g,h,e,z);}
       }
-      g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius});
+      g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius,color:e.color||0xffb347});
       if(e.remaining>0)keep.push(e);
+    } else if(e.kind==='mend') {
+      for(const ally of g.units)if(!ally.dead&&ally.hp>0&&d2(e,ally)<=e.radius**2)ally.hp=Math.min(ally.maxHp,ally.hp+e.heal);
+      g.emit({type:'mend',x:e.x,z:e.z,radius:e.radius,color:e.color||0xb7f0c8});
+    } else if(e.kind==='ward') {
+      const duration=Math.min(activeDt,e.t);e.t-=duration;
+      for(const z of g.zombies)if(!z.dead&&d2(e,z)<=e.radius**2){
+        if(e.slow){z.slowT=Math.max(z.slowT||0,.6);z.slowMul=Math.min(z.slowMul??1,e.slow);}
+        if(e.damage)hit(g,h,{...e,damage:e.damage*duration,stun:0},z);
+      }
+      if(e.heal)for(const ally of g.units)if(!ally.dead&&ally.hp>0&&d2(e,ally)<=e.radius**2)ally.hp=Math.min(ally.maxHp,ally.hp+e.heal*duration);
+      if(e.t>0)keep.push(e);
+      g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius,color:e.color||0x8fd6ff});
     } else if(e.kind==='zone') {
       const duration=Math.min(activeDt,e.t);e.t-=duration;
       for(const z of g.zombies)if(!z.dead&&d2(e,z)<=e.radius**2){
@@ -116,10 +129,10 @@ export function updateSpells(g,h,dt) {
         if(!prior||prior.effect.damage<damage)zoneHits.set(z.id,{target:z,effect:{...e,damage}});
       }
       if(e.t>0)keep.push(e);
-      g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius});
+      g.emit({type:'brewzone',x:e.x,z:e.z,r:e.radius,color:e.color||0xffb347});
     } else if(e.kind==='blast') {
       for(const z of g.zombies)if(d2(e,z)<=e.radius**2)hit(g,h,e,z);
-      g.emit({type:'groundstrike',x:e.x,z:e.z,radius:e.radius});
+      g.emit({type:'groundstrike',x:e.x,z:e.z,radius:e.radius,color:e.color||0xff7844});
     } else if(e.kind==='bolt'||e.kind==='cull') {
       const z=g.zombies.find(z=>z.id===e.targetId&&!z.dead);
       if(z){
@@ -131,13 +144,16 @@ export function updateSpells(g,h,dt) {
   s.effects=keep;
 }
 export function spellAttackSpeed(h) {
-  return h.def.fierySoul?1+(h.spells?.soul||0)*value(h.def.fierySoul.attackSpeed,spellRank(h,3)):1;
+  const soul=h.def.fierySoul?1+(h.spells?.soul||0)*value(h.def.fierySoul.attackSpeed,spellRank(h,3)):1;
+  const aim=h.spells?.aimT>0?1+(h.spells.aimRate||0):1;
+  return soul*aim;
 }
 export function spellMoveSpeed(h) {
   return (h.spells?.aimT>0?.35:1) * (h.def.fierySoul?1+(h.spells?.soul||0)*value(h.def.fierySoul.moveSpeed,spellRank(h,3)):1);
 }
 
 export function spellAttack(g,h,target,damage) {
+  if(h.def.distanceDamage)damage*=1+Math.sqrt(d2(h,target))*h.def.distanceDamage;
   if(h.def.keenScope)damage*=1+Math.sqrt(d2(h,target))*h.def.keenScope;
   if(h.def.headshot&&(h.spells?.aimT>0||g.rng()<h.def.headshot.chance)) {
     damage+=value(h.def.headshot.damage,spellRank(h,3));
