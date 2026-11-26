@@ -69,6 +69,8 @@ export const ACTIONS = [
     desc: 'Full speed, and only at full health.',
   },
 
+  { id: 'hero_stop', name: 'Stop hero', scopes: ['battle'], context: 'combat', default: 's' },
+  { id: 'hero_hold', name: 'Hold position', scopes: ['battle'], context: 'combat', default: 'h' },
   // ---- combat ----
   {
     id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: 'v',
@@ -197,6 +199,9 @@ export function setWasdCamera(binds, feel, on) {
       const to = firstFree(next, 'attack_move');
       parked.attack_move = { from: 'a', to };
       next.attack_move = to;
+    }
+    if (next.hero_stop === 's') {
+      const to = firstFree(next, 'hero_stop'); parked.hero_stop = {from:'s',to}; next.hero_stop=to;
     }
     options.wasdCamera = true;
     options.parked = parked;
@@ -367,8 +372,21 @@ function hydrate(force = false) {
   if (_cache && _feel && !force) return;
   const raw = readStore();
   const current = !!(raw && raw.v === KEYBIND_VERSION);
-  _cache = normalizeBinds(current ? raw.binds : null);
+  const requested = current ? {...(raw.binds || {})} : null;
+  // New default actions must yield to keys the player explicitly chose before
+  // this version introduced Stop/Hold. Keep both actions usable after upgrade.
+  if(requested)for(const id of ['hero_stop','hero_hold']){
+    if(Object.hasOwn(requested,id))continue;
+    const candidate={...defaultBinds(),...requested};
+    if(conflictsFor(candidate,id,candidate[id]).length)requested[id]=firstFree(candidate,id);
+  }
+  _cache = normalizeBinds(requested);
   _feel = normalizeFeel(current ? raw.feel : null);
+  // Existing WASD users predate Stop; keep S owned by camera pan on upgrade.
+  if (_feel.wasdCamera && !raw?.binds?.hero_stop) {
+    const migrated = setWasdCamera(_cache, _feel, true);
+    _cache = migrated.binds; _feel = migrated.feel;
+  }
 }
 
 function persist() {

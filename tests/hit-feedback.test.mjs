@@ -12,8 +12,8 @@ function fixture() {
 test('hero hit feedback reports the actual primary HP loss and existing critical roll',()=>{
  for(const chance of [0,1]) {
   const {g,h,z}=fixture();h.weapon={...h.weapon,critChance:chance};h.mods.critChance=0;h.auraCrit=0;
-  const before=z.hp;g._updateUnits(1/30);
-  const shot=g.events.find(e=>e.type==='shot' && e.fromId===h.id);
+  const before=z.hp;for(let i=0;i<30&&!g.events.some(e=>e.type==='heroimpact');i++){g._updateHero(1/30);g._updateUnits(1/30);}
+  const shot=g.events.find(e=>e.type==='heroimpact' && e.fromId===h.id);
   assert.ok(shot,'hero fired at the target');assert.equal(shot.crit,chance===1);
   assert.ok(shot.damage>0);assert.equal(shot.damage,before-z.hp);
  }

@@ -98,6 +98,12 @@ try {
       window.dispatchEvent(new KeyboardEvent('keyup',{key,code,bubbles:true}));app._updateHeroInput();
       if(g.heroes[0].mx!==0||g.heroes[0].mz!==0)return false;
     }
+    for(const [key,kind] of [['s','stop'],['h','hold']]) {
+      g.exec({t:'horder',p:0,k:'move',x:40,z:40});
+      window.dispatchEvent(new KeyboardEvent('keydown',{key,code:'Key'+key.toUpperCase(),bubbles:true}));
+      window.dispatchEvent(new KeyboardEvent('keyup',{key,code:'Key'+key.toUpperCase(),bubbles:true}));
+      if(g.heroes[0].orderKind!==kind||g.heroes[0].orderX!==null||app.ui.pauseOpen)return false;
+    }
     app.game=null;return true;
   })()`),true,'actual keyboard dispatch keeps ability/camera keys out of hero movement and honors numpad with either NumLock state');
   // Account/profile hydration finishes after the renderer is constructed and

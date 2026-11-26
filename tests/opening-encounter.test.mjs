@@ -40,3 +40,18 @@ test('co-op adds pressure without dropping the readable heavy and ranged roles',
 test('later campaign missions do not gain the opening encounter', () => {
   assert.equal(make(null, 'scott', 'normal', 2).firstSiege, null);
 });
+
+test('Sniper co-op opening restores after a shelled structure falls without enemy drift',()=>{
+ const g=make(null,['sniper','alexander']);g.exec({t:'found',s:0,p:0});g._construct(g.plots.find(p=>p.kind==='camp_militia'));
+ for(let batch=0;batch<5;batch++){
+  const c=batch%3===0?{t:'hhalt',k:batch%2?'stop':'hold',p:1}:{t:'horder',k:batch%2?'attack':'move',x:95+batch,z:95,p:1};
+  g.exec(c);ticks(g,300);
+ }
+ const restored=make(g.snapshot(),['sniper','alexander']);
+ const order={t:'horder',k:'attack',x:100,z:95,p:1};g.exec(order);restored.exec(order);
+ for(let i=0;i<600;i++){
+  ticks(g,1);ticks(restored,1);
+  assert.deepEqual(restored.zombies.map(z=>[z.id,z.x,z.z,z.atkT]),g.zombies.map(z=>[z.id,z.x,z.z,z.atkT]),'enemy motion differs after restore at tick '+i);
+  assert.equal(stateHash(restored),stateHash(g),'peer state differs at tick '+i);
+ }
+});
