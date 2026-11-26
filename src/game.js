@@ -1,3 +1,4 @@
+import { cancelHeroAttack, tickHeroProjectiles, updateHeroAttack } from './hero-attacks.js';
 import { tickUnitBuffs, unitBuffMod } from './combat-buffs.js';
 import { castSpell, updateSpells, spellAttackSpeed, spellMoveSpeed, spellAttack, spellAfterAttack, spellState, spellOnAttackTaken, spellCooldownBase, spellManaCost, spellRank, SPELL_UPGRADE_KEYS } from './hero-spells.js';
 import { heroAbility, abilityCooldown, abilityCooldowns, setAbilityCooldown, tickAbilityCooldowns } from './hero-abilities.js';
@@ -82,8 +83,9 @@ function segOpen(x0, z0, x1, z1, pass) {
 }
 
 // v12: colony crew, corrected escort routing and committed combat windups.
-export const SNAPSHOT_VERSION = 13;
-export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 12;
+// v14: timed hero attacks and released damage; older readers must not drop them.
+export const SNAPSHOT_VERSION = 14;
+export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 13 || snap?.v === 12;
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -358,9 +360,11 @@ export class Game {
         dead: !!h.dead, reviveT: snapNum(h.reviveT || 0),
         level: h.level, xp: snapNum(h.xp), cd: snapNum(h.abilCd), abilityCds: abilityCooldowns(h), spells: h.spells ? structuredClone(h.spells) : null,
         atkCd: snapNum(h.cooldown || 0), rt: snapNum(h.retargetT || 0), facing: snapNum(h.facing || 0),
-        mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
+        moving: !!h.moving, mx: snapNum(h.mx || 0), mz: snapNum(h.mz || 0), sprint: !!h.sprint, pay: !!h.payHold,
         ox: h.orderX == null ? null : snapNum(h.orderX), oz: h.orderZ == null ? null : snapNum(h.orderZ),
         ok: h.orderKind || null, oi: h.orderId ?? null,
+        attack: h.attack ? structuredClone(h.attack) : null, attackShots: structuredClone(h.attackShots || []),
+        attackRecovery: h.attackRecovery || 0, attackSerial: h.attackSerial || 0,
         coinAcc: snapNum(h._coinAcc || 0), auraT: snapNum(h._auraT || 0),
         focusId: h.focusId ?? null,
         target: h.target ? h.target.id : null, targetNest: h.targetNest ? h.targetNest.id : null,
@@ -604,11 +608,16 @@ export class Game {
       h.focusId = hs.focusId ?? null;
       h.retargetT = hs.rt || 0;
       h.facing = hs.facing || 0;
+      h.moving = !!hs.moving;
       h.mx = hs.mx || 0;
       h.mz = hs.mz || 0;
       h.orderX = hs.ox == null ? null : hs.ox;
       h.orderZ = hs.oz == null ? null : hs.oz;
-      h.orderKind = hs.ok === 'attack' || hs.ok === 'move' ? hs.ok : null;
+      h.orderKind = ['attack','move','stop','hold'].includes(hs.ok) ? hs.ok : null;
+      h.attack = hs.attack ? structuredClone(hs.attack) : null;
+      h.attackShots = structuredClone(hs.attackShots || []);
+      h.attackRecovery = hs.attackRecovery || 0;
+      h.attackSerial = hs.attackSerial || 0;
       h.orderId = Number.isInteger(hs.oi) ? hs.oi : null;
       h.sprint = !!hs.sprint;
       h.payHold = !!hs.pay;
@@ -2693,6 +2702,7 @@ export class Game {
     let x = Number(dx) || 0, z = Number(dz) || 0;
     if (!x && !z) { x = Math.sin(h.facing || 0); z = Math.cos(h.facing || 0); }
     const len = Math.hypot(x, z) || 1;
+    cancelHeroAttack(h);
     h.dodgeX = x / len;
     h.dodgeZ = z / len;
     h.dodgeT = DODGE_TIME;
@@ -2709,6 +2719,7 @@ export class Game {
     if (!h || h.dead) return;
     if (!hasSecondSet(h.equipment)) { this.emit({ type: 'deny' }); return; }
     if (h.swapCd > 0) { this.emit({ type: 'deny' }); return; }
+    cancelHeroAttack(h);
     h.activeSet = h.activeSet === 1 ? 0 : 1;
     h.swapCd = WEAPON_SWAP_CD;
     // The sheathed set's global mods and its doctrines both go away with it, so
@@ -2880,6 +2891,7 @@ export class Game {
       hp: d.hp, maxHp: d.hp,
       mx: 0, mz: 0, sprint: false,
       orderX: null, orderZ: null, orderKind: null, orderId: null,
+      attack: null, attackShots: [], attackRecovery: 0, attackSerial: 0,
       cooldown: 0, target: null, facing: 0, retargetT: 0,
       level, xp: (camp && camp.xp) || 0, abilCd: 0, abilityCds: Array(6).fill(0),
       items, pack, blessings: [], itemMods: itemModsOnly, mods: { ...itemModsOnly }, upgrades,
@@ -3072,8 +3084,15 @@ export class Game {
         if (h) {
           h.mx = c.x; h.mz = c.z; h.sprint = !!c.s;
           // A real stick direction cancels a click order. Sprint alone does not.
-          if (c.x || c.z) { h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null; }
+          if (c.x || c.z) { cancelHeroAttack(h); h.focusId=null; h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null; }
         }
+        break;
+      }
+      case 'hhalt': {
+        const h = this.heroes[c.p || 0];
+        if (!h || h.dead || !['stop','hold'].includes(c.k)) break;
+        cancelHeroAttack(h); h.orderKind=c.k; h.orderId=null; h.orderX=null; h.orderZ=null;
+        h.mx=0; h.mz=0; h.moving=false; h.focusId=null; h.target=null; h.targetNest=null; h.retargetT=0;
         break;
       }
       case 'horder': {
@@ -3083,12 +3102,14 @@ export class Game {
         const q = (n) => Math.round(Number(n) * 64) / 64;
         const x = q(c.x), z = q(c.z);
         if (!Number.isFinite(x) || !Number.isFinite(z)) break;
+        if (!(c.k === 'attack' && h.orderKind === 'attack' && c.id != null && c.id === h.orderId)) cancelHeroAttack(h);
+        h.target=null; h.targetNest=null; h.retargetT=0;
         h.orderX = Math.max(0, Math.min(size - 0.01, x));
         h.orderZ = Math.max(0, Math.min(size - 0.01, z));
         h.orderKind = c.k === 'attack' ? 'attack' : 'move';
         h.orderId = Number.isInteger(c.id) ? c.id : null;
         h.mx = 0; h.mz = 0;
-        if (h.orderKind === 'move') h.focusId = null;
+        h.focusId = h.orderKind === 'attack' ? h.orderId : null;
         break;
       }
       case 'cast': this.castAbility(c.p ?? 0, c.slot ?? 0, c); break;
@@ -3163,13 +3184,14 @@ export class Game {
     if (!h || h.dead) return;
     const ab = heroAbility(h.def, slot);
     if (!ab || ab.passive) return;
-    if (ab.spell) { if (!castSpell(this,h,slot,input)) this.emit({type:'deny'}); return; }
+    if (ab.spell) { if (!castSpell(this,h,slot,input)) this.emit({type:'deny'}); else cancelHeroAttack(h); return; }
     if (!ab.cast) return;
     if (abilityCooldown(h, slot) > 0) { this.emit({ type: 'deny' }); return; }
     const ranked = !!h.def.abilities;
     const r = ranked ? spellRank(h, slot) : abilityRank(h.level, h.upgrades) - 1;
     const cost = spellManaCost(h, slot);
     if (cost && spellState(h).mana < cost) {this.emit({type:'deny'});return;}
+    cancelHeroAttack(h);
     if (cost) spellState(h).mana -= cost;
     const ultMult = ranked ? 1 : this.heroUltDamageMult(h);
     const cdBase = Array.isArray(ab.cd) ? ab.cd[Math.min(ab.cd.length - 1, r)] : ab.cd;
@@ -3378,10 +3400,12 @@ export class Game {
   }
 
   _updateHeroOne(h, dt) {
+    tickHeroProjectiles(this, h, dt);
     tickUnitBuffs(h,dt);
     tickAbilityCooldowns(h, dt);
     updateSpells(this,h,dt);
     if (h.dead) {
+      cancelHeroAttack(h);
       h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null;
       if (h.fallen) return; // out of lives — this fall is final
       h.reviveT -= dt;
@@ -3443,6 +3467,7 @@ export class Game {
     // A roll owns the hero for its duration: it ignores the movement keys, so
     // the commitment is real and a peer cannot steer it differently mid-roll.
     if (h.dodgeT > 0) {
+      cancelHeroAttack(h);
       h.dodgeT = Math.max(0, h.dodgeT - dt);
       h.dodgeIT = Math.max(0, (h.dodgeIT || 0) - dt);
       h.moving = this._moveActor(h, h.dodgeX || 0, h.dodgeZ || 0, baseSpeed * DODGE_SPEED, dt);
@@ -3468,6 +3493,12 @@ export class Game {
   // walks the same line. Attack-move onto a unit chases that id until it dies.
   _followHeroOrder(h, baseSpeed, dt) {
     let tx = h.orderX, tz = h.orderZ, stop = 0.45;
+    if (h.orderKind === 'attack' && h.orderId == null) {
+      const range = this.heroRange(h);
+      const target = this.zombies.filter(z => !z.dead && z.hp > 0 && dist2(h.x,h.z,z.x,z.z) <= range*range)
+        .sort((a,b) => dist2(h.x,h.z,a.x,a.z)-dist2(h.x,h.z,b.x,b.z) || a.id-b.id)[0];
+      if (target) { h.target=target; h.targetNest=null; h.moving=false; return; }
+    }
     if (h.orderKind === 'attack' && h.orderId != null) {
       const target = this.zombies.find((z) => z.id === h.orderId && !z.dead && z.hp > 0);
       if (!target) {
@@ -4851,7 +4882,7 @@ export class Game {
       // Auto-attack — units fire even while moving. A weaving hero is a blade
       // between worlds: no gunfire until the threads release him.
       if (u.hero && u.swapCd > 0) u.swapCd = Math.max(0, u.swapCd - dt);
-      if (u.hero && u.weaveT > 0) { u.target = null; u.targetNest = null; continue; }
+      if (u.hero && u.weaveT > 0) { cancelHeroAttack(u); u.target = null; u.targetNest = null; continue; }
       let focus=null;
       if(u.hero && u.focusId!=null) {
         focus=this.zombies.find(z=>z.id===u.focusId);
@@ -4895,11 +4926,13 @@ export class Game {
         }
       }
       if(focus){u.target=focus;u.targetNest=null;}
+      if(u.hero && u.orderKind==='attack' && u.orderId!=null){u.target=this.zombies.find(z=>z.id===u.orderId&&!z.dead)||null;u.targetNest=null;}
       // hasteT/hasteMult now apply to any unit (Aaron's Warding Field buffs
       // squad troops too), not just heroes self-buffing.
       const rofMult = (u.hero ? spellAttackSpeed(u) : 1) * (u.hasteT > 0 ? (u.hasteMult || 1) : 1) * (u.hero ? 1 + u.mods.rof : 1);
       // A hero swings their equipped weapon; a squad trooper swings their unit
       // definition. Both answer the same questions, so one accessor serves.
+      if (u.hero) { updateHeroAttack(this, u, dt, rofMult); continue; }
       const w = u.weapon || u.def;
       const attackRange = u.hero ? this.heroRange(u) : u.def.range;
       // Crit: a hero's own chance (base + passives) plus whatever an aura is

@@ -35,6 +35,7 @@ export function stateHash(g) {
     if (hr.spells) h = (h * 31 + hashString(JSON.stringify(hr.spells))) | 0;
     for (const cd of abilityCooldowns(hr)) h = (h * 31 + Math.round(cd * 1000)) | 0;
     h=(h*31+(hr.focusId??0))|0;
+    h=(h*31+hashString(JSON.stringify([hr.orderKind,!!hr.moving,hr.mx||0,hr.mz||0,hr.attack||null,hr.attackShots||[],hr.attackRecovery||0,hr.attackSerial||0,hr.cooldown])))|0;
     if (hr.orderX != null && hr.orderZ != null) {
       h = (h * 31 + Math.round(hr.orderX * 64) + Math.round(hr.orderZ * 64) * 3) | 0;
       h = (h * 31 + (hr.orderKind === 'attack' ? 2 : 1)) | 0;

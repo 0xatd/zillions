@@ -250,6 +250,8 @@ enemy attack-moves onto that enemy and shows a red marker.
 | Input | Action |
 | --- | --- |
 | A | Arm attack-move, then click |
+| S | Stop hero |
+| H | Hold position |
 | Q, W, E, R | Abilities I–IV in Fight mode |
 | Space | Center the camera on your hero |
 | ↑, ↓, ←, → | Pan the camera. Edge pan is on by default |
@@ -435,3 +437,7 @@ critical hits. Spell aiming indicators and the command bar are unchanged.
 
 Music and biome ambience use the existing music/master settings. Missing tracks
 fall back to the procedural score; local combat sound and global base alerts stay intact.
+
+### Timed hero attacks
+
+Hero attacks wind up before release. Moving before release cancels the swing; moving after release cancels recovery without resetting the attack cooldown. Ranged damage lands when the projectile arrives. Right-click enemies pursues a specific target; attack-move pauses for nearby enemies then resumes its destination. Stop suppresses attacks until another order; Hold attacks in range without chasing. WASD camera mode parks Stop on a free rebindable key. Squads keep autonomous combat.

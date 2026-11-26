@@ -69,6 +69,8 @@ export const ACTIONS = [
     desc: 'Full speed, and only at full health.',
   },
 
+  { id: 'hero_stop', name: 'Stop hero', scopes: ['battle'], context: 'combat', default: 's' },
+  { id: 'hero_hold', name: 'Hold position', scopes: ['battle'], context: 'combat', default: 'h' },
   // ---- combat ----
   {
     id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: 'v',
@@ -197,6 +199,9 @@ export function setWasdCamera(binds, feel, on) {
       const to = firstFree(next, 'attack_move');
       parked.attack_move = { from: 'a', to };
       next.attack_move = to;
+    }
+    if (next.hero_stop === 's') {
+      const to = firstFree(next, 'hero_stop'); parked.hero_stop = {from:'s',to}; next.hero_stop=to;
     }
     options.wasdCamera = true;
     options.parked = parked;
@@ -369,6 +374,11 @@ function hydrate(force = false) {
   const current = !!(raw && raw.v === KEYBIND_VERSION);
   _cache = normalizeBinds(current ? raw.binds : null);
   _feel = normalizeFeel(current ? raw.feel : null);
+  // Existing WASD users predate Stop; keep S owned by camera pan on upgrade.
+  if (_feel.wasdCamera && !raw?.binds?.hero_stop) {
+    const migrated = setWasdCamera(_cache, _feel, true);
+    _cache = migrated.binds; _feel = migrated.feel;
+  }
 }
 
 function persist() {

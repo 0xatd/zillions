@@ -190,7 +190,7 @@ Right-click is the order. Q, W, E, and R are the four ability keys. The camera
 is free to pan, and Space brings it back to the hero.
 
 - Right-click on ground issues a move order. Right-click on an enemy issues an
-  attack-move onto that enemy. A shows a marker and the next click attack-moves.
+  pursue-and-attack order onto that enemy. A shows a marker and the next click attack-moves.
   An attack order enters Fight mode and releases held construction input.
   Orders are lockstep commands. Remapping keys does not change the command.
 - Direct hero movement remains bindable and is never camera-relative. The
@@ -476,3 +476,7 @@ Opening stage/wave state remains in existing snapshots. Multiplayer protocol
 16 prevents protocol-15 rooms from accepting the changed simulation. The hash
 includes opening state and army stance. Signed-in rewards, account progression,
 map generation, and combat authority are unchanged.
+
+## Timed hero attack contract (2026-11-26)
+
+Hero attacks have a cancellable wind-up, release and movement-cancellable recovery. Movement never resets the attack cooldown. Ranged damage lands at projectile impact; released shots survive movement and shooter death. Attack orders retain the chosen enemy, attack-move resumes its ground goal after contact, Stop suppresses auto-attacks, and Hold attacks without pursuit. Wind-up, flight payload, cooldown and order state survive restore and enter the lockstep hash. Protocol and shared replay simulation version 21 reject mixed runtimes. No denies, last-hit economy or Dota items are introduced.

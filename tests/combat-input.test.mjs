@@ -71,6 +71,7 @@ test('WASD camera pan is optional and still leaves one owner per key', () => {
   assert.equal(allConflicts(on.binds).length, 0);
   assert.notEqual(on.binds.ability2, 'w');
   assert.notEqual(on.binds.attack_move, 'a');
+  assert.notEqual(on.binds.hero_stop, 's');
   assert.equal(cameraAxisHeld(on.binds, new Set(['w']), 'up', {
     wasdCamera: true, actionFor, isHeld, cameraAction: 'camera_up',
   }), true);
@@ -83,6 +84,7 @@ test('WASD camera pan is optional and still leaves one owner per key', () => {
   assert.equal(off.binds.ability2, 'w');
   assert.equal(off.binds.ability4, 'r');
   assert.equal(off.binds.attack_move, 'a');
+  assert.equal(off.binds.hero_stop, 's');
   assert.equal(cameraAxisHeld(off.binds, new Set(['w']), 'up', {
     wasdCamera: false, actionFor, isHeld, cameraAction: 'camera_up',
   }), false);
