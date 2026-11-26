@@ -17,6 +17,18 @@ export function pointerOrder({ button = -1, armed = false, enemy = false } = {})
   return { t: 'horder', k: enemy || armed ? 'attack' : 'move' };
 }
 
+// The on-screen build button latches until the sim finishes the payment.
+// In co-op the pay command is queued, so payHold stays false until the
+// lockstep window applies. That gap is not completion. Clear the latch only
+// after the sim has shown payHold true and then turned it off.
+export function settleBuildToggle({ buttonPay = false, lastPay = false, payHold = false, acked = false } = {}) {
+  const seen = !!acked || !!(buttonPay && lastPay && payHold);
+  if (buttonPay && lastPay && seen && !payHold) {
+    return { buttonPay: false, lastPay: false, acked: false };
+  }
+  return { buttonPay: !!buttonPay, lastPay: !!lastPay, acked: !!(buttonPay && lastPay && seen) };
+}
+
 // Slots 0–3 are the four ability keys. The secondary bar shifts the first two
 // into slots 4 and 5. Rebinding the key does not change the slot.
 export function castSlot(action, secondBar = false) {

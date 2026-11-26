@@ -47,6 +47,15 @@ export function normalizeQuickSetup(raw = {}) {
   };
 }
 
+// Heroes a guest retry may start. Signed-in retry stays on the selected character.
+export function localRetryHeroes(profile = {}, selected = '') {
+  const keys = new Set();
+  if (selected) keys.add(selected);
+  if (profile?.lastHero) keys.add(profile.lastHero);
+  for (const key of PLAYABLE_LEADER_KEYS) keys.add(leaderHeroKey(key));
+  return [...keys];
+}
+
 export function leaderHeroKey(key) {
   if (key === 'vanguard') return 'scott';
   return HEROES[key] ? key : 'scott';

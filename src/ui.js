@@ -19,7 +19,7 @@ import {
 import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
 import { dailyScore, formatDailyStanding, modifierInfo } from './daily.js';
-import { combatAlert, runReview } from './combat-readability.js';
+import { combatAlert, firstWaveApproach, pauseVeilHidden, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources, visibleInFog } from './fog-of-war.js';
@@ -40,7 +40,7 @@ import {
 import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
-import { ShellState, SHELL_BASES } from './shell-state.js';
+import { ShellState, SHELL_BASES, matchBlocksShell } from './shell-state.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
@@ -109,6 +109,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
+      <div id="wave-approach" class="wave-approach hidden" aria-hidden="true"><b>➤</b><small></small></div>
       <div id="messages"></div>
       <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
         <button id="battle-details-close" aria-label="Close details">×</button>
@@ -501,7 +502,7 @@ export class UI {
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> build, repair, or rebuild. Fight mode makes it dodge and enables <kbd data-bind-label="ability1"></kbd>. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> and <kbd data-bind-label="build"></kbd> build, repair, or rebuild. Fight mode makes <kbd data-bind-label="dodge"></kbd> dodge. Fight mode enables abilities. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
@@ -1105,6 +1106,7 @@ export class UI {
   }
 
   _showScreen(name) {
+    if (this.cb.isMatchLive?.() && matchBlocksShell(name)) return;
     this._battlePanel = null;
     this.root.querySelector('#builder-controls').classList.add('hidden');
     this.root.querySelector('#battle-details').classList.add('hidden');
@@ -1517,7 +1519,7 @@ export class UI {
         const clash = clashes.get(action.id);
         const listening = this._bindingId === action.id;
         return `<div class="bindrow${clash ? ' clash' : ''}${action.reserved ? ' reserved' : ''}${key ? '' : ' unbound'}">
-          <span class="bindname">${escapeHtml(action.name)}${action.reserved ? '<em>not yet used</em>' : ''}
+          <span class="bindname">${escapeHtml(action.name)}
             ${action.desc ? `<small>${escapeHtml(action.desc)}</small>` : ''}</span>
           <button class="bindkey${listening ? ' listening' : ''}" data-action="${action.id}"
             ${action.fixed ? 'disabled title="This key is fixed."' : ''}>
@@ -2843,16 +2845,8 @@ export class UI {
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
       else if (this._bigMode === 'cast') this.cb.onCast();
+      else if (this._bigMode === 'build') this.cb.onBuildToggle && this.cb.onBuildToggle();
     };
-    big.onpointerdown = (e) => {
-      if (this._bigMode !== 'build') return;
-      e.preventDefault();
-      this.cb.onBuildHold && this.cb.onBuildHold(true);
-      try { big.setPointerCapture(e.pointerId); } catch {}
-    };
-    big.onpointerup = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
-    big.onpointercancel = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
-    big.onpointerleave = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
     big.onmouseenter = (e) => {
       const hh = this._game ? this._game.heroes[this._p] : null;
       if (hh) this._showTip(e, this._heroTip(heroCopy(hh.def, this._hudCharacter)));
@@ -2919,14 +2913,14 @@ export class UI {
     if(b){
       this._builderPaused=b.paused;
       this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
-      this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
+      this.root.querySelector('#builder-status').textContent=b.paused?'Crew idle':builderStatus(game);
       const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
       if(document.activeElement!==order)order.value=b.order;
       if(document.activeElement!==reserve)reserve.value=b.reserve;
       for(const control of [order,reserve,pause])control.disabled=p!==0;
       pause.textContent=b.paused?'Resume':'Pause';
       for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
-      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':(b.paused ? 'Paused — choose an order or Resume to start the crew. ' : b.status==='No eligible work' ? 'Current order is complete. Choose another order or capture more ground. ' : '')+({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':(b.paused ? 'Crew is standing by — choose an order or Resume. The siege keeps running. ' : b.status==='No eligible work' ? 'Current order is complete. Choose another order or capture more ground. ' : '')+({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
     }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
@@ -3082,7 +3076,7 @@ export class UI {
       this._updateUpgradePanel(game, h);
 
       const slots = q('#ability-slots');
-      slots.hidden = controlMode !== 'fight' || game.phase === 'found';
+      slots.hidden = false;
       const slotMarkup = heroAbilities(h.def).map((ability, slot) => {
         if (!ability || ability.passive || slot === 0) return '';
         const cd = abilityCooldown(h, slot);
@@ -3097,6 +3091,7 @@ export class UI {
       // The one big contextual button: found the city, build in Build mode, or cast.
       const big = q('#bigaction');
       const ab = h.def.ability;
+      const paying = !!controls.paying;
       if (game.phase === 'found') {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
@@ -3112,24 +3107,18 @@ export class UI {
           const verb = act.mode === 'repair' ? 'Repair' : act.mode === 'rebuild' ? 'Rebuild' : plot.tier > 0 ? 'Upgrade' : 'Build';
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
-          big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`;
-          big.disabled = h.dead;
+          this._paintBig(big, `bigaction build ready${paying ? ' holding' : ''}`, `<span class="bicon">🏗️</span><span class="btext">${paying ? 'Working' : verb} ${name}<small>Click, or hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`, h.dead);
         } else {
           this._bigMode = 'idle';
-          big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`;
-          big.disabled = true;
+          this._paintBig(big, 'bigaction build', `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`, true);
         }
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
-        big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
-          (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
-        big.disabled = h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0);
+        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')} · ${this._keyLabel('build_mode')} construction</small></span>` +
+          (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : ''), h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0));
       }
     }
 
@@ -3148,6 +3137,19 @@ export class UI {
       setTimeout(() => { div.remove(); }, 7000);
       if (m.kind === 'bad') this.showBanner(m.text, 'bad');
     }
+  }
+
+  // Rewriting the button every frame destroyed the element under the cursor
+  // and cancelled a click before it could pay.
+  _paintBig(big, className, html, disabled) {
+    if (!big) return;
+    if (big.className !== className) big.className = className;
+    if (big.dataset.markup !== html) {
+      big.dataset.markup = html;
+      big.innerHTML = html;
+    }
+    big.disabled = !!disabled;
+    big.setAttribute('aria-pressed', String(className.includes('holding')));
   }
 
   _updateUpgradePanel(game, h) {
@@ -3275,7 +3277,7 @@ export class UI {
     t.style.bottom = (window.innerHeight - e.clientY + 18) + 'px';
     t.style.top = 'auto';
   }
-  _hideTip() { this.tooltip.classList.add('hidden'); }
+  _hideTip() { this.tooltip?.classList.add('hidden'); }
 
   showMissionIntro(level, onSkip) {
     this.root.querySelector('#mission-intro-title').textContent = level.name;
@@ -3328,6 +3330,29 @@ export class UI {
     this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
   }
 
+  setWaveApproach(marker) {
+    const el = this.root.querySelector('#wave-approach');
+    if (!el) return;
+    if (!marker) {
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+    el.style.left = `${marker.x}px`;
+    el.style.top = `${marker.y}px`;
+    const arrow = el.querySelector('b');
+    const label = el.querySelector('small');
+    if (arrow) arrow.style.transform = `rotate(${marker.angle}rad)`;
+    if (label && label.textContent !== marker.label) label.textContent = marker.label || '';
+  }
+
+  suppressPauseVeil() {
+    this._matchOver = true;
+    this.root.querySelector('#pause-veil')?.classList.add('hidden');
+  }
+
   setSpeedUI(speed, paused) {
     this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
@@ -3336,7 +3361,9 @@ export class UI {
     const veil = this.root.querySelector('#pause-veil');
     const menusOpen = !this.root.querySelector('#overlay').classList.contains('hidden');
     if (veil) {
-      veil.classList.toggle('hidden', !paused || menusOpen || this.pauseOpen);
+      veil.classList.toggle('hidden', pauseVeilHidden({
+        paused, menusOpen, pauseOpen: this.pauseOpen, matchOver: !!this._matchOver,
+      }));
       const speedLine = veil.querySelector('#pause-veil-speed');
       if (speedLine) speedLine.textContent = `Speed ${speed}×`;
       const hint = veil.querySelector('#pause-veil-hint');
@@ -3439,14 +3466,20 @@ export class UI {
   _renderLeaderPick(selector) {
     const host = this.root.querySelector(selector);
     if (!host) return;
+    this._hideTip();
     const selected = this.selectedLeader;
     host.innerHTML = leaderRoster(this._profile).map((leader) => {
-      const tip = [leader.role, leader.kit].filter(Boolean).join(' — ');
       const on = leader.playable && leader.key === selected;
-      return `<button type="button" class="leaderchip${leader.playable ? ' playable' : ' locked'}${on ? ' sel' : ''}" data-leader="${escapeHtml(leader.key)}" title="${escapeHtml(tip)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? escapeHtml(leader.role) : escapeHtml(leader.status)}</small></button>`;
+      return `<button type="button" class="leaderchip${leader.playable ? ' playable' : ' locked'}${on ? ' sel' : ''}" data-leader="${escapeHtml(leader.key)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? escapeHtml(leader.role) : escapeHtml(leader.status)}</small></button>`;
     }).join('');
-    for (const button of host.querySelectorAll('.leaderchip.playable')) {
-      button.onclick = () => this._selectLeader(button.dataset.leader);
+    host.onmouseleave = () => this._hideTip();
+    for (const button of host.querySelectorAll('.leaderchip')) {
+      const leader = leaderRoster(this._profile).find((entry) => entry.key === button.dataset.leader);
+      const tip = [leader?.role, leader?.kit, leader?.status].filter(Boolean).join(' — ');
+      button.onmouseenter = (event) => { if (tip) this._showTip(event, escapeHtml(tip)); };
+      button.onmousemove = (event) => this._moveTip(event);
+      button.onmouseleave = () => this._hideTip();
+      if (button.classList.contains('playable')) button.onclick = () => this._selectLeader(button.dataset.leader);
     }
   }
 
@@ -3569,6 +3602,7 @@ export class UI {
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (this.cb.isMatchLive?.()) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
@@ -3975,6 +4009,7 @@ export class UI {
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
   hideStart() {
+    this._matchOver = false;
     this.root.querySelector('#replay-gate')?.classList.add('hidden');
     this.root.querySelector('#overlay').classList.add('hidden');
     this.pauseOpen = false;
@@ -4174,6 +4209,7 @@ export class UI {
   }
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
+    this._matchOver = true;
     this.pauseOpen = false;
     this.root.querySelector('#pause-veil')?.classList.add('hidden');
     this.hideCoach();
@@ -4525,6 +4561,19 @@ export class UI {
       ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
     }
 
+    const approach = firstWaveApproach(game);
+    if (approach) {
+      ctx.strokeStyle = '#ffd75e';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(approach.fromX, approach.fromZ);
+      ctx.lineTo(approach.x, approach.z);
+      ctx.stroke();
+      ctx.fillStyle = '#ffd75e';
+      ctx.beginPath();
+      ctx.arc(approach.x, approach.z, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     // Hive nests: living hives glow violet; tonight's spawners pulse red.
     const firstSiegeNest = game.firstSiegeStatus?.()?.nest;
     for (const n of game.nests || []) {

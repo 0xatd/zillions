@@ -2280,6 +2280,11 @@ button.is-pressed:not(:disabled) { transform:translateY(1px); filter:brightness(
 button.is-busy { opacity:.72; pointer-events:none; }
 .speed-readout { min-width:72px; text-align:center; font-weight:800; letter-spacing:.08em; color:#f4ead2; }
 .pause-veil { position:absolute; inset:0; z-index:30; display:flex; align-items:center; justify-content:center; background:rgba(3,8,14,.62); pointer-events:none; text-align:center; }
+#overlay:has(.endpanel) { background: rgba(4, 8, 14, 0.94); }
+.wave-approach { position:fixed; z-index:28; width:0; height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#ffd75e; text-shadow:0 2px 8px #000; pointer-events:none; transform:translate(-50%,-50%); }
+.wave-approach b { font-size:28px; line-height:1; }
+.wave-approach small { font-size:11px; letter-spacing:.08em; white-space:nowrap; }
+.bigaction.holding { box-shadow:inset 0 0 0 2px #ffd75e; }
 .pause-veil b { display:block; font-size:clamp(48px,8vw,92px); letter-spacing:.22em; color:#f6edd6; text-shadow:0 8px 30px #000; }
 .pause-veil span, .pause-veil small { display:block; margin-top:8px; color:#d5e4ec; letter-spacing:.08em; }
 .coach { position:absolute; left:16px; bottom:168px; z-index:26; width:min(380px,calc(100vw - 32px)); padding:14px 16px; background:#10202bf2; border:1px solid #6d8796; border-left:3px solid #e0b15a; box-shadow:0 12px 40px #000a; }

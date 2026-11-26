@@ -6,7 +6,7 @@ import { stateHash } from '../src/lockstep-hash.js';
 import { guestCommand } from '../src/multiplayer-command.js';
 import {
   pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake,
-  armHitStop, tickHitStop,
+  armHitStop, tickHitStop, settleBuildToggle,
 } from '../src/combat-input.js';
 import {
   defaultBinds, actionFor, isHeld, allConflicts, normalizeBinds, setWasdCamera,
@@ -63,6 +63,19 @@ test('right-click orders move or attack-move and a plain left click does not', (
   const q = quantizeOrder(10.006, 12.004);
   assert.equal(q.x, 10);
   assert.equal(q.z, 12);
+});
+
+test('a latched build waits for the sim to acknowledge payment before it clears', () => {
+  const pending = settleBuildToggle({ buttonPay: true, lastPay: true, payHold: false, acked: false });
+  assert.equal(pending.buttonPay, true, 'a queued co-op pay is not completion');
+  assert.equal(pending.acked, false);
+  const live = settleBuildToggle({ ...pending, payHold: true });
+  assert.equal(live.buttonPay, true);
+  assert.equal(live.acked, true);
+  const done = settleBuildToggle({ ...live, payHold: false });
+  assert.deepEqual(done, { buttonPay: false, lastPay: false, acked: false });
+  const keys = settleBuildToggle({ buttonPay: false, lastPay: true, payHold: false, acked: false });
+  assert.equal(keys.lastPay, true, 'a keyboard hold keeps its own release rule');
 });
 
 test('WASD camera pan is optional and still leaves one owner per key', () => {

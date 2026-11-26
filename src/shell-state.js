@@ -6,6 +6,17 @@ export const SHELL_BASES = Object.freeze({
 
 const BASE_SCREENS = new Set(Object.values(SHELL_BASES));
 
+// Screens that replace the battlefield. Pause, help, and settings stay
+// available during a match; these would look like the run had ended.
+const MATCH_BLOCKED_SCREENS = new Set([
+  'account', 'main', 'quick', 'solo', 'lobby', 'custom', 'share', 'daily',
+  'character-create', 'setup', 'credits', 'cinematics',
+]);
+
+export function matchBlocksShell(name) {
+  return MATCH_BLOCKED_SCREENS.has(name);
+}
+
 // One source of truth for where the player is and which temporary view is
 // covering it. Menus never become destinations: closing one always reveals
 // the base state that opened it.
