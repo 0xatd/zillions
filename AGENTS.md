@@ -37,9 +37,10 @@ the siege simulation or prohibition on persistent shared-world systems. Read
 
 ## Product Boundary
 
-Zillions is a sci-fi siege game and only a siege game. The living world
-(overworld, galaxy map, parties, encounters, companies, region workers) was
-removed; do not reintroduce it without a product decision. The core loop is:
+Zillions is a sci-fi siege game and only a siege game. The persistent shared
+world (galaxy travel with parties, encounters, companies, and region workers)
+was removed; do not reintroduce it without a product decision. The campaign
+overworld is only the menu of planets and sites described below. The core loop is:
 
 1. Control one hero.
 2. Found one terrain-aware colony.
@@ -50,10 +51,18 @@ removed; do not reintroduce it without a product decision. The core loop is:
 
 The loop is continuous. Do not add a day, night, dawn, or bell phase.
 
-The main menu is multiplayer-first. Story Campaign, Survival, and The
-Labyrinth belong under Play Solo. The Labyrinth is a no-building hero
-gauntlet (`mode === 'labyrinth'`, level ids 9001+): keep it free of colony,
-economy, and army systems, and never let its wins advance campaign progress.
+The menu is one Bannerlord-style shell over the live planet. Boot opens the
+title word list (Play, Squad, Armory, Settings, Account; Credits in the
+footer). Sign-in lives on Account. Character Select sets the active character.
+The play hub is a mode registry with Campaign, Co-op, Versus, and Custom.
+Campaign opens the star-system overworld; assaulting a site starts the siege.
+Co-op holds Survival, The Labyrinth, Daily Siege, and Arcade. Versus is visible
+and marked Coming soon until player-versus-player exists. Custom is the one
+game browser. Unbuilt actions stay on screen, grey, and disabled. The
+Labyrinth is a no-building hero gauntlet (`mode === 'labyrinth'`, level ids
+9001+): keep it free of colony, economy, and army systems, and never let its
+wins advance campaign progress. The campaign overworld is a menu of planets
+and sites. It is not a return of the removed living world.
 
 ## Hard Invariants
 
@@ -165,7 +174,9 @@ for completed mechanics and explicit gaps; a catalog entry is not a playable kit
 - `src/lanes.js`: deterministic lane graph.
 - `src/flowfield.js`: pathfinding fields.
 - `src/main.js`: runtime composition, renderer, input, saves, and co-op.
-- `src/ui.js`: menus, room UI, HUD, and overlays.
+- `src/nav/router.js`: menu route stack, back, one modal, toasts, and match-allowed routes. `src/shell-state.js` re-exports it.
+- `src/modes.js`: play-hub mode registry. Coming soon modes stay visible and disabled.
+- `src/ui.js`: menus, room UI, HUD, and overlays. `src/shell-markup.js` is the menu DOM. `shell.css` holds menu tokens and HUD lanes.
 - `src/online.js`: Supabase lobby, rooms, seats, and signaling.
 - `src/net.js`: WebRTC transport and diagnostics.
 - `src/auth.js`: authentication, profile sync, and server-progress hydration.
