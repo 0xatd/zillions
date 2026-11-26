@@ -88,6 +88,18 @@ try {
     if (!appReady) await delay(150);
   }
   assert.equal(appReady, true, `app did not start: ${runtimeErrors.join(' | ')} ${await evaluate('document.body.innerText.slice(0, 300)')}`);
+  assert.equal(await evaluate(`(async () => {
+    const app=__app,{Game}=await import('/src/game.js'),{TerrainField}=await import('/src/terrain.js'),{levelById}=await import('/src/config.js'),{defaultBinds}=await import('/src/keybinds.js');
+    const l=levelById(1),g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal','scott',null,1);
+    app.game=g;app.missionIntro=null;app.netMode=false;app.mpRole=null;app.paused=false;app.controlMode='fight';app._binds=defaultBinds();app.keys.clear();document.activeElement?.blur();
+    for(const [code,key,x,z] of [['KeyW','w',0,0],['KeyA','a',0,0],['ArrowUp','ArrowUp',0,0],['Numpad8','8',0,-1],['Numpad6','ArrowRight',1,0]]) {
+      window.dispatchEvent(new KeyboardEvent('keydown',{key,code,bubbles:true}));app._updateHeroInput();
+      if(g.heroes[0].mx!==x||g.heroes[0].mz!==z)return false;
+      window.dispatchEvent(new KeyboardEvent('keyup',{key,code,bubbles:true}));app._updateHeroInput();
+      if(g.heroes[0].mx!==0||g.heroes[0].mz!==0)return false;
+    }
+    app.game=null;return true;
+  })()`),true,'actual keyboard dispatch keeps ability/camera keys out of hero movement and honors numpad with either NumLock state');
   // Account/profile hydration finishes after the renderer is constructed and
   // can replace the initial page context. Wait for that startup work before
   // driving the real controls.

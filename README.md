@@ -284,6 +284,9 @@ Army stances take F1–F3 rather than the number row, so 1 and 2 stay reserved
 for a future consumable system. Alt switches Build and Fight. In Build mode,
 V and B fund construction. In Fight mode, V dodges and Q, W, E, R cast.
 
+Attack orders enter Fight mode and stop construction payment. An ability key
+in Build mode shows the bound mode-switch key instead of silently failing.
+
 ## Local Development
 
 Requirements:

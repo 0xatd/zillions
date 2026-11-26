@@ -49,3 +49,16 @@ test('culling uses a camera rotation made this frame, not the previous render', 
  assert.equal(sphereVisible(frustum,0,0,10,1),true);
  assert.equal(sphereVisible(frustum,0,0,-10,1),false);
 });
+
+test('Low LOD preserves actionable enemy silhouettes instead of anonymous boxes', async () => {
+  const { combatSilhouette } = await import('../src/unit-impostors.js');
+  const hero={x:0,z:0,dead:false};
+  assert.equal(combatSilhouette({type:'spitter',x:8,z:0},hero),true);
+  assert.equal(combatSilhouette({type:'brute',x:12,z:0},hero),true);
+  assert.equal(combatSilhouette({type:'walker',x:12,z:0},hero),false);
+  assert.equal(combatSilhouette({type:'spitter',x:40,z:0},hero),false);
+  assert.equal(combatSilhouette({type:'walker',x:12,z:0,windup:{}},hero),true);
+  assert.equal(combatSilhouette({boss:true,x:40,z:0},hero),true);
+  const target={type:'walker',x:12,z:0};hero.target=target;
+  assert.equal(combatSilhouette(target,hero),true);
+});
