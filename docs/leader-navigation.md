@@ -44,3 +44,33 @@ The menu foundation integrates PR160/161 on top of PR159. Explicit Ready,
 all-loaded barriers, reconnect catch-up and authenticated relay are unchanged.
 Faction/campaign data retains its existing account ownership. New leaders use
 the existing authoritative inventory registration path when signed in.
+
+## Visual pass — 2026-11-26
+
+Roster and creator share an original carrier environment backplate (132KiB
+WebP), a live character preview and warm-metal interaction accents. The plate
+is illustration, not a newly implemented 3D world. On phones it ends behind
+the character stage; controls continue on a quiet dark surface. The hero name
+is primary; level/class move into supporting text. Character creation remains
+separate from returning-player entry. Future destinations and affiliations
+remain disabled, not fake working routes.
+
+Human custom characters now reuse the existing authored marine-kit head
+sculpts, mapped to the four identity families and supported hairstyles. This
+is shared by creator, armory and gameplay. Missing kit assets retain a
+procedural fallback. Preview loading refreshes the latest selection, never a
+stale character. Shared template geometry is retained on disposal; materials
+are per-instance. Armor adds chamfered plates and a stronger silhouette while
+keeping every cosmetic/equipment layer, rig pivot and simulation field intact.
+Robot identity is retained. This is not twenty new playable character kits.
+
+Preview lighting uses warm key / cool rim, a contact shadow and restrained
+motion; reduced-motion preference stops rotation. The long-term character
+sculpt/material quality target remains above this incremental model pass.
+
+Deployment correction: production's marine-kit URL was verified to return a
+132-byte LFS pointer (HTTP200), not `glTF` bytes. Both compact runtime kit files
+(<2MiB combined) are now ordinary Git binaries via exact `.gitattributes`
+exceptions. This also restores the existing authored colony-troop path on
+Git-based deployments. Do not infer actual asset delivery from HTTP200 alone;
+verify the GLB magic bytes in preview/release checks.

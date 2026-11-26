@@ -344,3 +344,111 @@ button:disabled {cursor:not-allowed;}
 }
 @media(max-width:760px){#shell-tabs {transform:none;justify-content:center;top:12px;}}
 .custom-actions a {color:var(--accent);font-size:12px;text-decoration:none;padding:6px;}
+
+/* Expedition carrier — one continuous environment for roster and creation. */
+#screen-main.character-select,#screen-character-create {
+ background:linear-gradient(90deg,rgba(5,10,17,.1),rgba(5,10,17,.12) 42%,rgba(5,10,17,.91) 77%),url('assets/menu/expedition-hangar.webp') center/cover;
+}
+#screen-main.character-select {display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:56px minmax(0,1fr) 40px;gap:12px 5vw;padding:90px 5vw 20px;}
+#screen-main .character-heading {grid-column:1/-1;grid-row:1;align-items:center;}
+#screen-main .character-heading h1 {font-size:18px;letter-spacing:.18em;text-transform:uppercase;color:#e8dbc1;}
+#screen-main .character-stage {grid-column:1;grid-row:2;display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;min-height:0;}
+#screen-main .character-avatar {width:100%;height:100%;min-height:0;background:none;}
+#screen-main .character-avatar::before {display:none;}
+#screen-main .character-copy {padding:12px 20px;text-align:center;background:radial-gradient(ellipse,#081019bb,transparent 72%);}
+#screen-main .character-copy h2 {font-size:38px;font-weight:600;letter-spacing:.08em;text-shadow:0 2px 12px #000;}
+#screen-main .character-copy p {margin:6px auto;color:#c6c9c8;}
+#screen-main .character-roster {grid-column:2;grid-row:2;max-height:none;background:linear-gradient(145deg,#111c27bd,#080f18ed);border:1px solid #a9b2ad26;border-top:2px solid #b99c67;padding:24px;gap:16px;box-shadow:0 18px 55px #0005;}
+#screen-main .roster-label {color:#c7b995;font-size:12px;letter-spacing:.2em;}
+#screen-main #character-list {max-height:none;min-height:70px;}
+#screen-main .character-row {padding:16px 12px;min-height:76px;background:#111c2644;border:1px solid #a6b4c11c;border-radius:0;transition:background .18s,border-color .18s;}
+#screen-main .character-row.sel {background:linear-gradient(100deg,#b1955330,#14233060);border-color:#d5b87b80;box-shadow:inset 3px 0 #d5b87b;}
+#screen-main .character-row:hover {background:#35506166;}
+#screen-main #m-create-character {border:1px dashed #a6b4c145;background:none;color:#c3cbd0;letter-spacing:.06em;}
+#screen-main #nav-home,.creator-actions .enter-world {background:linear-gradient(135deg,#eed4a0,#c39b58);border:1px solid #f4dba6;color:#15202a;font-weight:700;box-shadow:0 4px 20px #0005;transition:filter .15s,transform .15s;}
+#screen-main #nav-home:hover,.creator-actions .enter-world:hover {filter:brightness(1.12);transform:translateY(-1px);}
+#screen-main .leader-links {grid-row:3;align-items:center;justify-content:flex-end;border-top:1px solid #b4c1c326;padding-top:6px;}
+#screen-main .leader-links button {color:#c2c9cd;font-size:13px;}
+#screen-character-create {padding:86px 5vw 20px;}
+#screen-character-create .creator-head {text-align:left;margin:0 0 16px;}
+#screen-character-create .creator-head>span {color:#c7b995;letter-spacing:.22em;font-size:10px;}
+#screen-character-create .creator-head h1 {font-size:22px;letter-spacing:.12em;margin:5px 0;}
+.creator-form.creator-xl {grid-template-columns:minmax(0,1.15fr) minmax(380px,1fr);gap:16px 5vw;max-width:none;}
+#screen-character-create .creator-preview {background:none;border:0;border-radius:0;box-shadow:none;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:16px;box-sizing:border-box;}
+#screen-character-create .creator-preview::before {display:none;}
+#screen-character-create .creator-preview strong {align-self:center;font-size:25px;font-weight:600;text-shadow:0 2px 12px #000;}
+#screen-character-create .creator-preview>span {align-self:center;background:#07121b99;padding:6px 12px;}
+#screen-character-create .creator-controls {background:linear-gradient(135deg,#101c27e8,#080f18f2);border:1px solid #a9b2ad26;border-top:2px solid #b99c67;padding:20px 24px;scrollbar-color:#6f7778 #101a24;}
+#creator-steps {gap:5px;border-bottom:1px solid #c6d0cc22;padding-bottom:12px;}
+#creator-steps button {font-size:12px;letter-spacing:.02em;}
+#creator-step-title {font-size:34px;font-weight:600;letter-spacing:.03em;color:#f0e8d9;}
+.creator-controls :is(input,select) {border-radius:2px;}
+.creator-controls :is(.creator-race,.creator-class) {border-radius:2px;}
+.creator-actions {background:none;}
+.archetype-soon {background:linear-gradient(130deg,#17222d,#0e1721);border-color:#8094a12e;border-radius:2px;}
+@media(max-width:760px){
+ #screen-main.character-select {grid-template-columns:1fr;grid-template-rows:40px 290px auto 48px;padding:76px 16px 16px;gap:10px;background-position:35% center;}
+ #screen-main .character-heading {grid-column:1;grid-row:1;}
+ #screen-main .character-stage {grid-column:1;grid-row:2;grid-template-rows:minmax(0,1fr) auto;min-height:0;}
+ #screen-main .character-avatar {height:100%;}
+ #screen-main .character-copy {padding:0;}
+ #screen-main .character-copy h2 {font-size:26px;}
+ #screen-main .character-copy p {font-size:12px;}
+ #screen-main .character-roster {grid-column:1;grid-row:3;padding:16px;gap:10px;}
+ #screen-main #character-list {max-height:180px;}
+ #screen-main .character-row {min-height:60px;padding:10px;}
+ #screen-main .leader-links {grid-column:1;grid-row:4;gap:10px;justify-content:center;}
+ #screen-main .leader-links button {font-size:12px;padding:6px 0;}
+ #screen-character-create {padding:76px 12px 16px;background-position:35% top;background-attachment:fixed;}
+ #screen-character-create .creator-head h1 {font-size:18px;}
+ .creator-form.creator-xl {grid-template-columns:1fr;gap:12px;}
+ #screen-character-create .creator-preview {height:250px;min-height:250px;padding-bottom:4px;}
+ #screen-character-create .creator-preview strong {font-size:20px;}
+ #screen-character-create .creator-controls {padding:16px;}
+ .creator-actions {background:#0a141fee;border-top:1px solid #b99c6755;backdrop-filter:blur(14px);}
+}
+@media(prefers-reduced-motion:reduce){#screen-main .character-row,#screen-main #nav-home,.creator-actions .enter-world{transition:none;}}
+#screen-main .roster-sigil {font-family:Georgia,serif;font-size:28px;display:grid;place-items:center;min-width:44px;height:44px;color:#e2c68e;background:radial-gradient(circle,#bc9d5433,transparent);border:1px solid #c2a66a40;box-shadow:none;}
+#screen-character-create fieldset {margin:0;border:0;padding:0;}
+#screen-character-create fieldset legend {display:none;}
+#screen-character-create .creator-controls {display:block;}
+#screen-character-create .creator-controls [data-creator-step]:not(.hidden) {margin-top:16px;}
+#screen-character-create .creator-race {padding:18px 14px;min-height:118px;}
+#screen-character-create .creator-race b {font-family:var(--font-display);font-size:22px;font-weight:600;}
+#screen-character-create .creator-race small {font-size:13px;line-height:1.5;color:#aebcc5;}
+#screen-character-create .creator-race.sel {background:linear-gradient(135deg,#c2a26224,#17232a);border-color:#cbb175;}
+#screen-account.title-screen {background:linear-gradient(90deg,#07101930,#07101970 55%,#071019eb),url('assets/menu/expedition-hangar.webp') center/cover;}
+#screen-account .title-login {background:#0b151edb;border:1px solid #a9b2ad26;border-top:2px solid #b99c67;backdrop-filter:blur(12px);}
+#screen-account .gametitle {color:#f2e8d5;text-shadow:0 4px 30px #0008;}
+#screen-account .gamesub {color:#c5c9c8;}
+#screen-settings,#screen-custom,#screen-squad {background:linear-gradient(120deg,#09131de8,#09131df5),url('assets/menu/expedition-hangar.webp') center/cover;}
+#screen-settings .glass,#screen-custom .glass,#screen-squad .glass {border-color:#a9b2ad26;background:#101b25b8;}
+.shell-screen button:focus-visible {outline:2px solid #f0ce8b;outline-offset:3px;}
+@media(max-width:760px){
+ #screen-main.character-select,#screen-character-create {background-color:#080f18;background-size:auto 440px;background-position:35% 65px;background-repeat:no-repeat;background-attachment:local;}
+ #screen-character-create [data-creator-step] button:disabled {opacity:.65;}
+ #screen-main .character-copy {background:radial-gradient(ellipse,#081019dd,transparent 75%);}
+}
+/* Utility screens retain the same material/spacing hierarchy, not bare forms. */
+#screen-squad,#screen-settings {padding:86px 6vw 32px;}
+#screen-squad .sheet-head {padding:0 0 20px;margin-bottom:24px;background:none;border:0;border-bottom:1px solid #a9b2ad33;box-shadow:none;display:flex;align-items:center;justify-content:space-between;}
+#screen-squad .sheet-head h1 {font-size:28px;letter-spacing:.04em;}
+#screen-squad .squad-grid {gap:20px;}
+#screen-squad .squad-grid>section {padding:24px;min-height:260px;border-top:2px solid #b99c6770;}
+#screen-squad .squad-grid h2 {font-size:24px;margin:0 0 12px;color:#e8dbc1;}
+#screen-squad .squad-grid p {font-size:16px;line-height:1.6;color:#b4c2cd;margin-bottom:24px;}
+#screen-squad .lobbychatlog {min-height:150px;}
+#screen-settings .settingsgrid {max-width:940px;background:none;border:0;box-shadow:none;gap:24px;margin-top:24px;}
+#screen-settings .settingspane {background:#111d27b8;border:1px solid #a9b2ad26;border-top:2px solid #b99c67;border-radius:2px;padding:28px;}
+#screen-settings .setrow {font-size:16px;min-height:48px;}
+#screen-settings .stab {min-height:48px;font-size:16px;}
+#screen-settings .setuphead h2 {font-size:28px;}
+@media(max-width:760px){
+ #screen-squad,#screen-settings {padding:76px 16px 24px;}
+ #screen-squad .squad-grid {gap:12px;}
+ #screen-squad .squad-grid>section {padding:18px;min-height:0;}
+ #screen-squad .squad-grid p {font-size:14px;}
+ #screen-settings .settingsgrid {gap:12px;margin-top:16px;}
+ #screen-settings .settingspane {padding:18px;}
+ #screen-settings .setrow {font-size:14px;}
+}

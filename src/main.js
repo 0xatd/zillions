@@ -27,7 +27,7 @@ import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
-import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
+import { loadMarineKit, marineKitReady, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
@@ -930,17 +930,25 @@ class App {
       renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(32, 1, .1, 20);
-      camera.position.set(2.5, 1.45, 3.4);
-      camera.lookAt(0, .65, 0);
-      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 2.2));
-      const key = new THREE.DirectionalLight(0xffe2b5, 2.4); key.position.set(3, 4, 4); scene.add(key);
+      camera.position.set(1.65, 1.3, 3.6);
+      camera.lookAt(0, .8, 0);
+      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 1.15));
+      const key = new THREE.DirectionalLight(0xffe2b5, 2.0); key.position.set(3, 4, 4); scene.add(key);
+      const rim = new THREE.DirectionalLight(0x8acbe7, 2.1); rim.position.set(-3, 2, -2); scene.add(rim);
+      const contact = new THREE.Mesh(new THREE.CircleGeometry(.28, 32), new THREE.MeshBasicMaterial({color:0x03090e,transparent:true,opacity:.24,depthWrite:false}));
+      contact.rotation.x = -Math.PI / 2; contact.position.y = -.035; contact.scale.y = .65; scene.add(contact);
       p = { renderer, scene, camera, canvas, model: null };
       this.characterPreviews.set(canvas.id, p);
+    }
+    p.style = style;
+    if (!marineKitReady() && !p.kitRequested) {
+      p.kitRequested = true;
+      loadMarineKit().then(ready => { if (ready && p.canvas.isConnected) this._setCharacterPreview(p.style); });
     }
     if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
     const key = style.proxyHero || 'scott';
     p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style.chapterLeader ? null : style }).node;
-    p.model.scale.setScalar(1.45);
+    p.model.scale.setScalar(1.6);
     p.model.position.y = -.02;
     p.scene.add(p.model);
   }
@@ -953,7 +961,7 @@ class App {
       if (p.canvas.width !== Math.round(w * p.renderer.getPixelRatio()) || p.canvas.height !== Math.round(h * p.renderer.getPixelRatio())) {
         p.renderer.setSize(w, h, false); p.camera.aspect = w / h; p.camera.updateProjectionMatrix();
       }
-      p.model.rotation.y = Math.sin(t * .55) * .35;
+      p.model.rotation.y = matchMedia('(prefers-reduced-motion: reduce)').matches ? -.1 : -.1 + Math.sin(t * .35) * .12;
       p.renderer.render(p.scene, p.camera);
     }
   }

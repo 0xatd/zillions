@@ -9,3 +9,8 @@
 *.psd filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.vat.bin filter=lfs diff=lfs merge=lfs -text
+
+# Runtime marine kit must be present in Git-based static deployments.
+# These two compact assets total <2 MiB; do not serve LFS pointer text as GLB.
+assets/art-marines/kit/marine_kit.glb -filter -diff -merge -text
+assets/art-marines/kit/marine_kit_lo.glb -filter -diff -merge -text

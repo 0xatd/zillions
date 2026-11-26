@@ -1104,7 +1104,7 @@ export class UI {
     const p=this._profile||{}, characters=p.mmoCharacters||[], founder=chapterFounder(p);
     for (const c of characters) {
       const b=document.createElement('button');b.className='character-row';b.dataset.id=c.id;
-      b.innerHTML=`<span>${HEROES[c.proxyHero]?.icon || '◉'}</span><span><b>${escapeHtml(c.name)}</b><small>Level ${c.level||1} · ${escapeHtml(MMO_CLASSES[c.classKey]?.name || 'Leader')}</small></span>`;
+      b.innerHTML=`<span class="roster-sigil" aria-hidden="true">${c.raceKey === 'robot' ? '⬡' : '✦'}</span><span><b>${escapeHtml(c.name)}</b><small>Level ${c.level||1} · ${escapeHtml(MMO_CLASSES[c.classKey]?.name || 'Leader')}</small></span>`;
       b.onclick=()=>this.cb.onCharacterSelect?.(c.id);list.appendChild(b);
     }
     if (!characters.length) { const empty=document.createElement('p');empty.textContent='Your story starts with a leader.';list.appendChild(empty); }
@@ -1147,14 +1147,14 @@ export class UI {
     this.cb.onCharacterPreview?.({ raceKey: character.raceKey, appearance: character.appearance,
       customization: character.customization, equipment: character.equipment,
       chapterLeader: character.chapterLeader, proxyHero: character.proxyHero || klass.proxy, classKey: character.classKey, canvasId: 'roster-preview-canvas' });
-    this.root.querySelector('#character-name').textContent = `${character.name} · LEVEL ${character.level || 1}`;
+    this.root.querySelector('#character-name').textContent = character.name;
     const corner = this.root.querySelector('#active-character');
     const cornerName = this.root.querySelector('#active-character-name');
     const you = this.root.querySelector('#party-you-name');
     if (corner) corner.classList.remove('hidden');
     if (cornerName) cornerName.textContent = character.name;
     if (you) you.textContent = character.name;
-    this.root.querySelector('#character-tagline').textContent = `${character.chapterLeader ? CHAPTER_LEADERS.find(l=>l.key===character.chapterLeader)?.role : klass.name} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP`;
+    this.root.querySelector('#character-tagline').textContent = `Level ${character.level || 1} · ${character.chapterLeader ? CHAPTER_LEADERS.find(l=>l.key===character.chapterLeader)?.role : klass.name} · ${character.xp || 0}/${xpToMmoLevel(character.level || 1)} XP`;
     this.root.querySelector('#character-gear').innerHTML = gear.length
       ? gear.map((item) => `<span>${item.icon} ${item.name}</span>`).join('')
       : '<span class="empty-gear">Frontier issue gear · no recovered sets</span>';

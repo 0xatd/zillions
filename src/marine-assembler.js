@@ -445,3 +445,28 @@ export function marineForUnit(u, { matchSeed = 0, culture = 'european' } = {}) {
   const palette = u.def?.color != null ? { armor: u.def.color } : undefined;
   return assembleMarine(hashSeed(matchSeed >>> 0, u.id, u.key), { chapter, role, palette, ownMaterials: true });
 }
+
+// Reuse the authored identity sculpt in custom heroes, without replacing their
+// equipment layers or animation rig. All three views use this same builder.
+export function assembleCharacterHead(identity) {
+  if (!KIT) return null;
+  const root = new THREE.Group();
+  const face = identity.face.family, hair = identity.head.family;
+  const variant = {sentinel:'square', ranger:'long', veteran:'sculpted', nomad:'round'}[face] || 'square';
+  const head = clonePart('head', variant);
+  if (!head) return null;
+  root.add(head);
+  const hairVariant = {cropped:'crew', swept:'swept', shaved:'bald', hooded:'buzz'}[hair] || 'buzz';
+  const hairPart = hairVariant !== 'bald' ? clonePart('hair', hairVariant) : null;
+  if (hairPart) root.add(hairPart);
+  const marking = {veteran:'scar', nomad:'warpaint'}[face];
+  if (marking) { const part = clonePart('face', marking); if (part) root.add(part); }
+  const colors = {skin:0xd8b395,hair:0x382c25,armor:0x8493a6,armorDark:0x303b48,trim:0xbeb59f,glow:0x8fd0ff,cloth:0x30343b};
+  const materials = new Map();
+  root.traverse(o=>{if(!o.isMesh)return;const tint=m=>{if(!materials.has(m)){const c=tintMaterial(m,colors).clone();c.userData={...c.userData,kitShared:false};materials.set(m,c);}return materials.get(m);};o.material=Array.isArray(o.material)?o.material.map(tint):tint(o.material);});
+  root.scale.setScalar(.49);
+  // Center from the face alone: hairstyles must not shift the jaw/neck.
+  const bounds = new THREE.Box3().setFromObject(head);
+  root.position.y = .01 - (bounds.min.y + bounds.max.y) * .245;
+  return root;
+}
