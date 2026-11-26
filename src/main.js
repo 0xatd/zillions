@@ -3536,9 +3536,15 @@ class App {
     this.ui.showShareNotice({ title: 'Joining siege', copy: 'Looking for the host…' });
     this._bindShareTransport('guest');
     clearTimeout(this._shareDiscover);
-    this._shareDiscover = setTimeout(() => {
-      if (!this._shareLobby) this._failShare('invalid');
-    }, SHARE_DISCOVER_MS);
+    // Count live event-loop turns, not wall time. A cold CI page can block
+    // the thread longer than the old 8s timer, and that timer then fired
+    // before the in-flight lobby poll resolved and called the link invalid.
+    let turns = 0;
+    this._shareDiscover = setInterval(() => {
+      if (this._shareLobby || this._shareFailed) { clearTimeout(this._shareDiscover); return; }
+      turns += 1;
+      if (turns * 2000 >= SHARE_DISCOVER_MS * 4) this._failShare('invalid');
+    }, 2000);
     this._startShareHeartbeat();
   }
 
@@ -3875,6 +3881,7 @@ class App {
     if (!(lobby.seats || []).some((seat) => seat.id === this._shareSelf)) this._shareAnnounced = false;
     if (!this._shareAnnounced) {
       this._shareAnnounced = true;
+      this._shareJoinedAt = Date.now();
       this.audio?.init();
       this._sharePublish({
         t: 'join', name: this._shareDisplayName(), hero: this.ui.selectedHero || 'scott', claim: true,
@@ -4053,6 +4060,9 @@ class App {
 
   async _acceptShareOffer(message) {
     if (message.to !== this._shareSelf || this._shareOffered === message.id) return;
+    // A reloaded page replays the mailbox, including the offer from the
+    // previous handshake. Ignore anything older than this join.
+    if (this._shareJoinedAt && Number(message.at || 0) < this._shareJoinedAt) return;
     if (!this._shareLobby || message.from !== this._shareLobby.hostId) return;
     const rejoining = !!(this._shareLobby.started || this.netMode);
     if (rejoining && !this._shareLobby.seats?.some((seat) => seat.id === this._shareSelf)) return;
