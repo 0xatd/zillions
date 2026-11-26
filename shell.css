@@ -1,0 +1,49 @@
+/* Menu tokens. Component rules live with the shell layout. */
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('assets/fonts/rajdhani-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('assets/fonts/rajdhani-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('assets/fonts/rajdhani-latin-700-normal.woff2') format('woff2');
+}
+
+:root {
+  --font-display: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  --ink: #e7eef6;
+  --ink-dim: #9aafc2;
+  --accent: #7fd4ff;
+  --accent-2: #e0b15a;
+  --accent-glow: rgba(127, 212, 255, 0.45);
+  --glass: rgba(8, 14, 22, 0.72);
+  --glass-strong: rgba(7, 12, 18, 0.88);
+  --line: rgba(127, 212, 255, 0.35);
+  --line-warm: rgba(224, 177, 90, 0.55);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius: 2px;
+  --z-world: 1;
+  --z-hud: 20;
+  --z-hud-float: 30;
+  --z-toast: 40;
+  --z-menu: 50;
+  --z-modal: 70;
+  --z-confirm: 80;
+}
