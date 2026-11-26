@@ -5713,7 +5713,7 @@ class App {
     // battlefield on top of that takes longer than the backlog and freezes
     // their clicks. Snapshot only a guest who has stopped moving forward.
     const quiet = now - (this._guestProgressAt || now);
-    if (lag < 90 || quiet < 8000) {
+    if (lag < 90 || quiet < 12000) {
       this._guestLagSince = 0;
       this._guestLagSnapped = false;
       return;
