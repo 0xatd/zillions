@@ -220,3 +220,13 @@ test('routine horde deaths do not stall hero presentation during sustained comba
   assert.equal(held, 0, 'routine kills froze the battlefield');
   assert.ok(impactCue({ type: 'zdeath', big: true }).hitStop > 0, 'heavy impacts retain their accent');
 });
+
+test('adding Stop/Hold preserves legacy explicit S/H combat bindings',()=>{
+ for(const [key,added] of [['s','hero_stop'],['h','hero_hold']]){
+  const binds=defaultBinds();delete binds.hero_stop;delete binds.hero_hold;binds.ability1=key;
+  setKeybindBackend({load:()=>({v:KEYBIND_VERSION,binds,feel:{}}),save:()=>{}});
+  const migrated=loadBinds({force:true});assert.equal(migrated.ability1,key,'existing custom action must keep its key');
+  assert.notEqual(migrated[added],key);assert.ok(migrated[added]);assert.equal(allConflicts(migrated).length,0);
+ }
+ setKeybindBackend(null);
+});

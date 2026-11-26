@@ -372,7 +372,15 @@ function hydrate(force = false) {
   if (_cache && _feel && !force) return;
   const raw = readStore();
   const current = !!(raw && raw.v === KEYBIND_VERSION);
-  _cache = normalizeBinds(current ? raw.binds : null);
+  const requested = current ? {...(raw.binds || {})} : null;
+  // New default actions must yield to keys the player explicitly chose before
+  // this version introduced Stop/Hold. Keep both actions usable after upgrade.
+  if(requested)for(const id of ['hero_stop','hero_hold']){
+    if(Object.hasOwn(requested,id))continue;
+    const candidate={...defaultBinds(),...requested};
+    if(conflictsFor(candidate,id,candidate[id]).length)requested[id]=firstFree(candidate,id);
+  }
+  _cache = normalizeBinds(requested);
   _feel = normalizeFeel(current ? raw.feel : null);
   // Existing WASD users predate Stop; keep S owned by camera pan on upgrade.
   if (_feel.wasdCamera && !raw?.binds?.hero_stop) {
