@@ -72,7 +72,7 @@ export const ACTIONS = [
   // ---- combat ----
   {
     id: 'dodge', name: 'Mode action: build / dodge', scopes: ['battle'], context: 'combat', default: 'v',
-    desc: 'Build mode: hold to build. Fight mode: dodge with brief invulnerability.',
+    desc: 'Build mode: hold to build. Fight mode: dodge with brief invulnerability. Abilities stay on Q, W, E, and R in both modes.',
   },
   {
     id: 'ability1', name: 'Ability I', scopes: ['battle'], context: 'combat', default: 'q',
@@ -104,11 +104,11 @@ export const ACTIONS = [
   },
   {
     id: 'consumable1', name: 'Consumable I', scopes: ['battle'], context: 'combat', default: '1', reserved: true,
-    desc: 'Reserved. Zillions has no flask system; these slots are where one would go.',
+    desc: 'Reserved for a future item.',
   },
   {
     id: 'consumable2', name: 'Consumable II', scopes: ['battle'], context: 'combat', default: '2', reserved: true,
-    desc: 'Cast the third equipped ability.',
+    desc: 'Reserved for a future item.',
   },
 
   // ---- army and colony ----
@@ -118,14 +118,20 @@ export const ACTIONS = [
   },
   {
     id: 'build_mode', name: 'Toggle Build / Fight mode', scopes: ['battle'], context: 'army', default: 'alt',
-    desc: 'Build mode enables construction. Fight mode enables dodge and hero abilities.',
+    desc: 'Build mode shows construction and funds it. Abilities stay available. Fight mode dodges instead of building.',
   },
   {
     id: 'stance_defend', name: 'Stance: defend city', scopes: ['battle'], context: 'army', default: 'f1',
-    desc: 'Zillions has no PoE equivalent — squads are ours.',
+    desc: 'Squads fall back and hold the Keep.',
   },
-  { id: 'stance_follow', name: 'Stance: follow hero', scopes: ['battle'], context: 'army', default: 'f2' },
-  { id: 'stance_push', name: 'Stance: push lanes', scopes: ['battle'], context: 'army', default: 'f3' },
+  {
+    id: 'stance_follow', name: 'Stance: follow hero', scopes: ['battle'], context: 'army', default: 'f2',
+    desc: 'Squads escort the heroes and leave the Keep.',
+  },
+  {
+    id: 'stance_push', name: 'Stance: push lanes', scopes: ['battle'], context: 'army', default: 'f3',
+    desc: 'Squads take lane nodes, then siege the hives.',
+  },
   { id: 'tower_priority', name: 'Cycle tower targeting', scopes: ['battle'], context: 'army', default: 't' },
   { id: 'drop_item', name: 'Drop newest field item', scopes: ['battle'], context: 'army', default: 'z' },
 

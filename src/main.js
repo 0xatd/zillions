@@ -6,7 +6,7 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
-import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, leaderHeroKey, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, leaderHeroKey, localRetryHeroes, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, structuresOccludeHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -43,7 +43,7 @@ import {
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
-import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
+import { clearRetry, consumeRetry, edgeMarker, firstWaveApproach, retryAllowed, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { normalizeQualityChoice, probeGpuSignals, resolveGraphics, stepDownTier } from './graphics-quality.js';
 import { mergeStaticMeshes } from './static-batch.js';
@@ -259,7 +259,9 @@ class App {
       },
       onCast: (slot = 0) => this.tryCast(slot),
       onControlMode: () => this.toggleControlMode(),
-      onBuildHold: (on) => { this.buttonPay = !!on; },
+      onBuildHold: (on) => { this.buttonPay = !!on; if (on) this._payPressUsed = false; },
+      onBuildToggle: () => { this.buttonPay = !this.buttonPay; if (this.buttonPay) this._payPressUsed = false; },
+      isMatchLive: () => !!(this.game && !this.game.over),
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
@@ -314,11 +316,13 @@ class App {
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
-      canRetry: (game) => {
-        const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
-        return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
-          && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
-      },
+      canRetry: (game) => retryAllowed({
+        netMode: !!this.netMode,
+        mode: game?.mode,
+        levelId: game?.levelId,
+        unlocked: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
+        hero: this.ui.selectedHero,
+      }),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
@@ -1891,21 +1895,21 @@ class App {
     this.ui.setAccount(this.authStatus);
     // A shared replay owns the screen. Account hydration above still ran.
     if (this._replayBoot) return;
-    if (status.signedIn && !status.needsUsername) {
-      const character = selectedMmoCharacter(this.profile);
-      const retry = consumeRetry(sessionStorage, {
-        allowedHeroes: character?.proxyHero ? [character.proxyHero] : [],
-        maxLevel: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
-      });
-      if (retry) {
-        this._authenticatedEntryHandled = true;
-        this.ui._accountAccepted = true;
-        this.ui.selectedLevel = retry.level;
-        this.ui.selectedMode = 'campaign';
-        setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
-        return;
+    const retry = this._consumeBootRetry(status);
+    if (retry) {
+      this._authenticatedEntryHandled = true;
+      this.ui._accountAccepted = true;
+      if (!status.signedIn) {
+        this._guestSession = true;
+        this.ui.noteGuestSession();
       }
-    } else clearRetry(sessionStorage);
+      this.ui.selectedLevel = retry.level;
+      this.ui.selectedMode = 'campaign';
+      this.ui.selectedHero = retry.hero;
+      this.ui.selectedDiff = retry.difficulty;
+      setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
+      return;
+    }
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: straight back to mission select.
@@ -1944,17 +1948,35 @@ class App {
     location.reload();
   }
 
+  _consumeBootRetry(status) {
+    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+    if (status?.signedIn && status.needsUsername) {
+      clearRetry(sessionStorage);
+      return null;
+    }
+    const signedIn = !!(status?.signedIn && !status.needsUsername);
+    const character = signedIn ? selectedMmoCharacter(this.profile) : null;
+    const allowedHeroes = signedIn
+      ? (character?.proxyHero ? [character.proxyHero] : [])
+      : localRetryHeroes(this.profile, this.ui.selectedHero);
+    return consumeRetry(sessionStorage, { allowedHeroes, maxLevel: unlocked });
+  }
+
   _retryMission() {
-    if (!this.auth?.isSignedIn() || !this.game?.over || this.game.mode !== 'campaign' || this.netMode) {
+    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+    const hero = this.ui.selectedHero;
+    if (!retryAllowed({
+      netMode: !!this.netMode, mode: this.game?.mode, levelId: this.game?.levelId, unlocked, hero,
+    }) || !this.game?.over) {
       clearRetry(sessionStorage);
       return this._restartOrReturn();
     }
-    const character = selectedMmoCharacter(this.profile);
-    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
-    if (!character?.proxyHero || this.ui.selectedHero !== character.proxyHero
-      || !Number.isInteger(this.game.levelId) || this.game.levelId < 1 || this.game.levelId > unlocked) {
-      clearRetry(sessionStorage);
-      return this._restartOrReturn();
+    if (this.auth?.isSignedIn()) {
+      const character = selectedMmoCharacter(this.profile);
+      if (!character?.proxyHero || hero !== character.proxyHero) {
+        clearRetry(sessionStorage);
+        return this._restartOrReturn();
+      }
     }
     // Preserve the exact mission setup across the clean reload. Startup already
     // owns authentication/profile hydration; the retry marker is consumed once
@@ -5784,10 +5806,8 @@ class App {
         : act.mode === 'branch' ? act.nt
         : { def: act.def || { name: act.label }, cost: act.cost, mode: act.mode };
       const built = plot.tier > 0 && !plot.ruined;
-      if (!buildMode && !built) {
-        rec.group.visible = false;
-        continue;
-      }
+      // Fight mode hides the pay rings below. The pad, ghost, and finished
+      // building stay, or a mode switch looks like the plot was destroyed.
       // Foundation scenery (pad, posts, rubble, ghost) hides once built.
       rec.group.children.forEach((ch) => {
         if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
@@ -6707,7 +6727,7 @@ class App {
         case 'ability1': case 'ability2': case 'ability3': case 'ability4': {
           e.preventDefault();
           const slot = castSlot(act, isHeld(binds, this.keys, 'second_bar'));
-          if (this.controlMode === 'fight' && slot != null) this.tryCast(slot);
+          if (slot != null) this.tryCast(slot);
           break;
         }
         case 'attack_move':
@@ -6727,9 +6747,9 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this._orderStance('defend'); break;
+        case 'stance_follow': e.preventDefault(); this._orderStance('guard'); break;
+        case 'stance_push': e.preventDefault(); this._orderStance('attack'); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
@@ -6744,6 +6764,13 @@ class App {
       }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(bindKey(e)));
+    window.addEventListener('blur', () => this._releaseBattleInput());
+    window.addEventListener('contextmenu', (e) => {
+      if (!this.game || this.game.over) return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+    });
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -6792,7 +6819,7 @@ class App {
       }
       if (this.pendingAbility != null) {
         const slot=this.pendingAbility,h=this.myHero(),ab=heroAbility(h?.def,slot);
-        if (!h || h.dead || this.controlMode !== 'fight' || !ab) {this.pendingAbility=null;return;}
+        if (!h || h.dead || !ab) {this.pendingAbility=null;return;}
         if (ab.target==='enemy') {
           if (!best?.enemy) {this.ui.showBanner('Select a visible enemy.', 'info');return;}
           const target={id:best.unit.id};
@@ -6920,8 +6947,49 @@ class App {
   // Optional direct-move keys → a cardinal direction, sent through the lockstep
   // pipe only on change. Right-click orders are the main move. Directions stay
   // aligned with the minimap: north is always north.
+  _releaseBattleInput() {
+    this.keys.clear();
+    if (!this.buttonPay && !this.lastPay) return;
+    this.buttonPay = false;
+    this._payPressUsed = false;
+    if (this.lastPay && this.game && !this.game.over) {
+      this.lastPay = false;
+      this.issue({ t: 'pay', p: this.myPlayer, on: false });
+    } else this.lastPay = false;
+  }
+
+  _orderStance(stance) {
+    this.issue({ t: 'stance', s: stance, p: this.myPlayer });
+  }
+
+  _stanceBanner(stance) {
+    const label = { defend: 'Defend Keep', guard: 'Follow heroes', attack: 'Push lanes' }[stance];
+    if (label) this.ui.showBanner(label, 'info', 1400);
+  }
+
+  _updateWaveApproach() {
+    const approach = firstWaveApproach(this.game);
+    if (!approach || !this.camera) { this.ui.setWaveApproach(null); return; }
+    const point = new THREE.Vector3(approach.x, this.map?.groundY(approach.x, approach.z) || 0, approach.z);
+    const screen = point.project(this.camera);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let dx = (screen.x * 0.5 + 0.5) * width - width / 2;
+    let dy = (1 - (screen.y * 0.5 + 0.5)) * height - height / 2;
+    if (screen.z > 1) { dx = -dx; dy = -dy; }
+    const edge = edgeMarker(dx, dy, width, height, 72);
+    this.ui.setWaveApproach(edge ? { ...edge, label: approach.label } : null);
+  }
+
   _updateHeroInput() {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
+    const heldHero = this.myHero();
+    // The simulation ends a completed hold itself. A latched on-screen button
+    // must not immediately start the next tier.
+    if (this.buttonPay && this.lastPay && heldHero && !heldHero.payHold) {
+      this.buttonPay = false;
+      this.lastPay = false;
+    }
     let dx = 0, dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
@@ -6941,6 +7009,7 @@ class App {
     // the configured Build key remains an accessible secondary binding.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
+    if (this.buttonPay && !canPay) this.buttonPay = false;
     const bindsNow = this.binds();
     const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
     const physicalPayHeld = buildHeld || !!this.buttonPay;
@@ -7628,6 +7697,7 @@ class App {
         case 'orderconfirmed':
           if (e.player === this.myPlayer) {
             this._noteCoach({ type: 'stance', stance: e.stance });
+            this._stanceBanner(e.stance);
             this.audio.eventGain = 1;
             this.audio.click();
           }
@@ -7639,12 +7709,12 @@ class App {
           this._noteCoach({ type: 'firstsiege' });
           break;
         case 'rally':
-          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          if (e.player === this.myPlayer) { this._noteCoach({ type: 'stance', stance: e.stance }); this._stanceBanner(e.stance); }
           this.audio.train();
           this.burst(e.x, 0.3, e.z, { count: 10, color: 0x59ff9c, speed: 1.4, life: 0.5, size: 0.45, up: 1.6 });
           break;
         case 'hold':
-          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          if (e.player === this.myPlayer) { this._noteCoach({ type: 'stance', stance: e.stance }); this._stanceBanner(e.stance); }
           this._impactRing(e.x, e.z, { color: 0x8acbff, radius: 5.5, count: 20, life: 0.55 });
           this.audio.click();
           break;
@@ -8106,12 +8176,15 @@ class App {
       const mh = this.myHero();
       const buildMode = this.controlMode !== 'fight';
       let branchPlot = null;
-      if (!this.replay && buildMode && mh && !mh.dead) {
+      if (!this.replay && buildMode && mh && !mh.dead && !mh.payHold) {
+        const funding = this.game.buildTargetFor(mh);
+        if (!funding) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
           const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
+        }
         }
       }
       this.ui.showBranch(branchPlot);
@@ -8144,7 +8217,9 @@ class App {
       }
       this.ui.showBuildHint(this.replay ? null : hint);
 
-      this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
+      this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode, paying: !!this.buttonPay || !!mh?.payHold });
+      if (this.game.over) this.ui.suppressPauseVeil();
+      this._updateWaveApproach();
       this.ui.updateBoss(this.game);
 
       this.autosaveT -= dt;
