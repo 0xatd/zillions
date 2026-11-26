@@ -433,9 +433,21 @@ try {
     }
     const mine = guestProbe.myPlayer;
     if (pending) {
-      const hostMoved = stepOf(hostProbe.heroes?.[mine], pending.hostFrom);
-      const guestMoved = stepOf(guestProbe.heroes?.[mine], pending.guestFrom);
-      if (hostMoved > 0.4 && guestMoved > 0.4) {
+      const hostNow = hostProbe.heroes?.[mine];
+      const guestNow = guestProbe.heroes?.[mine];
+      const hostMoved = stepOf(hostNow, pending.hostFrom);
+      const guestMoved = stepOf(guestNow, pending.guestFrom);
+      const hostDx = (hostNow?.x ?? 0) - pending.hostFrom.x;
+      const guestDx = (guestNow?.x ?? 0) - pending.guestFrom.x;
+      const hostDz = (hostNow?.z ?? 0) - pending.hostFrom.z;
+      const guestDz = (guestNow?.z ?? 0) - pending.guestFrom.z;
+      // Every order steps +z and alternates x. Both sims have to take that
+      // step and agree. 0.2 tiles is past one probe rounding quantum. A longer
+      // walk waits on hero speed, which at CPU throttle 4 is not the order.
+      const agree = stepOf(hostNow, guestNow);
+      const toward = hostDz > 0.05 && guestDz > 0.05
+        && hostDx * pending.flip > -0.3 && guestDx * pending.flip > -0.3;
+      if (hostMoved > 0.2 && guestMoved > 0.2 && agree < 1 && toward) {
         if (Date.now() - pending.at > 1500) {
           throw new Error(`move landed after ${Date.now() - pending.at}ms ${JSON.stringify({ hostProbe, guestProbe })}`);
         }
@@ -450,7 +462,7 @@ try {
       const hostHero = hostProbe.heroes?.[mine];
       if (guestHero && hostHero) {
         const flip = applied % 2 ? -1 : 1;
-        pending = { at: Date.now(), hostFrom: { ...hostHero }, guestFrom: { ...guestHero } };
+        pending = { at: Date.now(), flip, hostFrom: { ...hostHero }, guestFrom: { ...guestHero } };
         await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), {
           x: guestHero.x + 6 * flip,
           z: guestHero.z + 4,
