@@ -10,7 +10,7 @@ Stacked on `codex/siege-feel-20261126` (PR #157). No merge or production rollout
 - S stops and suppresses attacks; H holds position and attacks without chasing. Both are rebindable. WASD camera mode parks S; existing stored WASD settings migrate without losing their camera key.
 - Hero-only wind-up, release and recovery. Ranged attacks apply damage on projectile arrival. Melee hits at release. Flight survives movement and shooter death. Squads retain their prior autonomous behavior.
 - Attack poses use simulation state. Flight follows the simulation clock, including pause. Target highlight persists during pursuit; attack range appears while targeting/holding/winding up.
-- Pending swing, released payloads, cooldown, moving state and order survive restore and enter the peer hash. Snapshot 14 reads 12/13; protocol and shared replay simulation 22 refuse mixed clients.
+- Pending swing, released payloads, cooldown, moving state and order survive restore and enter the peer hash. Snapshot 14 reads 12/13; protocol and shared replay simulation 23 refuse mixed clients.
 
 ## Verification
 
@@ -31,3 +31,5 @@ No Dota item system, last-hit economy, denies, exact Dota patch parity or new ar
 ## Independent audit follow-up
 
 The pre-merge review reproduced Sniper Headshot applying stun/knockback at release while damage waited for arrival. `rollSpellAttack` now commits damage and on-hit payload without mutating the target; impact applies the stored payload. The regression fails before repair and passes after, including Aim expiring mid-flight and exact restore hashes. Protocol/shared simulation22 isolates the earlier21preview. The instant-hit helper retains its prior contract.
+
+A Sniper-specific two-browser restore check also exposed a stale spitter target: an uninterrupted spitter held position on its cooldown after its target structure died, while the restored game had no such structure reference and moved. `_spitAtBuilding` now releases dead targets before deciding to hold. A real-terrain 50-second restore regression compares enemy motion and peer hashes for the next 20 seconds; it fails before and passes after. The 120-second real WebRTC replay also passes. Protocol/shared simulation23 isolates published22previews. Legacy explicitly customized S/H actions are preserved by parking new defaults on free keys.

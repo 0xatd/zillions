@@ -4694,6 +4694,9 @@ export class Game {
   // Spitter: hits structures from outside their reach, so turtling is not a
   // strategy — somebody has to come out.
   _spitAtBuilding(zb, range, dmgMul) {
+    // Destroyed structures are absent after restore. Release their stale live
+    // references too, or one peer holds still while its restored peer walks.
+    if (zb._spitTarget && !zb._spitTarget.alive) zb._spitTarget = null;
     if (zb.atkT > 0) {
       // Already shelling something this cycle; hold position.
       return !!zb._spitTarget;
