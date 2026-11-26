@@ -568,6 +568,7 @@ class App {
         coach: this._coach ? this._coach.index : null,
         button: this.ui.root?.querySelector?.('#s-start')?.textContent || '',
         simFps: Math.round(this._simFps || 0),
+        paused: !!this.paused,
         renderFps: this._frameMs > 0 ? Math.round(1000 / this._frameMs) : 0,
         syncing: !(this.ui.root?.querySelector?.('#waitind')?.classList.contains('hidden') ?? true),
         hostFrame: this.mpRole === 'host' ? this.simFrame : (this._hostFrameSeen || 0),
@@ -5220,6 +5221,7 @@ class App {
           this.simFrame = m.frame;
           this.inbox = buf;
           this._resyncCatchup = true;
+          this.paused = false;
           if (this._shareCode) this._sharePublish?.({ t: 'pace', w: Math.floor(this.simFrame / NET_STEP) });
           this.netPrimed = false;
           this.desynced = false;
@@ -5352,7 +5354,10 @@ class App {
   // pump (a worker timer) off one shared wall clock, so the host keeps
   // emitting windows even when rendering hitches or the tab is hidden.
   _advanceNetSim() {
-    if (this._advancing || !this.netMode || !this.game || this.paused || this.game.over) return;
+    // Pause is a solo control. A co-op tab that paused on a dropped link used
+    // to leave the lockstep clock stopped while windows piled up, and the
+    // host then crawled waiting for a guest who would never catch up.
+    if (this._advancing || !this.netMode || !this.game || this.game.over) return;
     this._advancing = true;
     try { this._advanceNetSimBody(); }
     catch (error) {
@@ -5364,7 +5369,7 @@ class App {
   }
 
   _advanceNetSimBody() {
-    if (!this.netMode || !this.game || this.paused || this.game.over) return;
+    if (!this.netMode || !this.game || this.game.over) return;
     if (this.mpRole === 'host' && this.startBarrier) {
       this._netClockLast = performance.now();
       this.ui.setWaiting(true, '⏳ Waiting for every player to load…');
@@ -9747,9 +9752,10 @@ class App {
   }
 
   frame() {
-    // Wake the sim before any painting. A later throw in the picture must
-    // not be what decides whether the siege advanced this frame.
-    if (this.netMode && this.game && !this.paused && !this.game.over && !this.replay) this._simKick?.();
+    // Step before any painting. The continuation pump yields between turns,
+    // but the paint itself has to advance the clock even when that pump is
+    // late, or a 10 FPS tab banks windows and never plays them.
+    if (this.netMode && this.game && !this.game.over && !this.replay) this._advanceNetSim();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const hit = tickHitStop(this._hitFeel, dt);
     this._hitFeel = { hold: hit.hold, gap: hit.gap };
@@ -9795,10 +9801,7 @@ class App {
         const simStarted = performance.now();
         let simTicks = 0;
         if (this.netMode) {
-          // A painted frame wakes the sim. The pump then steps on its own
-          // turns until the clock is caught up, so 10 FPS of rendering is not
-          // 10 sim frames per second. The worker covers a hidden tab.
-          this._simKick?.();
+          // The step already ran at the top of this frame, ahead of the picture.
           simTicks = 0;
         } else {
           this.acc += dt * this.speed;
