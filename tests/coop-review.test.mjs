@@ -67,3 +67,17 @@ test('failed account-room handshake reports the error instead of throwing a Refe
  await receive.call(app,{t:'offer',from:'host',sdp:'offer'});
  assert.match(status,/Handshake failed: blocked/);
 });
+test('a lost reload join is retried until the host echoes this page session',()=>{
+ const id='22222222-2222-4222-8222-222222222222';
+ let room=links.createLobby({code:'abc2345678',hostId:'11111111-1111-4111-8111-111111111111',hostName:'Host',hero:'scott',now:Date.now()});
+ room=links.seatGuest(room,{id,name:'Guest'},Date.now()).lobby;
+ room.seats[1].session='old-page';
+ const sent=[];
+ const app={_shareCode:room.code,_shareSelf:id,_shareSession:'new-page',_shareAnnounced:true,_shareGuestShown:true,net:{open:true},_shareDisplayName:()=> 'Guest',_sharePublish:m=>sent.push(m),_shareSendPing(){},ui:{selectedHero:'scott',setRoomSettings(){},showShareGuest(){}}};
+ const receive=method('_onShareLobby','async _acceptShareGuest',{...links,highestUnlockedLevel:()=>1,LOBBY_PROTOCOL_VERSION:24,CLIENT_VERSION:'test'});
+ receive.call(app,room);receive.call(app,room);
+ assert.equal(sent.filter(m=>m.t==='join').length,2);
+ room.seats[1].session='new-page';receive.call(app,room);
+ assert.equal(sent.filter(m=>m.t==='join').length,2);
+ assert.equal(links.publicShareLobby(room).seats[1].session,'new-page');
+});
