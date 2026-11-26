@@ -131,6 +131,7 @@ export function publicShareLobby(lobby) {
       host: !!seat.host,
       ready: !!seat.host || !!seat.ready,
       linked: !!seat.linked,
+      session: String(seat.session || ''),
       transport: seat.transport === 'relay' || seat.transport === 'webrtc' ? seat.transport : '',
       unlockedLevel: shareUnlocked(seat.unlockedLevel),
       joinedAt: Number(seat.joinedAt) || lobby.createdAt || 0,

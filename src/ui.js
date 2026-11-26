@@ -242,7 +242,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-invite">INVITE</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-daily">DAILY SIEGE</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-invite">INVITE</button><button class="utilitybtn" id="m-party">PARTY & FRIENDS</button><button class="utilitybtn" id="m-daily">DAILY SIEGE</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -338,7 +338,7 @@ export class UI {
         </div>
 
         <div id="screen-custom" class="custom-browser hidden">
-          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">PARTY 1/4</small></div></header>
+          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
           <aside class="custom-nav">
             <button class="custom-primary-tab sel" data-view="live">LIVE GAMES</button>
             <button class="custom-primary-tab" data-view="arcade">ARCADE</button>
@@ -1147,7 +1147,7 @@ export class UI {
     this.root.querySelector('#cu-character').textContent = character
       ? `${character.name} · ${MMO_CLASSES[character.classKey]?.name || 'Commander'}`
       : hostName ? `@${hostName}` : 'COMMANDER';
-    this.root.querySelector('#cu-party').textContent = 'PARTY 1/4';
+    this.root.querySelector('#cu-party').textContent = 'MULTIPLAYER';
     this._renderCustomRows();
   }
 

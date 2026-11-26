@@ -44,4 +44,3 @@ test('wave 1 direction is known before the wave spawns and points to a screen ed
   assert.ok(Math.abs(edge.y - 400) < 1);
   assert.equal(edgeMarker(0, 0, 1000, 800), null);
 });
-

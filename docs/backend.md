@@ -10,7 +10,7 @@ this file.
 - Web host: Vercel project `zillions`
 - Static fallback: GitHub Pages at `https://0xatd.github.io/zillions/`
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`
-- Match networking: browser WebRTC DataChannels, host-sequenced lockstep
+- Match networking: browser WebRTC DataChannels, host-sequenced lockstep; invite links can fall back to Supabase Realtime. The backend does not simulate combat.
 
 Production sign-in is still Google or a passwordless email link through
 Supabase, and signed-in rewards stay server-owned. The title also offers

@@ -173,7 +173,10 @@ until the missing window arrives.
 
 ## Multiplayer Room Flow
 
-Supabase coordinates the room. WebRTC carries match traffic.
+Supabase coordinates the room. WebRTC carries account-room match traffic.
+Invite-link rooms prefer WebRTC and fall back to Supabase Realtime lockstep
+when the data channel cannot open. Guest page nonces reject old mailbox
+messages without assuming synchronized clocks. Ready remains an explicit vote.
 
 ```text
 create or join room

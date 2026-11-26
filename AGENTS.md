@@ -123,7 +123,8 @@ for completed mechanics and explicit gaps; a catalog entry is not a playable kit
 ### Multiplayer
 
 - Supabase owns identity, rooms, seats, chat, saves, and match history.
-- WebRTC carries match commands.
+- WebRTC carries account-room match commands. Invite-link rooms may use the
+  Supabase Realtime fallback; both transports carry the same lockstep messages.
 - The backend does not run the combat simulation. It is authoritative for
   rewards: only `api/match-result.js` (via `apply_match_result()`) grants
   signed-in XP, levels, loot, Alloy, and stats. Never add a client write path

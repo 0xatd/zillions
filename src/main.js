@@ -3413,7 +3413,8 @@ class App {
     if (lobby?.code === code && lobby.hostId === this._shareSelfId() && !lobby.closed) {
       this._shareCode = code;
       this._shareUrl = shareUrl(location.origin, code);
-      this._shareLobby = lobby;
+      this._shareLobby = { ...lobby, seats: lobby.seats.map((seat) => ({ ...seat, linked: !!seat.host, transport: '' })) };
+      this._shareGuestSessions = new Map(lobby.seats.filter((seat) => !seat.host).map((seat) => [seat.id, seat.session]));
       this._shareSeen = new Set();
       this._shareHands = new Map();
       this._shareFailed = false;
@@ -3571,13 +3572,17 @@ class App {
       }
       if (this.mpRole !== 'guest' || !this._shareLobby) return;
       const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf);
+      this._retryShareReady();
       if (mine && !mine.linked) this._shareSendPing(this._shareLobby.hostId);
       this._shareSendCatchup();
       if (this._shareRejoinArmed || (this.netMode && this.game && !this.game.over && !this.net?.open)) {
         this._shareRejoinTick();
         return;
       }
-      if (this.netMode) return;
+      if (this.netMode) {
+        this._sharePublish({ t: 'here', name: this._shareDisplayName() });
+        return;
+      }
       const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
       if (!decision.ok && decision.reason !== 'host_left') this._failShare(decision.reason);
       else {
@@ -3608,6 +3613,7 @@ class App {
   _joinShareLink(code) {
     this._shareFailed = false;
     this._shareSession = crypto.randomUUID();
+    this._shareReadyIntent = null;
     this._shareCode = code;
     this._shareSelf = this._shareSelfId();
     this._shareSeen = new Set();
@@ -3795,6 +3801,7 @@ class App {
     void this._acceptShareGuest({
       ...message,
       t: 'join',
+      hero: this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.hero,
       claim: true,
       ready: !!this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.ready,
       rejoin: !!peer,
@@ -4050,7 +4057,24 @@ class App {
 
   _setShareReady(ready) {
     if (this.mpRole !== 'guest' || !this._shareCode) return;
-    this._sharePublish({ t: 'ready', ready: !!ready });
+    this._shareReadyIntent = { ready: !!ready, setup: this._shareReadySetup() };
+    this._retryShareReady();
+  }
+
+  _shareReadySetup() {
+    const room = this._shareLobby;
+    return JSON.stringify([room?.mode, room?.level, room?.difficulty, room?.seats?.find((seat) => seat.id === this._shareSelf)?.hero]);
+  }
+
+  _retryShareReady() {
+    const intent = this._shareReadyIntent;
+    if (!intent) return;
+    const mine = this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf);
+    if (intent.setup !== this._shareReadySetup() || mine?.ready === intent.ready) {
+      this._shareReadyIntent = null;
+      return;
+    }
+    this._sharePublish({ t: 'ready', ready: intent.ready });
   }
 
   _renderShareHost() {
@@ -4238,7 +4262,8 @@ class App {
       return;
     }
     clearTimeout(this._shareDiscover);
-    if (!(lobby.seats || []).some((seat) => seat.id === this._shareSelf)) this._shareAnnounced = false;
+    if (!(lobby.seats || []).some((seat) => seat.id === this._shareSelf
+      && (!this._shareSession || seat.session === this._shareSession))) this._shareAnnounced = false;
     if (!this._shareAnnounced) {
       this._shareAnnounced = true;
       this._shareJoinedAt = Date.now();
@@ -4349,6 +4374,9 @@ class App {
       this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now());
     }
     if (message.ready) this._shareLobby = setSeatReady(this._shareLobby, message.from, true, Date.now());
+    this._shareLobby = { ...this._shareLobby, seats: this._shareLobby.seats.map(
+      (seat) => seat.id === message.from ? { ...seat, session: message.session || seat.session } : seat) };
+    this._sharePublishLobby();
     this._shareSeatedAt ??= new Map();
     if (!this._shareSeatedAt.has(message.from)) this._shareSeatedAt.set(message.from, Date.now());
     this._shareSendPing(message.from);
@@ -5577,6 +5605,7 @@ class App {
     if (sig.t === 'roomClosed') return this._handleRoomClosed(sig.reason);
     if (sig.t === 'reconnectRequest' && this.mpRole === 'guest') return this._retryRoomConnection();
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
+      const wasInGame = !!this.netMode;
       this.net = new NetSession(this.lobby?.iceServers);
       this._attachNetDiagnostics(this.net);
       this.net.onOpen = () => {

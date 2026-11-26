@@ -20,6 +20,12 @@ import { chromium } from 'playwright';
 
 const liveUrl = process.argv.find((arg, index) => process.argv[index - 1] === '--url') || '';
 const liveRealtime = process.argv.includes('--live-realtime');
+const transportOnly = process.argv.includes('--transport-only');
+async function configureRender(page) {
+  if (!transportOnly) return;
+  await page.waitForFunction(() => !!window.__app?.renderer);
+  await page.evaluate(() => { window.__app.renderer.render = () => {}; });
+}
 const root = new URL('..', import.meta.url).pathname;
 
 async function productionAuthConfig() {
@@ -180,8 +186,10 @@ async function dump(page, notes) {
 }
 
 try {
+  console.log('co-op: opening host');
   const host = await context('host');
   await host.page.goto(origin + '/', { waitUntil: 'domcontentloaded' });
+  await configureRender(host.page);
   await host.page.locator('#a-invite').click();
   await host.page.locator('#share-url').waitFor({ state: 'visible' });
   const invite = await host.page.locator('#share-url').inputValue();
@@ -191,6 +199,7 @@ try {
   const code = new URL(invite).searchParams.get('coop');
   await host.page.reload({ waitUntil: 'domcontentloaded' });
   await host.page.locator('#share-url').waitFor({ state: 'visible', timeout: 20000 });
+  await configureRender(host.page);
   const afterRefresh = host.page.url();
   const refreshedInvite = await host.page.locator('#share-url').inputValue();
   if (!afterRefresh.includes(`coop=${code}`) || !refreshedInvite.includes(`coop=${code}`)) {
@@ -201,6 +210,7 @@ try {
 
   const guest = await context('guest');
   await guest.page.goto(guestTarget, { waitUntil: 'domcontentloaded' });
+  await configureRender(guest.page);
   await guest.page.getByText(/You're in as /).waitFor({ timeout: 20000 }).catch(async (error) => {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`${error.message}\nGUEST BODY:\n${body.slice(0, 1500)}\n${JSON.stringify({ host: await dump(host.page, host.notes), guest: await dump(guest.page, guest.notes) }, null, 2)}`);
@@ -217,6 +227,7 @@ try {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
   await guest.page.locator('#share-ready').click();
+  console.log('co-op: guest explicitly ready');
   const hostSnap = await probe(host.page);
   const guestSnap = await probe(guest.page);
   if (!hostSnap?.self || !guestSnap?.self || hostSnap.self === guestSnap.self) {
@@ -289,6 +300,7 @@ try {
   if (!synced) {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   }
+  console.log('co-op: both simulations running');
   if (!liveRealtime) {
     // CPU throttle slows the guest toward the 10 FPS the live retest saw.
     // One long frame can make a single sample look older than 5s; a guest
@@ -308,7 +320,7 @@ try {
       if (stall > 5000) {
         if (!stuckSince) stuckSince = Date.now();
         else if (Date.now() - stuckSince > 1000) {
-          throw new Error(`guest stalled ${stall}ms ${JSON.stringify(guestProbe)}`);
+          throw new Error(`guest stalled ${stall}ms ${JSON.stringify({guestProbe, hostProbe: await probe(host.page), notes: guest.notes})}`);
         }
       } else stuckSince = 0;
       if ((guestProbe?.resyncMs || 0) > 20000) {
@@ -320,7 +332,7 @@ try {
     if ((paceEnd?.frame || 0) < (paceStart?.frame || 0) + 200) {
       throw new Error(`throttled guest did not keep simulating ${JSON.stringify({ paceStart, paceEnd, worstStall, worstResync })}`);
     }
-    console.log(`throttled guest stayed under 5s stalls (worst ${worstStall}ms, resync ${worstResync}ms)`);
+    console.log(`throttled guest recovered (maximum sampled stall ${worstStall}ms, resync ${worstResync}ms)`);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
   if (liveRealtime) {
@@ -350,8 +362,10 @@ try {
     if (agreed < 3 || mismatched) throw new Error(`state hashes diverged agreed=${agreed} mismatched=${mismatched} hostFrames=${hostLog.size} guestFrames=${guestLog.size}`);
   }
 
+  console.log('co-op: reloading guest');
   const beforeDrop = await probe(host.page);
   await guest.page.reload({ waitUntil: 'domcontentloaded' });
+  await configureRender(guest.page);
   let rejoined = null;
   let lastRejoin = null;
   const rejoinDeadline = Date.now() + 120000;
@@ -373,7 +387,7 @@ try {
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
   const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
-  console.log(`coop e2e passed against ${via} with WebRTC blocked`);
+  console.log(`coop e2e passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);
 } finally {
   await browser.close();
   mailbox?.server.close();
