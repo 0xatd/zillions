@@ -34,8 +34,9 @@ test('invite urls round-trip and malformed codes are refused', () => {
   const code = createShareCode(Uint8Array.from({ length: 10 }, (_, i) => i));
   const url = shareUrl('https://zillions.taborlin.co/', code);
   assert.equal(parseShareLocation(new URL(url).search)?.code, code);
-  const kept = new URL(shareUrl('https://zillions.taborlin.co', code, '?quality=low&coop=oldcode'));
+  const kept = new URL(shareUrl('https://zillions.taborlin.co', code, '?quality=low&netdebug=1&coop=oldcode'));
   assert.equal(kept.searchParams.get('quality'), 'low');
+  assert.equal(kept.searchParams.get('netdebug'), '1');
   assert.equal(kept.searchParams.get('coop'), code);
   assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: false }), true);
   assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: true }), false);

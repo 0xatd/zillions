@@ -51,6 +51,7 @@ export function shareUrl(origin, code, search = '') {
   const params = new URLSearchParams();
   const quality = incoming.get('quality');
   if (quality) params.set('quality', quality);
+  if (incoming.get('netdebug') === '1') params.set('netdebug', '1');
   params.set('coop', code);
   return `${base}/?${params.toString()}`;
 }
@@ -133,7 +134,7 @@ export function publicShareLobby(lobby) {
     starting: !!lobby.starting,
     closed: !!lobby.closed,
     hostBoot: Number(lobby.hostBoot) || 0,
-    endedReason: lobby.endedReason === 'host_reloaded' ? 'host_reloaded' : '',
+    endedReason: ['host_reloaded', 'host_left', 'retry'].includes(lobby.endedReason) ? lobby.endedReason : '',
     banned: (lobby.banned || []).filter((id) => shareId(id)),
     matchEnd: lobby.matchEnd?.reason ? {
       won: !!lobby.matchEnd.won,

@@ -78,6 +78,9 @@ test('a reloading guest sees Rejoining, then an honest state, never a forever sp
   const freshJoin = shareGuestView({ rejoinIntent: false, lobbyFresh: true, started: false });
   assert.equal(freshJoin.screen, 'waiting');
   const hostBack = shareGuestView({ rejoinIntent: true, lobbyFresh: true, started: false, endedReason: 'host_reloaded' });
+  const retry = shareGuestView({ started: false, endedReason: 'retry' });
+  assert.equal(retry.status, 'Waiting for host to retry');
+  assert.match(retry.button, /WAITING FOR HOST TO RETRY/);
   assert.equal(hostBack.screen, 'lobby');
   assert.match(hostBack.status, /back in the lobby/);
   const timedOut = shareGuestView({ rejoinIntent: true, lobbyFresh: true, started: true, waitingMs: 20000 });

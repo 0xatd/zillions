@@ -169,7 +169,14 @@ export function shareGuestView({
   limitMs = SHARE_REJOIN_UI_MS,
 } = {}) {
   if (inGame) return { screen: 'match', button: '', status: '' };
-  if (endedReason === 'host_reloaded' || (rejoinIntent && lobbyFresh && !started && !starting)) {
+  if (endedReason === 'retry') {
+    return {
+      screen: 'retry-wait',
+      button: '⏳  WAITING FOR HOST TO RETRY',
+      status: 'Waiting for host to retry',
+    };
+  }
+  if (endedReason === 'host_reloaded' || endedReason === 'host_left' || (rejoinIntent && lobbyFresh && !started && !starting)) {
     return {
       screen: 'lobby',
       button: '⏳  WAITING FOR HOST TO START',

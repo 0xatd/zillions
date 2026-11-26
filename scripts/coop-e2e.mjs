@@ -535,6 +535,39 @@ try {
   if (guestFrameEnd - guestFrameStart < 20 * heldSec) {
     throw new Error(`guest sim was under 20 fps ${guestFrameStart} -> ${guestFrameEnd} in ${heldSec.toFixed(1)}s`);
   }
+  const bootHost = (await probe(host.page))?.boot;
+  const bootGuest = (await probe(guest.page))?.boot;
+  await host.page.evaluate(() => globalThis.__zillionsKillKeep?.());
+  await host.page.getByRole('heading', { name: /the city has fallen/i }).waitFor({ timeout: 15000 });
+  await guest.page.getByRole('heading', { name: /the city has fallen/i }).waitFor({ timeout: 15000 });
+  const fallenHost = await probe(host.page);
+  const fallenGuest = await probe(guest.page);
+  if (fallenHost?.boot !== bootHost || fallenGuest?.boot !== bootGuest) {
+    throw new Error(`defeat reloaded a tab ${JSON.stringify({ bootHost, bootGuest, fallenHost, fallenGuest })}`);
+  }
+  const guestBody = await guest.page.locator('body').innerText();
+  if (/the host removed you/i.test(guestBody)) throw new Error('guest was told they were removed when the city fell');
+  await host.page.locator('#b-share-retry').click();
+  await guest.page.locator('#share-status', { hasText: /waiting for host to retry/i }).waitFor({ timeout: 15000 });
+  await host.page.waitForFunction(() => {
+    const roster = globalThis.__zillionsProbe?.()?.roster || [];
+    const button = document.querySelector('#s-start');
+    return roster.some((seat) => !seat.host)
+      && button && !button.disabled && /START/i.test(button.textContent || '');
+  }, null, { timeout: 20000 });
+  await host.page.locator('#s-start').click();
+  const restarted = Date.now() + 40000;
+  let again = null;
+  while (Date.now() < restarted) {
+    const hostProbe = await probe(host.page);
+    const guestProbe = await probe(guest.page);
+    if (hostProbe?.live && guestProbe?.live && hostProbe.role === 'host' && guestProbe.role === 'guest' && guestProbe.myPlayer > 0) {
+      again = { hostProbe, guestProbe };
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  if (!again) throw new Error(`retry did not start a new match host=${JSON.stringify(await probe(host.page))} guest=${JSON.stringify(await probe(guest.page))}`);
   await host.page.evaluate(() => globalThis.__zillionsEndMatch?.());
   await host.page.getByText(/ended the match for everyone/i).waitFor({ timeout: 10000 });
   await guest.page.getByText(/ended the match for everyone/i).waitFor({ timeout: 10000 });

@@ -4293,7 +4293,7 @@ export class UI {
     layer.classList.remove('hidden');
     layer.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
-        <h1>${won ? '🏆 PLANET TAKEN' : '💀 THE SIEGE ENDED'}</h1>
+        <h1>${won ? '🏆 PLANET TAKEN' : /city has fallen/i.test(reason) ? '💀 THE CITY HAS FALLEN' : '💀 THE SIEGE ENDED'}</h1>
         <p class="tagline">Exit: ${escapeHtml(reason)}</p>
         <div class="endactions">
           <button class="startbtn primary" id="b-share-retry" type="button">Retry</button>
@@ -4301,7 +4301,7 @@ export class UI {
         </div>
       </div>`;
     layer.querySelector('#b-lobby').onclick = () => this.cb.onBackToLobby?.();
-    layer.querySelector('#b-share-retry').onclick = () => this.cb.onBackToLobby?.();
+    layer.querySelector('#b-share-retry').onclick = () => (this.cb.onShareMatchRetry || this.cb.onBackToLobby)?.();
   }
 
   hideShareMatchEnd() {

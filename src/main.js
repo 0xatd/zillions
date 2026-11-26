@@ -322,12 +322,13 @@ class App {
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
+      onShareMatchRetry: () => this._retryShareParty(),
       canRetry: (game) => {
         const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
         return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
           && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
       },
-      onQuit: () => { this._noteMatchExit('player quit', { banner: false }); location.reload(); },
+      onQuit: () => this._quitToMenu(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
@@ -462,7 +463,16 @@ class App {
     this.autosaveT = 20;
     const leaveGuestSeat = () => this._shareLeaveOnUnload();
     window.addEventListener('pagehide', leaveGuestSeat);
+    window.addEventListener('error', (event) => {
+      if (!(this.netMode && this.game && !this.game.over)) return;
+      const message = event?.error?.message || event?.message || 'unknown error';
+      this._netReason = `page error: ${message}`;
+      this.ui.showBanner(`The siege hit an error: ${message}. The match is still running.`, 'bad', 8000);
+    });
     window.addEventListener('beforeunload', () => {
+      if (this._shareCode && this.netMode && this.game && !this.game.over && !this._matchExitReason) {
+        this._noteMatchExit('page unloaded during the siege', { banner: false });
+      }
       this._autosave(true);
       // A guest tab that is actually closing tells the host. The message
       // carries this page's boot time, so a refresh's late leave does not
@@ -576,7 +586,12 @@ class App {
         cmdSentFrame: this._cmdSentFrame ?? null,
         cmdAppliedFrame: this._cmdAppliedFrame ?? null,
         reason: this._netReason || this._stallReason || '',
+        boot: this._bootCount || 1,
       });
+      globalThis.__zillionsKillKeep = () => {
+        if (this.mpRole !== 'host' || !this.netMode || !this.game || this.game.over) return;
+        this.outbox.push({ t: 'debugKillKeep' });
+      };
       globalThis.__zillionsOrder = (x, z) => {
         if (!this.game || this.mpRole === 'spectator') return;
         this.issue({ t: 'horder', p: this.myPlayer, x: Number(x) || 0, z: Number(z) || 0, k: 'move' });
@@ -584,6 +599,11 @@ class App {
       globalThis.__zillionsEndMatch = () => this._leaveOnlineMatch();
     }
     this._netDebug = /(?:^|[?&])netdebug=1(?:&|$)/.test(location.search);
+    try {
+      const boots = Number(sessionStorage.getItem('zillions.boot') || 0) + 1;
+      sessionStorage.setItem('zillions.boot', String(boots));
+      this._bootCount = boots;
+    } catch { this._bootCount = 1; }
     requestAnimationFrame(() => this._ensurePresentation());
   }
 
@@ -2083,16 +2103,21 @@ class App {
   }
 
   _restartOrReturn() {
+    if (this._shareCode) {
+      this._retryShareParty();
+      return;
+    }
     // Any campaign run that belongs to a character returns to mission
     // select, not the title screen.
     if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
       try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
       this.ui.shell.finishMission();
     }
-    location.reload();
+    this._userReload('restart');
   }
 
   _retryMission() {
+    if (this._shareCode) return this._retryShareParty();
     if (!this.auth?.isSignedIn() || !this.game?.over || this.game.mode !== 'campaign' || this.netMode) {
       clearRetry(sessionStorage);
       return this._restartOrReturn();
@@ -2111,8 +2136,33 @@ class App {
       difficulty: this.game.diffKey, hero: this.ui.selectedHero,
       level: this.game.levelId, mode: this.game.mode,
     });
-    if (stored) location.reload();
+    if (stored) this._userReload('retry');
     else this._restartOrReturn();
+  }
+
+  _liveMatch() {
+    return !!(this.netMode && this.game && !this.game.over);
+  }
+
+  // A live siege never reloads itself. Reload is for an explicit quit of a
+  // finished or solo session. A crash, a defeat, and a worker error stay on
+  // this page and say what happened.
+  _userReload(reason, { force = false } = {}) {
+    if (this._liveMatch() && !force) {
+      this._noteMatchExit(reason || 'blocked reload during a live match');
+      this.ui.showBanner('The siege is still running.', 'bad', 4000);
+      return;
+    }
+    if (reason) this._noteMatchExit(reason, { banner: false });
+    location.reload();
+  }
+
+  _quitToMenu() {
+    if (this._shareCode && this._liveMatch()) {
+      this._leaveOnlineMatch();
+      return;
+    }
+    this._userReload('player quit');
   }
 
   async _signIn() {
@@ -3558,14 +3608,13 @@ class App {
     let previous = null;
     try { previous = JSON.parse(sessionStorage.getItem('zillions.share.exit') || 'null'); } catch { previous = null; }
     try { sessionStorage.removeItem('zillions.share.exit'); } catch { /* private mode */ }
-    const reason = previous?.reason
-      ? `host tab reloaded during the siege (${previous.reason})`
-      : 'host tab reloaded during the siege with no recorded exit';
+    const recorded = String(previous?.reason || '');
+    const finished = recorded === 'victory' || recorded === 'player quit'
+      || recorded.startsWith('defeat:')
+      || /ended the match|city has fallen|the host left|match ended/i.test(recorded);
+    const reason = finished ? recorded : (recorded ? `The host left. (${recorded})` : 'The host left.');
     this._matchExitReason = reason;
-    console.warn('match exit', { reason, code });
-    const finished = previous?.reason === 'victory' || previous?.reason === 'player quit'
-      || String(previous?.reason || '').startsWith('defeat:')
-      || /ended the match/i.test(String(previous?.reason || ''));
+    console.warn('match exit', { reason, code, recorded });
     if (finished) {
       const reason = previous.reason;
       this._shareLobby = { ...this._shareLobby, started: false, matchEnd: { won: false, reason } };
@@ -4548,7 +4597,7 @@ class App {
 
   _sharePaintGuestLobby() {
     const lobby = this._shareLobby;
-    if (!lobby || this.mpRole !== 'guest' || (this.netMode && this.game)) return;
+    if (!lobby || this.mpRole !== 'guest' || (this.netMode && this.game && !this.game.over)) return;
     const players = shareRoster(lobby, this._shareSelf);
     const mine = lobby.seats?.find((seat) => seat.id === this._shareSelf);
     const locked = (lobby.mode || 'campaign') === 'campaign' && (mine?.unlockedLevel || 1) < (lobby.level || 1);
@@ -4579,9 +4628,9 @@ class App {
           : 'Sending your seat request…')
         : view.status;
     const sig = `${view.screen}:${status}:${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}`;
-    if (sig === this._shareSig) return;
+    if (sig === this._shareSig && !this.ui.overlayHidden?.()) return;
     this._shareSig = sig;
-    if (!this._shareGuestShown) {
+    if (!this._shareGuestShown || view.screen === 'retry-wait' || this.ui.overlayHidden?.()) {
       this._shareGuestShown = true;
       this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
     }
@@ -4631,6 +4680,41 @@ class App {
     this.ui.showShareMatchEnd({ won: !!end.won, reason: this.ui._endReason });
   }
 
+  _retryShareParty() {
+    this.ui.hideShareMatchEnd?.();
+    this._netPumpStop();
+    this.paused = true;
+    this._matchEndShown = false;
+    this._clearShareLive();
+    if (this.game) this.game.over = true;
+    this.netMode = false;
+    if (this.mpRole !== 'host' || !this._shareLobby) {
+      if (this._shareLobby) {
+        this._shareLobby = { ...this._shareLobby, started: false, starting: false, endedReason: 'retry', matchEnd: null };
+      }
+      this._shareAnnounced = true;
+      this._shareSig = '';
+      this._sharePaintGuestLobby();
+      return;
+    }
+    this._shareBeginNeed = null;
+    this._shareBeginFinished = false;
+    this._shareBegan = new Set();
+    this._hostLaunching = false;
+    this._shareLobby = {
+      ...this._shareLobby,
+      started: false,
+      starting: false,
+      endedReason: 'retry',
+      matchEnd: null,
+    };
+    this._sharePublishLobby();
+    this.ui._shareMatch = true;
+    this.ui.showSetup({ mode: this._shareLobby.mode || this.ui.selectedMode || 'campaign', share: true });
+    this._shareSig = '';
+    this._renderShareHost();
+  }
+
   _returnToShareLobby() {
     this.ui.hideShareMatchEnd?.();
     this._netPumpStop();
@@ -4661,11 +4745,19 @@ class App {
     if (!lobby || lobby.code !== this._shareCode) return;
     this._shareReceivedAt = Date.now();
     this._shareLobby = lobby;
-    if ((lobby.banned || []).includes(this._shareSelf)) {
+    if (lobby.endedReason === 'retry') {
+      this._matchEndShown = false;
+      this._shareFailed = false;
+      this._netPumpStop();
+      this.netMode = false;
+      if (this.game) this.game.over = true;
+      this.ui.hideShareMatchEnd?.();
+      this._shareSendPing?.(lobby.hostId);
+    } else if (lobby.matchEnd && !this._matchEndShown) this._showSharedMatchEnd(lobby.matchEnd);
+    else if ((lobby.banned || []).includes(this._shareSelf)) {
       this._failShare('removed');
       return;
     }
-    if (lobby.matchEnd && !this._matchEndShown) this._showSharedMatchEnd(lobby.matchEnd);
     this._noteShareHostBoot(lobby);
     const decision = admitGuest(lobby, { id: this._shareSelf }, this._shareReceivedAt, {
       receivedAt: this._shareReceivedAt,
@@ -5020,9 +5112,11 @@ class App {
       }
       try { peer.destroy(); } catch { /* already closed */ }
     }
-    this._shareLobby = (ban || this._shareLobby.started)
-      ? evictGuest(this._shareLobby, id, Date.now())
-      : releaseGuest(this._shareLobby, id, Date.now());
+    // Only an explicit Remove bans the seat. A leave, a reload, or a dropped
+    // link used to take the same path once the siege had started, and the
+    // guest was told "The host removed you."
+    if (ban) this._shareLobby = evictGuest(this._shareLobby, id, Date.now());
+    else if (!this._shareLobby.started) this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
     if (ban) this._sharePublish({ t: 'reject', to: id, reason: 'removed' });
     this._shareSig = '';
     this._sharePublishLobby();
@@ -5490,7 +5584,10 @@ class App {
           }
         }
         for (const c of bundle) {
-          if (c && (c.t === 'horder' || c.t === 'hdir' || c.t === 'hhalt')) this._cmdAppliedFrame = this.simFrame;
+          if (c && (c.t === 'horder' || c.t === 'hdir' || c.t === 'hhalt')) {
+            this._cmdAppliedFrame = this.simFrame;
+            if ((c.p || 0) > 0) this._guestCmdAppliedFrame = this.simFrame;
+          }
           this.game.exec(c);
         }
         if (w > 0 && w % 30 === 0) {
@@ -5551,10 +5648,13 @@ class App {
     const guest = this.mpRole === 'guest' ? this.simFrame : (this._guestReportedWindow || 0) * NET_STEP;
     const sent = this._cmdSentFrame ?? '–';
     const applied = this._cmdAppliedFrame ?? '–';
+    const guestOrder = this._guestCmdAppliedFrame ?? '–';
+    const guestHero = this.game?.heroes?.[1];
+    const guestAt = guestHero ? `${guestHero.x.toFixed(1)},${guestHero.z.toFixed(1)}` : '–';
     const backlog = this.mpRole === 'guest' && this.inbox ? this._windowsBuffered() : 0;
     const reason = this._netReason || this._stallReason || '–';
     this.ui.setNetDebug(
-      `host ${host}   guest ${guest}\ncmd sent ${sent} → applied ${applied}\nbacklog ${backlog}   sim ${sim}/s   render ${render}/s\n${reason}`,
+      `host ${host}   guest ${guest}\ncmd sent ${sent} → applied ${applied}\nguest order applied ${guestOrder}   guest hero ${guestAt}\nbacklog ${backlog}   sim ${sim}/s   render ${render}/s\n${reason}`,
     );
   }
 
@@ -5687,6 +5787,11 @@ class App {
       const src = `setInterval(() => postMessage(0), ${periodMs});`;
       this._netWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
       this._netWorker.onmessage = wake;
+      this._netWorker.onerror = (event) => {
+        const message = event?.message || 'the sim clock worker crashed';
+        this._netReason = message;
+        this.ui.showBanner(`Sim clock error: ${message}. The siege is still running.`, 'bad', 8000);
+      };
     } catch {
       this._netPumpTimer = setInterval(wake, periodMs);
     }
@@ -6025,14 +6130,14 @@ class App {
       }
       return;
     }
-    if (!this.lobby?.game || !this.netMode) return location.reload();
+    if (!this.lobby?.game || !this.netMode) return this._userReload('leave match');
     try {
       if (this.mpRole === 'host') {
         try { await this.lobby.signal({ t: 'roomClosed', to: 'all', reason: 'match_ended' }); } catch { /* status update remains authoritative */ }
       }
       await this.lobby.endGame();
     } finally {
-      location.reload();
+      this._userReload('match ended', { force: true });
     }
   }
 
@@ -9668,12 +9773,20 @@ class App {
           this.pause();
           const keep = g.buildings?.find((b) => b.kind === 'hq');
           const keepHp = keep ? `${Math.round(keep.hp)}/${Math.round(keep.maxHp)}` : 'none';
-          const defeatReason = `defeat:${g.defeatCause || 'unknown'} keep ${keepHp}`;
-          this._clearShareLive();
+          const fallen = !g.defeatCause || g.defeatCause === 'keep_destroyed';
+          const defeatReason = fallen ? 'The city has fallen.' : `defeat:${g.defeatCause} keep ${keepHp}`;
           this._announceMatchEnd(false, defeatReason);
           this._noteMatchExit(defeatReason, { banner: false });
           this._recordGameEnd(false);
-          this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          this._netPumpStop();
+          if (this._shareCode) {
+            this.ui._shareMatch = true;
+            this.ui._endReason = defeatReason;
+            this.ui.showShareMatchEnd({ won: false, reason: defeatReason });
+          } else {
+            this._clearShareLive();
+            this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
+          }
           break;
         }
       }
