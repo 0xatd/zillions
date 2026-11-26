@@ -1,4 +1,5 @@
 import { heroCopy, bearing } from './campaign-presentation.js';
+import { publicRoomSetup } from './lobby-reliability.js';
 import { spellManaCost } from './hero-spells.js';
 import { heroAbilities, abilityCooldown } from './hero-abilities.js';
 import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
@@ -849,6 +850,7 @@ export class UI {
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
       b.onclick = () => {
         this.selectedDiff = key;
+        this._diffPicked = true;
         for (const c of seg.children) c.classList.toggle('sel', c === b);
         if (this.cb.onDifficultyPick) this.cb.onDifficultyPick(key);
       };
@@ -1222,13 +1224,14 @@ export class UI {
       const row = document.createElement('button');
       row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
       row.disabled = incompatible;
-      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}<small>${String(game.mode || 'campaign').toUpperCase()}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      const setup = publicRoomSetup(game);
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${String(setup.mode || 'campaign').toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
       row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
       box.appendChild(row);
     }
     const game = this._selectedCustomGame;
     detail.innerHTML = game
-      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${game.mode === 'labyrinth' ? '🌀' : game.mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${String(game.difficulty || 'normal').toUpperCase()}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
+      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${publicRoomSetup(game).mode === 'labyrinth' ? '🌀' : publicRoomSetup(game).mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(publicRoomSetup(game).mapName || levelById(publicRoomSetup(game).level)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${(DIFFICULTY[publicRoomSetup(game).difficulty] || DIFFICULTY.normal).label}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
       : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
     join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
     join.disabled = !game || game.protocol_compatible === false;
@@ -2565,13 +2568,14 @@ export class UI {
     }
   }
 
-  showSetup({ coop = false, mode = 'campaign', online = null, level = null } = {}) {
+  showSetup({ coop = false, mode = 'campaign', online = null, level = null, share = false } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._syncChapterHeroChoice(mode);
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
@@ -3663,9 +3667,33 @@ export class UI {
     const text = String(url || '');
     const field = this.root.querySelector('#share-url');
     if (field) field.value = text;
-    const done = () => this.showBanner('Invite link copied.', '', 2200);
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => this.showBanner('Select the invite link and copy it.', '', 3200));
-    else this.showBanner('Select the invite link and copy it.', '', 3200);
+    const button = this.root.querySelector('#share-copy');
+    const done = () => { if (button) button.textContent = 'Copied'; };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => { if (button) button.textContent = 'Select the link'; });
+    else if (button) button.textContent = 'Select the link';
+  }
+
+  showShareDraft() {
+    this._shareLive = true;
+    this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
+    const mp = this.root.querySelector('#mp-panel');
+    if (!mp) return;
+    mp.classList.remove('hidden');
+    mp.dataset.share = 'draft';
+    mp.innerHTML = `
+      <div class="share-card">
+        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <h3>Set the siege, then invite</h3>
+        <p class="mphint" id="share-status">Pick the battlefield and difficulty above. The invite link is created from those choices.</p>
+        <div class="share-actions"><button class="diffbtn sel" id="share-create" type="button">Create invite link</button></div>
+      </div>`;
+    mp.querySelector('#share-create').onclick = () => this.cb.onShareCreate?.();
+    this.setStartButton({
+      text: 'SET THE BATTLE, THEN CREATE THE LINK',
+      disabled: true,
+      title: 'Choose the map and difficulty, then create the invite link.',
+    });
   }
 
   showShareNotice({ title = 'Join a siege', copy = '', tone = '' } = {}) {
@@ -3682,9 +3710,10 @@ export class UI {
     if (card) card.classList.toggle('bad', tone === 'bad');
   }
 
-  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true } = {}) {
+  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true, startLabel = '' } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
@@ -3714,17 +3743,16 @@ export class UI {
     this.roomRoster(players || [], { isHost: true, maxPlayers, level, mode, difficulty });
     const waiting = (players || []).length > 1 && !launchReady;
     this.setStartButton({
-      text: waiting ? 'WAITING FOR READY' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
+      text: startLabel || (waiting ? 'WAITING FOR A FRIEND' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode)),
       disabled: waiting,
-      title: waiting
-        ? 'Start unlocks when every friend is connected, has this mission unlocked, and marks Ready.'
-        : 'Friends must join before you start. The link closes when the siege begins.',
+      title: status || 'Friends must join before you start. The link closes when the siege begins.',
     });
   }
 
   showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
@@ -4399,7 +4427,9 @@ export class UI {
       for (const g of rows) {
       const row = document.createElement('div');
       row.className = `gamerow ${activeGame ? 'active' : 'open'}`;
-      const lv = levelById(g.level || 1);
+      const setup = publicRoomSetup(g);
+      const lv = levelById(setup.level);
+      const diffLabel = (DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label;
       const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       const canRejoin = activeGame && myId && g.host_id !== myId
         && (g._players || []).some((p) => p.user_id === myId);
@@ -4407,7 +4437,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 4}</span>
+        <span class="ginfo">${setup.mode === 'survival' ? '💀 Survival' : setup.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${diffLabel} · ${g.players}/${g.max_players || 4}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible

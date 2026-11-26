@@ -140,7 +140,9 @@ server-owned inventory and Salvage Alloy ledger.
 
 Supabase stores accounts, usernames, rooms, chat, characters, inventories,
 wallets, stats, and match history. WebRTC carries co-op match commands. The
-backend does not run the combat simulation.
+backend does not run the combat simulation. Room cards show the host's
+committed map, mode, and difficulty. A dropped co-op player can rejoin from
+the same tab; the host sends a fresh snapshot and the match continues.
 
 ## Heroes
 

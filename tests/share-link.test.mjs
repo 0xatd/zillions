@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
-  admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, markStarted, parseShareLocation,
-  publicShareLobby, releaseGuest, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareLaunchReady, shareRoster, shareUrl, touchLobby, withSeatHero,
+  admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
+  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_CONNECT_GRACE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -89,6 +89,39 @@ test('share ice prefers the deployment relay list', async () => {
   const servers = await loadShareIceServers(async () => ({ ok: true, json: async () => ({ iceServers: turn }) }));
   assert.deepEqual(servers, turn);
   assert.equal(await loadShareIceServers(async () => ({ ok: false, json: async () => ({}) })), null);
+});
+
+test('a guest clock ahead of the host does not mean the host left', () => {
+  const room = lobby();
+  const skewed = { ...room, seenAt: NOW - 60_000 };
+  assert.equal(hostStillHere(skewed, NOW), false);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW, { receivedAt: NOW - 1000 }).ok, true);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW, { hostPresent: true }).ok, true);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW).reason, 'host_left');
+});
+
+test('a ghost connecting seat is named on Start and reaped after the grace', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW + 10).lobby;
+  room = seatGuest(room, { id: THIRD, name: 'Commander', hero: 'scott' }, NOW + 20).lobby;
+  const open = new Set([GUEST]);
+  const ready = setSeatReady(setSeatReady(room, GUEST, true, NOW + 30), THIRD, true, NOW + 30);
+  const gate = shareLaunchReady(ready, open);
+  assert.equal(gate.ready, false);
+  assert.equal(shareStartLabel(ready.seats, gate), 'WAITING FOR Commander TO CONNECT');
+  const young = reapStaleSeats(ready, NOW + 20 + SHARE_CONNECT_GRACE_MS - 1, { openIds: open });
+  assert.equal(young.dropped.length, 0);
+  const reaped = reapStaleSeats(ready, NOW + 20 + SHARE_CONNECT_GRACE_MS, { openIds: open });
+  assert.equal(reaped.dropped.length, 1);
+  assert.equal(reaped.dropped[0].id, THIRD);
+  assert.equal(shareLaunchReady(reaped.lobby, open).ready, true);
+  const refreshed = touchSeatActivity(ready, THIRD, NOW + 20 + SHARE_CONNECT_GRACE_MS);
+  assert.equal(reapStaleSeats(refreshed, NOW + 20 + SHARE_CONNECT_GRACE_MS, { openIds: open }).dropped.length, 0);
+});
+
+test('the seat label prefers the founder over the Commander fallback', () => {
+  assert.equal(seatDisplayName({ founderName: 'Mara' }), 'Mara');
+  assert.equal(seatDisplayName({ username: 'ada', founderName: 'Mara' }), 'ada');
+  assert.equal(seatDisplayName({}), 'Commander');
 });
 
 test('expired, closed, stale, and already-started links refuse a new hero', () => {

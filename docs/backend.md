@@ -178,9 +178,13 @@ RLS policy intent:
 12. The match simulation is peer-to-peer. Watch mode is read-only.
 13. Share links (`/?coop=`) seat a guest with no account. Signaling is a
     same-browser channel plus Supabase realtime broadcast on the existing anon
-    key. There is no new table and no new environment variable. The link does
-    not write stats, match history, wallets, or items. A guest still has to
-    join before the host starts the siege.
+    key. Presence on that channel is the server heartbeat. There is no new
+    table and no new environment variable. The link does not write stats,
+    match history, wallets, or items. Each browser tab has its own commander
+    id, so one tab cannot close another's lobby. A guest joins before the host
+    starts. A dropped seat can rejoin from the same tab; the host sends a
+    fresh snapshot and lockstep continues. A hash mismatch restores that
+    snapshot before anyone is told to refresh.
 
 ## Agent Rules
 

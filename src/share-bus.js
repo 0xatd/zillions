@@ -72,6 +72,10 @@ export function createBrowserHub({
       if (message?.t === 'lobby') write(code, { lobby: message.lobby });
       try { entry.channel?.postMessage(message); } catch { /* channel closed */ }
     },
+    // Same-browser tabs learn liveness from the lobby snapshot. Presence is
+    // the server path, used by the realtime hub below.
+    track() {},
+    onPresence() { return () => {}; },
     subscribe(code, listener, { replay = 'none' } = {}) {
       const entry = slot(code);
       entry.listeners.add(listener);
@@ -105,21 +109,42 @@ export function createSupabaseHub(client) {
     let entry = channels.get(code);
     if (entry) return entry;
     const listeners = new Set();
+    const presenceListeners = new Set();
     const pending = [];
     let ready = false;
-    const channel = client.channel(`zl-share-${code}`, { config: { broadcast: { self: false } } });
+    let tracked = null;
+    const channel = client.channel(`zl-share-${code}`, { config: { broadcast: { self: false }, presence: { key: 'commander' } } });
+    const emitPresence = () => {
+      if (typeof channel.presenceState !== 'function') return;
+      const state = channel.presenceState() || {};
+      const members = [];
+      for (const row of Object.values(state)) {
+        const list = Array.isArray(row) ? row : [row];
+        for (const meta of list) if (meta && typeof meta === 'object') members.push(meta);
+      }
+      for (const listener of presenceListeners) listener(members);
+    };
     channel.on('broadcast', { event: 'sig' }, (message) => {
       const payload = message?.payload;
       if (payload) for (const listener of listeners) listener(payload);
     });
+    channel.on('presence', { event: 'sync' }, emitPresence);
+    const trackNow = () => {
+      if (!tracked || typeof channel.track !== 'function') return;
+      Promise.resolve(channel.track(tracked)).catch(() => {});
+    };
     channel.subscribe((status) => {
       if (status !== 'SUBSCRIBED') return;
       ready = true;
+      trackNow();
       for (const message of pending.splice(0)) {
         channel.send({ type: 'broadcast', event: 'sig', payload: message }).catch(() => {});
       }
     });
-    entry = { channel, listeners, pending, isReady: () => ready };
+    entry = {
+      channel, listeners, presenceListeners, pending, isReady: () => ready,
+      track(payload) { tracked = payload; if (ready) trackNow(); },
+    };
     channels.set(code, entry);
     return entry;
   };
@@ -134,7 +159,19 @@ export function createSupabaseHub(client) {
       entry.listeners.add(listener);
       return () => {
         entry.listeners.delete(listener);
-        if (!entry.listeners.size) {
+        if (!entry.listeners.size && !entry.presenceListeners.size) {
+          entry.pending.length = 0; channels.delete(code);
+          Promise.resolve(client.removeChannel(entry.channel)).catch(() => {});
+        }
+      };
+    },
+    track(code, payload) { entryFor(code).track(payload); },
+    onPresence(code, listener) {
+      const entry = entryFor(code);
+      entry.presenceListeners.add(listener);
+      return () => {
+        entry.presenceListeners.delete(listener);
+        if (!entry.listeners.size && !entry.presenceListeners.size) {
           entry.pending.length = 0; channels.delete(code);
           Promise.resolve(client.removeChannel(entry.channel)).catch(() => {});
         }

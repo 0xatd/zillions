@@ -675,7 +675,24 @@ body::after {
 .setup.roommode .herocard .habils { display: none; }
 .setup.roommode .diff-label { grid-area: difflabel; }
 .setup.roommode .diffseg { grid-area: diffs; }
-.setup.roommode #mp-panel { grid-area: room; margin-top: 10px; min-height: 0; overflow: hidden; }
+.setup.roommode #mp-panel { grid-area: room; margin-top: 10px; min-height: 0; overflow: auto; }
+/* Drop-in co-op keeps the invite and roster in normal flow above START.
+   START is not sticky, so it cannot cover the seats, the link, or difficulty. */
+.setup.sharemode {
+  width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.setup.sharemode #mp-panel {
+  overflow: visible;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+.setup.sharemode #s-start {
+  position: static;
+  margin-top: 12px;
+}
 .setup.roommode.room-guest .modechip,
 .setup.roommode.room-guest .levelcard,
 .setup.roommode.room-guest .diffbtn:not(.roomready):not(.room-retry):not(.room-remove) { cursor: default; filter: saturate(.65); }
@@ -1070,7 +1087,8 @@ body::after {
 }
 #invitetoast b { color: var(--gold); }
 @media (max-width: 980px) {
-  .setup.roommode { display: block; height: auto; overflow-y: auto; }
+  .setup.roommode, .setup.sharemode { display: block; height: auto; overflow-y: auto; }
+  .setup.sharemode #s-start { position: static; }
   .setup.roommode .herorow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lobbygrid { grid-template-columns: 1fr; max-height: none; }
   .lobbychat { min-height: 180px; }

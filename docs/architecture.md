@@ -127,8 +127,10 @@ procedural renderer and must not stop a match from starting.
 | `src/supabase.js` | One shared Supabase client and write timeout |
 | `src/auth.js` | Google sign-in, username, profile, cloud saves, and read-only hydration of server stats and character progress |
 | `src/online.js` | Rooms, seats, roster refresh, chat, presence, and signaling |
+| `src/lobby-reliability.js` | Room-card setup, stale seats, rejoin grace, and desync recovery rules |
+| `src/tab-session.js` | Per-tab commander id and the lobby lease |
 | `src/share-link.js` | Invite-link seats: expiry, full lobby, host left, and late join |
-| `src/share-bus.js` | Share-link signaling: same-browser channel and realtime broadcast |
+| `src/share-bus.js` | Share-link signaling: same-browser channel, realtime broadcast, and presence |
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
@@ -142,7 +144,10 @@ procedural renderer and must not stop a match from starting.
 `supabase/schema.sql` defines the durable schema.
 
 Co-op rooms support one to four players. The first player hosts the room.
-The mission uses WebRTC lockstep.
+The mission uses WebRTC lockstep. A dropped player can rejoin during a grace
+period; the host sends its snapshot and the guest resumes that frame. If a
+window hash disagrees, the host sends the same snapshot before the match is
+abandoned. The simulation rules do not change.
 
 ## Deterministic Simulation
 

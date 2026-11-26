@@ -3,6 +3,7 @@
 // lives in Supabase.
 
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
+import { committedSetupPatch, mergeRefreshedRoom, ROOM_HEARTBEAT_MS, staleOpenSeatIds } from './lobby-reliability.js';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
 // Increment this only when two browser builds cannot safely share a room.
@@ -23,13 +24,16 @@ const CURRENT_RULES = 'survival-plots';
 // v18: click orders (`horder`) participate in movement and the lockstep hash.
 // A v17 tab drops the command and hashes a different hero, so it cannot share
 // a room or a Watch session with this build.
-export const LOBBY_PROTOCOL_VERSION = 18;
+// v19: opening Keep health is 5400 and the lockstep hash salt is 19
+// (SIM_HASH_SALT / replay SIM_VERSION). A v18 tab simulates a different Keep
+// and must not take a seat or a Watch session with this build.
+export const LOBBY_PROTOCOL_VERSION = 19;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
 const SIGNAL_ATTEMPTS = 3;
 const SIGNAL_RETRY_MS = 350;
-const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state,unlocked_level)';
+const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state,unlocked_level,last_seen_at,joined_at)';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -198,6 +202,11 @@ export class OnlineLobby {
     this._gamesPoll = setInterval(() => {
       if (!this.matchActive) this.refreshGames().catch(() => {});
     }, 5 * 1000);
+    // The joiner's room screen follows the host's committed row, even when a
+    // realtime event is missed. Heartbeats and setup writes share that row.
+    this._roomPoll = setInterval(() => {
+      if (this.game && !this.matchActive) this.refreshCurrentGame().catch(() => {});
+    }, ROOM_HEARTBEAT_MS);
 
     this.sb.channel('zl-rooms-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { if (!this.matchActive) this.refreshGames(); })
@@ -551,7 +560,7 @@ export class OnlineLobby {
     this.game = roomToGame({ ...data, room_players: [{ user_id: this.me.id, display_name: this.me.name, hero: this.me.hero }] });
     await this._joinGameChannel(data.id, true);
     // Heartbeat so the listing stays fresh; stops when the page dies.
-    this._beat = setInterval(() => this.touchGame({}), 45 * 1000);
+    this._beat = setInterval(() => this.touchGame({}), ROOM_HEARTBEAT_MS);
     this._installPageHide();
     await this.refreshCurrentGame();
     await this.refreshGames();
@@ -562,6 +571,8 @@ export class OnlineLobby {
     if (this._pageHide) window.removeEventListener('pagehide', this._pageHide);
     this._pageHide = () => {
       if (!this.game?.id || !this.me?.id) return;
+      // Another tab of this profile owns the room. Do not mark its seat offline.
+      if (typeof this.ownsRoom === 'function' && !this.ownsRoom(this.game.id)) return;
       this.sb.from('room_players').update({
         connection_state: 'offline',
         last_seen_at: new Date().toISOString(),
@@ -573,26 +584,40 @@ export class OnlineLobby {
   async touchGame(fields) {
     if (!this.game) return;
     const status = fields.status === 'playing' ? 'in_game' : fields.status;
-    const metadata = { ...(this.game.metadata || {}), players: fields.players || this.game.players || 1 };
+    // Heartbeats refresh liveness only. Rewriting metadata here raced a map
+    // change and put the previous battlefield back on the public card.
     await this.sb.from('rooms')
       .update({
         ...(status ? { status } : {}),
-        metadata,
         last_seen_at: new Date().toISOString(),
       })
       .eq('id', this.game.id);
     await this._touchPresence();
+    if (typeof this.onHeartbeat === 'function') this.onHeartbeat();
+    await this._reapOpenSeats();
+  }
+
+  async _reapOpenSeats() {
+    if (!this.game || this.game.host_id !== this.me?.id || this.matchActive) return;
+    if (this.game.status !== 'open') return;
+    const ids = staleOpenSeatIds(this.game._players, {
+      hostId: this.me.id,
+      now: Date.now(),
+      inGame: false,
+    });
+    if (!ids.length) return;
+    for (const userId of ids) {
+      await this.sb.from('room_players').delete().eq('room_id', this.game.id).eq('user_id', userId);
+    }
+    await this.refreshCurrentGame();
   }
 
   async updateGameSettings(fields = {}) {
     if (!this.game || this.game.host_id !== this.me?.id) return this.game;
-    const metadata = {
-      ...(this.game.metadata || {}),
-      ...(fields.level ? { level: fields.level } : {}),
-      ...(fields.mode ? { mode: fields.mode } : {}),
-    };
-    const patch = { metadata, last_seen_at: new Date().toISOString() };
-    if (fields.difficulty) patch.difficulty = fields.difficulty;
+    const revision = Number(this.game.metadata?.setupRevision || 0) + 1;
+    const committed = committedSetupPatch(this.game, fields, revision);
+    const metadata = committed.metadata;
+    const patch = { metadata, difficulty: committed.difficulty, last_seen_at: new Date().toISOString() };
     const { error } = await this.sb.from('rooms').update(patch).eq('id', this.game.id);
     if (error) throw new Error(error.message);
     const setupChanged = fields.level || fields.mode || fields.difficulty;
@@ -608,9 +633,10 @@ export class OnlineLobby {
     this.game = {
       ...this.game,
       metadata,
-      level: metadata.level || this.game.level,
-      mode: metadata.mode || this.game.mode,
-      difficulty: fields.difficulty || this.game.difficulty,
+      level: committed.level,
+      mode: committed.mode,
+      difficulty: committed.difficulty,
+      _setupRevision: committed.setupRevision,
     };
     if (this.cb.onRoom) this.cb.onRoom(this.game);
     return this.game;
@@ -671,7 +697,7 @@ export class OnlineLobby {
         if (local) data.room_players = [...players, local];
       }
     }
-    this.game = roomToGame(data);
+    this.game = mergeRefreshedRoom(this.game, roomToGame(data));
     if (this.cb.onRoom) this.cb.onRoom(this.game);
     return this.game;
   }

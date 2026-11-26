@@ -30,10 +30,12 @@ import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './mari
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
-  admitGuest, clearGuestReady, closeLobby, createLobby, markStarted, parseShareLocation, publicShareLobby,
-  randomShareCode, releaseGuest, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
-  shareName, shareRoster, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, withSeatHero,
+  admitGuest, clearGuestReady, closeLobby, createLobby, hostStillHere, markStarted, parseShareLocation, publicShareLobby,
+  randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
+  shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
+import { createTabSession } from './tab-session.js';
+import { desyncRecovery, roomStartLabel, withinRejoinGrace } from './lobby-reliability.js';
 import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
@@ -339,6 +341,7 @@ class App {
       onQuickStart: (draft) => this._quickStart(draft),
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
+      onShareCreate: () => this._openShareLobby(),
       onShareLeave: () => this._leaveShareLink(),
       onShareReady: (ready) => this._setShareReady(ready),
       onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
@@ -447,7 +450,11 @@ class App {
       this.profile.lastHero = initialCharacter.proxyHero;
     }
     this.autosaveT = 20;
-    window.addEventListener('beforeunload', () => { this._autosave(true); this._abandonShareLink(); });
+    window.addEventListener('beforeunload', () => {
+      this._autosave(true);
+      this._abandonShareLink();
+      this._tab?.release();
+    });
 
     this.groanAcc = 0;
     this.deathSfxT = 0;
@@ -2143,6 +2150,7 @@ class App {
     this._quickCommitted = true;
     this.ui.selectedCulture = draft.army;
     this.ui.selectedDiff = draft.difficulty;
+    this.ui._diffPicked = true;
     this.ui.selectedMode = 'campaign';
     this.ui.selectedLevel = Math.min(LEVELS.length, Math.max(1, Number(this.profile.campaign || 0) + 1));
     try { localStorage.setItem('zillions.culture', draft.army); } catch { /* private mode */ }
@@ -2402,8 +2410,19 @@ class App {
     };
   }
 
+  _tabSession() {
+    if (!this._tab) this._tab = createTabSession();
+    return this._tab;
+  }
+
   _publicName() {
-    return this.lobby?.me?.name || this.profile.username || this.profile.name || 'Commander';
+    const founder = chapterFounder(this.profile);
+    return seatDisplayName({
+      accountName: this.lobby?.me?.name || '',
+      username: this.profile.username || '',
+      founderName: founder?.name || '',
+      profileName: this.profile.name || '',
+    });
   }
 
   _heroPayload(key = this.ui.selectedHero) {
@@ -3158,11 +3177,22 @@ class App {
 
   _checkGuestHash(w, h, idx) {
     const mine = this.hashes.local.get(w);
-    if (mine !== undefined && mine !== h && !this.desynced) {
+    if (mine === undefined || mine === h || this.desynced) return;
+    const decision = desyncRecovery({ attempts: this._desyncAttempts || [], now: Date.now() });
+    this._desyncAttempts = decision.attempts;
+    if (decision.action === 'terminal') {
       this.desynced = true;
       this._broadcast({ t: 'desync' });
       this.ui.showBanner('⚠️ Games desynced — everyone should refresh and reconnect.', 'bad', 10000);
+      return;
     }
+    const peer = this.peers[idx];
+    if (!peer?.open || !this.game) return;
+    this.ui.showBanner('Restoring the shared battlefield…', '', 2500);
+    peer.send({
+      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      match: this._sharedMatchFields(), reason: 'desync',
+    });
   }
 
   async joinGame(code) {
@@ -3191,14 +3221,31 @@ class App {
   // Friends join before Start. After that the link refuses a new hero.
   _shareSelfId() {
     if (shareId(this._shareSelf)) return this._shareSelf;
-    let id = '';
-    try { id = sessionStorage.getItem('zillions.share.self') || ''; } catch { /* private mode */ }
-    if (!shareId(id)) {
-      id = crypto.randomUUID();
-      try { sessionStorage.setItem('zillions.share.self', id); } catch { /* private mode */ }
-    }
-    this._shareSelf = id;
-    return id;
+    const id = this._tabSession().id;
+    this._shareSelf = shareId(id) ? id : crypto.randomUUID();
+    return this._shareSelf;
+  }
+
+  _shareLiveness() {
+    return { receivedAt: this._shareReceivedAt || null, hostPresent: !!this._shareHostPresent };
+  }
+
+  _noteSharePresence(members) {
+    const list = Array.isArray(members) ? members : [];
+    this._sharePresentIds = new Set(list.map((member) => member?.id).filter(Boolean));
+    const hostId = this._shareLobby?.hostId;
+    this._shareHostPresent = !!(hostId && list.some((member) => member?.role === 'host' && member.id === hostId));
+    if (this._shareHostPresent) this._shareReceivedAt = Date.now();
+  }
+
+  _shareTrackPresence() {
+    if (!this._shareCode || !this._shareSelf) return;
+    const payload = {
+      id: this._shareSelf,
+      role: this.mpRole === 'host' ? 'host' : 'guest',
+      name: this._publicName(),
+    };
+    for (const hub of this._shareHubList || []) hub.track?.(this._shareCode, payload);
   }
 
   _consumeShareLink() {
@@ -3247,7 +3294,19 @@ class App {
       this.ui.showBanner('Name your chapter, then invite a friend. No account needed.', '', 3400);
       return;
     }
-    this._openShareLobby();
+    this._showShareDraft();
+  }
+
+  _showShareDraft() {
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    this.ui.showSetup({ mode: this.ui.selectedMode || 'campaign', share: true });
+    this.ui.setRoomSettings({
+      level: this.ui.selectedLevel || 1,
+      difficulty: this.ui.selectedDiff || QUICK_DEFAULTS.difficulty,
+      isHost: true,
+      mode: this.ui.selectedMode || 'campaign',
+    });
+    this.ui.showShareDraft();
   }
 
   _openShareLobby() {
@@ -3263,7 +3322,11 @@ class App {
       });
       this._shareSig = '';
       this._renderShareHost();
-      this.ui.copyShareUrl(this._shareUrl);
+      return;
+    }
+    const claim = this._tabSession().claimLease({ kind: 'share' });
+    if (!claim.ok) {
+      this.ui.showBanner('This browser already has a lobby open in another tab. Use that tab, or close it before hosting here.', 'bad', 5500);
       return;
     }
     const id = this._shareSelfId();
@@ -3296,13 +3359,43 @@ class App {
     this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
     this._bindShareTransport('host');
     this._sharePublishLobby();
-    clearInterval(this._shareBeat);
-    this._shareBeat = setInterval(() => {
-      if (this._shareLobby && this.mpRole === 'host') this._sharePublishLobby();
-    }, SHARE_HEARTBEAT_MS);
+    this._startShareHeartbeat();
     this._shareSig = '';
     this._renderShareHost();
-    this.ui.copyShareUrl(this._shareUrl);
+  }
+
+  _startShareHeartbeat() {
+    this._stopShareHeartbeat();
+    const tick = () => {
+      this._tabSession().touch();
+      if (this.mpRole === 'host' && this._shareLobby) {
+        this._tabSession().refreshLease();
+        this._reapShareSeats();
+        this._sharePublishLobby();
+        this._shareTrackPresence();
+        return;
+      }
+      if (this.mpRole !== 'guest' || !this._shareLobby || this.netMode) return;
+      const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
+      if (!decision.ok) this._failShare(decision.reason);
+      else this._shareTrackPresence();
+    };
+    try {
+      const src = `setInterval(() => postMessage(0), ${SHARE_HEARTBEAT_MS});`;
+      this._shareWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this._shareWorker.onmessage = tick;
+    } catch {
+      this._shareBeat = setInterval(tick, SHARE_HEARTBEAT_MS);
+    }
+  }
+
+  _stopShareHeartbeat() {
+    if (this._shareWorker) {
+      try { this._shareWorker.terminate(); } catch { /* already gone */ }
+      this._shareWorker = null;
+    }
+    clearInterval(this._shareBeat);
+    this._shareBeat = null;
   }
 
   _joinShareLink(code) {
@@ -3323,12 +3416,7 @@ class App {
     this._shareDiscover = setTimeout(() => {
       if (!this._shareLobby) this._failShare('invalid');
     }, SHARE_DISCOVER_MS);
-    clearInterval(this._shareBeat);
-    this._shareBeat = setInterval(() => {
-      if (this.mpRole !== 'guest' || !this._shareLobby || this.netMode) return;
-      const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now());
-      if (!decision.ok) this._failShare(decision.reason);
-    }, 1000);
+    this._startShareHeartbeat();
   }
 
   _bindShareTransport(role) {
@@ -3345,6 +3433,13 @@ class App {
       this._shareHubList.push(hub);
       this._shareRelay = true;
       this._shareUnsubs.push(hub.subscribe(this._shareCode, onMessage));
+      if (hub.onPresence) {
+        this._shareUnsubs.push(hub.onPresence(this._shareCode, (members) => {
+          if (generation !== this._shareGeneration) return;
+          this._noteSharePresence(members);
+        }));
+      }
+      this._shareTrackPresence();
       if (this.mpRole === 'host') this._sharePublishLobby();
       this._shareSig = '';
       this._renderShareHost();
@@ -3452,6 +3547,12 @@ class App {
 
   _renderShareHost() {
     if (this.mpRole !== 'host' || !this._shareLobby || this.netMode) return;
+    const name = this._publicName();
+    const hostSeat = this._shareLobby.seats?.find((seat) => seat.host);
+    if (hostSeat && hostSeat.name !== name) {
+      this._shareLobby = withSeatHero(this._shareLobby, hostSeat.id, hostSeat.hero, name, Date.now());
+      this._sharePublishLobby();
+    }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
     const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
@@ -3460,15 +3561,18 @@ class App {
     const blocked = players.length > 1 && !gate.ready;
     const status = gate.blockers.length
       ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
-      : !gate.ready && players.length > 1
-        ? (gate.connecting ? 'Waiting for every friend to connect.' : 'Waiting for every friend to mark Ready.')
-        : players.length > 1
-          ? `${players.length} commanders in this siege. Start when you are ready.`
-          : 'Link copied. Waiting for friends.';
+      : gate.connectingSeats?.length
+        ? `Waiting for ${gate.connectingSeats.map((seat) => seat.name).join(', ')} to connect.`
+        : gate.notReady?.length
+          ? `Waiting for ${gate.notReady.map((seat) => seat.name).join(', ')} to mark Ready.`
+          : players.length > 1
+            ? `${players.length} commanders in this siege. Start when you are ready.`
+            : 'Invite link ready. Set the map and difficulty, then send it.';
     this.ui.showShareHost({
       url: this._shareUrl,
       status,
       launchReady: !blocked,
+      startLabel: shareStartLabel(players, gate, this.ui._startCopyFor(this._shareLobby.mode)),
       players,
       relay: this._shareRelay,
       level: this._shareLobby.level,
@@ -3476,6 +3580,35 @@ class App {
       difficulty: this._shareLobby.difficulty,
       maxPlayers: this._shareLobby.maxPlayers || 4,
     });
+  }
+
+  _reapShareSeats() {
+    if (!this._shareLobby || this.mpRole !== 'host' || this._shareLobby.started || this.netMode) return;
+    const result = reapStaleSeats(this._shareLobby, Date.now(), {
+      openIds: this._shareOpenIds(),
+      presentIds: this._sharePresentIds || null,
+    });
+    if (!result.dropped.length) return;
+    for (const seat of result.dropped) this._dropShareHand(seat.id);
+    this._shareLobby = result.lobby;
+    this._shareSig = '';
+    this._renderShareHost();
+  }
+
+  _dropShareHand(id) {
+    const peer = this._shareHands?.get(id);
+    if (!peer) return;
+    peer.shareDropped = true;
+    this._shareHands.delete(id);
+    const idx = this.peers.indexOf(peer);
+    if (idx >= 0 && !this.netMode) {
+      this.peers.splice(idx, 1);
+      this.guestHeroes.splice(idx, 1);
+      this.guestNames.splice(idx, 1);
+      this.guestCmdQueues.splice(idx, 1);
+      this.peerUserIds.splice(idx, 1);
+    }
+    try { peer.destroy(); } catch { /* already closed */ }
   }
 
   _onShareMessage(message) {
@@ -3503,14 +3636,19 @@ class App {
 
   _onShareLobby(lobby) {
     if (!lobby || lobby.code !== this._shareCode) return;
+    this._shareReceivedAt = Date.now();
     this._shareLobby = lobby;
-    const decision = admitGuest(lobby, { id: this._shareSelf }, Date.now());
+    const decision = admitGuest(lobby, { id: this._shareSelf }, this._shareReceivedAt, {
+      receivedAt: this._shareReceivedAt,
+      hostPresent: !!this._shareHostPresent,
+    });
     if (!decision.ok) {
       if (this.net?.open || this.netMode) return;
       this._failShare(decision.reason);
       return;
     }
     clearTimeout(this._shareDiscover);
+    if (!(lobby.seats || []).some((seat) => seat.id === this._shareSelf)) this._shareAnnounced = false;
     if (!this._shareAnnounced) {
       this._shareAnnounced = true;
       this.audio?.init();
@@ -3522,7 +3660,7 @@ class App {
     }
     if (!this._shareGuestShown) {
       this._shareGuestShown = true;
-      this.ui.showSetup({ mode: lobby.mode || 'campaign' });
+      this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
     }
     if (!this.netMode) {
       this.ui.selectedLevel = lobby.level || 1;
@@ -3553,17 +3691,20 @@ class App {
   async _acceptShareGuest(message) {
     if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
     if (this._shareHands?.has(message.from)) {
-      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
       const peer = this._shareHands.get(message.from);
-      const idx = this.peers.indexOf(peer);
-      if (idx >= 0) {
-        this.guestHeroes[idx] = shareHero(message.hero);
-        this.guestNames[idx] = shareName(message.name);
+      this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now()), message.from, Date.now());
+      if (peer?.open) {
+        const idx = this.peers.indexOf(peer);
+        if (idx >= 0) {
+          this.guestHeroes[idx] = shareHero(message.hero);
+          this.guestNames[idx] = shareName(message.name);
+        }
+        this._shareSig = '';
+        this._sharePublishLobby();
+        this._renderShareHost();
+        return;
       }
-      this._shareSig = '';
-      this._sharePublishLobby();
-      this._renderShareHost();
-      return;
+      this._dropShareHand(message.from);
     }
     const decision = admitGuest(this._shareLobby, {
       id: message.from, claim: true,
@@ -3588,7 +3729,9 @@ class App {
     const generation = this._shareGeneration;
     const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
     this._sharePendingJoins.delete(message.from);
-    if (generation !== this._shareGeneration || !this._shareLobby || this._shareLobby.started || !this._shareLobby.seats.some(s => s.id === message.from)) return;
+    const liveMatch = !!(this._shareLobby?.started && this.netMode && this.game && !this.game.over);
+    if (generation !== this._shareGeneration || !this._shareLobby || !this._shareLobby.seats.some(s => s.id === message.from)) return;
+    if (this._shareLobby.started && !liveMatch) return;
     const peer = new NetSession(ice);
     peer.shareId = message.from;
     this._shareHands.set(message.from, peer);
@@ -3602,7 +3745,8 @@ class App {
     peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
       const sdp = await peer.hostTrickle();
-      if (this._shareLobby?.started || !this._shareHands?.has(message.from)) return;
+      if (!this._shareHands?.has(message.from)) return;
+      if (this._shareLobby?.started && !(this.netMode && this.game && !this.game.over)) return;
       this._sharePublish({ t: 'offer', to: message.from, sdp });
       this._shareSig = '';
       this._sharePublishLobby();
@@ -3616,11 +3760,32 @@ class App {
   }
 
   _bindSharePeer(peer, id) {
-    if (this._shareLobby?.started || this.netMode || this.peers.includes(peer)) {
-      if (!this.peers.includes(peer)) {
+    if (this.peers.includes(peer)) return;
+    if (this._shareLobby?.started || this.netMode) {
+      if (!this.game || this.game.over) {
         this._shareHands?.delete(id);
         try { peer.destroy(); } catch { /* ignore */ }
+        return;
       }
+      let idx = this.peers.findIndex((entry) => entry.shareId === id);
+      if (idx >= 0) {
+        const old = this.peers[idx];
+        if (old && old !== peer) { try { old.destroy(); } catch { /* already dead */ } }
+        this.peers[idx] = peer;
+        this.guestCmdQueues[idx] = [];
+      } else {
+        const seat = this._shareLobby.seats.find((entry) => entry.id === id);
+        this.peers.push(peer);
+        this.guestHeroes.push(shareHero(seat?.hero));
+        this.guestNames.push(seat?.name || 'Commander');
+        this.guestCmdQueues.push([]);
+        this.peerUserIds.push(null);
+        idx = this.peers.length - 1;
+      }
+      peer.send({
+        t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
+      });
+      this.ui.showBanner(`${this.guestNames[idx] || 'A friend'} reconnected.`, '', 2500);
       return;
     }
     const previous = this.peers.findIndex((entry) => entry.shareId === id && entry !== peer);
@@ -3644,8 +3809,11 @@ class App {
   }
 
   async _acceptShareOffer(message) {
-    if (message.to !== this._shareSelf || this.net?.open || this._shareOffered === message.id) return;
-    if (!this._shareLobby || message.from !== this._shareLobby.hostId || this._shareLobby.started) return;
+    if (message.to !== this._shareSelf || this._shareOffered === message.id) return;
+    if (!this._shareLobby || message.from !== this._shareLobby.hostId) return;
+    const rejoining = !!(this._shareLobby.started || this.netMode);
+    if (rejoining && !this._shareLobby.seats?.some((seat) => seat.id === this._shareSelf)) return;
+    if (this.net?.open) return;
     const generation = this._shareGeneration;
     this._shareOffered = message.id;
     if (this.net) {
@@ -3660,12 +3828,7 @@ class App {
     net.onMessage = (incoming) => this._onGuestMsg(incoming);
     net.onClose = () => {
       if (this.net !== net) return;
-      if (this.netMode && this.game && !this.game.over) {
-        this.pause();
-        this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
-        return;
-      }
-      if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+      this._onShareLinkLost();
     };
     net.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
@@ -3737,29 +3900,70 @@ class App {
     } else if (this.mpRole === 'guest' && this._shareCode) {
       this._sharePublish({ t: 'leave' });
     }
+    const hosted = this.mpRole === 'host';
     this._teardownShare();
+    if (hosted && this._tab?.ownsLease()) {
+      this._tab.release();
+      this._tab.touch();
+    }
     this.ui._shareLive = false;
+    this.ui.root?.querySelector?.('#screen-setup')?.classList.remove('sharemode');
     if (!this.netMode) this.mpRole = null;
     if (this.auth?.isSignedIn() || chapterFounder(this.profile) || this.profile.quickSetupDone) this.ui._showScreen('main');
     else this.ui._showScreen('account');
   }
 
   _abandonShareLink() {
-    if (!this._shareLobby || !this._shareCode) return;
+    if (!this._shareCode) return;
     try {
       if (this.mpRole === 'host') {
+        if (this._tab && !this._tab.ownsLease()) return;
+        if (!this._shareLobby) return;
         this._shareLobby = closeLobby(this._shareLobby, Date.now());
         this._sharePublishLobby();
       } else this._sharePublish({ t: 'leave' });
     } catch { /* the page is going away */ }
   }
 
+  _onShareLinkLost() {
+    const inMatch = !!(this.netMode && this.game && !this.game.over);
+    if (inMatch) {
+      if (!this._shareLostAt) this._shareLostAt = Date.now();
+      if (!withinRejoinGrace(this._shareLostAt, Date.now())) {
+        this.pause();
+        this.ui.setWaiting(false);
+        this.ui.showBanner('Could not rejoin the host. Open the same invite from this tab while the seat is held.', 'bad', 8000);
+        return;
+      }
+      this.ui.setWaiting(true, 'Reconnecting to the host…');
+      this._shareRetryJoin();
+      return;
+    }
+    const alive = this._shareLobby && hostStillHere(this._shareLobby, Date.now(), {
+      receivedAt: this._shareReceivedAt || null,
+      hostPresent: !!this._shareHostPresent,
+    });
+    if (alive) {
+      this._shareRetryJoin();
+      return;
+    }
+    if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+  }
+
+  _shareRetryJoin() {
+    const now = Date.now();
+    if (now - (this._shareRetryAt || 0) < 2000) return;
+    this._shareRetryAt = now;
+    this._shareAnnounced = false;
+    this._shareOffered = null;
+    if (this._shareLobby) this._onShareLobby(this._shareLobby);
+  }
+
   _teardownShare() {
     this._shareGeneration = (this._shareGeneration || 0) + 1;
     this._sharePendingJoins?.clear();
-    clearInterval(this._shareBeat);
+    this._stopShareHeartbeat();
     clearTimeout(this._shareDiscover);
-    this._shareBeat = null;
     this._shareDiscover = null;
     for (const unsub of this._shareUnsubs || []) {
       try { unsub(); } catch { /* ignore */ }
@@ -3847,10 +4051,14 @@ class App {
           this.simFrame = m.frame;
           this.inbox = buf;
           this.netPrimed = false;
+          this.desynced = false;
+          this._desyncAttempts = [];
           this._reconnectTries = 0;
+          this._reconnectSince = 0;
+          this._shareLostAt = 0;
           clearTimeout(this._reconnectT);
           this.ui.setWaiting(false);
-          this.ui.showBanner('🔌 Reconnected — back in the war.', '', 3500);
+          this.ui.showBanner(m.reason === 'desync' ? 'Battlefield restored from the host.' : '🔌 Reconnected — back in the war.', '', 3500);
         })
         .catch(() => {})
         .finally(() => { this._resyncing = false; this._resyncBuffer = null; });
@@ -4076,6 +4284,11 @@ class App {
       onSignal: (sig) => this._onSignal(sig),
       onRoomClosed: (reason) => this._handleRoomClosed(reason),
     });
+    this.lobby.ownsRoom = () => {
+      const lease = this._tabSession().lease();
+      return !!(lease && lease.kind === 'room' && this._tabSession().ownsLease());
+    };
+    this.lobby.onHeartbeat = () => this._tabSession().refreshLease();
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
@@ -4123,13 +4336,9 @@ class App {
         : 'You are in the room. Pick your hero and wait for the host to press START.',
     });
     this.ui.setStartButton(isHost ? {
-      text: !compatible
-        ? `🔒  LEVEL ${eligibility.level} LOCKED FOR ${eligibility.blockers.length} PLAYER${eligibility.blockers.length === 1 ? '' : 'S'}`
-        : ready
-        ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
-        : pending
-        ? `⏳  WAITING FOR ${connectionNames || `${pending} PLAYER${pending === 1 ? '' : 'S'}`}`
-        : `⏳  WAITING FOR ${waitingToReady} READY`,
+      text: roomStartLabel({
+        compatible, ready, pending, waiting, connectionNames, expectedPlayers, blockers: eligibility.blockers,
+      }),
       disabled: !ready || !compatible,
       title: !compatible
         ? 'Choose a level every player has unlocked before starting.'
@@ -4272,6 +4481,7 @@ class App {
     this.ui.onlineStatus('Leaving room…');
     try {
       await this.lobby.leaveRoom();
+      this._releaseRoomLease();
       for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
       if (this.net) { try { this.net.destroy(); } catch { /* closed */ } }
       this.peers = [];
@@ -4434,6 +4644,7 @@ class App {
       this.ui.showBanner('Leave your current room before hosting another.', 'bad', 4000);
       return;
     }
+    if (!this._claimRoomLease()) return;
     this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
     try {
       const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
@@ -4444,13 +4655,29 @@ class App {
       this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
     } catch (error) {
       this.ui.showBanner(`❌ Could not create the game: ${error.message}`, 'bad', 5000);
+      this._releaseRoomLease();
       this.mpRole = null; this.onlineMode = false;
     }
+  }
+
+  _claimRoomLease() {
+    const claim = this._tabSession().claimLease({ kind: 'room' });
+    if (claim.ok) return true;
+    this.ui.showBanner('This browser already has a lobby open in another tab. Use that tab, or close it before hosting here.', 'bad', 5500);
+    return false;
+  }
+
+  _releaseRoomLease() {
+    const lease = this._tab?.lease();
+    if (lease?.kind !== 'room' || !this._tab.ownsLease()) return;
+    this._tab.release();
+    this._tab.touch();
   }
 
   async createOnlineGame(visibility) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || lobby.game) return;
+    if (!this._claimRoomLease()) return;
     this.audio.init();
     this.mpRole = 'host';
     this.onlineMode = true;
@@ -4470,6 +4697,7 @@ class App {
       this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
     } catch (e) {
       this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
     }
@@ -4610,6 +4838,7 @@ class App {
         this.ui.setRoomReconnect({ visible: false });
         if (this.mpRole === 'guest') {
           this._reconnectTries = 0;
+          this._reconnectSince = 0;
           if (!this.netMode) {
             this.net.send(this._heroPayload());
             this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
@@ -4660,11 +4889,12 @@ class App {
 
   _scheduleReconnect(delayMs = null) {
     if (!this.netMode || !this.game || this.game.over) return;
+    if (!this._reconnectSince) this._reconnectSince = Date.now();
     this._reconnectTries = (this._reconnectTries || 0) + 1;
-    if (this._reconnectTries > 8) {
+    if (!withinRejoinGrace(this._reconnectSince, Date.now())) {
       this.pause();
       this.ui.setWaiting(false);
-      this.ui.showBanner('⚠️ Could not reach the host again. The room may have ended.', 'bad', 8000);
+      this.ui.showBanner('⚠️ Could not reach the host again. Rejoin from the lobby while your seat is held.', 'bad', 8000);
       return;
     }
     const wait = delayMs != null ? delayMs : Math.min(8000, 500 * 2 ** (this._reconnectTries - 1));
@@ -4692,11 +4922,13 @@ class App {
       this.ui.showBanner(compatibility.reason, 'bad', 7000);
       return;
     }
+    if (!this._claimRoomLease()) return;
     this.audio.init();
     this.mpRole = 'guest';
     this.onlineMode = true;
     const rejoining = row.status === 'in_game';
     if (rejoining && !canRejoinRoom(row, lobby.me?.id)) {
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
       this.ui.showBanner('This war is already in progress. Use Watch unless you already hold a player seat.', 'bad', 5000);
@@ -4722,6 +4954,7 @@ class App {
       this.ui.roomChatFill(await lobby.loadRoomChat(joinedRoom.id, 'room'));
       this._armLobbyConnectionWatchdog();
     } catch (e) {
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
       this.ui.onlineStatus(`❌ Could not join: ${e.message}. Try JOIN again.`);
