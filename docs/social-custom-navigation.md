@@ -27,6 +27,7 @@ flowchart LR
   join a battle, change character or change political affiliation.
 - Custom Battles uses the existing SC2/WC3-style room browser, map selection,
   public/private creation, player seats, chat and explicit Ready/Start barrier.
+  Custom lobby seats/chat appear beside settings on laptop and first on phone.
   Teams beyond the cooperative side and AI slots remain disabled.
 - Campaign setup shows only the selected encounter; arbitrary map selection
   belongs to Custom Battles. The current campaign remains a site selector,

@@ -515,3 +515,24 @@ button:disabled {cursor:not-allowed;}
 #social-panel .glass h2 {font-size:18px;margin:0 0 12px;}
 #social-panel .squad-grid {gap:12px;}
 #social-panel .friendrow {padding:8px 0;}
+
+/* Custom lobbies put player seats/chat beside settings, not below a hero poster. */
+#screen-setup.custom-room {grid-template-columns:minmax(360px,1fr) minmax(0,1fr);}
+#screen-setup.custom-room #setup-preview-canvas {display:none;}
+#screen-setup.custom-room .setup-stage {min-height:0;overflow:auto;}
+#screen-setup.custom-room .setuphead {flex-wrap:wrap;gap:8px;}
+#screen-setup.custom-room .setuphead h2 {font-size:19px;}
+#screen-setup.custom-room #mp-panel {margin-top:16px;}
+#screen-setup.custom-room .roomself, #screen-setup.custom-room .roomlaunch small,
+#screen-setup.custom-room .room-commandbar small {display:none;}
+#screen-setup.custom-room .team-row {display:flex;gap:16px;align-items:center;}
+#screen-setup.custom-room .team-row h3 {margin:8px 0;}
+#screen-setup.custom-room .roomslots {grid-template-columns:repeat(2,minmax(0,1fr));}
+#screen-setup.custom-room .roomchatlog {height:90px;min-height:60px;}
+#screen-setup.custom-room #warstatus {display:none;}
+@media(max-width:600px) {
+ #screen-setup.custom-room {display:block;overflow:auto;height:100dvh;padding-bottom:68px;}
+ #screen-setup.custom-room .setup-stage {height:auto;overflow:visible;}
+ #screen-setup.custom-room .setup-options {height:auto;overflow:visible;margin-top:16px;}
+ #screen-setup.custom-room #s-start {position:sticky;bottom:0;}
+}

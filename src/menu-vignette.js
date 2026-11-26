@@ -89,6 +89,9 @@ export class MenuVignette {
         this.phaseT = 3.2;
       }
       if (this.outcome === 'victory') {
+        // A straggler on an unreachable terrain pocket must not pin the
+        // ambient camera forever. Hold the survivors, then disperse offstage.
+        if (this.elapsed >= 60) this.phaseT = Math.min(this.phaseT, 4.5);
         this.phaseT -= dt;
         if (this.phaseT <= 0) { this.phase = 'dark'; this.phaseT = 3.2; }
       }

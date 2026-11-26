@@ -56,7 +56,9 @@ try{
  await h.locator('#social-close').click();assert.equal(await h.locator('#s-start').isDisabled(),true);
  await g.locator('#room-ready').click();await h.waitForFunction(()=>!document.querySelector('#s-start').disabled);
  assert.equal(await h.evaluate(()=>__app._isCustomBattle()),true);assert.equal(await g.evaluate(()=>__app._isCustomBattle()),true);
+ const seats=await h.locator('#room-roster').boundingBox();assert.ok(seats.y+seats.height<768,'player seats must be visible without scrolling on laptop');
  await h.screenshot({path:out+'/custom-lobby-real-laptop.png'});
+ await h.setViewportSize({width:390,height:844});await h.screenshot({path:out+'/custom-lobby-real-phone.png'});assert.ok((await h.locator('#room-roster').boundingBox()).y<500);await h.setViewportSize({width:1366,height:768});
  await log('party-room-ready-transport');
  await h.evaluate(()=>{const peer=__app.peers[0],receive=peer.onMessage;window.__qaOrder=[];peer.onMessage=m=>{if(m.t==='qa-order')window.__qaOrder.push(m.n);else receive?.(m);};});
  await g.evaluate(()=>{const peer=__app.net,emit=peer.emit.bind(peer);let lost=false;peer.emit=packet=>{if(!lost&&packet.body?.t==='qa-order'&&packet.body.n===1){lost=true;return;}emit(packet);};peer.send({t:'qa-order',n:1});peer.send({t:'qa-order',n:2});});

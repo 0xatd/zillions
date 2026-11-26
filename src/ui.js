@@ -2341,6 +2341,7 @@ export class UI {
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('custom-room', !!online && this._customBattle);
     setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
@@ -2377,6 +2378,8 @@ export class UI {
       });
     }
     const mp = this.root.querySelector('#mp-panel');
+    if (online && this._customBattle) setupScreen.querySelector('.setup-stage').append(mp);
+    else setupScreen.querySelector('.setup-options').insertBefore(mp, this.root.querySelector('#s-start'));
     mp.classList.toggle('hidden', !coop && !online);
     if (online) {
       mp.dataset.init = '1';
@@ -3756,7 +3759,7 @@ export class UI {
           : p.state === 'offline' ? 'offline'
           : p.state === 'disconnected' ? 'disconnected'
           : 'connecting';
-        const unlock = mode === 'campaign' && Number(p.unlockedLevel || 1) < Number(level || 1)
+        const unlock = !this._customBattle && mode === 'campaign' && Number(p.unlockedLevel || 1) < Number(level || 1)
           ? ` · 🔒 unlocked through Level ${Math.max(1, Number(p.unlockedLevel) || 1)}`
           : '';
         slots.push(`

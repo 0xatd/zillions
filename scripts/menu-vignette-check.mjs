@@ -139,3 +139,22 @@ for (let i = 0; i < Math.round(90 / DT); i++) {
 assert.ok(sawHundred, 'the deterministic 100th-signal victory never began');
 assert.ok(victoryReturnedToOrbit, 'the victory never returned the camera to orbit');
 victory.dispose();
+
+// Reproduce the CI hang without relying on random spawn/path choices: one
+// surviving straggler cannot be reached, while the squad has already won.
+const stranded = new MenuVignette({
+  scene, map, makeUnitMesh: stubUnitMesh, horde: stubHorde(), burst: () => {}, stream: () => {},
+  addCorpse: () => {}, dispose3D: () => {}, light: { position: stubVec(), intensity: 0 },
+  dummy: show._dummy, color: show._color, project: () => ({ x: 0, y: 0 }), initialCount: 99,
+});
+stranded._beginVignette();
+stranded._updateTroopers = () => {};
+stranded._spawnMob = () => {};
+stranded._updateMob = () => {};
+stranded._writeMob = () => {};
+stranded.zombies = [{ unreachable: true }];
+for (let i = 0; i < 66 / DT && stranded.phase === 'run'; i++) stranded.update(DT, i * DT);
+assert.equal(stranded.phase, 'dark', 'unreachable straggler pinned the victory camera');
+assert.ok(stranded.troopers.some(tr => !tr.dead), 'victory timeout must preserve survivors');
+stranded.dispose();
+console.log('menu victory timeout: unreachable straggler cannot pin the camera');
