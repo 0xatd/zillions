@@ -2,6 +2,40 @@
 
 Use this file as the entry point for agent work in Zillions.
 
+## Affiliation correction (Alex, 2026-11-26)
+
+A character is not automatically a faction ruler. Several characters and
+parties may belong to the same house/faction. Houses and factions may belong
+to larger kingdoms/empires. Character, party, political membership, leadership
+rank and organizational hierarchy are separate concepts. The navigation must
+not force faction founding during character creation. The existing account
+chapter is a shared campaign banner, not an implemented political hierarchy.
+Join/found affiliations and parent relationships stay disabled until built.
+No membership migration or simulated hierarchy is part of this navigation PR.
+
+## Leader-first navigation (Alex, 2026-11-26)
+
+This decision supersedes older chapter-first and mode-hub entry guidance.
+Existing players select a persistent leader and press **Enter World**. New
+leaders use a separate guided creation flow: origin, appearance, archetype,
+background, affiliation, review. Cancel does not create a leader. The current
+account-wide faction, campaign progress and economy are preserved; separate
+factions per leader are not implemented.
+
+The first world is the introductory campaign destination. Today it exposes
+existing Earth missions and companion recruitment, not simulated travel or a
+shared multiplayer overworld. Custom Games, invites, parties and existing
+sieges remain available. Future planets, travel, strategic actions and new
+archetypes are visibly disabled. Do not turn disabled buttons into fake demos.
+
+The initial 20-archetype reference list is an OpenDota public-pick snapshot,
+not a permanent ranking or a claim of implemented kits. See
+`docs/leader-navigation.md`. Only Vanguard is available in custom creation;
+previously recruited heroes remain playable. Requested future art direction:
+space-marine interpretations of human archetypes and distinct science-fiction
+alien interpretations. This navigation pass adds no new models or abilities.
+
+
 ## Fortress craft
 
 Use the installed `rts-fortress-design` skill for walls, gates, bases and terrain
@@ -31,15 +65,16 @@ Use `llms.txt` when you need a compact repository index.
 
 Chapter-first account progression is now authorized: customizable chapter and
 founder, named hero companions recruited by conquest, five Earth city campaigns,
-then the existing frontier. This supersedes character-first home guidance, not
-the siege simulation or prohibition on persistent shared-world systems. Read
+then the existing frontier. The newer leader-first entry supersedes this
+historical navigation; account progression and siege invariants remain. Read
 `docs/chapter-campaign-plan.md` and the updated product contract.
 
 ## Product Boundary
 
-Zillions is a sci-fi siege game and only a siege game. The living world
-(overworld, galaxy map, parties, encounters, companies, region workers) was
-removed; do not reintroduce it without a product decision. The core loop is:
+Zillions is a sci-fi siege game and only a siege game. The persistent shared
+world (galaxy travel with parties, encounters, companies, and region workers)
+was removed; do not reintroduce it without a product decision. The campaign
+overworld is only the menu of planets and sites described below. The core loop is:
 
 1. Control one hero.
 2. Found one terrain-aware colony.
@@ -50,10 +85,19 @@ removed; do not reintroduce it without a product decision. The core loop is:
 
 The loop is continuous. Do not add a day, night, dawn, or bell phase.
 
-The main menu is multiplayer-first. Story Campaign, Survival, and The
-Labyrinth belong under Play Solo. The Labyrinth is a no-building hero
-gauntlet (`mode === 'labyrinth'`, level ids 9001+): keep it free of colony,
-economy, and army systems, and never let its wins advance campaign progress.
+The menu is one Bannerlord-style shell over the live planet. Boot opens the
+title word list (Play, Squad, Armory, Settings, Account; Credits in the
+footer). Sign-in lives on Account. Character Select sets the active character.
+Enter World opens the campaign. Other battles is a secondary mode registry
+with Campaign, Co-op, Versus, and Custom.
+Campaign opens the star-system overworld; assaulting a site starts the siege.
+Co-op holds Survival, The Labyrinth, Daily Siege, and Arcade. Versus is visible
+and marked Coming soon until player-versus-player exists. Custom is the one
+game browser. Unbuilt actions stay on screen, grey, and disabled. The
+Labyrinth is a no-building hero gauntlet (`mode === 'labyrinth'`, level ids
+9001+): keep it free of colony, economy, and army systems, and never let its
+wins advance campaign progress. The campaign overworld is a menu of planets
+and sites. It is not a return of the removed living world.
 
 ## Hard Invariants
 
@@ -167,7 +211,9 @@ for completed mechanics and explicit gaps; a catalog entry is not a playable kit
 - `src/lanes.js`: deterministic lane graph.
 - `src/flowfield.js`: pathfinding fields.
 - `src/main.js`: runtime composition, renderer, input, saves, and co-op.
-- `src/ui.js`: menus, room UI, HUD, and overlays.
+- `src/nav/router.js`: menu route stack, back, one modal, toasts, and match-allowed routes. `src/shell-state.js` re-exports it.
+- `src/modes.js`: play-hub mode registry. Coming soon modes stay visible and disabled.
+- `src/ui.js`: menus, room UI, HUD, and overlays. `src/shell-markup.js` is the menu DOM. `shell.css` holds menu tokens and HUD lanes.
 - `src/online.js`: Supabase lobby, rooms, seats, and signaling.
 - `src/net.js`: WebRTC transport and diagnostics.
 - `src/auth.js`: authentication, profile sync, and server-progress hydration.

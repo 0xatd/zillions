@@ -335,11 +335,16 @@ class App {
         unlocked: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
         hero: this.ui.selectedHero,
       }),
-      onQuit: () => location.reload(),
+      onQuit: () => this._quitToMenu(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
-      onCampaignMap: () => this._openCampaignSelect(),
+      onCampaignMap: () => this._openOverworld(),
+      onEnterWorld: () => this._enterLeaderWorld(),
+      onLeaderEntry: () => {
+        if (!this.auth?.isSignedIn()) { this._guestSession = true; this.ui.noteGuestSession(); }
+        this.ui._accountAccepted = true;
+      },
       onGuestPlay: () => this._playAsGuest(),
       onDailyOpen: () => this._openDaily(),
       onDailyPlay: () => this._startDaily(),
@@ -700,6 +705,44 @@ class App {
     );
     group.add(orbitalGlow);
 
+    const system = new THREE.Group();
+    system.name = 'star-system';
+    const planetSpecs = [
+      { id: 'earth', color: 0x3c8f6b, emissive: 0x123828, radius: 8.4, x: 0, y: 0, z: 0 },
+      { id: 'cinder', color: 0x6d4636, emissive: 0x24140e, radius: 4.4, x: 18, y: 11, z: -8 },
+      { id: 'verge', color: 0x3c4d68, emissive: 0x121824, radius: 5.2, x: 13, y: -12, z: -2 },
+      { id: 'reach', color: 0x56485f, emissive: 0x1a1520, radius: 3.6, x: -16, y: 8, z: -12 },
+    ];
+    const planets = planetSpecs.map((spec) => {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius, 9, 7),
+        toyMat({ color: spec.color, emissive: spec.emissive, emissiveIntensity: spec.id === 'earth' ? 0.45 : 0.12 }),
+      );
+      mesh.position.set(spec.x, spec.y, spec.z);
+      if (spec.id !== 'earth') mesh.material.transparent = true, mesh.material.opacity = 0.72;
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius * 1.08, 9, 7),
+        new THREE.MeshBasicMaterial({ color: spec.id === 'earth' ? 0x8fd4ff : 0x667088, transparent: true, opacity: spec.id === 'earth' ? 0.22 : 0.08, side: THREE.BackSide, depthWrite: false, fog: false }),
+      );
+      mesh.add(shell);
+      if (spec.id === 'earth') {
+        for (let i = 0; i < 5; i++) {
+          const mark = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45, 5, 4),
+            toyMat({ color: 0xf1bf66, emissive: 0xf1bf66, emissiveIntensity: 0.8 }),
+          );
+          const a = i * 1.27;
+          mark.position.set(Math.cos(a) * 6.2, Math.sin(a * 1.4) * 3.4, Math.sin(a) * 5.4);
+          mesh.add(mark);
+        }
+      }
+      system.add(mesh);
+      return { id: spec.id, mesh };
+    });
+    group.add(system);
+    this._systemShift = new THREE.Vector3();
+    this._systemT = 0;
+
     const ships = new THREE.Group();
     for (let i = 0; i < 5; i++) {
       const ship = new THREE.Mesh(new THREE.BoxGeometry(5 + i * 0.7, 0.8, 1.8), new THREE.MeshBasicMaterial({ color: 0x24384d }));
@@ -737,7 +780,7 @@ class App {
     const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
     heroLight.visible = !!titleCharacter;
     group.add(heroLight);
-    group.userData = { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
+    group.userData = { atmosphere, limb: planet, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -747,11 +790,18 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
-    const showTitleCharacter = !!selectedMmoCharacter(this.profile);
+    const { atmosphere, limb, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets } = this.titleSpace.userData;
+    const systemView = this._systemViewActive();
+    const showTitleCharacter = !!selectedMmoCharacter(this.profile) && !systemView;
     titleHero.visible = showTitleCharacter;
     heroPedestal.visible = showTitleCharacter;
     heroLight.visible = showTitleCharacter;
+    if (limb) limb.visible = !systemView;
+    atmosphere.visible = !systemView;
+    orbitalGlobe.visible = !systemView;
+    orbitalGlow.visible = !systemView;
+    if (system) system.visible = systemView;
+    if (systemView) this._easeSystem(t, system, planets);
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
@@ -759,6 +809,13 @@ class App {
     orbitalGlobe.position.copy(cameraLocal(18, -36, -210));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
+    if (this._loadingZoom) {
+      this._loadZoom = Math.min(0.22, (this._loadZoom || 0) + 0.008);
+      orbitalGlobe.scale.setScalar(1 + this._loadZoom);
+    } else if (this._loadZoom) {
+      this._loadZoom = 0;
+      orbitalGlobe.scale.setScalar(1);
+    }
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
     const heroPos = cameraLocal(7.8, -4.5, -18);
     titleHero.position.copy(heroPos);
@@ -779,6 +836,69 @@ class App {
       s.position.set(MAP_SIZE / 2 - 55 + i * 34 + p * 22, 78 - p * 72, MAP_SIZE / 2 - 82 + i * 5);
       s.material.opacity = Math.sin(p * Math.PI) * 0.75;
     }
+    if (systemView) this._layoutSystemMarkers();
+  }
+
+  _systemViewActive() {
+    if (this.game || !this.titleSpace) return false;
+    const screen = this.ui?.root?.querySelector?.('#screen-overworld');
+    const overlay = this.ui?.root?.querySelector?.('#overlay');
+    return !!screen && !screen.classList.contains('hidden') && !!overlay && !overlay.classList.contains('hidden');
+  }
+
+  _easeSystem(t, system, planets) {
+    const dt = Math.min(0.05, Math.max(0, t - (this._systemT || t)));
+    this._systemT = t;
+    const id = this.ui?._focusedPlanet || 'earth';
+    const body = planets.find((planet) => planet.id === id) || planets[0];
+    if (!this._systemShift) this._systemShift = new THREE.Vector3();
+    const goal = body.mesh.position.clone().multiplyScalar(-1);
+    this._systemShift.lerp(goal, 1 - Math.exp(-dt * 3.4));
+    const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    const anchor = window.innerWidth <= 760 ? cameraLocal(0, 10, -105) : cameraLocal(-18, -1, -76);
+    const shift = this._systemShift.clone().applyQuaternion(this.camera.quaternion);
+    system.position.copy(anchor).add(shift);
+    system.quaternion.copy(this.camera.quaternion);
+    for (const planet of planets) planet.mesh.rotation.y = t * (planet.id === 'earth' ? 0.12 : 0.05);
+  }
+
+  _layoutSystemMarkers() {
+    const planets = this.titleSpace?.userData?.planets;
+    const system = this.titleSpace?.userData?.system;
+    if (!planets || !system || !this.ui?.root) return;
+    system.updateMatrixWorld(true);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const point = this._menuProjV || new THREE.Vector3();
+    this._menuProjV = point;
+    const project = (object) => {
+      object.getWorldPosition(point);
+      point.project(this.camera);
+      return { x: (point.x * 0.5 + 0.5) * width, y: (-point.y * 0.5 + 0.5) * height };
+    };
+    const spanOf = (planet, at) => {
+      const radius = planet.mesh.geometry.parameters.radius;
+      const edge = system.localToWorld(planet.mesh.position.clone().add(new THREE.Vector3(radius, 0, 0)));
+      edge.project(this.camera);
+      return Math.max(72, Math.min(320, Math.abs((edge.x * 0.5 + 0.5) * width - at.x) * 2));
+    };
+    for (const planet of planets) {
+      const label = this.ui.root.querySelector(`#system-labels [data-planet="${planet.id}"]`);
+      if (!label) continue;
+      const at = project(planet.mesh);
+      const span = spanOf(planet, at);
+      label.style.left = `${at.x}px`;
+      label.style.top = `${at.y + span * 0.58}px`;
+    }
+    const earth = planets.find((planet) => planet.id === 'earth');
+    const map = this.ui.root.querySelector('#chapter-map');
+    if (!earth || !map || map.classList.contains('hidden')) return;
+    const at = project(earth.mesh);
+    const span = spanOf(earth, at);
+    map.style.left = `${at.x - span / 2}px`;
+    map.style.top = `${at.y - span / 2}px`;
+    map.style.width = `${span}px`;
+    map.style.height = `${span}px`;
   }
 
   _clearMenuBackdrop() {
@@ -984,7 +1104,7 @@ class App {
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
-    this._clearMenuBackdrop();
+    this._loadingZoom = true;
     if (!this.assetsLoaded) {
       this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
@@ -1038,6 +1158,7 @@ class App {
     this._netClockLast = performance.now();
     this.acc = 0;
     } catch (error) {
+      this._loadingZoom = false;
       this._finishMissionIntro();
       throw error;
     } finally {
@@ -1049,6 +1170,8 @@ class App {
 
   // Shared battlefield presentation for a live match and a replay.
   _mountMatchView({ mode, level, snap = null, mp = null, heroKey = null, matchInbox = null, replay = false }) {
+    this._loadingZoom = false;
+    this._clearMenuBackdrop();
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -2033,13 +2156,93 @@ class App {
   }
 
   _restartOrReturn() {
-    // Any campaign run that belongs to a character returns to mission
-    // select, not the title screen.
-    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
-      try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
-      this.ui.shell.finishMission();
+    const game = this.game;
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      if (game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+        try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+      }
+      location.reload();
+      return;
     }
-    location.reload();
+    if (game && !game.over) {
+      const diff = game.diffKey || 'normal';
+      const hero = this.ui.selectedHero;
+      const mode = game.mode;
+      const level = game.levelId;
+      this._leaveSoloMatch();
+      this.ui.selectedMode = mode;
+      this.ui.selectedLevel = level;
+      this.startGame(diff, hero);
+      return;
+    }
+    const campaign = !!(game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile));
+    this._leaveSoloMatch();
+    if (campaign) this.ui.showOverworld();
+    else {
+      this.ui._playTab = 'campaign';
+      this.ui._showScreen('home');
+    }
+  }
+
+  _enterLeaderWorld() {
+    if (this.game && !this.game.over) return;
+    const character=selectedMmoCharacter(this.profile);
+    if (!character) {this.ui.showCharacterCreator();return;}
+    // World traversal is not built. Enter the truthful campaign surface.
+    this._openOverworld();
+  }
+
+  _openOverworld() {
+    if (this.game && !this.game.over) return;
+    if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
+      this.ui.showCharacterCreator();
+      return;
+    }
+    this.ui.showOverworld();
+  }
+
+  // Solo returns drop the battlefield and rebuild the menu scene in place.
+  // A live room still reloads: WebRTC seats, the lockstep inbox, and the
+  // host's ready barrier are not safe to reconstruct mid-page.
+  _quitToMenu() {
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      location.reload();
+      return;
+    }
+    this._leaveSoloMatch();
+    this.ui._playTab = 'campaign';
+    this.ui._showScreen('home');
+  }
+
+  _leaveSoloMatch() {
+    this._loadingZoom = false;
+    this.paused = false;
+    this.missionIntro = null;
+    this.acc = 0;
+    this.replay = null;
+    this._netPumpStop();
+    this._clearWorldMeshes();
+    this._clearNodeMarkers();
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); this.terrain = null; }
+    if (this.fogOfWar) {
+      this.scene.remove(this.fogOfWar.mesh);
+      this.fogOfWar.mesh.geometry.dispose();
+      this.fogOfWar.material.dispose();
+      this.fogOfWar = null;
+    }
+    if (this.corpseMesh) this.corpseMesh.count = 0;
+    this.corpses = this.corpses || [];
+    this.corpses.length = 0;
+    for (const fx of this.blockFx || []) { this.scene.remove(fx.mesh); this._disposeObject3D(fx.mesh); }
+    this.blockFx = [];
+    this.hitFeedback?.clear?.();
+    this.game = null;
+    this.map = null;
+    this.netMode = false;
+    this.mpRole = null;
+    this.ui.hideMatchChrome();
+    this.ui.nav.leaveMatch('home');
+    this.showLoginBackdrop();
   }
 
   _consumeBootRetry(status) {
@@ -2293,16 +2496,18 @@ class App {
     }
   }
 
-  async _createMmoCharacter({ name, appearance, raceKey, customization, quiet = false } = {}) {
+  async _createMmoCharacter({ name, appearance, raceKey, customization, faction, quiet = false } = {}) {
     if (this.game || this._founderCreating) return;
     const clean = String(name || '').trim().slice(0,18);
-    if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
-    if (chapterFounder(this.profile)) { this.ui._showScreen('main'); return; }
+    if (!clean) { this.ui.showBanner('Choose a leader name.', 'bad', 2200); return; }
+    const founder = chapterFounder(this.profile);
+    const identity = chapterIdentity(this.profile.chapter);
+    if (!identity.name) this.profile.chapter = chapterIdentity({ ...faction, name: String(faction?.name || '').trim() || `${clean}'s expedition` });
     this._founderCreating = true;
     const character = makeMmoCharacter(clean, 'vanguard', appearance, raceKey, customization);
     try {
       if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
-      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: character.id });
+      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: founder?.id || character.id });
       this.profile.lastHero = character.proxyHero;
       this.ui.selectedHero = character.proxyHero;
       this._storeProfileLocally();
@@ -2313,13 +2518,14 @@ class App {
       this.ui.setProfile(this.profile);
       if (!quiet) {
         this.ui._showScreen('main');
-        this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+        this.ui.showBanner(`${clean} is ready. Enter the world when you are ready.`, '', 3000);
       }
     } catch (err) {
       this.ui.setProfile(this.profile);
       this.ui._showScreen('main');
+      if (err?.message === 'roster_full') {this.ui.showBanner('Your character roster is full.', 'bad', 4000);return;}
       this.ui._showCharacterCreator();
-      this.ui.showBanner('Founder could not sync. Your character is preserved here; save the chapter to retry.', 'bad', 5000);
+      this.ui.showBanner('Character could not sync. Your character is preserved here; save the campaign banner to retry.', 'bad', 5000);
     } finally { this._founderCreating = false; }
   }
 
@@ -3504,6 +3710,7 @@ class App {
     }
     await this._createMmoCharacter({
       name: QUICK_DEFAULTS.founderName,
+      faction: { name: QUICK_DEFAULTS.chapterName, color: QUICK_DEFAULTS.color, emblem: QUICK_DEFAULTS.emblem },
       appearance: QUICK_DEFAULTS.color,
       raceKey: 'human',
       customization: {},
@@ -7817,12 +8024,10 @@ class App {
         this.ui.showCharacterSheet('lattice');
         return;
       }
-      // Dota grammar: Tab opens the hero library from anywhere in the menu.
-      if (!this.game && e.key === 'Tab') {
+      // Menus keep native Tab focus traversal. Character shortcuts remain above.
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'menu') {
         e.preventDefault();
-        const screen = document.querySelector('#screen-heroes');
-        if (screen && !screen.classList.contains('hidden')) this.ui._showScreen('main');
-        else this.ui._showScreen('heroes');
+        this.ui.back();
         return;
       }
       if (!this.game) return;
@@ -9207,6 +9412,7 @@ class App {
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
+    if (!this.game) this.ui.pollMenuPad();
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {

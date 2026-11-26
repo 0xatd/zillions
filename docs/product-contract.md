@@ -3,6 +3,40 @@
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 
+## Affiliation correction (Alex, 2026-11-26)
+
+A character is not automatically a faction ruler. Several characters and
+parties may belong to the same house/faction. Houses and factions may belong
+to larger kingdoms/empires. Character, party, political membership, leadership
+rank and organizational hierarchy are separate concepts. The navigation must
+not force faction founding during character creation. The existing account
+chapter is a shared campaign banner, not an implemented political hierarchy.
+Join/found affiliations and parent relationships stay disabled until built.
+No membership migration or simulated hierarchy is part of this navigation PR.
+
+## Leader-first navigation (Alex, 2026-11-26)
+
+This decision supersedes older chapter-first and mode-hub entry guidance.
+Existing players select a persistent leader and press **Enter World**. New
+leaders use a separate guided creation flow: origin, appearance, archetype,
+background, affiliation, review. Cancel does not create a leader. The current
+account-wide faction, campaign progress and economy are preserved; separate
+factions per leader are not implemented.
+
+The first world is the introductory campaign destination. Today it exposes
+existing Earth missions and companion recruitment, not simulated travel or a
+shared multiplayer overworld. Custom Games, invites, parties and existing
+sieges remain available. Future planets, travel, strategic actions and new
+archetypes are visibly disabled. Do not turn disabled buttons into fake demos.
+
+The initial 20-archetype reference list is an OpenDota public-pick snapshot,
+not a permanent ranking or a claim of implemented kits. See
+`docs/leader-navigation.md`. Only Vanguard is available in custom creation;
+previously recruited heroes remain playable. Requested future art direction:
+space-marine interpretations of human archetypes and distinct science-fiction
+alien interpretations. This navigation pass adds no new models or abilities.
+
+
 ## Chapter-first product decision (Alex, 2026-11-22)
 
 The persistent identity is the player's chapter: name, colors, insignia and
@@ -23,7 +57,8 @@ companion slots are additive. First-hour shopping is no longer compulsory.
 Only server-confirmed campaign progress determines online conquests/unlocks.
 Cosmetic chapter metadata cannot award victories, currency or items.
 
-This decision supersedes older character-first menu guidance below. Keep the
+This historical account-progression baseline is retained beneath the newer
+leader-first navigation decision above. Keep the
 siege, co-op, reward and economy invariants unchanged.
 
 ## Hero roster expansion (authorized, implementation in progress)
@@ -291,24 +326,42 @@ implemented. A persistent shared world is out of scope.
 ## Production UX Rules
 
 - Production must be account-first.
-- Signed-out players see the login screen. Signed-in players see Character
-  Select. The generic marketing title is not an account home.
-- Character Select shows the complete roster and owns `Deploy`, character
-  creation and deletion, Character Info, Custom Games, system options, and Log Out.
-  `Deploy` opens mission select.
-- The in-match Game Menu owns Resume, How to play, Settings, Restart, and Quit
-  to menu. It does not reuse Character Select as a pause menu.
-- Character Info uses separate Character, Equipment, Abilities, and Lattice
-  views. Equipment is interactive. The player can inspect and compare items,
-  click or double-click to equip and unequip, drag an item between the stash
-  and a compatible body slot, and drag items to reorder the stash. The model
-  remains the authority for requirements and legal equipment.
-- Custom Games has two primary views. Live Games lists real backend rooms that
-  can be joined or watched. Arcade catalogs prebuilt Zillions maps that a
-  player can play immediately or use to host a room. Recent and Favorites are
-  filters inside Arcade, not separate product sections.
-- Campaign and Survival own their saved runs. Show Resume inside the matching
-  solo mode. Do not add a generic Continue button to the home screen.
+- Boot opens the title. There is no logo delay. The title is a short left-aligned
+  word list over the live planet: Play, Squad, Armory, Settings, and Account.
+  Credits is a footer link. Account holds sign-in, the username claim, and log out.
+- Play with no character opens character creation. Play with a character opens
+  their roster. Enter World opens the current campaign destination.
+- Character Select shows a large character preview and a roster, plus Create
+  Character. Picking a card sets the active character. The selected identity is shown where relevant. An account owns multiple characters. A character joins or
+  creates games.
+- Other battles is a secondary mode registry. Tabs are Campaign, Co-op, Versus, and
+  Custom. A mode is built or coming soon. Coming soon stays visible, grey, and
+  disabled.
+- Campaign is Enter the Overworld: a star system of planets and site markers,
+  with a slim top bar and a site side panel (Assault, Defend, Recruit, Trade,
+  Build). Assault on a built Earth site starts the existing siege. Planets and
+  actions that are not built stay grey and read Coming soon. This overworld is
+  the campaign menu. It is not the removed living world.
+- Co-op lists the built modes: Survival, The Labyrinth, Daily Siege, and Arcade
+  maps. Versus lists unbuilt player-versus-player modes as Coming soon. Custom
+  is one browser for live games, arcade maps, create, and join-by-code.
+- The in-match pause menu is a left word list over the live match: Resume, How
+  to play, Settings, Restart, and Quit to menu. It does not reuse Character
+  Select. Settings is Audio, Video, and Controls, and opens from the title and
+  from pause.
+- Armory is one screen for the active character: Heroes, Equipment, Abilities,
+  Lattice, and Quartermaster / Forge. Equipment stays interactive. The player
+  can inspect and compare items, click or double-click to equip and unequip,
+  drag an item between the stash and a compatible body slot, and drag items to
+  reorder the stash. The model remains the authority for requirements and legal
+  equipment.
+- Custom Games has two primary views inside the one browser. Live Games lists
+  real backend rooms that can be joined or watched. Arcade catalogs prebuilt
+  Zillions maps that a player can play immediately or use to host a room.
+  Recent and Favorites are filters inside Arcade, not separate product sections.
+- Campaign and Survival own their saved runs. Resume stays on the matching
+  mode surface. Do not label the title Play button Continue unless it actually
+  resumes a compatible save.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the
   whole product or as the primary repeat-play action.
 - The player should see a real sign-in gate before the game shell.

@@ -58,7 +58,7 @@ Default branch: main
 - src/economy.js owns signed-in economy requests, legacy import, and snapshot projection.
 - src/plots.js creates colony plans, ramparts, gates, and plots.
 - src/lanes.js creates the deterministic lane graph.
-- src/ui.js owns menus, lobby UI, HUD, and overlays.
+- src/ui.js owns menus, staging, HUD, and overlays. src/nav/router.js owns the menu stack. src/modes.js owns the play-hub registry. src/shell-markup.js and shell.css are the menu layout.
 - src/menu-vignette.js owns the menu attract show (presentation only, no sim).
 - src/online.js owns Supabase room and signaling state.
 - src/lobby-reliability.js owns room-card setup, stale-seat reaping, rejoin grace, and desync recovery rules.

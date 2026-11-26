@@ -65,7 +65,7 @@ assert.match(mainSource, /const titleCharacter = selectedMmoCharacter\(this\.pro
   'the title stage must be driven by the created MMO roster');
 assert.match(mainSource, /titleHero\.visible = !!titleCharacter;/,
   'an empty MMO roster must not show a legacy named hero on the character screen');
-assert.match(mainSource, /const showTitleCharacter = !!selectedMmoCharacter\(this\.profile\);/,
+assert.match(mainSource, /const showTitleCharacter = !!selectedMmoCharacter\(this\.profile\) && !systemView;/,
   'the title stage must react when cloud auth restores a created character');
 assert.doesNotMatch(mainSource, /const heroKey = this\.profile\.lastHero \|\| this\.ui\.selectedHero/,
   'the title stage must not fall back to Custom Games heroes');

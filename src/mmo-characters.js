@@ -316,7 +316,10 @@ export function addMmoCharacter(profile, character) {
 // deployment so a match cannot credit a different identity.
 export function ensureDeployedLeader(profile, leaderKey) {
   normalizeMmoCharacters(profile);
-  const character = leaderKey === 'vanguard' ? chapterFounder(profile) : leaderRecord(profile, leaderKey);
+  const selected = selectedMmoCharacter(profile);
+  const character = leaderKey === 'vanguard'
+    ? (selected && !selected.chapterLeader ? selected : chapterFounder(profile))
+    : leaderRecord(profile, leaderKey);
   // Deployment is selection, not a second recruitment path. Existing companions
   // remain available after a culture change; only chapter recruitment adds one.
   if (!character) return null;
