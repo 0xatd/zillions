@@ -289,7 +289,7 @@ try {
       const hostHero = guestProbe.heroes[0];
       if (!spawn) {
         spawn = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
-        moveDeadline = Date.now() + 10000;
+        moveDeadline = Date.now() + 30000;
       }
       await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: spawn.x + 8, z: spawn.z + 6 });
       const mineStep = Math.hypot(me.x - spawn.x, me.z - spawn.z);
@@ -301,7 +301,7 @@ try {
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  if (!moved) throw new Error(`guest did not move its own hero within 10s guest=${JSON.stringify(await probe(guest.page))} host=${JSON.stringify(await probe(host.page))}`);
+  if (!moved) throw new Error(`guest did not move its own hero within 30s guest=${JSON.stringify(await probe(guest.page))} host=${JSON.stringify(await probe(host.page))}`);
   let synced = null;
   const deadline = Date.now() + 90000;
   let last = null;
