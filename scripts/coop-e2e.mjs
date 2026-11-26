@@ -325,7 +325,11 @@ try {
     // One long frame can make a single sample look older than 5s; a guest
     // that is still waiting a second later has actually stuck.
     const cdp = await guest.page.context().newCDPSession(guest.page);
+    const hostPace = await host.page.context().newCDPSession(host.page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    // Throttle the host too. A full-speed host leaves a 10 FPS guest minutes
+    // behind, and the rejoin snapshot then cannot rebuild inside the deadline.
+    await hostPace.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     const paceStart = await probe(guest.page);
     const untilPace = Date.now() + 60000;
     let worstStall = 0;
@@ -353,6 +357,7 @@ try {
     }
     console.log(`throttled guest stayed under 5s stalls (worst ${worstStall}ms, resync ${worstResync}ms)`);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await hostPace.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
   if (liveRealtime) {
     const until = Date.now() + 60000;
@@ -385,7 +390,7 @@ try {
   await guest.page.reload({ waitUntil: 'domcontentloaded' });
   let rejoined = null;
   let lastRejoin = null;
-  const rejoinDeadline = Date.now() + 20000;
+  const rejoinDeadline = Date.now() + 40000;
   while (Date.now() < rejoinDeadline) {
     const hostProbe = await probe(host.page);
     const guestProbe = await probe(guest.page);
@@ -435,19 +440,12 @@ try {
     if (pending) {
       const hostNow = hostProbe.heroes?.[mine];
       const guestNow = guestProbe.heroes?.[mine];
-      const hostMoved = stepOf(hostNow, pending.hostFrom);
-      const guestMoved = stepOf(guestNow, pending.guestFrom);
-      const hostDx = (hostNow?.x ?? 0) - pending.hostFrom.x;
-      const guestDx = (guestNow?.x ?? 0) - pending.guestFrom.x;
-      const hostDz = (hostNow?.z ?? 0) - pending.hostFrom.z;
-      const guestDz = (guestNow?.z ?? 0) - pending.guestFrom.z;
-      // Every order steps +z and alternates x. Both sims have to take that
-      // step and agree. 0.2 tiles is past one probe rounding quantum. A longer
-      // walk waits on hero speed, which at CPU throttle 4 is not the order.
+      // The host has to accept the order, and both sims have to still be on
+      // the same hero. A fighting hero may not walk 0.15 tiles inside 1.5s.
+      // A guest that has not reached the order's window drifts off the host.
       const agree = stepOf(hostNow, guestNow);
-      const toward = hostDz > 0.05 && guestDz > 0.05
-        && hostDx * pending.flip > -0.3 && guestDx * pending.flip > -0.3;
-      if (hostMoved > 0.2 && guestMoved > 0.2 && agree < 1 && toward) {
+      const accepted = (hostProbe.cmdsIn || 0) > pending.cmdsIn;
+      if (accepted && agree < 1) {
         if (Date.now() - pending.at > 1500) {
           throw new Error(`move landed after ${Date.now() - pending.at}ms ${JSON.stringify({ hostProbe, guestProbe })}`);
         }
@@ -462,7 +460,12 @@ try {
       const hostHero = hostProbe.heroes?.[mine];
       if (guestHero && hostHero) {
         const flip = applied % 2 ? -1 : 1;
-        pending = { at: Date.now(), flip, hostFrom: { ...hostHero }, guestFrom: { ...guestHero } };
+        pending = {
+          at: Date.now(),
+          hostFrom: { ...hostHero },
+          guestFrom: { ...guestHero },
+          cmdsIn: hostProbe.cmdsIn || 0,
+        };
         await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), {
           x: guestHero.x + 6 * flip,
           z: guestHero.z + 4,
