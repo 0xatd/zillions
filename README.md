@@ -261,6 +261,7 @@ enemy attack-moves onto that enemy and shows a red marker.
 | A | Arm attack-move, then click |
 | Q, W, E, R | Abilities I–IV in Fight mode |
 | Space | Center the camera on your hero |
+| K | Jump the camera to the Keep |
 | ↑, ↓, ←, → | Pan the camera. Edge pan is on by default |
 | Shift | Gallop at full health |
 | V | Build mode: build/pay. Fight mode: dodge roll |

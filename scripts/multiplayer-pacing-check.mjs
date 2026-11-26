@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from '../src/multiplayer-pacing.js';
+import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from '../src/multiplayer-pacing.js';
 
 const reordered = new Map([[20, []], [22, []], [23, []]]);
 assert.equal(consecutiveWindowCount(reordered, 20), 1,
@@ -21,5 +21,10 @@ for (let w = 0; w < 70; w++) rememberWindow(history, w, [{ t: 'move', p: 1 }], 6
 assert.equal(history.has(5), false, 'repair history must discard windows older than its cap');
 assert.deepEqual(history.get(20), [{ t: 'move', p: 1 }], 'a stalled guest can request an exact recent window');
 assert.equal(history.get(70), undefined, 'repair must never invent a window the host has not emitted');
+
+assert.equal(stallRecovery(1000, false), 'wait');
+assert.equal(stallRecovery(1500, false), 'retry-snapshot', 'a repair that is not served is requested once more, with a snapshot');
+assert.equal(stallRecovery(2000, true), 'snapshot');
+assert.equal(stallRecovery(10000, true), 'resync', 'a stall that outlasts the snapshot still forces one');
 
 console.log('Multiplayer pacing check passed.');

@@ -55,7 +55,7 @@ import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
-import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
+import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
@@ -94,9 +94,9 @@ import {
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
-const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_REDUNDANCY = 16;      // ~1s of windows on every packet. Four was shorter than one slow frame.
 const NET_SPECTATOR_BUFFER = 1024; // bounded loading backlog (~68 seconds)
-const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
+const NET_HISTORY = 180;        // ~12s. A 10 FPS guest can still ask for the window it missed.
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // Scratch colours for the per-frame sky/light update (no per-frame allocs).
@@ -314,10 +314,7 @@ class App {
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
-      onLocateKeep: () => {
-        const keep = this.game?.buildings.find(b => b.kind === 'hq' && b.alive);
-        if (keep) { this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 }; }
-      },
+      onLocateKeep: () => this._lookAtKeep(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
@@ -545,6 +542,8 @@ class App {
         code: this._shareCode || '',
         hash: (() => { try { return this.game && !this.startBarrier ? this._stateHash() : null; } catch { return null; } })(),
         hashLog: this._hashLog || [],
+        stallMs: this.mpRole === 'guest' && this._stallSince && !this._resyncing ? Math.round(performance.now() - this._stallSince) : 0,
+        resyncMs: this._resyncing ? Math.round(performance.now() - (this._resyncStarted || performance.now())) : 0,
         self: this._shareSelf || '',
         roster: this._shareLobby ? shareRoster(this._shareLobby, this._shareSelf) : [],
       });
@@ -3224,24 +3223,21 @@ class App {
       if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
     }
     else if (m.t === 'needWindow') {
-      const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
       if (!peer) return;
-      if (bundle) {
-        peer.sendFast({ t: 'w', w: Number(m.w), c: bundle, p: [] });
+      const start = Number(m.w);
+      const recent = [];
+      for (let n = start; n < start + 32; n++) {
+        const commands = this._windowHistory.get(n);
+        if (commands) recent.push([n, commands]);
+      }
+      if (recent.length) {
+        peer.sendFast({ t: 'w', w: recent[0][0], c: recent[0][1], p: recent.slice(1) });
         return;
       }
-      // The repair log is only a few seconds. A guest who asks for an older
-      // window — a slow reload, a missed start — gets a fresh snapshot
-      // instead of waiting on a window the host no longer has.
-      const now = Date.now();
-      if (peer.shareId && this.game && !this.game.over && (!peer._resyncAt || now - peer._resyncAt > 2000)) {
-        peer._resyncAt = now;
-        peer.send({
-          t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
-        });
-      }
+      this._sendGuestResync(idx);
     }
+    else if (m.t === 'snap') this._sendGuestResync(idx);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
       this.ui.gameChatAdd(m);
@@ -3586,6 +3582,7 @@ class App {
 
   _joinShareLink(code) {
     this._shareFailed = false;
+    this._sharePageAt = Date.now();
     this._shareCode = code;
     this._shareSelf = this._shareSelfId();
     this._shareSeen = new Set();
@@ -3845,6 +3842,10 @@ class App {
 
   async _acceptShareBegin(start) {
     if (!start || this.mpRole === 'host') return;
+    if (this._shareLobby?.started && !this.game && !start.snap) {
+      this._sharePublish({ t: 'catchup' });
+      return;
+    }
     if (this._shareBeginAcked && this.game && this.netMode) {
       this._sharePublish({ t: 'began' });
       return;
@@ -4118,6 +4119,10 @@ class App {
       this._shareSeen.add(message.id);
     }
     if (message.from && message.from === this._shareSelf && message.t !== 'lobby') return;
+    // A reloaded tab can be handed the mailbox backlog, including the original
+    // begin. That would start a second sim at frame 0. Only messages from this
+    // page's own lifetime are live; the host snapshot covers the rest.
+    if (this.mpRole !== 'host' && message.t !== 'lobby' && this._sharePageAt && Number(message.at || 0) < this._sharePageAt) return;
     if (message.t === 'lobby' && message.lobby && this.mpRole !== 'host') this._onShareLobby(message.lobby);
     else if (message.t === 'join' && this.mpRole === 'host') this._acceptShareGuest(message);
     else if (message.t === 'offer' && this.mpRole === 'guest') this._acceptShareOffer(message);
@@ -4136,11 +4141,9 @@ class App {
     else if (message.t === 'began' && this.mpRole === 'host' && message.from) {
       this._shareNoteBegan(message.from);
     }
-    else if (message.t === 'catchup' && this.mpRole === 'host' && message.from && this.game && !this.game.over && this.netMode) {
+    else if ((message.t === 'catchup' || message.t === 'snap') && this.mpRole === 'host' && message.from && this.game && !this.game.over && this.netMode) {
       const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
-      if (idx >= 0) this._shareSendTo(message.from, {
-        t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
-      });
+      if (idx >= 0) this._sendGuestResync(idx);
     }
     else if (message.t === 'ping') {
       if (message.to && message.to !== this._shareSelf) return;
@@ -4239,9 +4242,11 @@ class App {
     if (!this._shareSeatAskedAt) this._shareSeatAskedAt = Date.now();
     if (mine) this._shareSeatAskedAt = 0;
     const waitingForSeat = !mine && Date.now() - (this._shareSeatAskedAt || Date.now()) > 8000;
+    const rejoining = !!lobby.started && !this.game;
     this.ui.showShareGuest({
       status: locked
         ? 'This mission is still locked for you. The host can pick an earlier one.'
+        : rejoining ? 'Rejoining the match…'
         : mine ? `You're in as ${mine.name}. The host starts the match.`
         : this._shareReach === 'reconnecting' ? "Can't reach room, reconnecting…"
         : waitingForSeat ? 'No response to the seat request yet. Retrying.'
@@ -4249,6 +4254,7 @@ class App {
       players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
       maxPlayers: lobby.maxPlayers || 4,
       ready: !!mine?.ready,
+      rejoining,
     });
     this._ensureGuestRelay?.();
   }
@@ -4671,9 +4677,13 @@ class App {
       // from it, then pick up lockstep at the host's frame counter using the
       // windows banked while the sim was rebuilding. A second snapshot while
       // that rebuild is in flight would restart it and drop the banked windows.
-      if (this._resyncing) return;
+      // A rebuild that never finishes used to leave this flag set, which then
+      // refused every later snapshot and froze the guest on the same window.
+      if (this._resyncing && performance.now() - (this._resyncStarted || 0) < 8000) return;
       this._resyncing = true;
+      this._resyncStarted = performance.now();
       this._resyncBuffer = new Map();
+      for (const [pw, pc] of m.recent || []) if (pw != null && pc) this._resyncBuffer.set(pw, pc);
       this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match: this._sharedMatch(m.match) }, m.snap)
         .then(() => {
           const buf = this._resyncBuffer || new Map();
@@ -4736,13 +4746,63 @@ class App {
     this._missingWindow = w;
     this._missingRequestAt = now;
     this.net.send({ t: 'needWindow', w });
-    if (this.mpRole === 'guest' && this._shareCode && this.netStallT > 2) {
-      const asked = Date.now();
-      if (!this._shareResyncAskAt || asked - this._shareResyncAskAt > 2000) {
-        this._shareResyncAskAt = asked;
-        this._sharePublish({ t: 'catchup' });
-      }
+  }
+
+  // Host snapshot, same message a reload receives when its relay peer opens.
+  _sendGuestResync(idx) {
+    const peer = this.peers[idx];
+    if (!peer || !this.game || this.game.over || !this.netMode) return;
+    const now = Date.now();
+    if (peer._resyncAt && now - peer._resyncAt < 1000) return;
+    peer._resyncAt = now;
+    const recent = [...this._windowHistory.entries()].slice(-32);
+    peer.send({
+      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      match: this._sharedMatchFields(), recent,
+    });
+  }
+
+  _askForSnapshot(force) {
+    if (this.mpRole !== 'guest' || !this._shareCode) return;
+    if (this._resyncing) {
+      if (performance.now() - (this._resyncStarted || 0) < 8000) return;
+      this._resyncing = false;
+      this._resyncBuffer = null;
     }
+    const now = Date.now();
+    if (this._snapAskAt && now - this._snapAskAt < (force ? 800 : 1000)) return;
+    this._snapAskAt = now;
+    this._sharePublish({ t: 'snap' });
+    try { this.net?.send?.({ t: 'snap' }); } catch { /* the share publish is enough */ }
+  }
+
+  _trackStall(stalled, windowId) {
+    if (this.mpRole !== 'guest') return;
+    if (!stalled || windowId < 0) {
+      this._stallSince = 0;
+      this._stallWindow = -1;
+      this._stallRetried = false;
+      return;
+    }
+    const now = performance.now();
+    if (this._stallWindow !== windowId || !this._stallSince) {
+      this._stallWindow = windowId;
+      this._stallSince = now;
+      this._stallRetried = false;
+      this._missingRequestAt = 0;
+      this._requestMissingWindow(windowId);
+      return;
+    }
+    const action = stallRecovery(now - this._stallSince, this._stallRetried);
+    if (action === 'retry-snapshot') {
+      this._stallRetried = true;
+      this._missingRequestAt = 0;
+      this._requestMissingWindow(windowId);
+      this._askForSnapshot(false);
+      return;
+    }
+    if (action === 'snapshot') this._askForSnapshot(false);
+    else if (action === 'resync') this._askForSnapshot(true);
   }
 
   // Host-sequenced lockstep: the host merges every player's commands into
@@ -4773,6 +4833,7 @@ class App {
     this.acc += dt;
     let steps = 0;
     let stalled = false;
+    let missingWindow = -1;
     while (this.acc >= SIM_DT && steps < 10) {
       if (this.simFrame % NET_STEP === 0) {
         const w = this.simFrame / NET_STEP;
@@ -4796,6 +4857,7 @@ class App {
             // A real gap. Re-arm the buffer so we come back with margin
             // instead of running window-to-window and stuttering forever.
             stalled = true;
+            missingWindow = w;
             this.netPrimed = false;
             this._requestMissingWindow(w);
             break;
@@ -4828,10 +4890,15 @@ class App {
     }
     if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
     this.netStallT = stalled ? this.netStallT + dt : 0;
-    const visibleStall = stalled && this.netStallT > 0.25;
-    this.ui.setWaiting(visibleStall, this.netStallT > 1.2
-      ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
-      : '⏳ Syncing co-op…');
+    this._trackStall(stalled, missingWindow);
+    const stallAge = this._stallSince ? performance.now() - this._stallSince : 0;
+    const visibleStall = stalled && (this.netStallT > 0.25 || stallAge > 250);
+    const stallText = stallAge >= 10000
+      ? '⏳ Resyncing…'
+      : this.netStallT > 1.2
+        ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
+        : '⏳ Syncing co-op…';
+    this.ui.setWaiting(visibleStall, stallText);
     this._refreshDiagnosticsUI(visibleStall);
   }
 
@@ -7595,6 +7662,10 @@ class App {
           this._cameraPinned = true;
           this._recenter = true;
           break;
+        case 'camera_keep':
+          e.preventDefault();
+          this._lookAtKeep();
+          break;
         case 'build_mode':
           e.preventDefault();
           this.toggleControlMode();
@@ -7827,6 +7898,15 @@ class App {
     // Eligibility can disappear after repair (a specialisation is due), then
     // return while the same key/button remains down. Only a physical release
     // rearms that press; lastPay alone tracks eligibility, not release.
+    // A finished plot clears the sim hold. Walking to the next foundation
+    // while the key stays down has to arm a new press, or the second tower
+    // never receives gold.
+    const payTarget = canPay ? this.game.buildTargetFor(h)?.plot?.id ?? null : null;
+    if (physicalPayHeld && this._payPressUsed && payTarget != null && payTarget !== this._payTargetId) {
+      this._payPressUsed = false;
+      this.lastPay = false;
+    }
+    this._payTargetId = payTarget;
     if (!physicalPayHeld) this._payPressUsed = false;
     const pay = this.controlMode === 'build' && canPay && physicalPayHeld
       && (!this._payPressUsed || this.lastPay);
@@ -8035,6 +8115,13 @@ class App {
       this._replayDrag.dx = 0;
       this._replayDrag.dy = 0;
     }
+  }
+
+  _lookAtKeep() {
+    const keep = this.game?.buildings.find((b) => b.kind === 'hq' && b.alive);
+    if (!keep) return;
+    this._cameraPinned = false;
+    this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 };
   }
 
   _updateCamera(dt) {

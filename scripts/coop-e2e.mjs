@@ -32,7 +32,7 @@ async function productionAuthConfig() {
   return config;
 }
 
-function relay() {
+function relay({ drop = 0 } = {}) {
   const boxes = new Map();
   const presence = new Map();
   let seq = 0;
@@ -55,9 +55,16 @@ function relay() {
     const url = new URL(req.url, 'http://relay.local');
     if (req.method === 'POST' && url.pathname === '/pub') {
       const body = await readBody(req);
+      // Window and snapshot bodies travel as link messages. Dropping some of
+      // them is the loss a slow guest sees. Lobby traffic is not a link.
+      // Drop whole window packets. Snapshot chunks stay, so a missed window
+      // can still be rebuilt once the guest asks.
+      if (drop && body.message?.t === 'link' && !body.message.chunk && Math.random() < drop) {
+        res.writeHead(204); res.end(); return;
+      }
       const list = boxes.get(body.code) || [];
       list.push({ id: ++seq, message: body.message });
-      boxes.set(body.code, list.slice(-80));
+      boxes.set(body.code, list.slice(-4000));
       res.writeHead(204); res.end(); return;
     }
     if (req.method === 'POST' && url.pathname === '/presence') {
@@ -70,7 +77,10 @@ function relay() {
     if (url.pathname === '/poll') {
       const code = url.searchParams.get('code');
       const after = Number(url.searchParams.get('after') || 0);
-      const list = (boxes.get(code) || []).filter((entry) => entry.id > after);
+      const all = (boxes.get(code) || []).filter((entry) => entry.id > after);
+      // A fresh page polls from zero. Hand it the live tail, not the match
+      // backlog, or it replays the original begin and starts at frame 0.
+      const list = after === 0 && all.length > 40 ? all.slice(-40) : all;
       const cursor = list.length ? list.at(-1).id : after;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
@@ -119,7 +129,7 @@ function staticServer(authConfig = null) {
 }
 
 const authConfig = liveRealtime ? await productionAuthConfig() : null;
-const mailbox = liveUrl || liveRealtime ? null : await relay();
+const mailbox = liveUrl || liveRealtime ? null : await relay({ drop: 0.08 });
 const site = liveUrl ? null : await staticServer(authConfig);
 const origin = liveUrl || site.origin;
 const browser = await chromium.launch({
@@ -277,6 +287,40 @@ try {
   }
   if (!synced) {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
+  }
+  if (!liveRealtime) {
+    // CPU throttle slows the guest toward the 10 FPS the live retest saw.
+    // One long frame can make a single sample look older than 5s; a guest
+    // that is still waiting a second later has actually stuck.
+    const cdp = await guest.page.context().newCDPSession(guest.page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    const paceStart = await probe(guest.page);
+    const untilPace = Date.now() + 120000;
+    let worstStall = 0;
+    let worstResync = 0;
+    let stuckSince = 0;
+    while (Date.now() < untilPace) {
+      const guestProbe = await probe(guest.page);
+      const stall = guestProbe?.stallMs || 0;
+      worstStall = Math.max(worstStall, stall);
+      worstResync = Math.max(worstResync, guestProbe?.resyncMs || 0);
+      if (stall > 5000) {
+        if (!stuckSince) stuckSince = Date.now();
+        else if (Date.now() - stuckSince > 1000) {
+          throw new Error(`guest stalled ${stall}ms ${JSON.stringify(guestProbe)}`);
+        }
+      } else stuckSince = 0;
+      if ((guestProbe?.resyncMs || 0) > 20000) {
+        throw new Error(`guest resync hung ${guestProbe.resyncMs}ms ${JSON.stringify(guestProbe)}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const paceEnd = await probe(guest.page);
+    if ((paceEnd?.frame || 0) < (paceStart?.frame || 0) + 200) {
+      throw new Error(`throttled guest did not keep simulating ${JSON.stringify({ paceStart, paceEnd, worstStall, worstResync })}`);
+    }
+    console.log(`throttled guest stayed under 5s stalls (worst ${worstStall}ms, resync ${worstResync}ms)`);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
   if (liveRealtime) {
     const until = Date.now() + 60000;

@@ -92,6 +92,7 @@ export class UI {
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
         <button class="tbtn" id="b-quality" title="Toggle graphics quality">✨</button>
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
+        <button type="button" class="tbtn hidden" id="locate-keep" title="Jump to the Keep (K)">Keep</button>
       </div>
 
       <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
@@ -894,6 +895,7 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
+    q('#locate-keep').onclick = () => this.cb.onLocateKeep?.();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -3020,9 +3022,8 @@ export class UI {
       this._combatAlertKey = alertKey;
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
-        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button type="button" id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
         alertBox.querySelector('#recall-army')?.addEventListener('click', () => this.cb.onStance?.('defend'));
-        alertBox.querySelector('#locate-keep')?.addEventListener('click', () => this.cb.onLocateKeep?.());
       } else {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
@@ -3031,6 +3032,12 @@ export class UI {
 
     const keepLabel = alertBox.querySelector('[data-keep-status]');
     if (keepLabel) keepLabel.textContent = keepStatus;
+    const locate = q('#locate-keep');
+    if (locate) {
+      const showKeep = !!(keep && game.phase !== 'found');
+      locate.classList.toggle('hidden', !showKeep);
+      if (showKeep) locate.title = `Jump to the Keep (K) · ${keepStatus}`;
+    }
 
     // Hero plate.
     const h = game.heroes[p];
@@ -3749,7 +3756,7 @@ export class UI {
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
+  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
     this.root.querySelector('#screen-setup')?.classList.add('sharemode');
@@ -3762,8 +3769,8 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.</p>
-        <div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>
+        <p class="mphint">${rejoining ? 'Rejoining the match…' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
+        ${rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`}
       </div>
       <div id="room-roster" class="roomroster"></div>
       <div id="mp-sub"></div>`;
@@ -3772,9 +3779,9 @@ export class UI {
     if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
     this.setStartButton({
-      text: '⏳  WAITING FOR HOST TO START',
+      text: rejoining ? '⏳  REJOINING…' : '⏳  WAITING FOR HOST TO START',
       disabled: true,
-      title: 'Only the host can launch this siege.',
+      title: rejoining ? 'Catching up to the host snapshot.' : 'Only the host can launch this siege.',
     });
   }
 
