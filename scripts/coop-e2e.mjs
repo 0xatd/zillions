@@ -281,21 +281,20 @@ try {
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
   const moveDeadline = startedAt + 10000;
   let moved = null;
+  let origin = null;
   while (Date.now() < moveDeadline) {
     const guestProbe = await probe(guest.page);
     if (guestProbe?.myPlayer > 0 && guestProbe.heroes?.length === 2) {
       const me = guestProbe.heroes[guestProbe.myPlayer];
       const hostHero = guestProbe.heroes[0];
-      const origin = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
-      await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: origin.x + 8, z: origin.z + 6 });
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      const after = await probe(guest.page);
-      const mine = after?.heroes?.[after.myPlayer];
-      const hostNow = after?.heroes?.[0];
-      const mineStep = mine ? Math.hypot(mine.x - origin.x, mine.z - origin.z) : 0;
-      const hostStep = hostNow ? Math.hypot(hostNow.x - origin.hx, hostNow.z - origin.hz) : 99;
-      if (after?.myPlayer > 0 && mineStep > 0.4 && hostStep < 0.4) {
-        moved = after;
+      if (!origin) {
+        origin = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
+        await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: origin.x + 8, z: origin.z + 6 });
+      }
+      const mineStep = Math.hypot(me.x - origin.x, me.z - origin.z);
+      const hostStep = Math.hypot(hostHero.x - origin.hx, hostHero.z - origin.hz);
+      if (mineStep > 0.4 && hostStep < mineStep) {
+        moved = guestProbe;
         break;
       }
     }
