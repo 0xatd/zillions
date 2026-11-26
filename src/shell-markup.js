@@ -311,7 +311,8 @@ export function shellMarkup() {
             <nav id="creator-steps" aria-label="Character creation"></nav>
             <h2 id="creator-step-title">Origin</h2>
             <div data-creator-step="0"><h3>Origin</h3><div id="creator-origin-slot"></div></div>
-            <div data-creator-step="2"><h3>Leader archetype</h3><p>Your playable Vanguard is ready. The Dota-inspired marine and alien leaders below are coming soon.</p><div id="leader-archetypes"></div></div>
+            <fieldset data-creator-step="2"><legend>AVAILABLE NOW</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
+            <div data-creator-step="2"><h3>Leader archetype</h3><p>More archetypes · Coming soon</p><div id="leader-archetypes"></div></div>
             <div data-creator-step="3"><h3>Background</h3><p>Begin as a frontier commander. Additional backgrounds and their starting bonuses are coming soon.</p><button type="button" disabled>Veteran · Coming soon</button><button type="button" disabled>Explorer · Coming soon</button><button type="button" disabled>Strategist · Coming soon</button></div>
             <div data-creator-step="4"><h3>Affiliation</h3><div class="affiliation-choice"><b>Independent commander</b><p>You do not need to rule a faction to enter the world.</p></div><div class="affiliation-future"><button type="button" disabled>Join a house or faction · Coming soon</button><button type="button" disabled>Found a house or faction · Coming soon</button><button type="button" disabled>Kingdoms & empires · Coming soon</button></div><p id="creator-faction-note"></p><label>Campaign banner · optional<input id="creator-faction-name" maxlength="32" placeholder="Your expedition name"></label><label>Culture<select id="creator-faction-culture"></select></label><label>Banner color<select id="creator-faction-color"></select></label><label>Emblem<select id="creator-faction-emblem"></select></label><div id="creator-banner-preview" aria-label="Campaign banner preview"></div><button type="button" disabled>Faction doctrines · Coming soon</button></div>
             <div data-creator-step="5"><h3>Ready to begin</h3><p id="creator-review"></p></div>
@@ -319,7 +320,6 @@ export function shellMarkup() {
             <fieldset data-creator-step="0"><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
             <div data-creator-step="1" class="creator-parts" id="creator-parts"></div>
             <fieldset data-creator-step="1"><legend>ARMOR COLOR</legend><div id="creator-appearance" class="creator-appearance"></div></fieldset>
-            <fieldset data-creator-step="2"><legend>AVAILABLE NOW</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
           </div>
           <div id="creator-summary" class="creator-summary"></div>
           <div class="creator-actions"><button type="button" class="utilitybtn" id="creator-cancel">CANCEL</button><button type="button" class="utilitybtn" id="creator-back">Back</button><button type="button" class="enter-world" id="creator-next">Next</button><button type="submit" id="creator-submit" class="enter-world hidden">Create character</button></div>
