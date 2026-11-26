@@ -24,6 +24,11 @@ for(const [width,height,label] of [[1366,768,'laptop'],[390,844,'phone']]){
  for(let step=0;step<6;step++){await page.locator(`#creator-steps [data-step="${step}"]`).click();await page.screenshot({path:`${out}/creator-${step}-${label}.png`});}
  await page.locator('#creator-cancel').click();
 }
+await page.evaluate(()=>__app.ui.showBanner('Connection interrupted. Please try again.','bad',15000));
+await page.waitForTimeout(350);
+assert.ok(await page.locator('.toast-close').first().evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'menu must not paint over errors or their dismiss action');
+await page.screenshot({path:`${out}/visible-menu-error-phone.png`});
+await page.locator('.toast-close').first().click();
 await page.locator('#leader-faction').click();assert.ok(await page.locator('#chapter-identity').isVisible());
 assert.equal(await page.locator('#leader-faction').getAttribute('aria-expanded'),'true');
 await page.screenshot({path:`${out}/affiliation-phone.png`});
