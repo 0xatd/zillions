@@ -2499,7 +2499,7 @@ class App {
     }
     if (this._shareLobby && this.mpRole === 'guest') {
       this._sharePublish({
-        t: 'join', name: this._publicName(), hero: key, claim: true,
+        t: 'join', name: this._shareDisplayName(), hero: key, claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
       });
@@ -2557,6 +2557,7 @@ class App {
   }
 
   _syncSetupRoster() {
+    if (this._shareLobby && !this._shareLobby.closed && (this.mpRole === 'host' || this.mpRole === 'guest')) return;
     if (this.lobby?.game) return this._onRoomUpdate(this.lobby.game);
     if (this.mpRole !== 'host' && this.mpRole !== 'guest') return;
     const players = this._manualRosterPlayers();
@@ -3157,13 +3158,15 @@ class App {
       this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       const shareIdForPeer = this.peers[idx]?.shareId;
       if (shareIdForPeer && this._shareLobby) {
-        this._shareLobby = withSeatHero(this._shareLobby, shareIdForPeer, m.k, m.name, Date.now());
+        this._shareLobby = withSeatHero(this._shareLobby, shareIdForPeer, m.k, this._shareGuestLabel(m.name, shareIdForPeer), Date.now());
         this._sharePublishLobby();
         this._renderShareHost();
       }
-      const players = this._manualRosterPlayers();
-      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
-      this._syncSetupRoster();
+      if (!(this._shareLobby && !this._shareLobby.closed)) {
+        const players = this._manualRosterPlayers();
+        this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
+        this._syncSetupRoster();
+      }
     }
     else if (m.t === 'startReady') {
       this.startReadyGuests.add(idx);
@@ -3677,7 +3680,31 @@ class App {
   }
 
   _shareGuestLabel(name, id) {
-    return shareGuestName({ name, id, hostName: this._shareHostLabel() });
+    const aliases = [this._shareHostLabel(), this._shareLobby?.hostName, this._publicName()].filter(Boolean);
+    let label = name;
+    for (const hostName of aliases) label = shareGuestName({ name: label, id, hostName });
+    return label;
+  }
+
+  // A data channel that never opens does not close, so the seat stays and
+  // Start waits forever. A later heartbeat replaces that handshake without
+  // removing the seat. The gap keeps a slow ICE attempt from being restarted
+  // on every 2s check-in.
+  _shareKickLink(message) {
+    if (!message?.from || this._shareLobby?.started) return;
+    const peer = this._shareHands?.get(message.from);
+    if (peer?.open || this._sharePendingJoins?.has(message.from)) return;
+    const last = this._shareOfferAt?.get(message.from) || 0;
+    if (last && Date.now() - last < 12000) return;
+    void this._acceptShareGuest({
+      ...message,
+      t: 'join',
+      claim: true,
+      ready: true,
+      rejoin: !!peer,
+      protocolVersion: LOBBY_PROTOCOL_VERSION,
+      clientVersion: CLIENT_VERSION,
+    });
   }
 
   _shareOpenIds() {
@@ -3820,6 +3847,7 @@ class App {
         this._sharePublishLobby();
         this._renderShareHost();
       }
+      this._shareKickLink(message);
     }
     else if (message.t === 'ready' && this.mpRole === 'host') {
       this._shareLobby = touchSeatActivity(setSeatReady(this._shareLobby, message.from, message.ready, Date.now()), message.from, Date.now());
@@ -3961,6 +3989,8 @@ class App {
       if (!this._shareHands?.has(message.from)) return;
       if (this._shareLobby?.started && !(this.netMode && this.game && !this.game.over)) return;
       this._sharePublish({ t: 'offer', to: message.from, sdp });
+      this._shareOfferAt ??= new Map();
+      this._shareOfferAt.set(message.from, Date.now());
       this._shareSig = '';
       this._sharePublishLobby();
       this._renderShareHost();

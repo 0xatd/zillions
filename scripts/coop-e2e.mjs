@@ -235,7 +235,7 @@ try {
     }
     const line = await host.page.locator('.roomslot:not(.host):not(.open)').innerText();
     if (!line.includes(stableName) || !/\bconnected\b/.test(line) || /· connecting/.test(line)) {
-      throw new Error(`visible seat changed during the hold: ${line}`);
+      throw new Error(`visible seat changed during the hold: ${JSON.stringify({ line, stableName, roster: snap?.roster })}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -244,7 +244,7 @@ try {
   await host.page.waitForFunction(() => {
     const button = document.querySelector('#s-start');
     return button && !button.disabled && /START/i.test(button.textContent || '');
-  }, null, { timeout: 25000 }).catch(async (error) => {
+  }, null, { timeout: 45000 }).catch(async (error) => {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
   await host.page.locator('#s-start').click();
