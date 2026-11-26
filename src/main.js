@@ -3226,7 +3226,21 @@ class App {
     else if (m.t === 'needWindow') {
       const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
-      if (bundle && peer) peer.sendFast({ t: 'w', w: Number(m.w), c: bundle, p: [] });
+      if (!peer) return;
+      if (bundle) {
+        peer.sendFast({ t: 'w', w: Number(m.w), c: bundle, p: [] });
+        return;
+      }
+      // The repair log is only a few seconds. A guest who asks for an older
+      // window — a slow reload, a missed start — gets a fresh snapshot
+      // instead of waiting on a window the host no longer has.
+      const now = Date.now();
+      if (peer.shareId && this.game && !this.game.over && (!peer._resyncAt || now - peer._resyncAt > 2000)) {
+        peer._resyncAt = now;
+        peer.send({
+          t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
+        });
+      }
     }
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
@@ -4655,7 +4669,9 @@ class App {
     else if (m.t === 'resync') {
       // Mid-game rejoin: the host froze one sim tick into a snapshot; rebuild
       // from it, then pick up lockstep at the host's frame counter using the
-      // windows banked while the sim was rebuilding.
+      // windows banked while the sim was rebuilding. A second snapshot while
+      // that rebuild is in flight would restart it and drop the banked windows.
+      if (this._resyncing) return;
       this._resyncing = true;
       this._resyncBuffer = new Map();
       this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match: this._sharedMatch(m.match) }, m.snap)
@@ -4714,12 +4730,19 @@ class App {
   }
 
   _requestMissingWindow(w) {
-    if (!this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
+    if (this._resyncing || !this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
     const now = performance.now();
     if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
     this._missingWindow = w;
     this._missingRequestAt = now;
     this.net.send({ t: 'needWindow', w });
+    if (this.mpRole === 'guest' && this._shareCode && this.netStallT > 2) {
+      const asked = Date.now();
+      if (!this._shareResyncAskAt || asked - this._shareResyncAskAt > 2000) {
+        this._shareResyncAskAt = asked;
+        this._sharePublish({ t: 'catchup' });
+      }
+    }
   }
 
   // Host-sequenced lockstep: the host merges every player's commands into
