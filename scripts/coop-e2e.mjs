@@ -414,8 +414,10 @@ try {
   }
   const hostCdp = await host.page.context().newCDPSession(host.page);
   const guestCdp = await guest.page.context().newCDPSession(guest.page);
-  await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-  await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  // Rate 2 is the 10 FPS the retest saw. Rate 4 on CI made one accepted
+  // order take 5s even though both heroes were already on the same tile.
+  await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: 2 });
+  await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: 2 });
   const afterRejoin = await probe(guest.page);
   if (!(afterRejoin?.myPlayer > 0) || !/guest/i.test(afterRejoin.hud || '')) {
     throw new Error(`guest HUD is not its own hero ${JSON.stringify(afterRejoin)}`);
