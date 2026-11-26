@@ -1,5 +1,5 @@
 // Hero-only attack clock. Squads retain their autonomous combat behavior.
-import { spellAttack, spellAfterAttack } from './hero-spells.js';
+import { rollSpellAttack, applySpellAttackImpact, spellAfterAttack } from './hero-spells.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const targetOf = (g, a) => a.nest ? g.nests.find(n => n.id === a.id && n.alive)
@@ -11,6 +11,7 @@ function impact(g, h, shot, target) {
   const before = target.hp;
   if (shot.nest) g._damageNest(target, shot.damage);
   else {
+    applySpellAttackImpact(g, target, shot.onHit, shot.fx, shot.fz);
     g.damageZombie(target, shot.damage, shot.fx, shot.fz, shot.types, shot.mods);
     spellAfterAttack(g, h, target, shot.damage);
     if (shot.splash) for (const z of g.zombies) {
@@ -72,11 +73,12 @@ export function updateHeroAttack(g, h, dt, rofMult) {
   if (chance > 0 && g.rng() < chance) {
     damage *= (w.critMult || 1.75) + (h.mods.critMult || 0); crit = true;
   }
-  if (!nest) damage = spellAttack(g, h, target, damage);
+  const spell = nest ? {damage,onHit:null} : rollSpellAttack(g, h, target, damage);
+  damage = spell.damage;
   const kind = w.melee ? 'melee' : w.shotgun ? 'shotgun' : 'hero';
   const duration = w.melee ? 0 : Math.max(.08, Math.min(.45, distance(h, target) / 30));
   const serial = h.attackSerial = (h.attackSerial || 0) + 1;
-  const shot = { serial, id: target.id, nest, t: duration, damage, crit, kind,
+  const shot = { serial, id: target.id, nest, t: duration, damage, crit, kind, onHit: spell.onHit,
     fx: h.x, fz: h.z, types: w.types ? { ...w.types } : null,
     mods: { ...h.mods }, splash: w.splash || 0 };
   g.emit({ type: 'herorelease', kind, fromId: h.id, heroKey: h.key,

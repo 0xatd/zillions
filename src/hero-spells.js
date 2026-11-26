@@ -152,16 +152,33 @@ export function spellMoveSpeed(h) {
   return (h.spells?.aimT>0?.35:1) * (h.def.fierySoul?1+(h.spells?.soul||0)*value(h.def.fierySoul.moveSpeed,spellRank(h,3)):1);
 }
 
-export function spellAttack(g,h,target,damage) {
+// Resolve randomness and damage at release, but never mutate the target here.
+export function rollSpellAttack(g,h,target,damage) {
   if(h.def.distanceDamage)damage*=1+Math.sqrt(d2(h,target))*h.def.distanceDamage;
   if(h.def.keenScope)damage*=1+Math.sqrt(d2(h,target))*h.def.keenScope;
+  let onHit=null;
   if(h.def.headshot&&(h.spells?.aimT>0||g.rng()<h.def.headshot.chance)) {
     damage+=value(h.def.headshot.damage,spellRank(h,3));
-    target.stunT=Math.max(target.stunT||0,value(h.def.headshot.stun,spellRank(h,3)));
-    if(!target.boss){const d=Math.sqrt(d2(h,target))||1;const x=target.x+(target.x-h.x)/d*.5,z=target.z+(target.z-h.z)/d*.5;
-      if(g.map.isWalkable(x|0,z|0)&&g.occ[(z|0)*g.map.size+(x|0)]===0){target.x=x;target.z=z;}}
+    onHit={stun:value(h.def.headshot.stun,spellRank(h,3)),knockback:.5};
   }
-  return damage;
+  return {damage,onHit};
+}
+
+export function applySpellAttackImpact(g,target,onHit,fx,fz) {
+  if(!onHit || target.dead || target.hp<=0)return;
+  target.stunT=Math.max(target.stunT||0,onHit.stun||0);
+  if(!target.boss&&onHit.knockback){
+    const d=Math.hypot(target.x-fx,target.z-fz)||1;
+    const x=target.x+(target.x-fx)/d*onHit.knockback,z=target.z+(target.z-fz)/d*onHit.knockback;
+    if(g.map.isWalkable(x|0,z|0)&&g.occ[(z|0)*g.map.size+(x|0)]===0){target.x=x;target.z=z;}
+  }
+}
+
+// Instant-hit callers retain the same contract; projectiles use the two phases.
+export function spellAttack(g,h,target,damage) {
+  const result=rollSpellAttack(g,h,target,damage);
+  applySpellAttackImpact(g,target,result.onHit,h.x,h.z);
+  return result.damage;
 }
 
 export function spellOnAttackTaken(g,h,attacker) {

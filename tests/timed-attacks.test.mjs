@@ -62,3 +62,16 @@ test('released projectile survives shooter death; cancelled melee never damages'
  assert.ok(z.hp<10000);assert.equal(g.events.filter(e=>e.type==='heroimpact').length,1);
  const f=fresh('sven');order(f.g,f.z);tick(f.g);f.h.dead=true;tick(f.g,20);assert.equal(f.z.hp,10000);
 });
+
+test('Sniper Headshot commits its roll at release but staggers only on impact, including restore',()=>{
+ const {g,h,z}=fresh('sniper');z.x=30;g.exec({t:'cast',p:0,slot:1});order(g,z);
+ until(g,()=>h.attackShots.length>0);
+ assert.equal(z.hp,10000);assert.equal(z.stunT||0,0,'Headshot must not stun during projectile flight');assert.equal(z.x,30,'knockback must wait for contact');
+ const restored=new Game(map(),'normal','sniper',g.snapshot(),1);
+ // Aim can expire in flight; the committed proc must not be rerolled or lost.
+ h.spells.aimT=0;restored.heroes[0].spells.aimT=0;
+ g.exec({t:'hhalt',p:0,k:'stop'});restored.exec({t:'hhalt',p:0,k:'stop'});
+ for(let i=0;i<30&&z.hp===10000;i++){tick(g);tick(restored);assert.equal(stateHash(g),stateHash(restored));}
+ assert.ok(z.hp<10000);assert.ok(z.stunT>0);assert.equal(z.x,30.5);
+ const hp=z.hp;tick(g,20);assert.equal(z.hp,hp,'one projectile produces one hit');
+});

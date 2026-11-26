@@ -10,7 +10,7 @@ Stacked on `codex/siege-feel-20261126` (PR #157). No merge or production rollout
 - S stops and suppresses attacks; H holds position and attacks without chasing. Both are rebindable. WASD camera mode parks S; existing stored WASD settings migrate without losing their camera key.
 - Hero-only wind-up, release and recovery. Ranged attacks apply damage on projectile arrival. Melee hits at release. Flight survives movement and shooter death. Squads retain their prior autonomous behavior.
 - Attack poses use simulation state. Flight follows the simulation clock, including pause. Target highlight persists during pursuit; attack range appears while targeting/holding/winding up.
-- Pending swing, released payloads, cooldown, moving state and order survive restore and enter the peer hash. Snapshot 14 reads 12/13; protocol and shared replay simulation 21 refuse mixed clients.
+- Pending swing, released payloads, cooldown, moving state and order survive restore and enter the peer hash. Snapshot 14 reads 12/13; protocol and shared replay simulation 22 refuse mixed clients.
 
 ## Verification
 
@@ -27,3 +27,7 @@ Full check, local production build, browser shell and throwaway PostgreSQL gates
 ## Deliberate limits
 
 No Dota item system, last-hit economy, denies, exact Dota patch parity or new art assets. Phone screenshots validate layout, not a new touch-control scheme. PR155/156 overlap the underlying PR157; integration must preserve the new timing/commands and re-evaluate protocol numbers before landing the stack. Human play-feel assessment remains necessary.
+
+## Independent audit follow-up
+
+The pre-merge review reproduced Sniper Headshot applying stun/knockback at release while damage waited for arrival. `rollSpellAttack` now commits damage and on-hit payload without mutating the target; impact applies the stored payload. The regression fails before repair and passes after, including Aim expiring mid-flight and exact restore hashes. Protocol/shared simulation22 isolates the earlier21preview. The instant-hit helper retains its prior contract.
