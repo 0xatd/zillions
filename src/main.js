@@ -5679,6 +5679,7 @@ class App {
     // left a background tab with the flag set and the callback never delivered,
     // so the guest painted a frozen picture while its windows piled up.
     const wake = () => {
+      if (this._advancing) return;
       this._simPumping = false;
       this._advanceNetSim();
     };

@@ -401,7 +401,7 @@ try {
   }
 
   const beforeDrop = await probe(host.page);
-  await guest.page.reload({ waitUntil: 'domcontentloaded' });
+  await guest.page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   let rejoined = null;
   let lastRejoin = null;
   const rejoinDeadline = Date.now() + 40000;
