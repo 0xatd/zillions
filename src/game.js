@@ -3125,6 +3125,12 @@ export class Game {
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
       case 'found': this.foundCity(c.s, c.p || 0); break;
+      case 'debugKillKeep': {
+        const keep = this.buildings.find((b) => b.kind === 'hq' && b.alive);
+        if (keep) this._destroyBuilding(keep, true);
+        else { this.defeatCause = 'keep_destroyed'; this._gameOver(false); }
+        break;
+      }
       case 'drop': this.dropItem(c.p || 0, c.i ?? -1); break;
       case 'swapset': this.swapWeaponSet(c.p || 0); break;
       case 'dodge': this.dodgeRoll(c.p || 0, c.x, c.z); break;

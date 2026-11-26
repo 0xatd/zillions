@@ -5,7 +5,7 @@ import {Game} from '../src/game.js';
 import {TerrainField} from '../src/terrain.js';
 import {levelById,SIM_DT} from '../src/config.js';
 import {stateHash} from '../src/lockstep-hash.js';
-import {adaptiveWindowTarget,consecutiveWindowCount,hasConsecutiveWindowBuffer,rememberWindow} from '../src/multiplayer-pacing.js';
+import {adaptiveWindowTarget,consecutiveWindowCount,guestLagWindows,hasConsecutiveWindowBuffer,hostPaceScale,rememberWindow} from '../src/multiplayer-pacing.js';
 
 // Execute the production App methods with transport/renderer boundaries
 // replaced. No source-string assertions: real Game snapshots and commands run.
@@ -17,7 +17,7 @@ class Peer {
  send(packet){this.sent.push(structuredClone(packet));this.deliver?.(structuredClone(packet));}
  destroy(){this.open=false;this.onClose?.();}
 }
-const deps={NetSession:Peer,SIM_DT,NET_STEP:2,NET_REDUNDANCY:4,NET_HISTORY:64,NET_SPECTATOR_BUFFER:1024,NET_PACE_SLOW:.94,NET_PACE_FAST:1.06,performance:{now:()=>clock},setTimeout:()=>0,clearTimeout:()=>{},adaptiveWindowTarget,consecutiveWindowCount,hasConsecutiveWindowBuffer,rememberWindow};
+const deps={NetSession:Peer,SIM_DT,NET_STEP:2,NET_REDUNDANCY:4,NET_HISTORY:64,NET_SPECTATOR_BUFFER:1024,NET_PACE_SLOW:.94,NET_PACE_FAST:1.06,performance:{now:()=>clock},setTimeout:()=>0,clearTimeout:()=>{},adaptiveWindowTarget,consecutiveWindowCount,guestLagWindows,hasConsecutiveWindowBuffer,hostPaceScale,rememberWindow};
 function method(name){
  const start=source.search(new RegExp(`^  (?:async )?${name}\\(`,'m'));assert.ok(start>=0,`method ${name} exists`);
  const rest=source.slice(start+1),next=rest.search(/\n  (?:async )?[A-Za-z_]\w*\(/);
@@ -28,7 +28,7 @@ function method(name){
 function game(snap=null){const l=levelById(1);const g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal','scott',snap,1);if(!snap){g.foundCity(0,0);for(let i=0;i<60;i++)g.update(SIM_DT);}return g;}
 function app(role,g=game()){
  const a={mpRole:role,netMode:true,game:g,paused:false,startBarrier:false,simFrame:0,acc:0,_netClockLast:clock,outbox:[],guestCmdQueues:[],peers:[],spectators:[],pendingSpectators:[],onlinePending:new Map(),inbox:new Map(),_recentWindows:[],_windowHistory:new Map(),hashes:{local:new Map()},netPrimed:true,netBufferTarget:1,netStallT:0,netDiagnostics:{},ui:{setWaiting(){},showBanner(){},setNetworkDiagnostics(){}},lobby:{iceServers:[{urls:'turn:qa.invalid'}],async signal(){}},_refreshDiagnosticsUI(){},_attachNetDiagnostics(){},_stateHash(){return stateHash(this.game);}};
- for(const name of ['_acceptSpectator','_broadcastSpectators','_advanceNetSim','_windowsBuffered','_broadcastFast','_requestMissingWindow','issue'])a[name]=method(name);
+  for(const name of ['_acceptSpectator','_broadcastSpectators','_advanceNetSim','_advanceNetSimBody','_scheduleNetDrain','_windowsBuffered','_broadcastFast','_requestMissingWindow','issue'])a[name]=method(name);
  // This hook only exists after the production regression is fixed.
  if(source.includes('  _startPendingSpectators('))a._startPendingSpectators=method('_startPendingSpectators');
  return a;
@@ -68,6 +68,7 @@ test('slow Watch loading is bounded and retries only after the old restore ackno
 
 test('spectator startup restores the snapshot frame before requesting buffered windows',async()=>{
  const watcher=app('spectator');watcher._onGuestMsg=method('_onGuestMsg');
+ watcher._scheduleNetDrain=()=>{};
  let complete;const loading=new Promise(resolve=>{complete=resolve;});let ready=null;
  watcher.startGame=async(diff,key,mp,snap)=>{assert.equal(mp.role,'spectator');await loading;watcher.game=game(snap);watcher.simFrame=0;watcher.inbox=new Map();};
  watcher.net={send:m=>{ready=m;}};

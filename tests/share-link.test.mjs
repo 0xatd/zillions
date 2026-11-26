@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
-  admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, markStarted, parseShareLocation,
-  publicShareLobby, releaseGuest, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareLaunchReady, shareRoster, shareUrl, touchLobby, withSeatHero,
+  admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
+  evictGuest, preferLiveRelay, publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, sharePlayerIndex, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -20,10 +20,27 @@ function lobby(extra = {}) {
   return createLobby({ code: CODE, hostId: HOST, hostName: 'Ada', hero: 'scott', now: NOW, ...extra });
 }
 
+test('a removed guest cannot sit back down, and player index follows the seat', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  assert.equal(sharePlayerIndex(room, HOST), 0);
+  assert.equal(sharePlayerIndex(room, GUEST), 1);
+  room = evictGuest(markStarted(room, NOW), GUEST, NOW + 5);
+  assert.equal(room.seats.some((seat) => seat.id === GUEST), false);
+  assert.equal(admitGuest(room, { id: GUEST }, NOW + 6).reason, 'removed');
+  assert.equal(shareFailureCopy('removed'), 'The host removed you.');
+});
+
 test('invite urls round-trip and malformed codes are refused', () => {
   const code = createShareCode(Uint8Array.from({ length: 10 }, (_, i) => i));
   const url = shareUrl('https://zillions.taborlin.co/', code);
   assert.equal(parseShareLocation(new URL(url).search)?.code, code);
+  const kept = new URL(shareUrl('https://zillions.taborlin.co', code, '?quality=low&netdebug=1&coop=oldcode'));
+  assert.equal(kept.searchParams.get('quality'), 'low');
+  assert.equal(kept.searchParams.get('netdebug'), '1');
+  assert.equal(kept.searchParams.get('coop'), code);
+  assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: false }), true);
+  assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: true }), false);
+  assert.equal(preferLiveRelay({ live: false, relayOpen: true, incomingRelay: false }), false);
   assert.equal(parseShareLocation(''), null);
   assert.equal(parseShareLocation('?party=abcd')?.ok, undefined);
   assert.equal(parseShareLocation('?party=abcd'), null);
@@ -89,6 +106,59 @@ test('share ice prefers the deployment relay list', async () => {
   const servers = await loadShareIceServers(async () => ({ ok: true, json: async () => ({ iceServers: turn }) }));
   assert.deepEqual(servers, turn);
   assert.equal(await loadShareIceServers(async () => ({ ok: false, json: async () => ({}) })), null);
+});
+
+test('a guest clock ahead of the host does not mean the host left', () => {
+  const room = lobby();
+  const skewed = { ...room, seenAt: NOW - 60_000 };
+  assert.equal(hostStillHere(skewed, NOW), false);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW, { receivedAt: NOW - 1000 }).ok, true);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW, { hostPresent: true }).ok, true);
+  assert.equal(admitGuest(skewed, { id: GUEST }, NOW).reason, 'host_left');
+});
+
+test('a silent seat is dropped after five seconds, including one that still looks connected', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  room = seatGuest(room, { id: THIRD, name: 'Commander', hero: 'scott' }, NOW).lobby;
+  room = {
+    ...room,
+    seats: room.seats.map((seat) => (seat.host ? seat : { ...seat, linked: true, ready: true })),
+  };
+  const open = new Set([GUEST, THIRD]);
+  assert.equal(shareLaunchReady(room, open).ready, true);
+  assert.equal(reapStaleSeats(room, NOW + SHARE_SILENCE_MS - 1).dropped.length, 0);
+  const reaped = reapStaleSeats(room, NOW + SHARE_SILENCE_MS);
+  assert.equal(reaped.dropped.length, 2);
+  const refreshed = touchSeatActivity(room, THIRD, NOW + 4000);
+  const kept = reapStaleSeats(refreshed, NOW + 8000);
+  assert.deepEqual(kept.dropped.map((seat) => seat.id), [GUEST]);
+  assert.equal(kept.lobby.seats.some((seat) => seat.id === THIRD), true);
+});
+
+test('a live heartbeat keeps a guest seated for a full minute without WebRTC', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  const open = new Set();
+  for (let t = 2000; t <= 60000; t += 2000) {
+    const result = reapStaleSeats(room, NOW + t, { openIds: open, presentIds: null });
+    assert.equal(result.dropped.length, 0, `reaped at ${t}ms`);
+    room = touchSeatActivity(result.lobby, GUEST, NOW + t);
+  }
+  assert.equal(room.seats.some((seat) => seat.id === GUEST), true);
+});
+
+test('a joiner does not wear the host name', () => {
+  const id = 'abcdef12-3456-4789-abcd-ef1234567890';
+  assert.equal(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: 'Vanguard', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: '', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: 'Bea', id, hostName: 'Gork' }), 'Bea');
+  assert.notEqual(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), shareGuestName({ name: 'Gork', id: '99999999-9999-4999-8999-999999999991', hostName: 'Gork' }));
+});
+
+test('the seat label prefers the founder over the Commander fallback', () => {
+  assert.equal(seatDisplayName({ founderName: 'Mara' }), 'Mara');
+  assert.equal(seatDisplayName({ username: 'ada', founderName: 'Mara' }), 'ada');
+  assert.equal(seatDisplayName({}), 'Commander');
 });
 
 test('expired, closed, stale, and already-started links refuse a new hero', () => {

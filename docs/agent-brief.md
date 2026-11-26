@@ -214,8 +214,10 @@ History worth keeping, so old mistakes are not repeated:
   Campaign rooms also block levels that any seated player has not unlocked.
 - Match startup uses a load barrier. Each guest sends `startReady` after the
   battlefield loads. The host starts window 0 after all guests are ready.
-- The host sends a lockstep window about every 66 ms. Packets repeat four
-  recent windows. The host stores 64 windows for exact repair requests.
+- The host sends a lockstep window about every 66 ms. The sim steps on its
+  own clock, not on the paint rate, so a 10 FPS tab still advances the siege.
+  Packets repeat about a second of recent windows. The host stores about 12
+  seconds for exact repair requests.
 - A guest buffers 3–10 consecutive windows. The target uses measured round-trip
   time and jitter. A guest requests a missing window every 180 ms until it
   arrives.

@@ -6,6 +6,7 @@
   "scripts": {
     "precheck": "node scripts/multiplayer-lifecycle-qa-check.mjs && node scripts/run-telemetry-check.mjs && node scripts/first-hour-check.mjs && node scripts/combat-readability-check.mjs && node scripts/shell-state-check.mjs && node scripts/campaign-cloud-check.mjs && node scripts/economy-authority-check.mjs && node scripts/crafting-authority-check.mjs && node scripts/custom-games-shell-check.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:coop": "node scripts/coop-e2e.mjs",
     "check:browser": "node scripts/browser-shell-check.mjs",
     "check:postgres": "node scripts/match-result-postgres-check.mjs",
     "check:live-economy": "node scripts/live-economy-smoke.mjs",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "embedded-postgres": "^17.6.0-beta.15",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "playwright": "^1.49.1"
   }
 }

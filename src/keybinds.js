@@ -58,6 +58,10 @@ export const ACTIONS = [
     desc: 'Pulls the view back onto your hero.',
   },
   {
+    id: 'camera_keep', name: 'Jump camera to the Keep', scopes: ['battle'], context: 'movement', default: 'k',
+    desc: 'Looks at the Keep for a moment. Space returns to the hero.',
+  },
+  {
     id: 'move_up', name: 'Move hero north', scopes: ['battle'], context: 'movement', default: 'numpad8', held: true,
     desc: 'Optional direct move. Right-click is the main order.',
   },
@@ -173,7 +177,7 @@ export function abilityKeyLabel(binds, slot) {
   return prefix + keyLabel(binds[row[1]]);
 }
 
-const PARK_KEYS = ['f', 'y', 'u', 'h', 'j', 'k', 'l', 'n', 'i', 'o'];
+const PARK_KEYS = ['f', 'y', 'u', 'h', 'j', 'l', 'n', 'i', 'o'];
 
 function firstFree(binds, id, prefer = PARK_KEYS) {
   for (const key of prefer) {

@@ -1,4 +1,5 @@
 import { heroCopy, bearing } from './campaign-presentation.js';
+import { publicRoomSetup } from './lobby-reliability.js';
 import { spellManaCost } from './hero-spells.js';
 import { heroAbilities, abilityCooldown } from './hero-abilities.js';
 import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
@@ -91,6 +92,7 @@ export class UI {
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
         <button class="tbtn" id="b-quality" title="Toggle graphics quality">✨</button>
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
+        <button type="button" class="tbtn hidden" id="locate-keep" title="Jump to the Keep (K)">Keep</button>
       </div>
 
       <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
@@ -849,6 +851,7 @@ export class UI {
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
       b.onclick = () => {
         this.selectedDiff = key;
+        this._diffPicked = true;
         for (const c of seg.children) c.classList.toggle('sel', c === b);
         if (this.cb.onDifficultyPick) this.cb.onDifficultyPick(key);
       };
@@ -892,6 +895,7 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
+    q('#locate-keep').onclick = () => this.cb.onLocateKeep?.();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -1101,6 +1105,7 @@ export class UI {
   }
 
   _showScreen(name) {
+    if (this.cb.beforeScreen && this.cb.beforeScreen(name) === false) return;
     this._battlePanel = null;
     this.root.querySelector('#builder-controls').classList.add('hidden');
     this.root.querySelector('#battle-details').classList.add('hidden');
@@ -1222,13 +1227,14 @@ export class UI {
       const row = document.createElement('button');
       row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
       row.disabled = incompatible;
-      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}<small>${String(game.mode || 'campaign').toUpperCase()}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      const setup = publicRoomSetup(game);
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${String(setup.mode || 'campaign').toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
       row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
       box.appendChild(row);
     }
     const game = this._selectedCustomGame;
     detail.innerHTML = game
-      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${game.mode === 'labyrinth' ? '🌀' : game.mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${String(game.difficulty || 'normal').toUpperCase()}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
+      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${publicRoomSetup(game).mode === 'labyrinth' ? '🌀' : publicRoomSetup(game).mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(publicRoomSetup(game).mapName || levelById(publicRoomSetup(game).level)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${(DIFFICULTY[publicRoomSetup(game).difficulty] || DIFFICULTY.normal).label}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
       : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
     join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
     join.disabled = !game || game.protocol_compatible === false;
@@ -2565,13 +2571,14 @@ export class UI {
     }
   }
 
-  showSetup({ coop = false, mode = 'campaign', online = null, level = null } = {}) {
+  showSetup({ coop = false, mode = 'campaign', online = null, level = null, share = false } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._syncChapterHeroChoice(mode);
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
@@ -2792,7 +2799,7 @@ export class UI {
 
   // ---------- in-game HUD ----------
 
-  initHUD(game, p, character = null) {
+  initHUD(game, p, character = null, plateName = null) {
     this.msgSeen = 0;
     this._contactTime = -1;
     this._stance = null;
@@ -2828,7 +2835,7 @@ export class UI {
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
     face.innerHTML = character && !character.chapterLeader ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
-    this.root.querySelector('#a-name').textContent = character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name;
+    this.root.querySelector('#a-name').textContent = plateName || (character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name);
     const big = this.root.querySelector('#bigaction');
     this.root.querySelector('#ability-slots').onclick = e => {
       const button = e.target.closest('[data-ability-slot]');
@@ -3016,9 +3023,8 @@ export class UI {
       this._combatAlertKey = alertKey;
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
-        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button type="button" id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
         alertBox.querySelector('#recall-army')?.addEventListener('click', () => this.cb.onStance?.('defend'));
-        alertBox.querySelector('#locate-keep')?.addEventListener('click', () => this.cb.onLocateKeep?.());
       } else {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
@@ -3027,6 +3033,12 @@ export class UI {
 
     const keepLabel = alertBox.querySelector('[data-keep-status]');
     if (keepLabel) keepLabel.textContent = keepStatus;
+    const locate = q('#locate-keep');
+    if (locate) {
+      const showKeep = !!(keep && game.phase !== 'found');
+      locate.classList.toggle('hidden', !showKeep);
+      if (showKeep) locate.title = `Jump to the Keep (K) · ${keepStatus}`;
+    }
 
     // Hero plate.
     const h = game.heroes[p];
@@ -3090,8 +3102,8 @@ export class UI {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
-        big.disabled = !near || h.dead;
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Found the city — return to the flag'}<small>${this._keyLabel('build')}</small></span>`;
+        big.disabled = !!h.dead;
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
         if (target) {
@@ -3637,6 +3649,17 @@ export class UI {
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
+  setNetDebug(line) {
+    let el = this.root.querySelector('#netdebug');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'netdebug';
+      el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:80;max-width:92vw;padding:6px 8px;background:rgba(0,0,0,.78);color:#d7ffe4;font:12px/1.35 ui-monospace,monospace;pointer-events:none;white-space:pre-wrap';
+      this.root.appendChild(el);
+    }
+    el.textContent = line;
+  }
+
   setWaiting(on, text = '⏳ Syncing co-op…') {
     const el = this.root.querySelector('#waitind');
     if (!el) return;
@@ -3663,9 +3686,33 @@ export class UI {
     const text = String(url || '');
     const field = this.root.querySelector('#share-url');
     if (field) field.value = text;
-    const done = () => this.showBanner('Invite link copied.', '', 2200);
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => this.showBanner('Select the invite link and copy it.', '', 3200));
-    else this.showBanner('Select the invite link and copy it.', '', 3200);
+    const button = this.root.querySelector('#share-copy');
+    const done = () => { if (button) button.textContent = 'Copied'; };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => { if (button) button.textContent = 'Select the link'; });
+    else if (button) button.textContent = 'Select the link';
+  }
+
+  showShareDraft() {
+    this._shareLive = true;
+    this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
+    const mp = this.root.querySelector('#mp-panel');
+    if (!mp) return;
+    mp.classList.remove('hidden');
+    mp.dataset.share = 'draft';
+    mp.innerHTML = `
+      <div class="share-card">
+        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <h3>Set the siege, then invite</h3>
+        <p class="mphint" id="share-status">Pick the battlefield and difficulty above. The invite link is created from those choices.</p>
+        <div class="share-actions"><button class="diffbtn sel" id="share-create" type="button">Create invite link</button></div>
+      </div>`;
+    mp.querySelector('#share-create').onclick = () => this.cb.onShareCreate?.();
+    this.setStartButton({
+      text: 'SET THE BATTLE, THEN CREATE THE LINK',
+      disabled: true,
+      title: 'Choose the map and difficulty, then create the invite link.',
+    });
   }
 
   showShareNotice({ title = 'Join a siege', copy = '', tone = '' } = {}) {
@@ -3682,9 +3729,10 @@ export class UI {
     if (card) card.classList.toggle('bad', tone === 'bad');
   }
 
-  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true } = {}) {
+  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true, startLabel = '' } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
@@ -3699,7 +3747,7 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>Invite a friend</h3>
         <p class="mphint" id="share-status"></p>
-        <input class="share-link" id="share-url" readonly aria-label="Invite link">
+        <textarea class="share-link" id="share-url" readonly rows="3" aria-label="Invite link"></textarea>
         <div class="share-actions"><button class="tbtn" id="share-copy" type="button">Copy invite link</button></div>
         <p class="mphint" id="share-relay"></p>
         <p class="mphint">Friends join before you press Start. Once the siege begins, this link no longer adds a hero. ${maxPlayers} players maximum.</p>
@@ -3714,39 +3762,45 @@ export class UI {
     this.roomRoster(players || [], { isHost: true, maxPlayers, level, mode, difficulty });
     const waiting = (players || []).length > 1 && !launchReady;
     this.setStartButton({
-      text: waiting ? 'WAITING FOR READY' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
+      text: startLabel || (waiting ? 'WAITING FOR A FRIEND' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode)),
       disabled: waiting,
-      title: waiting
-        ? 'Start unlocks when every friend is connected, has this mission unlocked, and marks Ready.'
-        : 'Friends must join before you start. The link closes when the siege begins.',
+      title: status || 'Friends must join before you start. The link closes when the siege begins.',
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
+  showShareGuest({ status, hint, button, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false, starting = false, retry = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
     mp.dataset.share = '1';
+    const hintText = hint || (rejoining ? 'Rejoining the match…' : starting ? 'Starting… waiting for players' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.');
+    const actions = retry
+      ? '<div class="share-actions"><button class="diffbtn sel" id="share-retry" type="button">Retry rejoin</button></div>'
+      : rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`;
     mp.innerHTML = `
       <div class="share-card">
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.</p>
-        <div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>
+        <p class="mphint">${hintText}</p>
+        ${actions}
       </div>
       <div id="room-roster" class="roomroster"></div>
       <div id="mp-sub"></div>`;
     mp.querySelector('#share-status').textContent = status || 'Connected to the host.';
     const readyButton = mp.querySelector('#share-ready');
     if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
+    const retryButton = mp.querySelector('#share-retry');
+    if (retryButton) retryButton.onclick = () => this.cb.onShareRetry?.();
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
+    const buttonText = button || (rejoining ? '⏳  REJOINING…' : starting ? '⏳  STARTING… WAITING FOR PLAYERS' : '⏳  WAITING FOR HOST TO START');
     this.setStartButton({
-      text: '⏳  WAITING FOR HOST TO START',
+      text: buttonText,
       disabled: true,
-      title: 'Only the host can launch this siege.',
+      title: rejoining ? 'Catching up to the host snapshot.' : retry ? 'Ask the host for the match again.' : starting ? 'The host is collecting every seated friend.' : 'Only the host can launch this siege.',
     });
   }
 
@@ -3886,7 +3940,7 @@ export class UI {
       const p = bySeat.get(seat);
       if (p) {
         const label = p.host ? 'HOST' : `P${seat}`;
-        const hero = this._heroName(p.hero);
+        const who = p.name || this._heroName(p.hero);
         const state = p.state === 'connected' ? (p.ready ? 'ready · connected' : 'connected')
           : p.state === 'reconnecting' ? 'reconnecting'
           : p.state === 'offline' ? 'offline'
@@ -3899,8 +3953,8 @@ export class UI {
           <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''} state-${p.state || 'connecting'}">
             <span class="roomseat">${label}</span>
             <b></b>
-            <small>${hero} · ${state}${unlock}</small>
-            ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
+            <small>${who} · ${state}${unlock}</small>
+            ${isHost && !p.host ? `<span class="roomslotactions">${p.state !== 'connected' ? `<button type="button" class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button>` : ''}<button type="button" class="tbtn room-remove" data-seat="${p.id || ''}" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
         slots.push(`
@@ -3917,7 +3971,7 @@ export class UI {
         <div>
           <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
           <b>${modeCopy} · ${levelDef.name}</b>
-          <span class="roomsettings">${difficultyDef.label} · ${hostHero ? hostHero.name : 'Hero pending'} · ${filled}/${maxPlayers} players</span>
+          <span class="roomsettings">${difficultyDef.label} · ${host?.name || hostHero?.name || 'Host'} · ${filled}/${maxPlayers} players</span>
           <small>${launchCopy}</small>
         </div>
       </div>
@@ -3934,7 +3988,7 @@ export class UI {
       }
     }
     for (const button of box.querySelectorAll('.room-retry')) button.onclick = () => this.cb.onRoomReconnect && this.cb.onRoomReconnect(button.dataset.user);
-    for (const button of box.querySelectorAll('.room-remove')) button.onclick = () => this.cb.onRoomRemovePlayer && this.cb.onRoomRemovePlayer(button.dataset.user);
+    for (const button of box.querySelectorAll('.room-remove')) button.onclick = () => this.cb.onRoomRemovePlayer && this.cb.onRoomRemovePlayer(button.dataset.seat || button.dataset.user);
   }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
@@ -4169,6 +4223,7 @@ export class UI {
           : won
           ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
+        ${this._endReason ? `<p class="tagline">Exit: ${escapeHtml(this._endReason)}</p>` : ''}
         <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
         <p id="end-unlock" class="tagline hidden"></p>
         <div class="howto stats">
@@ -4192,11 +4247,17 @@ export class UI {
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
           ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
           <button class="startbtn" id="b-restart">${daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
+          ${this._shareMatch ? '<button class="startbtn" id="b-lobby" type="button">Back to lobby</button>' : ''}
+          ${this._shareMatch ? '<button class="startbtn primary" id="b-share-retry" type="button">Retry</button>' : ''}
         </div>
         <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;
     this.setEndRewards(extra);
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+    const lobbyButton = ov.querySelector('#b-lobby');
+    if (lobbyButton) lobbyButton.onclick = () => this.cb.onBackToLobby?.();
+    const shareRetry = ov.querySelector('#b-share-retry');
+    if (shareRetry) shareRetry.onclick = () => this.cb.onBackToLobby?.();
     const save = ov.querySelector('#b-daily-save');
     if (save) save.onclick = () => { save.disabled = true; this.cb.onDailySignIn?.(); };
     const email = ov.querySelector('#b-daily-email');
@@ -4213,6 +4274,38 @@ export class UI {
       retry.textContent = 'Restarting…';
       this.cb.onRetry && this.cb.onRetry();
     };
+  }
+
+  showShareMatchEnd({ won = false, reason = 'The siege ended.' } = {}) {
+    this._shareMatch = true;
+    this._endReason = reason;
+    this.pauseOpen = false;
+    this.hideCoach();
+    // The menu lives inside #overlay. Replacing that node to show the result
+    // throws the lobby away, so Back to lobby has nothing to return to.
+    let layer = this.root.querySelector('#share-end');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'share-end';
+      layer.className = 'screen';
+      this.root.appendChild(layer);
+    }
+    layer.classList.remove('hidden');
+    layer.innerHTML = `
+      <div class="panel endpanel ${won ? 'win' : 'lose'}">
+        <h1>${won ? '🏆 PLANET TAKEN' : /city has fallen/i.test(reason) ? '💀 THE CITY HAS FALLEN' : '💀 THE SIEGE ENDED'}</h1>
+        <p class="tagline">Exit: ${escapeHtml(reason)}</p>
+        <div class="endactions">
+          <button class="startbtn primary" id="b-share-retry" type="button">Retry</button>
+          <button class="startbtn" id="b-lobby" type="button">Back to lobby</button>
+        </div>
+      </div>`;
+    layer.querySelector('#b-lobby').onclick = () => this.cb.onBackToLobby?.();
+    layer.querySelector('#b-share-retry').onclick = () => (this.cb.onShareMatchRetry || this.cb.onBackToLobby)?.();
+  }
+
+  hideShareMatchEnd() {
+    this.root.querySelector('#share-end')?.remove();
   }
 
   // ---------- online lobby rendering ----------
@@ -4399,7 +4492,9 @@ export class UI {
       for (const g of rows) {
       const row = document.createElement('div');
       row.className = `gamerow ${activeGame ? 'active' : 'open'}`;
-      const lv = levelById(g.level || 1);
+      const setup = publicRoomSetup(g);
+      const lv = levelById(setup.level);
+      const diffLabel = (DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label;
       const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       const canRejoin = activeGame && myId && g.host_id !== myId
         && (g._players || []).some((p) => p.user_id === myId);
@@ -4407,7 +4502,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 4}</span>
+        <span class="ginfo">${setup.mode === 'survival' ? '💀 Survival' : setup.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${diffLabel} · ${g.players}/${g.max_players || 4}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible
