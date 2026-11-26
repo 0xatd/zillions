@@ -5338,7 +5338,7 @@ class App {
     const behind = guestSide && banked > this.netBufferTarget;
     // One slice can absorb about a second and a half of backlog. More than
     // that yields, so a missing window can still be requested.
-    const catchupSteps = behind ? Math.min(20, Math.max(NET_STEP * 2, banked * NET_STEP)) : 0;
+    const catchupSteps = behind ? Math.min(4, Math.max(NET_STEP * 2, banked * NET_STEP)) : 0;
     if (guestSide) {
       if (behind) dt = Math.max(dt, SIM_DT * catchupSteps);
       else if (!this._shareCode && banked < this.netBufferTarget && banked > 0) dt *= NET_PACE_SLOW;
@@ -5428,19 +5428,16 @@ class App {
     if (!stalled && behind && this._windowsBuffered() > this.netBufferTarget) this._scheduleNetDrain();
   }
 
-  // Apply a backlog on the turn it arrives. Nested calls, including the one
-  // this slice makes when it is still behind, wait until this turn returns.
+  // A backlog drains on the next turn, a couple of windows at a time. Doing
+  // the whole bank inside the message that delivered it freezes a slow tab
+  // for several seconds, which is the click the player is waiting on.
   _scheduleNetDrain() {
     if (this._resyncing || this._netDrain) return;
-    if (this._advancing) {
-      this._netDrain = true;
-      setTimeout(() => {
-        this._netDrain = false;
-        this._advanceNetSim();
-      }, 0);
-      return;
-    }
-    this._advanceNetSim();
+    this._netDrain = true;
+    setTimeout(() => {
+      this._netDrain = false;
+      this._advanceNetSim();
+    }, 0);
   }
 
   // Consecutive windows banked ahead of the guest's next lockstep boundary.
