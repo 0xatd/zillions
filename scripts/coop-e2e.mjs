@@ -18,6 +18,11 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { chromium } from 'playwright';
 
+// GitHub's runner is already slow. Extra CPU throttle there drops the guest
+// far enough behind that a click misses 1.5s. This machine needs rate 4 to
+// draw at about 10 FPS while the sim still keeps up.
+const cpuRate = process.env.GITHUB_ACTIONS ? 1 : 4;
+
 const liveUrl = process.argv.find((arg, index) => process.argv[index - 1] === '--url') || '';
 const liveRealtime = process.argv.includes('--live-realtime');
 const root = new URL('..', import.meta.url).pathname;
@@ -326,9 +331,6 @@ try {
     // that is still waiting a second later has actually stuck.
     const cdp = await guest.page.context().newCDPSession(guest.page);
     const hostPace = await host.page.context().newCDPSession(host.page);
-    // This machine needs rate 4 to land near 10 FPS. A GitHub runner is already
-    // that slow, and rate 4 there drops the sim to a handful of frames a second.
-    const cpuRate = process.env.GITHUB_ACTIONS ? 2 : 4;
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     // Both tabs render slowly. The sim pump has to keep the world moving anyway.
     await hostPace.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
@@ -435,7 +437,6 @@ try {
   const hostCdp = liveRealtime ? null : await host.page.context().newCDPSession(host.page);
   const guestCdp = liveRealtime ? null : await guest.page.context().newCDPSession(guest.page);
   if (hostCdp && guestCdp) {
-    const cpuRate = process.env.GITHUB_ACTIONS ? 2 : 4;
     await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     await guest.page.bringToFront();
