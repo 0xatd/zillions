@@ -76,7 +76,7 @@ import {
 } from './share-replay.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, loadFeel, saveBinds, saveFeel, resetBinds, actionFor, isHeld, keyLabel, bindKey } from './keybinds.js';
-import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop } from './combat-input.js';
+import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop, settleBuildToggle } from './combat-input.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
@@ -6949,6 +6949,7 @@ class App {
   // aligned with the minimap: north is always north.
   _releaseBattleInput() {
     this.keys.clear();
+    this._payAck = false;
     if (!this.buttonPay && !this.lastPay) return;
     this.buttonPay = false;
     this._payPressUsed = false;
@@ -6985,11 +6986,16 @@ class App {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
     const heldHero = this.myHero();
     // The simulation ends a completed hold itself. A latched on-screen button
-    // must not immediately start the next tier.
-    if (this.buttonPay && this.lastPay && heldHero && !heldHero.payHold) {
-      this.buttonPay = false;
-      this.lastPay = false;
-    }
+    // must not immediately start the next tier. In co-op the pay command is
+    // still in the outbox when payHold is false, so wait until the sim has
+    // acknowledged the start before treating a clear hold as completion.
+    const settled = settleBuildToggle({
+      buttonPay: this.buttonPay, lastPay: this.lastPay,
+      payHold: !!heldHero?.payHold, acked: !!this._payAck,
+    });
+    this.buttonPay = settled.buttonPay;
+    this.lastPay = settled.lastPay;
+    this._payAck = settled.acked;
     let dx = 0, dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
@@ -7022,7 +7028,11 @@ class App {
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       if (pay) this._payPressUsed = true;
+      else this._payAck = false;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
+      // Solo applies the command before this returns. Co-op only acks once
+      // the lockstep window sets payHold.
+      if (pay && !this.netMode) this._payAck = !!this.myHero()?.payHold;
     }
   }
 
