@@ -425,7 +425,7 @@ button:disabled {cursor:not-allowed;}
 #screen-settings .glass,#screen-custom .glass,#screen-squad .glass {border-color:#a9b2ad26;background:#101b25b8;}
 .shell-screen button:focus-visible {outline:2px solid #f0ce8b;outline-offset:3px;}
 @media(max-width:760px){
- #screen-main.character-select,#screen-character-create {background-color:#080f18;background-size:auto 440px;background-position:35% 65px;background-repeat:no-repeat;background-attachment:local;}
+ #screen-main.character-select,#screen-character-create {background-color:#080f18;background-size:auto 440px;background-position:35% 15px;background-repeat:no-repeat;background-attachment:local;}
  #screen-character-create [data-creator-step] button:disabled {opacity:.65;}
  #screen-main .character-copy {background:radial-gradient(ellipse,#081019dd,transparent 75%);}
 }
@@ -452,3 +452,13 @@ button:disabled {cursor:not-allowed;}
  #screen-settings .settingspane {padding:18px;}
  #screen-settings .setrow {font-size:14px;}
 }
+
+#screen-main #chapter-identity:not(.hidden) {position:absolute;z-index:6;inset:150px 5vw auto auto;width:min(440px,90vw);max-height:calc(100% - 175px);overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:24px;box-sizing:border-box;background:#101c27fa;border:1px solid #b99c67;box-shadow:0 20px 70px #000a;}
+#chapter-identity .affiliation-heading {grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+#chapter-identity .affiliation-heading h2 {font-size:24px;color:#e8dbc1;margin:0;}
+#chapter-identity .affiliation-heading button {color:#c4ced5;background:none;border:1px solid #8093a055;padding:6px 12px;cursor:pointer;}
+#chapter-identity .affiliation-note {grid-column:1/-1;font-size:13px;line-height:1.6;color:#aebcc5;}
+#chapter-identity label {min-width:0;}
+#chapter-identity input {width:100%;box-sizing:border-box;}
+#chapter-identity label:has(input),#chapter-identity button[type=submit] {grid-column:1/-1;}
+@media(max-width:760px){#screen-main #chapter-identity:not(.hidden){position:fixed;inset:80px 16px auto;width:calc(100vw - 32px);max-height:calc(100dvh - 100px);padding:18px;}}

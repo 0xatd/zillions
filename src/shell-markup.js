@@ -176,7 +176,7 @@ export function shellMarkup() {
 
       <div id="screen-main" class="mainmenu character-select shell-screen hidden">
         <div class="character-heading"><h1 id="chapter-title">Your leaders</h1><span id="chapter-territory"></span></div>
-        <form id="chapter-identity" class="chapter-identity glass hidden"><p class="affiliation-note">Campaign banner and recruitment preferences. Party membership, faction ranks, houses and empire relationships are coming soon; this banner does not make you a ruler.</p><label>Campaign banner<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Recruitment culture<select id="chapter-culture"></select></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">SAVE CHAPTER</button></form>
+        <form id="chapter-identity" class="chapter-identity glass hidden" aria-label="Campaign affiliation"><div class="affiliation-heading"><h2>Campaign identity</h2><button type="button" id="chapter-identity-close" aria-label="Close affiliation">Close</button></div><p class="affiliation-note">Campaign banner and recruitment preferences. Party membership, faction ranks, houses and empire relationships are coming soon; this banner does not make you a ruler.</p><label>Campaign banner<input id="chapter-name-input" maxlength="32" required placeholder="Name your chapter"></label><label>Recruitment culture<select id="chapter-culture"></select></label><label>Colors<select id="chapter-color"></select></label><label>Insignia<select id="chapter-emblem"></select></label><button type="submit" class="menubtn primary">Save banner</button></form>
         <div id="character-stage" class="character-stage">
           <div id="character-avatar" class="character-avatar" aria-label="Selected character">
             <canvas id="roster-preview-canvas" width="320" height="360" aria-label="Commander preview"></canvas>
@@ -191,7 +191,7 @@ export function shellMarkup() {
           <button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
         </aside>
-        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-custom">Custom Games</button><button type="button" id="leader-modes">Other battles</button><button type="button" id="leader-faction">Affiliation</button></div>
+        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-custom">Custom Games</button><button type="button" id="leader-modes">Other battles</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
         <button type="button" class="utilitybtn hidden" id="m-character-sheet">ARMORY</button>
       </div>
 

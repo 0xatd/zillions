@@ -99,7 +99,10 @@ export class UI {
     q('#a-pack').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#a-items').onclick = () => { this._battlePanel = {mode:'items'}; };
     q('#account-close').onclick=()=>q('#account-card').classList.add('hidden');
-    q('#leader-faction').onclick=()=>{q('#chapter-identity').classList.toggle('hidden');};
+    const closeAffiliation = () => { q('#chapter-identity').classList.add('hidden'); q('#leader-faction').setAttribute('aria-expanded','false'); q('#leader-faction').focus(); };
+    q('#leader-faction').onclick=()=>{ const open=q('#chapter-identity').classList.toggle('hidden')===false; q('#leader-faction').setAttribute('aria-expanded',String(open)); if(open) q('#chapter-identity-close').focus(); };
+    q('#chapter-identity-close').onclick=closeAffiliation;
+    q('#chapter-identity').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeAffiliation();}});
     q('#world-back').onclick=()=>this._showScreen('main');
     q('#a-play').onclick = () => this._playFromTitle();
     q('#m-daily').onclick = () => this.cb.onDailyOpen?.();
@@ -1062,6 +1065,7 @@ export class UI {
       q('#chapter-culture').value = identity.culture;
     }
     q('#chapter-identity').classList.add('hidden');
+    q('#leader-faction').setAttribute('aria-expanded','false');
     const cities = chapterCities(p);
     q('#chapter-map').innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M15 68 L34 40 L53 66 L73 36 L87 62" /></svg>` + cities.map(c=>`<button class="chapter-city ${c.status}" data-city="${c.level}" style="--x:${c.x}%;--y:${c.y}%" ${c.status==='locked'?'disabled':''} aria-label="${c.name}: ${c.status}"><i>${c.status==='held'?'✓':c.status==='frontier'?'⚑':'○'}</i><b>${c.name}</b><small>${c.status==='held'?'Held':c.status==='frontier'?'Next conquest':'Locked'}</small></button>`).join('');
     for (const button of q('#chapter-map').querySelectorAll('[data-city]')) {

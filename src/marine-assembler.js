@@ -464,9 +464,9 @@ export function assembleCharacterHead(identity) {
   const colors = {skin:0xd8b395,hair:0x382c25,armor:0x8493a6,armorDark:0x303b48,trim:0xbeb59f,glow:0x8fd0ff,cloth:0x30343b};
   const materials = new Map();
   root.traverse(o=>{if(!o.isMesh)return;const tint=m=>{if(!materials.has(m)){const c=tintMaterial(m,colors).clone();c.userData={...c.userData,kitShared:false};materials.set(m,c);}return materials.get(m);};o.material=Array.isArray(o.material)?o.material.map(tint):tint(o.material);});
-  root.scale.setScalar(.49);
   // Center from the face alone: hairstyles must not shift the jaw/neck.
   const bounds = new THREE.Box3().setFromObject(head);
+  root.scale.setScalar(.49);
   root.position.y = .01 - (bounds.min.y + bounds.max.y) * .245;
   return root;
 }
