@@ -14,7 +14,7 @@
 // A Vercel preview will stop the guest on Deployment Protection unless that
 // browser is already signed into the Vercel team. Production does not.
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -322,6 +322,11 @@ try {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   }
   console.log('co-op: both simulations running');
+  if (process.env.ZILLIONS_COOP_QA_DIR) {
+    await mkdir(process.env.ZILLIONS_COOP_QA_DIR, {recursive:true});
+    await host.page.screenshot({path:join(process.env.ZILLIONS_COOP_QA_DIR,'host-battlefield.png')});
+    await guest.page.screenshot({path:join(process.env.ZILLIONS_COOP_QA_DIR,'guest-battlefield.png')});
+  }
   if (!process.argv.includes('--startup-only')) {
   if (!liveRealtime) {
     // CPU throttle slows the guest toward the 10 FPS the live retest saw.
