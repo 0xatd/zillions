@@ -146,7 +146,8 @@ Market and Forge transactions go through `api/economy.js` against the same
 server-owned inventory and Salvage Alloy ledger.
 
 Supabase stores accounts, usernames, rooms, chat, characters, inventories,
-wallets, stats, and match history. WebRTC carries co-op match commands. The
+wallets, stats, and match history. Private Realtime relays signed-in player
+commands; invite links use WebRTC with a Realtime fallback. Watch uses WebRTC. The
 backend does not run the combat simulation. Room cards show the host's
 committed map, mode, and difficulty. A dropped co-op player can rejoin from
 the same tab; the host sends a fresh snapshot and the match continues.

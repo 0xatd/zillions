@@ -131,6 +131,7 @@ procedural renderer and must not stop a match from starting.
 | `src/tab-session.js` | Per-tab commander id and the lobby lease |
 | `src/share-link.js` | Invite-link seats: expiry, full lobby, host left, and late join |
 | `src/share-bus.js` | Share-link signaling: same-browser channel, realtime broadcast, and presence |
+| `src/room-relay.js` | Private signed-in room relay, acknowledgments and reconnect topics |
 | `src/net.js` | WebRTC channels, packets, route data, latency, and jitter |
 | `src/backend.js` | Same-origin Vercel API client |
 | `api/auth-config.js` | Public auth configuration route |
@@ -144,7 +145,7 @@ procedural renderer and must not stop a match from starting.
 `supabase/schema.sql` defines the durable schema.
 
 Co-op rooms support one to four players. The first player hosts the room.
-The mission uses WebRTC lockstep. A dropped player can rejoin during a grace
+The mission uses host-sequenced lockstep. A dropped player can rejoin during a grace
 period; the host sends its snapshot and the guest resumes that frame. If a
 window hash disagrees, the host sends the same snapshot before the match is
 abandoned. The simulation rules do not change.
@@ -156,7 +157,7 @@ the same order.
 
 ```text
 player input
-  -> WebRTC command
+  -> transport command
   -> host command window
   -> repeated recent windows
   -> guest consecutive-window buffer
@@ -173,7 +174,7 @@ until the missing window arrives.
 
 ## Multiplayer Room Flow
 
-Supabase coordinates the room. WebRTC carries account-room match traffic.
+Supabase coordinates the room. Private Realtime carries signed-in player traffic.
 Invite-link rooms prefer WebRTC and fall back to Supabase Realtime lockstep
 when the data channel cannot open. Guest page nonces reject old mailbox
 messages without assuming synchronized clocks. Ready remains an explicit vote.
@@ -182,8 +183,8 @@ messages without assuming synchronized clocks. Ready remains an explicit vote.
 create or join room
   -> validate protocol and build version
   -> reserve or restore a seat
-  -> exchange WebRTC signaling through Supabase
-  -> verify each direct connection
+  -> open private per-sender relay channels
+  -> verify each connection in both directions
   -> verify campaign unlocks
   -> collect guest Ready state
   -> run shared countdown
@@ -202,7 +203,7 @@ seat that the same account owned before disconnect.
 Invite copies one URL (`/?coop=` plus a code). The friend opens it with no
 account and takes the next hero seat. Signaling uses a same-browser channel
 and, when the account backend is reachable, the existing Supabase realtime
-broadcast. WebRTC lockstep is unchanged.
+broadcast. The lockstep simulation is unchanged.
 
 A link admits players only before the host starts the siege. After that it
 answers `started`. The hero list is fixed at lockstep window 0, so a new hero
@@ -221,7 +222,7 @@ load TURN servers from `/api/auth-config` even when the player is not signed in.
 | State | Owner |
 | --- | --- |
 | Combat, units, buildings, loot, and Threat during a match | Browser `Game` snapshot |
-| Current peer commands | WebRTC lockstep |
+| Current peer commands | Browser lockstep over private relay or WebRTC |
 | Account and public username | Supabase |
 | Cloud saves (resume snapshot) | Supabase |
 | Character level, XP, career stats | Supabase `game_characters`, written only by `apply_match_result()` |
@@ -411,7 +412,7 @@ accepting a cast. The host sanitizes guest slots and target coordinates.
 refresh loop. Closing it stops polling. `src/main.js` connects its actions to
 existing private-room creation/joining. The party never simulates combat.
 
-Chapter -> private party -> existing room -> Ready -> WebRTC siege -> same party.
+Chapter -> private party -> existing room -> Ready -> lockstep siege -> same party.
 A failed party request leaves the old room system available. A room that finishes
 or becomes stale is no longer offered as the next match; membership survives.
 
@@ -435,3 +436,33 @@ cannot switch the current scene. Source records: `assets/audio/cc0/LICENSES.md`.
 ### Hero attack timing
 
 `src/hero-attacks.js` owns hero wind-up, release, recovery and in-flight damage. `Game` owns orders and movement, invokes the attack clock, and snapshots its state. `main.js` renders wind-up from simulation state and tracks projectile flight against the simulation clock. Autonomous squads retain the existing unit attack path.
+
+## Signed-in player relay (protocol 25)
+
+`src/room-relay.js` carries player-room lockstep messages over private Supabase
+Realtime channels, one authenticated sender and recipient per connection.
+Migration `20261126000100_private_room_relay.sql` requires both player seats
+and a host endpoint. Outsiders cannot receive; recipients cannot publish as
+the sender. Each reconnect uses a new UUID topic. Packets are acknowledged,
+retried and deduplicated; missing activity closes the connection. Ready and
+the all-loaded start barrier are unchanged. Watch still uses WebRTC and may
+need TURN on restrictive networks. The backend does not simulate combat.
+
+### Battlefield loading and GPU diagnostics
+
+Live startup builds presentation without advancing the simulation, awaits
+`renderer.compileAsync`, and presents the initial scene before sending loaded.
+The loading gate stays visible during this work. Normal rendering does not
+request synchronous shader diagnostic logs. Add `?shaderDebug=1` when debugging
+a shader; those driver queries can stall SwiftShader for many seconds.
+
+`node scripts/coop-e2e.mjs --profile-render` measures frame, render, GL-call and
+event-loop timings through the rendered stress/reload check. `--startup-only`
+is a diagnostic subset, not a full co-op pass. `--transport-only` disables
+GPU draws and must never be reported as rendered performance evidence.
+
+`node scripts/party-e2e.mjs --live --url <candidate-url>` uses disposable real
+accounts and native candidate API handlers. Supply Supabase credentials through
+the environment; never commit them. It buys an opening building, waits for a
+real defeat, checks results and starts another match with the same group.
+The optional `--transport-only` flag isolates networking from GPU work.

@@ -10,7 +10,7 @@ this file.
 - Web host: Vercel project `zillions`
 - Static fallback: GitHub Pages at `https://0xatd.github.io/zillions/`
 - Account backend: Supabase project `zillions`, ref `skqggyvkblqtyggtcxbc`
-- Match networking: browser WebRTC DataChannels, host-sequenced lockstep; invite links can fall back to Supabase Realtime. The backend does not simulate combat.
+- Match networking: private Realtime for signed-in players, WebRTC/Realtime for invites; host-sequenced lockstep. The backend does not simulate combat.
 
 Production sign-in is still Google or a passwordless email link through
 Supabase, and signed-in rewards stay server-owned. The title also offers
@@ -80,9 +80,9 @@ localStorage remains the development/offline fallback:
 When backend support is available, the browser syncs signed-in account state to
 Supabase. Vercel Blob is no longer used.
 
-### WebRTC
+### Match transport
 
-Actual co-op gameplay is still peer-to-peer. The host sequences commands and
+Actual co-op simulation still runs in the players’ browsers. The host sequences commands and
 broadcasts them to peers. The backend does not run the simulation, validate
 combat, or prevent cheating. Treat ranked/authoritative multiplayer as a
 separate future project.
@@ -172,7 +172,7 @@ RLS policy intent:
 6. The lobby separates open rooms from active games.
 7. A player can Join an open room, Rejoin a prior seat, or Watch an active game.
 8. Campaign rooms block maps that any seated player has not unlocked.
-9. Host co-op uses WebRTC signaling and host-sequenced lockstep.
+9. Signed-in co-op uses private Realtime transport and host-sequenced lockstep.
 10. The host waits for each guest to connect and load before window 0 starts.
 11. In-game team chat writes to `room_chat` with `channel = 'game'`.
 12. The match simulation is peer-to-peer. Watch mode is read-only.
@@ -459,3 +459,14 @@ group to the earliest remaining member; leaving last deletes it. Room seats
 are separate: leaving a party does not silently terminate a running battle.
 The migration is additive and was applied to the Zillions project for isolated
 account QA on 2026-11-23. No existing account, reward or inventory schema changed.
+
+## Signed-in player relay (protocol 25)
+
+`src/room-relay.js` carries player-room lockstep messages over private Supabase
+Realtime channels, one authenticated sender and recipient per connection.
+Migration `20261126000100_private_room_relay.sql` requires both player seats
+and a host endpoint. Outsiders cannot receive; recipients cannot publish as
+the sender. Each reconnect uses a new UUID topic. Packets are acknowledged,
+retried and deduplicated; missing activity closes the connection. Ready and
+the all-loaded start barrier are unchanged. Watch still uses WebRTC and may
+need TURN on restrictive networks. The backend does not simulate combat.

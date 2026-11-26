@@ -24,7 +24,7 @@ const CURRENT_RULES = 'survival-plots';
 // v18: click orders (`horder`) participate in movement and the lockstep hash.
 // A v17 tab drops the command and hashes a different hero, so it cannot share
 // a room or a Watch session with this build.
-export const LOBBY_PROTOCOL_VERSION = 24;
+export const LOBBY_PROTOCOL_VERSION = 25;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
@@ -839,7 +839,8 @@ export class OnlineLobby {
 
   async joinGame(game, unlockedLevel = 1) {
     assertRoomCompatibility(game);
-    const seat = nextAvailableRoomSeat(game._players || [], game.max_players || 4);
+    const existing = (game._players || []).find(player => player.user_id === this.me.id);
+    const seat = existing?.seat || nextAvailableRoomSeat(game._players || [], game.max_players || 4);
     if (seat == null) throw new Error('This room is full. Refresh the browser and choose another room.');
     this.game = game;
     const localPlayer = {

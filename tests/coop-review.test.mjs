@@ -81,3 +81,41 @@ test('a lost reload join is retried until the host echoes this page session',()=
  assert.equal(sent.filter(m=>m.t==='join').length,2);
  assert.equal(links.publicShareLobby(room).seats[1].session,'new-page');
 });
+test('account room retries an acknowledged but lost knock until the peer opens, then stops',()=>{
+ let tick,cleared=0,sent=0;
+ const arm=method('_armLobbyConnectionWatchdog','_handleRoomClosed',{
+  setInterval:fn=>{tick=fn;return 1;},clearInterval:()=>{cleared++;},setTimeout:()=>2,clearTimeout:()=>{},
+ });
+ const app={mpRole:'guest',netMode:false,lobby:{game:{id:'room'},signal:()=>{sent++;return Promise.resolve();}},_publicName:()=> 'Guest'};
+ arm.call(app);assert.equal(typeof tick,'function');tick();tick();assert.equal(sent,2);
+ app.net={open:true};tick();assert.equal(sent,2);assert.ok(cleared>=2);assert.equal(app._roomDialRetry,null);
+});
+test('battlefield graphics preparation cannot advance host lockstep before loading completes',()=>{
+ const app={_preparingBattlefield:true,get netMode(){throw Error('simulation inspected while graphics are loading');}};
+ // Extract the method with its true adjacent boundary when runtime helpers move.
+ const start=source.indexOf('  _advanceNetSim()');let depth=0,end=start;
+ const brace=source.indexOf('{',start);
+ for(let i=brace;i<source.length;i++){if(source[i]==='{')depth++;if(source[i]==='}'&&--depth===0){end=i+1;break;}}
+ const fn=new Function(`return ({${source.slice(start,end)}})._advanceNetSim`)();
+ assert.doesNotThrow(()=>fn.call(app));
+});
+test('same-room reconnect retains this guest ticket, including an in-flight issuance',async()=>{
+ const begin=method('_beginMatchRecord','async startGame');
+ let requests=0;
+ const app={_match:{roomId:'room',ticket:'own-ticket',seed:5},_requestMatchTicket:()=>{requests++;return Promise.resolve({ok:true,ticket:'new'});},auth:{isSignedIn:()=>true}};
+ const args={snap:{},mp:{role:'guest',match:{roomId:'room',seed:5}},heroKeys:['scott'],levelId:1,mode:'campaign',difficulty:'normal'};
+ assert.equal(begin.call(app,args).ticket,'own-ticket');assert.equal(requests,0);
+ app._match={roomId:'room',ticket:null,ticketPromise:Promise.resolve({ok:true,ticket:'pending-own',seed:5})};
+ const result=begin.call(app,args);await result.ticketPromise;assert.equal(result.ticket,'pending-own');assert.equal(requests,0);
+ const other=begin.call(app,{...args,mp:{role:'guest',match:{roomId:'different',seed:5}}});await other.ticketPromise;assert.equal(requests,1,'another room must request its own ticket');
+});
+test('reconnect during startup acknowledges loaded only after the snapshot rebuild finishes',async()=>{
+ const start=source.indexOf('  async _onGuestMsg('),end=source.indexOf('  _stateHash()',start);
+ const receive=new Function('NET_STEP',`return ({${source.slice(start,end)}})._onGuestMsg`)(2);
+ let complete;const loading=new Promise(r=>{complete=r;});const sent=[];
+ const app={startGame:()=>loading,_sharedMatch:m=>m,net:{open:true,send:m=>sent.push(m)},ui:{setWaiting(){},showBanner(){}}};
+ await receive.call(app,{t:'resync',snap:{diff:'normal'},you:1,frame:0,match:{},awaitStart:true});
+ assert.deepEqual(sent,[],'loading is not a Ready acknowledgment');
+ complete();await new Promise(r=>setImmediate(r));
+ assert.deepEqual(sent,[{t:'startReady'}]);assert.equal(app._resyncing,false);
+});

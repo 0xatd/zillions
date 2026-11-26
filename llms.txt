@@ -66,6 +66,7 @@ Default branch: main
 - src/share-link.js owns drop-in invite seats (expiry, full, host left, late join).
 - src/share-bus.js carries share-link signaling and presence. src/net.js still carries the match.
 - src/net.js owns WebRTC transport and diagnostics.
+- src/room-relay.js owns private signed-in room transport and packet acknowledgments.
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.

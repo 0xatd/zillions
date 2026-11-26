@@ -1,3 +1,4 @@
+import { RoomRelay } from './room-relay.js';
 import { HitFeedback } from './hit-feedback.js';
 import {FriendParty,partyCode} from './friend-party.js';
 import {showFriendParty} from './friend-party-ui.js';
@@ -180,6 +181,9 @@ class App {
       antialias: boot.preset.antialias,
       powerPreference: boot.tier === 'high' ? 'high-performance' : 'default',
     });
+    // Synchronous shader diagnostic queries can stall software GPUs for seconds.
+    // Keep them opt-in for authoring; production still compiles before loading ends.
+    this.renderer.debug.checkShaderErrors = new URLSearchParams(location.search).has('shaderDebug');
     this.renderer.info.autoReset = false;
     this.renderer.shadowMap.enabled = boot.preset.shadows;
     // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
@@ -927,7 +931,9 @@ class App {
   // What this peer needs at match end: ticket, room, the exact hero setups the
   // sim started from, and (for resumed runs) the input log so far.
   _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket }) {
-    const resumed = snap ? this._resumeMatch || null : null;
+    const sameRoom = snap && mp?.role === 'guest' && mp?.match?.roomId
+      && this._match?.roomId === mp.match.roomId;
+    const resumed = snap ? this._resumeMatch || (sameRoom ? this._match : null) : null;
     this._resumeMatch = null;
     const given = mp?.match || null;
     const match = {
@@ -943,9 +949,10 @@ class App {
     // Guests (and resumed co-op peers) fetch their own ticket for the room in
     // the background; it is only needed when the match ends.
     if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
-      match.ticketPromise = this._requestMatchTicket({
+      const request = resumed?.ticketPromise || this._requestMatchTicket({
         levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
-      }).then((ticket) => {
+      });
+      match.ticketPromise = request.then((ticket) => {
         if (ticket?.ok) {
           if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
           match.ticket = ticket.ticket;
@@ -1018,11 +1025,24 @@ class App {
     if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
+    this._preparingBattlefield = true;
     this._mountMatchView({ mode, level, snap, mp, heroKey, matchInbox });
+    // Build the initial visible actors without advancing combat or drawing.
+    // Await shader compilation while heartbeats and loading UI remain live.
+    this.ui.setDeploymentLoading(true, null, 'Preparing battlefield graphics');
+    this._warmupFrame = true;
+    try { this.frame(); } finally { this._warmupFrame = false; }
+    await this.renderer.compileAsync(this.scene, this.camera);
+    // Texture/buffer upload belongs to loading too, before startReady.
+    this.tacticalVisuals.render();
+    this._netClockLast = performance.now();
+    this.acc = 0;
     } catch (error) {
       this._finishMissionIntro();
       throw error;
     } finally {
+      this._preparingBattlefield = false;
+      this._warmupFrame = false;
       this.ui.setDeploymentLoading(false);
     }
   }
@@ -4744,7 +4764,7 @@ class App {
       // that rebuild is in flight would restart it and drop the banked windows.
       // A rebuild that never finishes used to leave this flag set, which then
       // refused every later snapshot and froze the guest on the same window.
-      if (this._resyncing && performance.now() - (this._resyncStarted || 0) < 8000) return;
+      if (this._resyncing && (this._preparingBattlefield || performance.now() - (this._resyncStarted || 0) < 8000)) return;
       this._resyncing = true;
       this._resyncStarted = performance.now();
       this._resyncBuffer = new Map();
@@ -4764,6 +4784,7 @@ class App {
           this._shareLostAt = 0;
           clearTimeout(this._reconnectT);
           this.ui.setWaiting(false);
+          if (m.awaitStart && this.net?.open) this.net.send({ t: 'startReady' });
           this.ui.showBanner(m.reason === 'desync' ? 'Battlefield restored from the host.' : '🔌 Reconnected — back in the war.', '', 3500);
         })
         .catch(() => {})
@@ -4876,6 +4897,7 @@ class App {
   // pump (a worker timer) off one shared wall clock, so the host keeps
   // emitting windows even when rendering hitches or the tab is hidden.
   _advanceNetSim() {
+    if (this._preparingBattlefield) return;
     if (!this.netMode || !this.game || this.paused || this.game.over) return;
     if (this.mpRole === 'host' && this.startBarrier) {
       this._netClockLast = performance.now();
@@ -5117,7 +5139,7 @@ class App {
       title: !compatible
         ? 'Choose a level every player has unlocked before starting.'
         : ready ? 'The host launches the match for everyone connected.' : pending
-        ? 'Start unlocks when every player in the room has a direct game connection.'
+        ? 'Start unlocks when every player in the room has a working game connection.'
         : 'Start unlocks when every guest marks Ready.',
     } : isSpectator ? {
       text: '⏳  LOADING LIVE BATTLE',
@@ -5218,6 +5240,17 @@ class App {
 
   _armLobbyConnectionWatchdog() {
     clearTimeout(this._lobbyConnectionWatchdog);
+    clearInterval(this._roomDialRetry);
+    const roomId = this.lobby?.game?.id;
+    this._roomDialRetry = setInterval(() => {
+      if (!roomId || this.lobby?.game?.id !== roomId || this.mpRole !== 'guest' || this.netMode || this.net?.open) {
+        clearInterval(this._roomDialRetry); this._roomDialRetry = null; return;
+      }
+      // A broadcast ACK proves server receipt, not host receipt. Retry the
+      // invitation until the private connection itself proves both directions.
+      this.lobby.signal({ t: 'knock', name: this._publicName() }).catch(() => {});
+    }, 2000);
+
     this._lobbyConnectionWatchdog = setTimeout(() => {
       if (this.mpRole === 'guest' && !this.netMode && !this.net?.open && this.lobby?.game) {
         this.ui.onlineStatus('⚠️ Host connection stalled. Use RECONNECT TO HOST.');
@@ -5478,21 +5511,27 @@ class App {
   }
 
   // Host side of the automatic handshake: a guest knocked — offer them a
-  // WebRTC session through the signaling channel. Mid-game, a knock from a
+  // private relay session through the signaling channel. Mid-game, a knock from a
   // player who already holds a seat is a reconnect: rebuild the link and
   // resync them from a live snapshot.
   async _onKnock(sig) {
     if (sig.role === 'spectator') return this._acceptSpectator(sig);
     if (!this.onlinePending) return;
     const rejoinIdx = this.peerUserIds.indexOf(sig.from);
+    if (rejoinIdx >= 0 && this.peers[rejoinIdx]?.open) return;
     const rejoining = this.netMode && this.game && !this.game.over && rejoinIdx >= 0;
     if (this.netMode && !rejoining) return;           // mid-game seats are not open to strangers
     if (!this.netMode && this.peers.length >= 3) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession(this.lobby?.iceServers);
+    await this.lobby.refreshCurrentGameBounded();
+    if (!this.lobby.game?._players?.some(p => p.user_id === sig.from)) return;
+    if (this.onlinePending.has(sig.from)) return;
+    const session = crypto.randomUUID();
+    const peer = new RoomRelay(this.lobby.sb, { room: this.lobby.game.id, self: this.lobby.me.id, remote: sig.from, session });
     this._attachNetDiagnostics(peer);
     const idx = rejoining ? rejoinIdx : this.peers.length;
     peer.onOpen = async () => {
+      clearInterval(peer.offerRetry);
       this.onlinePending.delete(sig.from);
       if (rejoining) {
         const old = this.peers[idx];
@@ -5501,7 +5540,7 @@ class App {
         this.guestCmdQueues[idx] = [];
         // One live tick, frozen and shipped: the guest rebuilds from it and
         // rejoins lockstep at our frame counter.
-        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields() });
+        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(), awaitStart: !!this.startBarrier });
         this.game.msg(`⚔️ ${this.guestNames[idx] || `Player ${idx + 2}`} reconnected — their hero fights again.`, 'good');
       } else {
         this.peers.push(peer);
@@ -5518,8 +5557,11 @@ class App {
         if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
       }
     };
-    peer.onMessage = (m) => this._onHostMsg(idx, m);
+    peer.onMessage = (m) => { const live = this.peers.indexOf(peer); if (live >= 0) this._onHostMsg(live, m); };
     peer.onClose = () => {
+      clearInterval(peer.offerRetry);
+      if (this.startBarrier) this.startReadyGuests.delete(this.peers.indexOf(peer));
+      if (this.onlinePending?.get(sig.from) === peer) this.onlinePending.delete(sig.from);
       if (this.netMode && this.game && !this.game.over && this.peers[idx] === peer) {
         this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on until they return.`, 'warn');
       } else if (!this.netMode) {
@@ -5545,10 +5587,13 @@ class App {
       }
     }, 20000);
     try {
-      peer.onIce = (cand) => { this.lobby.signal({ t: 'ice', to: sig.from, cand }).catch(() => {}); };
-      const code = await peer.hostTrickle();
-      await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
+      const offer = () => this.lobby.signal({ t: 'relayOffer', to: sig.from, session }).catch(() => {});
+      peer.offerRetry = setInterval(offer, 2000);
+      await peer.connect();
+      await offer();
     } catch (e) {
+      console.warn('Room relay connection failed:', e.message);
+      peer.destroy();
       this.onlinePending.delete(sig.from);
       if (!rejoining) this.ui.onlineStatus('❌ Could not reach the joining player. Ask them to try JOIN again.');
     }
@@ -5604,6 +5649,25 @@ class App {
   async _onSignal(sig) {
     if (sig.t === 'roomClosed') return this._handleRoomClosed(sig.reason);
     if (sig.t === 'reconnectRequest' && this.mpRole === 'guest') return this._retryRoomConnection();
+    if (sig.t === 'relayOffer' && this.mpRole === 'guest') {
+      if (this.net?.open) return;
+      if (sig.from !== this.lobby?.game?.host_id || !/^[0-9a-f-]{36}$/i.test(sig.session || '')) return;
+      if (this.net?.session === sig.session && !this.net.closed) return;
+      if (this.net) { this.net.onClose = null; this.net.destroy(); }
+      const peer = new RoomRelay(this.lobby.sb, { room: this.lobby.game.id, self: this.lobby.me.id, remote: sig.from, session: sig.session });
+      peer.session = sig.session; this.net = peer;
+      peer.onOpen = () => {
+        clearTimeout(this._lobbyConnectionWatchdog);
+        this.ui.setRoomReconnect({ visible: false });
+        this._reconnectTries = 0; this._reconnectSince = 0;
+        if (!this.netMode) { peer.send(this._heroPayload()); this.ui.onlineStatus('Connected. Choose your hero and mark Ready.'); }
+      };
+      peer.onMessage = m => this._onGuestMsg(m);
+      peer.onClose = () => this._onHostLinkLost();
+      try { await peer.connect(); }
+      catch (error) { console.warn('Room relay connection failed:', error.message); this.ui.onlineStatus('Room relay unavailable. Reconnect to retry.'); if (this.netMode) this._scheduleReconnect(); }
+      return;
+    }
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
       const wasInGame = !!this.netMode;
       this.net = new NetSession(this.lobby?.iceServers);
@@ -5725,7 +5789,7 @@ class App {
       const joinedRoom = lobby.game || row;
       this._onRoomUpdate(joinedRoom);
       const mySeat = (joinedRoom._players || []).find((player) => player.user_id === lobby.me?.id)?.seat || 2;
-      this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Direct connection to host is establishing…`);
+      this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Connecting to the host…`);
       this.ui.roomChatFill(await lobby.loadRoomChat(joinedRoom.id, 'room'));
       this._armLobbyConnectionWatchdog();
     } catch (e) {
@@ -9049,6 +9113,7 @@ class App {
   }
 
   frame() {
+    if (this._preparingBattlefield && !this._warmupFrame) return;
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const hit = tickHitStop(this._hitFeel, dt);
     this._hitFeel = { hold: hit.hold, gap: hit.gap };
@@ -9087,9 +9152,9 @@ class App {
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
-      if (!this.missionIntro && !this.replay) this._updateHeroInput();
+      if (!this._preparingBattlefield && !this.missionIntro && !this.replay) this._updateHeroInput();
       if (this.replay) this._advanceReplay(dt);
-      else if (!this.paused && !this.game.over && !this.missionIntro) {
+      else if (!this._preparingBattlefield && !this.paused && !this.game.over && !this.missionIntro) {
         const simStarted = performance.now();
         let simTicks = 0;
         if (this.netMode) {
@@ -9318,6 +9383,7 @@ class App {
     this._updateProjectiles(dt);
     this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
+    if (this._preparingBattlefield) return;
     this.renderer.info.reset();
     this.tacticalVisuals.render();
     if (this.perfHud) {

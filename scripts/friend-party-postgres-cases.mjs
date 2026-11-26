@@ -37,6 +37,24 @@ export async function checkFriendParties(q, connect) {
  await assert.rejects(act(ids[0],'room',null,'ffffffff-ffff-ffff-ffff-ffffffffffff'),/invalid_room/);
  assert.ok(!JSON.stringify(await snapshot(ids[0])).includes('@example.test'),'public roster never exposes email');
  const room=(await q("insert into rooms(name,host_user_id,visibility,status,last_seen_at) values('Party QA',$1,'private','open',now()) returning id",[ids[0]])).rows[0].id;
+ for(let i=0;i<2;i++)await q('insert into room_players(room_id,user_id,seat,display_name) values($1,$2,$3,$4)',[room,ids[i],i+1,'Relay QA']);
+ const topic=`zl-link:${room}:${ids[0]}:${ids[1]}:11111111-1111-4111-8111-111111111111`;
+ const allow=async(id,topic,publish)=>(await as(id,'select room_relay_allowed($1,$2) ok',[topic,publish])).rows[0].ok;
+ assert.equal(await allow(ids[0],topic,true),true,'host publishes only its own direction');
+ assert.equal(await allow(ids[1],topic,false),true,'recipient reads host direction');
+ assert.equal(await allow(ids[1],topic,true),false,'guest cannot impersonate host');
+ assert.equal(await allow(ids[4],topic,false),false,'outsider cannot read relay');
+ assert.equal(await allow(ids[0],'malformed',true),false,'malformed topic denied');
+ await q(`grant usage on schema realtime to authenticated; grant select,insert on realtime.messages to authenticated;
+ create or replace function realtime.topic() returns text language sql stable as $$ select current_setting('test.relay.topic',true) $$`);
+ await q("select set_config('test.relay.topic',$1,false)",[topic]);
+ await as(ids[0],"insert into realtime.messages(extension) values('broadcast')");
+ assert.equal((await as(ids[1],'select * from realtime.messages')).rows.length,1,'recipient policy permits receipt');
+ assert.equal((await as(ids[4],'select * from realtime.messages')).rows.length,0,'outsider policy hides packets');
+ await assert.rejects(as(ids[1],"insert into realtime.messages(extension) values('broadcast')"),/row-level security/,'recipient policy denies sender impersonation');
+
+ await q('delete from room_players where room_id=$1 and user_id=$2',[room,ids[1]]);
+ assert.equal(await allow(ids[0],topic,true),false,'removed recipient loses new relay access');
  await act(ids[0],'room',null,room);
  assert.equal((await snapshot(ids[1])).room.id,room);
  await q("update rooms set status='finished' where id=$1",[room]);

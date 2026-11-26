@@ -123,8 +123,9 @@ for completed mechanics and explicit gaps; a catalog entry is not a playable kit
 ### Multiplayer
 
 - Supabase owns identity, rooms, seats, chat, saves, and match history.
-- WebRTC carries account-room match commands. Invite-link rooms may use the
-  Supabase Realtime fallback; both transports carry the same lockstep messages.
+- Private Supabase Realtime channels carry signed-in player-room commands.
+  Per-sender RLS checks both room seats. Invite links retain their separate
+  WebRTC/Realtime fallback; Watch retains WebRTC. All use the same lockstep messages.
 - The backend does not run the combat simulation. It is authoritative for
   rewards: only `api/match-result.js` (via `apply_match_result()`) grants
   signed-in XP, levels, loot, Alloy, and stats. Never add a client write path
@@ -269,3 +270,14 @@ Test the affected flow in a browser. For broad changes, also test:
 - Update `docs/backend.md` when service or data ownership changes.
 - Update `docs/art-direction.md` when the visual language, scale, budgets, or
   socket contract changes.
+
+## Signed-in player relay (protocol 25)
+
+`src/room-relay.js` carries player-room lockstep messages over private Supabase
+Realtime channels, one authenticated sender and recipient per connection.
+Migration `20261126000100_private_room_relay.sql` requires both player seats
+and a host endpoint. Outsiders cannot receive; recipients cannot publish as
+the sender. Each reconnect uses a new UUID topic. Packets are acknowledged,
+retried and deduplicated; missing activity closes the connection. Ready and
+the all-loaded start barrier are unchanged. Watch still uses WebRTC and may
+need TURN on restrictive networks. The backend does not simulate combat.

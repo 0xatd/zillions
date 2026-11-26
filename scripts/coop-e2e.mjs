@@ -20,10 +20,31 @@ import { chromium } from 'playwright';
 
 const liveUrl = process.argv.find((arg, index) => process.argv[index - 1] === '--url') || '';
 const liveRealtime = process.argv.includes('--live-realtime');
+const profileRender = process.argv.includes('--profile-render');
+const profiledPages = [];
 const transportOnly = process.argv.includes('--transport-only');
 async function configureRender(page) {
-  if (!transportOnly) return;
+  if (!transportOnly && !profileRender) return;
   await page.waitForFunction(() => !!window.__app?.renderer);
+  if (profileRender) {
+    profiledPages.push(page);
+    await page.evaluate(() => {
+      const a=window.__app;
+      window.__renderProfile={frame:[],render:[],drawCalls:[],triangles:[],gaps:[],quality:a.tacticalVisuals.quality};
+      const wrap=(obj,key,label)=>{const f=obj[key].bind(obj);obj[key]=(...args)=>{const start=performance.now();try{return f(...args);}finally{const list=__renderProfile[label];list.push(performance.now()-start);if(list.length>5000)list.shift();}};};
+      wrap(a,'frame','frame');wrap(a.tacticalVisuals,'render','render');
+      const gl=a.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info');
+      __renderProfile.gpu=ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):'unknown';
+      __renderProfile.gl={};
+      for(const key of [...new Set([...Object.getOwnPropertyNames(WebGLRenderingContext.prototype),...Object.getOwnPropertyNames(WebGL2RenderingContext.prototype)])].filter(k=>k!=='constructor'&&typeof gl[k]==='function')){
+        const fn=gl[key]?.bind(gl);if(!fn)continue;
+        gl[key]=(...args)=>{const t=performance.now();try{return fn(...args);}finally{const ms=performance.now()-t;const rec=__renderProfile.gl[key]||{n:0,total:0,max:0};rec.n++;rec.total+=ms;rec.max=Math.max(rec.max,ms);__renderProfile.gl[key]=rec;}};
+      }
+
+      let last=performance.now();setInterval(()=>{const now=performance.now();__renderProfile.gaps.push(now-last);last=now;__renderProfile.drawCalls.push(a.renderer.info.render.calls);__renderProfile.triangles.push(a.renderer.info.render.triangles);},1000);
+    });
+  }
+  if (!transportOnly) return;
   await page.evaluate(() => { window.__app.renderer.render = () => {}; });
 }
 const root = new URL('..', import.meta.url).pathname;
@@ -301,6 +322,7 @@ try {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   }
   console.log('co-op: both simulations running');
+  if (!process.argv.includes('--startup-only')) {
   if (!liveRealtime) {
     // CPU throttle slows the guest toward the 10 FPS the live retest saw.
     // One long frame can make a single sample look older than 5s; a guest
@@ -386,9 +408,18 @@ try {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
+  }
   const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
-  console.log(`coop e2e passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);
+  console.log(`${process.argv.includes('--startup-only') ? 'coop startup diagnostic' : 'coop e2e'} passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);
 } finally {
+  for (const page of profiledPages) {
+    const report=await page.evaluate(()=>{
+      const p=window.__renderProfile;if(!p)return null;
+      const stats=a=>{a=[...a].sort((a,b)=>a-b);return {n:a.length,mean:a.reduce((a,b)=>a+b,0)/Math.max(1,a.length),p95:a[Math.floor(a.length*.95)],max:a.at(-1)};};
+      return {gpu:p.gpu,quality:p.quality,gl:Object.fromEntries(Object.entries(p.gl).filter(([,r])=>r.total>100||r.max>50)),...Object.fromEntries(['frame','render','drawCalls','triangles','gaps'].map(k=>[k,stats(p[k])]))};
+    }).catch(()=>null);
+    console.log('render profile',JSON.stringify(report));
+  }
   await browser.close();
   mailbox?.server.close();
   site?.server.close();
