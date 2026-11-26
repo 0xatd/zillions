@@ -13,6 +13,8 @@ export function guestCommand(input, player, playerCount) {
     case 'hdir':
       return axis(input.x) && axis(input.z) && typeof input.s === 'boolean'
         ? { ...command, x: input.x, z: input.z, s: input.s } : null;
+    case 'hhalt':
+      return ['stop','hold'].includes(input.k) ? {...command,k:input.k} : null;
     case 'horder': {
       const coord = (value) => Number.isFinite(value) && value >= 0 && value <= 512;
       const kind = input.k === 'attack' ? 'attack' : input.k === 'move' ? 'move' : null;

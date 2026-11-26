@@ -3,7 +3,7 @@ import * as THREE from 'three';
 // Bounded, presentation-only hero hit numbers. Inspired by the useful portion
 // of PR #124; no HUD rewrite, hidden indicators, or simulation hit-stop.
 export class HitFeedback {
-  constructor(scene) { this.scene=scene;this.active=[]; }
+  constructor(scene, groundY = () => 0) { this.scene=scene;this.groundY=groundY;this.active=[]; }
   show(event) {
     if (!(event.damage>0) || !Number.isFinite(event.damage)) return;
     while(this.active.length>=24)this._remove(this.active[0]);
@@ -20,15 +20,16 @@ export class HitFeedback {
     const sprite=new THREE.Sprite(material);
     const scale=event.crit?1.35:hero?1:0.82;
     sprite.scale.set(2.4*scale,.9*scale,1);
-    sprite.position.set(event.tx,1.8,event.tz);
+    const y=this.groundY(event.tx,event.tz)+1.8;
+    sprite.position.set(event.tx,y,event.tz);
     this.scene.add(sprite);
-    this.active.push({sprite,age:0,x:event.tx,z:event.tz});
+    this.active.push({sprite,age:0,x:event.tx,z:event.tz,y});
   }
   update(dt,visible=()=>true) {
     for(const item of [...this.active]) {
       item.age+=dt;
       if(item.age>=.65 || !visible(item.x,item.z)){this._remove(item);continue;}
-      item.sprite.position.y=1.8+item.age*1.7;
+      item.sprite.position.y=item.y+item.age*1.7;
       item.sprite.material.opacity=Math.min(1,(.65-item.age)/.25);
     }
   }

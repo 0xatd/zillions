@@ -428,3 +428,7 @@ layout remain unchanged. This replaces only the hit/crit portion of PR #124.
 settings control them; combat SFX remain procedural and hero-local. Base warnings
 remain global and duck beds. Failed tracks keep procedural fallback; late loads
 cannot switch the current scene. Source records: `assets/audio/cc0/LICENSES.md`.
+
+### Hero attack timing
+
+`src/hero-attacks.js` owns hero wind-up, release, recovery and in-flight damage. `Game` owns orders and movement, invokes the attack clock, and snapshots its state. `main.js` renders wind-up from simulation state and tracks projectile flight against the simulation clock. Autonomous squads retain the existing unit attack path.

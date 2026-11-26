@@ -105,7 +105,7 @@ export const COACH_STEPS = Object.freeze([
   { id: 'found', title: 'Establish your outpost', body: 'Stand by a gold flag and press {build}. The Keep rises here.' },
   { id: 'build', title: 'Prepare your first defense', body: 'Hold {build} at a Tower or Militia Camp foundation. Economy is another opening choice, but you will need to fight beside it.' },
   { id: 'stances', title: 'Hold the Keep', body: 'Choose Defend Keep below or press {defend}. Your squads stay home while you intercept the attackers.' },
-  { id: 'attack', title: 'Meet the incoming wave', body: 'Right-click the wave, or walk into range and the weapon fires on its own. {ability}, {ability2}, {ability3} and {ability4} are your four abilities. {center} recenters the camera. {mode} switches Build and Fight.' },
+  { id: 'attack', title: 'Meet the incoming wave', body: 'Right-click an enemy to enter Fight mode and attack. Pick off the acid spitters; step out of the brute’s orange ring. {ability}, {ability2}, {ability3} and {ability4} are your four abilities. {center} recenters the camera. {mode} switches Build and Fight.' },
   { id: 'victory', title: 'Break the first siege', body: 'Protect the Keep and defeat the marked wave. Hold {build} beside damaged defenses to repair them.' },
   { id: 'push', title: 'Take the initiative', body: 'First siege broken. Choose Push lanes below or press {push}. Escort your squads to a node to claim income and new defenses.' },
 ]);

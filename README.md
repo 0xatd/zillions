@@ -259,6 +259,8 @@ enemy attack-moves onto that enemy and shows a red marker.
 | Input | Action |
 | --- | --- |
 | A | Arm attack-move, then click |
+| S | Stop hero |
+| H | Hold position |
 | Q, W, E, R | Abilities I–IV in Fight mode |
 | Space | Center the camera on your hero |
 | K | Jump the camera to the Keep |
@@ -293,6 +295,9 @@ Inspection alone never changes orders. Use **Items** to read carried gear.
 Army stances take F1–F3 rather than the number row, so 1 and 2 stay reserved
 for a future consumable system. Alt switches Build and Fight. In Build mode,
 V and B fund construction. In Fight mode, V dodges and Q, W, E, R cast.
+
+Attack orders enter Fight mode and stop construction payment. An ability key
+in Build mode shows the bound mode-switch key instead of silently failing.
 
 ## Local Development
 
@@ -442,3 +447,7 @@ critical hits. Spell aiming indicators and the command bar are unchanged.
 
 Music and biome ambience use the existing music/master settings. Missing tracks
 fall back to the procedural score; local combat sound and global base alerts stay intact.
+
+### Timed hero attacks
+
+Hero attacks wind up before release. Moving before release cancels the swing; moving after release cancels recovery without resetting the attack cooldown. Ranged damage lands when the projectile arrives. Right-click enemies pursues a specific target; attack-move pauses for nearby enemies then resumes its destination. Stop suppresses attacks until another order; Hold attacks in range without chasing. WASD camera mode parks Stop on a free rebindable key. Squads keep autonomous combat.

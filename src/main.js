@@ -49,7 +49,7 @@ import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { normalizeQualityChoice, probeGpuSignals, resolveGraphics, stepDownTier } from './graphics-quality.js';
 import { mergeStaticMeshes } from './static-batch.js';
-import { UnitImpostors, cameraFrustum, sphereVisible } from './unit-impostors.js';
+import { UnitImpostors, cameraFrustum, sphereVisible, combatSilhouette } from './unit-impostors.js';
 import { cullInstances, rememberInstances } from './instance-cull.js';
 import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -5968,7 +5968,7 @@ class App {
     const to = new THREE.Vector3(hit.x, hit.y, hit.z);
     const dist = Math.hypot(to.x - from.x, to.z - from.z);
     const dur = spec.dur || clamp(dist / spec.speed, 0.24, kind === 'grenade' || kind === 'ballista' ? 0.82 : 0.58);
-    this.projectiles.push({ from, to, t: 0, dur, spec, impact: extra.impact || e.impact || null });
+    this.projectiles.push({ from, to, targetId:e.type==='herorelease'?e.targetId:null, targetKind:e.targetKind, sourceHero:e.type==='herorelease'?e.fromId:null, serial:e.serial, t: 0, dur, spec, impact: extra.impact || e.impact || null });
   }
 
   _destroyProjectile(p) {
@@ -6008,7 +6008,15 @@ class App {
     let n = 0;
     for (let i = 0; i < this.projectiles.length; i++) {
       const p = this.projectiles[i];
-      p.t += dt;
+      if(p.targetId!=null){
+        const target=p.targetKind==='nest'?this.game?.nests.find(n=>n.id===p.targetId):this.game?.zombies.find(z=>z.id===p.targetId);
+        if(target)p.to.set(target.x,this.map.groundY(target.x,target.z)+.7,target.z);
+      }
+      if(p.sourceHero!=null){
+        const hero=this.game?.heroes.find(h=>h.id===p.sourceHero);
+        const shot=hero?.attackShots?.find(s=>s.serial===p.serial);
+        p.t=shot ? p.dur-shot.t : p.dur;
+      }else p.t += dt;
       const q = Math.min(1, p.t / p.dur);
       if (q >= 1) {
         this._projectileImpact(p);
@@ -6238,7 +6246,7 @@ class App {
       if (cull && !sphereVisible(this._frustum, zb.x, ground + 0.8, zb.z, 1.5 * s0)) continue;
       const dx = zb.x - this.focus.x;
       const dz = zb.z - this.focus.z;
-      if (this._impostorOpen && lod > 0 && (dx * dx + dz * dz) > lod * lod) {
+      if (this._impostorOpen && lod > 0 && !combatSilhouette(zb, this.myHero()) && (dx * dx + dz * dz) > lod * lod) {
         const yaw = Math.atan2(zb.dirX, zb.dirZ);
         this.impostors.write(zb.x, ground, zb.z, yaw, s0, s0, s0, zb.def.color || 0x9aa87a);
         continue;
@@ -7218,28 +7226,38 @@ class App {
           u.z + this._leadZ,
         );
       }
+      if(u.hero){
+        const a=u.attack;
+        rec.attack=a ? {t:a.t,dur:a.duration,kind:u.weapon?.melee?'melee':'hero'}
+          : u.attackRecovery>0 ? {t:u.attackRecovery,dur:.24,kind:u.weapon?.melee?'melee':'hero'} : null;
+      }
       let attackPulse = 0;
       let attackKind = '';
       if (rec.attack) {
-        rec.attack.t -= dt;
+        if(!u.hero)rec.attack.t -= dt;
         attackKind = rec.attack.kind || '';
         const p = clamp(1 - rec.attack.t / rec.attack.dur, 0, 1);
         attackPulse = Math.sin(p * Math.PI);
         if (rec.attack.t <= 0) rec.attack = null;
       }
+      if(u.hero)attackPulse=u.attack ? -.45*(1-u.attack.t/u.attack.duration) : Math.min(1,(u.attackRecovery||0)/.24);
       for (const cue of ['hit', 'cast']) {
         if (!rec[cue]) continue;
         rec[cue].t -= dt;
         if (rec[cue].t <= 0) rec[cue] = null;
       }
       const cue = rec.hit || rec.cast || rec.attack;
-      const cuePulse = cue ? Math.sin(clamp(1 - cue.t / cue.dur, 0, 1) * Math.PI) : 0;
+      const cuePulse = u.hero && !rec.hit && !rec.cast ? Math.max(0,attackPulse) : cue ? Math.sin(clamp(1 - cue.t / cue.dur, 0, 1) * Math.PI) : 0;
       const artState = unitArtState(u, {
         hitT: rec.hit?.t, castT: rec.cast?.t, attackT: rec.attack?.t,
       });
       const pose = unitPose(artState, t * (artState === 'run' ? 10 : 1.8) + u.id, {
         pulse: cuePulse, melee: attackKind === 'melee',
       });
+      if(u.hero && u.attack && !rec.hit && !rec.cast){
+        const prep=1-u.attack.t/u.attack.duration;
+        Object.assign(pose,{y:0,z:-.1*prep,pitch:.18*prep,roll:-.08*prep});
+      }
       const weaponParts = rec.mesh.userData.weaponParts || [];
       for (const part of weaponParts) {
         const rp = part.userData.restPos;
@@ -7474,16 +7492,18 @@ class App {
       cue(hit.x,hit.z,hit.r,hit.kind==='acid'?0xdfff55:0xff7844,.95);
       cue(hit.x,hit.z,Math.max(.15,hit.r*p),0xffffff,.65);
     }
-    const hero=this.myHero(),target=hero?.target;
+    const hero=this.myHero(),target=hero?.orderId!=null ? g.zombies.find(z=>z.id===hero.orderId) : hero?.target;
+    if(hero&&!hero.dead&&(this._attackMoveArmed||hero.attack||hero.orderKind==='attack'||hero.orderKind==='hold'))
+      cue(hero.x,hero.z,g.heroRange(hero),0x7edac1,.25);
+    if(hero?.attack)cue(hero.x,hero.z,.65,0xffd27a,.35+.6*(1-hero.attack.t/hero.attack.duration));
     if(hero&&!hero.dead&&this.pendingAbility!=null){
       const ab=heroAbility(hero.def,this.pendingAbility);if(ab?.range)cue(hero.x,hero.z,ab.range,0x7edac1,.4);
     }
     for(const caster of g.heroes)for(const e of caster.spells?.effects||[]){
       if((e.kind==='blast'||e.kind==='zone')&&visible(e.x,e.z))cue(e.x,e.z,e.radius,e.delay>0?0xffce68:0x7edac1,.65);
     }
-    if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)
-      &&Math.hypot(hero.x-target.x,hero.z-target.z)<=this.game.heroRange(hero)) {
-      cue(target.x,target.z,.45,hero.focusId===target.id?0xffc44c:0xff7777,.9);
+    if(hero&&!hero.dead&&target&&!target.dead&&visible(target.x,target.z)) {
+      cue(target.x,target.z,.45,(hero.orderId===target.id||hero.focusId===target.id)?0xffc44c:0xff7777,.9);
     }
   }
 
@@ -7650,8 +7670,15 @@ class App {
           e.preventDefault();
           const slot = castSlot(act, isHeld(binds, this.keys, 'second_bar'));
           if (this.controlMode === 'fight' && slot != null) this.tryCast(slot);
+          else if (slot != null) this.ui.showBanner(`Press ${keyLabel(binds.build_mode)} for Fight mode, then use your ability.`, 'info', 1800);
           break;
         }
+        case 'hero_stop': case 'hero_hold':
+          e.preventDefault();
+          this._attackMoveArmed=false; this.pendingAbility=null;
+          this.issue({t:'hhalt',p:this.myPlayer,k:act==='hero_stop'?'stop':'hold'});
+          this.ui.showBanner(act==='hero_stop'?'Stopped':'Holding position', 'info', 900);
+          break;
         case 'attack_move':
           e.preventDefault();
           this._attackMoveArmed = !this._attackMoveArmed;
@@ -7685,7 +7712,6 @@ class App {
         case 'pause': e.preventDefault(); this.setSpeed(0); break;
         case 'menu': if (this.pendingAbility != null || this._attackMoveArmed) {this.pendingAbility=null;this._attackMoveArmed=false;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
-          if (k === 'h') this.togglePauseMenu(true);
           break;
       }
     });
@@ -7812,7 +7838,12 @@ class App {
     if (!point) return;
     const q = quantizeOrder(point.x, point.z);
     const cmd = { t: 'horder', p: this.myPlayer, x: q.x, z: q.z, k: order.k };
-    if (order.k === 'attack' && picked.enemy) cmd.id = picked.unit.id;
+    if (order.k === 'attack') {
+      // An explicit attack order is an unambiguous combat intent. Do not leave
+      // the player paying for a plot with their abilities silently disabled.
+      if (this.controlMode !== 'fight') this.toggleControlMode();
+      if (picked.enemy) cmd.id = picked.unit.id;
+    }
     this.issue(cmd);
     this._showOrderMarker(q.x, q.z, order.k);
   }
@@ -7878,10 +7909,10 @@ class App {
     const active = document.activeElement;
     const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
     if (editing) this.keys.clear();
-    if (isHeld(binds, this.keys, 'camera_up') || this.keys.has(String('w'))) dz -= 1;
-    if (isHeld(binds, this.keys, 'camera_down') || this.keys.has(String('s'))) dz += 1;
-    if (isHeld(binds, this.keys, 'camera_left') || this.keys.has(String('a'))) dx -= 1;
-    if (isHeld(binds, this.keys, 'camera_right') || this.keys.has(String('d'))) dx += 1;
+    if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+    if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+    if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+    if (isHeld(binds, this.keys, 'move_right')) dx += 1;
     const s = isHeld(binds, this.keys, 'sprint');
     const last = this.lastDir;
     if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
@@ -8373,11 +8404,31 @@ class App {
           }
           break;
         }
+        case 'herorelease': {
+          if(e.fromId===this.myHero()?.id)this._coachSawAttack=true;
+          if(!visibleInFog(vision,e.fx,e.fz)&&!visibleInFog(vision,e.tx,e.tz))break;
+          if(e.kind==='melee')break; // melee sound and flash belong at contact
+          this.audio.shoot(e.kind==='shotgun'?'shotgun':'soldier');
+          this._spawnProjectile(e,{dur:e.duration,impact:null});
+          const muzzle=this._muzzlePoint(e,e.kind);
+          this.burst(muzzle.x,muzzle.y,muzzle.z,{count:e.kind==='shotgun'?10:5,color:0xffdf8a,speed:1,life:.12,size:.5});
+          break;
+        }
+        case 'heroimpact': {
+          if(!visibleInFog(vision,e.tx,e.tz))break;
+          this.hitFeedback ||= new HitFeedback(this.scene,(x,z)=>this.map.groundY(x,z));
+          this.hitFeedback.show(e);
+          if(e.fromId===this.myHero()?.id&&e.damage>0)this.audio.hitConfirm(e.crit);
+          if(e.kind==='melee')this.audio.melee();
+          this._impactRing(e.tx,e.tz,{color:e.kind==='melee'?0xffd27a:0xffefb0,radius:e.kind==='melee'?1:.55,life:.18,count:8});
+          this.burst(e.tx,this.map.groundY(e.tx,e.tz)+.7,e.tz,{count:8,color:0xffd27a,speed:1.8,life:.22,size:.32,up:1});
+          break;
+        }
         case 'shot': {
           this._presentCue(e);
           if (e.fromId === this.myHero()?.id) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
-            this.hitFeedback ||= new HitFeedback(this.scene);
+            this.hitFeedback ||= new HitFeedback(this.scene, (x, z) => this.map.groundY(x, z));
             this.hitFeedback.show(e);
             if (e.fromId === this.myHero()?.id && e.damage > 0) {
               this.audio.hitConfirm(e.crit);

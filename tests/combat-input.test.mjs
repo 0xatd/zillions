@@ -71,6 +71,7 @@ test('WASD camera pan is optional and still leaves one owner per key', () => {
   assert.equal(allConflicts(on.binds).length, 0);
   assert.notEqual(on.binds.ability2, 'w');
   assert.notEqual(on.binds.attack_move, 'a');
+  assert.notEqual(on.binds.hero_stop, 's');
   assert.equal(cameraAxisHeld(on.binds, new Set(['w']), 'up', {
     wasdCamera: true, actionFor, isHeld, cameraAction: 'camera_up',
   }), true);
@@ -83,6 +84,7 @@ test('WASD camera pan is optional and still leaves one owner per key', () => {
   assert.equal(off.binds.ability2, 'w');
   assert.equal(off.binds.ability4, 'r');
   assert.equal(off.binds.attack_move, 'a');
+  assert.equal(off.binds.hero_stop, 's');
   assert.equal(cameraAxisHeld(off.binds, new Set(['w']), 'up', {
     wasdCamera: false, actionFor, isHeld, cameraAction: 'camera_up',
   }), false);
@@ -206,4 +208,25 @@ test('impact cues stay presentation-only and the shake toggle scales them', () =
   assert.equal(scaledShake(0.2, {}), 0.2);
   assert.ok(scaledShake(0.2, { reduceShake: true }) < 0.2);
   assert.equal(scaledShake(0.2, { reduceMotion: true }), 0);
+});
+
+test('routine horde deaths do not stall hero presentation during sustained combat', () => {
+  let state = {}, held = 0;
+  for (let frame = 0; frame < 600; frame++) {
+    if (frame % 2 === 0) state = armHitStop(state, impactCue({ type: 'zdeath', big: false }).hitStop);
+    state = tickHitStop(state, 1 / 60);
+    held += Number(state.present);
+  }
+  assert.equal(held, 0, 'routine kills froze the battlefield');
+  assert.ok(impactCue({ type: 'zdeath', big: true }).hitStop > 0, 'heavy impacts retain their accent');
+});
+
+test('adding Stop/Hold preserves legacy explicit S/H combat bindings',()=>{
+ for(const [key,added] of [['s','hero_stop'],['h','hero_hold']]){
+  const binds=defaultBinds();delete binds.hero_stop;delete binds.hero_hold;binds.ability1=key;
+  setKeybindBackend({load:()=>({v:KEYBIND_VERSION,binds,feel:{}}),save:()=>{}});
+  const migrated=loadBinds({force:true});assert.equal(migrated.ability1,key,'existing custom action must keep its key');
+  assert.notEqual(migrated[added],key);assert.ok(migrated[added]);assert.equal(allConflicts(migrated).length,0);
+ }
+ setKeybindBackend(null);
 });

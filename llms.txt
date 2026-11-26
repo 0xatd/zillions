@@ -130,3 +130,5 @@ Campaign loading of workbench exports is not implemented.
 - src/hit-feedback.js: bounded hero hit numbers and disposable presentation resources.
 
 - src/audio-beds.js: scene score, lazy CC0 music/ambience and ducking.
+
+- src/hero-attacks.js: deterministic hero attack timing and released projectile damage.

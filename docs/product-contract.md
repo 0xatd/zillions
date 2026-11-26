@@ -190,7 +190,8 @@ Right-click is the order. Q, W, E, and R are the four ability keys. The camera
 is free to pan, and Space brings it back to the hero.
 
 - Right-click on ground issues a move order. Right-click on an enemy issues an
-  attack-move onto that enemy. A shows a marker and the next click attack-moves.
+  pursue-and-attack order onto that enemy. A shows a marker and the next click attack-moves.
+  An attack order enters Fight mode and releases held construction input.
   Orders are lockstep commands. Remapping keys does not change the command.
 - Direct hero movement remains bindable and is never camera-relative. The
   default keys are Num8, Num4, Num2, and Num6, so they do not take QWER.
@@ -210,7 +211,9 @@ is free to pan, and Space brings it back to the hero.
 - Army stances take F1–F3. They stay off 1/2/3. 1 and 2 remain reserved for a
   consumable system that does not exist yet.
 - Screen shake can be reduced from Settings → Controls. That toggle is
-  presentation only.
+  presentation only. Ordinary kills never freeze actor presentation; heavy
+  impacts retain a bounded accent. Camera and ability keys never double as
+  hero movement; direct movement listens only to its own bound actions.
 - Every binding is rebindable in Settings → Controls, which reads the same
   table `src/keybinds.js` dispatches through and persists in localStorage.
   The code, the Settings screen, the in-game help and the README controls
@@ -450,7 +453,10 @@ release. Existing lobby friends/chat remain available.
 
 Greenfall keeps site choice and Economy/Defense/Army openings. Its existing
 first-siege encounter is bounded: after the first paid build, one named hive
-launches the introductory wave from that hive, not unrelated forward nodes.
+starts a ten-second warning, then launches a mixed wave from that hive, not
+unrelated forward nodes. Walkers screen acid spitters and one brute on Normal
+solo. The player can prioritize ranged attackers and dodge committed ground
+strikes; co-op scales the screen and support count.
 Other hive reinforcements and time-driven Threat wait until that wave ends,
 for at most 180 seconds after the opening build. This deadline survives reload;
 keeping one enemy alive cannot create unlimited safe income.
@@ -470,3 +476,7 @@ Opening stage/wave state remains in existing snapshots. Multiplayer protocol
 16 prevents protocol-15 rooms from accepting the changed simulation. The hash
 includes opening state and army stance. Signed-in rewards, account progression,
 map generation, and combat authority are unchanged.
+
+## Timed hero attack contract (2026-11-26)
+
+Hero attacks have a cancellable wind-up, release and movement-cancellable recovery. Movement never resets the attack cooldown. Ranged damage lands at projectile impact; released shots survive movement and shooter death. Attack orders retain the chosen enemy, attack-move resumes its ground goal after contact, Stop suppresses auto-attacks, and Hold attacks without pursuit. Wind-up, flight payload, cooldown and order state survive restore and enter the lockstep hash. Protocol and shared replay simulation version 23 reject mixed runtimes. No denies, last-hit economy or Dota items are introduced.
