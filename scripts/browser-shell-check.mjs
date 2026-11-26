@@ -305,8 +305,9 @@ try {
       proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
     const model = window.__app.characterPreviews.get('creator-preview-canvas').model;
     let meshes = 0, triangles = 0;
-    model.traverse((node) => {
-      if (!node.isMesh || !node.visible) return;
+    // Hidden parent groups hide their descendants too. Count rendered meshes.
+    model.traverseVisible((node) => {
+      if (!node.isMesh) return;
       meshes++;
       triangles += (node.geometry.index ? node.geometry.index.count : node.geometry.attributes.position.count) / 3;
     });

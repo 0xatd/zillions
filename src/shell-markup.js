@@ -18,7 +18,7 @@ export function shellMarkup() {
   const versus = modesForTab('versus').map(modeButton).join('');
   const campaign = modesForTab('campaign').map(modeButton).join('');
   return `
-    <div id="toasts" aria-live="polite"></div>
+    <div id="toasts" aria-live="polite"></div><button type="button" id="social-toggle" aria-haspopup="dialog" aria-controls="social-panel" aria-expanded="false">Friends <span id="social-count">—</span></button><dialog id="social-panel" aria-labelledby="social-title"><header><div><small>YOUR NETWORK</small><h2 id="social-title">Friends &amp; Party</h2></div><button type="button" id="social-close" aria-label="Close friends">Close</button></header><p id="social-status" role="status">Sign in to see your friends.</p><button type="button" id="social-refresh">Refresh</button><div id="social-content"></div></dialog>
     <div id="topbar" class="hidden">
       <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend"><b>0</b></div>
       <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take"><b>Threat 1</b></div>
@@ -140,8 +140,8 @@ export function shellMarkup() {
 
       <div id="screen-account" class="shell-screen title-screen">
         <nav class="menu-list" aria-label="Title menu">
-          <button type="button" class="menu-word is-focus" id="a-play"><b>Play</b></button>
-          <button type="button" class="menu-word" id="nav-squad">Party & Friends</button>
+          <button type="button" class="menu-word is-focus" id="a-play"><b>Enter World</b></button>
+          <button type="button" class="menu-word" id="nav-squad">Custom Battles</button>
           <button type="button" class="menu-word" id="nav-armory">Armory</button>
           <button type="button" class="menu-word" id="a-settings">Settings</button>
           <button type="button" class="menu-word" id="nav-account">Account</button>
@@ -188,10 +188,10 @@ export function shellMarkup() {
           <div id="character-list" class="character-cards"></div>
           <button type="button" class="character-card new-card" id="m-create-character">+ Create Character</button>
           <button type="button" class="menu-word" id="nav-home">Enter World</button>
-          <button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
+          <button type="button" class="menubtn custom-entry" id="leader-custom">Custom Battles</button><button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
         </aside>
-        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-custom">Custom Games</button><button type="button" id="leader-modes">Other battles</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
+        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-modes">Other battles</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
         <button type="button" class="utilitybtn hidden" id="m-character-sheet">ARMORY</button>
       </div>
 
@@ -239,16 +239,16 @@ export function shellMarkup() {
       </div>
 
       <div id="screen-squad" class="shell-screen hidden">
-        <header class="glass sheet-head"><h1>Party & Friends</h1><button type="button" class="tbtn info-back">Back</button></header>
+
         <div class="squad-grid">
-          <section class="glass"><h2>Party</h2><p>Invite friends and manage your party. Set Ready in the match lobby.</p><button type="button" class="menubtn" id="m-party">Open party</button></section>
-          <section class="glass"><h2>Friends</h2>
-            <div class="friendadd"><input id="l-friendcode" maxlength="32" placeholder="@username"><button class="tbtn" id="l-friendadd" type="button">Add</button></div>
+          <section class="glass social-party"><h2>Your party</h2><div id="social-party-roster">No party loaded.</div><button type="button" class="menubtn" id="m-party">Manage party</button></section>
+          <section class="glass"><h2>Friends</h2><p class="mphint">Account-wide, across characters and battles.</p>
+            <div class="friendadd"><input aria-label="Friend username" id="l-friendcode" maxlength="32" placeholder="@username"><button class="tbtn" id="l-friendadd" type="button">Add</button></div>
             <div id="l-friends" class="friendlist"></div>
-            <div class="friendshead"><b>Online</b><span id="l-player-count"></span><span id="l-online"></span></div>
-            <div id="l-players" class="onlineplayers"></div>
+            <div class="friendshead hidden"><b>Online</b><span id="l-player-count"></span><span id="l-online"></span></div>
+            <div id="l-players" class="onlineplayers hidden"></div>
           </section>
-          <section class="glass"><h2>Lobby</h2>
+          <section class="glass hidden"><h2>Lobby</h2>
             <div class="lobbychatlog" id="l-chatlog"></div>
             <div class="lobbychatrow"><input id="l-chatinput" maxlength="400" placeholder="Say something…"><button class="tbtn" id="l-chatsend" type="button">Send</button></div>
             <div id="l-tab-lore" class="hidden"></div>
@@ -327,14 +327,14 @@ export function shellMarkup() {
       </div>
 
       <div id="screen-custom" class="custom-browser shell-screen hidden">
-        <header class="custom-head"><button class="tbtn" id="cu-back" type="button">Back</button><div><span>CUSTOM</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
+        <header class="custom-head"><button class="tbtn" id="cu-back" type="button">Back</button><div><span>CUSTOM</span><h1>CUSTOM BATTLES</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
         <aside class="custom-nav">
-          <button class="custom-primary-tab sel" data-view="live" type="button">LIVE GAMES</button>
-          <button class="custom-primary-tab" data-view="arcade" type="button">ARCADE</button>
+          <button class="custom-primary-tab sel" data-view="live" type="button">BROWSE GAMES</button>
+          <button class="custom-primary-tab" data-view="arcade" type="button">MAPS</button>
           <div class="custom-filter-group" id="cu-mode-filters">
             <span>MODE</span>
             <button class="custom-filter sel" data-filter="all" type="button">ALL</button>
-            <button class="custom-filter" data-filter="campaign" type="button">CAMPAIGN</button>
+            <button class="custom-filter" data-filter="campaign" type="button">SIEGE</button>
             <button class="custom-filter" data-filter="survival" type="button">SURVIVAL</button>
             <button class="custom-filter" data-filter="labyrinth" type="button">LABYRINTH</button>
           </div>
@@ -348,17 +348,17 @@ export function shellMarkup() {
           <button class="diffbtn" id="cu-refresh" type="button">Refresh</button>
           <button class="menubtn" id="cu-join" type="button" disabled>JOIN GAME</button>
           <button class="menubtn primary" id="cu-create" type="button">CREATE GAME</button>
-          <button class="menubtn" id="l-create-pub" type="button">Public room</button>
-          <button class="menubtn" id="l-create-priv" type="button">Private room</button>
+          <button class="menubtn" hidden id="l-create-pub" type="button">Public room</button>
+          <button class="menubtn" hidden id="l-create-priv" type="button">Private room</button>
           <button class="menubtn" id="l-create-join" type="button">Join by code</button>
-          <a href="#" id="l-manual">Manual invite codes</a>
+          <a href="#" hidden id="l-manual">Manual invite codes</a>
         </footer>
         <div id="cu-create-panel" class="charcreate custom-create-panel hidden">
           <div class="cchead"><b>CREATE GAME</b><button class="tbtn" id="cu-cancel" type="button">Close</button></div>
           <label class="field-label" for="cu-name">Game name</label><input id="cu-name" maxlength="32" placeholder="Friday night siege" autocomplete="off">
           <label class="field-label">Map</label><select id="cu-map" class="cumap"></select>
           <label class="field-label">Difficulty</label><div class="diffseg" id="cu-diff"></div>
-          <label class="field-label">Max players</label><div class="diffseg" id="cu-max"></div>
+          <label class="field-label" for="cu-visibility">Visibility</label><select id="cu-visibility"><option value="public">Public — listed in browser</option><option value="private">Private — invite only</option></select><label class="field-label">Max players</label><div class="diffseg" id="cu-max"></div>
           <button class="menubtn primary" id="cu-confirm" type="button">HOST GAME</button>
         </div>
         <div id="screen-lobby" class="hidden"></div>

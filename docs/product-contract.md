@@ -1,5 +1,16 @@
 # Zillions Product Contract
 
+## Social and Custom Battles (Alex, 2026-11-26)
+
+Custom Battles replaces the title Party & Friends entry and sits directly below
+Enter World in character selection. Friends is an independent persistent panel
+available from menu, lobby and play, not buried in Account. Reuse account-wide
+friendships and persistent friend parties; use SC2/WC3-style custom room browsing,
+map setup, slots and Ready controls. Campaign battles originate at overworld
+sites, not an arbitrary map picker. See `docs/social-custom-navigation.md` for
+implemented behavior and explicit remaining limits.
+
+
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 

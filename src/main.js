@@ -296,6 +296,9 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
       onPartyOpen: () => this._openFriendParty(),
+      onSocialOpen: () => this._openSocial(),
+      onSocialClose: () => { clearInterval(this._socialTimer); this._socialGeneration = (this._socialGeneration || 0) + 1; },
+      onInviteParty: (userId) => this._inviteToParty(userId),
       onChapterSave: (draft) => this._saveChapter(draft),
       onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
       onChapterMission: (level) => this._openCampaignSelect(level),
@@ -519,6 +522,7 @@ class App {
     void getSupabaseClient().then((client) => {
       try { client.realtime?.connect?.(); } catch { /* the invite subscribe connects too */ }
     }).catch(() => {});
+    if (sessionStorage.getItem('zillions-return-custom')) { sessionStorage.removeItem('zillions-return-custom'); setTimeout(() => this._openCustomGames(), 1800); }
     this._consumeShareLink();
     this._bootReplay();
     this.ui.setAccount(this.authStatus);
@@ -971,8 +975,10 @@ class App {
   // carries the match seed every peer runs, the room the match is credited
   // to, and makes the end-of-match report single use. Signed-out play needs
   // no ticket and keeps the fixed seed it always had.
+  _isCustomBattle() { return this.lobby?.game ? isCustomGame(this.lobby.game) : !!this.ui._customBattle; }
+
   async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
-    if (!this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
+    if (this._isCustomBattle() || !this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
     const character = selectedMmoCharacter(this.profile);
     if (!character) return null;
     try {
@@ -1094,6 +1100,7 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this._customBattle = this._isCustomBattle();
     this._seedRun = !!this._startingSeedRun;
     this._startingSeedRun = false;
     this.pendingAbility = null;
@@ -1150,7 +1157,7 @@ class App {
     if (mp?.role !== 'spectator') {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
-    if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
+    if (!this._customBattle && mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
     this._preparingBattlefield = true;
@@ -2113,6 +2120,9 @@ class App {
       }
     } else if (status.enabled) {
       document.querySelector('#friend-party-dialog')?.close();
+      this.ui.root.querySelector('#social-panel')?.close();
+      clearInterval(this._socialTimer);
+      this.lobby?.disconnect?.();
       this.lobby = null;
       this._authenticatedEntryHandled = false;
     }
@@ -2166,7 +2176,8 @@ class App {
   _restartOrReturn() {
     const game = this.game;
     if (this.netMode || this.onlineMode || this.lobby?.game) {
-      if (game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+      if (this._customBattle) { try { sessionStorage.setItem('zillions-return-custom','1'); } catch {} }
+      if (!this._customBattle && game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
         try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
       }
       location.reload();
@@ -2183,9 +2194,11 @@ class App {
       this.startGame(diff, hero);
       return;
     }
-    const campaign = !!(game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile));
+    const custom = this._customBattle;
+    const campaign = !custom && !!(game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile));
     this._leaveSoloMatch();
-    if (campaign) this.ui.showOverworld();
+    if (custom) { this._customBattle = false; this._openCustomGames(); }
+    else if (campaign) this.ui.showOverworld();
     else {
       this.ui._playTab = 'campaign';
       this.ui._showScreen('home');
@@ -2206,6 +2219,7 @@ class App {
       this.ui.showCharacterCreator();
       return;
     }
+    this.ui._customBattle = false;
     this.ui.showOverworld();
   }
 
@@ -2894,7 +2908,7 @@ class App {
   // host frame hitch becomes a stall broadcast to all guests, and stringify +
   // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
-    if (!this.game || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
+    if (!this.game || this._customBattle || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -3058,6 +3072,13 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if (this._customBattle) {
+      this._endExtras = { customBattle:true, local:true, grants:[], quests:[] };
+      this._netPumpStop();
+      this.lobby?.setMatchActive(false);
+      if (this.lobby?.game && this.mpRole === 'host') this.lobby.endGame();
+      return;
+    }
     if (this._seedRun) {
       this._seedRun = false;
       this._endExtras = { seedRun: true, local: true };
@@ -5297,10 +5318,47 @@ class App {
 
   // ---------------- online lobby ----------------
 
+  async _openSocial() {
+    const generation = this._socialGeneration = (this._socialGeneration || 0) + 1;
+    clearInterval(this._socialTimer);
+    this.keys?.clear(); this.buttonPay = false;
+    for (const id of ['l-friendcode','l-friendadd','m-party']) this.ui.root.querySelector('#'+id).disabled = !this.authStatus?.signedIn;
+    if (!this.authStatus?.signedIn) { this.ui.socialStatus('Sign in through Account to add friends and join parties.'); return; }
+    const refresh = async () => {
+      if (this._socialRefreshing || !this.ui.root.querySelector('#social-panel')?.open) return;
+      this._socialRefreshing = true;
+      try {
+        const lobby = await this._openLobby();
+        if (!lobby?.connected) throw new Error('Friends unavailable. Check your connection and Refresh.');
+        await lobby.loadFriends();
+        const party = await new FriendParty(lobby.sb).refresh();
+        if (!this.authStatus?.signedIn) return;
+        this.ui.socialParty(party);
+        this.ui.socialStatus('Friends stay with your account across characters and games.');
+      } catch (error) { this.ui.socialStatus(error.message || 'Could not load friends. Refresh to retry.'); }
+      finally { this._socialRefreshing = false; }
+    };
+    this.ui.socialStatus('Loading friends and party…');
+    await refresh();
+    if (generation === this._socialGeneration && this.ui.root.querySelector('#social-panel')?.open) this._socialTimer = setInterval(refresh, 15000);
+  }
+
+  async _inviteToParty(userId) {
+    try {
+      if (!this.authStatus?.signedIn) throw new Error('Sign in to invite friends.');
+      const lobby = await this._openLobby();
+      if (!lobby?.connected) throw new Error('Friends unavailable. Refresh to reconnect.');
+      const client = new FriendParty(lobby.sb);
+      const party = await client.refresh() || await client.act('create');
+      await lobby.sendSocialInvite(userId, { fromId:lobby.me.id, fromName:lobby.me.name, partyCode:party.code });
+      this.ui.socialParty(party); this.ui.socialStatus('Party invite sent.');
+    } catch (error) { this.ui.socialStatus(error.message || 'Could not invite your friend.'); }
+  }
+
   async _openFriendParty() {
     try {
       if (!this.authStatus?.signedIn) throw new Error('Sign in to play with friends.');
-      if (!this.profile.mmoCharacters?.length) throw new Error('Create your chapter founder first.');
+
       const lobby=await this._openLobby();
       if (!lobby?.connected) throw new Error('The lobby is unavailable. Retry when your connection recovers.');
       const client=new FriendParty(lobby.sb);
@@ -5328,8 +5386,15 @@ class App {
   }
 
   async _openLobby() {
+    if (this._lobbyOpening) return this._lobbyOpening;
+    this._lobbyOpening = this._connectLobby().finally(() => { this._lobbyOpening = null; });
+    return this._lobbyOpening;
+  }
+
+  async _connectLobby() {
+    if (this.lobby && !this.lobby.connected) { this.lobby.disconnect?.(); this.lobby = null; }
     if (this.lobby) {
-      if (this.lobby.connected) this.lobby.refreshGames();
+      if (this.lobby.connected) this.lobby.refreshGames().catch(() => {});
       return this.lobby;
     }
     this.lobby = new OnlineLobby({
@@ -5345,7 +5410,7 @@ class App {
         if (this.ui._lastScreen === 'custom') this._renderCustomBrowser();
       },
       onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
-      onFriends: (friends) => this.ui.lobbyFriends(friends),
+      onFriends: (friends) => { if (this.authStatus?.signedIn) this.ui.lobbyFriends(friends); },
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onRoom: (game) => this._onRoomUpdate(game),
       onKnock: (sig) => this._onKnock(sig),
@@ -5361,7 +5426,9 @@ class App {
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
-      const me = await this.lobby.connect(this.profile.name || 'Commander', this.auth?.client || null);
+      const connecting = this.lobby;
+      const me = await connecting.connect(this.profile.name || 'Commander', this.auth?.client || null);
+      if (this.lobby !== connecting || !this.authStatus?.signedIn) { connecting.disconnect(); return null; }
       this.ui.lobbySetMe(me);
       this.ui.lobbyChatFill(await this.lobby.loadChat());
       this.ui.lobbyFriends(await this.lobby.loadFriends());
@@ -5375,6 +5442,7 @@ class App {
 
   _onRoomUpdate(game) {
     if (!game) return;
+    this.ui._customBattle = isCustomGame(game);
     const isHost = this.mpRole === 'host';
     const isSpectator = this.mpRole === 'spectator';
     const readiness = roomLaunchReadiness(game, this.peers.length + 1);
@@ -5651,10 +5719,12 @@ class App {
   }
 
   async _addFriend(handle) {
-    if (!this.lobby) return;
+    if (!this.lobby?.connected) { this.ui.socialStatus('Friends unavailable. Refresh to reconnect.'); return; }
     try {
       this.ui.lobbyFriends(await this.lobby.addFriend(handle));
+      this.ui.socialStatus('Friend request sent.');
     } catch (e) {
+      this.ui.socialStatus('Friend request failed: ' + e.message);
       this.ui.showBanner('❌ Friend request failed: ' + e.message, 'bad', 4000);
     }
   }
@@ -5664,6 +5734,7 @@ class App {
     try {
       this.ui.lobbyFriends(await this.lobby.acceptFriend(id));
     } catch (e) {
+      this.ui.socialStatus('Could not accept friend: ' + e.message);
       this.ui.showBanner('❌ Could not accept friend: ' + e.message, 'bad', 4000);
     }
   }
@@ -5673,6 +5744,7 @@ class App {
     try {
       this.ui.lobbyFriends(await this.lobby.removeFriend(id));
     } catch (e) {
+      this.ui.socialStatus('Could not update friend: ' + e.message);
       this.ui.showBanner('❌ Could not update friend: ' + e.message, 'bad', 4000);
     }
   }
@@ -5681,8 +5753,10 @@ class App {
     if (!this.lobby) return;
     try {
       await this.lobby.inviteFriend(userId);
+      this.ui.socialStatus('Lobby invite sent.');
       this.ui.showBanner('⚔️ Invite sent.', '', 2200);
     } catch (e) {
+      this.ui.socialStatus('Lobby invite failed: ' + e.message);
       this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
     }
   }
@@ -5703,9 +5777,10 @@ class App {
 
   playArcadeMap(map) {
     if (!map) return;
+    this.ui._customBattle = true;
     this.ui.selectedMode = map.mode || 'campaign';
     this.ui.selectedLevel = Number(map.level) || 1;
-    this.ui.showSetup({ mode: this.ui.selectedMode });
+    this.ui.showSetup({ mode: this.ui.selectedMode, custom:true, level:Number(map.level)||1 });
     this.ui.setRoomSettings({
       level: this.ui.selectedLevel,
       difficulty: 'normal',
@@ -5714,7 +5789,7 @@ class App {
     });
   }
 
-  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
+  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers, visibility = 'public' } = {}) {
     const lobby = await this._openLobby();
     if (!lobby?.connected) {
       this.ui.showBanner('📡 The lobby is unreachable — Custom Games needs the server.', 'bad', 4500);
@@ -5727,7 +5802,7 @@ class App {
     if (!this._claimRoomLease()) return;
     this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
     try {
-      const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
+      const game = await lobby.createGame({ visibility: visibility === 'private' ? 'private' : 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
       const room = lobby.game || game;
       this.ui.showSetup({ online: room, mode: room.mode });
@@ -6106,6 +6181,12 @@ class App {
   }
 
   async acceptInvite(inv) {
+    if (inv.partyCode) {
+      if (!/^[A-Z0-9]{10}$/.test(inv.partyCode)) return;
+      sessionStorage.setItem('zillions-party-invite', inv.partyCode);
+      return this._openFriendParty();
+    }
+    this.ui.root.querySelector('#social-panel')?.close();
     const lobby = await this._openLobby();
     const row = await lobby.findByCode(inv.joinCode);
     if (row) this.joinOnlineGame(row);
@@ -8000,6 +8081,7 @@ class App {
   _setupInput() {
     const cv = this.canvas;
     window.addEventListener('keydown', (e) => {
+      if (document.querySelector?.('#social-panel[open], #friend-party-dialog[open]')) return;
       const k = bindKey(e);
       if (e.repeat) {
         const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
@@ -8360,7 +8442,7 @@ class App {
     let dx = 0, dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     if (editing) this.keys.clear();
     if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
     if (isHeld(binds, this.keys, 'move_down')) dz += 1;
@@ -8587,7 +8669,7 @@ class App {
     let dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     if (!editing) {
       if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
       if (isHeld(binds, this.keys, 'move_down')) dz += 1;
@@ -8623,7 +8705,7 @@ class App {
     const feel = this.feel();
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     let panX = 0, panZ = 0;
     if (!this.replay && !editing && !this.paused && !this._presentHold) {
       const held = (axis, action) => cameraAxisHeld(binds, this.keys, axis, {
