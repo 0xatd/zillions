@@ -30,6 +30,22 @@ keeps those working and shows unbuilt destinations/actions as disabled. Do
 not relabel the existing selector as a completed shared world or reactivate
 removed world-worker code without a reviewed implementation plan.
 
+### Strategic armies and tactical sieges — further clarification
+
+Alex's intended loop: roam independently or attach your force to a larger
+allied army on the shared Bannerlord-style map; encounters transition into
+Dota-style hero/ability combat and Zillions siege battles, then return to the
+shared world with consequences. An assembled army can contain multiple
+parties/warbands. Army attachment is not faction membership, political rank,
+or ownership of a private world. Do not equate the existing four-friend social
+party implementation with a completed strategic army system.
+
+Keep the player character, their commanded troops/warband, cooperative friend
+group, assembled army and political affiliation distinct. Exact join/leave
+permissions, army movement control and battle instancing/scaling are not yet
+specified; do not invent a finished system or player-count promise. This is
+product direction, not authorization to pretend those backend systems exist.
+
 ## Affiliation correction (Alex, 2026-11-26)
 
 A character is not automatically a faction ruler. Several characters and
