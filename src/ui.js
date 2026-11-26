@@ -3094,8 +3094,8 @@ export class UI {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
-        big.disabled = !near || h.dead;
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Found the city — return to the flag'}<small>${this._keyLabel('build')}</small></span>`;
+        big.disabled = !!h.dead;
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
         if (target) {

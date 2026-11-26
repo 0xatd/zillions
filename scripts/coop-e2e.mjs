@@ -278,6 +278,32 @@ try {
   if (!synced) {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   }
+  if (liveRealtime) {
+    const until = Date.now() + 60000;
+    const hostLog = new Map();
+    const guestLog = new Map();
+    let hostMax = 0;
+    let guestMax = 0;
+    while (Date.now() < until) {
+      const hostProbe = await probe(host.page);
+      const guestProbe = await probe(guest.page);
+      hostMax = Math.max(hostMax, hostProbe?.frame || 0);
+      guestMax = Math.max(guestMax, guestProbe?.frame || 0);
+      for (const row of hostProbe?.hashLog || []) hostLog.set(row[0], row[1]);
+      for (const row of guestProbe?.hashLog || []) guestLog.set(row[0], row[1]);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    let agreed = 0;
+    let mismatched = 0;
+    for (const [frame, hash] of hostLog) {
+      const other = guestLog.get(frame);
+      if (!other) continue;
+      if (other === hash) agreed += 1;
+      else mismatched += 1;
+    }
+    if (hostMax < 200 || guestMax < 200) throw new Error(`ticks did not advance host=${hostMax} guest=${guestMax}`);
+    if (agreed < 3 || mismatched) throw new Error(`state hashes diverged agreed=${agreed} mismatched=${mismatched} hostFrames=${hostLog.size} guestFrames=${guestLog.size}`);
+  }
 
   const beforeDrop = await probe(host.page);
   await guest.page.reload({ waitUntil: 'domcontentloaded' });
