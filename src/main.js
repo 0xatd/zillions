@@ -319,11 +319,11 @@ class App {
         return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
           && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
       },
-      onQuit: () => location.reload(),
+      onQuit: () => this._quitToMenu(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
-      onCampaignMap: () => this._openCampaignSelect(),
+      onCampaignMap: () => this._openOverworld(),
       onGuestPlay: () => this._playAsGuest(),
       onDailyOpen: () => this._openDaily(),
       onDailyPlay: () => this._startDaily(),
@@ -709,6 +709,13 @@ class App {
     orbitalGlobe.position.copy(cameraLocal(18, -36, -210));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
+    if (this._loadingZoom) {
+      this._loadZoom = Math.min(0.22, (this._loadZoom || 0) + 0.008);
+      orbitalGlobe.scale.setScalar(1 + this._loadZoom);
+    } else if (this._loadZoom) {
+      this._loadZoom = 0;
+      orbitalGlobe.scale.setScalar(1);
+    }
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
     const heroPos = cameraLocal(7.8, -4.5, -18);
     titleHero.position.copy(heroPos);
@@ -900,7 +907,7 @@ class App {
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
-    this._clearMenuBackdrop();
+    this._loadingZoom = true;
     if (!this.assetsLoaded) {
       this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
@@ -943,6 +950,7 @@ class App {
     }
     this._mountMatchView({ mode, level, snap, mp, heroKey, matchInbox });
     } catch (error) {
+      this._loadingZoom = false;
       this._finishMissionIntro();
       throw error;
     } finally {
@@ -952,6 +960,8 @@ class App {
 
   // Shared battlefield presentation for a live match and a replay.
   _mountMatchView({ mode, level, snap = null, mp = null, heroKey = null, matchInbox = null, replay = false }) {
+    this._loadingZoom = false;
+    this._clearMenuBackdrop();
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1935,13 +1945,85 @@ class App {
   }
 
   _restartOrReturn() {
-    // Any campaign run that belongs to a character returns to mission
-    // select, not the title screen.
-    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
-      try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
-      this.ui.shell.finishMission();
+    const game = this.game;
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      if (game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+        try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+      }
+      location.reload();
+      return;
     }
-    location.reload();
+    if (game && !game.over) {
+      const diff = game.diffKey || 'normal';
+      const hero = this.ui.selectedHero;
+      const mode = game.mode;
+      const level = game.levelId;
+      this._leaveSoloMatch();
+      this.ui.selectedMode = mode;
+      this.ui.selectedLevel = level;
+      this.startGame(diff, hero);
+      return;
+    }
+    const campaign = !!(game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile));
+    this._leaveSoloMatch();
+    if (campaign) this.ui.showOverworld();
+    else {
+      this.ui._playTab = 'campaign';
+      this.ui._showScreen('home');
+    }
+  }
+
+  _openOverworld() {
+    if (this.game && !this.game.over) return;
+    if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
+      this.ui.showCharacterCreator();
+      return;
+    }
+    this.ui.showOverworld();
+  }
+
+  // Solo returns drop the battlefield and rebuild the menu scene in place.
+  // A live room still reloads: WebRTC seats, the lockstep inbox, and the
+  // host's ready barrier are not safe to reconstruct mid-page.
+  _quitToMenu() {
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      location.reload();
+      return;
+    }
+    this._leaveSoloMatch();
+    this.ui._playTab = 'campaign';
+    this.ui._showScreen('home');
+  }
+
+  _leaveSoloMatch() {
+    this._loadingZoom = false;
+    this.paused = false;
+    this.missionIntro = null;
+    this.acc = 0;
+    this.replay = null;
+    this._netPumpStop();
+    this._clearWorldMeshes();
+    this._clearNodeMarkers();
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); this.terrain = null; }
+    if (this.fogOfWar) {
+      this.scene.remove(this.fogOfWar.mesh);
+      this.fogOfWar.mesh.geometry.dispose();
+      this.fogOfWar.material.dispose();
+      this.fogOfWar = null;
+    }
+    if (this.corpseMesh) this.corpseMesh.count = 0;
+    this.corpses = this.corpses || [];
+    this.corpses.length = 0;
+    for (const fx of this.blockFx || []) { this.scene.remove(fx.mesh); this._disposeObject3D(fx.mesh); }
+    this.blockFx = [];
+    this.hitFeedback?.clear?.();
+    this.game = null;
+    this.map = null;
+    this.netMode = false;
+    this.mpRole = null;
+    this.ui.hideMatchChrome();
+    this.ui.nav.leaveMatch('home');
+    this.showLoginBackdrop();
   }
 
   _retryMission() {
@@ -6692,9 +6774,13 @@ class App {
       // Dota grammar: Tab opens the hero library from anywhere in the menu.
       if (!this.game && e.key === 'Tab') {
         e.preventDefault();
-        const screen = document.querySelector('#screen-heroes');
-        if (screen && !screen.classList.contains('hidden')) this.ui._showScreen('main');
-        else this.ui._showScreen('heroes');
+        if (this.ui.nav.current().name === 'armory') this.ui.back();
+        else this.ui.showCharacterSheet('character');
+        return;
+      }
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'menu') {
+        e.preventDefault();
+        this.ui.back();
         return;
       }
       if (!this.game) return;
@@ -7989,6 +8075,7 @@ class App {
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
+    if (!this.game) this.ui.pollMenuPad();
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {

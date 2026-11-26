@@ -228,8 +228,8 @@ try {
   for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     assert.equal(await evaluate(`(() => {
-      window.__app.ui._showScreen('main');
-      const screen = document.querySelector('#screen-main');
+      window.__app.ui.showOverworld();
+      const screen = document.querySelector('#screen-overworld');
       screen.scrollTop = 0;
       return ['#chapter-map', '#chapter-next'].every(selector => {
         const button = document.querySelector(selector), r = button.getBoundingClientRect();
