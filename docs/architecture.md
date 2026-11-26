@@ -334,7 +334,7 @@ Run `node scripts/map-check.mjs --report` after a map-generation change.
 - Room actions show actionable errors and permit retry.
 - A missing lockstep window triggers an exact repair request.
 - A dropped peer shows per-player connection state.
-- A fatal frame-loop error stops the battlefield and shows a reload action.
+- A fatal frame-loop error stops a solo battlefield and shows a reload action. During co-op the siege keeps stepping and the next paint tries again.
 - A corrupt save returns the player to the menu.
 
 Do not hide these failures or continue with partial state.

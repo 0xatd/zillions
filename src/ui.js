@@ -3649,6 +3649,17 @@ export class UI {
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
+  setNetDebug(line) {
+    let el = this.root.querySelector('#netdebug');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'netdebug';
+      el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:80;max-width:92vw;padding:6px 8px;background:rgba(0,0,0,.78);color:#d7ffe4;font:12px/1.35 ui-monospace,monospace;pointer-events:none;white-space:pre-wrap';
+      this.root.appendChild(el);
+    }
+    el.textContent = line;
+  }
+
   setWaiting(on, text = '⏳ Syncing co-op…') {
     const el = this.root.querySelector('#waitind');
     if (!el) return;
@@ -4270,9 +4281,17 @@ export class UI {
     this._endReason = reason;
     this.pauseOpen = false;
     this.hideCoach();
-    const ov = this.root.querySelector('#overlay');
-    ov.classList.remove('hidden');
-    ov.innerHTML = `
+    // The menu lives inside #overlay. Replacing that node to show the result
+    // throws the lobby away, so Back to lobby has nothing to return to.
+    let layer = this.root.querySelector('#share-end');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'share-end';
+      layer.className = 'screen';
+      this.root.appendChild(layer);
+    }
+    layer.classList.remove('hidden');
+    layer.innerHTML = `
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${won ? '🏆 PLANET TAKEN' : '💀 THE SIEGE ENDED'}</h1>
         <p class="tagline">Exit: ${escapeHtml(reason)}</p>
@@ -4281,8 +4300,12 @@ export class UI {
           <button class="startbtn" id="b-lobby" type="button">Back to lobby</button>
         </div>
       </div>`;
-    ov.querySelector('#b-lobby').onclick = () => this.cb.onBackToLobby?.();
-    ov.querySelector('#b-share-retry').onclick = () => this.cb.onBackToLobby?.();
+    layer.querySelector('#b-lobby').onclick = () => this.cb.onBackToLobby?.();
+    layer.querySelector('#b-share-retry').onclick = () => this.cb.onBackToLobby?.();
+  }
+
+  hideShareMatchEnd() {
+    this.root.querySelector('#share-end')?.remove();
   }
 
   // ---------- online lobby rendering ----------

@@ -5,7 +5,7 @@ import {Game} from '../src/game.js';
 import {TerrainField} from '../src/terrain.js';
 import {levelById,SIM_DT} from '../src/config.js';
 import {stateHash} from '../src/lockstep-hash.js';
-import {adaptiveWindowTarget,consecutiveWindowCount,hasConsecutiveWindowBuffer,rememberWindow} from '../src/multiplayer-pacing.js';
+import {adaptiveWindowTarget,consecutiveWindowCount,guestLagWindows,hasConsecutiveWindowBuffer,hostPaceScale,rememberWindow} from '../src/multiplayer-pacing.js';
 
 // Execute the production App methods with transport/renderer boundaries
 // replaced. No source-string assertions: real Game snapshots and commands run.
@@ -17,7 +17,7 @@ class Peer {
  send(packet){this.sent.push(structuredClone(packet));this.deliver?.(structuredClone(packet));}
  destroy(){this.open=false;this.onClose?.();}
 }
-const deps={NetSession:Peer,SIM_DT,NET_STEP:2,NET_REDUNDANCY:4,NET_HISTORY:64,NET_SPECTATOR_BUFFER:1024,NET_PACE_SLOW:.94,NET_PACE_FAST:1.06,performance:{now:()=>clock},setTimeout:()=>0,clearTimeout:()=>{},adaptiveWindowTarget,consecutiveWindowCount,hasConsecutiveWindowBuffer,rememberWindow};
+const deps={NetSession:Peer,SIM_DT,NET_STEP:2,NET_REDUNDANCY:4,NET_HISTORY:64,NET_SPECTATOR_BUFFER:1024,NET_PACE_SLOW:.94,NET_PACE_FAST:1.06,performance:{now:()=>clock},setTimeout:()=>0,clearTimeout:()=>{},adaptiveWindowTarget,consecutiveWindowCount,guestLagWindows,hasConsecutiveWindowBuffer,hostPaceScale,rememberWindow};
 function method(name){
  const start=source.search(new RegExp(`^  (?:async )?${name}\\(`,'m'));assert.ok(start>=0,`method ${name} exists`);
  const rest=source.slice(start+1),next=rest.search(/\n  (?:async )?[A-Za-z_]\w*\(/);

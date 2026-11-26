@@ -55,7 +55,7 @@ import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
-import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
+import { adaptiveWindowTarget, consecutiveWindowCount, guestLagWindows, hasConsecutiveWindowBuffer, hostPaceScale, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
@@ -567,12 +567,22 @@ class App {
         exit: this._matchExitReason || '',
         coach: this._coach ? this._coach.index : null,
         button: this.ui.root?.querySelector?.('#s-start')?.textContent || '',
+        simFps: Math.round(this._simFps || 0),
+        renderFps: this._frameMs > 0 ? Math.round(1000 / this._frameMs) : 0,
+        syncing: !(this.ui.root?.querySelector?.('#waitind')?.classList.contains('hidden') ?? true),
+        hostFrame: this.mpRole === 'host' ? this.simFrame : (this._hostFrameSeen || 0),
+        guestFrame: this.mpRole === 'guest' ? this.simFrame : (this._guestReportedWindow || 0) * NET_STEP,
+        cmdSentFrame: this._cmdSentFrame ?? null,
+        cmdAppliedFrame: this._cmdAppliedFrame ?? null,
+        reason: this._netReason || this._stallReason || '',
       });
       globalThis.__zillionsOrder = (x, z) => {
         if (!this.game || this.mpRole === 'spectator') return;
         this.issue({ t: 'horder', p: this.myPlayer, x: Number(x) || 0, z: Number(z) || 0, k: 'move' });
       };
+      globalThis.__zillionsEndMatch = () => this._leaveOnlineMatch();
     }
+    this._netDebug = /(?:^|[?&])netdebug=1(?:&|$)/.test(location.search);
     requestAnimationFrame(() => this._ensurePresentation());
   }
 
@@ -2178,6 +2188,7 @@ class App {
     const boot = this._sharePageAt || 0;
     const packet = { t: 'cmd', c: cmd, n: nonce, boot };
     this._cmdsSent = (this._cmdsSent || 0) + 1;
+    this._cmdSentFrame = this.simFrame;
     if (this.net?.open || this.net?.relay) this.net.send(packet);
     else {
       this._pendingGuestCmds ??= [];
@@ -3253,9 +3264,22 @@ class App {
 
   _handleFrameError(error) {
     this._finishMissionIntro();
+    console.error('game frame failed', error);
+    // A paint error used to pause the match and tear down the sim pump. The
+    // guard then latched, so a 10 FPS tab that threw once never stepped again.
+    // Co-op keeps simulating. The next paint tries again.
+    if (this.netMode && this.game && !this.game.over) {
+      if (this.frameGuard) this.frameGuard.failed = false;
+      this._netReason = `render error: ${error?.message || error}`;
+      this._simKick?.();
+      if (!this._frameErrorBanner) {
+        this._frameErrorBanner = true;
+        this.ui.showBanner('The picture hit an error. The siege is still running.', 'bad', 4000);
+      }
+      return;
+    }
     this.paused = true;
     this._netPumpStop();
-    console.error('game frame failed', error);
     this.ui.showBanner('The battlefield stopped after an error. Reload to continue.', 'bad', 15000);
   }
 
@@ -3350,6 +3374,7 @@ class App {
     }
     else if (m.t === 'snap') this._sendGuestResync(idx);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
+    else if (m.t === 'pace') this._noteGuestWindow(this.peers[idx]?.shareId || `peer:${idx}`, m.w);
     else if (m.t === 'chat') {
       this.ui.gameChatAdd(m);
       this._broadcast(m);
@@ -3389,10 +3414,8 @@ class App {
   }
 
   _checkGuestHash(w, h, idx) {
-    if (this._shareCode) {
-      const hostW = Math.floor((this.simFrame || 0) / NET_STEP);
-      this._guestLagWindows = Math.max(0, hostW - (Number(w) || 0));
-    }
+    const paceId = this.peers[idx]?.shareId || (idx >= 0 ? `peer:${idx}` : '');
+    if (paceId) this._noteGuestWindow(paceId, w);
     const mine = this.hashes.local.get(w);
     if (mine === undefined || mine === h || !this.game || this.game.over) return;
     const decision = desyncRecovery({ attempts: this._desyncAttempts || [], now: Date.now() });
@@ -3540,7 +3563,17 @@ class App {
     this._matchExitReason = reason;
     console.warn('match exit', { reason, code });
     const finished = previous?.reason === 'victory' || previous?.reason === 'player quit'
-      || String(previous?.reason || '').startsWith('defeat:');
+      || String(previous?.reason || '').startsWith('defeat:')
+      || /ended the match/i.test(String(previous?.reason || ''));
+    if (finished) {
+      const reason = previous.reason;
+      this._shareLobby = { ...this._shareLobby, started: false, matchEnd: { won: false, reason } };
+      this._matchEndShown = true;
+      this.ui._shareMatch = true;
+      this.ui._endReason = reason;
+      this.ui.showShareMatchEnd({ won: false, reason });
+      return;
+    }
     const save = this._loadSave();
     if (!finished && save?.shareCode === code && save.snap && isCompatibleSnapshot(save.snap)) {
       try {
@@ -3884,6 +3917,7 @@ class App {
       const view = shareSeatState(seat);
       return {
         seat: index + 1,
+        id: seat.id,
         name: seat.name,
         hero: seat.hero,
         host: !!seat.host,
@@ -4382,8 +4416,12 @@ class App {
       this._shareSawPong.add(message.from);
       if (this.mpRole === 'host') this._shareConsiderLink(message.from);
     }
+    else if (message.t === 'pace' && this.mpRole === 'host' && message.from) {
+      this._noteGuestWindow(message.from, message.w);
+    }
     else if (message.t === 'hash' && this.mpRole === 'host' && message.from) {
       const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
+      this._noteGuestWindow(message.from, message.w);
       this._checkGuestHash(message.w, message.h, idx);
     }
     else if (message.t === 'guestCmd' && this.mpRole === 'host' && message.from) {
@@ -4593,6 +4631,7 @@ class App {
   }
 
   _returnToShareLobby() {
+    this.ui.hideShareMatchEnd?.();
     this._netPumpStop();
     this.netMode = false;
     this.paused = true;
@@ -4677,6 +4716,13 @@ class App {
     if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
     const guestName = this._shareGuestLabel(message.name, message.from);
     if (message.rejoin) {
+      // A reload stops acks while the battlefield rebuilds. That is not a
+      // guest who has given up, so the lag timer starts over.
+      this._forgetGuestWindow(message.from);
+      this._guestLagSince = 0;
+      this._guestLagSnapped = false;
+      this._hostEaseSince = 0;
+      this._guestProgressAt = Date.now();
       this._shareSeatedAt ??= new Map();
       this._shareSeatedAt.set(message.from, Date.now());
       this._shareSawPing?.delete(message.from);
@@ -4937,6 +4983,7 @@ class App {
 
   _dropShareGuest(id, { ban = false } = {}) {
     if (!this._shareLobby) return;
+    if (ban) this._forgetGuestWindow(id);
     const live = !!(this.netMode && this.game && !this.game.over);
     // A disconnect during the siege leaves the hero in the sim so the guest
     // can rejoin. Remove is different: the seat goes immediately and that
@@ -4982,16 +5029,21 @@ class App {
   }
 
   _failShare(reason) {
-    if (reason !== 'removed' && this.netMode && this.game && !this.game.over) {
+    if (reason !== 'removed' && reason !== 'behind' && this.netMode && this.game && !this.game.over) {
       this._noteMatchExit(`share join failed during a match: ${reason}`);
       return;
     }
     if (this._shareFailed) return;
     this._shareFailed = true;
+    this.ui.hideShareMatchEnd?.();
+    this._netPumpStop();
+    this.netMode = false;
+    if (this.game) this.game.over = true;
     this._teardownShare();
     this.mpRole = null;
     const copy = shareFailureCopy(reason);
-    this.ui.showShareNotice({ title: reason === 'removed' ? 'Removed' : 'Could not join', copy, tone: 'bad' });
+    const title = reason === 'removed' ? 'Removed' : reason === 'behind' ? 'Left behind' : 'Could not join';
+    this.ui.showShareNotice({ title, copy, tone: 'bad' });
   }
 
   _leaveShareLink() {
@@ -5127,6 +5179,7 @@ class App {
       const box = this._resyncing ? this._resyncBuffer : this.inbox;
       const next = this._resyncing ? 0 : this.game ? Math.ceil(this.simFrame / NET_STEP) : 0;
       if (m.w >= next) box.set(m.w, m.c);
+      if (Number.isFinite(m.w)) this._hostFrameSeen = Math.max(this._hostFrameSeen || 0, m.w * NET_STEP);
       // Redundant copies of recent windows ride along in every packet, so a
       // late or lost packet no longer stalls the sim — a later one fills it.
       for (const [pw, pc] of m.p || []) {
@@ -5167,6 +5220,7 @@ class App {
           this.simFrame = m.frame;
           this.inbox = buf;
           this._resyncCatchup = true;
+          if (this._shareCode) this._sharePublish?.({ t: 'pace', w: Math.floor(this.simFrame / NET_STEP) });
           this.netPrimed = false;
           this.desynced = false;
           this._desyncAttempts = [];
@@ -5301,6 +5355,11 @@ class App {
     if (this._advancing || !this.netMode || !this.game || this.paused || this.game.over) return;
     this._advancing = true;
     try { this._advanceNetSimBody(); }
+    catch (error) {
+      console.error('lockstep step failed', error);
+      this._netReason = `sim error: ${error?.message || error}`;
+      this.acc = Math.min(this.acc || 0, SIM_DT);
+    }
     finally { this._advancing = false; }
   }
 
@@ -5314,13 +5373,21 @@ class App {
     const now = performance.now();
     let dt = Math.min((now - (this._netClockLast ?? now)) / 1000, 0.25);
     this._netClockLast = now;
-    // A share guest that is still loading, or just slower, reports hashes for
-    // old windows. Running the host at full speed leaves that guest minutes
-    // behind, so its clicks sit in windows it has not reached. Ease off until
-    // the guest is within about two thirds of a second.
+    // Ease only while a fresh ack says the guest is actually behind, and only
+    // for a few seconds. A hash every 30 windows used to look like permanent
+    // lag and held the whole siege at 70%.
     if (this.mpRole === 'host' && this._shareCode) {
-      const lag = this._guestLagWindows || 0;
-      if (lag > 10) dt *= Math.max(0.15, 10 / lag);
+      const hostWindow = Math.floor(this.simFrame / NET_STEP);
+      const lag = guestLagWindows(hostWindow, this._guestReportedWindow || 0);
+      this._guestLagWindows = lag;
+      const reportAge = this._guestProgressAt ? Date.now() - this._guestProgressAt : Infinity;
+      const fresh = reportAge < 800 && (this._guestReportedWindow || 0) > 0;
+      const easeAge = this._hostEaseSince ? Date.now() - this._hostEaseSince : 0;
+      const pace = hostPaceScale({ lagWindows: lag, reportFresh: fresh, easeAgeMs: easeAge });
+      if (pace.easing) {
+        if (!this._hostEaseSince) this._hostEaseSince = Date.now();
+        dt *= pace.scale;
+      } else if (lag <= 10 || !fresh) this._hostEaseSince = 0;
     }
 
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
@@ -5336,11 +5403,10 @@ class App {
     const guestSide = this.mpRole === 'guest' || this.mpRole === 'spectator';
     const banked = guestSide ? this._windowsBuffered() : 0;
     const behind = guestSide && banked > this.netBufferTarget;
-    // One slice can absorb about a second and a half of backlog. More than
-    // that yields, so a missing window can still be requested.
-    const catchupSteps = behind ? Math.min(4, Math.max(NET_STEP * 2, banked * NET_STEP)) : 0;
     if (guestSide) {
-      if (behind) dt = Math.max(dt, SIM_DT * catchupSteps);
+      // Spend the backlog, not a couple of frames. The time budget below is
+      // what yields to rendering; the remainder stays queued for the next turn.
+      if (behind) dt = Math.max(dt, SIM_DT * Math.min(banked * NET_STEP, 120));
       else if (!this._shareCode && banked < this.netBufferTarget && banked > 0) dt *= NET_PACE_SLOW;
       else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
     }
@@ -5349,8 +5415,17 @@ class App {
     let steps = 0;
     let stalled = false;
     let missingWindow = -1;
-    const cap = this.mpRole === 'host' ? 10 : (behind ? catchupSteps : 10);
+    const cap = 120;
+    const turnStart = performance.now();
+    // A 10 FPS paint is ~100ms. The wall clock earned about three sim steps
+    // in that time. A 12ms budget on a throttled CPU finishes one step and
+    // then yields the rest of the frame to rendering, so the sim never gets
+    // above the paint rate. Take the steps the clock already earned.
+    const owed = Math.max(1, Math.ceil(this.acc / SIM_DT));
+    const minSteps = Math.min(behind ? 4 : 3, Math.max(behind ? 2 : 1, owed));
+    const budgetMs = 12;
     while (this.acc >= SIM_DT && steps < cap) {
+      if (steps >= minSteps && performance.now() - turnStart >= budgetMs) break;
       if (this.simFrame % NET_STEP === 0) {
         const w = this.simFrame / NET_STEP;
         let bundle;
@@ -5369,7 +5444,11 @@ class App {
           rememberWindow(this._windowHistory, w, bundle, NET_HISTORY);
         } else {
           bundle = this.inbox.get(w);
-          if (!bundle) {
+          // A key with no commands is not a buffered window. Leaving it in
+          // the map made has() true and get() empty, so the guest stalled
+          // forever on a hole it already "had".
+          if (!Array.isArray(bundle)) {
+            if (this.inbox.has(w)) this.inbox.delete(w);
             // A real gap. Re-arm the buffer so we come back with margin
             // instead of running window-to-window and stuttering forever.
             stalled = true;
@@ -5392,8 +5471,17 @@ class App {
             this._resyncCatchup = false;
           }
           this.inbox.delete(w);
+          // The host must hear the window that was just applied. A state hash
+          // every 30 windows is too coarse, and it was being read as lag.
+          if (this.mpRole === 'guest' && this._shareCode && w % 2 === 0) {
+            this._sharePublish?.({ t: 'pace', w });
+            try { this.net?.send?.({ t: 'pace', w }); } catch { /* the share publish is enough */ }
+          }
         }
-        for (const c of bundle) this.game.exec(c);
+        for (const c of bundle) {
+          if (c && (c.t === 'horder' || c.t === 'hdir' || c.t === 'hhalt')) this._cmdAppliedFrame = this.simFrame;
+          this.game.exec(c);
+        }
         if (w > 0 && w % 30 === 0) {
           const hsh = this._stateHash();
           this._hashLog ??= [];
@@ -5411,11 +5499,17 @@ class App {
       this.acc -= SIM_DT;
       steps++;
     }
-    if (steps >= cap || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
+    // A stall must not spin. A backlog must. Throwing the clock away here is
+    // what left a 10 FPS tab unable to drain the windows it already had.
+    if (stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
+    this._noteSimSteps?.(steps);
     this.netStallT = stalled ? this.netStallT + dt : 0;
     this._trackStall?.(stalled, missingWindow);
     const stallAge = this._stallSince ? performance.now() - this._stallSince : 0;
-    const visibleStall = stalled && (this.netStallT > 0.25 || stallAge > 250);
+    // A one-window wait is normal at the edge of the buffer. The banner is for
+    // a hole that has actually sat there, not for every packet that is one
+    // tick late. Otherwise "Syncing co-op…" flaps on a 10 FPS guest.
+    const visibleStall = stalled && stallAge > 2000;
     const stallText = this._shareAwaitingGo
       ? '⏳ Starting… waiting for players'
       : stallAge >= 10000
@@ -5425,19 +5519,118 @@ class App {
           : '⏳ Syncing co-op…';
     this.ui.setWaiting(visibleStall, stallText);
     this._refreshDiagnosticsUI(visibleStall);
-    if (!stalled && behind && this._windowsBuffered() > this.netBufferTarget) this._scheduleNetDrain();
+    this._policeGuestLag?.();
+    const stillBehind = !stalled && ((this.acc >= SIM_DT) || (guestSide && this._windowsBuffered() > this.netBufferTarget));
+    if (stillBehind) this._simKick?.();
+    if (this._netDebug) this._paintNetDebug();
   }
 
-  // A backlog drains on the next turn, a couple of windows at a time. Doing
-  // the whole bank inside the message that delivered it freezes a slow tab
-  // for several seconds, which is the click the player is waiting on.
+  // The render loop must not be what steps the world. A MessageChannel turn
+  // yields so a frame can paint, then keeps going until the sim clock and the
+  // window backlog are caught up. The worker only wakes that loop.
   _scheduleNetDrain() {
-    if (this._resyncing || this._netDrain) return;
-    this._netDrain = true;
-    setTimeout(() => {
-      this._netDrain = false;
-      this._advanceNetSim();
-    }, 0);
+    this._simKick?.();
+  }
+
+  _paintNetDebug() {
+    if (!this._netDebug) return;
+    const render = this._frameMs > 0 ? Math.round(1000 / this._frameMs) : 0;
+    const sim = Math.round(this._simFps || 0);
+    const host = this.mpRole === 'host' ? this.simFrame : (this._hostFrameSeen || 0);
+    const guest = this.mpRole === 'guest' ? this.simFrame : (this._guestReportedWindow || 0) * NET_STEP;
+    const sent = this._cmdSentFrame ?? '–';
+    const applied = this._cmdAppliedFrame ?? '–';
+    const backlog = this.mpRole === 'guest' && this.inbox ? this._windowsBuffered() : 0;
+    const reason = this._netReason || this._stallReason || '–';
+    this.ui.setNetDebug(
+      `host ${host}   guest ${guest}\ncmd sent ${sent} → applied ${applied}\nbacklog ${backlog}   sim ${sim}/s   render ${render}/s\n${reason}`,
+    );
+  }
+
+  _noteSimSteps(steps) {
+    if (!steps) return;
+    const now = performance.now();
+    this._simStepCount = (this._simStepCount || 0) + steps;
+    if (!this._simRateAt) this._simRateAt = now;
+    const span = now - this._simRateAt;
+    if (span < 500) return;
+    this._simFps = (this._simStepCount * 1000) / span;
+    this._simStepCount = 0;
+    this._simRateAt = now;
+  }
+
+  _noteGuestWindow(id, w) {
+    const reported = Number(w) || 0;
+    if (!id || reported <= 0) return;
+    this._guestWindows ??= new Map();
+    const prev = this._guestWindows.get(id) || 0;
+    if (reported <= prev) return;
+    this._guestWindows.set(id, reported);
+    let slowest = Infinity;
+    for (const value of this._guestWindows.values()) slowest = Math.min(slowest, value);
+    this._guestReportedWindow = slowest;
+    if (slowest > (this._guestProgressWindow || 0)) {
+      this._guestProgressWindow = slowest;
+      this._guestProgressAt = Date.now();
+    }
+  }
+
+  _forgetGuestWindow(id) {
+    if (id) this._guestWindows?.delete(id);
+    if (!this._guestWindows?.size) {
+      this._guestReportedWindow = 0;
+      this._guestLagWindows = 0;
+      this._guestProgressWindow = 0;
+      this._guestProgressAt = 0;
+      return;
+    }
+    let slowest = Infinity;
+    for (const value of this._guestWindows.values()) slowest = Math.min(slowest, value);
+    this._guestReportedWindow = slowest;
+  }
+
+  _policeGuestLag() {
+    if (this.mpRole !== 'host' || !this._shareCode || !this._guestReportedWindow) return;
+    const lag = guestLagWindows(Math.floor(this.simFrame / NET_STEP), this._guestReportedWindow);
+    this._guestLagWindows = lag;
+    const now = Date.now();
+    if (this._guestReportedWindow > (this._guestProgressWindow || 0)) {
+      this._guestProgressWindow = this._guestReportedWindow;
+      this._guestProgressAt = now;
+    }
+    // A guest who is still acking is chewing the backlog. Rebuilding the
+    // battlefield on top of that takes longer than the backlog and freezes
+    // their clicks. Snapshot only a guest who has stopped moving forward.
+    const quiet = now - (this._guestProgressAt || now);
+    if (lag < 90 || quiet < 4000) {
+      this._guestLagSince = 0;
+      this._guestLagSnapped = false;
+      return;
+    }
+    if (!this._guestLagSince) this._guestLagSince = now;
+    const age = now - this._guestLagSince;
+    if (age >= 5000 && !this._guestLagSnapped) {
+      this._guestLagSnapped = true;
+      this._guestLagSnappedAt = now;
+      this._netReason = 'guest far behind — snapshot sent';
+      for (let idx = 0; idx < this.peers.length; idx++) {
+        if (this.peers[idx]?.shareId) this._sendGuestResync(idx);
+      }
+      return;
+    }
+    const frozen = now - (this._guestProgressAt || now) > 30000;
+    if (this._guestLagSnapped && now - (this._guestLagSnappedAt || now) >= 30000 && frozen) {
+      this._netReason = 'guest dropped — still behind after a snapshot';
+      for (const peer of [...this.peers]) {
+        if (!peer?.shareId) continue;
+        this._forgetGuestWindow(peer.shareId);
+        this._sharePublish({ t: 'reject', to: peer.shareId, reason: 'behind' });
+        try { peer.destroy(); } catch { /* already closed */ }
+      }
+      this._guestLagSince = 0;
+      this._guestLagSnapped = false;
+      this._guestReportedWindow = 0;
+    }
   }
 
   // Consecutive windows banked ahead of the guest's next lockstep boundary.
@@ -5457,20 +5650,38 @@ class App {
   // Worker timers keep firing in backgrounded tabs where window timers are
   // throttled, so guests no longer freeze because the host alt-tabbed.
   _netPumpStart() {
+    this._netPumpStop();
+    // MessageChannel turns are not timer-clamped. A 10 FPS render can paint
+    // between them while the sim keeps stepping.
+    this._simChannel = new MessageChannel();
+    this._simChannel.port1.onmessage = () => {
+      this._simPumping = false;
+      this._advanceNetSim();
+    };
+    this._simKick = () => {
+      if (this._simPumping || !this._simChannel) return;
+      this._simPumping = true;
+      this._simChannel.port2.postMessage(0);
+    };
     const periodMs = Math.round(SIM_DT * NET_STEP * 1000);
-    const tick = () => this._advanceNetSim();
+    const wake = () => this._simKick?.();
     try {
       const src = `setInterval(() => postMessage(0), ${periodMs});`;
       this._netWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
-      this._netWorker.onmessage = tick;
+      this._netWorker.onmessage = wake;
     } catch {
-      this._netPumpTimer = setInterval(tick, periodMs);
+      this._netPumpTimer = setInterval(wake, periodMs);
     }
+    this._simKick();
   }
 
   _netPumpStop() {
     if (this._netWorker) { try { this._netWorker.terminate(); } catch { /* gone */ } this._netWorker = null; }
     if (this._netPumpTimer) { clearInterval(this._netPumpTimer); this._netPumpTimer = null; }
+    this._simKick = null;
+    this._simPumping = false;
+    try { this._simChannel?.port1.close(); this._simChannel?.port2.close(); } catch { /* already closed */ }
+    this._simChannel = null;
   }
 
   // ---------------- scene setup ----------------
@@ -5752,7 +5963,49 @@ class App {
     }
   }
 
+  _endShareMatchForEveryone() {
+    if (this.mpRole !== 'host' || !this._shareCode) return;
+    const reason = 'The host ended the match for everyone.';
+    this._deliberateEnd = true;
+    this._noteMatchExit(reason, { banner: false });
+    this._announceMatchEnd(false, reason);
+    this._matchEndShown = true;
+    this._netPumpStop();
+    this.paused = true;
+    if (this.game) this.game.over = true;
+    if (this._shareLobby) {
+      this._shareLobby = {
+        ...this._shareLobby,
+        started: false,
+        endedReason: 'host_ended',
+        matchEnd: { won: false, reason },
+      };
+      this._sharePublishLobby();
+    }
+    this.ui._shareMatch = true;
+    this.ui._endReason = reason;
+    this.ui.hidePause();
+    this.ui.showShareMatchEnd({ won: false, reason });
+  }
+
   async _leaveOnlineMatch() {
+    if (this._shareCode && this.netMode) {
+      if (this.mpRole === 'host') this._endShareMatchForEveryone();
+      else {
+        this._noteMatchExit('guest left the match', { banner: false });
+        this._sharePublish({ t: 'leave', boot: this._sharePageAt || 0 });
+        this._netPumpStop();
+        this.netMode = false;
+        if (this.game) this.game.over = true;
+        this.ui.hidePause();
+        this.ui.showShareNotice({
+          title: 'Left the siege',
+          copy: 'Your hero keeps fighting. Open the invite again if the host is still playing.',
+          tone: 'bad',
+        });
+      }
+      return;
+    }
     if (!this.lobby?.game || !this.netMode) return location.reload();
     try {
       if (this.mpRole === 'host') {
@@ -9494,12 +9747,16 @@ class App {
   }
 
   frame() {
+    // Wake the sim before any painting. A later throw in the picture must
+    // not be what decides whether the siege advanced this frame.
+    if (this.netMode && this.game && !this.paused && !this.game.over && !this.replay) this._simKick?.();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const hit = tickHitStop(this._hitFeel, dt);
     this._hitFeel = { hold: hit.hold, gap: hit.gap };
     this._hitStop = hit.hold;
     this._presentHold = hit.present;
     this._frameMs = this._frameMs * 0.88 + dt * 1000 * 0.12;
+    if (this._netDebug) this._paintNetDebug();
     const t = this.clock.elapsedTime;
     this._autoTuneQuality(dt);
     this._refreshDiagnosticsUI(false);
@@ -9538,9 +9795,11 @@ class App {
         const simStarted = performance.now();
         let simTicks = 0;
         if (this.netMode) {
-          const before = this.simFrame;
-          this._advanceNetSim();
-          simTicks = Math.max(0, this.simFrame - before);
+          // A painted frame wakes the sim. The pump then steps on its own
+          // turns until the clock is caught up, so 10 FPS of rendering is not
+          // 10 sim frames per second. The worker covers a hidden tab.
+          this._simKick?.();
+          simTicks = 0;
         } else {
           this.acc += dt * this.speed;
           let steps = 0;

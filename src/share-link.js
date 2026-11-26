@@ -438,6 +438,7 @@ export function shareFailureCopy(reason) {
     case 'host_left': return 'The host left this siege.';
     case 'started': return 'This siege has already started. Friends join before the host launches, not mid-fight.';
     case 'removed': return 'The host removed you.';
+    case 'behind': return 'You fell too far behind the siege. The host is still playing.';
     default: return 'Could not join this siege.';
   }
 }
