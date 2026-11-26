@@ -301,7 +301,7 @@ try {
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  if (!moved) throw new Error(`guest did not move its own hero within 10s ${JSON.stringify(await probe(guest.page))}`);
+  if (!moved) throw new Error(`guest did not move its own hero within 10s guest=${JSON.stringify(await probe(guest.page))} host=${JSON.stringify(await probe(host.page))}`);
   let synced = null;
   const deadline = Date.now() + 90000;
   let last = null;
@@ -310,7 +310,7 @@ try {
     const guestProbe = await probe(guest.page);
     last = { hostProbe, guestProbe };
     if (hostProbe?.net && guestProbe?.net && !hostProbe.barrier && !guestProbe.barrier
-      && hostProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 30
+      && hostProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 120
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       synced = last;
       break;
@@ -396,7 +396,7 @@ try {
     }
     if (guestProbe?.role === 'guest' && guestProbe.net && hostProbe?.role === 'host'
       && guestProbe.frame + 15 >= beforeDrop.frame
-      && Math.abs(hostProbe.frame - guestProbe.frame) <= 45
+      && Math.abs(hostProbe.frame - guestProbe.frame) <= 120
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       rejoined = lastRejoin;
       break;

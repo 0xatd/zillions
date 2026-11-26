@@ -554,6 +554,8 @@ class App {
         resyncMs: this._resyncing ? Math.round(performance.now() - (this._resyncStarted || performance.now())) : 0,
         self: this._shareSelf || '',
         roster: this._shareLobby ? shareRoster(this._shareLobby, this._shareSelf) : [],
+        cmdsSent: this._cmdsSent || 0,
+        cmdsIn: this._cmdsIn || 0,
         live: !!(this.netMode && this.game && !this.game.over),
         over: !!this.game?.over,
         exit: this._matchExitReason || '',
@@ -2151,19 +2153,49 @@ class App {
     if (this.mpRole === 'spectator') return;
     if (!this.netMode) { this.game.exec(cmd); return; }
     if (this.mpRole === 'host') this.outbox.push(cmd);
-    else if (this.net?.open || this.net?.relay) this.net.send({ t: 'cmd', c: cmd });
+    else this._sendGuestCmd(cmd);
+  }
+
+  // The link peer is the lockstep path. A second copy on the share channel
+  // covers a hand that was replaced or a dropped link packet. The nonce makes
+  // the two copies apply once.
+  _sendGuestCmd(cmd) {
+    const nonce = (this._cmdNonce = (this._cmdNonce || 0) + 1);
+    const packet = { t: 'cmd', c: cmd, n: nonce };
+    this._cmdsSent = (this._cmdsSent || 0) + 1;
+    if (this.net?.open || this.net?.relay) this.net.send(packet);
     else {
       this._pendingGuestCmds ??= [];
-      this._pendingGuestCmds.push(cmd);
+      this._pendingGuestCmds.push(packet);
     }
+    if (this._shareCode) this._sharePublish({ t: 'guestCmd', c: cmd, n: nonce });
+  }
+
+  _acceptGuestCmd(from, raw, nonce, knownIdx = -1) {
+    const key = nonce ? `${from || knownIdx}:${nonce}` : '';
+    if (key) {
+      this._cmdSeen ??= new Set();
+      if (this._cmdSeen.has(key)) return;
+      this._cmdSeen.add(key);
+      if (this._cmdSeen.size > 400) this._cmdSeen.delete(this._cmdSeen.values().next().value);
+    }
+    let idx = knownIdx;
+    if (idx < 0 && from) idx = this.peers.findIndex((peer) => peer.shareId === from);
+    if (idx < 0) return;
+    const command = guestCommand(raw, idx + 1, this.game?.heroes.length || 0);
+    if (!command) return;
+    this.guestCmdQueues[idx] ??= [];
+    this.guestCmdQueues[idx].push(command);
+    this._cmdsIn = (this._cmdsIn || 0) + 1;
   }
 
   _flushGuestCmds() {
     const queued = this._pendingGuestCmds || [];
     this._pendingGuestCmds = [];
-    for (const cmd of queued) {
-      if (this.mpRole === 'host') this.outbox.push(cmd);
-      else this.net?.send?.({ t: 'cmd', c: cmd });
+    for (const packet of queued) {
+      if (packet?.t === 'cmd') this.net?.send?.(packet);
+      else if (this.mpRole === 'host') this.outbox.push(packet);
+      else this.net?.send?.({ t: 'cmd', c: packet });
     }
   }
 
@@ -3281,10 +3313,7 @@ class App {
         this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
       }
     }
-    else if (m.t === 'cmd') {
-      const command = guestCommand(m.c, idx + 1, this.game?.heroes.length || 0);
-      if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
-    }
+    else if (m.t === 'cmd') this._acceptGuestCmd(this.peers[idx]?.shareId, m.c, m.n, idx);
     else if (m.t === 'needWindow') {
       const peer = this.peers[idx];
       if (!peer) return;
@@ -4292,6 +4321,9 @@ class App {
       this._shareSawPong ??= new Set();
       this._shareSawPong.add(message.from);
       if (this.mpRole === 'host') this._shareConsiderLink(message.from);
+    }
+    else if (message.t === 'guestCmd' && this.mpRole === 'host' && message.from) {
+      this._acceptGuestCmd(message.from, message.c, message.n);
     }
     else if (message.t === 'link' && message.to === this._shareSelf) {
       this._shareChunks ??= new Map();
