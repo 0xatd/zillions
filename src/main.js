@@ -6298,19 +6298,24 @@ class App {
         attackPulse = Math.sin(p * Math.PI);
         if (rec.attack.t <= 0) rec.attack = null;
       }
+      if(u.hero)attackPulse=u.attack ? -.45*(1-u.attack.t/u.attack.duration) : Math.min(1,(u.attackRecovery||0)/.24);
       for (const cue of ['hit', 'cast']) {
         if (!rec[cue]) continue;
         rec[cue].t -= dt;
         if (rec[cue].t <= 0) rec[cue] = null;
       }
       const cue = rec.hit || rec.cast || rec.attack;
-      const cuePulse = cue ? Math.sin(clamp(1 - cue.t / cue.dur, 0, 1) * Math.PI) : 0;
+      const cuePulse = u.hero && !rec.hit && !rec.cast ? Math.max(0,attackPulse) : cue ? Math.sin(clamp(1 - cue.t / cue.dur, 0, 1) * Math.PI) : 0;
       const artState = unitArtState(u, {
         hitT: rec.hit?.t, castT: rec.cast?.t, attackT: rec.attack?.t,
       });
       const pose = unitPose(artState, t * (artState === 'run' ? 10 : 1.8) + u.id, {
         pulse: cuePulse, melee: attackKind === 'melee',
       });
+      if(u.hero && u.attack && !rec.hit && !rec.cast){
+        const prep=1-u.attack.t/u.attack.duration;
+        Object.assign(pose,{y:0,z:-.1*prep,pitch:.18*prep,roll:-.08*prep});
+      }
       const weaponParts = rec.mesh.userData.weaponParts || [];
       for (const part of weaponParts) {
         const rp = part.userData.restPos;
