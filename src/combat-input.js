@@ -48,8 +48,8 @@ export function impactCue(event) {
   if (!event || typeof event !== 'object') return null;
   if (event.type === 'zdeath') {
     return {
-      shake: event.big ? 0.2 : 0.06,
-      hitStop: event.big ? 0.07 : 0.045,
+      shake: event.big ? 0.2 : 0,
+      hitStop: event.big ? 0.07 : 0,
       sample: event.big ? 'heavy' : 'hit',
     };
   }

@@ -925,7 +925,7 @@ export class Game {
       const closest = live.sort((a, b) => dist2(a.x, a.z, site.x, site.z) - dist2(b.x, b.z, site.x, site.z))[0];
       this.firstSiege.nestId = closest?.id ?? null;
       for (const nest of live) {
-        nest.musterT = nest === closest ? 24 : Math.max(nest.musterT, 38 + nest.id * 3);
+        nest.musterT = nest === closest ? 10 : Math.max(nest.musterT, 38 + nest.id * 3);
         if (this.dailyMods?.has('eager_nests')) nest.musterT *= 0.8;
       }
     }
@@ -964,13 +964,13 @@ export class Game {
       const nest = this.nests[this.firstSiege.nestId];
       return {
         title: `FIRST SIEGE · ${Math.max(0, Math.ceil(nest?.musterT || 0))}s`,
-        detail: 'The marked hive is mustering walkers for your city. Prepare the nearest gate.',
+        detail: 'Walkers screen a brute and acid spitters. Prepare the marked approach.',
         nest,
       };
     }
     if (this.firstSiege.stage === 'defend') return {
       title: `DEFEND THE CITY · ${this.firstSiege.waveIds.length} remain`,
-      detail: 'Gold contacts mark the wave in sight on your minimap. Protect the Keep.',
+      detail: 'Pick off the spitters. Leave the brute’s orange smash ring. Gold contacts mark this wave.',
     };
     return null;
   }
@@ -2181,7 +2181,14 @@ export class Game {
       }
     }
     const before = new Set(this.zombies.map((z) => z.id));
-    spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
+    if (firstSiege) {
+      // A readable mixed encounter: a screen, ranged pressure and one committed
+      // heavy attack. Normal hive mixes hide these roles until much later.
+      const scale = hordeCountMult(this.diff.mult) * coopMult;
+      spawned += this._spawnHorde(Math.max(6, Math.round(12 * scale)), [nest.id], { walker: 1 });
+      spawned += this._spawnHorde(Math.max(1, Math.round(2 * scale)), [nest.id], { spitter: 1 });
+      spawned += this._spawnHorde(Math.max(1, Math.round(coopMult)), [nest.id], { brute: 1 });
+    } else spawned += this._spawnHorde(Math.max(0, fromNest), [nest.id], w.types);
     if (firstSiege) {
       for (const zombie of this.zombies) if (!before.has(zombie.id)) this.firstSiege.waveIds.push(zombie.id);
       this.firstSiege.stage = 'defend';

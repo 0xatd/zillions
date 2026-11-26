@@ -47,7 +47,7 @@ import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { normalizeQualityChoice, probeGpuSignals, resolveGraphics, stepDownTier } from './graphics-quality.js';
 import { mergeStaticMeshes } from './static-batch.js';
-import { UnitImpostors, cameraFrustum, sphereVisible } from './unit-impostors.js';
+import { UnitImpostors, cameraFrustum, sphereVisible, combatSilhouette } from './unit-impostors.js';
 import { cullInstances, rememberInstances } from './instance-cull.js';
 import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
@@ -5296,7 +5296,7 @@ class App {
       if (cull && !sphereVisible(this._frustum, zb.x, ground + 0.8, zb.z, 1.5 * s0)) continue;
       const dx = zb.x - this.focus.x;
       const dz = zb.z - this.focus.z;
-      if (this._impostorOpen && lod > 0 && (dx * dx + dz * dz) > lod * lod) {
+      if (this._impostorOpen && lod > 0 && !combatSilhouette(zb, this.myHero()) && (dx * dx + dz * dz) > lod * lod) {
         const yaw = Math.atan2(zb.dirX, zb.dirZ);
         this.impostors.write(zb.x, ground, zb.z, yaw, s0, s0, s0, zb.def.color || 0x9aa87a);
         continue;
@@ -6708,6 +6708,7 @@ class App {
           e.preventDefault();
           const slot = castSlot(act, isHeld(binds, this.keys, 'second_bar'));
           if (this.controlMode === 'fight' && slot != null) this.tryCast(slot);
+          else if (slot != null) this.ui.showBanner(`Press ${keyLabel(binds.build_mode)} for Fight mode, then use your ability.`, 'info', 1800);
           break;
         }
         case 'attack_move':
@@ -6861,7 +6862,12 @@ class App {
     if (!point) return;
     const q = quantizeOrder(point.x, point.z);
     const cmd = { t: 'horder', p: this.myPlayer, x: q.x, z: q.z, k: order.k };
-    if (order.k === 'attack' && picked.enemy) cmd.id = picked.unit.id;
+    if (order.k === 'attack') {
+      // An explicit attack order is an unambiguous combat intent. Do not leave
+      // the player paying for a plot with their abilities silently disabled.
+      if (this.controlMode !== 'fight') this.toggleControlMode();
+      if (picked.enemy) cmd.id = picked.unit.id;
+    }
     this.issue(cmd);
     this._showOrderMarker(q.x, q.z, order.k);
   }
@@ -6927,10 +6933,10 @@ class App {
     const active = document.activeElement;
     const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
     if (editing) this.keys.clear();
-    if (isHeld(binds, this.keys, 'camera_up') || this.keys.has(String('w'))) dz -= 1;
-    if (isHeld(binds, this.keys, 'camera_down') || this.keys.has(String('s'))) dz += 1;
-    if (isHeld(binds, this.keys, 'camera_left') || this.keys.has(String('a'))) dx -= 1;
-    if (isHeld(binds, this.keys, 'camera_right') || this.keys.has(String('d'))) dx += 1;
+    if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
+    if (isHeld(binds, this.keys, 'move_down')) dz += 1;
+    if (isHeld(binds, this.keys, 'move_left')) dx -= 1;
+    if (isHeld(binds, this.keys, 'move_right')) dx += 1;
     const s = isHeld(binds, this.keys, 'sprint');
     const last = this.lastDir;
     if (Math.abs(dx - last.x) > 0.001 || Math.abs(dz - last.z) > 0.001 || s !== last.s) {
@@ -7406,7 +7412,7 @@ class App {
           this._presentCue(e);
           if (e.fromId === this.myHero()?.id) this._coachSawAttack = true;
           if (visibleInFog(vision,e.tx,e.tz)) {
-            this.hitFeedback ||= new HitFeedback(this.scene);
+            this.hitFeedback ||= new HitFeedback(this.scene, (x, z) => this.map.groundY(x, z));
             this.hitFeedback.show(e);
             if (e.fromId === this.myHero()?.id && e.damage > 0) {
               this.audio.hitConfirm(e.crit);

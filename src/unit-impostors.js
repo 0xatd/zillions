@@ -68,3 +68,12 @@ export function sphereVisible(frustum, x, y, z, radius) {
   _sphere.radius = radius;
   return frustum.intersectsSphere(_sphere);
 }
+
+// Keep the threat's authored silhouette where a player must react to it.
+// Distance-only Low LOD otherwise turns a spitter into a box before its
+// acid is even in range. Distant crowds still use the shared cheap batch.
+export function combatSilhouette(unit, hero) {
+  if (unit?.boss || unit?.windup || (hero && hero.target === unit)) return true;
+  return !!hero && !hero.dead && unit.type !== 'walker'
+    && Math.hypot(unit.x - hero.x, unit.z - hero.z) <= 19;
+}

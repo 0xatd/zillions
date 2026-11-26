@@ -207,3 +207,14 @@ test('impact cues stay presentation-only and the shake toggle scales them', () =
   assert.ok(scaledShake(0.2, { reduceShake: true }) < 0.2);
   assert.equal(scaledShake(0.2, { reduceMotion: true }), 0);
 });
+
+test('routine horde deaths do not stall hero presentation during sustained combat', () => {
+  let state = {}, held = 0;
+  for (let frame = 0; frame < 600; frame++) {
+    if (frame % 2 === 0) state = armHitStop(state, impactCue({ type: 'zdeath', big: false }).hitStop);
+    state = tickHitStop(state, 1 / 60);
+    held += Number(state.present);
+  }
+  assert.equal(held, 0, 'routine kills froze the battlefield');
+  assert.ok(impactCue({ type: 'zdeath', big: true }).hitStop > 0, 'heavy impacts retain their accent');
+});
