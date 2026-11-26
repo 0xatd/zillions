@@ -5,7 +5,11 @@
 // storage, and both talk to that relay. This machine's CI job has no Supabase
 // key, so it cannot open the production websocket.
 //
-// Live: `node scripts/coop-e2e.mjs --url https://zillions.taborlin.co`
+// Live signaling: `node scripts/coop-e2e.mjs --live-realtime` serves this
+// branch locally and points it at production Supabase Realtime. The anon key
+// comes from the public auth-config response. It is not printed.
+//
+// Live site: `node scripts/coop-e2e.mjs --url https://zillions.taborlin.co`
 // uses that site's real Supabase Realtime and does not install the relay.
 // A Vercel preview will stop the guest on Deployment Protection unless that
 // browser is already signed into the Vercel team. Production does not.
@@ -15,23 +19,52 @@ import { extname, join, normalize } from 'node:path';
 import { chromium } from 'playwright';
 
 const liveUrl = process.argv.find((arg, index) => process.argv[index - 1] === '--url') || '';
+const liveRealtime = process.argv.includes('--live-realtime');
 const root = new URL('..', import.meta.url).pathname;
+
+async function productionAuthConfig() {
+  const response = await fetch('https://zillions.taborlin.co/api/auth-config', {
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`auth-config HTTP ${response.status}`);
+  const config = await response.json();
+  if (!config?.enabled || !config.supabaseUrl || !config.supabaseAnonKey) throw new Error('auth-config incomplete');
+  return config;
+}
 
 function relay() {
   const boxes = new Map();
+  const presence = new Map();
   let seq = 0;
+  const readBody = async (req) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    return JSON.parse(Buffer.concat(chunks).toString() || '{}');
+  };
+  const present = (code) => {
+    const now = Date.now();
+    const box = presence.get(code) || new Map();
+    for (const [id, entry] of box) if (now - entry.at > 8000) box.delete(id);
+    presence.set(code, box);
+    return [...box.values()].map((entry) => ({ ...entry.payload, id: entry.payload?.id || entry.id }));
+  };
   const server = createServer(async (req, res) => {
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('access-control-allow-headers', 'content-type');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     const url = new URL(req.url, 'http://relay.local');
     if (req.method === 'POST' && url.pathname === '/pub') {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+      const body = await readBody(req);
       const list = boxes.get(body.code) || [];
       list.push({ id: ++seq, message: body.message });
       boxes.set(body.code, list.slice(-80));
+      res.writeHead(204); res.end(); return;
+    }
+    if (req.method === 'POST' && url.pathname === '/presence') {
+      const body = await readBody(req);
+      const box = presence.get(body.code) || new Map();
+      box.set(body.id, { id: body.id, payload: body.payload || { id: body.id }, at: Date.now() });
+      presence.set(body.code, box);
       res.writeHead(204); res.end(); return;
     }
     if (url.pathname === '/poll') {
@@ -40,7 +73,11 @@ function relay() {
       const list = (boxes.get(code) || []).filter((entry) => entry.id > after);
       const cursor = list.length ? list.at(-1).id : after;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ cursor, messages: list.map((entry) => entry.message) }));
+      res.end(JSON.stringify({
+        cursor,
+        messages: list.map((entry) => entry.message),
+        presence: present(code),
+      }));
       return;
     }
     res.writeHead(404); res.end();
@@ -53,11 +90,16 @@ function relay() {
   });
 }
 
-function staticServer() {
+function staticServer(authConfig = null) {
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp', '.png': 'image/png', '.json': 'application/json', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
   const server = createServer(async (req, res) => {
     try {
       const pathname = decodeURIComponent(new URL(req.url, 'http://local').pathname);
+      if (pathname === '/api/auth-config' && authConfig) {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(authConfig));
+        return;
+      }
       const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
       const file = normalize(join(root, relative));
       if (!file.startsWith(root)) throw new Error('bad path');
@@ -76,8 +118,9 @@ function staticServer() {
   });
 }
 
-const mailbox = liveUrl ? null : await relay();
-const site = liveUrl ? null : await staticServer();
+const authConfig = liveRealtime ? await productionAuthConfig() : null;
+const mailbox = liveUrl || liveRealtime ? null : await relay();
+const site = liveUrl ? null : await staticServer(authConfig);
 const origin = liveUrl || site.origin;
 const browser = await chromium.launch({
   headless: true,
@@ -147,13 +190,56 @@ try {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`${error.message}\nGUEST BODY:\n${body.slice(0, 1500)}\n${JSON.stringify({ host: await dump(host.page, host.notes), guest: await dump(guest.page, guest.notes) }, null, 2)}`);
   });
-  await host.page.locator('.roomslot:not(.host):not(.open) small').filter({ hasText: 'Vanguard' }).waitFor({ timeout: 20000 }).catch(async (error) => {
-    const body = await host.page.locator('#room-roster').innerText().catch(() => '');
-    throw new Error(`${error.message}\nHOST ROSTER:\n${body}\n${JSON.stringify(await dump(host.page, host.notes))}`);
+  const probe = (page) => page.evaluate(() => globalThis.__zillionsProbe?.() || null);
+  const guestSeat = async () => {
+    const snap = await probe(host.page);
+    return (snap?.roster || []).find((seat) => !seat.host) || null;
+  };
+  await host.page.waitForFunction(() => {
+    const roster = globalThis.__zillionsProbe?.()?.roster || [];
+    return roster.filter((seat) => !seat.host).length === 1;
+  }, null, { timeout: 20000 }).catch(async (error) => {
+    throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
+  });
+  const hostSnap = await probe(host.page);
+  const guestSnap = await probe(guest.page);
+  if (!hostSnap?.self || !guestSnap?.self || hostSnap.self === guestSnap.self) {
+    throw new Error(`host and guest share a commander id ${JSON.stringify({ host: hostSnap?.self, guest: guestSnap?.self })}`);
+  }
+  await host.page.waitForFunction(() => {
+    const roster = globalThis.__zillionsProbe?.()?.roster || [];
+    const hostSeat = roster.find((seat) => seat.host);
+    const guestSeat = roster.find((seat) => !seat.host);
+    const line = document.querySelector('.roomslot:not(.host):not(.open)')?.innerText || '';
+    return !!(guestSeat && hostSeat && guestSeat.name && guestSeat.name !== hostSeat.name
+      && guestSeat.state === 'connected'
+      && line.includes(guestSeat.name)
+      && /\bconnected\b/.test(line)
+      && !line.includes('· connecting'));
+  }, null, { timeout: 10000 }).catch(async (error) => {
+    const line = await host.page.locator('.roomslot:not(.host):not(.open)').innerText().catch(() => '');
+    throw new Error(`${error.message}\n${line}\n${JSON.stringify((await probe(host.page))?.roster)}`);
   });
   const hostSeat = await host.page.locator('.roomslot.host small').innerText();
   if (/Scott English/i.test(hostSeat)) throw new Error(`seat subtitle used the hero kit: ${hostSeat}`);
-  if (!/Vanguard/i.test(hostSeat)) throw new Error(`seat subtitle was not the founder: ${hostSeat}`);
+  const seated = (await probe(host.page)).roster.find((seat) => !seat.host);
+  const stableName = seated.name;
+  const stableId = seated.id;
+  const holdUntil = Date.now() + 60000;
+  while (Date.now() < holdUntil) {
+    const snap = await probe(host.page);
+    const guests = (snap?.roster || []).filter((seat) => !seat.host);
+    const live = guests[0];
+    if (guests.length !== 1 || live?.id !== stableId || live?.name !== stableName || live?.state !== 'connected') {
+      throw new Error(`seat flapped during the hold ${JSON.stringify(snap?.roster)}`);
+    }
+    const line = await host.page.locator('.roomslot:not(.host):not(.open)').innerText();
+    if (!line.includes(stableName) || !/\bconnected\b/.test(line) || /· connecting/.test(line)) {
+      throw new Error(`visible seat changed during the hold: ${line}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  if ((await guestSeat())?.name !== stableName) throw new Error('guest seat name changed at the end of the hold');
 
   await host.page.waitForFunction(() => {
     const button = document.querySelector('#s-start');
@@ -164,7 +250,6 @@ try {
   await host.page.locator('#s-start').click();
   await host.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
-  const probe = (page) => page.evaluate(() => globalThis.__zillionsProbe?.() || null);
   let synced = null;
   const deadline = Date.now() + 90000;
   let last = null;
@@ -206,7 +291,7 @@ try {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
-  console.log(liveUrl ? 'coop e2e passed against the live URL' : 'coop e2e passed against the in-process relay');
+  console.log(liveUrl ? 'coop e2e passed against the live URL' : liveRealtime ? 'coop e2e passed against production Supabase Realtime' : 'coop e2e passed against the in-process relay');
 } finally {
   await browser.close();
   mailbox?.server.close();

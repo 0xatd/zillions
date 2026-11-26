@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
   admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
-  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_CONNECT_GRACE_MS, touchLobby, touchSeatActivity, withSeatHero,
+  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_CONNECT_GRACE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -116,6 +116,25 @@ test('a ghost connecting seat is named on Start and reaped after the grace', () 
   assert.equal(shareLaunchReady(reaped.lobby, open).ready, true);
   const refreshed = touchSeatActivity(ready, THIRD, NOW + 20 + SHARE_CONNECT_GRACE_MS);
   assert.equal(reapStaleSeats(refreshed, NOW + 20 + SHARE_CONNECT_GRACE_MS, { openIds: open }).dropped.length, 0);
+});
+
+test('a live heartbeat keeps a guest seated for a full minute without WebRTC', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  const open = new Set();
+  for (let t = 2000; t <= 60000; t += 2000) {
+    const result = reapStaleSeats(room, NOW + t, { openIds: open, presentIds: null });
+    assert.equal(result.dropped.length, 0, `reaped at ${t}ms`);
+    room = touchSeatActivity(result.lobby, GUEST, NOW + t);
+  }
+  assert.equal(room.seats.some((seat) => seat.id === GUEST), true);
+});
+
+test('a joiner does not wear the host name', () => {
+  const id = 'abcdef12-3456-4789-abcd-ef1234567890';
+  assert.equal(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: '', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: 'Bea', id, hostName: 'Gork' }), 'Bea');
+  assert.notEqual(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), shareGuestName({ name: 'Gork', id: '99999999-9999-4999-8999-999999999991', hostName: 'Gork' }));
 });
 
 test('the seat label prefers the founder over the Commander fallback', () => {

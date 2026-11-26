@@ -189,9 +189,14 @@ export function createSupabaseHub(client, { onStatus, presenceKey } = {}) {
       if (typeof channel.presenceState !== 'function') return;
       const state = channel.presenceState() || {};
       const members = [];
-      for (const row of Object.values(state)) {
+      for (const [key, row] of Object.entries(state)) {
         const list = Array.isArray(row) ? row : [row];
-        for (const meta of list) if (meta && typeof meta === 'object') members.push(meta);
+        for (const meta of list) {
+          if (!meta || typeof meta !== 'object') continue;
+          // The presence key is the commander id. A meta that lost its id
+          // still has to count as that person, or the host treats them as gone.
+          members.push({ ...meta, id: meta.id || key });
+        }
       }
       for (const listener of entry.presenceListeners) listener(members);
     };
@@ -286,27 +291,67 @@ export function createSupabaseHub(client, { onStatus, presenceKey } = {}) {
 
 // Test relay. Two browser contexts do not share BroadcastChannel, so the
 // coop end-to-end test points both pages at this same HTTP mailbox.
-export function createRelayHub(relayUrl) {
+// Presence on the test relay follows the same shape as Supabase: a sync of
+// who is currently tracked, a join when an id appears, and a leave when that
+// id stops heartbeating. The mailbox is shared, so two browser profiles see
+// one presence set. Supabase keys that set by commander id; so does this.
+export function createRelayHub(relayUrl, { presenceMs = 2000, absentMs = 8000 } = {}) {
   const listeners = new Map();
+  const presenceListeners = new Map();
   const cursors = new Map();
+  const lastPresence = new Map();
+  const lastSync = new Map();
   let timer = null;
+  const notifyPresence = (code, members, reason) => {
+    const set = presenceListeners.get(code);
+    if (!set) return;
+    for (const listener of set) listener(members, reason);
+  };
   const pump = async () => {
-    for (const [code, set] of listeners) {
-      if (!set.size) continue;
+    const codes = new Set([...listeners.keys(), ...presenceListeners.keys()]);
+    for (const code of codes) {
+      const messageSet = listeners.get(code);
+      const presenceSet = presenceListeners.get(code);
+      if (!messageSet?.size && !presenceSet?.size) continue;
       try {
         const response = await fetch(`${relayUrl}/poll?code=${encodeURIComponent(code)}&after=${cursors.get(code) || 0}`);
         if (!response.ok) continue;
         const body = await response.json();
         cursors.set(code, body.cursor || cursors.get(code) || 0);
-        for (const message of body.messages || []) {
-          for (const listener of set) listener(message);
+        if (messageSet) {
+          for (const message of body.messages || []) {
+            for (const listener of messageSet) listener(message);
+          }
+        }
+        if (presenceSet) {
+          const members = Array.isArray(body.presence) ? body.presence : [];
+          const ids = members.map((member) => member?.id).filter(Boolean).sort().join(',');
+          const previous = lastPresence.get(code);
+          const now = Date.now();
+          const changed = previous !== ids;
+          const due = now - (lastSync.get(code) || 0) >= presenceMs;
+          if (changed || due) {
+            let reason = 'sync';
+            if (changed && previous) {
+              const before = new Set(previous.split(',').filter(Boolean));
+              const after = new Set(ids.split(',').filter(Boolean));
+              const joined = [...after].filter((id) => !before.has(id));
+              const left = [...before].filter((id) => !after.has(id));
+              reason = joined.length && !left.length ? 'join' : left.length && !joined.length ? 'leave' : 'sync';
+            } else if (changed) reason = 'join';
+            lastPresence.set(code, ids);
+            lastSync.set(code, now);
+            notifyPresence(code, members, reason);
+          }
         }
       } catch { /* the next poll retries */ }
     }
+    if (!listeners.size && !presenceListeners.size && timer) { clearInterval(timer); timer = null; }
   };
   const ensure = () => {
     if (timer) return;
-    timer = setInterval(() => { pump().catch(() => {}); }, 200);
+    timer = setInterval(() => { pump().catch(() => {}); }, Math.min(200, presenceMs));
+    pump().catch(() => {});
   };
   return {
     publish(code, message) {
@@ -324,11 +369,29 @@ export function createRelayHub(relayUrl) {
       return () => {
         set.delete(listener);
         if (!set.size) listeners.delete(code);
-        if (!listeners.size && timer) { clearInterval(timer); timer = null; }
       };
     },
-    track() {},
-    onPresence() { return () => {}; },
+    track(code, payload) {
+      const id = payload?.id || '';
+      if (!id) return;
+      fetch(`${relayUrl}/presence`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, id, payload }),
+      }).catch(() => {});
+      ensure();
+    },
+    onPresence(code, listener) {
+      const set = presenceListeners.get(code) || new Set();
+      set.add(listener);
+      presenceListeners.set(code, set);
+      ensure();
+      return () => {
+        set.delete(listener);
+        if (!set.size) presenceListeners.delete(code);
+      };
+    },
     status() { return 'subscribed'; },
+    presenceTiming: { presenceMs, absentMs },
   };
 }

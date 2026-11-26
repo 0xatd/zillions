@@ -203,10 +203,11 @@ export function hostStillHere(lobby, now, { receivedAt = null, hostPresent = fal
   return Number(now) - basis <= SHARE_STALE_MS;
 }
 
-// Drop guests that never finished the WebRTC handshake. A live retry refreshes
-// joinedAt, so an active friend is not removed. Presence, when the server
-// reports it, reaps an absent seat sooner than a seat we simply have not heard
-// from.
+// Drop guests the host has not heard from. joinedAt is that clock: a heartbeat
+// (`here`) or any later signal refreshes it. WebRTC can take longer than the
+// grace on a shared NAT, and deleting the seat also destroys the handshake,
+// so a live friend must not be removed just because the data channel is still
+// opening. Presence, when it names real ids, reaps an absent seat sooner.
 export function reapStaleSeats(lobby, now, {
   openIds = new Set(),
   presentIds = null,
@@ -239,6 +240,27 @@ export function touchSeatActivity(lobby, id, now) {
 
 export function seatDisplayName({ accountName = '', username = '', founderName = '', profileName = '' } = {}) {
   return shareName(accountName || username || founderName || profileName);
+}
+
+// A joiner's label comes from their own profile. If they have none, or it is
+// the host's name, the seat would read as a second copy of the host. The
+// suffix is the joiner's own commander id, which is different per browser.
+export function shareGuestName({ name = '', id = '', hostName = '' } = {}) {
+  const clean = String(name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24);
+  const host = String(hostName || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24);
+  const tail = (String(id || '').replace(/[^0-9a-z]/gi, '').slice(-4) || '0000').toUpperCase();
+  if (!clean || (host && clean.toLowerCase() === host.toLowerCase())) return `Guest ${tail}`;
+  return clean;
+}
+
+// One state for the seat title and the subline. A seat that is still in the
+// lobby is connected. WebRTC is the launch gate, not a second word baked
+// into the name.
+export function shareSeatState(seat) {
+  return {
+    state: 'connected',
+    ready: !!seat?.host || !!seat?.ready,
+  };
 }
 
 function seatNumber(lobby, id) {
@@ -337,16 +359,20 @@ export function setSeatReady(lobby, id, ready, now) {
 }
 
 export function shareRoster(lobby, selfId) {
-  return (lobby?.seats || []).map((seat, index) => ({
-    seat: index + 1,
-    name: seat.name,
-    hero: seat.hero,
-    host: !!seat.host,
-    you: seat.id === selfId,
-    ready: !!seat.host || !!seat.ready,
-    unlockedLevel: shareUnlocked(seat.unlockedLevel),
-    state: 'connected',
-  }));
+  return (lobby?.seats || []).map((seat, index) => {
+    const view = shareSeatState(seat);
+    return {
+      seat: index + 1,
+      id: seat.id,
+      name: seat.name,
+      hero: seat.hero,
+      host: !!seat.host,
+      you: seat.id === selfId,
+      ready: view.ready,
+      unlockedLevel: shareUnlocked(seat.unlockedLevel),
+      state: view.state,
+    };
+  });
 }
 
 export function shareFailureCopy(reason) {

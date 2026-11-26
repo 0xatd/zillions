@@ -31,7 +31,7 @@ import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
   admitGuest, clearGuestReady, closeLobby, createLobby, hostStillHere, markStarted, parseShareLocation, publicShareLobby,
-  randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
+  randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareGuestName, shareHero, shareId, shareLaunchReady, shareMessageId, shareSeatState,
   shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
 import { createTabSession } from './tab-session.js';
@@ -235,7 +235,16 @@ class App {
         }
         this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
-        if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
+        if (this.mpRole === 'host' && this._shareLobby && !this._shareLobby.started && this._shareSoloBlocked()) {
+          if (!this._shareSoloConfirm) {
+            this._shareSoloConfirm = true;
+            this.ui.showBanner('Your friend left this lobby. Press Start again to play alone.', '', 6000);
+            this._shareSig = '';
+            this._renderShareHost();
+            return;
+          }
+        }
+        if (this.mpRole === 'host' && (this.peers.length || this.onlineMode || (this._shareLobby && !this._shareLobby.started))) {
           if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
           if (this.onlineMode && this.lobby?.game) {
             const eligibility = roomLevelEligibility(this.lobby.game);
@@ -254,7 +263,7 @@ class App {
               return;
             }
           }
-          this._launchPrepared(d, hero, mode, true);
+          this._launchPrepared(d, hero, mode, this.peers.length > 0 || !!this.onlineMode);
         } else {
           this._launchPrepared(d, hero, mode, false);
         }
@@ -535,6 +544,8 @@ class App {
         open: !!(this.net?.open || [...(this._shareHands?.values() || [])].some((peer) => peer.open)),
         code: this._shareCode || '',
         seats: this._shareLobby?.seats?.length || 0,
+        self: this._shareSelf || '',
+        roster: this._shareLobby ? shareRoster(this._shareLobby, this._shareSelf) : [],
       });
     }
     requestAnimationFrame(() => this._ensurePresentation());
@@ -2446,6 +2457,23 @@ class App {
     });
   }
 
+  // Share seats never borrow the online-lobby account name or the host's
+  // label. The id is this tab's commander id.
+  _shareHostLabel() {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.host);
+    return seat?.name || this._shareLobby?.hostName || (this.mpRole === 'host' ? this._publicName() : '');
+  }
+
+  _shareDisplayName() {
+    const founder = chapterFounder(this.profile);
+    const own = founder?.name || this.profile.username || this.profile.name || '';
+    return shareGuestName({
+      name: own,
+      id: this._shareSelf || this._shareSelfId(),
+      hostName: this.mpRole === 'host' ? '' : this._shareHostLabel(),
+    });
+  }
+
   _heroPayload(key = this.ui.selectedHero) {
     return { t: 'hero', k: key, camp: this.campFor(key), name: this._publicName() };
   }
@@ -3253,7 +3281,8 @@ class App {
 
   _noteSharePresence(members) {
     const list = Array.isArray(members) ? members : [];
-    this._sharePresentIds = new Set(list.map((member) => member?.id).filter(Boolean));
+    const ids = list.map((member) => member?.id).filter(Boolean);
+    this._sharePresentIds = ids.length ? new Set(ids) : null;
     const hostId = this._shareLobby?.hostId;
     this._shareHostPresent = !!(hostId && list.some((member) => member?.role === 'host' && member.id === hostId));
     if (this._shareHostPresent) this._shareReceivedAt = Date.now();
@@ -3264,7 +3293,7 @@ class App {
     const payload = {
       id: this._shareSelf,
       role: this.mpRole === 'host' ? 'host' : 'guest',
-      name: this._publicName(),
+      name: this._shareDisplayName(),
     };
     for (const hub of this._shareHubList || []) hub.track?.(this._shareCode, payload);
   }
@@ -3466,7 +3495,10 @@ class App {
       if (this.netMode) return;
       const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
       if (!decision.ok && decision.reason !== 'host_left') this._failShare(decision.reason);
-      else this._shareTrackPresence();
+      else {
+        this._sharePublish({ t: 'here', name: this._shareDisplayName() });
+        this._shareTrackPresence();
+      }
     };
     try {
       const src = `setInterval(() => postMessage(0), ${SHARE_HEARTBEAT_MS});`;
@@ -3618,18 +3650,34 @@ class App {
 
   _shareRoster() {
     return (this._shareLobby?.seats || []).map((seat, index) => {
-      const open = !!seat.host || !!this._shareHands?.get(seat.id)?.open || (this.mpRole === 'guest' && seat.id === this._shareSelf && !!this.net?.open);
+      const view = shareSeatState(seat);
       return {
         seat: index + 1,
-        name: open ? seat.name : `${seat.name} · connecting`,
+        name: seat.name,
         hero: seat.hero,
         host: !!seat.host,
         you: seat.id === this._shareSelf,
-        ready: !!seat.host || !!seat.ready,
+        ready: view.ready,
         unlockedLevel: seat.unlockedLevel || 1,
-        state: 'connected',
+        state: view.state,
       };
     });
+  }
+
+  _shareSoloBlocked() {
+    if (!this._shareHadGuest || !this._shareLobby || this._shareLobby.started) return false;
+    return !(this._shareLobby.seats || []).some((seat) => !seat.host);
+  }
+
+  _shareRememberGuests() {
+    if ((this._shareLobby?.seats || []).some((seat) => !seat.host)) {
+      this._shareHadGuest = true;
+      this._shareSoloConfirm = false;
+    }
+  }
+
+  _shareGuestLabel(name, id) {
+    return shareGuestName({ name, id, hostName: this._shareHostLabel() });
   }
 
   _shareOpenIds() {
@@ -3666,14 +3714,24 @@ class App {
     const hostSeat = this._shareLobby.seats?.find((seat) => seat.host);
     if (hostSeat && hostSeat.name !== name) {
       this._shareLobby = withSeatHero(this._shareLobby, hostSeat.id, hostSeat.hero, name, Date.now());
+      this._shareLobby = { ...this._shareLobby, hostName: name };
+      this._sharePublishLobby();
+    }
+    for (const seat of this._shareLobby.seats || []) {
+      if (seat.host) continue;
+      const label = shareGuestName({ name: seat.name, id: seat.id, hostName: name });
+      if (label === seat.name) continue;
+      this._shareLobby = withSeatHero(this._shareLobby, seat.id, seat.hero, label, Date.now());
       this._sharePublishLobby();
     }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}`;
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}:${this._shareSoloConfirm ? 1 : 0}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
+    this._shareRememberGuests();
     const blocked = players.length > 1 && !gate.ready;
+    const soloLeft = this._shareSoloBlocked();
     const offline = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
     const status = offline
       ? "Can't reach room, reconnecting…"
@@ -3686,11 +3744,14 @@ class App {
           : players.length > 1
             ? `${players.length} commanders in this siege. Start when you are ready.`
             : 'Invite link ready. Set the map and difficulty, then send it.';
+    const startLabel = soloLeft
+      ? (this._shareSoloConfirm ? 'PRESS AGAIN — START ALONE' : 'GUEST LEFT — START ALONE')
+      : shareStartLabel(players, gate, this.ui._startCopyFor(this._shareLobby.mode));
     this.ui.showShareHost({
       url: this._shareUrl,
-      status,
-      launchReady: !blocked,
-      startLabel: shareStartLabel(players, gate, this.ui._startCopyFor(this._shareLobby.mode)),
+      status: soloLeft ? 'Your friend left this lobby. Press Start again to play alone.' : status,
+      launchReady: soloLeft ? true : !blocked,
+      startLabel,
       players,
       relay: this._shareRelay,
       level: this._shareLobby.level,
@@ -3740,11 +3801,28 @@ class App {
     if (message.t === 'lobby' && message.lobby && this.mpRole !== 'host') this._onShareLobby(message.lobby);
     else if (message.t === 'join' && this.mpRole === 'host') this._acceptShareGuest(message);
     else if (message.t === 'offer' && this.mpRole === 'guest') this._acceptShareOffer(message);
-    else if (message.t === 'answer' && this.mpRole === 'host') this._acceptShareAnswer(message);
-    else if (message.t === 'ice') this._acceptShareIce(message);
+    else if (message.t === 'answer' && this.mpRole === 'host') {
+      this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      this._acceptShareAnswer(message);
+    }
+    else if (message.t === 'ice') {
+      if (this.mpRole === 'host') this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      this._acceptShareIce(message);
+    }
     else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'here' && this.mpRole === 'host' && message.from) {
+      this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      const label = this._shareGuestLabel(message.name, message.from);
+      const seat = this._shareLobby?.seats?.find((entry) => entry.id === message.from);
+      if (seat && label && seat.name !== label) {
+        this._shareLobby = withSeatHero(this._shareLobby, message.from, seat.hero, label, Date.now());
+        this._shareSig = '';
+        this._sharePublishLobby();
+        this._renderShareHost();
+      }
+    }
     else if (message.t === 'ready' && this.mpRole === 'host') {
-      this._shareLobby = setSeatReady(this._shareLobby, message.from, message.ready, Date.now());
+      this._shareLobby = touchSeatActivity(setSeatReady(this._shareLobby, message.from, message.ready, Date.now()), message.from, Date.now());
       this._shareSig = '';
       this._sharePublishLobby();
       this._renderShareHost();
@@ -3771,7 +3849,7 @@ class App {
       this._shareAnnounced = true;
       this.audio?.init();
       this._sharePublish({
-        t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
+        t: 'join', name: this._shareDisplayName(), hero: this.ui.selectedHero || 'scott', claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
         ready: true,
@@ -3818,16 +3896,17 @@ class App {
 
   async _acceptShareGuest(message) {
     if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
+    const guestName = this._shareGuestLabel(message.name, message.from);
     if (this._shareHands?.has(message.from)) {
       const peer = this._shareHands.get(message.from);
-      this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now()), message.from, Date.now());
+      this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now()), message.from, Date.now());
       // A live hero change keeps the open channel. A rejoin replaces it even
       // when the old channel has not reported closed yet.
       if (peer?.open && !message.rejoin) {
         const idx = this.peers.indexOf(peer);
         if (idx >= 0) {
           this.guestHeroes[idx] = shareHero(message.hero);
-          this.guestNames[idx] = shareName(message.name);
+          this.guestNames[idx] = guestName;
         }
         this._shareSig = '';
         this._sharePublishLobby();
@@ -3846,12 +3925,12 @@ class App {
     }
     if (!decision.rejoining) {
       this._shareLobby = seatGuest(this._shareLobby, {
-        id: message.from, name: message.name, hero: message.hero, claim: true,
+        id: message.from, name: guestName, hero: message.hero, ready: !!message.ready, claim: true,
         protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
         unlockedLevel: message.unlockedLevel,
       }, Date.now()).lobby;
     } else {
-      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
+      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now());
     }
     if (message.ready) this._shareLobby = setSeatReady(this._shareLobby, message.from, true, Date.now());
     this._sharePendingJoins ||= new Set();
