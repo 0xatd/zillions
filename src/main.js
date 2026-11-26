@@ -5454,8 +5454,14 @@ class App {
           // forever on a hole it already "had".
           if (!Array.isArray(bundle)) {
             if (this.inbox.has(w)) this.inbox.delete(w);
-            // A real gap. Re-arm the buffer so we come back with margin
-            // instead of running window-to-window and stuttering forever.
+            // Caught up to the newest packet is not a hole. Starting the
+            // stall clock here is what flashed "Syncing co-op…" whenever the
+            // next window was simply still in flight.
+            const hostSeen = this._hostFrameSeen || 0;
+            if (hostSeen <= this.simFrame) {
+              stalled = true;
+              break;
+            }
             stalled = true;
             missingWindow = w;
             this.netPrimed = false;
@@ -5669,7 +5675,13 @@ class App {
       this._simChannel.port2.postMessage(0);
     };
     const periodMs = Math.round(SIM_DT * NET_STEP * 1000);
-    const wake = () => this._simKick?.();
+    // Step here, on the worker's message. Hopping through a MessageChannel
+    // left a background tab with the flag set and the callback never delivered,
+    // so the guest painted a frozen picture while its windows piled up.
+    const wake = () => {
+      this._simPumping = false;
+      this._advanceNetSim();
+    };
     try {
       const src = `setInterval(() => postMessage(0), ${periodMs});`;
       this._netWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
@@ -5677,7 +5689,8 @@ class App {
     } catch {
       this._netPumpTimer = setInterval(wake, periodMs);
     }
-    this._simKick();
+    if (this.frameGuard) this.frameGuard.failed = false;
+    wake();
   }
 
   _netPumpStop() {
