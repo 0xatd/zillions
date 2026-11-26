@@ -6,7 +6,10 @@ let clientPromise = null;
 
 async function fetchWithWriteTimeout(input, init = {}) {
   const method = String(init.method || 'GET').toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || init.signal) return fetch(input, init);
+  const target = String(input?.url || input || '');
+  // Realtime's own abort must not be stacked with this write timer. A stacked
+  // abort showed up as net::ERR_ABORTED on /realtime/v1/api/broadcast.
+  if (method === 'GET' || method === 'HEAD' || init.signal || target.includes('/realtime/')) return fetch(input, init);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SUPABASE_WRITE_TIMEOUT_MS);
   try {

@@ -3728,7 +3728,7 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>Invite a friend</h3>
         <p class="mphint" id="share-status"></p>
-        <input class="share-link" id="share-url" readonly aria-label="Invite link">
+        <textarea class="share-link" id="share-url" readonly rows="3" aria-label="Invite link"></textarea>
         <div class="share-actions"><button class="tbtn" id="share-copy" type="button">Copy invite link</button></div>
         <p class="mphint" id="share-relay"></p>
         <p class="mphint">Friends join before you press Start. Once the siege begins, this link no longer adds a hero. ${maxPlayers} players maximum.</p>
@@ -3914,7 +3914,7 @@ export class UI {
       const p = bySeat.get(seat);
       if (p) {
         const label = p.host ? 'HOST' : `P${seat}`;
-        const hero = this._heroName(p.hero);
+        const who = p.name || this._heroName(p.hero);
         const state = p.state === 'connected' ? (p.ready ? 'ready · connected' : 'connected')
           : p.state === 'reconnecting' ? 'reconnecting'
           : p.state === 'offline' ? 'offline'
@@ -3927,7 +3927,7 @@ export class UI {
           <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''} state-${p.state || 'connecting'}">
             <span class="roomseat">${label}</span>
             <b></b>
-            <small>${hero} · ${state}${unlock}</small>
+            <small>${who} · ${state}${unlock}</small>
             ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
@@ -3945,7 +3945,7 @@ export class UI {
         <div>
           <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
           <b>${modeCopy} · ${levelDef.name}</b>
-          <span class="roomsettings">${difficultyDef.label} · ${hostHero ? hostHero.name : 'Hero pending'} · ${filled}/${maxPlayers} players</span>
+          <span class="roomsettings">${difficultyDef.label} · ${host?.name || hostHero?.name || 'Host'} · ${filled}/${maxPlayers} players</span>
           <small>${launchCopy}</small>
         </div>
       </div>

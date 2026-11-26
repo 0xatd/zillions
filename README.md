@@ -106,10 +106,17 @@ their soft vision circles is almost black, including the minimap.
 - **Co-op** (Play Online) supports up to four players. Each player controls
   one hero; the players share gold, colony buildings, the enemy force, and the
   win condition. Rooms can be created, joined, rejoined, or watched.
-- **Invite link.** From the title, chapter, or battle setup, Invite copies one
-  URL. A friend opens it and joins as the next hero with no account. Join
-  before the host presses Start. The link expires after two hours. A bad link,
-  a full siege, a host who left, or a link opened after the start is refused.
+- **Invite link.** From the title, Invite copies one URL and puts that same
+  link in the address bar, so a refresh keeps the room. A friend opens it on
+  another device with no account and is seated as the default founder. The
+  host presses Start. The link expires after two hours. A bad link, a full
+  siege, or a host who left is refused. A friend who already has a seat can
+  rejoin after the start. A new friend cannot.
+  Production (`https://zillions.taborlin.co`) has no Vercel sign-in wall.
+  Preview deployments are behind Vercel Deployment Protection, so a friend
+  who is not on that Vercel team sees a sign-in page instead of the game.
+  Test the invite on production, or with both browsers already allowed
+  through that wall. The game does not add a bypass token to the link.
 - **Custom Games** separates Live Games (real rooms) from Arcade (prebuilt
   campaign, Survival, and Labyrinth maps that can be played or hosted).
 

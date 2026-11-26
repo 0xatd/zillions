@@ -281,7 +281,7 @@ export function seatGuest(lobby, guest, now) {
     name: shareName(guest.name),
     hero: shareHero(guest.hero),
     host: false,
-    ready: false,
+    ready: !!guest.ready,
     unlockedLevel: shareUnlocked(guest.unlockedLevel),
     joinedAt: Number(now) || 0,
   }];

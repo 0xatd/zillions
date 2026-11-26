@@ -100,20 +100,91 @@ export function createBrowserHub({
   };
 }
 
-// Realtime broadcast on a public channel. No table. Messages queued until the
-// socket subscribes, which is how the lobby already sends friend invites.
-export function createSupabaseHub(client) {
+// True only when a websocket push will be used. channel.send() falls back to
+// POST /realtime/v1/api/broadcast whenever the socket cannot push, and that
+// request was aborting (net::ERR_ABORTED) while the socket was still down.
+export function canSocketSend(channelState, socketConnected) {
+  const joined = channelState == null || channelState === 'joined';
+  return joined && socketConnected !== false;
+}
+
+const RESUBSCRIBE_MS = [500, 1000, 2000, 4000, 8000];
+
+function enqueueShare(pending, message) {
+  if (message?.t === 'lobby') {
+    const index = pending.findIndex((entry) => entry?.t === 'lobby');
+    if (index >= 0) pending.splice(index, 1);
+  }
+  pending.push(message);
+  if (pending.length > 40) pending.splice(0, pending.length - 40);
+}
+
+// Realtime broadcast on a public channel. No table. Messages stay queued
+// until the websocket channel is SUBSCRIBED. Seat traffic never uses the
+// REST broadcast fallback.
+export function createSupabaseHub(client, { onStatus, presenceKey } = {}) {
   if (!client?.channel) throw new Error('share_relay_unavailable');
+  try { client.realtime?.connect?.(); } catch { /* socket opens on subscribe */ }
   const channels = new Map();
+  const selfKey = presenceKey || (globalThis.crypto?.randomUUID?.() || `seat-${Date.now()}`);
+  const socketUp = () => (typeof client.realtime?.isConnected === 'function'
+    ? client.realtime.isConnected()
+    : true);
+
   const entryFor = (code) => {
     let entry = channels.get(code);
     if (entry) return entry;
-    const listeners = new Set();
-    const presenceListeners = new Set();
-    const pending = [];
-    let ready = false;
-    let tracked = null;
-    const channel = client.channel(`zl-share-${code}`, { config: { broadcast: { self: false }, presence: { key: 'commander' } } });
+    entry = {
+      listeners: new Set(),
+      presenceListeners: new Set(),
+      pending: [],
+      ready: false,
+      tracked: null,
+      channel: null,
+      attempt: 0,
+      timer: null,
+      closed: false,
+    };
+    channels.set(code, entry);
+    openChannel(code, entry);
+    return entry;
+  };
+
+  const emitStatus = (status) => { try { onStatus?.(status); } catch { /* ui can be mid-render */ } };
+
+  const flush = (entry) => {
+    if (!entry.ready || !canSocketSend(entry.channel?.state, socketUp())) return;
+    const batch = entry.pending.splice(0);
+    for (const message of batch) {
+      const sent = entry.channel.send({ type: 'broadcast', event: 'sig', payload: message });
+      Promise.resolve(sent).then((result) => {
+        if (result && result !== 'ok') {
+          enqueueShare(entry.pending, message);
+          scheduleResubscribe(entry.code, entry);
+        }
+      }).catch(() => {
+        enqueueShare(entry.pending, message);
+        scheduleResubscribe(entry.code, entry);
+      });
+    }
+  };
+
+  const trackNow = (entry) => {
+    if (!entry.tracked || !entry.ready || typeof entry.channel?.track !== 'function') return;
+    if (!canSocketSend(entry.channel?.state, socketUp())) return;
+    Promise.resolve(entry.channel.track(entry.tracked)).catch(() => {});
+  };
+
+  function openChannel(code, entry) {
+    entry.code = code;
+    const channel = client.channel(`zl-share-${code}`, {
+      config: {
+        broadcast: { self: false, ack: false },
+        presence: { key: selfKey },
+        private: false,
+      },
+    });
+    entry.channel = channel;
     const emitPresence = () => {
       if (typeof channel.presenceState !== 'function') return;
       const state = channel.presenceState() || {};
@@ -122,60 +193,142 @@ export function createSupabaseHub(client) {
         const list = Array.isArray(row) ? row : [row];
         for (const meta of list) if (meta && typeof meta === 'object') members.push(meta);
       }
-      for (const listener of presenceListeners) listener(members);
+      for (const listener of entry.presenceListeners) listener(members);
     };
     channel.on('broadcast', { event: 'sig' }, (message) => {
       const payload = message?.payload;
-      if (payload) for (const listener of listeners) listener(payload);
+      if (payload) for (const listener of entry.listeners) listener(payload);
     });
     channel.on('presence', { event: 'sync' }, emitPresence);
-    const trackNow = () => {
-      if (!tracked || typeof channel.track !== 'function') return;
-      Promise.resolve(channel.track(tracked)).catch(() => {});
-    };
     channel.subscribe((status) => {
-      if (status !== 'SUBSCRIBED') return;
-      ready = true;
-      trackNow();
-      for (const message of pending.splice(0)) {
-        channel.send({ type: 'broadcast', event: 'sig', payload: message }).catch(() => {});
+      if (entry.closed || entry.channel !== channel) return;
+      if (status === 'SUBSCRIBED') {
+        entry.ready = true;
+        entry.attempt = 0;
+        emitStatus('subscribed');
+        flush(entry);
+        trackNow(entry);
+        return;
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        entry.ready = false;
+        emitStatus('reconnecting');
+        scheduleResubscribe(code, entry);
       }
     });
-    entry = {
-      channel, listeners, presenceListeners, pending, isReady: () => ready,
-      track(payload) { tracked = payload; if (ready) trackNow(); },
-    };
-    channels.set(code, entry);
-    return entry;
+  }
+
+  function scheduleResubscribe(code, entry) {
+    if (entry.closed || entry.timer) return;
+    entry.ready = false;
+    const wait = RESUBSCRIBE_MS[Math.min(entry.attempt, RESUBSCRIBE_MS.length - 1)];
+    entry.attempt += 1;
+    emitStatus('reconnecting');
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      if (entry.closed) return;
+      const old = entry.channel;
+      entry.ready = false;
+      try { client.realtime?.connect?.(); } catch { /* reconnect the socket first */ }
+      openChannel(code, entry);
+      if (old && old !== entry.channel) Promise.resolve(client.removeChannel?.(old)).catch(() => {});
+    }, wait);
+  }
+
+  const dropIfIdle = (entry) => {
+    if (entry.listeners.size || entry.presenceListeners.size) return;
+    entry.closed = true;
+    clearTimeout(entry.timer);
+    entry.pending.length = 0;
+    channels.delete(entry.code);
+    if (entry.channel) Promise.resolve(client.removeChannel?.(entry.channel)).catch(() => {});
   };
+
   return {
     publish(code, message) {
       const entry = entryFor(code);
-      if (!entry.isReady()) { entry.pending.push(message); return; }
-      entry.channel.send({ type: 'broadcast', event: 'sig', payload: message }).catch(() => {});
+      enqueueShare(entry.pending, message);
+      if (!entry.ready || !canSocketSend(entry.channel?.state, socketUp())) {
+        if (entry.ready) scheduleResubscribe(code, entry);
+        emitStatus(entry.ready ? 'reconnecting' : 'connecting');
+        return;
+      }
+      flush(entry);
     },
     subscribe(code, listener) {
       const entry = entryFor(code);
       entry.listeners.add(listener);
       return () => {
         entry.listeners.delete(listener);
-        if (!entry.listeners.size && !entry.presenceListeners.size) {
-          entry.pending.length = 0; channels.delete(code);
-          Promise.resolve(client.removeChannel(entry.channel)).catch(() => {});
-        }
+        dropIfIdle(entry);
       };
     },
-    track(code, payload) { entryFor(code).track(payload); },
+    track(code, payload) {
+      const entry = entryFor(code);
+      entry.tracked = payload;
+      trackNow(entry);
+    },
     onPresence(code, listener) {
       const entry = entryFor(code);
       entry.presenceListeners.add(listener);
       return () => {
         entry.presenceListeners.delete(listener);
-        if (!entry.listeners.size && !entry.presenceListeners.size) {
-          entry.pending.length = 0; channels.delete(code);
-          Promise.resolve(client.removeChannel(entry.channel)).catch(() => {});
-        }
+        dropIfIdle(entry);
       };
     },
+    status(code) {
+      const entry = channels.get(code);
+      if (!entry) return 'connecting';
+      return entry.ready && canSocketSend(entry.channel?.state, socketUp()) ? 'subscribed' : 'reconnecting';
+    },
+  };
+}
+
+// Test relay. Two browser contexts do not share BroadcastChannel, so the
+// coop end-to-end test points both pages at this same HTTP mailbox.
+export function createRelayHub(relayUrl) {
+  const listeners = new Map();
+  const cursors = new Map();
+  let timer = null;
+  const pump = async () => {
+    for (const [code, set] of listeners) {
+      if (!set.size) continue;
+      try {
+        const response = await fetch(`${relayUrl}/poll?code=${encodeURIComponent(code)}&after=${cursors.get(code) || 0}`);
+        if (!response.ok) continue;
+        const body = await response.json();
+        cursors.set(code, body.cursor || cursors.get(code) || 0);
+        for (const message of body.messages || []) {
+          for (const listener of set) listener(message);
+        }
+      } catch { /* the next poll retries */ }
+    }
+  };
+  const ensure = () => {
+    if (timer) return;
+    timer = setInterval(() => { pump().catch(() => {}); }, 200);
+  };
+  return {
+    publish(code, message) {
+      fetch(`${relayUrl}/pub`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, message }),
+      }).catch(() => {});
+    },
+    subscribe(code, listener) {
+      const set = listeners.get(code) || new Set();
+      set.add(listener);
+      listeners.set(code, set);
+      ensure();
+      return () => {
+        set.delete(listener);
+        if (!set.size) listeners.delete(code);
+        if (!listeners.size && timer) { clearInterval(timer); timer = null; }
+      };
+    },
+    track() {},
+    onPresence() { return () => {}; },
+    status() { return 'subscribed'; },
   };
 }

@@ -36,7 +36,7 @@ import {
 } from './share-link.js';
 import { createTabSession } from './tab-session.js';
 import { desyncRecovery, roomStartLabel, shareRejoinStep, withinRejoinGrace } from './lobby-reliability.js';
-import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
+import { createBrowserHub, createRelayHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
 import {
@@ -452,7 +452,10 @@ class App {
     this.autosaveT = 20;
     window.addEventListener('beforeunload', () => {
       this._autosave(true);
-      this._abandonShareLink();
+      // A refresh is also an unload. Publishing close/leave here races the
+      // next page: the dying page's message can arrive after the resumed
+      // lobby and tell the friend the host left. A real close stops the
+      // heartbeat, and that silence is what ends the room.
       this._tab?.release();
     });
 
@@ -494,6 +497,9 @@ class App {
         }).catch(() => {});
       }).catch(() => {});
     }, 1500);
+    void getSupabaseClient().then((client) => {
+      try { client.realtime?.connect?.(); } catch { /* the invite subscribe connects too */ }
+    }).catch(() => {});
     this._consumeShareLink();
     this._bootReplay();
     this.ui.setAccount(this.authStatus);
@@ -516,6 +522,21 @@ class App {
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
     this._boot = { shellMs: Math.round(performance.now() - this._bootStart) };
     window.__zillionsBoot = this._boot;
+    // The coop end-to-end test reads this. It is only installed when that
+    // test has pointed the page at its in-process relay.
+    if (globalThis.__zillionsShareRelay || globalThis.__zillionsProbeEnabled) {
+      globalThis.__zillionsProbe = () => ({
+        frame: this.simFrame,
+        gold: this.game ? Math.floor(this.game.gold) : null,
+        role: this.mpRole,
+        net: !!this.netMode,
+        barrier: !!this.startBarrier,
+        peers: this.peers?.length || 0,
+        open: !!(this.net?.open || [...(this._shareHands?.values() || [])].some((peer) => peer.open)),
+        code: this._shareCode || '',
+        seats: this._shareLobby?.seats?.length || 0,
+      });
+    }
     requestAnimationFrame(() => this._ensurePresentation());
   }
 
@@ -3260,10 +3281,57 @@ class App {
       this.ui.showShareNotice({ title: 'Invite link', copy: shareFailureCopy('invalid'), tone: 'bad' });
       return;
     }
-    this._joinShareLink(parsed.code);
+    void this._enterShare(parsed.code);
   }
 
-  _requestShareInvite() {
+  async _enterShare(code) {
+    let hostCode = '';
+    try { hostCode = sessionStorage.getItem('zillions.share.host') || ''; } catch { /* private mode */ }
+    await this._ensureDefaultCommander();
+    if (hostCode === code) {
+      this._resumeShareHost(code);
+      return;
+    }
+    this._joinShareLink(code);
+  }
+
+  _rememberShareHost() {
+    if (!this._shareCode || !this._shareUrl) return;
+    try { sessionStorage.setItem('zillions.share.host', this._shareCode); } catch { /* private mode */ }
+    try { history.replaceState(null, '', this._shareUrl); } catch { /* ignore */ }
+  }
+
+  _resumeShareHost(code) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(`zillions.share.${code}`) || 'null'); } catch { saved = null; }
+    const lobby = saved?.lobby;
+    if (lobby?.code === code && lobby.hostId === this._shareSelfId() && !lobby.closed) {
+      this._shareCode = code;
+      this._shareUrl = shareUrl(location.origin, code);
+      this._shareLobby = lobby;
+      this._shareSeen = new Set();
+      this._shareHands = new Map();
+      this._shareFailed = false;
+      this.mpRole = 'host';
+      this.ui._shareLive = true;
+      this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
+      this.ui.setRoomSettings({
+        level: lobby.level || 1,
+        difficulty: lobby.difficulty || 'casual',
+        isHost: true,
+        mode: lobby.mode || 'campaign',
+      });
+      this._bindShareTransport('host');
+      this._startShareHeartbeat();
+      this._shareSig = '';
+      this._renderShareHost();
+      this._rememberShareHost();
+      return;
+    }
+    this._openShareLobby(code);
+  }
+
+  async _requestShareInvite() {
     this.ui._clearBusy();
     if (this.game && !this.game.over) {
       this.ui.showBanner(shareFailureCopy('started'), 'bad', 5200);
@@ -3282,19 +3350,33 @@ class App {
       this.ui.noteGuestSession();
       this.ui._accountAccepted = true;
     }
-    const ready = !!(chapterFounder(this.profile) || this.profile.quickSetupDone);
-    if (!ready) {
-      this.ui.showQuickSetup(normalizeQuickSetup({
-        chapterName: this.profile.chapter?.name || QUICK_DEFAULTS.chapterName,
-        founderName: QUICK_DEFAULTS.founderName,
-        army: this.ui.selectedCulture,
-        color: this.profile.chapter?.color,
-        emblem: this.profile.chapter?.emblem,
-      }));
-      this.ui.showBanner('Name your chapter, then invite a friend. No account needed.', '', 3400);
+    await this._ensureDefaultCommander();
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    if (!this.ui.selectedLevel) this.ui.selectedLevel = 1;
+    this._openShareLobby();
+    if (this._shareUrl) this.ui.copyShareUrl(this._shareUrl);
+  }
+
+  async _ensureDefaultCommander() {
+    if (!this.ui.selectedMode) this.ui.selectedMode = 'campaign';
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    if (chapterFounder(this.profile)) {
+      const founder = chapterFounder(this.profile);
+      if (founder?.proxyHero) this.ui.selectedHero = founder.proxyHero;
       return;
     }
-    this._showShareDraft();
+    await this._createMmoCharacter({
+      name: QUICK_DEFAULTS.founderName,
+      appearance: QUICK_DEFAULTS.color,
+      raceKey: 'human',
+      customization: {},
+      quiet: true,
+    });
+    const character = await this._bindDeployedLeader(QUICK_DEFAULTS.leader);
+    this.profile.quickSetupDone = true;
+    this._storeProfileLocally();
+    if (character?.proxyHero) this.ui.selectedHero = character.proxyHero;
+    this.ui.setProfile(this.profile);
   }
 
   _showShareDraft() {
@@ -3309,7 +3391,7 @@ class App {
     this.ui.showShareDraft();
   }
 
-  _openShareLobby() {
+  _openShareLobby(existingCode) {
     this.ui._clearBusy();
     if (this._shareLobby && !this._shareLobby.closed && !this._shareLobby.started) {
       this.ui._shareLive = true;
@@ -3330,7 +3412,7 @@ class App {
       return;
     }
     const id = this._shareSelfId();
-    const code = randomShareCode();
+    const code = existingCode || randomShareCode();
     this._shareCode = code;
     this._shareUrl = shareUrl(location.origin, code);
     this._shareSeen = new Set();
@@ -3346,8 +3428,9 @@ class App {
       now: Date.now(),
       mode: this.ui.selectedMode || 'campaign',
       level: this.ui.selectedLevel || 1,
-      difficulty: this.ui.selectedDiff || 'normal',
+      difficulty: this.ui.selectedDiff || QUICK_DEFAULTS.difficulty,
     });
+    this._rememberShareHost();
     this.ui._shareLive = true;
     this.ui.showSetup({ mode: this._shareLobby.mode });
     this.ui.setRoomSettings({
@@ -3382,7 +3465,7 @@ class App {
       }
       if (this.netMode) return;
       const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
-      if (!decision.ok) this._failShare(decision.reason);
+      if (!decision.ok && decision.reason !== 'host_left') this._failShare(decision.reason);
       else this._shareTrackPresence();
     };
     try {
@@ -3430,11 +3513,38 @@ class App {
     const code = this._shareCode;
     const generation = this._shareGeneration = (this._shareGeneration || 0) + 1;
     const onMessage = (message) => { if (generation === this._shareGeneration) this._onShareMessage(message); };
+    const relayUrl = globalThis.__zillionsShareRelay;
+    if (relayUrl) {
+      // The browser hub still writes the lobby snapshot this tab reloads.
+      // The relay is what the other browser actually hears.
+      const local = createBrowserHub();
+      const hub = createRelayHub(relayUrl);
+      this._shareHubList = [local, hub];
+      this._shareUnsubs = [
+        local.subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }),
+        hub.subscribe(this._shareCode, onMessage),
+      ];
+      this._shareRelay = true;
+      this._shareReach = 'subscribed';
+      if (this.mpRole === 'host') this._sharePublishLobby();
+      return;
+    }
     this._shareUnsubs.push(this._shareHubList[0].subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }));
     this._shareRelay = undefined;
+    this._shareReach = 'connecting';
     getSupabaseClient().then((client) => {
       if (generation !== this._shareGeneration || code !== this._shareCode) return;
-      const hub = createSupabaseHub(client);
+      try { client.realtime?.connect?.(); } catch { /* subscribe connects as well */ }
+      const hub = createSupabaseHub(client, {
+        presenceKey: this._shareSelf,
+        onStatus: (status) => {
+          if (generation !== this._shareGeneration) return;
+          this._shareReach = status;
+          this._shareSig = '';
+          if (status === 'subscribed' && this.mpRole === 'host') this._sharePublishLobby();
+          this._renderShareHost();
+        },
+      });
       this._shareHubList.push(hub);
       this._shareRelay = true;
       this._shareUnsubs.push(hub.subscribe(this._shareCode, onMessage));
@@ -3560,11 +3670,14 @@ class App {
     }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
     const blocked = players.length > 1 && !gate.ready;
-    const status = gate.blockers.length
+    const offline = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
+    const status = offline
+      ? "Can't reach room, reconnecting…"
+      : gate.blockers.length
       ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
       : gate.connectingSeats?.length
         ? `Waiting for ${gate.connectingSeats.map((seat) => seat.name).join(', ')} to connect.`
@@ -3661,7 +3774,10 @@ class App {
         t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
-        rejoin: !!(this._shareRejoinArmed || (this.netMode && !this.net?.open)),
+        ready: true,
+        // A fresh page that opens a siege already in progress has no armed
+        // rejoin flag. The host still has to replace the dead data channel.
+        rejoin: !!(lobby.started || this._shareRejoinArmed || (this.netMode && !this.net?.open)),
       });
     }
     if (!this._shareGuestShown) {
@@ -3684,10 +3800,16 @@ class App {
     this._shareSig = sig;
     const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
     const locked = (lobby.mode || 'campaign') === 'campaign' && (mine?.unlockedLevel || 1) < (lobby.level || 1);
+    if (!this._shareSeatAskedAt) this._shareSeatAskedAt = Date.now();
+    if (mine) this._shareSeatAskedAt = 0;
+    const waitingForSeat = !mine && Date.now() - (this._shareSeatAskedAt || Date.now()) > 8000;
     this.ui.showShareGuest({
       status: locked
         ? 'This mission is still locked for you. The host can pick an earlier one.'
-        : mine ? 'Seat saved. Pick your hero, then mark Ready.' : 'Asking the host for a seat…',
+        : mine ? `You're in as ${mine.name}. The host starts the match.`
+        : this._shareReach === 'reconnecting' ? "Can't reach room, reconnecting…"
+        : waitingForSeat ? 'No response to the seat request yet. Retrying.'
+        : 'Sending your seat request…',
       players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
       maxPlayers: lobby.maxPlayers || 4,
       ready: !!mine?.ready,
@@ -3731,6 +3853,7 @@ class App {
     } else {
       this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
     }
+    if (message.ready) this._shareLobby = setSeatReady(this._shareLobby, message.from, true, Date.now());
     this._sharePendingJoins ||= new Set();
     if (this._sharePendingJoins.has(message.from)) return;
     this._sharePendingJoins.add(message.from);
@@ -3918,6 +4041,8 @@ class App {
       this._sharePublish({ t: 'leave' });
     }
     const hosted = this.mpRole === 'host';
+    try { sessionStorage.removeItem('zillions.share.host'); } catch { /* private mode */ }
+    try { if (hosted) history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
     this._teardownShare();
     if (hosted && this._tab?.ownsLease()) {
       this._tab.release();
@@ -3928,18 +4053,6 @@ class App {
     if (!this.netMode) this.mpRole = null;
     if (this.auth?.isSignedIn() || chapterFounder(this.profile) || this.profile.quickSetupDone) this.ui._showScreen('main');
     else this.ui._showScreen('account');
-  }
-
-  _abandonShareLink() {
-    if (!this._shareCode) return;
-    try {
-      if (this.mpRole === 'host') {
-        if (this._tab && !this._tab.ownsLease()) return;
-        if (!this._shareLobby) return;
-        this._shareLobby = closeLobby(this._shareLobby, Date.now());
-        this._sharePublishLobby();
-      } else this._sharePublish({ t: 'leave' });
-    } catch { /* the page is going away */ }
   }
 
   _onShareLinkLost() {

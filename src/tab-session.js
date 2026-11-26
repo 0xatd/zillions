@@ -52,11 +52,16 @@ export function createTabSession({
   };
   publish(openedAt);
 
+  // A dying page can still receive one heartbeat after release. That write
+  // would make the reloaded tab look like a duplicate and mint a new id,
+  // which drops a guest out of a siege they were already seated in.
+  let released = false;
   return {
     id,
     token,
-    touch(atNow = clock()) { publish(atNow); },
+    touch(atNow = clock()) { if (!released) publish(atNow); },
     release(atNow = clock()) {
+      released = true;
       writeJson(local, LIVE_KEY, readLive(local, atNow).filter((row) => row.token !== token));
       const lease = readJson(local, LEASE_KEY);
       if (lease?.token === token) {

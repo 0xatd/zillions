@@ -11,7 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,8 +21,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       # `npm run check` runs `precheck` first (auth, economy, crafting, shell).
       - run: npm run check
+      # Two isolated browsers over an in-process relay. CI has no Supabase
+      # key, so this does not open the production Realtime websocket.
+      - run: npm run test:coop
       # Applies schema.sql + every migration to a throwaway local Postgres and
       # exercises apply_match_result(). Never touches a real Supabase project.
       - run: npm run check:postgres
