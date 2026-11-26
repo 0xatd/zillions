@@ -310,7 +310,7 @@ try {
     const guestProbe = await probe(guest.page);
     last = { hostProbe, guestProbe };
     if (hostProbe?.net && guestProbe?.net && !hostProbe.barrier && !guestProbe.barrier
-      && hostProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 120
+      && hostProbe.frame > 20 && guestProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 600
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       synced = last;
       break;
@@ -396,7 +396,7 @@ try {
     }
     if (guestProbe?.role === 'guest' && guestProbe.net && hostProbe?.role === 'host'
       && guestProbe.frame + 15 >= beforeDrop.frame
-      && Math.abs(hostProbe.frame - guestProbe.frame) <= 120
+      && Math.abs(hostProbe.frame - guestProbe.frame) <= 600
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       rejoined = lastRejoin;
       break;
