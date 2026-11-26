@@ -291,24 +291,43 @@ implemented. A persistent shared world is out of scope.
 ## Production UX Rules
 
 - Production must be account-first.
-- Signed-out players see the login screen. Signed-in players see Character
-  Select. The generic marketing title is not an account home.
-- Character Select shows the complete roster and owns `Deploy`, character
-  creation and deletion, Character Info, Custom Games, system options, and Log Out.
-  `Deploy` opens mission select.
-- The in-match Game Menu owns Resume, How to play, Settings, Restart, and Quit
-  to menu. It does not reuse Character Select as a pause menu.
-- Character Info uses separate Character, Equipment, Abilities, and Lattice
-  views. Equipment is interactive. The player can inspect and compare items,
-  click or double-click to equip and unequip, drag an item between the stash
-  and a compatible body slot, and drag items to reorder the stash. The model
-  remains the authority for requirements and legal equipment.
-- Custom Games has two primary views. Live Games lists real backend rooms that
-  can be joined or watched. Arcade catalogs prebuilt Zillions maps that a
-  player can play immediately or use to host a room. Recent and Favorites are
-  filters inside Arcade, not separate product sections.
-- Campaign and Survival own their saved runs. Show Resume inside the matching
-  solo mode. Do not add a generic Continue button to the home screen.
+- Boot opens the title. There is no logo delay. The title is a short left-aligned
+  word list over the live planet: Play, Squad, Armory, Settings, and Account.
+  Credits is a footer link. Account holds sign-in, the username claim, and log out.
+- Play with no character opens character creation. Play with a character opens
+  the play hub. Continue on the title resumes a saved run when one exists.
+- Character Select is a row of character cards over the live scene, plus a New
+  card. Picking a card sets the active character. That name stays in the corner
+  on every menu. An account owns multiple characters. A character joins or
+  creates games.
+- The play hub is one mode registry. Tabs are Campaign, Co-op, Versus, and
+  Custom. A mode is built or coming soon. Coming soon stays visible, grey, and
+  disabled.
+- Campaign is Enter the Overworld: a star system of planets and site markers,
+  with a slim top bar and a site side panel (Assault, Defend, Recruit, Trade,
+  Build). Assault on a built Earth site starts the existing siege. Planets and
+  actions that are not built stay grey and read Coming soon. This overworld is
+  the campaign menu. It is not the removed living world.
+- Co-op lists the built modes: Survival, The Labyrinth, Daily Siege, and Arcade
+  maps. Versus lists unbuilt player-versus-player modes as Coming soon. Custom
+  is one browser for live games, arcade maps, create, and join-by-code.
+- The in-match pause menu is a left word list over the live match: Resume, How
+  to play, Settings, Restart, and Quit to menu. It does not reuse Character
+  Select. Settings is Audio, Video, and Controls, and opens from the title and
+  from pause.
+- Armory is one screen for the active character: Heroes, Equipment, Abilities,
+  Lattice, and Quartermaster / Forge. Equipment stays interactive. The player
+  can inspect and compare items, click or double-click to equip and unequip,
+  drag an item between the stash and a compatible body slot, and drag items to
+  reorder the stash. The model remains the authority for requirements and legal
+  equipment.
+- Custom Games has two primary views inside the one browser. Live Games lists
+  real backend rooms that can be joined or watched. Arcade catalogs prebuilt
+  Zillions maps that a player can play immediately or use to host a room.
+  Recent and Favorites are filters inside Arcade, not separate product sections.
+- Campaign and Survival own their saved runs. Resume stays on the matching
+  mode card. The title Continue action resumes that same save. Do not add a
+  second generic Continue on the play hub.
 - Treat Campaign as the finite story/onboarding path. Do not present it as the
   whole product or as the primary repeat-play action.
 - The player should see a real sign-in gate before the game shell.
