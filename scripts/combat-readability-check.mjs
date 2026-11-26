@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { combatAlert, consumeRetry, RETRY_SCHEMA, runReview, storeRetry } from '../src/combat-readability.js';
+import { combatAlert, consumeRetry, edgeMarker, firstWaveApproach, pauseVeilHidden, RETRY_SCHEMA, retryAllowed, runReview, storeRetry } from '../src/combat-readability.js';
 
 const game = (overrides = {}) => ({
   over: false, phase: 'live', finalStand: false,
@@ -8,7 +8,21 @@ const game = (overrides = {}) => ({
   liveNests: () => 2, activeNodes: () => [{ id: 1 }], ...overrides,
 });
 assert.equal(combatAlert(game(), 0), null, 'healthy combat stays quiet');
+assert.equal(combatAlert(game({ buildings: [{ kind: 'hq', alive: true, hp: 90, maxHp: 100 }] }), 0), null, 'a scratched Keep stays quiet');
+assert.equal(combatAlert(game({ buildings: [{ kind: 'hq', alive: true, hp: 70, maxHp: 100 }] }), 0).key, 'keep-damaged', 'pressure warns before the Keep is half gone');
 assert.equal(combatAlert(game({ buildings: [{ kind: 'hq', alive: true, hp: 20, maxHp: 100 }] }), 0).key, 'keep-critical');
+const approach = firstWaveApproach({
+  over: false, phase: 'live', firstSiege: { stage: 'opening', nestId: 0 },
+  nests: [{ x: 12, z: 4, alive: true }], hq: { cx: 40, cz: 40 },
+});
+assert.equal(approach?.label, 'First wave');
+assert.equal(firstWaveApproach({ over: false, phase: 'live', firstSiege: { stage: 'defend', nestId: 0 }, nests: [{ x: 1, z: 1, alive: true }], hq: { cx: 2, cz: 2 } }), null);
+const east = edgeMarker(400, 0, 800, 600, 48);
+assert.ok(east && east.x > 700 && Math.abs(east.y - 300) < 1, 'an eastbound wave sits on the right edge');
+assert.equal(pauseVeilHidden({ paused: true, matchOver: true }), true, 'the end screen hides PAUSED');
+assert.equal(pauseVeilHidden({ paused: true }), false);
+assert.equal(retryAllowed({ mode: 'campaign', levelId: 1, unlocked: 1, hero: 'scott' }), true);
+assert.equal(retryAllowed({ netMode: true, mode: 'campaign', levelId: 1, unlocked: 1, hero: 'scott' }), false);
 assert.equal(combatAlert(game({ heroes: [{ hp: 20, maxHp: 100 }] }), 0).key, 'hero-critical');
 assert.equal(combatAlert(game({ finalStand: true, boss: { dead: false, enraged: true } }), 0).key, 'boss-enraged');
 const keepLoss = runReview({ won: false, stats: { kills: 50, built: 6, lost: 4, bestHeld: 1 }, threat: 3,

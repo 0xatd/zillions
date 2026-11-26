@@ -21,3 +21,15 @@ export function rememberWindow(history, window, commands, limit = 64) {
   while (history.size > limit) history.delete(history.keys().next().value);
   return history;
 }
+
+// What a guest does while one lockstep window is missing.
+// Re-request once after a couple of seconds, and ask for a host snapshot at
+// the same time. If that still has not moved the sim, force another snapshot
+// and say so. Callers rate-limit the actual sends.
+export function stallRecovery(ageMs, retried) {
+  const age = Number(ageMs) || 0;
+  if (age >= 10000) return 'resync';
+  if (age >= 1500 && !retried) return 'retry-snapshot';
+  if (age >= 1500 && retried) return 'snapshot';
+  return 'wait';
+}

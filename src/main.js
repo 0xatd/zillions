@@ -1,3 +1,4 @@
+import { RoomRelay } from './room-relay.js';
 import { HitFeedback } from './hit-feedback.js';
 import {FriendParty,partyCode} from './friend-party.js';
 import {showFriendParty} from './friend-party-ui.js';
@@ -6,7 +7,7 @@ import {eventHearingGain, hearingGain} from './audio-distance.js';
 import { spellTarget, spellManaCost } from './hero-spells.js';
 import { heroAbility, abilityCooldown } from './hero-abilities.js';
 import { chapterIdentity, chapterFounder, CHAPTER_LEADERS, leaderAvailable, leaderRecord, recruitmentAllowed } from './chapter.js';
-import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, leaderHeroKey, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
+import { COACH_STEPS, QUICK_DEFAULTS, coachAdvance, coachApply, coachComplete, coachStep, freshCoach, leaderHeroKey, localRetryHeroes, normalizeQuickSetup, pauseIntent, randomizeQuickSetup, fittedLabel } from './first-run.js';
 import { guestCommand } from './multiplayer-command.js';
 import { gateSupports } from './rampart-art-plan.js';
 import { terrainOccludesHero, structuresOccludeHero, installHeroOcclusionShell } from './hero-visibility.js';
@@ -30,11 +31,13 @@ import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './mari
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
-  admitGuest, clearGuestReady, closeLobby, createLobby, markStarted, parseShareLocation, publicShareLobby,
-  randomShareCode, releaseGuest, seatGuest, setSeatReady, shareFailureCopy, shareHero, shareId, shareLaunchReady, shareMessageId,
-  shareName, shareRoster, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, withSeatHero,
+  admitGuest, clearGuestReady, closeLobby, createLobby, hostStillHere, markStarted, parseShareLocation, publicShareLobby,
+  randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareGuestName, shareHero, shareId, shareLaunchReady, shareMessageId, shareSeatState,
+  shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, SHARE_LINK_FALLBACK_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
-import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
+import { createTabSession } from './tab-session.js';
+import { desyncRecovery, roomStartLabel, shareRejoinStep, withinRejoinGrace } from './lobby-reliability.js';
+import { createBrowserHub, createRelayHub, createShareRelayPeer, createSupabaseHub, loadShareIceServers, packShareLink, unpackShareLink } from './share-bus.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
 import {
@@ -43,7 +46,7 @@ import {
   sellAuthoritativeItem, unequipAuthoritativeItem, buyCraftMaterial, buyCraftComponent, craftAuthoritative,
 } from './economy.js';
 import { clamp, lerp } from './utils.js';
-import { clearRetry, consumeRetry, storeRetry } from './combat-readability.js';
+import { clearRetry, consumeRetry, edgeMarker, firstWaveApproach, retryAllowed, storeRetry } from './combat-readability.js';
 import { TacticalVisuals } from './tactical-visuals.js';
 import { normalizeQualityChoice, probeGpuSignals, resolveGraphics, stepDownTier } from './graphics-quality.js';
 import { mergeStaticMeshes } from './static-batch.js';
@@ -53,7 +56,7 @@ import { mountPerfHud, perfHudWanted } from './perf-hud.js';
 import { roomConnectionReadiness, roomLaunchReadiness } from './multiplayer-readiness.js';
 import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
-import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow } from './multiplayer-pacing.js';
+import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, unitArtState, unitPose } from './art-state.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
@@ -76,7 +79,7 @@ import {
 } from './share-replay.js';
 import { persistRunTelemetry } from './run-telemetry.js';
 import { loadBinds, loadFeel, saveBinds, saveFeel, resetBinds, actionFor, isHeld, keyLabel, bindKey } from './keybinds.js';
-import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop } from './combat-input.js';
+import { pointerOrder, quantizeOrder, castSlot, cameraAxisHeld, impactCue, scaledShake, armHitStop, tickHitStop, settleBuildToggle } from './combat-input.js';
 import {
   MMO_CLASSES, makeMmoCharacter, normalizeMmoCharacters, selectedMmoCharacter,
   addMmoCharacter, characterCamp, ensureDeployedLeader, recordMmoInstance, rewireLattice,
@@ -92,9 +95,9 @@ import {
 const ZMAX = 1700;
 const NET_STEP = 2;          // one lockstep command window every 2 sim ticks (~66ms)
 const NET_GUEST_BUFFER_MIN = 3; // adaptive floor; ~200ms at the 15Hz window rate
-const NET_REDUNDANCY = 4;       // recent windows piggybacked on every packet
+const NET_REDUNDANCY = 16;      // ~1s of windows on every packet. Four was shorter than one slow frame.
 const NET_SPECTATOR_BUFFER = 1024; // bounded loading backlog (~68 seconds)
-const NET_HISTORY = 64;         // explicit repair history (~4.3 seconds)
+const NET_HISTORY = 180;        // ~12s. A 10 FPS guest can still ask for the window it missed.
 const NET_PACE_SLOW = 0.94;  // guest sim rate when the bank is running dry
 const NET_PACE_FAST = 1.06;  // guest sim rate when the bank is overfull
 // Scratch colours for the per-frame sky/light update (no per-frame allocs).
@@ -178,6 +181,9 @@ class App {
       antialias: boot.preset.antialias,
       powerPreference: boot.tier === 'high' ? 'high-performance' : 'default',
     });
+    // Synchronous shader diagnostic queries can stall software GPUs for seconds.
+    // Keep them opt-in for authoring; production still compiles before loading ends.
+    this.renderer.debug.checkShaderErrors = new URLSearchParams(location.search).has('shaderDebug');
     this.renderer.info.autoReset = false;
     this.renderer.shadowMap.enabled = boot.preset.shadows;
     // Toy art pass: crisp-edged shadows and NO tone mapping, so a picked hex
@@ -233,7 +239,16 @@ class App {
         }
         this._launchCountdownComplete = false;
         const mode = this.ui.selectedMode || 'campaign';
-        if (this.mpRole === 'host' && (this.peers.length || this.onlineMode)) {
+        if (this.mpRole === 'host' && this._shareLobby && !this._shareLobby.started && this._shareSoloBlocked()) {
+          if (!this._shareSoloConfirm) {
+            this._shareSoloConfirm = true;
+            this.ui.showBanner('Your friend left this lobby. Press Start again to play alone.', '', 6000);
+            this._shareSig = '';
+            this._renderShareHost();
+            return;
+          }
+        }
+        if (this.mpRole === 'host' && (this.peers.length || this.onlineMode || (this._shareLobby && !this._shareLobby.started))) {
           if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
           if (this.onlineMode && this.lobby?.game) {
             const eligibility = roomLevelEligibility(this.lobby.game);
@@ -252,14 +267,16 @@ class App {
               return;
             }
           }
-          this._launchPrepared(d, hero, mode, true);
+          this._launchPrepared(d, hero, mode, this.peers.length > 0 || !!this.onlineMode);
         } else {
           this._launchPrepared(d, hero, mode, false);
         }
       },
       onCast: (slot = 0) => this.tryCast(slot),
       onControlMode: () => this.toggleControlMode(),
-      onBuildHold: (on) => { this.buttonPay = !!on; },
+      onBuildHold: (on) => { this.buttonPay = !!on; if (on) this._payPressUsed = false; },
+      onBuildToggle: () => { this.buttonPay = !this.buttonPay; if (this.buttonPay) this._payPressUsed = false; },
+      isMatchLive: () => !!(this.game && !this.game.over),
       onRally: (g) => { this.audio.init(); this.issue({ t: 'rally', g, p: this.myPlayer }); },
       onBranch: (id, b) => this.issue({ t: 'choose', id, b, p: this.myPlayer }),
       onSpeed: (s) => this.setSpeed(s),
@@ -303,10 +320,7 @@ class App {
       onCharacterCreate: (draft) => this._createMmoCharacter(draft),
       onCharacterPreview: (style) => this._setCharacterPreview(style),
       onFound: () => this._tryFound(),
-      onLocateKeep: () => {
-        const keep = this.game?.buildings.find(b => b.kind === 'hq' && b.alive);
-        if (keep) { this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 }; }
-      },
+      onLocateKeep: () => this._lookAtKeep(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
@@ -314,11 +328,13 @@ class App {
       onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
       onRestart: () => this._restartOrReturn(),
       onRetry: () => this._retryMission(),
-      canRetry: (game) => {
-        const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
-        return !!this.auth?.isSignedIn() && !this.netMode && game?.mode === 'campaign'
-          && Number.isInteger(game?.levelId) && game.levelId >= 1 && game.levelId <= unlocked;
-      },
+      canRetry: (game) => retryAllowed({
+        netMode: !!this.netMode,
+        mode: game?.mode,
+        levelId: game?.levelId,
+        unlocked: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
+        hero: this.ui.selectedHero,
+      }),
       onQuit: () => location.reload(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
@@ -339,6 +355,7 @@ class App {
       onQuickStart: (draft) => this._quickStart(draft),
       onQuickInvite: (draft) => this._quickStart(draft, { invite: true }),
       onShareInvite: () => this._requestShareInvite(),
+      onShareCreate: () => this._openShareLobby(),
       onShareLeave: () => this._leaveShareLink(),
       onShareReady: (ready) => this._setShareReady(ready),
       onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
@@ -447,7 +464,14 @@ class App {
       this.profile.lastHero = initialCharacter.proxyHero;
     }
     this.autosaveT = 20;
-    window.addEventListener('beforeunload', () => { this._autosave(true); this._abandonShareLink(); });
+    window.addEventListener('beforeunload', () => {
+      this._autosave(true);
+      // A refresh is also an unload. Publishing close/leave here races the
+      // next page: the dying page's message can arrive after the resumed
+      // lobby and tell the friend the host left. A real close stops the
+      // heartbeat, and that silence is what ends the room.
+      this._tab?.release();
+    });
 
     this.groanAcc = 0;
     this.deathSfxT = 0;
@@ -487,6 +511,9 @@ class App {
         }).catch(() => {});
       }).catch(() => {});
     }, 1500);
+    void getSupabaseClient().then((client) => {
+      try { client.realtime?.connect?.(); } catch { /* the invite subscribe connects too */ }
+    }).catch(() => {});
     this._consumeShareLink();
     this._bootReplay();
     this.ui.setAccount(this.authStatus);
@@ -509,6 +536,29 @@ class App {
     this.renderer.setAnimationLoop(() => this.frameGuard.run(() => this.frame()));
     this._boot = { shellMs: Math.round(performance.now() - this._bootStart) };
     window.__zillionsBoot = this._boot;
+    // The coop end-to-end test reads this. It is only installed when that
+    // test has pointed the page at its in-process relay.
+    if (globalThis.__zillionsShareRelay || globalThis.__zillionsProbeEnabled) {
+      globalThis.__zillionsProbe = () => ({
+        frame: this.simFrame,
+        over: !!this.game?.over, paused: !!this.paused,
+        windows: this.inbox?.size || 0, bufferTarget: this.netBufferTarget,
+        missingWindow: this._missingWindow, frameError: this._frameError?.message || '',
+        gold: this.game ? Math.floor(this.game.gold) : null,
+        role: this.mpRole,
+        net: !!this.netMode,
+        barrier: !!this.startBarrier,
+        peers: this.peers?.length || 0,
+        open: !!(this.net?.open || [...(this._shareHands?.values() || [])].some((peer) => peer.open)),
+        code: this._shareCode || '',
+        hash: (() => { try { return this.game && !this.startBarrier ? this._stateHash() : null; } catch { return null; } })(),
+        hashLog: this._hashLog || [],
+        stallMs: this.mpRole === 'guest' && this._stallSince && !this._resyncing ? Math.round(performance.now() - this._stallSince) : 0,
+        resyncMs: this._resyncing ? Math.round(performance.now() - (this._resyncStarted || performance.now())) : 0,
+        self: this._shareSelf || '',
+        roster: this._shareLobby ? shareRoster(this._shareLobby, this._shareSelf) : [],
+      });
+    }
     requestAnimationFrame(() => this._ensurePresentation());
   }
 
@@ -812,13 +862,17 @@ class App {
   // BEFORE telling guests to start, so every peer runs the ticket's seed and
   // knows the room id from the first frame — not looked up at match end.
   async _launchHostMatch(d, hero, mode) {
+    if (this._shareBeginNeed && !this._shareBeginFinished) {
+      this._shareFanBegin();
+      this._shareSig = '';
+      this._renderShareHost();
+      return;
+    }
     if (this._hostLaunching) return;
     this._hostLaunching = true;
     try {
       if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
-      this._sealShareLobby();
       const level = this.ui.selectedLevel || 1;
-      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
       const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
       // The server only issues room tickets for a room that is in game.
       if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
@@ -830,11 +884,38 @@ class App {
         joinToken: ticket?.ok ? ticket.joinToken || null : null,
         error: ticket && !ticket.ok ? ticket.error : null,
       };
+      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      const culture = cultureKey(this.ui.selectedCulture);
+      const seated = (this._shareLobby?.seats || []).filter((seat) => !seat.host);
+      if (seated.length) {
+        const missing = seated.filter((seat) => !this.peers.some((peer) => peer.shareId === seat.id && peer.open));
+        if (missing.length) {
+          const names = missing.map((seat) => seat.name || 'A guest').join(', ');
+          this.ui.showBanner(`${names} ${missing.length === 1 ? 'is' : 'are'} not connected. The match will not start without them.`, 'bad', 5200);
+          this._shareSig = '';
+          this._renderShareHost();
+          return;
+        }
+        const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+        this._shareBeginNeed = new Set(seated.map((seat) => seat.id));
+        this._shareBegan = new Set();
+        this._shareBeginFinished = false;
+        this._shareBeginAt = Date.now();
+        this._shareBeginReminded = false;
+        this._shareBeginPayload = { d, heroes, level, mode, culture, match: shared, attempt: crypto.randomUUID() };
+        this.startExpectedGuests = seated.length;
+        this.startReadyGuests.clear();
+        this.startBarrier = true;
+        this._shareSig = '';
+        this._renderShareHost();
+        this._shareFanBegin();
+        return;
+      }
+      this._sealShareLobby();
+      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
       this.startExpectedGuests = this.peers.length;
       this.startReadyGuests.clear();
       this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
-      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
-      const culture = cultureKey(this.ui.selectedCulture);
       this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
       await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
     } finally {
@@ -850,7 +931,9 @@ class App {
   // What this peer needs at match end: ticket, room, the exact hero setups the
   // sim started from, and (for resumed runs) the input log so far.
   _beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket }) {
-    const resumed = snap ? this._resumeMatch || null : null;
+    const sameRoom = snap && mp?.role === 'guest' && mp?.match?.roomId
+      && this._match?.roomId === mp.match.roomId;
+    const resumed = snap ? this._resumeMatch || (sameRoom ? this._match : null) : null;
     this._resumeMatch = null;
     const given = mp?.match || null;
     const match = {
@@ -866,9 +949,10 @@ class App {
     // Guests (and resumed co-op peers) fetch their own ticket for the room in
     // the background; it is only needed when the match ends.
     if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
-      match.ticketPromise = this._requestMatchTicket({
+      const request = resumed?.ticketPromise || this._requestMatchTicket({
         levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
-      }).then((ticket) => {
+      });
+      match.ticketPromise = request.then((ticket) => {
         if (ticket?.ok) {
           if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
           match.ticket = ticket.ticket;
@@ -941,11 +1025,24 @@ class App {
     if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
+    this._preparingBattlefield = true;
     this._mountMatchView({ mode, level, snap, mp, heroKey, matchInbox });
+    // Build the initial visible actors without advancing combat or drawing.
+    // Await shader compilation while heartbeats and loading UI remain live.
+    this.ui.setDeploymentLoading(true, null, 'Preparing battlefield graphics');
+    this._warmupFrame = true;
+    try { this.frame(); } finally { this._warmupFrame = false; }
+    await this.renderer.compileAsync(this.scene, this.camera);
+    // Texture/buffer upload belongs to loading too, before startReady.
+    this.tacticalVisuals.render();
+    this._netClockLast = performance.now();
+    this.acc = 0;
     } catch (error) {
       this._finishMissionIntro();
       throw error;
     } finally {
+      this._preparingBattlefield = false;
+      this._warmupFrame = false;
       this.ui.setDeploymentLoading(false);
     }
   }
@@ -1332,7 +1429,7 @@ class App {
 
   // Presentation-only arrival. Never runs for network, Watch or restored games.
   _finishMissionIntro() {
-    if (this.missionIntro) {
+    if (this.missionIntro && !this.missionIntro.held) {
       this.camDist = this.missionIntro.distance;
       this.lastDir = { x: 0, z: 0, s: false };
     }
@@ -1536,15 +1633,16 @@ class App {
       ring.position.set(s.x, 0.06, s.z);
       gr.add(ring);
       gr.userData.ring = ring;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
-      pole.position.set(s.x, 2.5, s.z);
+      const ox = 2.6;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6.4, 6), toyMat({ color: 0x3a3228 }));
+      pole.position.set(s.x + ox, 3.2, s.z);
       gr.add(pole);
       const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), toyMat({ color: 0xc9a44a }));
-      flag.position.set(s.x + 0.85, 4.4, s.z);
+      flag.position.set(s.x + ox + 0.85, 5.8, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
       const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
-      label.position.set(s.x, 6.3, s.z);
+      label.position.set(s.x + ox, 7.6, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
       gr.position.y = this.map.groundY(s.x, s.z);
@@ -1891,21 +1989,21 @@ class App {
     this.ui.setAccount(this.authStatus);
     // A shared replay owns the screen. Account hydration above still ran.
     if (this._replayBoot) return;
-    if (status.signedIn && !status.needsUsername) {
-      const character = selectedMmoCharacter(this.profile);
-      const retry = consumeRetry(sessionStorage, {
-        allowedHeroes: character?.proxyHero ? [character.proxyHero] : [],
-        maxLevel: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
-      });
-      if (retry) {
-        this._authenticatedEntryHandled = true;
-        this.ui._accountAccepted = true;
-        this.ui.selectedLevel = retry.level;
-        this.ui.selectedMode = 'campaign';
-        setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
-        return;
+    const retry = this._consumeBootRetry(status);
+    if (retry) {
+      this._authenticatedEntryHandled = true;
+      this.ui._accountAccepted = true;
+      if (!status.signedIn) {
+        this._guestSession = true;
+        this.ui.noteGuestSession();
       }
-    } else clearRetry(sessionStorage);
+      this.ui.selectedLevel = retry.level;
+      this.ui.selectedMode = 'campaign';
+      this.ui.selectedHero = retry.hero;
+      this.ui.selectedDiff = retry.difficulty;
+      setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
+      return;
+    }
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: straight back to mission select.
@@ -1944,17 +2042,35 @@ class App {
     location.reload();
   }
 
+  _consumeBootRetry(status) {
+    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+    if (status?.signedIn && status.needsUsername) {
+      clearRetry(sessionStorage);
+      return null;
+    }
+    const signedIn = !!(status?.signedIn && !status.needsUsername);
+    const character = signedIn ? selectedMmoCharacter(this.profile) : null;
+    const allowedHeroes = signedIn
+      ? (character?.proxyHero ? [character.proxyHero] : [])
+      : localRetryHeroes(this.profile, this.ui.selectedHero);
+    return consumeRetry(sessionStorage, { allowedHeroes, maxLevel: unlocked });
+  }
+
   _retryMission() {
-    if (!this.auth?.isSignedIn() || !this.game?.over || this.game.mode !== 'campaign' || this.netMode) {
+    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
+    const hero = this.ui.selectedHero;
+    if (!retryAllowed({
+      netMode: !!this.netMode, mode: this.game?.mode, levelId: this.game?.levelId, unlocked, hero,
+    }) || !this.game?.over) {
       clearRetry(sessionStorage);
       return this._restartOrReturn();
     }
-    const character = selectedMmoCharacter(this.profile);
-    const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
-    if (!character?.proxyHero || this.ui.selectedHero !== character.proxyHero
-      || !Number.isInteger(this.game.levelId) || this.game.levelId < 1 || this.game.levelId > unlocked) {
-      clearRetry(sessionStorage);
-      return this._restartOrReturn();
+    if (this.auth?.isSignedIn()) {
+      const character = selectedMmoCharacter(this.profile);
+      if (!character?.proxyHero || hero !== character.proxyHero) {
+        clearRetry(sessionStorage);
+        return this._restartOrReturn();
+      }
     }
     // Preserve the exact mission setup across the clean reload. Startup already
     // owns authentication/profile hydration; the retry marker is consumed once
@@ -2143,6 +2259,7 @@ class App {
     this._quickCommitted = true;
     this.ui.selectedCulture = draft.army;
     this.ui.selectedDiff = draft.difficulty;
+    this.ui._diffPicked = true;
     this.ui.selectedMode = 'campaign';
     this.ui.selectedLevel = Math.min(LEVELS.length, Math.max(1, Number(this.profile.campaign || 0) + 1));
     try { localStorage.setItem('zillions.culture', draft.army); } catch { /* private mode */ }
@@ -2402,8 +2519,36 @@ class App {
     };
   }
 
+  _tabSession() {
+    if (!this._tab) this._tab = createTabSession();
+    return this._tab;
+  }
+
   _publicName() {
-    return this.lobby?.me?.name || this.profile.username || this.profile.name || 'Commander';
+    const founder = chapterFounder(this.profile);
+    return seatDisplayName({
+      accountName: this.lobby?.me?.name || '',
+      username: this.profile.username || '',
+      founderName: founder?.name || '',
+      profileName: this.profile.name || '',
+    });
+  }
+
+  // Share seats never borrow the online-lobby account name or the host's
+  // label. The id is this tab's commander id.
+  _shareHostLabel() {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.host);
+    return seat?.name || this._shareLobby?.hostName || (this.mpRole === 'host' ? this._publicName() : '');
+  }
+
+  _shareDisplayName() {
+    const founder = chapterFounder(this.profile);
+    const own = founder?.name || this.profile.username || this.profile.name || '';
+    return shareGuestName({
+      name: own,
+      id: this._shareSelf || this._shareSelfId(),
+      hostName: this.mpRole === 'host' ? '' : this._shareHostLabel(),
+    });
   }
 
   _heroPayload(key = this.ui.selectedHero) {
@@ -2431,7 +2576,7 @@ class App {
     }
     if (this._shareLobby && this.mpRole === 'guest') {
       this._sharePublish({
-        t: 'join', name: this._publicName(), hero: key, claim: true,
+        t: 'join', name: this._shareDisplayName(), hero: key, claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
       });
@@ -2489,6 +2634,7 @@ class App {
   }
 
   _syncSetupRoster() {
+    if (this._shareLobby && !this._shareLobby.closed && (this.mpRole === 'host' || this.mpRole === 'guest')) return;
     if (this.lobby?.game) return this._onRoomUpdate(this.lobby.game);
     if (this.mpRole !== 'host' && this.mpRole !== 'guest') return;
     const players = this._manualRosterPlayers();
@@ -3089,15 +3235,22 @@ class App {
       this.guestHeroes[idx] = m.camp ? { k: m.k, camp: m.camp } : m.k;
       const shareIdForPeer = this.peers[idx]?.shareId;
       if (shareIdForPeer && this._shareLobby) {
-        this._shareLobby = withSeatHero(this._shareLobby, shareIdForPeer, m.k, m.name, Date.now());
+        this._shareLobby = withSeatHero(this._shareLobby, shareIdForPeer, m.k, this._shareGuestLabel(m.name, shareIdForPeer), Date.now());
         this._sharePublishLobby();
         this._renderShareHost();
       }
-      const players = this._manualRosterPlayers();
-      this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
-      this._syncSetupRoster();
+      if (!(this._shareLobby && !this._shareLobby.closed)) {
+        const players = this._manualRosterPlayers();
+        this.ui.mpLobby(this.peers.length, this.peers.length < 3, players, { mode: this.ui.selectedMode || 'campaign' });
+        this._syncSetupRoster();
+      }
     }
     else if (m.t === 'startReady') {
+      const shareGuest = this.peers[idx]?.shareId;
+      if (this._shareBeginNeed) {
+        if (shareGuest && this._shareBeginNeed.has(shareGuest)) this._shareNoteBegan(shareGuest, m.attempt);
+        return;
+      }
       this.startReadyGuests.add(idx);
       if (matchStartReady(this.startExpectedGuests, this.startReadyGuests.size)) {
         this.startBarrier = false;
@@ -3115,10 +3268,21 @@ class App {
       if (command && this.guestCmdQueues[idx]) this.guestCmdQueues[idx].push(command);
     }
     else if (m.t === 'needWindow') {
-      const bundle = this._windowHistory.get(Number(m.w));
       const peer = this.peers[idx];
-      if (bundle && peer) peer.sendFast({ t: 'w', w: Number(m.w), c: bundle, p: [] });
+      if (!peer) return;
+      const start = Number(m.w);
+      const recent = [];
+      for (let n = start; n < start + 32; n++) {
+        const commands = this._windowHistory.get(n);
+        if (commands) recent.push([n, commands]);
+      }
+      if (recent.length) {
+        peer.sendFast({ t: 'w', w: recent[0][0], c: recent[0][1], p: recent.slice(1) });
+        return;
+      }
+      this._sendGuestResync(idx);
     }
+    else if (m.t === 'snap') this._sendGuestResync(idx);
     else if (m.t === 'h') this._checkGuestHash(m.w, m.h, idx);
     else if (m.t === 'chat') {
       this.ui.gameChatAdd(m);
@@ -3158,11 +3322,22 @@ class App {
 
   _checkGuestHash(w, h, idx) {
     const mine = this.hashes.local.get(w);
-    if (mine !== undefined && mine !== h && !this.desynced) {
+    if (mine === undefined || mine === h || this.desynced) return;
+    const decision = desyncRecovery({ attempts: this._desyncAttempts || [], now: Date.now() });
+    this._desyncAttempts = decision.attempts;
+    if (decision.action === 'terminal') {
       this.desynced = true;
       this._broadcast({ t: 'desync' });
       this.ui.showBanner('⚠️ Games desynced — everyone should refresh and reconnect.', 'bad', 10000);
+      return;
     }
+    const peer = this.peers[idx];
+    if (!peer?.open || !this.game) return;
+    this.ui.showBanner('Restoring the shared battlefield…', '', 2500);
+    peer.send({
+      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      match: this._sharedMatchFields(), reason: 'desync',
+    });
   }
 
   async joinGame(code) {
@@ -3191,14 +3366,32 @@ class App {
   // Friends join before Start. After that the link refuses a new hero.
   _shareSelfId() {
     if (shareId(this._shareSelf)) return this._shareSelf;
-    let id = '';
-    try { id = sessionStorage.getItem('zillions.share.self') || ''; } catch { /* private mode */ }
-    if (!shareId(id)) {
-      id = crypto.randomUUID();
-      try { sessionStorage.setItem('zillions.share.self', id); } catch { /* private mode */ }
-    }
-    this._shareSelf = id;
-    return id;
+    const id = this._tabSession().id;
+    this._shareSelf = shareId(id) ? id : crypto.randomUUID();
+    return this._shareSelf;
+  }
+
+  _shareLiveness() {
+    return { receivedAt: this._shareReceivedAt || null, hostPresent: !!this._shareHostPresent };
+  }
+
+  _noteSharePresence(members) {
+    const list = Array.isArray(members) ? members : [];
+    const ids = list.map((member) => member?.id).filter(Boolean);
+    this._sharePresentIds = ids.length ? new Set(ids) : null;
+    const hostId = this._shareLobby?.hostId;
+    this._shareHostPresent = !!(hostId && list.some((member) => member?.role === 'host' && member.id === hostId));
+    if (this._shareHostPresent) this._shareReceivedAt = Date.now();
+  }
+
+  _shareTrackPresence() {
+    if (!this._shareCode || !this._shareSelf) return;
+    const payload = {
+      id: this._shareSelf,
+      role: this.mpRole === 'host' ? 'host' : 'guest',
+      name: this._shareDisplayName(),
+    };
+    for (const hub of this._shareHubList || []) hub.track?.(this._shareCode, payload);
   }
 
   _consumeShareLink() {
@@ -3213,10 +3406,69 @@ class App {
       this.ui.showShareNotice({ title: 'Invite link', copy: shareFailureCopy('invalid'), tone: 'bad' });
       return;
     }
-    this._joinShareLink(parsed.code);
+    void this._enterShare(parsed.code);
   }
 
-  _requestShareInvite() {
+  async _enterShare(code) {
+    let hostCode = '';
+    try { hostCode = sessionStorage.getItem('zillions.share.host') || ''; } catch { /* private mode */ }
+    await this._ensureDefaultCommander();
+    if (hostCode === code) {
+      this._resumeShareHost(code);
+      return;
+    }
+    this._joinShareLink(code);
+  }
+
+  _rememberShareHost() {
+    if (!this._shareCode || !this._shareUrl) return;
+    try { sessionStorage.setItem('zillions.share.host', this._shareCode); } catch { /* private mode */ }
+    try { history.replaceState(null, '', this._shareUrl); } catch { /* ignore */ }
+  }
+
+  _resumeShareHost(code) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(`zillions.share.${code}`) || 'null'); } catch { saved = null; }
+    const lobby = saved?.lobby;
+    if (lobby?.code === code && lobby.hostId === this._shareSelfId() && !lobby.closed) {
+      this._shareCode = code;
+      this._shareUrl = shareUrl(location.origin, code);
+      this._shareLobby = { ...lobby, seats: lobby.seats.map((seat) => ({ ...seat, linked: !!seat.host, transport: '' })) };
+      this._shareGuestSessions = new Map(lobby.seats.filter((seat) => !seat.host).map((seat) => [seat.id, seat.session]));
+      this._shareSeen = new Set();
+      this._shareHands = new Map();
+      this._shareFailed = false;
+      this.mpRole = 'host';
+      this.ui._shareLive = true;
+      if (lobby.started) {
+        // A saved lobby is not a running host simulation. End this invite
+        // rather than advertise an unrejoinable match; keep the autosave
+        // available through the ordinary solo Resume path.
+        this._shareLobby = closeLobby(this._shareLobby, Date.now());
+        this._bindShareTransport('host');
+        this._sharePublishLobby();
+        this._leaveShareLink();
+        this.ui.showBanner('The invite ended when the host refreshed. Resume your saved siege from Play Solo.', '', 8000);
+        return;
+      }
+      this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
+      this.ui.setRoomSettings({
+        level: lobby.level || 1,
+        difficulty: lobby.difficulty || 'casual',
+        isHost: true,
+        mode: lobby.mode || 'campaign',
+      });
+      this._bindShareTransport('host');
+      this._startShareHeartbeat();
+      this._shareSig = '';
+      this._renderShareHost();
+      this._rememberShareHost();
+      return;
+    }
+    this._openShareLobby(code);
+  }
+
+  async _requestShareInvite() {
     this.ui._clearBusy();
     if (this.game && !this.game.over) {
       this.ui.showBanner(shareFailureCopy('started'), 'bad', 5200);
@@ -3235,22 +3487,48 @@ class App {
       this.ui.noteGuestSession();
       this.ui._accountAccepted = true;
     }
-    const ready = !!(chapterFounder(this.profile) || this.profile.quickSetupDone);
-    if (!ready) {
-      this.ui.showQuickSetup(normalizeQuickSetup({
-        chapterName: this.profile.chapter?.name || QUICK_DEFAULTS.chapterName,
-        founderName: QUICK_DEFAULTS.founderName,
-        army: this.ui.selectedCulture,
-        color: this.profile.chapter?.color,
-        emblem: this.profile.chapter?.emblem,
-      }));
-      this.ui.showBanner('Name your chapter, then invite a friend. No account needed.', '', 3400);
-      return;
-    }
+    await this._ensureDefaultCommander();
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    if (!this.ui.selectedLevel) this.ui.selectedLevel = 1;
     this._openShareLobby();
+    if (this._shareUrl) this.ui.copyShareUrl(this._shareUrl);
   }
 
-  _openShareLobby() {
+  async _ensureDefaultCommander() {
+    if (!this.ui.selectedMode) this.ui.selectedMode = 'campaign';
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    if (chapterFounder(this.profile)) {
+      const founder = chapterFounder(this.profile);
+      if (founder?.proxyHero) this.ui.selectedHero = founder.proxyHero;
+      return;
+    }
+    await this._createMmoCharacter({
+      name: QUICK_DEFAULTS.founderName,
+      appearance: QUICK_DEFAULTS.color,
+      raceKey: 'human',
+      customization: {},
+      quiet: true,
+    });
+    const character = await this._bindDeployedLeader(QUICK_DEFAULTS.leader);
+    this.profile.quickSetupDone = true;
+    this._storeProfileLocally();
+    if (character?.proxyHero) this.ui.selectedHero = character.proxyHero;
+    this.ui.setProfile(this.profile);
+  }
+
+  _showShareDraft() {
+    if (!this.ui._diffPicked) this.ui.selectedDiff = QUICK_DEFAULTS.difficulty;
+    this.ui.showSetup({ mode: this.ui.selectedMode || 'campaign', share: true });
+    this.ui.setRoomSettings({
+      level: this.ui.selectedLevel || 1,
+      difficulty: this.ui.selectedDiff || QUICK_DEFAULTS.difficulty,
+      isHost: true,
+      mode: this.ui.selectedMode || 'campaign',
+    });
+    this.ui.showShareDraft();
+  }
+
+  _openShareLobby(existingCode) {
     this.ui._clearBusy();
     if (this._shareLobby && !this._shareLobby.closed && !this._shareLobby.started) {
       this.ui._shareLive = true;
@@ -3263,11 +3541,15 @@ class App {
       });
       this._shareSig = '';
       this._renderShareHost();
-      this.ui.copyShareUrl(this._shareUrl);
+      return;
+    }
+    const claim = this._tabSession().claimLease({ kind: 'share' });
+    if (!claim.ok) {
+      this.ui.showBanner('This browser already has a lobby open in another tab. Use that tab, or close it before hosting here.', 'bad', 5500);
       return;
     }
     const id = this._shareSelfId();
-    const code = randomShareCode();
+    const code = existingCode || randomShareCode();
     this._shareCode = code;
     this._shareUrl = shareUrl(location.origin, code);
     this._shareSeen = new Set();
@@ -3283,8 +3565,9 @@ class App {
       now: Date.now(),
       mode: this.ui.selectedMode || 'campaign',
       level: this.ui.selectedLevel || 1,
-      difficulty: this.ui.selectedDiff || 'normal',
+      difficulty: this.ui.selectedDiff || QUICK_DEFAULTS.difficulty,
     });
+    this._rememberShareHost();
     this.ui._shareLive = true;
     this.ui.showSetup({ mode: this._shareLobby.mode });
     this.ui.setRoomSettings({
@@ -3296,17 +3579,72 @@ class App {
     this._shareIcePromise = this.lobby?.iceServers?.length ? Promise.resolve(this.lobby.iceServers) : loadShareIceServers();
     this._bindShareTransport('host');
     this._sharePublishLobby();
-    clearInterval(this._shareBeat);
-    this._shareBeat = setInterval(() => {
-      if (this._shareLobby && this.mpRole === 'host') this._sharePublishLobby();
-    }, SHARE_HEARTBEAT_MS);
+    this._startShareHeartbeat();
     this._shareSig = '';
     this._renderShareHost();
-    this.ui.copyShareUrl(this._shareUrl);
+  }
+
+  _startShareHeartbeat() {
+    this._stopShareHeartbeat();
+    const tick = () => {
+      this._tabSession().touch();
+      if (this.mpRole === 'host' && this._shareLobby) {
+        this._tabSession().refreshLease();
+        this._reapShareSeats();
+        this._sharePublishLobby();
+        this._shareTrackPresence();
+        for (const seat of this._shareLobby.seats || []) {
+          if (seat.host || seat.linked) continue;
+          this._shareSendPing(seat.id);
+          this._shareConsiderLink(seat.id);
+        }
+        this._sharePollBegin();
+        return;
+      }
+      if (this.mpRole !== 'guest' || !this._shareLobby) return;
+      const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf);
+      this._retryShareReady();
+      if (mine && !mine.linked) this._shareSendPing(this._shareLobby.hostId);
+      this._shareSendCatchup();
+      if (this._shareRejoinArmed || (this.netMode && this.game && !this.game.over && !this.net?.open)) {
+        this._shareRejoinTick();
+        return;
+      }
+      if (this.netMode) {
+        this._sharePublish({ t: 'here', name: this._shareDisplayName() });
+        return;
+      }
+      const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
+      if (!decision.ok) this._failShare(decision.reason);
+      else {
+        this._sharePublish({ t: 'here', name: this._shareDisplayName() });
+        this._shareTrackPresence();
+        const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf);
+        if (mine && !mine.linked) this._shareSendPing(this._shareLobby.hostId);
+      }
+    };
+    try {
+      const src = `setInterval(() => postMessage(0), ${SHARE_HEARTBEAT_MS});`;
+      this._shareWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this._shareWorker.onmessage = tick;
+    } catch {
+      this._shareBeat = setInterval(tick, SHARE_HEARTBEAT_MS);
+    }
+  }
+
+  _stopShareHeartbeat() {
+    if (this._shareWorker) {
+      try { this._shareWorker.terminate(); } catch { /* already gone */ }
+      this._shareWorker = null;
+    }
+    clearInterval(this._shareBeat);
+    this._shareBeat = null;
   }
 
   _joinShareLink(code) {
     this._shareFailed = false;
+    this._shareSession = crypto.randomUUID();
+    this._shareReadyIntent = null;
     this._shareCode = code;
     this._shareSelf = this._shareSelfId();
     this._shareSeen = new Set();
@@ -3320,15 +3658,16 @@ class App {
     this.ui.showShareNotice({ title: 'Joining siege', copy: 'Looking for the host…' });
     this._bindShareTransport('guest');
     clearTimeout(this._shareDiscover);
-    this._shareDiscover = setTimeout(() => {
-      if (!this._shareLobby) this._failShare('invalid');
-    }, SHARE_DISCOVER_MS);
-    clearInterval(this._shareBeat);
-    this._shareBeat = setInterval(() => {
-      if (this.mpRole !== 'guest' || !this._shareLobby || this.netMode) return;
-      const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now());
-      if (!decision.ok) this._failShare(decision.reason);
-    }, 1000);
+    // Count live event-loop turns, not wall time. A cold CI page can block
+    // the thread longer than the old 8s timer, and that timer then fired
+    // before the in-flight lobby poll resolved and called the link invalid.
+    let turns = 0;
+    this._shareDiscover = setInterval(() => {
+      if (this._shareLobby || this._shareFailed) { clearTimeout(this._shareDiscover); return; }
+      turns += 1;
+      if (turns * 2000 >= SHARE_DISCOVER_MS * 4) this._failShare('invalid');
+    }, 2000);
+    this._startShareHeartbeat();
   }
 
   _bindShareTransport(role) {
@@ -3337,14 +3676,48 @@ class App {
     const code = this._shareCode;
     const generation = this._shareGeneration = (this._shareGeneration || 0) + 1;
     const onMessage = (message) => { if (generation === this._shareGeneration) this._onShareMessage(message); };
+    const relayUrl = globalThis.__zillionsShareRelay;
+    if (relayUrl) {
+      // The browser hub still writes the lobby snapshot this tab reloads.
+      // The relay is what the other browser actually hears.
+      const local = createBrowserHub();
+      const hub = createRelayHub(relayUrl);
+      this._shareHubList = [local, hub];
+      this._shareUnsubs = [
+        local.subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }),
+        hub.subscribe(this._shareCode, onMessage),
+      ];
+      this._shareRelay = true;
+      this._shareReach = 'subscribed';
+      if (this.mpRole === 'host') this._sharePublishLobby();
+      return;
+    }
     this._shareUnsubs.push(this._shareHubList[0].subscribe(this._shareCode, onMessage, { replay: role === 'guest' ? 'lobby' : 'none' }));
     this._shareRelay = undefined;
+    this._shareReach = 'connecting';
     getSupabaseClient().then((client) => {
       if (generation !== this._shareGeneration || code !== this._shareCode) return;
-      const hub = createSupabaseHub(client);
+      try { client.realtime?.connect?.(); } catch { /* subscribe connects as well */ }
+      const hub = createSupabaseHub(client, {
+        presenceKey: this._shareSelf,
+        onStatus: (status) => {
+          if (generation !== this._shareGeneration) return;
+          this._shareReach = status;
+          this._shareSig = '';
+          if (status === 'subscribed' && this.mpRole === 'host') this._sharePublishLobby();
+          this._renderShareHost();
+        },
+      });
       this._shareHubList.push(hub);
       this._shareRelay = true;
       this._shareUnsubs.push(hub.subscribe(this._shareCode, onMessage));
+      if (hub.onPresence) {
+        this._shareUnsubs.push(hub.onPresence(this._shareCode, (members) => {
+          if (generation !== this._shareGeneration) return;
+          this._noteSharePresence(members);
+        }));
+      }
+      this._shareTrackPresence();
       if (this.mpRole === 'host') this._sharePublishLobby();
       this._shareSig = '';
       this._renderShareHost();
@@ -3357,7 +3730,10 @@ class App {
 
   _sharePublish(partial) {
     if (!this._shareCode || !this._shareSelf) return;
-    const message = { v: 1, id: shareMessageId(), at: Date.now(), from: this._shareSelf, ...partial };
+    const session = this.mpRole === 'host'
+      ? this._shareGuestSessions?.get(partial.to)
+      : this._shareSession;
+    const message = { v: 1, id: shareMessageId(), at: Date.now(), from: this._shareSelf, ...partial, session };
     for (const hub of this._shareHubList || []) {
       try { hub.publish(this._shareCode, message); } catch { /* one transport can fail */ }
     }
@@ -3408,23 +3784,315 @@ class App {
 
   _shareRoster() {
     return (this._shareLobby?.seats || []).map((seat, index) => {
-      const open = !!seat.host || !!this._shareHands?.get(seat.id)?.open || (this.mpRole === 'guest' && seat.id === this._shareSelf && !!this.net?.open);
+      const view = shareSeatState(seat);
       return {
         seat: index + 1,
-        name: open ? seat.name : `${seat.name} · connecting`,
+        name: seat.name,
         hero: seat.hero,
         host: !!seat.host,
         you: seat.id === this._shareSelf,
-        ready: !!seat.host || !!seat.ready,
+        ready: view.ready,
         unlockedLevel: seat.unlockedLevel || 1,
-        state: 'connected',
+        state: view.state,
       };
     });
   }
 
+  _shareSoloBlocked() {
+    if (!this._shareHadGuest || !this._shareLobby || this._shareLobby.started) return false;
+    return !(this._shareLobby.seats || []).some((seat) => !seat.host);
+  }
+
+  _shareRememberGuests() {
+    if ((this._shareLobby?.seats || []).some((seat) => !seat.host)) {
+      this._shareHadGuest = true;
+      this._shareSoloConfirm = false;
+    }
+  }
+
+  _shareGuestLabel(name, id) {
+    const aliases = [this._shareHostLabel(), this._shareLobby?.hostName, this._publicName()].filter(Boolean);
+    let label = name;
+    for (const hostName of aliases) label = shareGuestName({ name: label, id, hostName });
+    return label;
+  }
+
+  // A data channel that never opens does not close, so the seat stays and
+  // Start waits forever. A later heartbeat replaces that handshake without
+  // removing the seat. The gap keeps a slow ICE attempt from being restarted
+  // on every 2s check-in.
+  _shareKickLink(message) {
+    if (!message?.from || this._shareLobby?.started) return;
+    if (this._shareWebrtcFailed?.has(message.from)) return;
+    if (this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.transport === 'relay') return;
+    const peer = this._shareHands?.get(message.from);
+    if (peer?.open || peer?.relay || this._sharePendingJoins?.has(message.from)) return;
+    const last = this._shareOfferAt?.get(message.from) || 0;
+    if (last && Date.now() - last < 12000) return;
+    void this._acceptShareGuest({
+      ...message,
+      t: 'join',
+      hero: this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.hero,
+      claim: true,
+      ready: !!this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.ready,
+      rejoin: !!peer,
+      protocolVersion: LOBBY_PROTOCOL_VERSION,
+      clientVersion: CLIENT_VERSION,
+    });
+  }
+
+  _shareSendPing(to) {
+    if (!to || to === this._shareSelf) return;
+    this._sharePublish({ t: 'ping', n: Date.now() % 1000000, to });
+  }
+
+  _shareFanBegin() {
+    const payload = this._shareBeginPayload;
+    if (!payload || !this._shareBeginNeed) return;
+    this.peers.forEach((peer, index) => {
+      const id = peer.shareId;
+      if (!id || !this._shareBeginNeed.has(id) || this._shareBegan?.has(id)) return;
+      const start = { ...payload, you: index + 1 };
+      this._sharePublish({ t: 'begin', to: id, start });
+      if (peer.open) peer.send({ t: 'start', ...start });
+    });
+  }
+
+  _shareNoteBegan(id, attempt) {
+    if (attempt !== this._shareBeginPayload?.attempt) return;
+    if (!this._shareBeginNeed?.has(id) || this._shareBegan?.has(id)) return;
+    this._shareBegan.add(id);
+    if ([...this._shareBeginNeed].every((guestId) => this._shareBegan.has(guestId))) void this._shareFinishBegin();
+  }
+
+  async _shareFinishBegin() {
+    if (this._shareBeginFinished || !this._shareBeginPayload) return;
+    if ([...this._shareBeginNeed].some(id => !this._shareLobby?.seats?.some(seat => seat.id === id))) {
+      this._cancelShareBegin();
+      return;
+    }
+    this._shareBeginFinished = true;
+    const { d, heroes, level, mode, culture, match } = this._shareBeginPayload;
+    this._sealShareLobby();
+    await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
+    this.startBarrier = false;
+    this._netClockLast = performance.now();
+    this.acc = 0;
+    this.ui.setWaiting(false);
+    this.ui.showBanner('⚔️ All players loaded — the war begins.', '', 2600);
+  }
+
+  _cancelShareBegin() {
+    if (!this._shareBeginNeed || this._shareBeginFinished) return;
+    const attempt = this._shareBeginPayload?.attempt;
+    this._shareBeginNeed = null;
+    this._shareBeginPayload = null;
+    this._shareBegan = null;
+    this.startBarrier = false;
+    this._shareLobby = clearGuestReady({ ...this._shareLobby, cancelledStart: attempt }, Date.now());
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+    this.ui.showBanner('Launch canceled: a player left. Wait for everyone to reconnect and mark Ready.', '', 6000);
+  }
+
+  _sharePollBegin() {
+    if (!this._shareBeginNeed || this._shareBeginFinished) return;
+    for (const id of [...this._shareBeginNeed]) {
+      if (!this._shareLobby?.seats?.some((seat) => seat.id === id && !seat.host)) { this._cancelShareBegin(); return; }
+    }
+    if (!this._shareBeginNeed.size) {
+      this._shareBeginNeed = null;
+      this._shareBeginPayload = null;
+      this.startBarrier = false;
+      this._shareSig = '';
+      this._renderShareHost();
+      this.ui.showBanner('The guest left before entering. Press Start again to play alone.', '', 6000);
+      return;
+    }
+    const missing = [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id));
+    if (!missing.length) {
+      void this._shareFinishBegin();
+      return;
+    }
+    if (!this._shareBeginReminded && Date.now() - this._shareBeginAt > 20000) {
+      this._shareBeginReminded = true;
+      const names = missing.map((id) => this._shareLobby?.seats?.find((seat) => seat.id === id)?.name || 'A guest');
+      this.ui.showBanner(`${names.join(', ')} did not enter the match. Still waiting for their acknowledgement.`, 'bad', 8000);
+      this._shareSig = '';
+      this._renderShareHost();
+    }
+    this._shareFanBegin();
+  }
+
+  async _acceptShareBegin(start) {
+    if (!start || this.mpRole === 'host') return;
+    if (start.attempt && start.attempt === this._shareLobby?.cancelledStart) return;
+    if (this._shareBeginLoading) return;
+    if (this._shareLobby?.started && !this.game && !start.snap) {
+      this._sharePublish({ t: 'catchup' });
+      return;
+    }
+    if (this._shareBeginAcked && this.game && this.netMode) {
+      this._sharePublish({ t: 'began', attempt: this._shareStartAttempt });
+      return;
+    }
+    if (this._shareBeginAcked) return;
+    this._shareBeginLoading = true;
+    this._shareStartAttempt = start.attempt;
+    const generation = this._shareGeneration;
+    try {
+      this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
+      const match = this._sharedMatch(start.match);
+      if (start.snap) await this.startGame(start.snap.diff, null, { myPlayer: start.you, role: 'guest', match }, start.snap);
+      else await this.startGame(start.d, null, { heroes: start.heroes, myPlayer: start.you, role: 'guest', level: start.level, mode: start.mode, culture: start.culture, match });
+      if (generation !== this._shareGeneration) return;
+      this._shareBeginAcked = true;
+      this._sharePublish({ t: 'began', attempt: start.attempt });
+      if (this.net?.open) this.net.send({ t: 'startReady', attempt: start.attempt });
+      this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
+    } catch (error) {
+      this._shareBeginAcked = false;
+      this.ui.showBanner('Could not enter the match. Still trying.', 'bad', 4000);
+      console.warn('share begin failed', error);
+    } finally {
+      if (generation === this._shareGeneration) this._shareBeginLoading = false;
+    }
+  }
+
+  _shareSendCatchup() {
+    if (this.mpRole !== 'guest' || !this._shareLobby?.started || this.game || this._shareBeginAcked || this._shareBeginLoading) return;
+    const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf && !seat.host);
+    if (!mine) return;
+    const now = Date.now();
+    if (this._shareCatchupAt && now - this._shareCatchupAt < 2000) return;
+    this._shareCatchupAt = now;
+    this._sharePublish({ t: 'catchup' });
+  }
+
+  _shareRelayProven(id) {
+    return !!(this._shareSawPing?.has(id) && this._shareSawPong?.has(id));
+  }
+
+  // One decision for the seat label and START. WebRTC wins when its own
+  // ping comes back within a few seconds. Otherwise the realtime channel,
+  // which already proved both directions, carries lockstep.
+  _shareConsiderLink(id) {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.id === id && !entry.host);
+    if (!seat || seat.linked || seat.transport) return;
+    const peer = this._shareHands?.get(id);
+    const since = this._shareSeatedAt?.get(id) || Number(seat.joinedAt) || Date.now();
+    const webrtcUp = !!(peer && peer.open && !peer.relay && this._shareWebrtcPong?.has(id));
+    if (webrtcUp) {
+      this._shareMarkLinked(id, 'webrtc');
+      return;
+    }
+    const waiting = !this._shareWebrtcFailed?.has(id) && Date.now() - since < SHARE_LINK_FALLBACK_MS;
+    if (waiting) return;
+    if (this._shareRelayProven(id)) this._shareUseRelay(id);
+  }
+
+  _shareMarkLinked(id, transport) {
+    if (!this._shareLobby?.seats?.some((seat) => seat.id === id)) return;
+    this._shareLobby = {
+      ...this._shareLobby,
+      seats: this._shareLobby.seats.map((seat) => (seat.id === id ? { ...seat, linked: true, transport } : seat)),
+    };
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+  }
+
+  _shareUseRelay(id) {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.id === id);
+    if (!seat || seat.transport === 'relay') {
+      if (seat && !seat.linked) this._shareMarkLinked(id, 'relay');
+      return;
+    }
+    const old = this._shareHands?.get(id);
+    if (old && !old.relay) {
+      old.onClose = null;
+      try { old.destroy(); } catch { /* the data channel is not the match */ }
+      this._shareHands.delete(id);
+      const idx = this.peers.indexOf(old);
+      if (idx >= 0 && !this.netMode) {
+        this.peers.splice(idx, 1);
+        this.guestHeroes.splice(idx, 1);
+        this.guestNames.splice(idx, 1);
+        this.guestCmdQueues.splice(idx, 1);
+        this.peerUserIds.splice(idx, 1);
+      }
+    }
+    const peer = createShareRelayPeer(id);
+    peer._emit = (obj) => this._shareSendTo(id, obj);
+    peer.onMessage = (incoming) => {
+      if (incoming?.t === 'probe' || incoming?.t === 'probeAck') return;
+      const idx = this.peers.indexOf(peer);
+      if (idx >= 0) this._onHostMsg(idx, incoming);
+    };
+    peer.onOpen = () => this._bindSharePeer(peer, id);
+    this._shareHands.set(id, peer);
+    peer.markOpen();
+    this._shareMarkLinked(id, 'relay');
+  }
+
+  _shareSendTo(to, body) {
+    const chunkId = `${Date.now().toString(36)}-${(this._shareChunkSeq = (this._shareChunkSeq || 0) + 1)}`;
+    for (const part of packShareLink(body, chunkId)) this._sharePublish({ t: 'link', to, ...part });
+  }
+
+  _shareAcceptLink(from, body) {
+    if (!body) return;
+    if (this.mpRole === 'host') {
+      const peer = this._shareHands?.get(from);
+      peer?.deliver?.(body);
+      return;
+    }
+    if (this.net?.relay) {
+      this.net.deliver(body);
+      return;
+    }
+    this._shareInbox ??= [];
+    this._shareInbox.push(body);
+    this._ensureGuestRelay();
+  }
+
+  _ensureGuestRelay() {
+    const mine = this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf);
+    if (this.mpRole !== 'guest' || !mine?.linked || mine.transport !== 'relay') return;
+    if (this.net?.relay) return;
+    if (this.net) {
+      this.net.onClose = null;
+      try { this.net.destroy(); } catch { /* replaced by the relay */ }
+      this.net = null;
+    }
+    const hostId = this._shareLobby.hostId;
+    const net = createShareRelayPeer(hostId);
+    net._emit = (obj) => this._shareSendTo(hostId, obj);
+    net.onMessage = (incoming) => {
+      if (incoming?.t === 'probe' || incoming?.t === 'probeAck') return;
+      this._onGuestMsg(incoming);
+    };
+    net.onOpen = () => {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
+      try { net.send(this._heroPayload()); } catch { /* the next window still carries it */ }
+    };
+    this.net = net;
+    this._attachNetDiagnostics(net);
+    const queued = this._shareInbox || [];
+    this._shareInbox = [];
+    net.markOpen();
+    for (const body of queued) net.deliver(body);
+  }
+
   _shareOpenIds() {
     const openIds = new Set();
-    for (const [id, peer] of this._shareHands || []) if (peer?.open) openIds.add(id);
+    for (const seat of this._shareLobby?.seats || []) {
+      const peer = this._shareHands?.get(seat.id);
+      const recent = Date.now() - Number(seat.joinedAt || 0) < 8000;
+      if (!seat.host && seat.linked && peer?.open && recent) openIds.add(seat.id);
+    }
     return openIds;
   }
 
@@ -3447,28 +4115,78 @@ class App {
 
   _setShareReady(ready) {
     if (this.mpRole !== 'guest' || !this._shareCode) return;
-    this._sharePublish({ t: 'ready', ready: !!ready });
+    this._shareReadyIntent = { ready: !!ready, setup: this._shareReadySetup() };
+    this._retryShareReady();
+  }
+
+  _shareReadySetup() {
+    const room = this._shareLobby;
+    return JSON.stringify([room?.mode, room?.level, room?.difficulty, room?.seats?.find((seat) => seat.id === this._shareSelf)?.hero]);
+  }
+
+  _retryShareReady() {
+    const intent = this._shareReadyIntent;
+    if (!intent) return;
+    const mine = this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf);
+    if (intent.setup !== this._shareReadySetup() || mine?.ready === intent.ready) {
+      this._shareReadyIntent = null;
+      return;
+    }
+    this._sharePublish({ t: 'ready', ready: intent.ready });
   }
 
   _renderShareHost() {
     if (this.mpRole !== 'host' || !this._shareLobby || this.netMode) return;
+    const name = this._publicName();
+    const hostSeat = this._shareLobby.seats?.find((seat) => seat.host);
+    if (hostSeat && hostSeat.name !== name) {
+      this._shareLobby = withSeatHero(this._shareLobby, hostSeat.id, hostSeat.hero, name, Date.now());
+      this._shareLobby = { ...this._shareLobby, hostName: name };
+      this._sharePublishLobby();
+    }
+    for (const seat of this._shareLobby.seats || []) {
+      if (seat.host) continue;
+      const label = shareGuestName({ name: seat.name, id: seat.id, hostName: name });
+      if (label === seat.name) continue;
+      this._shareLobby = withSeatHero(this._shareLobby, seat.id, seat.hero, label, Date.now());
+      this._sharePublishLobby();
+    }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}`;
+    const entering = !!(this._shareBeginNeed && !this._shareBeginFinished);
+    const waitingOn = entering
+      ? [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id)).map((id) => this._shareLobby.seats?.find((seat) => seat.id === id)?.name || 'a guest')
+      : [];
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}:${this._shareSoloConfirm ? 1 : 0}:${waitingOn.join(',')}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
+    this._shareRememberGuests();
     const blocked = players.length > 1 && !gate.ready;
-    const status = gate.blockers.length
+    const soloLeft = this._shareSoloBlocked();
+    const offline = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
+    const status = entering
+      ? `Waiting for ${waitingOn.join(', ')} to acknowledge the start. The match has not begun.`
+      : offline
+      ? "Can't reach room, reconnecting…"
+      : gate.blockers.length
       ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
-      : !gate.ready && players.length > 1
-        ? (gate.connecting ? 'Waiting for every friend to connect.' : 'Waiting for every friend to mark Ready.')
-        : players.length > 1
-          ? `${players.length} commanders in this siege. Start when you are ready.`
-          : 'Link copied. Waiting for friends.';
+      : gate.connectingSeats?.length
+        ? `Waiting for ${gate.connectingSeats.map((seat) => seat.name).join(', ')} to connect.`
+        : gate.notReady?.length
+          ? `Waiting for ${gate.notReady.map((seat) => seat.name).join(', ')} to mark Ready.`
+          : players.length > 1
+            ? `${players.length} commanders in this siege. Start when you are ready.`
+            : 'Invite link ready. Set the map and difficulty, then send it.';
+    const startLabel = entering
+      ? `WAITING FOR ${waitingOn.join(', ').toUpperCase()} TO ENTER`
+      : soloLeft
+      ? (this._shareSoloConfirm ? 'PRESS AGAIN — START ALONE' : 'GUEST LEFT — START ALONE')
+      : shareStartLabel(players, gate, this.ui._startCopyFor(this._shareLobby.mode));
     this.ui.showShareHost({
       url: this._shareUrl,
-      status,
-      launchReady: !blocked,
+      status: soloLeft && !entering ? 'Your friend left this lobby. Press Start again to play alone.' : status,
+      launchReady: entering ? false : (soloLeft ? true : !blocked),
+      startLabel,
       players,
       relay: this._shareRelay,
       level: this._shareLobby.level,
@@ -3476,6 +4194,37 @@ class App {
       difficulty: this._shareLobby.difficulty,
       maxPlayers: this._shareLobby.maxPlayers || 4,
     });
+  }
+
+  _reapShareSeats() {
+    if (!this._shareLobby || this.mpRole !== 'host' || this._shareLobby.started || this.netMode) return;
+    const result = reapStaleSeats(this._shareLobby, Date.now(), {
+      openIds: this._shareOpenIds(),
+      presentIds: this._sharePresentIds || null,
+    });
+    if (!result.dropped.length) return;
+    this._shareLobby = result.lobby;
+    this._cancelShareBegin();
+    for (const seat of result.dropped) this._dropShareHand(seat.id);
+    this._shareSig = '';
+    this._renderShareHost();
+  }
+
+  _dropShareHand(id) {
+    const peer = this._shareHands?.get(id);
+    if (!peer) return;
+    if (this._shareBeginNeed && !this._shareBeginFinished) this._cancelShareBegin();
+    peer.shareDropped = true;
+    this._shareHands.delete(id);
+    const idx = this.peers.indexOf(peer);
+    if (idx >= 0 && !this.netMode) {
+      this.peers.splice(idx, 1);
+      this.guestHeroes.splice(idx, 1);
+      this.guestNames.splice(idx, 1);
+      this.guestCmdQueues.splice(idx, 1);
+      this.peerUserIds.splice(idx, 1);
+    }
+    try { peer.destroy(); } catch { /* already closed */ }
   }
 
   _onShareMessage(message) {
@@ -3486,14 +4235,72 @@ class App {
       this._shareSeen.add(message.id);
     }
     if (message.from && message.from === this._shareSelf && message.t !== 'lobby') return;
+    // A page nonce rejects replayed mailbox traffic without comparing clocks.
+    if (this.mpRole === 'guest' && message.t !== 'lobby'
+      && (message.to !== this._shareSelf || message.session !== this._shareSession)) return;
+    if (this.mpRole === 'host' && message.t === 'join' && message.session) {
+      this._shareGuestSessions ??= new Map();
+      this._shareGuestSessions.set(message.from, message.session);
+    }
+    if (this.mpRole === 'host' && message.t !== 'join' && message.t !== 'lobby'
+      && message.session !== this._shareGuestSessions?.get(message.from)) return;
     if (message.t === 'lobby' && message.lobby && this.mpRole !== 'host') this._onShareLobby(message.lobby);
     else if (message.t === 'join' && this.mpRole === 'host') this._acceptShareGuest(message);
     else if (message.t === 'offer' && this.mpRole === 'guest') this._acceptShareOffer(message);
-    else if (message.t === 'answer' && this.mpRole === 'host') this._acceptShareAnswer(message);
-    else if (message.t === 'ice') this._acceptShareIce(message);
+    else if (message.t === 'answer' && this.mpRole === 'host') {
+      this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      this._acceptShareAnswer(message);
+    }
+    else if (message.t === 'ice') {
+      if (this.mpRole === 'host') this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      this._acceptShareIce(message);
+    }
     else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'begin' && this.mpRole !== 'host' && (!message.to || message.to === this._shareSelf)) {
+      void this._acceptShareBegin(message.start);
+    }
+    else if (message.t === 'began' && this.mpRole === 'host' && message.from) {
+      this._shareNoteBegan(message.from, message.attempt);
+    }
+    else if ((message.t === 'catchup' || message.t === 'snap') && this.mpRole === 'host' && message.from && this.game && !this.game.over && this.netMode) {
+      const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
+      if (idx >= 0) this._sendGuestResync(idx);
+    }
+    else if (message.t === 'ping') {
+      if (message.to && message.to !== this._shareSelf) return;
+      this._sharePublish({ t: 'pong', n: message.n, to: message.from });
+      if (this.mpRole === 'host' && message.from) {
+        this._shareSawPing ??= new Set();
+        this._shareSawPing.add(message.from);
+        this._shareConsiderLink(message.from);
+      }
+    }
+    else if (message.t === 'pong') {
+      if (message.to !== this._shareSelf || !message.from) return;
+      this._shareSawPong ??= new Set();
+      this._shareSawPong.add(message.from);
+      if (this.mpRole === 'host') this._shareConsiderLink(message.from);
+    }
+    else if (message.t === 'link' && message.to === this._shareSelf) {
+      this._shareChunks ??= new Map();
+      const body = unpackShareLink(this._shareChunks, message);
+      if (!body) return;
+      this._shareAcceptLink(message.from, body);
+    }
+    else if (message.t === 'here' && this.mpRole === 'host' && message.from) {
+      this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
+      const label = this._shareGuestLabel(message.name, message.from);
+      const seat = this._shareLobby?.seats?.find((entry) => entry.id === message.from);
+      if (seat && label && seat.name !== label) {
+        this._shareLobby = withSeatHero(this._shareLobby, message.from, seat.hero, label, Date.now());
+        this._shareSig = '';
+        this._sharePublishLobby();
+        this._renderShareHost();
+      }
+      this._shareKickLink(message);
+    }
     else if (message.t === 'ready' && this.mpRole === 'host') {
-      this._shareLobby = setSeatReady(this._shareLobby, message.from, message.ready, Date.now());
+      this._shareLobby = touchSeatActivity(setSeatReady(this._shareLobby, message.from, message.ready, Date.now()), message.from, Date.now());
       this._shareSig = '';
       this._sharePublishLobby();
       this._renderShareHost();
@@ -3503,26 +4310,44 @@ class App {
 
   _onShareLobby(lobby) {
     if (!lobby || lobby.code !== this._shareCode) return;
+    if (lobby.cancelledStart && lobby.cancelledStart === this._shareStartAttempt) {
+      // A fresh page nonce rejects old begins/acks and rebuilds player slots
+      // from the current roster, even if cancellation arrived mid-load.
+      location.reload();
+      return;
+    }
+    this._shareReceivedAt = Date.now();
     this._shareLobby = lobby;
-    const decision = admitGuest(lobby, { id: this._shareSelf }, Date.now());
+    const decision = admitGuest(lobby, { id: this._shareSelf }, this._shareReceivedAt, {
+      receivedAt: this._shareReceivedAt,
+      hostPresent: !!this._shareHostPresent,
+    });
     if (!decision.ok) {
       if (this.net?.open || this.netMode) return;
       this._failShare(decision.reason);
       return;
     }
     clearTimeout(this._shareDiscover);
+    if (!(lobby.seats || []).some((seat) => seat.id === this._shareSelf
+      && (!this._shareSession || seat.session === this._shareSession))) this._shareAnnounced = false;
     if (!this._shareAnnounced) {
       this._shareAnnounced = true;
+      this._shareJoinedAt = Date.now();
       this.audio?.init();
       this._sharePublish({
-        t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
+        t: 'join', name: this._shareDisplayName(), hero: this.ui.selectedHero || 'scott', claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+        ready: false,
+        // A fresh page that opens a siege already in progress has no armed
+        // rejoin flag. The host still has to replace the dead data channel.
+        rejoin: !!(lobby.started || this._shareRejoinArmed || (this.netMode && !this.net?.open)),
       });
+      this._shareSendPing(lobby.hostId);
     }
     if (!this._shareGuestShown) {
       this._shareGuestShown = true;
-      this.ui.showSetup({ mode: lobby.mode || 'campaign' });
+      this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
     }
     if (!this.netMode) {
       this.ui.selectedLevel = lobby.level || 1;
@@ -3536,34 +4361,66 @@ class App {
     }
     const players = shareRoster(lobby, this._shareSelf);
     const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
+    this._ensureGuestRelay?.();
+    if (this.netMode && this.game) return;
     if (this._shareGuestShown && sig === this._shareSig) return;
     this._shareSig = sig;
     const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
     const locked = (lobby.mode || 'campaign') === 'campaign' && (mine?.unlockedLevel || 1) < (lobby.level || 1);
+    if (!this._shareSeatAskedAt) this._shareSeatAskedAt = Date.now();
+    if (mine) this._shareSeatAskedAt = 0;
+    const waitingForSeat = !mine && Date.now() - (this._shareSeatAskedAt || Date.now()) > 8000;
+    const rejoining = !!lobby.started && !this.game;
     this.ui.showShareGuest({
       status: locked
         ? 'This mission is still locked for you. The host can pick an earlier one.'
-        : mine ? 'Seat saved. Pick your hero, then mark Ready.' : 'Asking the host for a seat…',
+        : rejoining ? 'Rejoining the match…'
+        : mine ? `You're in as ${mine.name}. The host starts the match.`
+        : this._shareReach === 'reconnecting' ? "Can't reach room, reconnecting…"
+        : waitingForSeat ? 'No response to the seat request yet. Retrying.'
+        : 'Sending your seat request…',
       players, level: lobby.level, mode: lobby.mode, difficulty: lobby.difficulty,
       maxPlayers: lobby.maxPlayers || 4,
       ready: !!mine?.ready,
+      rejoining,
     });
+    this._ensureGuestRelay?.();
   }
 
   async _acceptShareGuest(message) {
     if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
-    if (this._shareHands?.has(message.from)) {
-      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
-      const peer = this._shareHands.get(message.from);
-      const idx = this.peers.indexOf(peer);
-      if (idx >= 0) {
-        this.guestHeroes[idx] = shareHero(message.hero);
-        this.guestNames[idx] = shareName(message.name);
+    const guestName = this._shareGuestLabel(message.name, message.from);
+    if (message.rejoin) {
+      this._shareSeatedAt ??= new Map();
+      this._shareSeatedAt.set(message.from, Date.now());
+      this._shareSawPing?.delete(message.from);
+      this._shareSawPong?.delete(message.from);
+      this._shareWebrtcPong?.delete(message.from);
+      this._shareWebrtcFailed?.delete(message.from);
+      if (this._shareLobby?.seats) {
+        this._shareLobby = {
+          ...this._shareLobby,
+          seats: this._shareLobby.seats.map((seat) => (seat.id === message.from ? { ...seat, linked: false, transport: '' } : seat)),
+        };
       }
-      this._shareSig = '';
-      this._sharePublishLobby();
-      this._renderShareHost();
-      return;
+    }
+    if (this._shareHands?.has(message.from)) {
+      const peer = this._shareHands.get(message.from);
+      this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now()), message.from, Date.now());
+      // A live hero change keeps the open channel. A rejoin replaces it even
+      // when the old channel has not reported closed yet.
+      if (peer?.open && !message.rejoin) {
+        const idx = this.peers.indexOf(peer);
+        if (idx >= 0) {
+          this.guestHeroes[idx] = shareHero(message.hero);
+          this.guestNames[idx] = guestName;
+        }
+        this._shareSig = '';
+        this._sharePublishLobby();
+        this._renderShareHost();
+        return;
+      }
+      this._dropShareHand(message.from);
     }
     const decision = admitGuest(this._shareLobby, {
       id: message.from, claim: true,
@@ -3575,52 +4432,107 @@ class App {
     }
     if (!decision.rejoining) {
       this._shareLobby = seatGuest(this._shareLobby, {
-        id: message.from, name: message.name, hero: message.hero, claim: true,
+        id: message.from, name: guestName, hero: message.hero, ready: !!message.ready, claim: true,
         protocolVersion: message.protocolVersion, clientVersion: message.clientVersion,
         unlockedLevel: message.unlockedLevel,
       }, Date.now()).lobby;
     } else {
-      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now());
+      this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now());
     }
+    if (message.ready) this._shareLobby = setSeatReady(this._shareLobby, message.from, true, Date.now());
+    this._shareLobby = { ...this._shareLobby, seats: this._shareLobby.seats.map(
+      (seat) => seat.id === message.from ? { ...seat, session: message.session || seat.session } : seat) };
+    this._sharePublishLobby();
+    this._shareSeatedAt ??= new Map();
+    if (!this._shareSeatedAt.has(message.from)) this._shareSeatedAt.set(message.from, Date.now());
+    this._shareSendPing(message.from);
     this._sharePendingJoins ||= new Set();
     if (this._sharePendingJoins.has(message.from)) return;
     this._sharePendingJoins.add(message.from);
     const generation = this._shareGeneration;
     const ice = this.lobby?.iceServers?.length ? this.lobby.iceServers : await (this._shareIcePromise || loadShareIceServers());
     this._sharePendingJoins.delete(message.from);
-    if (generation !== this._shareGeneration || !this._shareLobby || this._shareLobby.started || !this._shareLobby.seats.some(s => s.id === message.from)) return;
+    const liveMatch = !!(this._shareLobby?.started && this.netMode && this.game && !this.game.over);
+    if (generation !== this._shareGeneration || !this._shareLobby || !this._shareLobby.seats.some(s => s.id === message.from)) return;
+    if (this._shareLobby.started && !liveMatch) return;
+    if (this._shareLobby.seats.find((seat) => seat.id === message.from)?.transport === 'relay') return;
     const peer = new NetSession(ice);
     peer.shareId = message.from;
     this._shareHands.set(message.from, peer);
     this._attachNetDiagnostics(peer);
-    peer.onOpen = () => this._bindSharePeer(peer, message.from);
+    peer.onOpen = () => {
+      this._bindSharePeer(peer, message.from);
+      try { peer.send({ t: 'probe', n: 1 }); } catch { /* channel closed */ }
+    };
     peer.onMessage = (incoming) => {
+      if (incoming?.t === 'probe') { try { peer.send({ t: 'probeAck', n: incoming.n }); } catch { /* ignore */ } return; }
+      if (incoming?.t === 'probeAck') {
+        this._shareWebrtcPong ??= new Set();
+        this._shareWebrtcPong.add(message.from);
+        this._shareConsiderLink(message.from);
+        return;
+      }
       const idx = this.peers.indexOf(peer);
       if (idx >= 0) this._onHostMsg(idx, incoming);
     };
-    peer.onClose = () => this._dropShareGuest(message.from);
+    peer.onClose = () => {
+      if (this._shareHands?.get(message.from) !== peer || peer.relay) return;
+      this._shareWebrtcFailed ??= new Set();
+      this._shareWebrtcFailed.add(message.from);
+      this._shareHands.delete(message.from);
+      this._shareLobby = { ...this._shareLobby, seats: this._shareLobby.seats.map(
+        (seat) => seat.id === message.from ? { ...seat, linked: false, transport: '' } : seat) };
+      this._shareConsiderLink(message.from);
+    };
     peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
       const sdp = await peer.hostTrickle();
-      if (this._shareLobby?.started || !this._shareHands?.has(message.from)) return;
+      if (!this._shareHands?.has(message.from)) return;
+      if (this._shareLobby?.started && !(this.netMode && this.game && !this.game.over)) return;
       this._sharePublish({ t: 'offer', to: message.from, sdp });
+      this._shareOfferAt ??= new Map();
+      this._shareOfferAt.set(message.from, Date.now());
       this._shareSig = '';
       this._sharePublishLobby();
       this._renderShareHost();
     } catch {
-      this._shareHands.delete(message.from);
-      this._shareLobby = releaseGuest(this._shareLobby, message.from, Date.now());
-      this._sharePublish({ t: 'reject', to: message.from, reason: 'invalid' });
+      this._shareWebrtcFailed ??= new Set();
+      this._shareWebrtcFailed.add(message.from);
+      if (this._shareHands?.get(message.from) === peer) this._shareHands.delete(message.from);
+      peer.onClose = null;
       try { peer.destroy(); } catch { /* ignore */ }
+      this._shareConsiderLink(message.from);
     }
   }
 
   _bindSharePeer(peer, id) {
-    if (this._shareLobby?.started || this.netMode || this.peers.includes(peer)) {
-      if (!this.peers.includes(peer)) {
+    if (this.peers.includes(peer)) return;
+    if (this._shareBeginNeed && !this._shareBeginFinished) this._cancelShareBegin();
+    if (this._shareLobby?.started || this.netMode) {
+      if (!this.game || this.game.over) {
         this._shareHands?.delete(id);
         try { peer.destroy(); } catch { /* ignore */ }
+        return;
       }
+      let idx = this.peers.findIndex((entry) => entry.shareId === id);
+      if (idx >= 0) {
+        const old = this.peers[idx];
+        if (old && old !== peer) { try { old.destroy(); } catch { /* already dead */ } }
+        this.peers[idx] = peer;
+        this.guestCmdQueues[idx] = [];
+      } else {
+        const seat = this._shareLobby.seats.find((entry) => entry.id === id);
+        this.peers.push(peer);
+        this.guestHeroes.push(shareHero(seat?.hero));
+        this.guestNames.push(seat?.name || 'Commander');
+        this.guestCmdQueues.push([]);
+        this.peerUserIds.push(null);
+        idx = this.peers.length - 1;
+      }
+      peer.send({
+        t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
+      });
+      this.ui.showBanner(`${this.guestNames[idx] || 'A friend'} reconnected.`, '', 2500);
       return;
     }
     const previous = this.peers.findIndex((entry) => entry.shareId === id && entry !== peer);
@@ -3644,8 +4556,12 @@ class App {
   }
 
   async _acceptShareOffer(message) {
-    if (message.to !== this._shareSelf || this.net?.open || this._shareOffered === message.id) return;
-    if (!this._shareLobby || message.from !== this._shareLobby.hostId || this._shareLobby.started) return;
+    if (message.to !== this._shareSelf || this._shareOffered === message.id) return;
+    if (message.session !== this._shareSession) return;
+    if (!this._shareLobby || message.from !== this._shareLobby.hostId) return;
+    const rejoining = !!(this._shareLobby.started || this.netMode);
+    if (rejoining && !this._shareLobby.seats?.some((seat) => seat.id === this._shareSelf)) return;
+    if (this.net?.open) return;
     const generation = this._shareGeneration;
     this._shareOffered = message.id;
     if (this.net) {
@@ -3656,16 +4572,22 @@ class App {
     const net = new NetSession(ice);
     this.net = net;
     this._attachNetDiagnostics(net);
-    net.onOpen = () => net.send(this._heroPayload());
-    net.onMessage = (incoming) => this._onGuestMsg(incoming);
+    net.onOpen = () => {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
+      this._shareHandshakeUntil = 0;
+      net.send(this._heroPayload());
+      try { net.send({ t: 'probe', n: 1 }); } catch { /* channel closed */ }
+    };
+    net.onMessage = (incoming) => {
+      if (incoming?.t === 'probe') { try { net.send({ t: 'probeAck', n: incoming.n }); } catch { /* ignore */ } return; }
+      if (incoming?.t === 'probeAck') return;
+      this._onGuestMsg(incoming);
+    };
     net.onClose = () => {
       if (this.net !== net) return;
-      if (this.netMode && this.game && !this.game.over) {
-        this.pause();
-        this.ui.showBanner('⚠️ Connection to the host was lost.', 'bad', 8000);
-        return;
-      }
-      if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+      if (this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf)?.transport === 'relay') return;
+      this._onShareLinkLost();
     };
     net.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
@@ -3673,7 +4595,12 @@ class App {
       if (this.net !== net) return;
       this._sharePublish({ t: 'answer', to: message.from, sdp });
     } catch {
-      if (this.net === net) this._failShare('invalid');
+      this._shareHandshakeUntil = 0;
+      if (this.net === net) {
+        this.net = null;
+        net.onClose = null;
+        try { net.destroy(); } catch { /* webrtc is unavailable; the realtime relay still carries the match */ }
+      }
     }
   }
 
@@ -3716,6 +4643,7 @@ class App {
       try { peer.destroy(); } catch { /* already closed */ }
     }
     this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
+    this._cancelShareBegin();
     this._shareSig = '';
     this._sharePublishLobby();
     this._renderShareHost();
@@ -3737,29 +4665,80 @@ class App {
     } else if (this.mpRole === 'guest' && this._shareCode) {
       this._sharePublish({ t: 'leave' });
     }
+    const hosted = this.mpRole === 'host';
+    try { sessionStorage.removeItem('zillions.share.host'); } catch { /* private mode */ }
+    try { if (hosted) history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
     this._teardownShare();
+    if (hosted && this._tab?.ownsLease()) {
+      this._tab.release();
+      this._tab.touch();
+    }
     this.ui._shareLive = false;
+    this.ui.root?.querySelector?.('#screen-setup')?.classList.remove('sharemode');
     if (!this.netMode) this.mpRole = null;
     if (this.auth?.isSignedIn() || chapterFounder(this.profile) || this.profile.quickSetupDone) this.ui._showScreen('main');
     else this.ui._showScreen('account');
   }
 
-  _abandonShareLink() {
-    if (!this._shareLobby || !this._shareCode) return;
-    try {
-      if (this.mpRole === 'host') {
-        this._shareLobby = closeLobby(this._shareLobby, Date.now());
-        this._sharePublishLobby();
-      } else this._sharePublish({ t: 'leave' });
-    } catch { /* the page is going away */ }
+  _onShareLinkLost() {
+    this._shareRejoinArmed = true;
+    if (this.netMode && this.game && !this.game.over && !this._shareLostAt) this._shareLostAt = Date.now();
+    this._shareHandshakeUntil = 0;
+    this._shareRejoinTick();
+  }
+
+  // Heartbeat calls this until the data channel is open again or grace ends.
+  // One join is not enough: the host may still see the old channel as open,
+  // and a dropped signaling message must not end the grace period.
+  _shareRejoinTick() {
+    const inMatch = !!(this.netMode && this.game && !this.game.over);
+    if (inMatch && !this._shareLostAt) this._shareLostAt = Date.now();
+    const step = shareRejoinStep({
+      open: !!this.net?.open,
+      inMatch,
+      lostAt: this._shareLostAt || 0,
+      now: Date.now(),
+      hostAlive: !!(this._shareLobby && hostStillHere(this._shareLobby, Date.now(), this._shareLiveness())),
+      armed: !!this._shareRejoinArmed || inMatch,
+    });
+    if (step === 'stop') {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
+      return;
+    }
+    if (step === 'giveUp') {
+      this._shareRejoinArmed = false;
+      this.pause();
+      this.ui.setWaiting(false);
+      this.ui.showBanner('Could not rejoin the host. Open the same invite from this tab while the seat is held.', 'bad', 8000);
+      return;
+    }
+    if (step === 'hostLeft') {
+      this._shareRejoinArmed = false;
+      if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+      return;
+    }
+    if (step !== 'retry') return;
+    if (inMatch) this.ui.setWaiting(true, 'Reconnecting to the host…');
+    this._shareRetryJoin();
+  }
+
+  _shareRetryJoin() {
+    const now = Date.now();
+    if (this._shareHandshakeUntil && now < this._shareHandshakeUntil) return;
+    this._shareHandshakeUntil = now + 8000;
+    this._shareAnnounced = false;
+    this._shareOffered = null;
+    if (this._shareLobby) this._onShareLobby(this._shareLobby);
   }
 
   _teardownShare() {
     this._shareGeneration = (this._shareGeneration || 0) + 1;
+    this._shareBeginLoading = false;
+    this._shareBeginAcked = false;
     this._sharePendingJoins?.clear();
-    clearInterval(this._shareBeat);
+    this._stopShareHeartbeat();
     clearTimeout(this._shareDiscover);
-    this._shareBeat = null;
     this._shareDiscover = null;
     for (const unsub of this._shareUnsubs || []) {
       try { unsub(); } catch { /* ignore */ }
@@ -3819,12 +4798,7 @@ class App {
       }
     }
     else if (m.t === 'start') {
-      this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
-      const match = this._sharedMatch(m.match);
-      if (m.snap) await this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match }, m.snap);
-      else await this.startGame(m.d, null, { heroes: m.heroes, myPlayer: m.you, role: 'guest', level: m.level, mode: m.mode, culture: m.culture, match });
-      this.net.send({ t: 'startReady' });
-      this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
+      await this._acceptShareBegin(m);
     }
     else if (m.t === 'spectateStart') {
       await this.startGame(m.snap.diff, null, { myPlayer: 0, role: 'spectator' }, m.snap);
@@ -3836,9 +4810,15 @@ class App {
     else if (m.t === 'resync') {
       // Mid-game rejoin: the host froze one sim tick into a snapshot; rebuild
       // from it, then pick up lockstep at the host's frame counter using the
-      // windows banked while the sim was rebuilding.
+      // windows banked while the sim was rebuilding. A second snapshot while
+      // that rebuild is in flight would restart it and drop the banked windows.
+      // A rebuild that never finishes used to leave this flag set, which then
+      // refused every later snapshot and froze the guest on the same window.
+      if (this._resyncing && (this._preparingBattlefield || performance.now() - (this._resyncStarted || 0) < 8000)) return;
       this._resyncing = true;
+      this._resyncStarted = performance.now();
       this._resyncBuffer = new Map();
+      for (const [pw, pc] of m.recent || []) if (pw != null && pc) this._resyncBuffer.set(pw, pc);
       this.startGame(m.snap.diff, null, { myPlayer: m.you, role: 'guest', match: this._sharedMatch(m.match) }, m.snap)
         .then(() => {
           const buf = this._resyncBuffer || new Map();
@@ -3847,10 +4827,15 @@ class App {
           this.simFrame = m.frame;
           this.inbox = buf;
           this.netPrimed = false;
+          this.desynced = false;
+          this._desyncAttempts = [];
           this._reconnectTries = 0;
+          this._reconnectSince = 0;
+          this._shareLostAt = 0;
           clearTimeout(this._reconnectT);
           this.ui.setWaiting(false);
-          this.ui.showBanner('🔌 Reconnected — back in the war.', '', 3500);
+          if (m.awaitStart && this.net?.open) this.net.send({ t: 'startReady' });
+          this.ui.showBanner(m.reason === 'desync' ? 'Battlefield restored from the host.' : '🔌 Reconnected — back in the war.', '', 3500);
         })
         .catch(() => {})
         .finally(() => { this._resyncing = false; this._resyncBuffer = null; });
@@ -3891,12 +4876,69 @@ class App {
   }
 
   _requestMissingWindow(w) {
-    if (!this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
+    if (this._resyncing || !this.net || !['guest', 'spectator'].includes(this.mpRole)) return;
     const now = performance.now();
     if (this._missingWindow === w && now - this._missingRequestAt < 180) return;
     this._missingWindow = w;
     this._missingRequestAt = now;
     this.net.send({ t: 'needWindow', w });
+  }
+
+  // Host snapshot, same message a reload receives when its relay peer opens.
+  _sendGuestResync(idx) {
+    const peer = this.peers[idx];
+    if (!peer || !this.game || this.game.over || !this.netMode) return;
+    const now = Date.now();
+    if (peer._resyncAt && now - peer._resyncAt < 1000) return;
+    peer._resyncAt = now;
+    const recent = [...this._windowHistory.entries()].slice(-32);
+    peer.send({
+      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      match: this._sharedMatchFields(), recent,
+    });
+  }
+
+  _askForSnapshot(force) {
+    if (this.mpRole !== 'guest' || !this._shareCode) return;
+    if (this._resyncing) {
+      if (performance.now() - (this._resyncStarted || 0) < 8000) return;
+      this._resyncing = false;
+      this._resyncBuffer = null;
+    }
+    const now = Date.now();
+    if (this._snapAskAt && now - this._snapAskAt < (force ? 800 : 1000)) return;
+    this._snapAskAt = now;
+    this._sharePublish({ t: 'snap' });
+    try { this.net?.send?.({ t: 'snap' }); } catch { /* the share publish is enough */ }
+  }
+
+  _trackStall(stalled, windowId) {
+    if (this.mpRole !== 'guest') return;
+    if (!stalled || windowId < 0) {
+      this._stallSince = 0;
+      this._stallWindow = -1;
+      this._stallRetried = false;
+      return;
+    }
+    const now = performance.now();
+    if (this._stallWindow !== windowId || !this._stallSince) {
+      this._stallWindow = windowId;
+      this._stallSince = now;
+      this._stallRetried = false;
+      this._missingRequestAt = 0;
+      this._requestMissingWindow(windowId);
+      return;
+    }
+    const action = stallRecovery(now - this._stallSince, this._stallRetried);
+    if (action === 'retry-snapshot') {
+      this._stallRetried = true;
+      this._missingRequestAt = 0;
+      this._requestMissingWindow(windowId);
+      this._askForSnapshot(false);
+      return;
+    }
+    if (action === 'snapshot') this._askForSnapshot(false);
+    else if (action === 'resync') this._askForSnapshot(true);
   }
 
   // Host-sequenced lockstep: the host merges every player's commands into
@@ -3905,6 +4947,7 @@ class App {
   // pump (a worker timer) off one shared wall clock, so the host keeps
   // emitting windows even when rendering hitches or the tab is hidden.
   _advanceNetSim() {
+    if (this._preparingBattlefield) return;
     if (!this.netMode || !this.game || this.paused || this.game.over) return;
     if (this.mpRole === 'host' && this.startBarrier) {
       this._netClockLast = performance.now();
@@ -3921,12 +4964,21 @@ class App {
     if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
       const banked = this._windowsBuffered();
       if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
-      else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
+      else if (banked >= this.netBufferTarget + 2) {
+        // A snapshot rebuild can bank seconds of commands. A fixed +6%
+        // would take minutes to repay that loading delay. Drain a large
+        // consecutive backlog at up to 2x, easing back to normal jitter
+        // pacing near the target. Still execute every fixed tick/command;
+        // the per-pump step cap and missing-window barrier stay in force.
+        const excessSeconds = (banked - this.netBufferTarget - 2) * NET_STEP * SIM_DT;
+        dt *= Math.min(2, Math.max(NET_PACE_FAST, 1 + excessSeconds));
+      }
     }
 
     this.acc += dt;
     let steps = 0;
     let stalled = false;
+    let missingWindow = -1;
     while (this.acc >= SIM_DT && steps < 10) {
       if (this.simFrame % NET_STEP === 0) {
         const w = this.simFrame / NET_STEP;
@@ -3950,6 +5002,7 @@ class App {
             // A real gap. Re-arm the buffer so we come back with margin
             // instead of running window-to-window and stuttering forever.
             stalled = true;
+            missingWindow = w;
             this.netPrimed = false;
             this._requestMissingWindow(w);
             break;
@@ -3968,6 +5021,9 @@ class App {
         for (const c of bundle) this.game.exec(c);
         if (w > 0 && w % 30 === 0) {
           const hsh = this._stateHash();
+          this._hashLog ??= [];
+          this._hashLog.push([this.simFrame, hsh]);
+          if (this._hashLog.length > 40) this._hashLog.shift();
           if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
           else this.net.send({ t: 'h', w, h: hsh });
         }
@@ -3979,10 +5035,15 @@ class App {
     }
     if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
     this.netStallT = stalled ? this.netStallT + dt : 0;
-    const visibleStall = stalled && this.netStallT > 0.25;
-    this.ui.setWaiting(visibleStall, this.netStallT > 1.2
-      ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
-      : '⏳ Syncing co-op…');
+    this._trackStall?.(stalled, missingWindow);
+    const stallAge = this._stallSince ? performance.now() - this._stallSince : 0;
+    const visibleStall = stalled && (this.netStallT > 0.25 || stallAge > 250);
+    const stallText = stallAge >= 10000
+      ? '⏳ Resyncing…'
+      : this.netStallT > 1.2
+        ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
+        : '⏳ Syncing co-op…';
+    this.ui.setWaiting(visibleStall, stallText);
     this._refreshDiagnosticsUI(visibleStall);
   }
 
@@ -4076,6 +5137,12 @@ class App {
       onSignal: (sig) => this._onSignal(sig),
       onRoomClosed: (reason) => this._handleRoomClosed(reason),
     });
+    this.lobby.ownsRoom = () => {
+      const lease = this._tabSession().lease();
+      return !!(lease && lease.kind === 'room' && this._tabSession().ownsLease());
+    };
+    this.lobby.onHeartbeat = () => this._tabSession().refreshLease();
+    this.lobby.connectedSeatIds = () => (this.peerUserIds || []).filter((id, index) => id && this.peers[index]?.open);
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
@@ -4123,18 +5190,14 @@ class App {
         : 'You are in the room. Pick your hero and wait for the host to press START.',
     });
     this.ui.setStartButton(isHost ? {
-      text: !compatible
-        ? `🔒  LEVEL ${eligibility.level} LOCKED FOR ${eligibility.blockers.length} PLAYER${eligibility.blockers.length === 1 ? '' : 'S'}`
-        : ready
-        ? `▶  START ROOM — LAUNCH ${expectedPlayers} PLAYER${expectedPlayers === 1 ? '' : 'S'}`
-        : pending
-        ? `⏳  WAITING FOR ${connectionNames || `${pending} PLAYER${pending === 1 ? '' : 'S'}`}`
-        : `⏳  WAITING FOR ${waitingToReady} READY`,
+      text: roomStartLabel({
+        compatible, ready, pending, waiting, connectionNames, expectedPlayers, blockers: eligibility.blockers,
+      }),
       disabled: !ready || !compatible,
       title: !compatible
         ? 'Choose a level every player has unlocked before starting.'
         : ready ? 'The host launches the match for everyone connected.' : pending
-        ? 'Start unlocks when every player in the room has a direct game connection.'
+        ? 'Start unlocks when every player in the room has a working game connection.'
         : 'Start unlocks when every guest marks Ready.',
     } : isSpectator ? {
       text: '⏳  LOADING LIVE BATTLE',
@@ -4235,6 +5298,17 @@ class App {
 
   _armLobbyConnectionWatchdog() {
     clearTimeout(this._lobbyConnectionWatchdog);
+    clearInterval(this._roomDialRetry);
+    const roomId = this.lobby?.game?.id;
+    this._roomDialRetry = setInterval(() => {
+      if (!roomId || this.lobby?.game?.id !== roomId || this.mpRole !== 'guest' || this.netMode || this.net?.open) {
+        clearInterval(this._roomDialRetry); this._roomDialRetry = null; return;
+      }
+      // A broadcast ACK proves server receipt, not host receipt. Retry the
+      // invitation until the private connection itself proves both directions.
+      this.lobby.signal({ t: 'knock', name: this._publicName() }).catch(() => {});
+    }, 2000);
+
     this._lobbyConnectionWatchdog = setTimeout(() => {
       if (this.mpRole === 'guest' && !this.netMode && !this.net?.open && this.lobby?.game) {
         this.ui.onlineStatus('⚠️ Host connection stalled. Use RECONNECT TO HOST.');
@@ -4272,6 +5346,7 @@ class App {
     this.ui.onlineStatus('Leaving room…');
     try {
       await this.lobby.leaveRoom();
+      this._releaseRoomLease();
       for (const peer of this.peers) { try { peer.destroy(); } catch { /* closed */ } }
       if (this.net) { try { this.net.destroy(); } catch { /* closed */ } }
       this.peers = [];
@@ -4434,6 +5509,7 @@ class App {
       this.ui.showBanner('Leave your current room before hosting another.', 'bad', 4000);
       return;
     }
+    if (!this._claimRoomLease()) return;
     this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
     try {
       const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
@@ -4444,13 +5520,29 @@ class App {
       this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
     } catch (error) {
       this.ui.showBanner(`❌ Could not create the game: ${error.message}`, 'bad', 5000);
+      this._releaseRoomLease();
       this.mpRole = null; this.onlineMode = false;
     }
+  }
+
+  _claimRoomLease() {
+    const claim = this._tabSession().claimLease({ kind: 'room' });
+    if (claim.ok) return true;
+    this.ui.showBanner('This browser already has a lobby open in another tab. Use that tab, or close it before hosting here.', 'bad', 5500);
+    return false;
+  }
+
+  _releaseRoomLease() {
+    const lease = this._tab?.lease();
+    if (lease?.kind !== 'room' || !this._tab.ownsLease()) return;
+    this._tab.release();
+    this._tab.touch();
   }
 
   async createOnlineGame(visibility) {
     const lobby = await this._openLobby();
     if (!lobby || !lobby.connected || lobby.game) return;
+    if (!this._claimRoomLease()) return;
     this.audio.init();
     this.mpRole = 'host';
     this.onlineMode = true;
@@ -4470,27 +5562,34 @@ class App {
       this.ui.roomChatFill(await lobby.loadRoomChat(room.id, 'room'));
     } catch (e) {
       this.ui.showBanner('❌ Could not create the game: ' + e.message, 'bad', 5000);
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
     }
   }
 
   // Host side of the automatic handshake: a guest knocked — offer them a
-  // WebRTC session through the signaling channel. Mid-game, a knock from a
+  // private relay session through the signaling channel. Mid-game, a knock from a
   // player who already holds a seat is a reconnect: rebuild the link and
   // resync them from a live snapshot.
   async _onKnock(sig) {
     if (sig.role === 'spectator') return this._acceptSpectator(sig);
     if (!this.onlinePending) return;
     const rejoinIdx = this.peerUserIds.indexOf(sig.from);
+    if (rejoinIdx >= 0 && this.peers[rejoinIdx]?.open) return;
     const rejoining = this.netMode && this.game && !this.game.over && rejoinIdx >= 0;
     if (this.netMode && !rejoining) return;           // mid-game seats are not open to strangers
     if (!this.netMode && this.peers.length >= 3) return;
     if (this.onlinePending.has(sig.from)) return;
-    const peer = new NetSession(this.lobby?.iceServers);
+    await this.lobby.refreshCurrentGameBounded();
+    if (!this.lobby.game?._players?.some(p => p.user_id === sig.from)) return;
+    if (this.onlinePending.has(sig.from)) return;
+    const session = crypto.randomUUID();
+    const peer = new RoomRelay(this.lobby.sb, { room: this.lobby.game.id, self: this.lobby.me.id, remote: sig.from, session });
     this._attachNetDiagnostics(peer);
     const idx = rejoining ? rejoinIdx : this.peers.length;
     peer.onOpen = async () => {
+      clearInterval(peer.offerRetry);
       this.onlinePending.delete(sig.from);
       if (rejoining) {
         const old = this.peers[idx];
@@ -4499,7 +5598,7 @@ class App {
         this.guestCmdQueues[idx] = [];
         // One live tick, frozen and shipped: the guest rebuilds from it and
         // rejoins lockstep at our frame counter.
-        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields() });
+        peer.send({ t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(), awaitStart: !!this.startBarrier });
         this.game.msg(`⚔️ ${this.guestNames[idx] || `Player ${idx + 2}`} reconnected — their hero fights again.`, 'good');
       } else {
         this.peers.push(peer);
@@ -4516,8 +5615,11 @@ class App {
         if (this.lobby.game) this.lobby.touchGame({ players: this.peers.length + 1 });
       }
     };
-    peer.onMessage = (m) => this._onHostMsg(idx, m);
+    peer.onMessage = (m) => { const live = this.peers.indexOf(peer); if (live >= 0) this._onHostMsg(live, m); };
     peer.onClose = () => {
+      clearInterval(peer.offerRetry);
+      if (this.startBarrier) this.startReadyGuests.delete(this.peers.indexOf(peer));
+      if (this.onlinePending?.get(sig.from) === peer) this.onlinePending.delete(sig.from);
       if (this.netMode && this.game && !this.game.over && this.peers[idx] === peer) {
         this.game.msg(`⚠️ Player ${idx + 2} disconnected — their hero fights on until they return.`, 'warn');
       } else if (!this.netMode) {
@@ -4543,10 +5645,13 @@ class App {
       }
     }, 20000);
     try {
-      peer.onIce = (cand) => { this.lobby.signal({ t: 'ice', to: sig.from, cand }).catch(() => {}); };
-      const code = await peer.hostTrickle();
-      await this.lobby.signal({ t: 'offer', to: sig.from, sdp: code });
+      const offer = () => this.lobby.signal({ t: 'relayOffer', to: sig.from, session }).catch(() => {});
+      peer.offerRetry = setInterval(offer, 2000);
+      await peer.connect();
+      await offer();
     } catch (e) {
+      console.warn('Room relay connection failed:', e.message);
+      peer.destroy();
       this.onlinePending.delete(sig.from);
       if (!rejoining) this.ui.onlineStatus('❌ Could not reach the joining player. Ask them to try JOIN again.');
     }
@@ -4602,7 +5707,27 @@ class App {
   async _onSignal(sig) {
     if (sig.t === 'roomClosed') return this._handleRoomClosed(sig.reason);
     if (sig.t === 'reconnectRequest' && this.mpRole === 'guest') return this._retryRoomConnection();
+    if (sig.t === 'relayOffer' && this.mpRole === 'guest') {
+      if (this.net?.open) return;
+      if (sig.from !== this.lobby?.game?.host_id || !/^[0-9a-f-]{36}$/i.test(sig.session || '')) return;
+      if (this.net?.session === sig.session && !this.net.closed) return;
+      if (this.net) { this.net.onClose = null; this.net.destroy(); }
+      const peer = new RoomRelay(this.lobby.sb, { room: this.lobby.game.id, self: this.lobby.me.id, remote: sig.from, session: sig.session });
+      peer.session = sig.session; this.net = peer;
+      peer.onOpen = () => {
+        clearTimeout(this._lobbyConnectionWatchdog);
+        this.ui.setRoomReconnect({ visible: false });
+        this._reconnectTries = 0; this._reconnectSince = 0;
+        if (!this.netMode) { peer.send(this._heroPayload()); this.ui.onlineStatus('Connected. Choose your hero and mark Ready.'); }
+      };
+      peer.onMessage = m => this._onGuestMsg(m);
+      peer.onClose = () => this._onHostLinkLost();
+      try { await peer.connect(); }
+      catch (error) { console.warn('Room relay connection failed:', error.message); this.ui.onlineStatus('Room relay unavailable. Reconnect to retry.'); if (this.netMode) this._scheduleReconnect(); }
+      return;
+    }
     if (sig.t === 'offer' && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
+      const wasInGame = !!this.netMode;
       this.net = new NetSession(this.lobby?.iceServers);
       this._attachNetDiagnostics(this.net);
       this.net.onOpen = () => {
@@ -4610,6 +5735,7 @@ class App {
         this.ui.setRoomReconnect({ visible: false });
         if (this.mpRole === 'guest') {
           this._reconnectTries = 0;
+          this._reconnectSince = 0;
           if (!this.netMode) {
             this.net.send(this._heroPayload());
             this.ui.onlineStatus('🟢 Connected! Pick your hero — the host starts the war.');
@@ -4660,11 +5786,12 @@ class App {
 
   _scheduleReconnect(delayMs = null) {
     if (!this.netMode || !this.game || this.game.over) return;
+    if (!this._reconnectSince) this._reconnectSince = Date.now();
     this._reconnectTries = (this._reconnectTries || 0) + 1;
-    if (this._reconnectTries > 8) {
+    if (!withinRejoinGrace(this._reconnectSince, Date.now())) {
       this.pause();
       this.ui.setWaiting(false);
-      this.ui.showBanner('⚠️ Could not reach the host again. The room may have ended.', 'bad', 8000);
+      this.ui.showBanner('⚠️ Could not reach the host again. Rejoin from the lobby while your seat is held.', 'bad', 8000);
       return;
     }
     const wait = delayMs != null ? delayMs : Math.min(8000, 500 * 2 ** (this._reconnectTries - 1));
@@ -4692,11 +5819,13 @@ class App {
       this.ui.showBanner(compatibility.reason, 'bad', 7000);
       return;
     }
+    if (!this._claimRoomLease()) return;
     this.audio.init();
     this.mpRole = 'guest';
     this.onlineMode = true;
     const rejoining = row.status === 'in_game';
     if (rejoining && !canRejoinRoom(row, lobby.me?.id)) {
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
       this.ui.showBanner('This war is already in progress. Use Watch unless you already hold a player seat.', 'bad', 5000);
@@ -4718,10 +5847,11 @@ class App {
       const joinedRoom = lobby.game || row;
       this._onRoomUpdate(joinedRoom);
       const mySeat = (joinedRoom._players || []).find((player) => player.user_id === lobby.me?.id)?.seat || 2;
-      this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Direct connection to host is establishing…`);
+      this.ui.onlineStatus(`✅ YOU ARE IN — PLAYER ${mySeat}. Connecting to the host…`);
       this.ui.roomChatFill(await lobby.loadRoomChat(joinedRoom.id, 'room'));
       this._armLobbyConnectionWatchdog();
     } catch (e) {
+      this._releaseRoomLease();
       this.mpRole = null;
       this.onlineMode = false;
       this.ui.onlineStatus(`❌ Could not join: ${e.message}. Try JOIN again.`);
@@ -5792,10 +6922,8 @@ class App {
         : act.mode === 'branch' ? act.nt
         : { def: act.def || { name: act.label }, cost: act.cost, mode: act.mode };
       const built = plot.tier > 0 && !plot.ruined;
-      if (!buildMode && !built) {
-        rec.group.visible = false;
-        continue;
-      }
+      // Fight mode hides the pay rings below. The pad, ghost, and finished
+      // building stay, or a mode switch looks like the plot was destroyed.
       // Foundation scenery (pad, posts, rubble, ghost) hides once built.
       rec.group.children.forEach((ch) => {
         if (ch !== ud.label && ch !== ud.ring && ch !== ud.prog && (!ud.pips || ch !== ud.pips.sprite)) ch.visible = !built;
@@ -6747,6 +7875,10 @@ class App {
           this._cameraPinned = true;
           this._recenter = true;
           break;
+        case 'camera_keep':
+          e.preventDefault();
+          this._lookAtKeep();
+          break;
         case 'build_mode':
           e.preventDefault();
           this.toggleControlMode();
@@ -6754,9 +7886,9 @@ class App {
         case 'build':
           if (this.game.phase === 'found') this._tryFound();
           break;
-        case 'stance_defend': e.preventDefault(); this.issue({ t: 'stance', s: 'defend', p: this.myPlayer }); break;
-        case 'stance_follow': e.preventDefault(); this.issue({ t: 'stance', s: 'guard', p: this.myPlayer }); break;
-        case 'stance_push': e.preventDefault(); this.issue({ t: 'stance', s: 'attack', p: this.myPlayer }); break;
+        case 'stance_defend': e.preventDefault(); this._orderStance('defend'); break;
+        case 'stance_follow': e.preventDefault(); this._orderStance('guard'); break;
+        case 'stance_push': e.preventDefault(); this._orderStance('attack'); break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
@@ -6770,10 +7902,22 @@ class App {
       }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(bindKey(e)));
+    window.addEventListener('blur', () => this._releaseBattleInput());
+    window.addEventListener('contextmenu', (e) => {
+      if (!this.game || this.game.over) return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+    });
 
     cv.addEventListener('wheel', (e) => {
+      if (!this.game) return;
       e.preventDefault();
-      this.camDist = clamp(this.camDist * (1 + Math.sign(e.deltaY) * 0.12), 22, 95);
+      const pixels = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const step = clamp(pixels, -100, 100) / 100 * 0.045;
+      const base = this._camDistTarget ?? this.camDist;
+      this._camDistTarget = clamp(base * (1 + step), 22, 95);
+      if (this.missionIntro) this.missionIntro.held = true;
     }, { passive: false });
 
     cv.addEventListener('pointermove', (e) => {
@@ -6951,8 +8095,55 @@ class App {
   // Optional direct-move keys → a cardinal direction, sent through the lockstep
   // pipe only on change. Right-click orders are the main move. Directions stay
   // aligned with the minimap: north is always north.
+  _releaseBattleInput() {
+    this.keys.clear();
+    this._payAck = false;
+    if (!this.buttonPay && !this.lastPay) return;
+    this.buttonPay = false;
+    this._payPressUsed = false;
+    if (this.lastPay && this.game && !this.game.over) {
+      this.lastPay = false;
+      this.issue({ t: 'pay', p: this.myPlayer, on: false });
+    } else this.lastPay = false;
+  }
+
+  _orderStance(stance) {
+    this.issue({ t: 'stance', s: stance, p: this.myPlayer });
+  }
+
+  _stanceBanner(stance) {
+    const label = { defend: 'Defend Keep', guard: 'Follow heroes', attack: 'Push lanes' }[stance];
+    if (label) this.ui.showBanner(label, 'info', 1400);
+  }
+
+  _updateWaveApproach() {
+    const approach = firstWaveApproach(this.game);
+    if (!approach || !this.camera) { this.ui.setWaveApproach(null); return; }
+    const point = new THREE.Vector3(approach.x, this.map?.groundY(approach.x, approach.z) || 0, approach.z);
+    const screen = point.project(this.camera);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let dx = (screen.x * 0.5 + 0.5) * width - width / 2;
+    let dy = (1 - (screen.y * 0.5 + 0.5)) * height - height / 2;
+    if (screen.z > 1) { dx = -dx; dy = -dy; }
+    const edge = edgeMarker(dx, dy, width, height, 72);
+    this.ui.setWaveApproach(edge ? { ...edge, label: approach.label } : null);
+  }
+
   _updateHeroInput() {
     if (!this.game || this.game.over || this.mpRole === 'spectator') return;
+    const heldHero = this.myHero();
+    // The simulation ends a completed hold itself. A latched on-screen button
+    // must not immediately start the next tier. In co-op the pay command is
+    // still in the outbox when payHold is false, so wait until the sim has
+    // acknowledged the start before treating a clear hold as completion.
+    const settled = settleBuildToggle({
+      buttonPay: this.buttonPay, lastPay: this.lastPay,
+      payHold: !!heldHero?.payHold, acked: !!this._payAck,
+    });
+    this.buttonPay = settled.buttonPay;
+    this.lastPay = settled.lastPay;
+    this._payAck = settled.acked;
     let dx = 0, dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
@@ -6972,19 +8163,33 @@ class App {
     // the configured Build key remains an accessible secondary binding.
     const h = this.myHero();
     const canPay = this.game && this.game.phase === 'live' && h && !h.dead && !!this.game.buildTargetFor(h);
+    if (this.buttonPay && !canPay) this.buttonPay = false;
     const bindsNow = this.binds();
     const buildHeld = isHeld(bindsNow, this.keys, 'build') || isHeld(bindsNow, this.keys, 'dodge');
     const physicalPayHeld = buildHeld || !!this.buttonPay;
     // Eligibility can disappear after repair (a specialisation is due), then
     // return while the same key/button remains down. Only a physical release
     // rearms that press; lastPay alone tracks eligibility, not release.
+    // A finished plot clears the sim hold. If another foundation is already
+    // in reach, that same press may fund it. Leaving range and coming back
+    // is not a new press.
+    const payTarget = canPay ? this.game.buildTargetFor(h)?.plot?.id ?? null : null;
+    if (physicalPayHeld && this._payPressUsed && payTarget != null && this._payTargetId != null && payTarget !== this._payTargetId) {
+      this._payPressUsed = false;
+      this.lastPay = false;
+    }
+    this._payTargetId = payTarget;
     if (!physicalPayHeld) this._payPressUsed = false;
     const pay = this.controlMode === 'build' && canPay && physicalPayHeld
       && (!this._payPressUsed || this.lastPay);
     if (pay !== this.lastPay) {
       this.lastPay = pay;
       if (pay) this._payPressUsed = true;
+      else this._payAck = false;
       this.issue({ t: 'pay', p: this.myPlayer, on: pay });
+      // Solo applies the command before this returns. Co-op only acks once
+      // the lockstep window sets payHold.
+      if (pay && !this.netMode) this._payAck = !!this.myHero()?.payHold;
     }
   }
 
@@ -7188,8 +8393,19 @@ class App {
     }
   }
 
+  _lookAtKeep() {
+    const keep = this.game?.buildings.find((b) => b.kind === 'hq' && b.alive);
+    if (!keep) return;
+    this._cameraPinned = false;
+    this._keepPeek = { x: keep.cx ?? keep.x, z: keep.cz ?? keep.z, until: performance.now() + 2500 };
+  }
+
   _updateCamera(dt) {
     if (!this.game) return;
+    if (this._camDistTarget != null) {
+      this.camDist += (this._camDistTarget - this.camDist) * (1 - Math.exp(-8 * dt));
+      if (Math.abs(this._camDistTarget - this.camDist) < 0.02) this.camDist = this._camDistTarget;
+    }
 
     const feel = this.feel();
     const binds = this.binds();
@@ -7679,6 +8895,7 @@ class App {
         case 'orderconfirmed':
           if (e.player === this.myPlayer) {
             this._noteCoach({ type: 'stance', stance: e.stance });
+            this._stanceBanner(e.stance);
             this.audio.eventGain = 1;
             this.audio.click();
           }
@@ -7690,12 +8907,12 @@ class App {
           this._noteCoach({ type: 'firstsiege' });
           break;
         case 'rally':
-          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          if (e.player === this.myPlayer) { this._noteCoach({ type: 'stance', stance: e.stance }); this._stanceBanner(e.stance); }
           this.audio.train();
           this.burst(e.x, 0.3, e.z, { count: 10, color: 0x59ff9c, speed: 1.4, life: 0.5, size: 0.45, up: 1.6 });
           break;
         case 'hold':
-          if (e.player === this.myPlayer) this._noteCoach({ type: 'stance', stance: e.stance });
+          if (e.player === this.myPlayer) { this._noteCoach({ type: 'stance', stance: e.stance }); this._stanceBanner(e.stance); }
           this._impactRing(e.x, e.z, { color: 0x8acbff, radius: 5.5, count: 20, life: 0.55 });
           this.audio.click();
           break;
@@ -7954,6 +9171,7 @@ class App {
   }
 
   frame() {
+    if (this._preparingBattlefield && !this._warmupFrame) return;
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const hit = tickHitStop(this._hitFeel, dt);
     this._hitFeel = { hold: hit.hold, gap: hit.gap };
@@ -7967,7 +9185,7 @@ class App {
       this.missionIntro.elapsed += dt;
       const progress = Math.min(1, this.missionIntro.elapsed / 4);
       const eased = progress * progress * (3 - 2 * progress);
-      this.camDist = this.missionIntro.distance + 16 * (1 - eased);
+      if (!this.missionIntro.held) this.camDist = this.missionIntro.distance + 16 * (1 - eased);
       if (progress >= 1) this._finishMissionIntro();
     }
     this._updateCamera(dt);
@@ -7992,9 +9210,9 @@ class App {
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {
-      if (!this.missionIntro && !this.replay) this._updateHeroInput();
+      if (!this._preparingBattlefield && !this.missionIntro && !this.replay) this._updateHeroInput();
       if (this.replay) this._advanceReplay(dt);
-      else if (!this.paused && !this.game.over && !this.missionIntro) {
+      else if (!this._preparingBattlefield && !this.paused && !this.game.over && !this.missionIntro) {
         const simStarted = performance.now();
         let simTicks = 0;
         if (this.netMode) {
@@ -8157,12 +9375,15 @@ class App {
       const mh = this.myHero();
       const buildMode = this.controlMode !== 'fight';
       let branchPlot = null;
-      if (!this.replay && buildMode && mh && !mh.dead) {
+      if (!this.replay && buildMode && mh && !mh.dead && !mh.payHold) {
+        const funding = this.game.buildTargetFor(mh);
+        if (!funding) {
         for (const plot of this.game.plots) {
           const nt = this.game.nextTier(plot);
           if (!nt || !nt.branch || this.game.plotAction(plot)?.mode !== 'branch') continue;
           const [px, pz] = this.game.payPoint(plot, mh);
           if ((mh.x - px) ** 2 + (mh.z - pz) ** 2 < (PAY_RADIUS + 1.5) ** 2) { branchPlot = { plot, options: nt.options }; break; }
+        }
         }
       }
       this.ui.showBranch(branchPlot);
@@ -8195,7 +9416,9 @@ class App {
       }
       this.ui.showBuildHint(this.replay ? null : hint);
 
-      this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode });
+      this.ui.update(this.game, this.myPlayer, { controlMode: this.controlMode, paying: !!this.buttonPay || !!mh?.payHold });
+      if (this.game.over) this.ui.suppressPauseVeil();
+      this._updateWaveApproach();
       this.ui.updateBoss(this.game);
 
       this.autosaveT -= dt;
@@ -8218,6 +9441,7 @@ class App {
     this._updateProjectiles(dt);
     this._updateAbilityFx(dt);
     this.tacticalVisuals.update(dt);
+    if (this._preparingBattlefield) return;
     this.renderer.info.reset();
     this.tacticalVisuals.render();
     if (this.perfHud) {

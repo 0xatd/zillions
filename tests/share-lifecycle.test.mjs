@@ -28,3 +28,85 @@ test('a guest sees subsequent host difficulty and mission changes',()=>{
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'brutal'});
  assert.equal(rendered.difficulty,'brutal','difficulty-only update must refresh the visible room summary');
 });
+test('an unacked guest blocks the start and the host keeps resending',()=>{
+ const launch=source.slice(source.indexOf('  async _launchHostMatch('),source.indexOf('  _sharedMatchFields('));
+ const waitAt=launch.indexOf('if (seated.length)');
+ const sealAt=launch.indexOf('this._sealShareLobby()');
+ assert.ok(waitAt>0&&sealAt>waitAt,'the lobby is sealed only after a share guest is not waiting');
+ const poll=source.slice(source.indexOf('  _sharePollBegin('),source.indexOf('  async _acceptShareBegin('));
+ assert.ok(poll.lastIndexOf('this._shareFanBegin()')>poll.indexOf('did not enter the match'));
+ const calls=[];
+ const app={
+  _shareBeginNeed:new Set(['guest-1']),
+  _shareBegan:new Set(),
+  _shareBeginFinished:false,
+  _shareBeginAt:Date.now()-21000,
+  _shareBeginReminded:false,
+  _shareLobby:{seats:[{id:'guest-1',name:'Guest ABCD',host:false}]},
+  _shareFanBegin(){calls.push('fan')},
+  _renderShareHost(){calls.push('render')},
+  ui:{showBanner(){calls.push('banner')}},
+ };
+ method('_sharePollBegin','async _acceptShareBegin').call(app);
+ assert.ok(calls.includes('fan'));
+ assert.ok(calls.includes('banner'));
+ assert.equal(app._shareBeginFinished,false);
+ assert.equal(app.startBarrier,undefined);
+});
+
+test('repeated begin waits for battlefield loading before acknowledging',async()=>{
+ const start=source.indexOf('  async _acceptShareBegin('),end=source.indexOf('  _shareSendCatchup(',start);
+ const accept=new Function(`return ({${source.slice(start,end)}})._acceptShareBegin`)();
+ let finish,loads=0;const sent=[];
+ const app={mpRole:'guest',_sharedMatch:m=>m,ui:{setWaiting(){},showBanner(){}},_sharePublish:m=>sent.push(m),net:{open:true,send:m=>sent.push(m)},startGame(){loads++;this.game={};this.netMode=true;return new Promise(r=>finish=r);}};
+ const first=accept.call(app,{d:'normal'});
+ await accept.call(app,{d:'normal'});
+ assert.equal(loads,1);assert.deepEqual(sent,[],'a retry must not release the host while shaders load');
+ finish();await first;assert.equal(sent.filter(m=>m.t==='began').length,1);
+ await accept.call(app,{d:'normal'});assert.equal(loads,1);assert.equal(sent.filter(m=>m.t==='began').length,2,'loaded guest can repeat a lost acknowledgment');
+});
+
+test('stale host presence ends the waiting relay lobby instead of waiting forever',()=>{
+ let tick,failure;
+ const heartbeat=method('_startShareHeartbeat','_stopShareHeartbeat',{...links,Worker:class{constructor(){throw Error('no worker')}},setInterval:fn=>{tick=fn;return 1;}});
+ const id='22222222-2222-4222-8222-222222222222';
+ const room=links.createLobby({code:'abc2345678',hostId:'11111111-1111-4111-8111-111111111111',hostName:'Host',hero:'scott',now:Date.now()-120000});
+ const app={mpRole:'guest',_shareSelf:id,_shareLobby:room,net:{open:true,relay:true},_stopShareHeartbeat(){},_tabSession:()=>({touch(){}}),_retryShareReady(){},_shareSendCatchup(){},_shareDisplayName:()=>'Guest',_shareLiveness:()=>({receivedAt:Date.now()-120000,hostPresent:false}),_failShare:r=>{failure=r},_sharePublish(){},_shareTrackPresence(){}};
+ heartbeat.call(app);tick();assert.equal(failure,'host_left');
+});
+
+test('refreshing a started invite closes its stale lobby and leaves saved-game recovery accessible',()=>{
+ const hostId='11111111-1111-4111-8111-111111111111',code='abc2345678';
+ const lobby={...links.createLobby({code,hostId,hostName:'Host',hero:'scott',now:Date.now()}),started:true};
+ const storage=new Map([[`zillions.share.${code}`,JSON.stringify({lobby})],['zillions_save','original-save']]);
+ let heartbeat=false,published,screen;
+ const bindings={...links,localStorage:{getItem:k=>storage.get(k)},sessionStorage:{removeItem(){}},history:{replaceState(){}},location:{origin:'https://game.invalid',pathname:'/'},chapterFounder:()=>true};
+ const app={_shareSelfId:()=>hostId,profile:{},ui:{showSetup(){},setRoomSettings(){},showBanner(){},_showScreen:s=>{screen=s}},_bindShareTransport(){},_sharePublishLobby(){published=this._shareLobby},_startShareHeartbeat(){heartbeat=true},_renderShareHost(){},_rememberShareHost(){},_teardownShare(){this._shareLobby=null;this._shareCode=null;},_openShareLobby(){throw Error('must not create a new room silently')}};
+ app._leaveShareLink=method('_leaveShareLink','_onShareLinkLost',bindings);
+ method('_resumeShareHost','async _requestShareInvite',bindings).call(app,code);
+ assert.equal(heartbeat,false,'dead host cannot advertise a live match');
+ assert.equal(published?.closed,true);assert.equal(app.mpRole,null);assert.equal(screen,'main');
+ assert.equal(storage.get('zillions_save'),'original-save');
+});
+
+test('one departed guest cancels the entire pending launch and clears Ready for remaining guests',()=>{
+ const calls=[];const app={_shareBeginNeed:new Set(['first','second']),_shareBeginPayload:{attempt:'old',heroes:['host','first','second']},_shareBegan:new Set(['second']),startBarrier:true,_shareLobby:{seats:[{id:'host',host:true},{id:'second',ready:true}]},_sharePublishLobby(){calls.push('publish')},_renderShareHost(){},ui:{showBanner(){}},_shareFinishBegin(){calls.push('started')},_shareFanBegin(){}};
+ if(source.includes('  _cancelShareBegin('))app._cancelShareBegin=method('_cancelShareBegin','_sharePollBegin',{...links});
+ method('_sharePollBegin','async _acceptShareBegin').call(app);
+ assert.ok(!calls.includes('started'));assert.equal(app._shareBeginNeed,null);assert.equal(app._shareBeginPayload,null);assert.equal(app.startBarrier,false);
+ assert.equal(app._shareLobby.seats[1].ready,false);assert.equal(links.publicShareLobby(app._shareLobby).cancelledStart,'old');
+});
+
+test('cancellation survives lost broadcasts, reloads an in-flight guest and rejects stale launch acknowledgments',async()=>{
+ let reloaded=0,started=0;
+ const app={_shareCode:'abc2345678',_shareStartAttempt:'old',_shareBeginLoading:true};
+ const receive=method('_onShareLobby','async _acceptShareGuest',{...links,location:{reload(){reloaded++;}}});
+ receive.call(app,{code:app._shareCode,cancelledStart:'old'});assert.equal(reloaded,1);
+ const host={_shareBeginPayload:{attempt:'new'},_shareBeginNeed:new Set(['guest']),_shareBegan:new Set(),_shareFinishBegin(){started++}};
+ const ack=method('_shareNoteBegan','async _shareFinishBegin');
+ ack.call(host,'guest','old');assert.equal(started,0);
+ ack.call(host,'guest','new');assert.equal(started,1);
+ const start=source.indexOf('  async _acceptShareBegin('),end=source.indexOf('  _shareSendCatchup(',start);
+ const begin=new Function(`return ({${source.slice(start,end)}})._acceptShareBegin`)();
+ await begin.call({mpRole:'guest',_shareLobby:{cancelledStart:'old'},startGame(){throw Error('stale begin restarted loading')}},{attempt:'old'});
+});

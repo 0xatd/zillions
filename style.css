@@ -675,7 +675,24 @@ body::after {
 .setup.roommode .herocard .habils { display: none; }
 .setup.roommode .diff-label { grid-area: difflabel; }
 .setup.roommode .diffseg { grid-area: diffs; }
-.setup.roommode #mp-panel { grid-area: room; margin-top: 10px; min-height: 0; overflow: hidden; }
+.setup.roommode #mp-panel { grid-area: room; margin-top: 10px; min-height: 0; overflow: auto; }
+/* Drop-in co-op keeps the invite and roster in normal flow above START.
+   START is not sticky, so it cannot cover the seats, the link, or difficulty. */
+.setup.sharemode {
+  width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.setup.sharemode #mp-panel {
+  overflow: visible;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+.setup.sharemode #s-start {
+  position: static;
+  margin-top: 12px;
+}
 .setup.roommode.room-guest .modechip,
 .setup.roommode.room-guest .levelcard,
 .setup.roommode.room-guest .diffbtn:not(.roomready):not(.room-retry):not(.room-remove) { cursor: default; filter: saturate(.65); }
@@ -1070,7 +1087,8 @@ body::after {
 }
 #invitetoast b { color: var(--gold); }
 @media (max-width: 980px) {
-  .setup.roommode { display: block; height: auto; overflow-y: auto; }
+  .setup.roommode, .setup.sharemode { display: block; height: auto; overflow-y: auto; }
+  .setup.sharemode #s-start { position: static; }
   .setup.roommode .herorow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lobbygrid { grid-template-columns: 1fr; max-height: none; }
   .lobbychat { min-height: 180px; }
@@ -2249,8 +2267,9 @@ body::after { background: radial-gradient(ellipse at center, transparent 72%, rg
 .share-card { max-width:720px; margin:18px auto; padding:18px 20px; background:#101820ee; border:1px solid #86d9dc55; border-radius:16px; }
 .share-card.bad { border-color:#e07070aa; }
 .share-card h3 { margin:6px 0 8px; }
-.share-link { width:100%; box-sizing:border-box; margin:8px 0; padding:10px 12px; font:inherit; color:#e8f4f2; background:#071018; border:1px solid #86d9dc66; border-radius:8px; }
+.share-link { width:100%; box-sizing:border-box; margin:8px 0; padding:10px 12px; font: 13px/1.45 ui-monospace, monospace; color:#e8f4f2; background:#071018; border:1px solid #86d9dc66; border-radius:8px; white-space:pre-wrap; word-break:break-all; overflow:auto; resize:none; }
 .share-actions { display:flex; gap:10px; margin:8px 0; }
+.share-actions .tbtn { min-height:40px; }
 #screen-share .share-card { margin-top:28px; }
 .guest-note, .save-progress-label { margin:8px 0; color:#9fb4c2; font-size:12px; }
 .save-progress-label { margin-top:14px; letter-spacing:.16em; text-transform:uppercase; font-size:10px; color:#dbac63; }
@@ -2261,6 +2280,11 @@ button.is-pressed:not(:disabled) { transform:translateY(1px); filter:brightness(
 button.is-busy { opacity:.72; pointer-events:none; }
 .speed-readout { min-width:72px; text-align:center; font-weight:800; letter-spacing:.08em; color:#f4ead2; }
 .pause-veil { position:absolute; inset:0; z-index:30; display:flex; align-items:center; justify-content:center; background:rgba(3,8,14,.62); pointer-events:none; text-align:center; }
+#overlay:has(.endpanel) { background: rgba(4, 8, 14, 0.94); }
+.wave-approach { position:fixed; z-index:28; width:0; height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#ffd75e; text-shadow:0 2px 8px #000; pointer-events:none; transform:translate(-50%,-50%); }
+.wave-approach b { font-size:28px; line-height:1; }
+.wave-approach small { font-size:11px; letter-spacing:.08em; white-space:nowrap; }
+.bigaction.holding { box-shadow:inset 0 0 0 2px #ffd75e; }
 .pause-veil b { display:block; font-size:clamp(48px,8vw,92px); letter-spacing:.22em; color:#f6edd6; text-shadow:0 8px 30px #000; }
 .pause-veil span, .pause-veil small { display:block; margin-top:8px; color:#d5e4ec; letter-spacing:.08em; }
 .coach { position:absolute; left:16px; bottom:168px; z-index:26; width:min(380px,calc(100vw - 32px)); padding:14px 16px; background:#10202bf2; border:1px solid #6d8796; border-left:3px solid #e0b15a; box-shadow:0 12px 40px #000a; }

@@ -39,7 +39,7 @@ try {
   await q(`create role anon; create role authenticated; create role service_role;
     create schema auth; create table auth.users(id uuid primary key, email text, raw_user_meta_data jsonb default '{}');
     create function auth.uid() returns uuid language sql as 'select null::uuid';
-    create schema extensions; create extension if not exists pgcrypto with schema extensions;
+    create schema realtime; create table realtime.messages(extension text); alter table realtime.messages enable row level security; create function realtime.topic() returns text language sql as 'select null::text'; create schema extensions; create extension if not exists pgcrypto with schema extensions;
     set search_path = public, extensions;
     create publication supabase_realtime;`);
   await q(read('supabase/schema.sql'));

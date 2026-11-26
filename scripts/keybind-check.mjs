@@ -67,7 +67,8 @@ for (const bad of [null, undefined, 42, 'nope', [], { move_up: 42 }, { nonsense:
   ok(out && ACTIONS.every((a) => typeof out[a.id] === 'string'), `normalizeBinds left a hole on ${JSON.stringify(bad)}`);
 }
 ok(normalizeBinds({ menu: 'z' }).menu === 'escape', 'a fixed action was rebound');
-ok(normalizeBinds({ move_up: 'K' }).move_up === 'k', 'a rebound key was not lower-cased');
+ok(normalizeBinds({ move_up: 'Y' }).move_up === 'y', 'a rebound key was not lower-cased');
+ok(actionFor(defaultBinds(), 'k') === 'camera_keep', 'K does not jump the camera to the Keep');
 ok(normalizeBinds({ __proto__: 'x' }).ability2 === 'w', 'a prototype key disturbed the scheme');
 ok(Object.keys(normalizeBinds({})).length === ACTIONS.length, 'normalize did not return the full scheme');
 

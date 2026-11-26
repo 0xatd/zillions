@@ -1,4 +1,5 @@
 import { heroCopy, bearing } from './campaign-presentation.js';
+import { publicRoomSetup } from './lobby-reliability.js';
 import { spellManaCost } from './hero-spells.js';
 import { heroAbilities, abilityCooldown } from './hero-abilities.js';
 import { CHAPTER_CULTURES, recruitmentAllowed, CHAPTER_LEADERS, CHAPTER_COLORS, CHAPTER_EMBLEMS, chapterIdentity, chapterFounder, chapterCities, conquestCount, leaderAvailable, leaderRecord } from './chapter.js';
@@ -18,7 +19,7 @@ import {
 import {BUILDER_ORDERS,builderStatus} from './builders.js';
 import { formatTime } from './utils.js';
 import { dailyScore, formatDailyStanding, modifierInfo } from './daily.js';
-import { combatAlert, runReview } from './combat-readability.js';
+import { combatAlert, firstWaveApproach, pauseVeilHidden, runReview } from './combat-readability.js';
 import { TERRAIN_SHAPES, TerrainField } from './terrain.js';
 import { CITY_PLANS } from './plots.js';
 import { FOG_DARKNESS, FOG_EDGE_SOFTNESS, fogVisionSources, visibleInFog } from './fog-of-war.js';
@@ -39,7 +40,7 @@ import {
 import {
   EQUIP_SLOTS, slotPool, slotsForPool, itemLines, meetsRequirement, requirementText, ATTRIBUTES,
 } from './items.js';
-import { ShellState, SHELL_BASES } from './shell-state.js';
+import { ShellState, SHELL_BASES, matchBlocksShell } from './shell-state.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
@@ -91,6 +92,7 @@ export class UI {
         <button class="tbtn" id="b-mute" title="Mute sound (M)">🔊</button>
         <button class="tbtn" id="b-quality" title="Toggle graphics quality">✨</button>
         <button class="tbtn" id="b-menu" title="Menu (Esc)">☰</button>
+        <button type="button" class="tbtn hidden" id="locate-keep" title="Jump to the Keep (K)">Keep</button>
       </div>
 
       <div id="pause-veil" class="pause-veil hidden" role="status" aria-live="polite">
@@ -107,6 +109,7 @@ export class UI {
       <div id="waitind" class="hidden">⏳ Syncing co-op…</div>
       <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
       <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
+      <div id="wave-approach" class="wave-approach hidden" aria-hidden="true"><b>➤</b><small></small></div>
       <div id="messages"></div>
       <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
         <button id="battle-details-close" aria-label="Close details">×</button>
@@ -239,7 +242,7 @@ export class UI {
             <div class="character-copy"><h2 id="character-name"></h2><p id="character-tagline"></p><div id="character-gear" class="character-gear"></div></div>
           </div>
           <aside class="character-roster"><span class="roster-label">CHAPTER LEADERS</span><div id="character-list"></div><button class="enter-world" id="m-enter-world">DEPLOY</button><button class="character-create" id="m-create-character">CHAPTER IDENTITY</button><button class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button><div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div></aside>
-          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-invite">INVITE</button><button class="utilitybtn" id="m-party">PLAY WITH FRIENDS</button><button class="utilitybtn" id="m-daily">DAILY SIEGE</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
+          <div class="character-footer"><div class="profilerow"><span id="prof-name-display">Signed in</span><span id="prof-stats"></span></div><button class="utilitybtn" id="m-character-sheet">ARMORY & SKILLS</button><button class="utilitybtn" id="m-invite">INVITE</button><button class="utilitybtn" id="m-party">PARTY & FRIENDS</button><button class="utilitybtn" id="m-daily">DAILY SIEGE</button><button class="utilitybtn" id="m-custom">CUSTOM GAMES</button><button class="utilitybtn" id="m-settings">MENU</button><button class="utilitybtn danger" id="m-logout">LOG OUT</button></div>
         </div>
 
         <div id="screen-character-sheet" class="sheet-screen hidden">
@@ -335,7 +338,7 @@ export class UI {
         </div>
 
         <div id="screen-custom" class="custom-browser hidden">
-          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">PARTY 1/4</small></div></header>
+          <header class="custom-head"><button class="tbtn" id="cu-back">← BACK</button><div><span>CUSTOM GAMES</span><h1>GAME BROWSER</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
           <aside class="custom-nav">
             <button class="custom-primary-tab sel" data-view="live">LIVE GAMES</button>
             <button class="custom-primary-tab" data-view="arcade">ARCADE</button>
@@ -499,7 +502,7 @@ export class UI {
             <div><b>⚔️ Camps are faucets.</b> Every camp musters a fresh formation on a timer, forever. Press <kbd data-bind-label="stance_push"></kbd> and those squads push the lanes together — no unit micro.</div>
             <div><b>🚩 Take the lane nodes.</b> Stand on one with no enemies nearby and it flips to you. Held nodes pay income, and you can raise a Forward Camp on them so squads muster at the front.</div>
             <div><b>🔥 Hives are stronger factories.</b> One nest outproduces one human camp and accelerates as Threat climbs. Its dead do not form ranks; they flood. Raze it to stop it.</div>
-            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> build, repair, or rebuild. Fight mode makes it dodge and enables <kbd data-bind-label="ability1"></kbd>. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
+            <div><b>🔧 Nothing repairs itself.</b> Build mode makes <kbd data-bind-label="dodge"></kbd> and <kbd data-bind-label="build"></kbd> build, repair, or rebuild. Fight mode makes <kbd data-bind-label="dodge"></kbd> dodge. Fight mode enables abilities. Press <kbd data-bind-label="tower_priority"></kbd> beside a tower to change what it shoots first.</div>
             <div><b>⚔️ Your army uses blended control.</b> Squads fight automatically. You set the plan: <b>F1</b> DEFEND city, <b>F2</b> FOLLOW hero, <b>F3</b> HUNT hives.</div>
             <div><b>👑 Level up</b> from nearby kills. Spend upgrade points on Aura, Passive I, Passive II, or Ult Damage.</div>
             <div><b>🔁 Two weapon sets.</b> Press <kbd>X</kbd> to draw the other one. Every key here can be rebound in Settings → Controls. A scattergun for the press and a rifle for the pass is a real decision — the swap has a cooldown, and Lattice nodes can be pinned to one set.</div>
@@ -849,6 +852,7 @@ export class UI {
       b.innerHTML = `${d.label}<small>${key === 'casual' ? 'smaller hordes' : key === 'normal' ? 'the true experience' : 'good luck'}</small>`;
       b.onclick = () => {
         this.selectedDiff = key;
+        this._diffPicked = true;
         for (const c of seg.children) c.classList.toggle('sel', c === b);
         if (this.cb.onDifficultyPick) this.cb.onDifficultyPick(key);
       };
@@ -892,6 +896,7 @@ export class UI {
     q('#b-mute').onclick = () => this.cb.onMute();
     q('#b-quality').onclick = () => this.cb.onQuality && this.cb.onQuality();
     q('#b-menu').onclick = () => this.cb.onPause();
+    q('#locate-keep').onclick = () => this.cb.onLocateKeep?.();
     this.pings = [];
 
     this.tooltip = q('#tooltip');
@@ -1101,6 +1106,7 @@ export class UI {
   }
 
   _showScreen(name) {
+    if (this.cb.isMatchLive?.() && matchBlocksShell(name)) return;
     this._battlePanel = null;
     this.root.querySelector('#builder-controls').classList.add('hidden');
     this.root.querySelector('#battle-details').classList.add('hidden');
@@ -1141,7 +1147,7 @@ export class UI {
     this.root.querySelector('#cu-character').textContent = character
       ? `${character.name} · ${MMO_CLASSES[character.classKey]?.name || 'Commander'}`
       : hostName ? `@${hostName}` : 'COMMANDER';
-    this.root.querySelector('#cu-party').textContent = 'PARTY 1/4';
+    this.root.querySelector('#cu-party').textContent = 'MULTIPLAYER';
     this._renderCustomRows();
   }
 
@@ -1222,13 +1228,14 @@ export class UI {
       const row = document.createElement('button');
       row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
       row.disabled = incompatible;
-      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}<small>${String(game.mode || 'campaign').toUpperCase()}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      const setup = publicRoomSetup(game);
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${String(setup.mode || 'campaign').toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
       row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
       box.appendChild(row);
     }
     const game = this._selectedCustomGame;
     detail.innerHTML = game
-      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${game.mode === 'labyrinth' ? '🌀' : game.mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.mapName || levelById(game.level || 1)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${String(game.difficulty || 'normal').toUpperCase()}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
+      ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${publicRoomSetup(game).mode === 'labyrinth' ? '🌀' : publicRoomSetup(game).mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(publicRoomSetup(game).mapName || levelById(publicRoomSetup(game).level)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${(DIFFICULTY[publicRoomSetup(game).difficulty] || DIFFICULTY.normal).label}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
       : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
     join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
     join.disabled = !game || game.protocol_compatible === false;
@@ -1512,7 +1519,7 @@ export class UI {
         const clash = clashes.get(action.id);
         const listening = this._bindingId === action.id;
         return `<div class="bindrow${clash ? ' clash' : ''}${action.reserved ? ' reserved' : ''}${key ? '' : ' unbound'}">
-          <span class="bindname">${escapeHtml(action.name)}${action.reserved ? '<em>not yet used</em>' : ''}
+          <span class="bindname">${escapeHtml(action.name)}
             ${action.desc ? `<small>${escapeHtml(action.desc)}</small>` : ''}</span>
           <button class="bindkey${listening ? ' listening' : ''}" data-action="${action.id}"
             ${action.fixed ? 'disabled title="This key is fixed."' : ''}>
@@ -2565,13 +2572,14 @@ export class UI {
     }
   }
 
-  showSetup({ coop = false, mode = 'campaign', online = null, level = null } = {}) {
+  showSetup({ coop = false, mode = 'campaign', online = null, level = null, share = false } = {}) {
     this._fromLobby = !!online || this._lobbyWasOpen();
     this.selectedMode = mode;
     this._syncChapterHeroChoice(mode);
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
@@ -2837,16 +2845,8 @@ export class UI {
     big.onclick = () => {
       if (this._bigMode === 'found') this.cb.onFound && this.cb.onFound();
       else if (this._bigMode === 'cast') this.cb.onCast();
+      else if (this._bigMode === 'build') this.cb.onBuildToggle && this.cb.onBuildToggle();
     };
-    big.onpointerdown = (e) => {
-      if (this._bigMode !== 'build') return;
-      e.preventDefault();
-      this.cb.onBuildHold && this.cb.onBuildHold(true);
-      try { big.setPointerCapture(e.pointerId); } catch {}
-    };
-    big.onpointerup = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
-    big.onpointercancel = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
-    big.onpointerleave = () => this.cb.onBuildHold && this.cb.onBuildHold(false);
     big.onmouseenter = (e) => {
       const hh = this._game ? this._game.heroes[this._p] : null;
       if (hh) this._showTip(e, this._heroTip(heroCopy(hh.def, this._hudCharacter)));
@@ -2913,14 +2913,14 @@ export class UI {
     if(b){
       this._builderPaused=b.paused;
       this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
-      this.root.querySelector('#builder-status').textContent=b.paused?'Paused':builderStatus(game);
+      this.root.querySelector('#builder-status').textContent=b.paused?'Crew idle':builderStatus(game);
       const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
       if(document.activeElement!==order)order.value=b.order;
       if(document.activeElement!==reserve)reserve.value=b.reserve;
       for(const control of [order,reserve,pause])control.disabled=p!==0;
       pause.textContent=b.paused?'Resume':'Pause';
       for(const kind of ['tower','wall']){const field=this.root.querySelector('#builder-'+kind);if(document.activeElement!==field)field.value=b.branches?.[kind]||'ask';field.disabled=p!==0;}
-      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':(b.paused ? 'Paused — choose an order or Resume to start the crew. ' : b.status==='No eligible work' ? 'Current order is complete. Choose another order or capture more ground. ' : '')+({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
+      this.root.querySelector('#builder-help').textContent=p!==0?'The host directs the shared colony crew.':(b.paused ? 'Crew is standing by — choose an order or Resume. The siege keeps running. ' : b.status==='No eligible work' ? 'Current order is complete. Choose another order or capture more ground. ' : '')+({maintain:'Repair and rebuild only.',develop:'Balance income, troops and defenses in existing holdings.',expand:'Secure reachable outposts on friendly ground.',fortify:'Build walls and gate defenses.',prosper:'Grow income before military spending.',mobilize:'Prioritize camps and troop production.'}[b.order]);
     }
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
@@ -3016,9 +3016,8 @@ export class UI {
       this._combatAlertKey = alertKey;
       if (alert) {
         alertBox.className = `combat-alert ${alert.tone}`;
-        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep ? '<button id="locate-keep" class="tbtn">Locate Keep</button>' : ''}${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
+        alertBox.innerHTML = `<span>${alert.icon}</span><div><b>${alert.title}</b><small>${alert.detail}${alert.key.startsWith('keep') ? ' · <span data-keep-status></span>' : ''}</small>${keep && alert.key.startsWith('keep') && game.stance !== 'defend' ? '<button type="button" id="recall-army" class="tbtn">Recall army</button>' : ''}</div>`;
         alertBox.querySelector('#recall-army')?.addEventListener('click', () => this.cb.onStance?.('defend'));
-        alertBox.querySelector('#locate-keep')?.addEventListener('click', () => this.cb.onLocateKeep?.());
       } else {
         alertBox.className = 'combat-alert hidden';
         alertBox.textContent = '';
@@ -3027,6 +3026,12 @@ export class UI {
 
     const keepLabel = alertBox.querySelector('[data-keep-status]');
     if (keepLabel) keepLabel.textContent = keepStatus;
+    const locate = q('#locate-keep');
+    if (locate) {
+      const showKeep = !!(keep && game.phase !== 'found');
+      locate.classList.toggle('hidden', !showKeep);
+      if (showKeep) locate.title = `Jump to the Keep (K) · ${keepStatus}`;
+    }
 
     // Hero plate.
     const h = game.heroes[p];
@@ -3071,7 +3076,7 @@ export class UI {
       this._updateUpgradePanel(game, h);
 
       const slots = q('#ability-slots');
-      slots.hidden = controlMode !== 'fight' || game.phase === 'found';
+      slots.hidden = false;
       const slotMarkup = heroAbilities(h.def).map((ability, slot) => {
         if (!ability || ability.passive || slot === 0) return '';
         const cd = abilityCooldown(h, slot);
@@ -3086,12 +3091,13 @@ export class UI {
       // The one big contextual button: found the city, build in Build mode, or cast.
       const big = q('#bigaction');
       const ab = h.def.ability;
+      const paying = !!controls.paying;
       if (game.phase === 'found') {
         this._bigMode = 'found';
         const near = game.map.sites.some((s) => (h.x - s.x) ** 2 + (h.z - s.z) ** 2 < 64);
         big.className = 'bigaction bell';
-        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Ride to a flagged site…'}<small>${this._keyLabel('build')}</small></span>`;
-        big.disabled = !near || h.dead;
+        big.innerHTML = `<span class="bicon">🏳️</span><span class="btext">${near ? 'Found the city HERE' : 'Found the city — return to the flag'}<small>${this._keyLabel('build')}</small></span>`;
+        big.disabled = !!h.dead;
       } else if (controlMode === 'build' && game.buildTargetFor) {
         const target = game.buildTargetFor(h);
         if (target) {
@@ -3101,24 +3107,18 @@ export class UI {
           const verb = act.mode === 'repair' ? 'Repair' : act.mode === 'rebuild' ? 'Rebuild' : plot.tier > 0 ? 'Upgrade' : 'Build';
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
-          big.className = 'bigaction build ready';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">${verb} ${name}<small>Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`;
-          big.disabled = h.dead;
+          this._paintBig(big, `bigaction build ready${paying ? ' holding' : ''}`, `<span class="bicon">🏗️</span><span class="btext">${paying ? 'Working' : verb} ${name}<small>Click, or hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`, h.dead);
         } else {
           this._bigMode = 'idle';
-          big.className = 'bigaction build';
-          big.innerHTML = `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`;
-          big.disabled = true;
+          this._paintBig(big, 'bigaction build', `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`, true);
         }
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
-        big.className = 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready');
-        big.innerHTML = `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')}${controlMode === 'fight' ? ` · ${this._keyLabel('build_mode')} show construction` : ''}</small></span>` +
-          (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : '');
-        big.disabled = h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0);
+        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')} · ${this._keyLabel('build_mode')} construction</small></span>` +
+          (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : ''), h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0));
       }
     }
 
@@ -3137,6 +3137,19 @@ export class UI {
       setTimeout(() => { div.remove(); }, 7000);
       if (m.kind === 'bad') this.showBanner(m.text, 'bad');
     }
+  }
+
+  // Rewriting the button every frame destroyed the element under the cursor
+  // and cancelled a click before it could pay.
+  _paintBig(big, className, html, disabled) {
+    if (!big) return;
+    if (big.className !== className) big.className = className;
+    if (big.dataset.markup !== html) {
+      big.dataset.markup = html;
+      big.innerHTML = html;
+    }
+    big.disabled = !!disabled;
+    big.setAttribute('aria-pressed', String(className.includes('holding')));
   }
 
   _updateUpgradePanel(game, h) {
@@ -3264,7 +3277,7 @@ export class UI {
     t.style.bottom = (window.innerHeight - e.clientY + 18) + 'px';
     t.style.top = 'auto';
   }
-  _hideTip() { this.tooltip.classList.add('hidden'); }
+  _hideTip() { this.tooltip?.classList.add('hidden'); }
 
   showMissionIntro(level, onSkip) {
     this.root.querySelector('#mission-intro-title').textContent = level.name;
@@ -3317,6 +3330,29 @@ export class UI {
     this._bt = setTimeout(() => { this.banner.className = ''; }, dur);
   }
 
+  setWaveApproach(marker) {
+    const el = this.root.querySelector('#wave-approach');
+    if (!el) return;
+    if (!marker) {
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+    el.style.left = `${marker.x}px`;
+    el.style.top = `${marker.y}px`;
+    const arrow = el.querySelector('b');
+    const label = el.querySelector('small');
+    if (arrow) arrow.style.transform = `rotate(${marker.angle}rad)`;
+    if (label && label.textContent !== marker.label) label.textContent = marker.label || '';
+  }
+
+  suppressPauseVeil() {
+    this._matchOver = true;
+    this.root.querySelector('#pause-veil')?.classList.add('hidden');
+  }
+
   setSpeedUI(speed, paused) {
     this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
@@ -3325,7 +3361,9 @@ export class UI {
     const veil = this.root.querySelector('#pause-veil');
     const menusOpen = !this.root.querySelector('#overlay').classList.contains('hidden');
     if (veil) {
-      veil.classList.toggle('hidden', !paused || menusOpen || this.pauseOpen);
+      veil.classList.toggle('hidden', pauseVeilHidden({
+        paused, menusOpen, pauseOpen: this.pauseOpen, matchOver: !!this._matchOver,
+      }));
       const speedLine = veil.querySelector('#pause-veil-speed');
       if (speedLine) speedLine.textContent = `Speed ${speed}×`;
       const hint = veil.querySelector('#pause-veil-hint');
@@ -3428,14 +3466,20 @@ export class UI {
   _renderLeaderPick(selector) {
     const host = this.root.querySelector(selector);
     if (!host) return;
+    this._hideTip();
     const selected = this.selectedLeader;
     host.innerHTML = leaderRoster(this._profile).map((leader) => {
-      const tip = [leader.role, leader.kit].filter(Boolean).join(' — ');
       const on = leader.playable && leader.key === selected;
-      return `<button type="button" class="leaderchip${leader.playable ? ' playable' : ' locked'}${on ? ' sel' : ''}" data-leader="${escapeHtml(leader.key)}" title="${escapeHtml(tip)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? escapeHtml(leader.role) : escapeHtml(leader.status)}</small></button>`;
+      return `<button type="button" class="leaderchip${leader.playable ? ' playable' : ' locked'}${on ? ' sel' : ''}" data-leader="${escapeHtml(leader.key)}" ${leader.playable ? '' : 'disabled'}><b>${escapeHtml(leader.name)}</b><small>${leader.playable ? escapeHtml(leader.role) : escapeHtml(leader.status)}</small></button>`;
     }).join('');
-    for (const button of host.querySelectorAll('.leaderchip.playable')) {
-      button.onclick = () => this._selectLeader(button.dataset.leader);
+    host.onmouseleave = () => this._hideTip();
+    for (const button of host.querySelectorAll('.leaderchip')) {
+      const leader = leaderRoster(this._profile).find((entry) => entry.key === button.dataset.leader);
+      const tip = [leader?.role, leader?.kit, leader?.status].filter(Boolean).join(' — ');
+      button.onmouseenter = (event) => { if (tip) this._showTip(event, escapeHtml(tip)); };
+      button.onmousemove = (event) => this._moveTip(event);
+      button.onmouseleave = () => this._hideTip();
+      if (button.classList.contains('playable')) button.onclick = () => this._selectLeader(button.dataset.leader);
     }
   }
 
@@ -3558,6 +3602,7 @@ export class UI {
     if (loginDivider) loginDivider.classList.toggle('hidden', !state.enabled || !!state.signedIn || needsUsername);
     if (offline) offline.classList.toggle('hidden', !offlineAllowed || !!state.signedIn);
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
+    if (this.cb.isMatchLive?.()) return;
     if (needsUsername) {
       this._accountAccepted = false;
       this._showScreen('account');
@@ -3663,9 +3708,33 @@ export class UI {
     const text = String(url || '');
     const field = this.root.querySelector('#share-url');
     if (field) field.value = text;
-    const done = () => this.showBanner('Invite link copied.', '', 2200);
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => this.showBanner('Select the invite link and copy it.', '', 3200));
-    else this.showBanner('Select the invite link and copy it.', '', 3200);
+    const button = this.root.querySelector('#share-copy');
+    const done = () => { if (button) button.textContent = 'Copied'; };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => { if (button) button.textContent = 'Select the link'; });
+    else if (button) button.textContent = 'Select the link';
+  }
+
+  showShareDraft() {
+    this._shareLive = true;
+    this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
+    const mp = this.root.querySelector('#mp-panel');
+    if (!mp) return;
+    mp.classList.remove('hidden');
+    mp.dataset.share = 'draft';
+    mp.innerHTML = `
+      <div class="share-card">
+        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <h3>Set the siege, then invite</h3>
+        <p class="mphint" id="share-status">Pick the battlefield and difficulty above. The invite link is created from those choices.</p>
+        <div class="share-actions"><button class="diffbtn sel" id="share-create" type="button">Create invite link</button></div>
+      </div>`;
+    mp.querySelector('#share-create').onclick = () => this.cb.onShareCreate?.();
+    this.setStartButton({
+      text: 'SET THE BATTLE, THEN CREATE THE LINK',
+      disabled: true,
+      title: 'Choose the map and difficulty, then create the invite link.',
+    });
   }
 
   showShareNotice({ title = 'Join a siege', copy = '', tone = '' } = {}) {
@@ -3682,9 +3751,10 @@ export class UI {
     if (card) card.classList.toggle('bad', tone === 'bad');
   }
 
-  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true } = {}) {
+  showShareHost({ url, status, players, relay, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, launchReady = true, startLabel = '' } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
@@ -3699,7 +3769,7 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>Invite a friend</h3>
         <p class="mphint" id="share-status"></p>
-        <input class="share-link" id="share-url" readonly aria-label="Invite link">
+        <textarea class="share-link" id="share-url" readonly rows="3" aria-label="Invite link"></textarea>
         <div class="share-actions"><button class="tbtn" id="share-copy" type="button">Copy invite link</button></div>
         <p class="mphint" id="share-relay"></p>
         <p class="mphint">Friends join before you press Start. Once the siege begins, this link no longer adds a hero. ${maxPlayers} players maximum.</p>
@@ -3714,17 +3784,16 @@ export class UI {
     this.roomRoster(players || [], { isHost: true, maxPlayers, level, mode, difficulty });
     const waiting = (players || []).length > 1 && !launchReady;
     this.setStartButton({
-      text: waiting ? 'WAITING FOR READY' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode),
+      text: startLabel || (waiting ? 'WAITING FOR A FRIEND' : (players || []).length > 1 ? `▶  START — ${(players || []).length} HEROES` : this._startCopyFor(mode)),
       disabled: waiting,
-      title: waiting
-        ? 'Start unlocks when every friend is connected, has this mission unlocked, and marks Ready.'
-        : 'Friends must join before you start. The link closes when the siege begins.',
+      title: status || 'Friends must join before you start. The link closes when the siege begins.',
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false } = {}) {
+  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
+    this.root.querySelector('#screen-setup')?.classList.add('sharemode');
     const mp = this.root.querySelector('#mp-panel');
     if (!mp) return;
     mp.classList.remove('hidden');
@@ -3734,8 +3803,8 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.</p>
-        <div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>
+        <p class="mphint">${rejoining ? 'Rejoining the match…' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
+        ${rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`}
       </div>
       <div id="room-roster" class="roomroster"></div>
       <div id="mp-sub"></div>`;
@@ -3744,9 +3813,9 @@ export class UI {
     if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
     this.setStartButton({
-      text: '⏳  WAITING FOR HOST TO START',
+      text: rejoining ? '⏳  REJOINING…' : '⏳  WAITING FOR HOST TO START',
       disabled: true,
-      title: 'Only the host can launch this siege.',
+      title: rejoining ? 'Catching up to the host snapshot.' : 'Only the host can launch this siege.',
     });
   }
 
@@ -3886,7 +3955,7 @@ export class UI {
       const p = bySeat.get(seat);
       if (p) {
         const label = p.host ? 'HOST' : `P${seat}`;
-        const hero = this._heroName(p.hero);
+        const who = p.name || this._heroName(p.hero);
         const state = p.state === 'connected' ? (p.ready ? 'ready · connected' : 'connected')
           : p.state === 'reconnecting' ? 'reconnecting'
           : p.state === 'offline' ? 'offline'
@@ -3899,7 +3968,7 @@ export class UI {
           <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''} state-${p.state || 'connecting'}">
             <span class="roomseat">${label}</span>
             <b></b>
-            <small>${hero} · ${state}${unlock}</small>
+            <small>${escapeHtml(who)} · ${state}${unlock}</small>
             ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
@@ -3917,7 +3986,7 @@ export class UI {
         <div>
           <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
           <b>${modeCopy} · ${levelDef.name}</b>
-          <span class="roomsettings">${difficultyDef.label} · ${hostHero ? hostHero.name : 'Hero pending'} · ${filled}/${maxPlayers} players</span>
+          <span class="roomsettings">${difficultyDef.label} · ${escapeHtml(host?.name || hostHero?.name || 'Host')} · ${filled}/${maxPlayers} players</span>
           <small>${launchCopy}</small>
         </div>
       </div>
@@ -3940,6 +4009,7 @@ export class UI {
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }
 
   hideStart() {
+    this._matchOver = false;
     this.root.querySelector('#replay-gate')?.classList.add('hidden');
     this.root.querySelector('#overlay').classList.add('hidden');
     this.pauseOpen = false;
@@ -4139,6 +4209,7 @@ export class UI {
   }
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
+    this._matchOver = true;
     this.pauseOpen = false;
     this.root.querySelector('#pause-veil')?.classList.add('hidden');
     this.hideCoach();
@@ -4399,7 +4470,9 @@ export class UI {
       for (const g of rows) {
       const row = document.createElement('div');
       row.className = `gamerow ${activeGame ? 'active' : 'open'}`;
-      const lv = levelById(g.level || 1);
+      const setup = publicRoomSetup(g);
+      const lv = levelById(setup.level);
+      const diffLabel = (DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label;
       const names = (g._players || []).map((p) => `@${p.display_name || 'Commander'}`).join(', ');
       const canRejoin = activeGame && myId && g.host_id !== myId
         && (g._players || []).some((p) => p.user_id === myId);
@@ -4407,7 +4480,7 @@ export class UI {
       row.innerHTML = `
         <span class="gamestate">${incompatible ? 'UPDATE' : activeGame ? 'LIVE' : 'OPEN'}</span>
         <span class="gmain"><b class="gname"></b><small class="gplayers"></small></span>
-        <span class="ginfo">${g.mode === 'survival' ? '💀 Survival' : g.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${g.players}/${g.max_players || 4}</span>
+        <span class="ginfo">${setup.mode === 'survival' ? '💀 Survival' : setup.mode === 'labyrinth' ? '🌀 Labyrinth' : '⚔️ Campaign'} · ${lv ? lv.name : '?'} · ${diffLabel} · ${g.players}/${g.max_players || 4}</span>
         <button class="tbtn gjoin" ${incompatible ? 'disabled' : ''}>${incompatible ? 'Refresh required' : canRejoin ? 'Rejoin' : activeGame ? 'Watch' : 'Join'}</button>`;
       row.querySelector('.gname').textContent = `${g.host_name}'s war`;
       row.querySelector('.gplayers').textContent = incompatible
@@ -4488,6 +4561,19 @@ export class UI {
       ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
     }
 
+    const approach = firstWaveApproach(game);
+    if (approach) {
+      ctx.strokeStyle = '#ffd75e';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(approach.fromX, approach.fromZ);
+      ctx.lineTo(approach.x, approach.z);
+      ctx.stroke();
+      ctx.fillStyle = '#ffd75e';
+      ctx.beginPath();
+      ctx.arc(approach.x, approach.z, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     // Hive nests: living hives glow violet; tonight's spawners pulse red.
     const firstSiegeNest = game.firstSiegeStatus?.()?.nest;
     for (const n of game.nests || []) {
