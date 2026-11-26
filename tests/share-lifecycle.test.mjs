@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createBrowserHub,createSupabaseHub} from '../src/share-bus.js';
 import * as links from '../src/share-link.js';
+import {shareGuestView} from '../src/lobby-reliability.js';
 const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
 function method(name,next,bindings={}) {
  const code=source.slice(source.indexOf(`  ${name}(`),source.indexOf(`  ${next}(`));
@@ -22,7 +23,11 @@ test('a guest sees subsequent host difficulty and mission changes',()=>{
  let room=links.createLobby({code:'abc2345678',hostId:'11111111-1111-4111-8111-111111111111',hostName:'Host',hero:'scott',now:Date.now()});
  room=links.seatGuest(room,{id,name:'Guest'},Date.now()).lobby;
  let settings,rendered;
- const app={_shareCode:room.code,_shareSelf:id,_shareAnnounced:true,_shareGuestShown:true,net:{open:true},ui:{setRoomSettings(s){settings=s},showShareGuest(s){rendered=s}}};
+ const app={_shareCode:room.code,_shareSelf:id,_shareAnnounced:true,_shareGuestShown:true,mpRole:'guest',net:{open:true},ui:{setRoomSettings(s){settings=s},showShareGuest(s){rendered=s}}};
+ app._noteShareHostBoot=method('_noteShareHostBoot','_shareResetGuestLink');
+ app._shareLobbyFresh=method('_shareLobbyFresh','_shareGuestPlayerIndex');
+ app._shareRejoinIntent=method('_shareRejoinIntent','_shareLobbyFresh');
+ app._sharePaintGuestLobby=method('_sharePaintGuestLobby','_allowMatchScreen',{...links,shareGuestView});
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'hard'});
  assert.equal(settings.level,2);assert.equal(settings.difficulty,'hard');
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'brutal'});

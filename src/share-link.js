@@ -45,9 +45,21 @@ export function randomShareCode(cryptoObj = globalThis.crypto) {
   return createShareCode(bytes);
 }
 
-export function shareUrl(origin, code) {
+export function shareUrl(origin, code, search = '') {
   const base = String(origin || '').replace(/\/$/, '');
-  return `${base}/?coop=${code}`;
+  const incoming = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+  const params = new URLSearchParams();
+  const quality = incoming.get('quality');
+  if (quality) params.set('quality', quality);
+  params.set('coop', code);
+  return `${base}/?${params.toString()}`;
+}
+
+// A live realtime relay is already carrying the match. A late WebRTC
+// handshake must not replace it: the guest keeps sending on the relay,
+// and the host would then drop those commands while the world keeps ticking.
+export function preferLiveRelay({ live = false, relayOpen = false, incomingRelay = false } = {}) {
+  return !!(live && relayOpen && !incomingRelay);
 }
 
 // null when the page is not an invite. { ok:false } when the parameter is
@@ -120,6 +132,8 @@ export function publicShareLobby(lobby) {
     started: !!lobby.started,
     starting: !!lobby.starting,
     closed: !!lobby.closed,
+    hostBoot: Number(lobby.hostBoot) || 0,
+    endedReason: lobby.endedReason === 'host_reloaded' ? 'host_reloaded' : '',
     mode: lobby.mode,
     level: lobby.level,
     difficulty: lobby.difficulty,

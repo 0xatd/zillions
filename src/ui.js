@@ -1105,6 +1105,7 @@ export class UI {
   }
 
   _showScreen(name) {
+    if (this.cb.beforeScreen && this.cb.beforeScreen(name) === false) return;
     this._battlePanel = null;
     this.root.querySelector('#builder-controls').classList.add('hidden');
     this.root.querySelector('#battle-details').classList.add('hidden');
@@ -3756,7 +3757,7 @@ export class UI {
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false, starting = false } = {}) {
+  showShareGuest({ status, hint, button, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false, starting = false, retry = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
     this.root.querySelector('#screen-setup')?.classList.add('sharemode');
@@ -3764,24 +3765,31 @@ export class UI {
     if (!mp) return;
     mp.classList.remove('hidden');
     mp.dataset.share = '1';
+    const hintText = hint || (rejoining ? 'Rejoining the match…' : starting ? 'Starting… waiting for players' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.');
+    const actions = retry
+      ? '<div class="share-actions"><button class="diffbtn sel" id="share-retry" type="button">Retry rejoin</button></div>'
+      : rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`;
     mp.innerHTML = `
       <div class="share-card">
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">${rejoining ? 'Rejoining the match…' : starting ? 'Starting… waiting for players' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
-        ${rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`}
+        <p class="mphint">${hintText}</p>
+        ${actions}
       </div>
       <div id="room-roster" class="roomroster"></div>
       <div id="mp-sub"></div>`;
     mp.querySelector('#share-status').textContent = status || 'Connected to the host.';
     const readyButton = mp.querySelector('#share-ready');
     if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
+    const retryButton = mp.querySelector('#share-retry');
+    if (retryButton) retryButton.onclick = () => this.cb.onShareRetry?.();
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
+    const buttonText = button || (rejoining ? '⏳  REJOINING…' : starting ? '⏳  STARTING… WAITING FOR PLAYERS' : '⏳  WAITING FOR HOST TO START');
     this.setStartButton({
-      text: rejoining ? '⏳  REJOINING…' : starting ? '⏳  STARTING… WAITING FOR PLAYERS' : '⏳  WAITING FOR HOST TO START',
+      text: buttonText,
       disabled: true,
-      title: rejoining ? 'Catching up to the host snapshot.' : starting ? 'The host is collecting every seated friend.' : 'Only the host can launch this siege.',
+      title: rejoining ? 'Catching up to the host snapshot.' : retry ? 'Ask the host for the match again.' : starting ? 'The host is collecting every seated friend.' : 'Only the host can launch this siege.',
     });
   }
 

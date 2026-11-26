@@ -6,6 +6,7 @@ export const ROOM_SEAT_GRACE_MS = 25000;
 export const REJOIN_GRACE_MS = 90000;
 export const DESYNC_RECOVERY_LIMIT = 3;
 export const DESYNC_RECOVERY_WINDOW_MS = 60000;
+export const SHARE_REJOIN_UI_MS = 20000;
 
 export function roomSetupFromRow(game) {
   const metadata = game?.metadata || {};
@@ -147,8 +148,45 @@ export function desyncRecovery({
   windowMs = DESYNC_RECOVERY_WINDOW_MS,
 } = {}) {
   const recent = (attempts || []).filter((stamp) => Number(now) - Number(stamp) < windowMs);
-  if (recent.length >= limit) return { action: 'terminal', attempts: recent };
-  return { action: 'resync', attempts: [...recent, Number(now) || 0] };
+  const repeated = recent.length >= limit;
+  // A real hash mismatch restores from the host snapshot. It does not end
+  // the match, even after several mismatches in the same minute.
+  return { action: 'resync', repeated, attempts: [...recent, Number(now) || 0] };
+}
+
+// What a share-link guest should see while they have no sim yet.
+// A reload of a match that was already running must say Rejoining, including
+// when the first lobby snapshot is the stale pre-start copy. Waiting is only
+// for a fresh lobby that has not started. After the limit, stop spinning.
+export function shareGuestView({
+  started = false,
+  starting = false,
+  inGame = false,
+  rejoinIntent = false,
+  lobbyFresh = false,
+  endedReason = '',
+  waitingMs = 0,
+  limitMs = SHARE_REJOIN_UI_MS,
+} = {}) {
+  if (inGame) return { screen: 'match', button: '', status: '' };
+  if (endedReason === 'host_reloaded' || (rejoinIntent && lobbyFresh && !started && !starting)) {
+    return {
+      screen: 'lobby',
+      button: '⏳  WAITING FOR HOST TO START',
+      status: 'The host is back in the lobby. Ready up, then wait for the start.',
+    };
+  }
+  const rejoining = !!started || (!!rejoinIntent && !lobbyFresh);
+  if (rejoining && Number(waitingMs) >= limitMs) {
+    return {
+      screen: 'retry',
+      button: 'REJOIN FAILED — RETRY',
+      status: 'Could not rejoin the match. Retry, or stay in the lobby until the host starts again.',
+    };
+  }
+  if (rejoining) return { screen: 'rejoining', button: '⏳  REJOINING…', status: 'Rejoining the match…' };
+  if (starting) return { screen: 'starting', button: '⏳  STARTING… WAITING FOR PLAYERS', status: 'Starting… waiting for players' };
+  return { screen: 'waiting', button: '⏳  WAITING FOR HOST TO START', status: 'Waiting for the host to start.' };
 }
 
 export function withinRejoinGrace(since, now, graceMs = REJOIN_GRACE_MS) {

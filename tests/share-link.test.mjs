@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
   admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
-  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
+  preferLiveRelay, publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -24,6 +24,12 @@ test('invite urls round-trip and malformed codes are refused', () => {
   const code = createShareCode(Uint8Array.from({ length: 10 }, (_, i) => i));
   const url = shareUrl('https://zillions.taborlin.co/', code);
   assert.equal(parseShareLocation(new URL(url).search)?.code, code);
+  const kept = new URL(shareUrl('https://zillions.taborlin.co', code, '?quality=low&coop=oldcode'));
+  assert.equal(kept.searchParams.get('quality'), 'low');
+  assert.equal(kept.searchParams.get('coop'), code);
+  assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: false }), true);
+  assert.equal(preferLiveRelay({ live: true, relayOpen: true, incomingRelay: true }), false);
+  assert.equal(preferLiveRelay({ live: false, relayOpen: true, incomingRelay: false }), false);
   assert.equal(parseShareLocation(''), null);
   assert.equal(parseShareLocation('?party=abcd')?.ok, undefined);
   assert.equal(parseShareLocation('?party=abcd'), null);

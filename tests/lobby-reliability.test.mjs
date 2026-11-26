@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   committedSetupPatch, desyncRecovery, mergeRefreshedRoom, noteSeatReceipts, publicRoomSetup, roomStartLabel,
-  shareRejoinStep, staleOpenSeatIds, withinRejoinGrace,
+  shareGuestView, shareRejoinStep, staleOpenSeatIds, withinRejoinGrace,
 } from '../src/lobby-reliability.js';
 
 const HOST = '11111111-1111-4111-8111-111111111111';
@@ -69,6 +69,23 @@ test('Start names the player who is blocking, and stale seats can be reaped', ()
   assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000, receipts: seen, inGame: true }), []);
 });
 
+test('a reloading guest sees Rejoining, then an honest state, never a forever spinner', () => {
+  const first = shareGuestView({ rejoinIntent: true, lobbyFresh: false, started: false, waitingMs: 0 });
+  assert.equal(first.screen, 'rejoining');
+  assert.match(first.button, /REJOINING/);
+  const live = shareGuestView({ rejoinIntent: true, lobbyFresh: true, started: true, waitingMs: 1000 });
+  assert.equal(live.screen, 'rejoining');
+  const freshJoin = shareGuestView({ rejoinIntent: false, lobbyFresh: true, started: false });
+  assert.equal(freshJoin.screen, 'waiting');
+  const hostBack = shareGuestView({ rejoinIntent: true, lobbyFresh: true, started: false, endedReason: 'host_reloaded' });
+  assert.equal(hostBack.screen, 'lobby');
+  assert.match(hostBack.status, /back in the lobby/);
+  const timedOut = shareGuestView({ rejoinIntent: true, lobbyFresh: true, started: true, waitingMs: 20000 });
+  assert.equal(timedOut.screen, 'retry');
+  const playing = shareGuestView({ inGame: true, started: true, waitingMs: 90000 });
+  assert.equal(playing.screen, 'match');
+});
+
 test('a dropped share guest keeps asking until the channel returns or grace ends', () => {
   assert.equal(shareRejoinStep({ open: false, inMatch: true, lostAt: 1_000, now: 2_000 }), 'retry');
   assert.equal(shareRejoinStep({ open: true, inMatch: true, lostAt: 1_000, now: 2_000 }), 'stop');
@@ -77,13 +94,15 @@ test('a dropped share guest keeps asking until the channel returns or grace ends
   assert.equal(shareRejoinStep({ open: false, inMatch: false, armed: true, hostAlive: false, now: 2_000 }), 'hostLeft');
 });
 
-test('a hash mismatch restores a snapshot before it becomes terminal', () => {
+test('a hash mismatch keeps restoring from the host snapshot', () => {
   const first = desyncRecovery({ attempts: [], now: 1_000 });
   assert.equal(first.action, 'resync');
+  assert.equal(first.repeated, false);
   const second = desyncRecovery({ attempts: first.attempts, now: 2_000 });
   const third = desyncRecovery({ attempts: second.attempts, now: 3_000 });
-  const stopped = desyncRecovery({ attempts: third.attempts, now: 4_000 });
-  assert.equal(stopped.action, 'terminal');
+  const again = desyncRecovery({ attempts: third.attempts, now: 4_000 });
+  assert.equal(again.action, 'resync');
+  assert.equal(again.repeated, true);
   assert.equal(withinRejoinGrace(1_000, 91_000), true);
   assert.equal(withinRejoinGrace(1_000, 91_001), false);
 });
