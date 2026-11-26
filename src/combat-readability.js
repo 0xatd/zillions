@@ -6,10 +6,10 @@ export function combatAlert(game, player = 0) {
   const keep = game.buildings?.find((b) => b.kind === 'hq' && b.alive);
   const keepHealth = keep && n(keep.maxHp) > 0 ? n(keep.hp) / n(keep.maxHp) : null;
   const heroHealth = hero && !hero.dead && n(hero.maxHp) > 0 ? n(hero.hp) / n(hero.maxHp) : null;
-  if (keepHealth != null && keepHealth <= 0.3) return { key: 'keep-critical', tone: 'critical', icon: '🏰', title: 'KEEP CRITICAL', detail: 'Return to the city. Set the army to Defend and repair the inner line.' };
+  if (keepHealth != null && keepHealth <= 0.35) return { key: 'keep-critical', tone: 'critical', icon: '🏰', title: 'KEEP CRITICAL', detail: 'Return to the city. Set the army to Defend and repair the inner line.' };
   if (game.finalStand && game.boss && !game.boss.dead) return { key: game.boss.enraged ? 'boss-enraged' : 'boss-walking', tone: 'boss', icon: '☠️', title: game.boss.enraged ? 'BOSS ENRAGED' : 'CHAMPION AT LARGE', detail: game.boss.enraged ? 'Break contact if needed; focus the champion before it reaches the Keep.' : 'Regroup at the city and focus the marked champion.' };
   if (heroHealth != null && heroHealth <= 0.25) return { key: 'hero-critical', tone: 'warning', icon: '❤️', title: 'HERO WOUNDED', detail: 'Disengage, dodge, and let regeneration work before re-entering the horde.' };
-  if (keepHealth != null && keepHealth <= 0.55) return { key: 'keep-damaged', tone: 'warning', icon: '🏰', title: 'KEEP UNDER PRESSURE', detail: 'Check the city line now. Siegers can bypass your army.' };
+  if (keepHealth != null && keepHealth <= 0.75) return { key: 'keep-damaged', tone: 'warning', icon: '🏰', title: 'KEEP UNDER PRESSURE', detail: 'Check the city line now. Siegers can bypass your army.' };
   return null;
 }
 
@@ -52,6 +52,56 @@ function retryMarker(retry) {
   if (retry?.mode !== 'campaign' || !Number.isInteger(level) || level < 1
     || !hero || hero.length > 64 || !RETRY_DIFFICULTIES.has(difficulty)) return null;
   return { schema: RETRY_SCHEMA, mode: 'campaign', level, difficulty, hero };
+}
+
+// The pause veil sits behind a translucent end screen. Hide it once the
+// match is over, and whenever a menu already explains the pause.
+export function pauseVeilHidden({ paused = false, menusOpen = false, pauseOpen = false, matchOver = false } = {}) {
+  return !!(matchOver || !paused || menusOpen || pauseOpen);
+}
+
+// Solo campaign losses can retry the same level. Co-op does not: the room
+// owns that setup, and a guest reload would not rejoin the same seats.
+export function retryAllowed({ netMode = false, mode = '', levelId = 0, unlocked = 0, hero = '' } = {}) {
+  const level = Number(levelId);
+  const cap = Number(unlocked);
+  return !netMode && mode === 'campaign'
+    && Number.isInteger(level) && level >= 1 && level <= cap
+    && typeof hero === 'string' && hero.trim().length > 0;
+}
+
+// Direction of the introductory wave once the source hive is known, and
+// before that wave has spawned. Presentation only.
+export function firstWaveApproach(game) {
+  const siege = game?.firstSiege;
+  if (!game || game.over || game.phase === 'found' || !siege) return null;
+  if (siege.stage !== 'opening' && siege.stage !== 'warning') return null;
+  const nest = game.nests?.[siege.nestId];
+  if (!nest || nest.alive === false) return null;
+  const keep = game.hq || game.buildings?.find((b) => b.kind === 'hq' && b.alive);
+  if (!keep || !Number.isFinite(nest.x) || !Number.isFinite(nest.z)) return null;
+  return {
+    x: nest.x,
+    z: nest.z,
+    fromX: keep.cx ?? keep.x,
+    fromZ: keep.cz ?? keep.z,
+    label: siege.stage === 'warning' ? 'Wave approaching' : 'First wave',
+  };
+}
+
+// Place an arrow on the inset screen edge, pointing along (dx, dy) from center.
+// y grows downward, matching the DOM.
+export function edgeMarker(dx, dy, width, height, margin = 48) {
+  const len = Math.hypot(dx, dy);
+  if (!(len > 8) || !(width > margin * 2) || !(height > margin * 2)) return null;
+  const hw = width / 2 - margin;
+  const hh = height / 2 - margin;
+  const scale = Math.min(hw / Math.max(Math.abs(dx), 0.001), hh / Math.max(Math.abs(dy), 0.001));
+  return {
+    x: width / 2 + dx * scale,
+    y: height / 2 + dy * scale,
+    angle: Math.atan2(dy, dx),
+  };
 }
 
 export function clearRetry(storage) {

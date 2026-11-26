@@ -10,8 +10,13 @@ import { abilityCooldowns } from './hero-abilities.js';
 // and it must be testable without a browser.
 import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 
+// Bump when a balance change can alter a result. Peers on this build agree;
+// an older build fails the window hash immediately instead of drifting later.
+// 19: opening Keep tier-0 health 4200 → 5400.
+export const SIM_HASH_SALT = 19;
+
 export function stateHash(g) {
-  let h = 7;
+  let h = (7 * 31 + SIM_HASH_SALT) | 0;
   h = (h * 31 + hashString(g.stance || '')) | 0;
   if (g.firstSiege) h = (h * 31 + hashString(JSON.stringify(g.firstSiege))) | 0;
   if(g.builders) h = (h * 31 + hashString(JSON.stringify(g.builders))) | 0;

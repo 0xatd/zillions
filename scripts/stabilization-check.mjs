@@ -35,7 +35,7 @@ assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an 
 assert.match(ui, /#m-logout'\)\.onclick = \(\) => this\.cb\.onSignOut/, 'logout must call auth instead of repainting the title');
 assert.match(main, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'the shell must sign out of the account backend');
 assert.match(ui, /id="fight-kit"[\s\S]*d\.aura[\s\S]*d\.passives[\s\S]*heroAbilities\(d\)/, 'Fight mode must render the hero aura, passives, and active ability');
-assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting/, 'the complete hero kit must appear in Fight mode');
+assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', multi\)/, 'a single-ability kit stays visible in Build mode and Fight mode');
 
 // Build and Fight are explicit action contexts. Space builds in Build mode and
 // dodges in Fight mode; Q only casts in Fight mode. Movement stays shared.
@@ -44,7 +44,9 @@ assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'dodge'\)[\s\S]*control
 assert.match(inputUpdate, /isHeld\(bindsNow, this\.keys, 'build'\)/, 'B must remain a secondary Build-mode binding');
 assert.match(main, /case 'dodge':[\s\S]*controlMode !== 'fight'[\s\S]*case 'ability1'/, 'Space must be blocked from dodging in Build mode');
 assert.match(main, /case 'dodge':[\s\S]*issue\(\{ t: 'dodge'/, 'Space must dispatch dodge in Fight mode');
-assert.match(main, /case 'ability1':[\s\S]*controlMode === 'fight'[\s\S]*tryCast\(/, 'Q must cast only in Fight mode');
+assert.match(main, /case 'ability1':[\s\S]*tryCast\(/, 'Q must cast');
+assert.doesNotMatch(main.slice(main.indexOf("case 'ability1'"), main.indexOf("case 'attack_move'")), /controlMode === 'fight'/, 'Q must cast in Build mode as well as Fight mode');
+assert.doesNotMatch(main, /!buildMode && !built/, 'Fight mode must not hide unbuilt plots');
 assert.match(main, /case 'build':[\s\S]*_tryFound\(\)/, 'Build must found the city');
 assert.match(keybinds, /Toggle Build \/ Fight mode/, 'Alt must describe the contextual mode switch');
 

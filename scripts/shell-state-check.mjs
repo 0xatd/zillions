@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ShellState, SHELL_BASES } from '../src/shell-state.js';
+import { ShellState, SHELL_BASES, matchBlocksShell } from '../src/shell-state.js';
 
 const shell = new ShellState();
 assert.equal(shell.base, SHELL_BASES.AUTH);
@@ -15,6 +15,9 @@ shell.enterMission();
 assert.equal(shell.base, SHELL_BASES.MISSION);
 assert.deepEqual(shell.finishMission(), { base: SHELL_BASES.CHARACTER_SELECT, overlay: null, returnOverlay: null });
 assert.equal(SHELL_BASES.OVERWORLD, undefined, 'the overworld base was removed with the MMO layer');
+assert.equal(matchBlocksShell('account'), true, 'a live match must not open the title');
+assert.equal(matchBlocksShell('pause'), false, 'pause stays available during a match');
+assert.equal(matchBlocksShell('settings'), false);
 assert.throws(() => shell.enterBase('title'), /invalid_shell_base/);
 assert.throws(() => shell.enterBase('overworld'), /invalid_shell_base/);
 console.log('shell state check passed');

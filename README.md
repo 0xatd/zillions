@@ -250,7 +250,7 @@ enemy attack-moves onto that enemy and shows a red marker.
 | Input | Action |
 | --- | --- |
 | A | Arm attack-move, then click |
-| Q, W, E, R | Abilities I–IV in Fight mode |
+| Q, W, E, R | Abilities I–IV, in Build mode and Fight mode |
 | Space | Center the camera on your hero |
 | ↑, ↓, ←, → | Pan the camera. Edge pan is on by default |
 | Shift | Gallop at full health |
@@ -281,8 +281,9 @@ for your hero only; **Clear attack focus** restores automatic targeting.
 Inspection alone never changes orders. Use **Items** to read carried gear.
 
 Army stances take F1–F3 rather than the number row, so 1 and 2 stay reserved
-for a future consumable system. Alt switches Build and Fight. In Build mode,
-V and B fund construction. In Fight mode, V dodges and Q, W, E, R cast.
+for a future consumable system. Alt switches Build and Fight. Q, W, E, and R
+cast in both modes. In Build mode, V and B fund construction, and the on-screen
+build button toggles that same payment. In Fight mode, V dodges.
 
 ## Local Development
 

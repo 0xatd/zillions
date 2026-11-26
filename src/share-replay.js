@@ -11,7 +11,9 @@ import { Game } from './game.js';
 import { stateHash } from './lockstep-hash.js';
 import { dailyChallenge, validDay } from './daily.js';
 
-export const SIM_VERSION = 18;
+// 19: opening Keep tier-0 health raised from 4200 to 5400. A replay from 18
+// would resolve that fight differently, so it is refused before the first step.
+export const SIM_VERSION = 19;
 export const SHARE_REPLAY_VERSION = 1;
 
 export const SHARE_LIMITS = Object.freeze({

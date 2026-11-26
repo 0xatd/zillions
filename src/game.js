@@ -959,6 +959,7 @@ export class Game {
     if (this.firstSiege.stage === 'opening') return {
       title: 'CHOOSE YOUR OPENING',
       detail: 'Economy: Cottage or Field · Defense: Tower · Army: Militia Camp',
+      nest: this.nests[this.firstSiege.nestId] || null,
     };
     if (this.firstSiege.stage === 'warning') {
       const nest = this.nests[this.firstSiege.nestId];

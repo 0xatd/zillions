@@ -5,11 +5,12 @@ import {Game} from '../src/game.js';
 import {TerrainField} from '../src/terrain.js';
 import {levelById} from '../src/config.js';
 import {defaultBinds,isHeld} from '../src/keybinds.js';
+import {settleBuildToggle} from '../src/combat-input.js';
 
 // Run the actual browser input method without constructing a WebGL renderer.
 const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
 const method=source.slice(source.indexOf('  _updateHeroInput() {'),source.indexOf('\n  myHero() {'));
-const updateInput=new Function('isHeld','document',`return ({${method}})._updateHeroInput`)(isHeld,{activeElement:null});
+const updateInput=new Function('isHeld','document','settleBuildToggle',`return ({${method}})._updateHeroInput`)(isHeld,{activeElement:null},settleBuildToggle);
 function fixture(input) {
  const l=levelById(5),map=new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests});
  const g=new Game(map,'normal','scott',null,5);g.foundCity(0,0);g.gold=10000;

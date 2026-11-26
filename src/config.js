@@ -116,7 +116,7 @@ export const PLOT_KINDS = {
   hq: {
     name: 'The Keep', icon: '🏰',
     tiers: [
-      { name: 'The Keep', cost: 0, hp: 4200, income: 10 },
+      { name: 'The Keep', cost: 0, hp: 5400, income: 10 },
       { name: 'Stone Keep', cost: 56, hp: 6500, income: 24 },
       { name: 'High Keep', cost: 100, hp: 9000, income: 42 },
       { name: 'Citadel Nexus', cost: 220, hp: 14000, income: 70 },
