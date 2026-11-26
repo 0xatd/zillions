@@ -460,7 +460,7 @@ are separate: leaving a party does not silently terminate a running battle.
 The migration is additive and was applied to the Zillions project for isolated
 account QA on 2026-11-23. No existing account, reward or inventory schema changed.
 
-## Signed-in player relay (protocol 25)
+## Signed-in player relay (protocol 26)
 
 `src/room-relay.js` carries player-room lockstep messages over private Supabase
 Realtime channels, one authenticated sender and recipient per connection.

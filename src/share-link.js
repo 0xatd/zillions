@@ -118,6 +118,7 @@ export function publicShareLobby(lobby) {
     seenAt: lobby.seenAt,
     started: !!lobby.started,
     closed: !!lobby.closed,
+    cancelledStart: lobby.cancelledStart || null,
     mode: lobby.mode,
     level: lobby.level,
     difficulty: lobby.difficulty,

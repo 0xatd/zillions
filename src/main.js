@@ -902,7 +902,7 @@ class App {
         this._shareBeginFinished = false;
         this._shareBeginAt = Date.now();
         this._shareBeginReminded = false;
-        this._shareBeginPayload = { d, heroes, level, mode, culture, match: shared };
+        this._shareBeginPayload = { d, heroes, level, mode, culture, match: shared, attempt: crypto.randomUUID() };
         this.startExpectedGuests = seated.length;
         this.startReadyGuests.clear();
         this.startBarrier = true;
@@ -3248,7 +3248,7 @@ class App {
     else if (m.t === 'startReady') {
       const shareGuest = this.peers[idx]?.shareId;
       if (this._shareBeginNeed) {
-        if (shareGuest && this._shareBeginNeed.has(shareGuest)) this._shareNoteBegan(shareGuest);
+        if (shareGuest && this._shareBeginNeed.has(shareGuest)) this._shareNoteBegan(shareGuest, m.attempt);
         return;
       }
       this.startReadyGuests.add(idx);
@@ -3858,7 +3858,8 @@ class App {
     });
   }
 
-  _shareNoteBegan(id) {
+  _shareNoteBegan(id, attempt) {
+    if (attempt !== this._shareBeginPayload?.attempt) return;
     if (!this._shareBeginNeed?.has(id) || this._shareBegan?.has(id)) return;
     this._shareBegan.add(id);
     if ([...this._shareBeginNeed].every((guestId) => this._shareBegan.has(guestId))) void this._shareFinishBegin();
@@ -3866,6 +3867,10 @@ class App {
 
   async _shareFinishBegin() {
     if (this._shareBeginFinished || !this._shareBeginPayload) return;
+    if ([...this._shareBeginNeed].some(id => !this._shareLobby?.seats?.some(seat => seat.id === id))) {
+      this._cancelShareBegin();
+      return;
+    }
     this._shareBeginFinished = true;
     const { d, heroes, level, mode, culture, match } = this._shareBeginPayload;
     this._sealShareLobby();
@@ -3877,10 +3882,24 @@ class App {
     this.ui.showBanner('⚔️ All players loaded — the war begins.', '', 2600);
   }
 
+  _cancelShareBegin() {
+    if (!this._shareBeginNeed || this._shareBeginFinished) return;
+    const attempt = this._shareBeginPayload?.attempt;
+    this._shareBeginNeed = null;
+    this._shareBeginPayload = null;
+    this._shareBegan = null;
+    this.startBarrier = false;
+    this._shareLobby = clearGuestReady({ ...this._shareLobby, cancelledStart: attempt }, Date.now());
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+    this.ui.showBanner('Launch canceled: a player left. Wait for everyone to reconnect and mark Ready.', '', 6000);
+  }
+
   _sharePollBegin() {
     if (!this._shareBeginNeed || this._shareBeginFinished) return;
     for (const id of [...this._shareBeginNeed]) {
-      if (!this._shareLobby?.seats?.some((seat) => seat.id === id && !seat.host)) this._shareBeginNeed.delete(id);
+      if (!this._shareLobby?.seats?.some((seat) => seat.id === id && !seat.host)) { this._cancelShareBegin(); return; }
     }
     if (!this._shareBeginNeed.size) {
       this._shareBeginNeed = null;
@@ -3908,17 +3927,19 @@ class App {
 
   async _acceptShareBegin(start) {
     if (!start || this.mpRole === 'host') return;
+    if (start.attempt && start.attempt === this._shareLobby?.cancelledStart) return;
     if (this._shareBeginLoading) return;
     if (this._shareLobby?.started && !this.game && !start.snap) {
       this._sharePublish({ t: 'catchup' });
       return;
     }
     if (this._shareBeginAcked && this.game && this.netMode) {
-      this._sharePublish({ t: 'began' });
+      this._sharePublish({ t: 'began', attempt: this._shareStartAttempt });
       return;
     }
     if (this._shareBeginAcked) return;
     this._shareBeginLoading = true;
+    this._shareStartAttempt = start.attempt;
     const generation = this._shareGeneration;
     try {
       this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
@@ -3927,8 +3948,8 @@ class App {
       else await this.startGame(start.d, null, { heroes: start.heroes, myPlayer: start.you, role: 'guest', level: start.level, mode: start.mode, culture: start.culture, match });
       if (generation !== this._shareGeneration) return;
       this._shareBeginAcked = true;
-      this._sharePublish({ t: 'began' });
-      if (this.net?.open) this.net.send({ t: 'startReady' });
+      this._sharePublish({ t: 'began', attempt: start.attempt });
+      if (this.net?.open) this.net.send({ t: 'startReady', attempt: start.attempt });
       this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
     } catch (error) {
       this._shareBeginAcked = false;
@@ -4182,8 +4203,9 @@ class App {
       presentIds: this._sharePresentIds || null,
     });
     if (!result.dropped.length) return;
-    for (const seat of result.dropped) this._dropShareHand(seat.id);
     this._shareLobby = result.lobby;
+    this._cancelShareBegin();
+    for (const seat of result.dropped) this._dropShareHand(seat.id);
     this._shareSig = '';
     this._renderShareHost();
   }
@@ -4191,6 +4213,7 @@ class App {
   _dropShareHand(id) {
     const peer = this._shareHands?.get(id);
     if (!peer) return;
+    if (this._shareBeginNeed && !this._shareBeginFinished) this._cancelShareBegin();
     peer.shareDropped = true;
     this._shareHands.delete(id);
     const idx = this.peers.indexOf(peer);
@@ -4237,7 +4260,7 @@ class App {
       void this._acceptShareBegin(message.start);
     }
     else if (message.t === 'began' && this.mpRole === 'host' && message.from) {
-      this._shareNoteBegan(message.from);
+      this._shareNoteBegan(message.from, message.attempt);
     }
     else if ((message.t === 'catchup' || message.t === 'snap') && this.mpRole === 'host' && message.from && this.game && !this.game.over && this.netMode) {
       const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
@@ -4287,6 +4310,12 @@ class App {
 
   _onShareLobby(lobby) {
     if (!lobby || lobby.code !== this._shareCode) return;
+    if (lobby.cancelledStart && lobby.cancelledStart === this._shareStartAttempt) {
+      // A fresh page nonce rejects old begins/acks and rebuilds player slots
+      // from the current roster, even if cancellation arrived mid-load.
+      location.reload();
+      return;
+    }
     this._shareReceivedAt = Date.now();
     this._shareLobby = lobby;
     const decision = admitGuest(lobby, { id: this._shareSelf }, this._shareReceivedAt, {
@@ -4478,6 +4507,7 @@ class App {
 
   _bindSharePeer(peer, id) {
     if (this.peers.includes(peer)) return;
+    if (this._shareBeginNeed && !this._shareBeginFinished) this._cancelShareBegin();
     if (this._shareLobby?.started || this.netMode) {
       if (!this.game || this.game.over) {
         this._shareHands?.delete(id);
@@ -4613,6 +4643,7 @@ class App {
       try { peer.destroy(); } catch { /* already closed */ }
     }
     this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
+    this._cancelShareBegin();
     this._shareSig = '';
     this._sharePublishLobby();
     this._renderShareHost();

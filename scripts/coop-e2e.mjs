@@ -300,6 +300,28 @@ try {
     const notice = await guest.page.locator('body').innerText();
     if (!notice.includes('The host left this siege.')) throw new Error('missing host-left notice');
     console.log('relay lobby host-close recovery passed');
+  } else if (process.argv.includes('--cancel-loading-only')) {
+    const remaining = await context('remaining');
+    await remaining.page.goto(guestTarget, { waitUntil: 'domcontentloaded' });
+    await configureRender(remaining.page);
+    await remaining.page.locator('#share-ready').click();
+    const oldSession = await remaining.page.evaluate(() => {
+      const app = window.__app;
+      app.startGame = () => new Promise(() => {}); // Hold the asset-loading boundary.
+      return app._shareSession;
+    });
+    await host.page.waitForFunction(() => window.__app?._shareCanLaunch() && window.__app.peers.length === 2);
+    await host.page.locator('#s-start').click();
+    await remaining.page.waitForFunction(() => window.__app?._shareBeginLoading);
+    await guest.page.close();
+    await remaining.page.waitForFunction(old => window.__app?._shareSession && window.__app._shareSession !== old && window.__app._shareGuestShown, oldSession, { timeout: 60000 });
+    await configureRender(remaining.page);
+    await remaining.page.locator('#share-ready').click();
+    await host.page.waitForFunction(() => window.__app?._shareCanLaunch() && window.__app.peers.length === 1);
+    await host.page.locator('#s-start').click();
+    await remaining.page.waitForFunction(() => window.__app?.netMode && window.__app.simFrame > 30 && window.__app.myPlayer === 1, null, { timeout: 90000 });
+    await host.page.waitForFunction(() => window.__app?.simFrame > 30 && window.__app.game.heroes.length === 2, null, { timeout: 90000 });
+    console.log('three-browser loading cancellation rebuilt Ready and correct player assignments');
   } else {
   await guest.page.evaluate(() => {
     const app = window.__app, publish = app._sharePublish.bind(app);

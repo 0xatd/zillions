@@ -271,7 +271,7 @@ Test the affected flow in a browser. For broad changes, also test:
 - Update `docs/art-direction.md` when the visual language, scale, budgets, or
   socket contract changes.
 
-## Signed-in player relay (protocol 25)
+## Signed-in player relay (protocol 26)
 
 `src/room-relay.js` carries player-room lockstep messages over private Supabase
 Realtime channels, one authenticated sender and recipient per connection.

@@ -8,7 +8,8 @@ export class RoomRelay {
     }
     this.subscriptionTimers = new Set();
     this.sb = sb; this.open = false; this.relay = true; this.closed = false;
-    this.pending = new Map(); this.outstanding = new Map(); this.seen = new Set(); this.seq = 0; this.packetSeq = 0; this.lastReceipt = 0;
+    this.pending = new Map(); this.outstanding = new Map(); this.seq = 0; this.packetSeq = 0; this.lastReceipt = 0;
+    this.nextReceived = 1; this.reordered = new Map();
     this.outTopic = `zl-link:${room}:${self}:${remote}:${session}`;
     this.inTopic = `zl-link:${room}:${remote}:${self}:${session}`;
   }
@@ -54,15 +55,19 @@ export class RoomRelay {
     if (Number.isSafeInteger(payload.ack)) { this.outstanding.delete(payload.ack); return; }
     if (!this.open || !Number.isSafeInteger(payload.id) || payload.id < 1) return;
     this.emit({ ack: payload.id });
-    if (this.seen.has(payload.id)) return;
-    this.seen.add(payload.id);
-    if (this.seen.size > 4096) this.seen.delete(this.seen.values().next().value);
+    if (payload.id < this.nextReceived || this.reordered.has(payload.id)) return;
+    if (payload.id - this.nextReceived > 4096) { this.destroy(); return; }
     if (payload.chunk && (!Number.isSafeInteger(payload.n) || payload.n < 1 || payload.n > 1024
       || !Number.isSafeInteger(payload.i) || payload.i < 0 || payload.i >= payload.n
       || typeof payload.part !== 'string' || payload.part.length > 12000
       || (!this.pending.has(payload.chunk) && this.pending.size >= 8))) return;
-    const body = unpackShareLink(this.pending, payload);
-    if (body) this.onMessage?.(body);
+    this.reordered.set(payload.id, payload);
+    while (this.reordered.has(this.nextReceived)) {
+      const packet = this.reordered.get(this.nextReceived);
+      this.reordered.delete(this.nextReceived++);
+      const body = unpackShareLink(this.pending, packet);
+      if (body) this.onMessage?.(body);
+    }
   }
   send(body) {
     if (!this.open) return;
@@ -79,6 +84,6 @@ export class RoomRelay {
     for (const timer of this.subscriptionTimers) clearTimeout(timer);
     this.subscriptionTimers.clear();
     for (const channel of this.channels || []) this.sb.removeChannel(channel);
-    this.pending.clear(); this.outstanding.clear(); this.onClose?.();
+    this.pending.clear(); this.outstanding.clear(); this.reordered.clear(); this.onClose?.();
   }
 }

@@ -30,3 +30,14 @@ test('rejoining a full account room restores its existing seat instead of reques
  lobby._joinGameChannel=async()=>{};lobby._installPageHide=()=>{};lobby.refreshCurrentGame=async()=>{lobby.game=room;};lobby.signal=async()=>{};
  await lobby.joinGame(room);assert.equal(written.seat,2);assert.equal(written.user_id,id(3));assert.equal(written.ready,false);
 });
+
+test('reliable relay preserves movement then release order across loss, reordering and duplicates',()=>{
+ const a=new RoomRelay({}, {room:id(1),self:id(2),remote:id(3),session:id(4)});
+ const b=new RoomRelay({}, {room:id(1),self:id(3),remote:id(2),session:id(4)});
+ a.open=b.open=true;const packets=[],seen=[];a.emit=p=>packets.push(p);b.emit=()=>{};b.onMessage=m=>seen.push(m);
+ const move={t:'cmd',c:{t:'hdir',x:1,z:0}},stop={t:'cmd',c:{t:'hdir',x:0,z:0}};
+ a.send(move);a.send(stop);
+ b.receive(packets[1]);assert.deepEqual(seen,[],'release cannot overtake the missing movement command');
+ b.receive(packets[0]);b.receive(packets[0]);assert.deepEqual(seen,[move,stop]);
+ a.destroy();b.destroy();
+});
