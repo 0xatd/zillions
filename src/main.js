@@ -3389,6 +3389,10 @@ class App {
   }
 
   _checkGuestHash(w, h, idx) {
+    if (this._shareCode) {
+      const hostW = Math.floor((this.simFrame || 0) / NET_STEP);
+      this._guestLagWindows = Math.max(0, hostW - (Number(w) || 0));
+    }
     const mine = this.hashes.local.get(w);
     if (mine === undefined || mine === h || !this.game || this.game.over) return;
     const decision = desyncRecovery({ attempts: this._desyncAttempts || [], now: Date.now() });
@@ -4378,6 +4382,10 @@ class App {
       this._shareSawPong.add(message.from);
       if (this.mpRole === 'host') this._shareConsiderLink(message.from);
     }
+    else if (message.t === 'hash' && this.mpRole === 'host' && message.from) {
+      const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
+      this._checkGuestHash(message.w, message.h, idx);
+    }
     else if (message.t === 'guestCmd' && this.mpRole === 'host' && message.from) {
       this._acceptGuestCmd(message.from, message.c, message.n, -1, message.boot);
     }
@@ -5306,6 +5314,14 @@ class App {
     const now = performance.now();
     let dt = Math.min((now - (this._netClockLast ?? now)) / 1000, 0.25);
     this._netClockLast = now;
+    // A share guest that is still loading, or just slower, reports hashes for
+    // old windows. Running the host at full speed leaves that guest minutes
+    // behind, so its clicks sit in windows it has not reached. Ease off until
+    // the guest is within about two thirds of a second.
+    if (this.mpRole === 'host' && this._shareCode) {
+      const lag = this._guestLagWindows || 0;
+      if (lag > 10) dt *= Math.max(0.15, 10 / lag);
+    }
 
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
     // rate a few percent to hold its measured jitter target in the bank.
@@ -5384,7 +5400,10 @@ class App {
           this._hashLog.push([this.simFrame, hsh]);
           if (this._hashLog.length > 40) this._hashLog.shift();
           if (this.mpRole === 'host') this.hashes.local.set(w, hsh);
-          else this.net.send({ t: 'h', w, h: hsh });
+          else {
+            this.net.send({ t: 'h', w, h: hsh });
+            if (this._shareCode) this._sharePublish({ t: 'hash', w, h: hsh });
+          }
         }
       }
       this.game.update(SIM_DT);
