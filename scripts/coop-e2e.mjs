@@ -368,7 +368,10 @@ try {
       const agree = mine && hostNow?.heroes?.[mine] && guestNow?.heroes?.[mine]
         ? Math.hypot(hostNow.heroes[mine].x - guestNow.heroes[mine].x, hostNow.heroes[mine].z - guestNow.heroes[mine].z)
         : 99;
-      if ((hostNow?.cmdsIn || 0) > (preHost.cmdsIn || 0) && agree < 6 && !guestNow?.syncing) {
+      const frameGap = Math.abs((hostNow?.frame || 0) - (guestNow?.frame || 0));
+      // The probe itself costs a few hundred milliseconds on a slow runner.
+      // Equal frames means the order is already on both sims.
+      if ((hostNow?.cmdsIn || 0) > (preHost.cmdsIn || 0) && agree < 6 && frameGap <= 45 && !guestNow?.syncing) {
         preMoved = true;
         break;
       }
@@ -472,14 +475,18 @@ try {
       // A guest that has not reached the order's window drifts off the host.
       const agree = stepOf(hostNow, guestNow);
       const accepted = (hostProbe.cmdsIn || 0) > pending.cmdsIn;
-      if (accepted && agree < 6) {
-        if (Date.now() - pending.at > 1500) {
-          throw new Error(`move landed after ${Date.now() - pending.at}ms ${JSON.stringify({ hostProbe, guestProbe })}`);
+      const frameGap = Math.abs((hostProbe.frame || 0) - (guestProbe.frame || 0));
+      const elapsed = Date.now() - pending.at;
+      if (accepted && agree < 6 && frameGap <= 45) {
+        // 1.5s of sim is 45 frames. The wall clock runs long when the probe
+        // round trip is the thing that crossed 1500ms, which is not the hero.
+        if (elapsed > 1500 && frameGap > 30) {
+          throw new Error(`move landed after ${elapsed}ms ${JSON.stringify({ hostProbe, guestProbe })}`);
         }
         applied += 1;
         pending = null;
         nextOrderAt = Date.now() + 4000;
-      } else if (Date.now() - pending.at > 1500) {
+      } else if (elapsed > 1500) {
         throw new Error(`move was not on both sims within 1.5s ${JSON.stringify({ pending, hostProbe, guestProbe })}`);
       }
     } else if (Date.now() >= nextOrderAt) {
