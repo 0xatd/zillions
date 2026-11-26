@@ -2799,7 +2799,7 @@ export class UI {
 
   // ---------- in-game HUD ----------
 
-  initHUD(game, p, character = null) {
+  initHUD(game, p, character = null, plateName = null) {
     this.msgSeen = 0;
     this._contactTime = -1;
     this._stance = null;
@@ -2835,7 +2835,7 @@ export class UI {
     const face = this.root.querySelector('#a-face');
     const klass = character ? MMO_CLASSES[character.classKey] : null;
     face.innerHTML = character && !character.chapterLeader ? klass.icon : PORTRAITS[d.key] ? `<img src="${PORTRAITS[d.key]}" loading="lazy" decoding="async" onerror="this.parentElement.textContent='${d.icon}'" alt="">` : d.icon;
-    this.root.querySelector('#a-name').textContent = character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name;
+    this.root.querySelector('#a-name').textContent = plateName || (character ? (character.chapterLeader ? character.name : `${character.name} · ${klass.name}`) : d.name);
     const big = this.root.querySelector('#bigaction');
     this.root.querySelector('#ability-slots').onclick = e => {
       const button = e.target.closest('[data-ability-slot]');
@@ -4212,6 +4212,7 @@ export class UI {
           : won
           ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
+        ${this._endReason ? `<p class="tagline">Exit: ${escapeHtml(this._endReason)}</p>` : ''}
         <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
         <p id="end-unlock" class="tagline hidden"></p>
         <div class="howto stats">
@@ -4235,11 +4236,17 @@ export class UI {
           ${!won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
           ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
           <button class="startbtn" id="b-restart">${daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
+          ${this._shareMatch ? '<button class="startbtn" id="b-lobby" type="button">Back to lobby</button>' : ''}
+          ${this._shareMatch ? '<button class="startbtn primary" id="b-share-retry" type="button">Retry</button>' : ''}
         </div>
         <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;
     this.setEndRewards(extra);
     ov.querySelector('#b-restart').onclick = () => this.cb.onRestart();
+    const lobbyButton = ov.querySelector('#b-lobby');
+    if (lobbyButton) lobbyButton.onclick = () => this.cb.onBackToLobby?.();
+    const shareRetry = ov.querySelector('#b-share-retry');
+    if (shareRetry) shareRetry.onclick = () => this.cb.onBackToLobby?.();
     const save = ov.querySelector('#b-daily-save');
     if (save) save.onclick = () => { save.disabled = true; this.cb.onDailySignIn?.(); };
     const email = ov.querySelector('#b-daily-email');
@@ -4256,6 +4263,26 @@ export class UI {
       retry.textContent = 'Restarting…';
       this.cb.onRetry && this.cb.onRetry();
     };
+  }
+
+  showShareMatchEnd({ won = false, reason = 'The siege ended.' } = {}) {
+    this._shareMatch = true;
+    this._endReason = reason;
+    this.pauseOpen = false;
+    this.hideCoach();
+    const ov = this.root.querySelector('#overlay');
+    ov.classList.remove('hidden');
+    ov.innerHTML = `
+      <div class="panel endpanel ${won ? 'win' : 'lose'}">
+        <h1>${won ? '🏆 PLANET TAKEN' : '💀 THE SIEGE ENDED'}</h1>
+        <p class="tagline">Exit: ${escapeHtml(reason)}</p>
+        <div class="endactions">
+          <button class="startbtn primary" id="b-share-retry" type="button">Retry</button>
+          <button class="startbtn" id="b-lobby" type="button">Back to lobby</button>
+        </div>
+      </div>`;
+    ov.querySelector('#b-lobby').onclick = () => this.cb.onBackToLobby?.();
+    ov.querySelector('#b-share-retry').onclick = () => this.cb.onBackToLobby?.();
   }
 
   // ---------- online lobby rendering ----------

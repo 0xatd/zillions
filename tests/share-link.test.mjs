@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
   admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
-  preferLiveRelay, publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
+  evictGuest, preferLiveRelay, publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, sharePlayerIndex, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -19,6 +19,16 @@ const CODE = 'abc2345678';
 function lobby(extra = {}) {
   return createLobby({ code: CODE, hostId: HOST, hostName: 'Ada', hero: 'scott', now: NOW, ...extra });
 }
+
+test('a removed guest cannot sit back down, and player index follows the seat', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  assert.equal(sharePlayerIndex(room, HOST), 0);
+  assert.equal(sharePlayerIndex(room, GUEST), 1);
+  room = evictGuest(markStarted(room, NOW), GUEST, NOW + 5);
+  assert.equal(room.seats.some((seat) => seat.id === GUEST), false);
+  assert.equal(admitGuest(room, { id: GUEST }, NOW + 6).reason, 'removed');
+  assert.equal(shareFailureCopy('removed'), 'The host removed you.');
+});
 
 test('invite urls round-trip and malformed codes are refused', () => {
   const code = createShareCode(Uint8Array.from({ length: 10 }, (_, i) => i));

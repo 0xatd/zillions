@@ -298,60 +298,113 @@ export function createSupabaseHub(client, { onStatus, presenceKey } = {}) {
 export function createRelayHub(relayUrl, { presenceMs = 2000, absentMs = 8000 } = {}) {
   const listeners = new Map();
   const presenceListeners = new Map();
-  const cursors = new Map();
   const lastPresence = new Map();
   const lastSync = new Map();
+  let worker = null;
   let timer = null;
+  let pumping = false;
+  let sawPoll = false;
   const notifyPresence = (code, members, reason) => {
     const set = presenceListeners.get(code);
     if (!set) return;
     for (const listener of set) listener(members, reason);
   };
+  const applyPoll = (code, body) => {
+    sawPoll = true;
+    const messageSet = listeners.get(code);
+    const presenceSet = presenceListeners.get(code);
+    if (messageSet) {
+      for (const message of body?.messages || []) {
+        for (const listener of messageSet) listener(message);
+      }
+    }
+    if (!presenceSet) return;
+    const members = Array.isArray(body?.presence) ? body.presence : [];
+    const ids = members.map((member) => member?.id).filter(Boolean).sort().join(',');
+    const previous = lastPresence.get(code);
+    const now = Date.now();
+    const changed = previous !== ids;
+    const due = now - (lastSync.get(code) || 0) >= presenceMs;
+    if (!changed && !due) return;
+    let reason = 'sync';
+    if (changed && previous) {
+      const before = new Set(previous.split(',').filter(Boolean));
+      const after = new Set(ids.split(',').filter(Boolean));
+      const joined = [...after].filter((id) => !before.has(id));
+      const left = [...before].filter((id) => !after.has(id));
+      reason = joined.length && !left.length ? 'join' : left.length && !joined.length ? 'leave' : 'sync';
+    } else if (changed) reason = 'join';
+    lastPresence.set(code, ids);
+    lastSync.set(code, now);
+    notifyPresence(code, members, reason);
+  };
+  const syncWorker = () => {
+    if (!worker) return;
+    const codes = [...new Set([...listeners.keys(), ...presenceListeners.keys()])];
+    worker.postMessage({ codes });
+  };
+  // Main-thread fallback if a blob worker cannot fetch. One poll at a time.
+  const cursors = new Map();
   const pump = async () => {
-    const codes = new Set([...listeners.keys(), ...presenceListeners.keys()]);
+    const codes = [...new Set([...listeners.keys(), ...presenceListeners.keys()])];
     for (const code of codes) {
-      const messageSet = listeners.get(code);
-      const presenceSet = presenceListeners.get(code);
-      if (!messageSet?.size && !presenceSet?.size) continue;
       try {
         const response = await fetch(`${relayUrl}/poll?code=${encodeURIComponent(code)}&after=${cursors.get(code) || 0}`);
         if (!response.ok) continue;
         const body = await response.json();
         cursors.set(code, body.cursor || cursors.get(code) || 0);
-        if (messageSet) {
-          for (const message of body.messages || []) {
-            for (const listener of messageSet) listener(message);
-          }
-        }
-        if (presenceSet) {
-          const members = Array.isArray(body.presence) ? body.presence : [];
-          const ids = members.map((member) => member?.id).filter(Boolean).sort().join(',');
-          const previous = lastPresence.get(code);
-          const now = Date.now();
-          const changed = previous !== ids;
-          const due = now - (lastSync.get(code) || 0) >= presenceMs;
-          if (changed || due) {
-            let reason = 'sync';
-            if (changed && previous) {
-              const before = new Set(previous.split(',').filter(Boolean));
-              const after = new Set(ids.split(',').filter(Boolean));
-              const joined = [...after].filter((id) => !before.has(id));
-              const left = [...before].filter((id) => !after.has(id));
-              reason = joined.length && !left.length ? 'join' : left.length && !joined.length ? 'leave' : 'sync';
-            } else if (changed) reason = 'join';
-            lastPresence.set(code, ids);
-            lastSync.set(code, now);
-            notifyPresence(code, members, reason);
-          }
-        }
+        applyPoll(code, body);
       } catch { /* the next poll retries */ }
     }
-    if (!listeners.size && !presenceListeners.size && timer) { clearInterval(timer); timer = null; }
   };
   const ensure = () => {
-    if (timer) return;
-    timer = setInterval(() => { pump().catch(() => {}); }, Math.min(200, presenceMs));
-    pump().catch(() => {});
+    if (worker || timer) { syncWorker(); return; }
+    const period = Math.min(30, presenceMs);
+    try {
+      // The poll has to run while the sim occupies the page thread. A guest
+      // whose poll waits on that thread sits a second behind the host, and
+      // a click lands in a window it has not reached yet.
+      const src = `
+        const relayUrl = ${JSON.stringify(relayUrl)};
+        const cursors = new Map();
+        let codes = [];
+        let busy = false;
+        const poll = async () => {
+          if (busy || !codes.length) return;
+          busy = true;
+          try {
+            for (const code of codes) {
+              const response = await fetch(relayUrl + '/poll?code=' + encodeURIComponent(code) + '&after=' + (cursors.get(code) || 0));
+              if (!response.ok) continue;
+              const body = await response.json();
+              cursors.set(code, body.cursor || cursors.get(code) || 0);
+              postMessage({ code, body });
+            }
+          } catch (error) { /* the page falls back if this keeps failing */ }
+          busy = false;
+        };
+        setInterval(() => { poll(); }, ${period});
+        self.onmessage = (event) => { codes = event.data?.codes || []; poll(); };
+      `;
+      worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      worker.onmessage = (event) => applyPoll(event.data?.code, event.data?.body);
+      worker.onerror = () => {
+        const failed = worker;
+        worker = null;
+        try { failed?.terminate(); } catch { /* already gone */ }
+        // Replaying the mailbox from zero would run the original begin again.
+        if (sawPoll || timer) return;
+        timer = setInterval(() => { if (!pumping) { pumping = true; pump().finally(() => { pumping = false; }); } }, period);
+      };
+      syncWorker();
+    } catch {
+      timer = setInterval(() => {
+        if (pumping) return;
+        pumping = true;
+        pump().finally(() => { pumping = false; });
+      }, period);
+      pump().catch(() => {});
+    }
   };
   return {
     publish(code, message) {
@@ -369,6 +422,7 @@ export function createRelayHub(relayUrl, { presenceMs = 2000, absentMs = 8000 } 
       return () => {
         set.delete(listener);
         if (!set.size) listeners.delete(code);
+        syncWorker();
       };
     },
     track(code, payload) {
@@ -389,6 +443,7 @@ export function createRelayHub(relayUrl, { presenceMs = 2000, absentMs = 8000 } 
       return () => {
         set.delete(listener);
         if (!set.size) presenceListeners.delete(code);
+        syncWorker();
       };
     },
     status() { return 'subscribed'; },

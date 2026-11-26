@@ -30,7 +30,7 @@ import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './mari
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
-  admitGuest, clearGuestReady, closeLobby, createLobby, hostStillHere, markStarted, parseShareLocation, publicShareLobby,
+  admitGuest, clearGuestReady, closeLobby, createLobby, evictGuest, hostStillHere, markStarted, parseShareLocation, publicShareLobby, sharePlayerIndex,
   markStarting, randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareGuestName, shareHero, shareId, shareLaunchReady, shareMessageId, shareSeatState,
   preferLiveRelay, shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
@@ -351,6 +351,7 @@ class App {
       onShareLeave: () => this._leaveShareLink(),
       onShareReady: (ready) => this._setShareReady(ready),
       onShareRetry: () => this._shareRetryRejoin(),
+      onBackToLobby: () => this._returnToShareLobby(),
       beforeScreen: (name) => this._allowMatchScreen(name),
       onQuickRandom: () => this.ui.fillQuickSetup(randomizeQuickSetup()),
       onCoachSkip: () => this._skipCoach(),
@@ -548,14 +549,19 @@ class App {
         peers: this.peers?.length || 0,
         open: !!(this.net?.open || [...(this._shareHands?.values() || [])].some((peer) => peer.open)),
         code: this._shareCode || '',
-        hash: (() => { try { return this.game && !this.startBarrier ? this._stateHash() : null; } catch { return null; } })(),
+        // The live hash walks the whole sim. The co-op probe runs many times a
+        // second; hashing there stalls the match it is trying to watch.
+        // hashLog is the record the peers already compared.
+        hash: null,
         hashLog: this._hashLog || [],
         stallMs: this.mpRole === 'guest' && this._stallSince && !this._resyncing ? Math.round(performance.now() - this._stallSince) : 0,
+        banked: this.mpRole === 'guest' && this.inbox ? this._windowsBuffered() : 0,
         resyncMs: this._resyncing ? Math.round(performance.now() - (this._resyncStarted || performance.now())) : 0,
         self: this._shareSelf || '',
         roster: this._shareLobby ? shareRoster(this._shareLobby, this._shareSelf) : [],
         cmdsSent: this._cmdsSent || 0,
         cmdsIn: this._cmdsIn || 0,
+        hud: this.ui.root?.querySelector?.('#a-name')?.textContent || '',
         live: !!(this.netMode && this.game && !this.game.over),
         over: !!this.game?.over,
         exit: this._matchExitReason || '',
@@ -1056,7 +1062,10 @@ class App {
     this.lastPay = false;
     this._endExtras = null;
     if (!replay && !snap && heroKey && mode !== 'daily') { this.profile.lastHero = heroKey; this._saveProfile(); }
-    this.myPlayer = mp?.role === 'guest' ? Math.max(1, Number(mp.myPlayer) || this._shareGuestPlayerIndex()) : (mp ? mp.myPlayer || 0 : 0);
+    const guestSeat = mp?.role === 'guest' ? sharePlayerIndex(this._shareLobby, this._shareSelf) : 0;
+    this.myPlayer = mp?.role === 'guest'
+      ? (guestSeat >= 1 ? guestSeat : Math.max(1, Number(mp.myPlayer) || 1))
+      : (mp ? mp.myPlayer || 0 : 0);
     this.netMode = !!mp;
     this._netPumpStop();
     if (this.netMode) {
@@ -1114,8 +1123,13 @@ class App {
     }
     this.map.drawMinimap(document.getElementById('minimap-base'));
     this.ui.hideStart();
+    const ownSeat = this.mpRole === 'guest'
+      ? this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf && !seat.host)
+      : null;
+    this.ui._shareMatch = !!this._shareCode;
     this.ui.initHUD(this.game, this.myPlayer,
-      this.game.mode === 'campaign' && this.mpRole !== 'spectator' ? selectedMmoCharacter(this.profile) : null);
+      this.game.mode === 'campaign' && this.mpRole !== 'spectator' && !ownSeat ? selectedMmoCharacter(this.profile) : null,
+      ownSeat?.name || null);
     this.ui.setGameChatEnabled(this.netMode);
     if (this.netMode) this.ui.gameChatFill([]);
     this.setSpeed(1);
@@ -2161,18 +2175,19 @@ class App {
   // the two copies apply once.
   _sendGuestCmd(cmd) {
     const nonce = (this._cmdNonce = (this._cmdNonce || 0) + 1);
-    const packet = { t: 'cmd', c: cmd, n: nonce };
+    const boot = this._sharePageAt || 0;
+    const packet = { t: 'cmd', c: cmd, n: nonce, boot };
     this._cmdsSent = (this._cmdsSent || 0) + 1;
     if (this.net?.open || this.net?.relay) this.net.send(packet);
     else {
       this._pendingGuestCmds ??= [];
       this._pendingGuestCmds.push(packet);
     }
-    if (this._shareCode) this._sharePublish({ t: 'guestCmd', c: cmd, n: nonce });
+    if (this._shareCode) this._sharePublish({ t: 'guestCmd', c: cmd, n: nonce, boot });
   }
 
-  _acceptGuestCmd(from, raw, nonce, knownIdx = -1) {
-    const key = nonce ? `${from || knownIdx}:${nonce}` : '';
+  _acceptGuestCmd(from, raw, nonce, knownIdx = -1, boot = 0) {
+    const key = nonce ? `${from || knownIdx}:${boot}:${nonce}` : '';
     if (key) {
       this._cmdSeen ??= new Set();
       if (this._cmdSeen.has(key)) return;
@@ -2182,7 +2197,11 @@ class App {
     let idx = knownIdx;
     if (idx < 0 && from) idx = this.peers.findIndex((peer) => peer.shareId === from);
     if (idx < 0) return;
-    const command = guestCommand(raw, idx + 1, this.game?.heroes.length || 0);
+    const player = sharePlayerIndex(this._shareLobby, from) || (idx + 1);
+    if (player < 1) return;
+    const body = raw && typeof raw === 'object' ? { ...raw } : null;
+    if (body) delete body.p;
+    const command = guestCommand(body, player, this.game?.heroes.length || 0);
     if (!command) return;
     this.guestCmdQueues[idx] ??= [];
     this.guestCmdQueues[idx].push(command);
@@ -3313,7 +3332,7 @@ class App {
         this.ui.setWaiting(true, `⏳ Waiting for ${pending} player${pending === 1 ? '' : 's'} to load…`);
       }
     }
-    else if (m.t === 'cmd') this._acceptGuestCmd(this.peers[idx]?.shareId, m.c, m.n, idx);
+    else if (m.t === 'cmd') this._acceptGuestCmd(this.peers[idx]?.shareId, m.c, m.n, idx, m.boot);
     else if (m.t === 'needWindow') {
       const peer = this.peers[idx];
       if (!peer) return;
@@ -3381,7 +3400,7 @@ class App {
       ? 'Still restoring the shared battlefield from the host.'
       : 'Restoring the shared battlefield…', '', 2500);
     peer.send({
-      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      t: 'resync', snap: this.game.snapshot(), you: this._shareYou(peer, idx), frame: this.simFrame,
       match: this._sharedMatchFields(), reason: 'desync',
     });
   }
@@ -3528,11 +3547,19 @@ class App {
         console.warn('share host restore failed', error);
       }
     }
-    this._shareLobby = { ...this._shareLobby, started: false, endedReason: 'host_reloaded' };
+    this._shareLobby = {
+      ...this._shareLobby,
+      started: false,
+      endedReason: 'host_reloaded',
+      matchEnd: { won: false, reason },
+    };
+    this._matchEndShown = true;
+    this.ui._shareMatch = true;
+    this.ui._endReason = reason;
+    this._sharePublish({ t: 'matchEnd', won: false, reason });
     this._sharePublishLobby();
-    this.ui.showSetup({ mode: this._shareLobby.mode || 'campaign', share: true });
+    this.ui.showShareMatchEnd({ won: false, reason });
     this._shareSig = '';
-    this._renderShareHost();
     this.ui.showBanner('This tab reloaded during the siege and the match could not be restored. Everyone is back in the lobby.', 'bad', 8000);
   }
 
@@ -3917,7 +3944,7 @@ class App {
     this.peers.forEach((peer, index) => {
       const id = peer.shareId;
       if (!id || !this._shareBeginNeed.has(id) || this._shareBegan?.has(id)) return;
-      const start = { ...payload, you: index + 1 };
+      const start = { ...payload, you: this._shareYou(peer, index) };
       this._sharePublish({ t: 'begin', to: id, start });
       if (peer.open) peer.send({ t: 'start', ...start });
     });
@@ -3934,13 +3961,17 @@ class App {
     this._shareBeginFinished = true;
     const base = this._shareBeginPayload;
     const hero = this.ui.selectedHero || 'scott';
-    const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+    const guestSeats = (this._shareLobby?.seats || []).filter((seat) => !seat.host);
+    const heroes = [{ k: hero, camp: this.campFor(hero) }, ...guestSeats.map((seat) => {
+      const idx = this.peers.findIndex((peer) => peer.shareId === seat.id);
+      return (idx >= 0 && this.guestHeroes[idx]) || shareHero(seat.hero);
+    })];
     const payload = { ...base, heroes };
     this._shareBeginPayload = payload;
     this.peers.forEach((peer, index) => {
       const id = peer.shareId;
       if (id && this._shareBegan && !this._shareBegan.has(id)) return;
-      const start = { ...payload, you: index + 1 };
+      const start = { ...payload, you: this._shareYou(peer, index) };
       if (id) this._sharePublish({ t: 'go', to: id, start });
       if (peer.open) peer.send({ t: 'go', ...start });
     });
@@ -4198,7 +4229,7 @@ class App {
     }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const entering = !!(this._shareBeginNeed && !this._shareBeginFinished);
+    const entering = !!(this._shareBeginNeed && !this._shareBeginFinished && !this._shareLobby.started);
     const waitingOn = entering
       ? [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id)).map((id) => this._shareLobby.seats?.find((seat) => seat.id === id)?.name || 'a guest')
       : [];
@@ -4208,7 +4239,10 @@ class App {
     this._shareRememberGuests();
     const blocked = players.length > 1 && !gate.ready;
     const soloLeft = this._shareSoloBlocked();
-    const offline = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
+    const offlineNow = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
+    if (offlineNow) this._shareOfflineSince ||= Date.now();
+    else this._shareOfflineSince = 0;
+    const offline = offlineNow && Date.now() - this._shareOfflineSince > 3000;
     const status = entering
       ? `Waiting for ${waitingOn.join(', ')} to acknowledge the start. The match has not begun.`
       : offline
@@ -4294,6 +4328,28 @@ class App {
       this._acceptShareIce(message);
     }
     else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'matchEnd' && this.mpRole !== 'host') this._showSharedMatchEnd(message);
+    else if (message.t === 'needWindow' && this.mpRole === 'host' && message.from) {
+      const start = Number(message.w);
+      const recent = [];
+      for (let n = start; n < start + 32; n++) {
+        const commands = this._windowHistory.get(n);
+        if (commands) recent.push([n, commands]);
+      }
+      if (recent.length) this._sharePublish({ t: 'windows', to: message.from, recent });
+      else {
+        const keys = [...this._windowHistory.keys()];
+        const oldest = keys.length ? keys[0] : -1;
+        const idx = this.peers.findIndex((peer) => peer.shareId === message.from);
+        if (idx >= 0 && oldest >= 0 && start < oldest) this._sendGuestResync(idx);
+      }
+    }
+    else if (message.t === 'windows' && message.to === this._shareSelf && this.mpRole !== 'host') {
+      const box = this._resyncing ? (this._resyncBuffer ||= new Map()) : this.inbox;
+      if (!box) return;
+      for (const [w, c] of message.recent || []) if (w != null && c && !box.has(w)) box.set(w, c);
+      this._scheduleNetDrain();
+    }
     else if (message.t === 'begin' && this.mpRole !== 'host' && (!message.to || message.to === this._shareSelf)) {
       void this._acceptShareBegin(message.start);
     }
@@ -4323,7 +4379,7 @@ class App {
       if (this.mpRole === 'host') this._shareConsiderLink(message.from);
     }
     else if (message.t === 'guestCmd' && this.mpRole === 'host' && message.from) {
-      this._acceptGuestCmd(message.from, message.c, message.n);
+      this._acceptGuestCmd(message.from, message.c, message.n, -1, message.boot);
     }
     else if (message.t === 'link' && message.to === this._shareSelf) {
       this._shareChunks ??= new Map();
@@ -4386,6 +4442,11 @@ class App {
   _shareLobbyFresh(lobby) {
     const seen = Number(lobby?.seenAt) || 0;
     return seen > 0 && seen >= (this._sharePageAt || 0) - 15000;
+  }
+
+  _shareYou(peer, idx = 0) {
+    const player = sharePlayerIndex(this._shareLobby, peer?.shareId);
+    return player >= 1 ? player : Math.max(1, idx + 1);
   }
 
   _shareGuestPlayerIndex(explicit) {
@@ -4502,6 +4563,44 @@ class App {
     return false;
   }
 
+  _announceMatchEnd(won, reason) {
+    const text = String(reason || (won ? 'victory' : 'defeat'));
+    this._matchEndShown = true;
+    this.ui._endReason = text;
+    this.ui._shareMatch = !!this._shareCode;
+    if (this.mpRole !== 'host' || !this._shareLobby) return;
+    this._shareLobby = { ...this._shareLobby, matchEnd: { won: !!won, reason: text } };
+    this._sharePublish({ t: 'matchEnd', won: !!won, reason: text });
+    this._sharePublishLobby();
+  }
+
+  _showSharedMatchEnd(end) {
+    if (!end || this._matchEndShown || this.mpRole === 'host') return;
+    this._matchEndShown = true;
+    this.pause();
+    this.ui._shareMatch = true;
+    this.ui._endReason = end.reason || 'the siege ended';
+    console.warn('match exit', { reason: this.ui._endReason, won: !!end.won });
+    this.ui.showShareMatchEnd({ won: !!end.won, reason: this.ui._endReason });
+  }
+
+  _returnToShareLobby() {
+    this._netPumpStop();
+    this.netMode = false;
+    this.paused = true;
+    this._matchEndShown = false;
+    this._clearShareLive();
+    if (this.game) this.game.over = true;
+    if (this._shareLobby && this.mpRole === 'host') {
+      this._shareLobby = { ...this._shareLobby, started: false, matchEnd: null, endedReason: '' };
+      this._sharePublishLobby();
+    }
+    this.ui._shareMatch = !!this._shareCode;
+    this.ui.showSetup({ mode: this._shareLobby?.mode || this.ui.selectedMode || 'campaign', share: !!this._shareCode });
+    this._shareSig = '';
+    this._renderShareHost();
+  }
+
   _noteMatchExit(reason, { banner = true } = {}) {
     const record = { reason, at: Date.now(), code: this._shareCode || '' };
     this._matchExitReason = reason;
@@ -4514,6 +4613,11 @@ class App {
     if (!lobby || lobby.code !== this._shareCode) return;
     this._shareReceivedAt = Date.now();
     this._shareLobby = lobby;
+    if ((lobby.banned || []).includes(this._shareSelf)) {
+      this._failShare('removed');
+      return;
+    }
+    if (lobby.matchEnd && !this._matchEndShown) this._showSharedMatchEnd(lobby.matchEnd);
     this._noteShareHostBoot(lobby);
     const decision = admitGuest(lobby, { id: this._shareSelf }, this._shareReceivedAt, {
       receivedAt: this._shareReceivedAt,
@@ -4720,7 +4824,7 @@ class App {
         idx = this.peers.length - 1;
       }
       peer.send({
-        t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame, match: this._sharedMatchFields(),
+        t: 'resync', snap: this.game.snapshot(), you: this._shareYou(peer, idx), frame: this.simFrame, match: this._sharedMatchFields(),
       });
       this.ui.showBanner(`${this.guestNames[idx] || 'A friend'} reconnected.`, '', 2500);
       return;
@@ -4823,12 +4927,16 @@ class App {
     };
   }
 
-  _dropShareGuest(id) {
+  _dropShareGuest(id, { ban = false } = {}) {
     if (!this._shareLobby) return;
-    if (this._shareLobby.started || this.netMode) {
+    const live = !!(this.netMode && this.game && !this.game.over);
+    // A disconnect during the siege leaves the hero in the sim so the guest
+    // can rejoin. Remove is different: the seat goes immediately and that
+    // tab cannot sit back down on its own.
+    if (live && !ban) {
       const peer = this._shareHands?.get(id);
       const idx = peer ? this.peers.indexOf(peer) : -1;
-      if (idx >= 0 && this.game && !this.game.over && peer && !peer.shareNotified) {
+      if (idx >= 0 && peer && !peer.shareNotified) {
         peer.shareNotified = true;
         this.game.msg(`⚠️ ${this.guestNames[idx] || `Player ${idx + 2}`} disconnected — their hero fights on.`, 'warn');
       }
@@ -4839,24 +4947,34 @@ class App {
     if (peer) {
       peer.shareDropped = true;
       this._shareHands.delete(id);
-      const idx = this.peers.indexOf(peer);
-      if (idx >= 0) {
-        this.peers.splice(idx, 1);
-        this.guestHeroes.splice(idx, 1);
-        this.guestNames.splice(idx, 1);
-        this.guestCmdQueues.splice(idx, 1);
-        this.peerUserIds.splice(idx, 1);
+      // Keep peer slots while the sim is live so the other commanders'
+      // command queues stay on the same index.
+      if (!live) {
+        const idx = this.peers.indexOf(peer);
+        if (idx >= 0) {
+          this.peers.splice(idx, 1);
+          this.guestHeroes.splice(idx, 1);
+          this.guestNames.splice(idx, 1);
+          this.guestCmdQueues.splice(idx, 1);
+          this.peerUserIds.splice(idx, 1);
+        }
+      } else {
+        const idx = this.peers.indexOf(peer);
+        this.game?.msg(`⚠️ ${this.guestNames[idx] || 'Guest'} was removed — their hero fights on.`, 'warn');
       }
       try { peer.destroy(); } catch { /* already closed */ }
     }
-    this._shareLobby = releaseGuest(this._shareLobby, id, Date.now());
+    this._shareLobby = (ban || this._shareLobby.started)
+      ? evictGuest(this._shareLobby, id, Date.now())
+      : releaseGuest(this._shareLobby, id, Date.now());
+    if (ban) this._sharePublish({ t: 'reject', to: id, reason: 'removed' });
     this._shareSig = '';
     this._sharePublishLobby();
     this._renderShareHost();
   }
 
   _failShare(reason) {
-    if (this.netMode && this.game && !this.game.over) {
+    if (reason !== 'removed' && this.netMode && this.game && !this.game.over) {
       this._noteMatchExit(`share join failed during a match: ${reason}`);
       return;
     }
@@ -4864,7 +4982,8 @@ class App {
     this._shareFailed = true;
     this._teardownShare();
     this.mpRole = null;
-    this.ui.showShareNotice({ title: 'Could not join', copy: shareFailureCopy(reason), tone: 'bad' });
+    const copy = shareFailureCopy(reason);
+    this.ui.showShareNotice({ title: reason === 'removed' ? 'Removed' : 'Could not join', copy, tone: 'bad' });
   }
 
   _leaveShareLink() {
@@ -5005,6 +5124,7 @@ class App {
       for (const [pw, pc] of m.p || []) {
         if (pw >= next && !box.has(pw)) box.set(pw, pc);
       }
+      this._scheduleNetDrain();
     }
     else if (m.t === 'start') {
       await this._acceptShareBegin(m);
@@ -5038,6 +5158,7 @@ class App {
           for (const k of [...buf.keys()]) { if (k < next) buf.delete(k); }
           this.simFrame = m.frame;
           this.inbox = buf;
+          this._resyncCatchup = true;
           this.netPrimed = false;
           this.desynced = false;
           this._desyncAttempts = [];
@@ -5049,11 +5170,17 @@ class App {
           this.ui.showBanner(m.reason === 'desync' ? 'Battlefield restored from the host.' : '🔌 Reconnected — back in the war.', '', 3500);
         })
         .catch(() => { this._stallReason = 'the snapshot could not be applied'; })
-        .finally(() => { this._resyncing = false; this._resyncBuffer = null; });
+        .finally(() => {
+          this._resyncing = false;
+          this._resyncBuffer = null;
+          this._resyncDoneAt = Date.now();
+          if (this._resyncCatchup) this._scheduleNetDrain();
+        });
     }
     else if (m.t === 'desync') {
       this._askForSnapshot(true);
     }
+    else if (m.t === 'matchEnd') this._showSharedMatchEnd(m);
     else if (m.t === 'chat') this.ui.gameChatAdd(m);
   }
 
@@ -5092,6 +5219,7 @@ class App {
     this._missingWindow = w;
     this._missingRequestAt = now;
     this.net.send({ t: 'needWindow', w });
+    if (this._shareCode) this._sharePublish({ t: 'needWindow', w });
   }
 
   // Host snapshot, same message a reload receives when its relay peer opens.
@@ -5103,13 +5231,17 @@ class App {
     peer._resyncAt = now;
     const recent = [...this._windowHistory.entries()].slice(-32);
     peer.send({
-      t: 'resync', snap: this.game.snapshot(), you: idx + 1, frame: this.simFrame,
+      t: 'resync', snap: this.game.snapshot(), you: this._shareYou(peer, idx), frame: this.simFrame,
       match: this._sharedMatchFields(), recent,
     });
   }
 
   _askForSnapshot(force) {
     if (this.mpRole !== 'guest' || !this._shareCode) return;
+    // Rebuilding the battlefield is the slow path. A missing window is asked
+    // for by id first. Only a stall that survives that becomes a snapshot.
+    if (this._stallWindow >= 0) this._requestMissingWindow(this._stallWindow);
+    if (!force) return;
     if (this._resyncing) {
       if (performance.now() - (this._resyncStarted || 0) < 8000) return;
       this._resyncing = false;
@@ -5158,6 +5290,13 @@ class App {
   // pump (a worker timer) off one shared wall clock, so the host keeps
   // emitting windows even when rendering hitches or the tab is hidden.
   _advanceNetSim() {
+    if (this._advancing || !this.netMode || !this.game || this.paused || this.game.over) return;
+    this._advancing = true;
+    try { this._advanceNetSimBody(); }
+    finally { this._advancing = false; }
+  }
+
+  _advanceNetSimBody() {
     if (!this.netMode || !this.game || this.paused || this.game.over) return;
     if (this.mpRole === 'host' && this.startBarrier) {
       this._netClockLast = performance.now();
@@ -5171,9 +5310,22 @@ class App {
     // Adaptive pacing: instead of stall-and-burst, a guest drifts its sim
     // rate a few percent to hold its measured jitter target in the bank.
     // Network jitter then shows up as imperceptible speed drift, not freezes.
-    if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
-      const banked = this._windowsBuffered();
-      if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
+    // A share guest clamps that target to a few windows. Ten windows is most
+    // of a second, which is the click the player already issued.
+    if (this._shareCode && (this.mpRole === 'guest' || this.mpRole === 'spectator')) {
+      // Three windows is the jitter floor (~200ms). A deeper bank is a click
+      // the guest has already issued and not yet seen.
+      this.netBufferTarget = NET_GUEST_BUFFER_MIN;
+    }
+    const guestSide = this.mpRole === 'guest' || this.mpRole === 'spectator';
+    const banked = guestSide ? this._windowsBuffered() : 0;
+    const behind = guestSide && banked > this.netBufferTarget;
+    // One slice can absorb about a second and a half of backlog. More than
+    // that yields, so a missing window can still be requested.
+    const catchupSteps = behind ? Math.min(20, Math.max(NET_STEP * 2, banked * NET_STEP)) : 0;
+    if (guestSide) {
+      if (behind) dt = Math.max(dt, SIM_DT * catchupSteps);
+      else if (!this._shareCode && banked < this.netBufferTarget && banked > 0) dt *= NET_PACE_SLOW;
       else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
     }
 
@@ -5181,7 +5333,8 @@ class App {
     let steps = 0;
     let stalled = false;
     let missingWindow = -1;
-    while (this.acc >= SIM_DT && steps < 10) {
+    const cap = this.mpRole === 'host' ? 10 : (behind ? catchupSteps : 10);
+    while (this.acc >= SIM_DT && steps < cap) {
       if (this.simFrame % NET_STEP === 0) {
         const w = this.simFrame / NET_STEP;
         let bundle;
@@ -5213,10 +5366,14 @@ class App {
             // The window channel is intentionally unordered. A large inbox is
             // not necessarily a usable buffer: [w, w+2] still has a hole at
             // w+1 and would restart for one tick, freeze, then repeat. Resume
-            // only behind a consecutive run of windows.
-            const hasBuffer = hasConsecutiveWindowBuffer(this.inbox, w, this.netBufferTarget);
+            // only behind a consecutive run of windows. Right after a snapshot
+            // the next window is enough — waiting for a deep jitter buffer is
+            // what left a 10 FPS guest on "Syncing co-op…" after a rejoin.
+            const need = this._resyncCatchup ? 1 : this.netBufferTarget;
+            const hasBuffer = hasConsecutiveWindowBuffer(this.inbox, w, need);
             if (!hasBuffer) { stalled = true; break; }
             this.netPrimed = true;
+            this._resyncCatchup = false;
           }
           this.inbox.delete(w);
         }
@@ -5235,7 +5392,7 @@ class App {
       this.acc -= SIM_DT;
       steps++;
     }
-    if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
+    if (steps >= cap || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
     this.netStallT = stalled ? this.netStallT + dt : 0;
     this._trackStall?.(stalled, missingWindow);
     const stallAge = this._stallSince ? performance.now() - this._stallSince : 0;
@@ -5249,12 +5406,28 @@ class App {
           : '⏳ Syncing co-op…';
     this.ui.setWaiting(visibleStall, stallText);
     this._refreshDiagnosticsUI(visibleStall);
+    if (!stalled && behind && this._windowsBuffered() > this.netBufferTarget) this._scheduleNetDrain();
+  }
+
+  // Apply a backlog on the turn it arrives. Nested calls, including the one
+  // this slice makes when it is still behind, wait until this turn returns.
+  _scheduleNetDrain() {
+    if (this._resyncing || this._netDrain) return;
+    if (this._advancing) {
+      this._netDrain = true;
+      setTimeout(() => {
+        this._netDrain = false;
+        this._advanceNetSim();
+      }, 0);
+      return;
+    }
+    this._advanceNetSim();
   }
 
   // Consecutive windows banked ahead of the guest's next lockstep boundary.
   _windowsBuffered() {
     const w = Math.ceil(this.simFrame / NET_STEP);
-    return consecutiveWindowCount(this.inbox, w);
+    return this.inbox ? consecutiveWindowCount(this.inbox, w, 64) : 0;
   }
 
   _broadcastFast(msg) {
@@ -5485,7 +5658,7 @@ class App {
 
   async _removeRoomPlayer(userId) {
     if (this.mpRole === 'host' && this._shareLobby && userId && this._shareLobby.seats?.some((seat) => seat.id === userId && !seat.host)) {
-      this._dropShareGuest(userId);
+      this._dropShareGuest(userId, { ban: true });
       if (this._shareBeginNeed?.has(userId)) this._shareBeginNeed.delete(userId);
       return;
     }
@@ -9195,6 +9368,7 @@ class App {
           this.audio.victory();
           this.pause();
           this._clearShareLive();
+          this._announceMatchEnd(true, 'victory');
           this._noteMatchExit('victory', { banner: false });
           this._recordGameEnd(true);
           this.ui.showEnd(true, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
@@ -9206,8 +9380,10 @@ class App {
           this.pause();
           const keep = g.buildings?.find((b) => b.kind === 'hq');
           const keepHp = keep ? `${Math.round(keep.hp)}/${Math.round(keep.maxHp)}` : 'none';
+          const defeatReason = `defeat:${g.defeatCause || 'unknown'} keep ${keepHp}`;
           this._clearShareLive();
-          this._noteMatchExit(`defeat:${g.defeatCause || 'unknown'} keep ${keepHp}`, { banner: false });
+          this._announceMatchEnd(false, defeatReason);
+          this._noteMatchExit(defeatReason, { banner: false });
           this._recordGameEnd(false);
           this.ui.showEnd(false, g.stats, g.threatLevel, g.levelId, g.mode, this.profile.bestSurvival || 0, this._endExtras, g);
           break;

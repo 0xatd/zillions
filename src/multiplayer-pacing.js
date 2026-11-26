@@ -28,8 +28,10 @@ export function rememberWindow(history, window, commands, limit = 64) {
 // and say so. Callers rate-limit the actual sends.
 export function stallRecovery(ageMs, retried) {
   const age = Number(ageMs) || 0;
-  if (age >= 10000) return 'resync';
-  if (age >= 1500 && !retried) return 'retry-snapshot';
-  if (age >= 1500 && retried) return 'snapshot';
+  // A missing window has to be repaired inside a click, not after the guest
+  // has sat on "Syncing co-op…" for most of a minute.
+  if (age >= 8000) return 'resync';
+  if (age >= 300 && !retried) return 'retry-snapshot';
+  if (age >= 300 && retried) return 'snapshot';
   return 'wait';
 }

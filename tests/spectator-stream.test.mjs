@@ -28,7 +28,7 @@ function method(name){
 function game(snap=null){const l=levelById(1);const g=new Game(new TerrainField(l.seed,l.theme,{size:l.size,nests:l.nests}),'normal','scott',snap,1);if(!snap){g.foundCity(0,0);for(let i=0;i<60;i++)g.update(SIM_DT);}return g;}
 function app(role,g=game()){
  const a={mpRole:role,netMode:true,game:g,paused:false,startBarrier:false,simFrame:0,acc:0,_netClockLast:clock,outbox:[],guestCmdQueues:[],peers:[],spectators:[],pendingSpectators:[],onlinePending:new Map(),inbox:new Map(),_recentWindows:[],_windowHistory:new Map(),hashes:{local:new Map()},netPrimed:true,netBufferTarget:1,netStallT:0,netDiagnostics:{},ui:{setWaiting(){},showBanner(){},setNetworkDiagnostics(){}},lobby:{iceServers:[{urls:'turn:qa.invalid'}],async signal(){}},_refreshDiagnosticsUI(){},_attachNetDiagnostics(){},_stateHash(){return stateHash(this.game);}};
- for(const name of ['_acceptSpectator','_broadcastSpectators','_advanceNetSim','_windowsBuffered','_broadcastFast','_requestMissingWindow','issue'])a[name]=method(name);
+  for(const name of ['_acceptSpectator','_broadcastSpectators','_advanceNetSim','_advanceNetSimBody','_scheduleNetDrain','_windowsBuffered','_broadcastFast','_requestMissingWindow','issue'])a[name]=method(name);
  // This hook only exists after the production regression is fixed.
  if(source.includes('  _startPendingSpectators('))a._startPendingSpectators=method('_startPendingSpectators');
  return a;
@@ -68,6 +68,7 @@ test('slow Watch loading is bounded and retries only after the old restore ackno
 
 test('spectator startup restores the snapshot frame before requesting buffered windows',async()=>{
  const watcher=app('spectator');watcher._onGuestMsg=method('_onGuestMsg');
+ watcher._scheduleNetDrain=()=>{};
  let complete;const loading=new Promise(resolve=>{complete=resolve;});let ready=null;
  watcher.startGame=async(diff,key,mp,snap)=>{assert.equal(mp.role,'spectator');await loading;watcher.game=game(snap);watcher.simFrame=0;watcher.inbox=new Map();};
  watcher.net={send:m=>{ready=m;}};

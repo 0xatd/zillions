@@ -22,9 +22,9 @@ assert.equal(history.has(5), false, 'repair history must discard windows older t
 assert.deepEqual(history.get(20), [{ t: 'move', p: 1 }], 'a stalled guest can request an exact recent window');
 assert.equal(history.get(70), undefined, 'repair must never invent a window the host has not emitted');
 
-assert.equal(stallRecovery(1000, false), 'wait');
-assert.equal(stallRecovery(1500, false), 'retry-snapshot', 'a repair that is not served is requested once more, with a snapshot');
-assert.equal(stallRecovery(2000, true), 'snapshot');
-assert.equal(stallRecovery(10000, true), 'resync', 'a stall that outlasts the snapshot still forces one');
+assert.equal(stallRecovery(200, false), 'wait');
+assert.equal(stallRecovery(300, false), 'retry-snapshot', 'a repair that is not served is requested once more, with a snapshot');
+assert.equal(stallRecovery(300, true), 'snapshot');
+assert.equal(stallRecovery(8000, true), 'resync', 'a stall that outlasts the snapshot still forces one');
 
 console.log('Multiplayer pacing check passed.');

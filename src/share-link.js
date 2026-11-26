@@ -134,6 +134,11 @@ export function publicShareLobby(lobby) {
     closed: !!lobby.closed,
     hostBoot: Number(lobby.hostBoot) || 0,
     endedReason: lobby.endedReason === 'host_reloaded' ? 'host_reloaded' : '',
+    banned: (lobby.banned || []).filter((id) => shareId(id)),
+    matchEnd: lobby.matchEnd?.reason ? {
+      won: !!lobby.matchEnd.won,
+      reason: String(lobby.matchEnd.reason).slice(0, 180),
+    } : null,
     mode: lobby.mode,
     level: lobby.level,
     difficulty: lobby.difficulty,
@@ -289,11 +294,25 @@ function seatNumber(lobby, id) {
   return index < 0 ? 0 : index + 1;
 }
 
+// Host is player 0. Every other seat keeps the index it had when the heroes
+// were created, which is its place among guests. A peer-array slot can move
+// after a rejoin; the seat does not.
+export function sharePlayerIndex(lobby, id) {
+  if (!lobby || !id) return 0;
+  if (id === lobby.hostId) return 0;
+  const seat = (lobby.seats || []).find((entry) => entry.id === id);
+  if (!seat || seat.host) return 0;
+  const guests = (lobby.seats || []).filter((entry) => !entry.host);
+  const index = guests.findIndex((entry) => entry.id === id);
+  return index < 0 ? 0 : index + 1;
+}
+
 // Decide whether `guest` may take a seat. Does not mutate the lobby.
 export function admitGuest(lobby, guest, now, liveness = {}) {
   if (!lobby || !CODE_RE.test(lobby.code) || !guest) return { ok: false, reason: 'invalid' };
   const id = shareId(guest.id);
   if (!id || id === lobby.hostId) return { ok: false, reason: 'invalid' };
+  if ((lobby.banned || []).includes(id)) return { ok: false, reason: 'removed' };
   if (lobby.closed) return { ok: false, reason: 'host_left' };
   const at = Number(now) || 0;
   const seated = lobby.seats.find((seat) => seat.id === id && !seat.host);
@@ -359,6 +378,18 @@ export function releaseGuest(lobby, id, now) {
   }, now);
 }
 
+// Remove a guest even after the siege has started, and refuse that tab if it
+// tries to sit down again on its own.
+export function evictGuest(lobby, id, now) {
+  if (!lobby || !id) return lobby;
+  const banned = [...new Set([...(lobby.banned || []), id])];
+  return touchLobby({
+    ...lobby,
+    banned,
+    seats: (lobby.seats || []).filter((seat) => seat.host || seat.id !== id),
+  }, now);
+}
+
 export function markStarted(lobby, now) {
   return touchLobby({ ...lobby, started: true }, now);
 }
@@ -406,6 +437,7 @@ export function shareFailureCopy(reason) {
     case 'incompatible': return 'This invite is from a different game version. Refresh both browsers and make a new link.';
     case 'host_left': return 'The host left this siege.';
     case 'started': return 'This siege has already started. Friends join before the host launches, not mid-fight.';
+    case 'removed': return 'The host removed you.';
     default: return 'Could not join this siege.';
   }
 }

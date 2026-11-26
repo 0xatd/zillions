@@ -25,7 +25,7 @@ test('a guest sees subsequent host difficulty and mission changes',()=>{
  let settings,rendered;
  const app={_shareCode:room.code,_shareSelf:id,_shareAnnounced:true,_shareGuestShown:true,mpRole:'guest',net:{open:true},ui:{setRoomSettings(s){settings=s},showShareGuest(s){rendered=s}}};
  app._noteShareHostBoot=method('_noteShareHostBoot','_shareResetGuestLink');
- app._shareLobbyFresh=method('_shareLobbyFresh','_shareGuestPlayerIndex');
+ app._shareLobbyFresh=method('_shareLobbyFresh','_shareYou');
  app._shareRejoinIntent=method('_shareRejoinIntent','_shareLobbyFresh');
  app._sharePaintGuestLobby=method('_sharePaintGuestLobby','_allowMatchScreen',{...links,shareGuestView});
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'hard'});

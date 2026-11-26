@@ -310,7 +310,7 @@ try {
     const guestProbe = await probe(guest.page);
     last = { hostProbe, guestProbe };
     if (hostProbe?.net && guestProbe?.net && !hostProbe.barrier && !guestProbe.barrier
-      && hostProbe.frame > 20 && guestProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 600
+      && hostProbe.frame > 20 && guestProbe.frame > 20 && Math.abs(hostProbe.frame - guestProbe.frame) <= 90
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       synced = last;
       break;
@@ -396,7 +396,7 @@ try {
     }
     if (guestProbe?.role === 'guest' && guestProbe.net && hostProbe?.role === 'host'
       && guestProbe.frame + 15 >= beforeDrop.frame
-      && Math.abs(hostProbe.frame - guestProbe.frame) <= 600
+      && Math.abs(hostProbe.frame - guestProbe.frame) <= 45
       && hostProbe.gold != null && hostProbe.gold === guestProbe.gold) {
       rejoined = lastRejoin;
       break;
@@ -412,46 +412,58 @@ try {
   await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   const afterRejoin = await probe(guest.page);
-  const rejoinSpawn = afterRejoin?.heroes?.[afterRejoin.myPlayer];
-  const hostSpawn = afterRejoin?.heroes?.[0];
-  if (!(afterRejoin?.myPlayer > 0) || !rejoinSpawn || !hostSpawn) {
-    throw new Error(`guest has no hero after rejoin ${JSON.stringify(afterRejoin)}`);
+  if (!(afterRejoin?.myPlayer > 0) || !/guest/i.test(afterRejoin.hud || '')) {
+    throw new Error(`guest HUD is not its own hero ${JSON.stringify(afterRejoin)}`);
   }
-  const orderGuest = () => guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: rejoinSpawn.x + 8, z: rejoinSpawn.z + 6 });
-  await orderGuest();
-  const holdStart = await probe(host.page);
   const hostLog = new Map();
   const guestLog = new Map();
   const untilHold = Date.now() + 120000;
-  let movedAfter = false;
+  let nextOrderAt = Date.now();
+  let pending = null;
+  let applied = 0;
+  const stepOf = (hero, from) => hero ? Math.hypot(hero.x - from.x, hero.z - from.z) : 0;
   while (Date.now() < untilHold) {
     const hostProbe = await probe(host.page);
     const guestProbe = await probe(guest.page);
-    if (!hostProbe?.live || hostProbe.role !== 'host') {
+    if (!hostProbe?.live || hostProbe.role !== 'host' || hostProbe.exit) {
       throw new Error(`host match ended after rejoin ${JSON.stringify({ hostProbe, guestProbe })}`);
     }
-    if (!guestProbe?.live || !(guestProbe.myPlayer > 0)) {
-      throw new Error(`guest left the match after rejoin ${JSON.stringify(guestProbe)}`);
+    if (!guestProbe?.live || !(guestProbe.myPlayer > 0) || !/guest/i.test(guestProbe.hud || '')) {
+      throw new Error(`guest left its own hero after rejoin ${JSON.stringify(guestProbe)}`);
     }
-    const me = guestProbe.heroes?.[guestProbe.myPlayer];
-    const hostHero = guestProbe.heroes?.[0];
-    if (me && hostHero) {
-      const mineStep = Math.hypot(me.x - rejoinSpawn.x, me.z - rejoinSpawn.z);
-      const hostStep = Math.hypot(hostHero.x - hostSpawn.x, hostHero.z - hostSpawn.z);
-      if (mineStep > 0.4 && hostStep < mineStep) movedAfter = true;
-      else if (!movedAfter) await orderGuest();
+    const mine = guestProbe.myPlayer;
+    if (pending) {
+      const hostMoved = stepOf(hostProbe.heroes?.[mine], pending.hostFrom);
+      const guestMoved = stepOf(guestProbe.heroes?.[mine], pending.guestFrom);
+      if (hostMoved > 0.4 && guestMoved > 0.4) {
+        if (Date.now() - pending.at > 1500) {
+          throw new Error(`move landed after ${Date.now() - pending.at}ms ${JSON.stringify({ hostProbe, guestProbe })}`);
+        }
+        applied += 1;
+        pending = null;
+        nextOrderAt = Date.now() + 4000;
+      } else if (Date.now() - pending.at > 1500) {
+        throw new Error(`move was not on both sims within 1.5s ${JSON.stringify({ pending, hostProbe, guestProbe })}`);
+      }
+    } else if (Date.now() >= nextOrderAt) {
+      const guestHero = guestProbe.heroes?.[mine];
+      const hostHero = hostProbe.heroes?.[mine];
+      if (guestHero && hostHero) {
+        const flip = applied % 2 ? -1 : 1;
+        pending = { at: Date.now(), hostFrom: { ...hostHero }, guestFrom: { ...guestHero } };
+        await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), {
+          x: guestHero.x + 6 * flip,
+          z: guestHero.z + 4,
+        });
+      }
     }
     for (const row of hostProbe.hashLog || []) hostLog.set(row[0], row[1]);
     for (const row of guestProbe.hashLog || []) guestLog.set(row[0], row[1]);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
   await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
-  const holdEnd = await probe(host.page);
-  if ((holdEnd?.frame || 0) < (holdStart?.frame || 0) + 200) {
-    throw new Error(`host did not keep simulating after rejoin ${JSON.stringify({ holdStart, holdEnd })}`);
-  }
-  if (!movedAfter) throw new Error(`guest did not move its hero after rejoin ${JSON.stringify(await probe(guest.page))}`);
+  if (applied < 8) throw new Error(`guest did not land enough moves after rejoin (${applied})`);
   let agreed = 0;
   let mismatched = 0;
   for (const [frame, hash] of hostLog) {
