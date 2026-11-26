@@ -623,12 +623,12 @@ export class UI {
     this.root.querySelector('#builder-controls')?.classList.add('hidden');
     this.root.querySelector('#battle-details')?.classList.add('hidden');
     const ov = this.root.querySelector('#overlay');
-    if (ov) ov.classList.remove('hidden');
     try { this.nav.push(name); }
     catch (error) {
       if (!String(error?.message || '').includes('route_blocked_in_match')) throw error;
       return;
     }
+    if (ov) ov.classList.remove('hidden');
     const screen = this.nav.screen();
     this._lastScreen = screen || name;
     this._paintScreen(screen);

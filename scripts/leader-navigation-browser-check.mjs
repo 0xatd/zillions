@@ -24,6 +24,7 @@ for(const [width,height,label] of [[1366,768,'laptop'],[390,844,'phone']]){
  for(let step=0;step<6;step++){await page.locator(`#creator-steps [data-step="${step}"]`).click();await page.screenshot({path:`${out}/creator-${step}-${label}.png`});}
  await page.locator('#creator-cancel').click();
 }
+assert.equal(await page.evaluate(()=>{const u=__app.ui;u.hideStart();u._showScreen('characters');const hidden=u.overlayHidden();u.nav.leaveMatch('characters');u._showScreen('main');return hidden;}),true,'blocked navigation does not expose a menu over the active match');
 assert.deepEqual(await page.evaluate(async()=>{
  const {openConfirm}=await import('/src/ui-kit.js');const host=document.createElement('div');host.innerHTML='<h2 data-confirm-title></h2><p data-confirm-copy></p><button data-confirm-yes></button><button data-confirm-no></button>';document.body.appendChild(host);
  const first=openConfirm(host,{title:'First'});const second=openConfirm(host,{title:'Second'});host.querySelector('[data-confirm-yes]').click();const result=await Promise.all([first,second]);host.remove();return result;
