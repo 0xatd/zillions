@@ -132,7 +132,7 @@ const authConfig = liveRealtime ? await productionAuthConfig() : null;
 const mailbox = liveUrl || liveRealtime ? null : await relay({ drop: 0.08 });
 const site = liveUrl ? null : await staticServer(authConfig);
 const origin = liveUrl || site.origin;
-const browser = await chromium.launch({
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined,
   headless: true,
   args: [
     '--no-sandbox',
@@ -216,6 +216,7 @@ try {
   }, null, { timeout: 20000 }).catch(async (error) => {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
+  await guest.page.locator('#share-ready').click();
   const hostSnap = await probe(host.page);
   const guestSnap = await probe(guest.page);
   if (!hostSnap?.self || !guestSnap?.self || hostSnap.self === guestSnap.self) {

@@ -3934,7 +3934,7 @@ export class UI {
           <div class="roomslot ${p.host ? 'host' : ''} ${p.you ? 'you' : ''} state-${p.state || 'connecting'}">
             <span class="roomseat">${label}</span>
             <b></b>
-            <small>${who} · ${state}${unlock}</small>
+            <small>${escapeHtml(who)} · ${state}${unlock}</small>
             ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
@@ -3952,7 +3952,7 @@ export class UI {
         <div>
           <span class="roomeyebrow">Host's game setup${safeCode ? ` · ${safeCode}` : ''}</span>
           <b>${modeCopy} · ${levelDef.name}</b>
-          <span class="roomsettings">${difficultyDef.label} · ${host?.name || hostHero?.name || 'Host'} · ${filled}/${maxPlayers} players</span>
+          <span class="roomsettings">${difficultyDef.label} · ${escapeHtml(host?.name || hostHero?.name || 'Host')} · ${filled}/${maxPlayers} players</span>
           <small>${launchCopy}</small>
         </div>
       </div>

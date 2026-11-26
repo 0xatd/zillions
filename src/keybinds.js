@@ -379,7 +379,7 @@ function hydrate(force = false) {
   const requested = current ? {...(raw.binds || {})} : null;
   // New default actions must yield to keys the player explicitly chose before
   // this version introduced Stop/Hold. Keep both actions usable after upgrade.
-  if(requested)for(const id of ['hero_stop','hero_hold']){
+  if(requested)for(const id of ['hero_stop','hero_hold','camera_keep']){
     if(Object.hasOwn(requested,id))continue;
     const candidate={...defaultBinds(),...requested};
     if(conflictsFor(candidate,id,candidate[id]).length)requested[id]=firstFree(candidate,id);

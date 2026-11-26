@@ -24,7 +24,7 @@ const CURRENT_RULES = 'survival-plots';
 // v18: click orders (`horder`) participate in movement and the lockstep hash.
 // A v17 tab drops the command and hashes a different hero, so it cannot share
 // a room or a Watch session with this build.
-export const LOBBY_PROTOCOL_VERSION = 23;
+export const LOBBY_PROTOCOL_VERSION = 24;
 export const CLIENT_VERSION = '0.1.0';
 const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;

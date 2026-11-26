@@ -221,11 +221,12 @@ export function reapStaleSeats(lobby, now, {
   const at = Number(now) || 0;
   const dropped = [];
   const seats = (lobby.seats || []).filter((seat) => {
-    if (seat.host || openIds.has(seat.id)) return true;
+    if (seat.host) return true;
     const since = Number(seat.joinedAt || lobby.createdAt || 0);
     const age = at - since;
     const absent = presentIds ? !presentIds.has(seat.id) : false;
     if (absent && age >= absentMs) { dropped.push(seat); return false; }
+    if (openIds.has(seat.id)) return true;
     if (age >= graceMs) { dropped.push(seat); return false; }
     return true;
   });

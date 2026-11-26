@@ -3582,7 +3582,7 @@ class App {
 
   _joinShareLink(code) {
     this._shareFailed = false;
-    this._sharePageAt = Date.now();
+    this._shareSession = crypto.randomUUID();
     this._shareCode = code;
     this._shareSelf = this._shareSelfId();
     this._shareSeen = new Set();
@@ -3668,7 +3668,10 @@ class App {
 
   _sharePublish(partial) {
     if (!this._shareCode || !this._shareSelf) return;
-    const message = { v: 1, id: shareMessageId(), at: Date.now(), from: this._shareSelf, ...partial };
+    const session = this.mpRole === 'host'
+      ? this._shareGuestSessions?.get(partial.to)
+      : this._shareSession;
+    const message = { v: 1, id: shareMessageId(), at: Date.now(), from: this._shareSelf, ...partial, session };
     for (const hub of this._shareHubList || []) {
       try { hub.publish(this._shareCode, message); } catch { /* one transport can fail */ }
     }
@@ -3768,7 +3771,7 @@ class App {
       ...message,
       t: 'join',
       claim: true,
-      ready: true,
+      ready: !!this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.ready,
       rejoin: !!peer,
       protocolVersion: LOBBY_PROTOCOL_VERSION,
       clientVersion: CLIENT_VERSION,
@@ -3995,7 +3998,11 @@ class App {
 
   _shareOpenIds() {
     const openIds = new Set();
-    for (const seat of this._shareLobby?.seats || []) if (!seat.host && seat.linked) openIds.add(seat.id);
+    for (const seat of this._shareLobby?.seats || []) {
+      const peer = this._shareHands?.get(seat.id);
+      const recent = Date.now() - Number(seat.joinedAt || 0) < 8000;
+      if (!seat.host && seat.linked && peer?.open && recent) openIds.add(seat.id);
+    }
     return openIds;
   }
 
@@ -4119,10 +4126,15 @@ class App {
       this._shareSeen.add(message.id);
     }
     if (message.from && message.from === this._shareSelf && message.t !== 'lobby') return;
-    // A reloaded tab can be handed the mailbox backlog, including the original
-    // begin. That would start a second sim at frame 0. Only messages from this
-    // page's own lifetime are live; the host snapshot covers the rest.
-    if (this.mpRole !== 'host' && message.t !== 'lobby' && this._sharePageAt && Number(message.at || 0) < this._sharePageAt) return;
+    // A page nonce rejects replayed mailbox traffic without comparing clocks.
+    if (this.mpRole === 'guest' && message.t !== 'lobby'
+      && (message.to !== this._shareSelf || message.session !== this._shareSession)) return;
+    if (this.mpRole === 'host' && message.t === 'join' && message.session) {
+      this._shareGuestSessions ??= new Map();
+      this._shareGuestSessions.set(message.from, message.session);
+    }
+    if (this.mpRole === 'host' && message.t !== 'join' && message.t !== 'lobby'
+      && message.session !== this._shareGuestSessions?.get(message.from)) return;
     if (message.t === 'lobby' && message.lobby && this.mpRole !== 'host') this._onShareLobby(message.lobby);
     else if (message.t === 'join' && this.mpRole === 'host') this._acceptShareGuest(message);
     else if (message.t === 'offer' && this.mpRole === 'guest') this._acceptShareOffer(message);
@@ -4210,7 +4222,7 @@ class App {
         t: 'join', name: this._shareDisplayName(), hero: this.ui.selectedHero || 'scott', claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
-        ready: true,
+        ready: false,
         // A fresh page that opens a siege already in progress has no armed
         // rejoin flag. The host still has to replace the dead data channel.
         rejoin: !!(lobby.started || this._shareRejoinArmed || (this.netMode && !this.net?.open)),
@@ -4349,6 +4361,8 @@ class App {
       this._shareWebrtcFailed ??= new Set();
       this._shareWebrtcFailed.add(message.from);
       this._shareHands.delete(message.from);
+      this._shareLobby = { ...this._shareLobby, seats: this._shareLobby.seats.map(
+        (seat) => seat.id === message.from ? { ...seat, linked: false, transport: '' } : seat) };
       this._shareConsiderLink(message.from);
     };
     peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
@@ -4423,9 +4437,7 @@ class App {
 
   async _acceptShareOffer(message) {
     if (message.to !== this._shareSelf || this._shareOffered === message.id) return;
-    // A reloaded page replays the mailbox, including the offer from the
-    // previous handshake. Ignore anything older than this join.
-    if (this._shareJoinedAt && Number(message.at || 0) < this._shareJoinedAt) return;
+    if (message.session !== this._shareSession) return;
     if (!this._shareLobby || message.from !== this._shareLobby.hostId) return;
     const rejoining = !!(this._shareLobby.started || this.netMode);
     if (rejoining && !this._shareLobby.seats?.some((seat) => seat.id === this._shareSelf)) return;
