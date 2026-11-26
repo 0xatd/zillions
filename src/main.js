@@ -4890,7 +4890,7 @@ class App {
     }
     if (steps === 10 || stalled) this.acc = Math.min(this.acc, SIM_DT * 3);
     this.netStallT = stalled ? this.netStallT + dt : 0;
-    this._trackStall(stalled, missingWindow);
+    this._trackStall?.(stalled, missingWindow);
     const stallAge = this._stallSince ? performance.now() - this._stallSince : 0;
     const visibleStall = stalled && (this.netStallT > 0.25 || stallAge > 250);
     const stallText = stallAge >= 10000
@@ -7929,11 +7929,11 @@ class App {
     // Eligibility can disappear after repair (a specialisation is due), then
     // return while the same key/button remains down. Only a physical release
     // rearms that press; lastPay alone tracks eligibility, not release.
-    // A finished plot clears the sim hold. Walking to the next foundation
-    // while the key stays down has to arm a new press, or the second tower
-    // never receives gold.
+    // A finished plot clears the sim hold. If another foundation is already
+    // in reach, that same press may fund it. Leaving range and coming back
+    // is not a new press.
     const payTarget = canPay ? this.game.buildTargetFor(h)?.plot?.id ?? null : null;
-    if (physicalPayHeld && this._payPressUsed && payTarget != null && payTarget !== this._payTargetId) {
+    if (physicalPayHeld && this._payPressUsed && payTarget != null && this._payTargetId != null && payTarget !== this._payTargetId) {
       this._payPressUsed = false;
       this.lastPay = false;
     }
