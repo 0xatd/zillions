@@ -28,3 +28,32 @@ test('a guest sees subsequent host difficulty and mission changes',()=>{
  method('_onShareLobby','async _acceptShareGuest',{...links}).call(app,{...room,level:2,difficulty:'brutal'});
  assert.equal(rendered.difficulty,'brutal','difficulty-only update must refresh the visible room summary');
 });
+test('an unacked guest blocks the start and the host keeps resending',()=>{
+ const launch=source.slice(source.indexOf('  async _launchHostMatch('),source.indexOf('  _sharedMatchFields('));
+ const waitAt=launch.indexOf('if (seated.length)');
+ const sealAt=launch.indexOf('this._sealShareLobby()');
+ assert.ok(waitAt>0&&sealAt>waitAt,'the lobby is sealed only after a share guest is not waiting');
+ const poll=source.slice(source.indexOf('  _sharePollBegin('),source.indexOf('  async _acceptShareBegin('));
+ assert.ok(poll.lastIndexOf('this._shareFanBegin()')>poll.indexOf('did not enter the match'));
+ const calls=[];
+ const app={
+  _shareBeginNeed:new Set(['guest-1']),
+  _shareBegan:new Set(),
+  _shareBeginFinished:false,
+  _shareBeginAt:Date.now()-21000,
+  _shareBeginReminded:false,
+  _shareLobby:{seats:[{id:'guest-1',name:'Guest ABCD',host:false}]},
+  _shareFanBegin(){calls.push('fan')},
+  _renderShareHost(){calls.push('render')},
+  ui:{showBanner(){calls.push('banner')}},
+ };
+ method('_sharePollBegin','async _acceptShareBegin').call(app);
+ assert.ok(calls.includes('fan'));
+ assert.ok(calls.includes('banner'));
+ assert.equal(app._shareBeginFinished,false);
+ assert.equal(app.startBarrier,undefined);
+ app._shareLobby={seats:[]};
+ method('_sharePollBegin','async _acceptShareBegin').call(app);
+ assert.equal(app._shareBeginNeed,null);
+ assert.equal(app.startBarrier,false);
+});

@@ -852,13 +852,17 @@ class App {
   // BEFORE telling guests to start, so every peer runs the ticket's seed and
   // knows the room id from the first frame — not looked up at match end.
   async _launchHostMatch(d, hero, mode) {
+    if (this._shareBeginNeed && !this._shareBeginFinished) {
+      this._shareFanBegin();
+      this._shareSig = '';
+      this._renderShareHost();
+      return;
+    }
     if (this._hostLaunching) return;
     this._hostLaunching = true;
     try {
       if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
-      this._sealShareLobby();
       const level = this.ui.selectedLevel || 1;
-      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
       const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
       // The server only issues room tickets for a room that is in game.
       if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
@@ -870,26 +874,38 @@ class App {
         joinToken: ticket?.ok ? ticket.joinToken || null : null,
         error: ticket && !ticket.ok ? ticket.error : null,
       };
-      this.startExpectedGuests = this.peers.length;
-      this.startReadyGuests.clear();
-      this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
       const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
       const culture = cultureKey(this.ui.selectedCulture);
-      const shareGuests = this._shareLobby
-        ? this.peers.map((peer) => peer.shareId).filter((id) => id && this._shareLobby.seats.some((seat) => seat.id === id && !seat.host))
-        : [];
-      if (shareGuests.length) {
-        this._shareBeginNeed = new Set(shareGuests);
+      const seated = (this._shareLobby?.seats || []).filter((seat) => !seat.host);
+      if (seated.length) {
+        const missing = seated.filter((seat) => !this.peers.some((peer) => peer.shareId === seat.id && peer.open));
+        if (missing.length) {
+          const names = missing.map((seat) => seat.name || 'A guest').join(', ');
+          this.ui.showBanner(`${names} ${missing.length === 1 ? 'is' : 'are'} not connected. The match will not start without them.`, 'bad', 5200);
+          this._shareSig = '';
+          this._renderShareHost();
+          return;
+        }
+        const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+        this._shareBeginNeed = new Set(seated.map((seat) => seat.id));
         this._shareBegan = new Set();
         this._shareBeginFinished = false;
         this._shareBeginAt = Date.now();
         this._shareBeginReminded = false;
         this._shareBeginPayload = { d, heroes, level, mode, culture, match: shared };
-        this.startExpectedGuests = shareGuests.length;
+        this.startExpectedGuests = seated.length;
+        this.startReadyGuests.clear();
         this.startBarrier = true;
+        this._shareSig = '';
+        this._renderShareHost();
         this._shareFanBegin();
         return;
       }
+      this._sealShareLobby();
+      const heroes = [{ k: hero, camp: this.campFor(hero) }, ...this.peers.map((_, i) => this.guestHeroes[i] || 'scott')];
+      this.startExpectedGuests = this.peers.length;
+      this.startReadyGuests.clear();
+      this.startBarrier = !matchStartReady(this.startExpectedGuests, 0);
       this.peers.forEach((p, i) => p.send({ t: 'start', d, heroes, you: i + 1, level, mode, culture, match: shared }));
       await this.startGame(d, null, { heroes, myPlayer: 0, role: 'host', level, mode, culture, match });
     } finally {
@@ -1387,7 +1403,7 @@ class App {
 
   // Presentation-only arrival. Never runs for network, Watch or restored games.
   _finishMissionIntro() {
-    if (this.missionIntro) {
+    if (this.missionIntro && !this.missionIntro.held) {
       this.camDist = this.missionIntro.distance;
       this.lastDir = { x: 0, z: 0, s: false };
     }
@@ -1591,15 +1607,16 @@ class App {
       ring.position.set(s.x, 0.06, s.z);
       gr.add(ring);
       gr.userData.ring = ring;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5, 6), toyMat({ color: 0x3a3228 }));
-      pole.position.set(s.x, 2.5, s.z);
+      const ox = 2.6;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6.4, 6), toyMat({ color: 0x3a3228 }));
+      pole.position.set(s.x + ox, 3.2, s.z);
       gr.add(pole);
       const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.05), toyMat({ color: 0xc9a44a }));
-      flag.position.set(s.x + 0.85, 4.4, s.z);
+      flag.position.set(s.x + ox + 0.85, 5.8, s.z);
       gr.add(flag);
       gr.userData.flag = flag;
       const label = this._makeLabelSprite('🏳️', (s.name || `SITE ${i + 1}`).toUpperCase());
-      label.position.set(s.x, 6.3, s.z);
+      label.position.set(s.x + ox, 7.6, s.z);
       label.scale.set(4.2, 2.1, 1);
       gr.add(label);
       gr.position.y = this.map.groundY(s.x, s.z);
@@ -3785,15 +3802,29 @@ class App {
 
   _sharePollBegin() {
     if (!this._shareBeginNeed || this._shareBeginFinished) return;
-    const missing = [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id));
-    if (!missing.length) return;
-    if (Date.now() - this._shareBeginAt > 20000) {
-      if (!this._shareBeginReminded) {
-        this._shareBeginReminded = true;
-        const names = missing.map((id) => this._shareLobby?.seats?.find((seat) => seat.id === id)?.name || 'A guest');
-        this.ui.showBanner(`${names.join(', ')} did not enter the match. Still waiting for their acknowledgement.`, 'bad', 8000);
-      }
+    for (const id of [...this._shareBeginNeed]) {
+      if (!this._shareLobby?.seats?.some((seat) => seat.id === id && !seat.host)) this._shareBeginNeed.delete(id);
+    }
+    if (!this._shareBeginNeed.size) {
+      this._shareBeginNeed = null;
+      this._shareBeginPayload = null;
+      this.startBarrier = false;
+      this._shareSig = '';
+      this._renderShareHost();
+      this.ui.showBanner('The guest left before entering. Press Start again to play alone.', '', 6000);
       return;
+    }
+    const missing = [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id));
+    if (!missing.length) {
+      void this._shareFinishBegin();
+      return;
+    }
+    if (!this._shareBeginReminded && Date.now() - this._shareBeginAt > 20000) {
+      this._shareBeginReminded = true;
+      const names = missing.map((id) => this._shareLobby?.seats?.find((seat) => seat.id === id)?.name || 'A guest');
+      this.ui.showBanner(`${names.join(', ')} did not enter the match. Still waiting for their acknowledgement.`, 'bad', 8000);
+      this._shareSig = '';
+      this._renderShareHost();
     }
     this._shareFanBegin();
   }
@@ -3993,14 +4024,20 @@ class App {
     }
     const players = this._shareRoster();
     const gate = shareLaunchReady(this._shareLobby, this._shareOpenIds());
-    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}:${this._shareSoloConfirm ? 1 : 0}`;
+    const entering = !!(this._shareBeginNeed && !this._shareBeginFinished);
+    const waitingOn = entering
+      ? [...this._shareBeginNeed].filter((id) => !this._shareBegan?.has(id)).map((id) => this._shareLobby.seats?.find((seat) => seat.id === id)?.name || 'a guest')
+      : [];
+    const sig = `${JSON.stringify(players)}:${this._shareLobby.mode}:${this._shareLobby.level}:${this._shareLobby.difficulty}:${this._shareLobby.maxPlayers}:${gate.ready}:${String(this._shareRelay)}:${this._shareReach || ''}:${this._shareSoloConfirm ? 1 : 0}:${waitingOn.join(',')}`;
     if (sig === this._shareSig && this.ui.root.querySelector('#share-url')) return;
     this._shareSig = sig;
     this._shareRememberGuests();
     const blocked = players.length > 1 && !gate.ready;
     const soloLeft = this._shareSoloBlocked();
     const offline = this._shareReach === 'connecting' || this._shareReach === 'reconnecting';
-    const status = offline
+    const status = entering
+      ? `Waiting for ${waitingOn.join(', ')} to acknowledge the start. The match has not begun.`
+      : offline
       ? "Can't reach room, reconnecting…"
       : gate.blockers.length
       ? `Level ${this._shareLobby.level} is locked for ${gate.blockers.map((seat) => seat.name).join(', ')}.`
@@ -4011,13 +4048,15 @@ class App {
           : players.length > 1
             ? `${players.length} commanders in this siege. Start when you are ready.`
             : 'Invite link ready. Set the map and difficulty, then send it.';
-    const startLabel = soloLeft
+    const startLabel = entering
+      ? `WAITING FOR ${waitingOn.join(', ').toUpperCase()} TO ENTER`
+      : soloLeft
       ? (this._shareSoloConfirm ? 'PRESS AGAIN — START ALONE' : 'GUEST LEFT — START ALONE')
       : shareStartLabel(players, gate, this.ui._startCopyFor(this._shareLobby.mode));
     this.ui.showShareHost({
       url: this._shareUrl,
-      status: soloLeft ? 'Your friend left this lobby. Press Start again to play alone.' : status,
-      launchReady: soloLeft ? true : !blocked,
+      status: soloLeft && !entering ? 'Your friend left this lobby. Press Start again to play alone.' : status,
+      launchReady: entering ? false : (soloLeft ? true : !blocked),
       startLabel,
       players,
       relay: this._shareRelay,
@@ -4178,6 +4217,7 @@ class App {
     const players = shareRoster(lobby, this._shareSelf);
     const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
     this._ensureGuestRelay?.();
+    if (this.netMode && this.game) return;
     if (this._shareGuestShown && sig === this._shareSig) return;
     this._shareSig = sig;
     const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
@@ -7558,8 +7598,13 @@ class App {
     window.addEventListener('keyup', (e) => this.keys.delete(bindKey(e)));
 
     cv.addEventListener('wheel', (e) => {
+      if (!this.game) return;
       e.preventDefault();
-        this.camDist = clamp(this.camDist * (1 + clamp(e.deltaY, -120, 120) / 120 * 0.12), 22, 95);
+      const pixels = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const step = clamp(pixels, -100, 100) / 100 * 0.045;
+      const base = this._camDistTarget ?? this.camDist;
+      this._camDistTarget = clamp(base * (1 + step), 22, 95);
+      if (this.missionIntro) this.missionIntro.held = true;
     }, { passive: false });
 
     cv.addEventListener('pointermove', (e) => {
@@ -7971,6 +8016,10 @@ class App {
 
   _updateCamera(dt) {
     if (!this.game) return;
+    if (this._camDistTarget != null) {
+      this.camDist += (this._camDistTarget - this.camDist) * (1 - Math.exp(-8 * dt));
+      if (Math.abs(this._camDistTarget - this.camDist) < 0.02) this.camDist = this._camDistTarget;
+    }
 
     const feel = this.feel();
     const binds = this.binds();
@@ -8728,7 +8777,7 @@ class App {
       this.missionIntro.elapsed += dt;
       const progress = Math.min(1, this.missionIntro.elapsed / 4);
       const eased = progress * progress * (3 - 2 * progress);
-      this.camDist = this.missionIntro.distance + 16 * (1 - eased);
+      if (!this.missionIntro.held) this.camDist = this.missionIntro.distance + 16 * (1 - eased);
       if (progress >= 1) this._finishMissionIntro();
     }
     this._updateCamera(dt);
