@@ -413,6 +413,7 @@ try {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
+  console.log(`co-op: reload recovered in ${120000 - (rejoinDeadline - Date.now())}ms after page load; frame gap ${Math.abs(rejoined.hostProbe.frame - rejoined.guestProbe.frame)}`);
   }
   const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
   console.log(`${process.argv.includes('--startup-only') ? 'coop startup diagnostic' : 'coop e2e'} passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);

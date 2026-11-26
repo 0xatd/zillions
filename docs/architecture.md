@@ -450,6 +450,11 @@ need TURN on restrictive networks. The backend does not simulate combat.
 
 ### Battlefield loading and GPU diagnostics
 
+After a snapshot rebuild, guests and watchers drain large consecutive command
+backlogs at up to twice normal simulation speed, easing back to the adaptive
+jitter buffer. Every fixed tick and command still executes; missing-window
+gates and the per-pump work cap remain unchanged.
+
 Live startup builds presentation without advancing the simulation, awaits
 `renderer.compileAsync`, and presents the initial scene before sending loaded.
 The loading gate stays visible during this work. Normal rendering does not

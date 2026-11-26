@@ -76,3 +76,23 @@ test('spectator startup restores the snapshot frame before requesting buffered w
  complete();await pending;assert.equal(watcher.simFrame,48);assert.deepEqual(ready,{t:'spectateReady',frame:48});
  await watcher._onGuestMsg({t:'w',w:24,c:[{t:'cast',p:0}],p:[]});assert.equal(watcher.inbox.get(24)[0].t,'cast');
 });
+
+test('reloaded guest drains a loading backlog promptly without skipping commands or diverging',()=>{
+ const host=app('host');const guest=app('guest',game(host.game.snapshot()));
+ guest.net={send(){}};guest.netBufferTarget=3;guest.netPrimed=false;
+ host.peers=[{sendFast(packet){guest.inbox.set(packet.w,structuredClone(packet.c));}}];
+ const advance=()=>{clock+=1000/30;host._advanceNetSim();};
+ // Snapshot reconstruction takes ten seconds while the host keeps playing.
+ for(let i=0;i<300;i++){
+  if(i===150)host.outbox.push({t:'hdir',p:0,x:1,z:0,s:false});
+  advance();
+ }
+ guest._netClockLast=clock;
+ for(let i=0;i<900;i++){advance();guest._advanceNetSim();}
+ assert.ok(host.simFrame-guest.simFrame<=45,`rejoin still ${host.simFrame-guest.simFrame} frames behind after 30 seconds`);
+ const hostHashes=new Map(host._hashLog);
+ const shared=guest._hashLog.filter(([frame])=>hostHashes.has(frame));
+ assert.ok(shared.length>=3,'compare multiple actual simulation boundaries');
+ for(const [frame,hash] of shared)assert.equal(hash,hostHashes.get(frame),`state diverged at ${frame}`);
+ assert.ok(guest.simFrame<=host.simFrame,'catch-up cannot overtake the host');
+});

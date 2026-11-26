@@ -4914,7 +4914,15 @@ class App {
     if (this.mpRole === 'guest' || this.mpRole === 'spectator') {
       const banked = this._windowsBuffered();
       if (banked < this.netBufferTarget) dt *= NET_PACE_SLOW;
-      else if (banked >= this.netBufferTarget + 2) dt *= NET_PACE_FAST;
+      else if (banked >= this.netBufferTarget + 2) {
+        // A snapshot rebuild can bank seconds of commands. A fixed +6%
+        // would take minutes to repay that loading delay. Drain a large
+        // consecutive backlog at up to 2x, easing back to normal jitter
+        // pacing near the target. Still execute every fixed tick/command;
+        // the per-pump step cap and missing-window barrier stay in force.
+        const excessSeconds = (banked - this.netBufferTarget - 2) * NET_STEP * SIM_DT;
+        dt *= Math.min(2, Math.max(NET_PACE_FAST, 1 + excessSeconds));
+      }
     }
 
     this.acc += dt;
