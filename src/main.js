@@ -3440,6 +3440,17 @@ class App {
       this._shareFailed = false;
       this.mpRole = 'host';
       this.ui._shareLive = true;
+      if (lobby.started) {
+        // A saved lobby is not a running host simulation. End this invite
+        // rather than advertise an unrejoinable match; keep the autosave
+        // available through the ordinary solo Resume path.
+        this._shareLobby = closeLobby(this._shareLobby, Date.now());
+        this._bindShareTransport('host');
+        this._sharePublishLobby();
+        this._leaveShareLink();
+        this.ui.showBanner('The invite ended when the host refreshed. Resume your saved siege from Play Solo.', '', 8000);
+        return;
+      }
       this.ui.showSetup({ mode: lobby.mode || 'campaign', share: true });
       this.ui.setRoomSettings({
         level: lobby.level || 1,
@@ -3604,7 +3615,7 @@ class App {
         return;
       }
       const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
-      if (!decision.ok && decision.reason !== 'host_left') this._failShare(decision.reason);
+      if (!decision.ok) this._failShare(decision.reason);
       else {
         this._sharePublish({ t: 'here', name: this._shareDisplayName() });
         this._shareTrackPresence();
@@ -3897,6 +3908,7 @@ class App {
 
   async _acceptShareBegin(start) {
     if (!start || this.mpRole === 'host') return;
+    if (this._shareBeginLoading) return;
     if (this._shareLobby?.started && !this.game && !start.snap) {
       this._sharePublish({ t: 'catchup' });
       return;
@@ -3906,12 +3918,15 @@ class App {
       return;
     }
     if (this._shareBeginAcked) return;
-    this._shareBeginAcked = true;
+    this._shareBeginLoading = true;
+    const generation = this._shareGeneration;
     try {
       this.ui.setWaiting(true, '⏳ Loading the shared battlefield…');
       const match = this._sharedMatch(start.match);
       if (start.snap) await this.startGame(start.snap.diff, null, { myPlayer: start.you, role: 'guest', match }, start.snap);
       else await this.startGame(start.d, null, { heroes: start.heroes, myPlayer: start.you, role: 'guest', level: start.level, mode: start.mode, culture: start.culture, match });
+      if (generation !== this._shareGeneration) return;
+      this._shareBeginAcked = true;
       this._sharePublish({ t: 'began' });
       if (this.net?.open) this.net.send({ t: 'startReady' });
       this.ui.setWaiting(true, '⏳ Loaded — waiting for host to begin…');
@@ -3919,11 +3934,13 @@ class App {
       this._shareBeginAcked = false;
       this.ui.showBanner('Could not enter the match. Still trying.', 'bad', 4000);
       console.warn('share begin failed', error);
+    } finally {
+      if (generation === this._shareGeneration) this._shareBeginLoading = false;
     }
   }
 
   _shareSendCatchup() {
-    if (this.mpRole !== 'guest' || !this._shareLobby?.started || this.game || this._shareBeginAcked) return;
+    if (this.mpRole !== 'guest' || !this._shareLobby?.started || this.game || this._shareBeginAcked || this._shareBeginLoading) return;
     const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf && !seat.host);
     if (!mine) return;
     const now = Date.now();
@@ -4686,6 +4703,8 @@ class App {
 
   _teardownShare() {
     this._shareGeneration = (this._shareGeneration || 0) + 1;
+    this._shareBeginLoading = false;
+    this._shareBeginAcked = false;
     this._sharePendingJoins?.clear();
     this._stopShareHeartbeat();
     clearTimeout(this._shareDiscover);

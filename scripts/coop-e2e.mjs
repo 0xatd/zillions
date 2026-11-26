@@ -294,6 +294,21 @@ try {
   }
   if ((await guestSeat())?.name !== stableName) throw new Error('guest seat name changed at the end of the hold');
 
+  if (process.argv.includes('--lobby-close-only')) {
+    await host.page.close();
+    await guest.page.waitForFunction(() => window.__app?._shareFailed && window.__app.mpRole === null, null, { timeout: 45000 });
+    const notice = await guest.page.locator('body').innerText();
+    if (!notice.includes('The host left this siege.')) throw new Error('missing host-left notice');
+    console.log('relay lobby host-close recovery passed');
+  } else {
+  await guest.page.evaluate(() => {
+    const app = window.__app, publish = app._sharePublish.bind(app);
+    window.__earlyBeginAck = false;
+    app._sharePublish = (message) => {
+      if (message.t === 'began' && app._preparingBattlefield) window.__earlyBeginAck = true;
+      return publish(message);
+    };
+  });
   await host.page.waitForFunction(() => {
     const button = document.querySelector('#s-start');
     return button && !button.disabled && /START/i.test(button.textContent || '');
@@ -390,6 +405,7 @@ try {
   }
 
   console.log('co-op: reloading guest');
+  if (await guest.page.evaluate(() => window.__earlyBeginAck)) throw new Error('guest acknowledged begin during battlefield loading');
   const beforeDrop = await probe(host.page);
   await guest.page.reload({ waitUntil: 'domcontentloaded' });
   await configureRender(guest.page);
@@ -414,9 +430,15 @@ try {
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
   console.log(`co-op: reload recovered in ${120000 - (rejoinDeadline - Date.now())}ms after page load; frame gap ${Math.abs(rejoined.hostProbe.frame - rejoined.guestProbe.frame)}`);
+  await host.page.reload({ waitUntil: 'domcontentloaded' });
+  await host.page.waitForFunction(() => window.__app && window.__app.mpRole === null && !window.__app._shareCode, null, { timeout: 30000 });
+  const closed = await host.page.evaluate((code) => JSON.parse(localStorage.getItem(`zillions.share.${code}`))?.lobby?.closed, code);
+  if (!closed) throw new Error('refreshed host revived a stale started lobby');
+  console.log('co-op: host refresh closed stale invite');
   }
   const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
   console.log(`${process.argv.includes('--startup-only') ? 'coop startup diagnostic' : 'coop e2e'} passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);
+  }
 } finally {
   for (const page of profiledPages) {
     const report=await page.evaluate(()=>{

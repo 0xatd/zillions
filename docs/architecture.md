@@ -471,3 +471,10 @@ accounts and native candidate API handlers. Supply Supabase credentials through
 the environment; never commit them. It buys an opening building, waits for a
 real defeat, checks results and starts another match with the same group.
 The optional `--transport-only` flag isolates networking from GPU work.
+
+Invite startup acknowledges `began` only after the original battlefield load
+finishes; repeated start packets cannot release the host early. Refreshing a
+host during play ends that invite rather than advertising a lobby without a
+simulation. The autosave remains available through the normal solo Resume
+path. A pre-match relay guest exits to a host-left notice after the receipt
+and presence liveness timeout instead of waiting indefinitely.
