@@ -875,7 +875,7 @@ export class UI {
     detail.innerHTML = game
       ? `<span class="modeeyebrow">LIVE GAME</span><div class="custom-map-preview">${publicRoomSetup(game).mode === 'labyrinth' ? '🌀' : publicRoomSetup(game).mode === 'survival' ? '💀' : '⚔️'}</div><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(publicRoomSetup(game).mapName || levelById(publicRoomSetup(game).level)?.name || 'Unknown map')}</p><dl><div><dt>HOST</dt><dd>@${escapeHtml(game.host_name)}</dd></div><div><dt>PLAYERS</dt><dd>${game.players || 1}/${game.max_players || 4}</dd></div><div><dt>DIFFICULTY</dt><dd>${(DIFFICULTY[publicRoomSetup(game).difficulty] || DIFFICULTY.normal).label}</dd></div><div><dt>STATUS</dt><dd>${game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</dd></div></dl>`
       : '<span class="modeeyebrow">LIVE GAMES</span><h2>CHOOSE A GAME</h2><p>Select a joinable lobby to inspect its host, map, rules, and party.</p>';
-    join.textContent = game?.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
+    join.textContent = !game || game.status === 'open' ? 'JOIN GAME' : 'WATCH GAME';
     join.disabled = !game || game.protocol_compatible === false;
     create.textContent = 'CREATE GAME';
     create.disabled = false;

@@ -342,3 +342,5 @@ button:disabled {cursor:not-allowed;}
  #shell-tabs {gap:8px;left:12px;right:12px;}
  #shell-tabs button {font-size:12px;letter-spacing:.05em;white-space:nowrap;}
 }
+@media(max-width:760px){#shell-tabs {transform:none;justify-content:center;top:12px;}}
+.custom-actions a {color:var(--accent);font-size:12px;text-decoration:none;padding:6px;}
