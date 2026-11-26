@@ -24,6 +24,7 @@ export const SHARE_CONNECT_GRACE_MS = 20000;
 export const SHARE_ABSENT_MS = 8000;
 export const SHARE_DISCOVER_MS = 8000;
 export const SHARE_HEARTBEAT_MS = 2000;
+export const SHARE_LINK_FALLBACK_MS = 4000;
 export const SHARE_CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 export const SHARE_CODE_LENGTH = 10;
 
@@ -129,6 +130,8 @@ export function publicShareLobby(lobby) {
       hero: shareHero(seat.hero),
       host: !!seat.host,
       ready: !!seat.host || !!seat.ready,
+      linked: !!seat.linked,
+      transport: seat.transport === 'relay' || seat.transport === 'webrtc' ? seat.transport : '',
       unlockedLevel: shareUnlocked(seat.unlockedLevel),
       joinedAt: Number(seat.joinedAt) || lobby.createdAt || 0,
     })),
@@ -242,23 +245,25 @@ export function seatDisplayName({ accountName = '', username = '', founderName =
   return shareName(accountName || username || founderName || profileName);
 }
 
-// A joiner's label comes from their own profile. If they have none, or it is
-// the host's name, the seat would read as a second copy of the host. The
-// suffix is the joiner's own commander id, which is different per browser.
+// A joiner who never chose a name gets Guest plus their own id. Vanguard is
+// the automatic founder, not a name anyone picked. The host's name is never
+// reused, or the blocker line reads as two copies of the host.
+const UNNAMED_JOINER = new Set(['', 'commander', 'vanguard']);
 export function shareGuestName({ name = '', id = '', hostName = '' } = {}) {
   const clean = String(name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24);
   const host = String(hostName || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24);
   const tail = (String(id || '').replace(/[^0-9a-z]/gi, '').slice(-4) || '0000').toUpperCase();
-  if (!clean || (host && clean.toLowerCase() === host.toLowerCase())) return `Guest ${tail}`;
+  const unnamed = !clean || UNNAMED_JOINER.has(clean.toLowerCase());
+  if (unnamed || (host && clean.toLowerCase() === host.toLowerCase())) return `Guest ${tail}`;
   return clean;
 }
 
-// One state for the seat title and the subline. A seat that is still in the
-// lobby is connected. WebRTC is the launch gate, not a second word baked
-// into the name.
+// The seat label and START share this. Connected means the chosen transport
+// has carried a message both ways. A seat that is only present is still connecting.
 export function shareSeatState(seat) {
+  const linked = !!seat?.host || !!seat?.linked;
   return {
-    state: 'connected',
+    state: linked ? 'connected' : 'connecting',
     ready: !!seat?.host || !!seat?.ready,
   };
 }
@@ -304,6 +309,8 @@ export function seatGuest(lobby, guest, now) {
     hero: shareHero(guest.hero),
     host: false,
     ready: !!guest.ready,
+    linked: false,
+    transport: '',
     unlockedLevel: shareUnlocked(guest.unlockedLevel),
     joinedAt: Number(now) || 0,
   }];

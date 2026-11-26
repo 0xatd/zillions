@@ -132,6 +132,7 @@ test('a live heartbeat keeps a guest seated for a full minute without WebRTC', (
 test('a joiner does not wear the host name', () => {
   const id = 'abcdef12-3456-4789-abcd-ef1234567890';
   assert.equal(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), 'Guest 7890');
+  assert.equal(shareGuestName({ name: 'Vanguard', id, hostName: 'Gork' }), 'Guest 7890');
   assert.equal(shareGuestName({ name: '', id, hostName: 'Gork' }), 'Guest 7890');
   assert.equal(shareGuestName({ name: 'Bea', id, hostName: 'Gork' }), 'Bea');
   assert.notEqual(shareGuestName({ name: 'Gork', id, hostName: 'Gork' }), shareGuestName({ name: 'Gork', id: '99999999-9999-4999-8999-999999999991', hostName: 'Gork' }));

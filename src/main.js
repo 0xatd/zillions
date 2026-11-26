@@ -32,11 +32,11 @@ import { getSupabaseClient } from './supabase.js';
 import {
   admitGuest, clearGuestReady, closeLobby, createLobby, hostStillHere, markStarted, parseShareLocation, publicShareLobby,
   randomShareCode, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareFailureCopy, shareGuestName, shareHero, shareId, shareLaunchReady, shareMessageId, shareSeatState,
-  shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, touchSeatActivity, withSeatHero,
+  shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, SHARE_LINK_FALLBACK_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
 import { createTabSession } from './tab-session.js';
 import { desyncRecovery, roomStartLabel, shareRejoinStep, withinRejoinGrace } from './lobby-reliability.js';
-import { createBrowserHub, createRelayHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
+import { createBrowserHub, createRelayHub, createShareRelayPeer, createSupabaseHub, loadShareIceServers, packShareLink, unpackShareLink } from './share-bus.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
 import {
@@ -3488,9 +3488,16 @@ class App {
         this._reapShareSeats();
         this._sharePublishLobby();
         this._shareTrackPresence();
+        for (const seat of this._shareLobby.seats || []) {
+          if (seat.host || seat.linked) continue;
+          this._shareSendPing(seat.id);
+          this._shareConsiderLink(seat.id);
+        }
         return;
       }
       if (this.mpRole !== 'guest' || !this._shareLobby) return;
+      const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf);
+      if (mine && !mine.linked) this._shareSendPing(this._shareLobby.hostId);
       if (this._shareRejoinArmed || (this.netMode && this.game && !this.game.over && !this.net?.open)) {
         this._shareRejoinTick();
         return;
@@ -3501,6 +3508,8 @@ class App {
       else {
         this._sharePublish({ t: 'here', name: this._shareDisplayName() });
         this._shareTrackPresence();
+        const mine = this._shareLobby.seats?.find((seat) => seat.id === this._shareSelf);
+        if (mine && !mine.linked) this._shareSendPing(this._shareLobby.hostId);
       }
     };
     try {
@@ -3698,8 +3707,10 @@ class App {
   // on every 2s check-in.
   _shareKickLink(message) {
     if (!message?.from || this._shareLobby?.started) return;
+    if (this._shareWebrtcFailed?.has(message.from)) return;
+    if (this._shareLobby?.seats?.find((seat) => seat.id === message.from)?.transport === 'relay') return;
     const peer = this._shareHands?.get(message.from);
-    if (peer?.open || this._sharePendingJoins?.has(message.from)) return;
+    if (peer?.open || peer?.relay || this._sharePendingJoins?.has(message.from)) return;
     const last = this._shareOfferAt?.get(message.from) || 0;
     if (last && Date.now() - last < 12000) return;
     void this._acceptShareGuest({
@@ -3713,9 +3724,130 @@ class App {
     });
   }
 
+  _shareSendPing(to) {
+    if (!to || to === this._shareSelf) return;
+    this._sharePublish({ t: 'ping', n: Date.now() % 1000000, to });
+  }
+
+  _shareRelayProven(id) {
+    return !!(this._shareSawPing?.has(id) && this._shareSawPong?.has(id));
+  }
+
+  // One decision for the seat label and START. WebRTC wins when its own
+  // ping comes back within a few seconds. Otherwise the realtime channel,
+  // which already proved both directions, carries lockstep.
+  _shareConsiderLink(id) {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.id === id && !entry.host);
+    if (!seat || seat.linked || seat.transport) return;
+    const peer = this._shareHands?.get(id);
+    const since = this._shareSeatedAt?.get(id) || Number(seat.joinedAt) || Date.now();
+    const webrtcUp = !!(peer && peer.open && !peer.relay && this._shareWebrtcPong?.has(id));
+    if (webrtcUp) {
+      this._shareMarkLinked(id, 'webrtc');
+      return;
+    }
+    const waiting = !this._shareWebrtcFailed?.has(id) && Date.now() - since < SHARE_LINK_FALLBACK_MS;
+    if (waiting) return;
+    if (this._shareRelayProven(id)) this._shareUseRelay(id);
+  }
+
+  _shareMarkLinked(id, transport) {
+    if (!this._shareLobby?.seats?.some((seat) => seat.id === id)) return;
+    this._shareLobby = {
+      ...this._shareLobby,
+      seats: this._shareLobby.seats.map((seat) => (seat.id === id ? { ...seat, linked: true, transport } : seat)),
+    };
+    this._shareSig = '';
+    this._sharePublishLobby();
+    this._renderShareHost();
+  }
+
+  _shareUseRelay(id) {
+    const seat = this._shareLobby?.seats?.find((entry) => entry.id === id);
+    if (!seat || seat.transport === 'relay') {
+      if (seat && !seat.linked) this._shareMarkLinked(id, 'relay');
+      return;
+    }
+    const old = this._shareHands?.get(id);
+    if (old && !old.relay) {
+      old.onClose = null;
+      try { old.destroy(); } catch { /* the data channel is not the match */ }
+      this._shareHands.delete(id);
+      const idx = this.peers.indexOf(old);
+      if (idx >= 0 && !this.netMode) {
+        this.peers.splice(idx, 1);
+        this.guestHeroes.splice(idx, 1);
+        this.guestNames.splice(idx, 1);
+        this.guestCmdQueues.splice(idx, 1);
+        this.peerUserIds.splice(idx, 1);
+      }
+    }
+    const peer = createShareRelayPeer(id);
+    peer._emit = (obj) => this._shareSendTo(id, obj);
+    peer.onMessage = (incoming) => {
+      if (incoming?.t === 'probe' || incoming?.t === 'probeAck') return;
+      const idx = this.peers.indexOf(peer);
+      if (idx >= 0) this._onHostMsg(idx, incoming);
+    };
+    peer.onOpen = () => this._bindSharePeer(peer, id);
+    this._shareHands.set(id, peer);
+    peer.markOpen();
+    this._shareMarkLinked(id, 'relay');
+  }
+
+  _shareSendTo(to, body) {
+    const chunkId = `${Date.now().toString(36)}-${(this._shareChunkSeq = (this._shareChunkSeq || 0) + 1)}`;
+    for (const part of packShareLink(body, chunkId)) this._sharePublish({ t: 'link', to, ...part });
+  }
+
+  _shareAcceptLink(from, body) {
+    if (!body) return;
+    if (this.mpRole === 'host') {
+      const peer = this._shareHands?.get(from);
+      peer?.deliver?.(body);
+      return;
+    }
+    if (this.net?.relay) {
+      this.net.deliver(body);
+      return;
+    }
+    this._shareInbox ??= [];
+    this._shareInbox.push(body);
+    this._ensureGuestRelay();
+  }
+
+  _ensureGuestRelay() {
+    const mine = this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf);
+    if (this.mpRole !== 'guest' || !mine?.linked || mine.transport !== 'relay') return;
+    if (this.net?.relay) return;
+    if (this.net) {
+      this.net.onClose = null;
+      try { this.net.destroy(); } catch { /* replaced by the relay */ }
+      this.net = null;
+    }
+    const hostId = this._shareLobby.hostId;
+    const net = createShareRelayPeer(hostId);
+    net._emit = (obj) => this._shareSendTo(hostId, obj);
+    net.onMessage = (incoming) => {
+      if (incoming?.t === 'probe' || incoming?.t === 'probeAck') return;
+      this._onGuestMsg(incoming);
+    };
+    net.onOpen = () => {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
+      try { net.send(this._heroPayload()); } catch { /* the next window still carries it */ }
+    };
+    this.net = net;
+    this._attachNetDiagnostics(net);
+    const queued = this._shareInbox || [];
+    this._shareInbox = [];
+    net.markOpen();
+    for (const body of queued) net.deliver(body);
+  }
+
   _shareOpenIds() {
     const openIds = new Set();
-    for (const [id, peer] of this._shareHands || []) if (peer?.open) openIds.add(id);
+    for (const seat of this._shareLobby?.seats || []) if (!seat.host && seat.linked) openIds.add(seat.id);
     return openIds;
   }
 
@@ -3843,6 +3975,27 @@ class App {
       this._acceptShareIce(message);
     }
     else if (message.t === 'reject' && message.to === this._shareSelf) this._failShare(message.reason || 'invalid');
+    else if (message.t === 'ping') {
+      if (message.to && message.to !== this._shareSelf) return;
+      this._sharePublish({ t: 'pong', n: message.n, to: message.from });
+      if (this.mpRole === 'host' && message.from) {
+        this._shareSawPing ??= new Set();
+        this._shareSawPing.add(message.from);
+        this._shareConsiderLink(message.from);
+      }
+    }
+    else if (message.t === 'pong') {
+      if (message.to !== this._shareSelf || !message.from) return;
+      this._shareSawPong ??= new Set();
+      this._shareSawPong.add(message.from);
+      if (this.mpRole === 'host') this._shareConsiderLink(message.from);
+    }
+    else if (message.t === 'link' && message.to === this._shareSelf) {
+      this._shareChunks ??= new Map();
+      const body = unpackShareLink(this._shareChunks, message);
+      if (!body) return;
+      this._shareAcceptLink(message.from, body);
+    }
     else if (message.t === 'here' && this.mpRole === 'host' && message.from) {
       this._shareLobby = touchSeatActivity(this._shareLobby, message.from, Date.now());
       const label = this._shareGuestLabel(message.name, message.from);
@@ -3892,6 +4045,7 @@ class App {
         // rejoin flag. The host still has to replace the dead data channel.
         rejoin: !!(lobby.started || this._shareRejoinArmed || (this.netMode && !this.net?.open)),
       });
+      this._shareSendPing(lobby.hostId);
     }
     if (!this._shareGuestShown) {
       this._shareGuestShown = true;
@@ -3909,6 +4063,7 @@ class App {
     }
     const players = shareRoster(lobby, this._shareSelf);
     const sig = `${JSON.stringify(players)}:${lobby.mode}:${lobby.level}:${lobby.difficulty}:${lobby.maxPlayers}:${this.net?.open ? 'open' : 'wait'}`;
+    this._ensureGuestRelay?.();
     if (this._shareGuestShown && sig === this._shareSig) return;
     this._shareSig = sig;
     const mine = lobby.seats.find((seat) => seat.id === this._shareSelf);
@@ -3927,11 +4082,26 @@ class App {
       maxPlayers: lobby.maxPlayers || 4,
       ready: !!mine?.ready,
     });
+    this._ensureGuestRelay?.();
   }
 
   async _acceptShareGuest(message) {
     if (this.mpRole !== 'host' || !this._shareLobby || !shareId(message.from)) return;
     const guestName = this._shareGuestLabel(message.name, message.from);
+    if (message.rejoin) {
+      this._shareSeatedAt ??= new Map();
+      this._shareSeatedAt.set(message.from, Date.now());
+      this._shareSawPing?.delete(message.from);
+      this._shareSawPong?.delete(message.from);
+      this._shareWebrtcPong?.delete(message.from);
+      this._shareWebrtcFailed?.delete(message.from);
+      if (this._shareLobby?.seats) {
+        this._shareLobby = {
+          ...this._shareLobby,
+          seats: this._shareLobby.seats.map((seat) => (seat.id === message.from ? { ...seat, linked: false, transport: '' } : seat)),
+        };
+      }
+    }
     if (this._shareHands?.has(message.from)) {
       const peer = this._shareHands.get(message.from);
       this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now()), message.from, Date.now());
@@ -3968,6 +4138,9 @@ class App {
       this._shareLobby = withSeatHero(this._shareLobby, message.from, message.hero, guestName, Date.now());
     }
     if (message.ready) this._shareLobby = setSeatReady(this._shareLobby, message.from, true, Date.now());
+    this._shareSeatedAt ??= new Map();
+    if (!this._shareSeatedAt.has(message.from)) this._shareSeatedAt.set(message.from, Date.now());
+    this._shareSendPing(message.from);
     this._sharePendingJoins ||= new Set();
     if (this._sharePendingJoins.has(message.from)) return;
     this._sharePendingJoins.add(message.from);
@@ -3977,18 +4150,32 @@ class App {
     const liveMatch = !!(this._shareLobby?.started && this.netMode && this.game && !this.game.over);
     if (generation !== this._shareGeneration || !this._shareLobby || !this._shareLobby.seats.some(s => s.id === message.from)) return;
     if (this._shareLobby.started && !liveMatch) return;
+    if (this._shareLobby.seats.find((seat) => seat.id === message.from)?.transport === 'relay') return;
     const peer = new NetSession(ice);
     peer.shareId = message.from;
     this._shareHands.set(message.from, peer);
     this._attachNetDiagnostics(peer);
-    peer.onOpen = () => this._bindSharePeer(peer, message.from);
+    peer.onOpen = () => {
+      this._bindSharePeer(peer, message.from);
+      try { peer.send({ t: 'probe', n: 1 }); } catch { /* channel closed */ }
+    };
     peer.onMessage = (incoming) => {
+      if (incoming?.t === 'probe') { try { peer.send({ t: 'probeAck', n: incoming.n }); } catch { /* ignore */ } return; }
+      if (incoming?.t === 'probeAck') {
+        this._shareWebrtcPong ??= new Set();
+        this._shareWebrtcPong.add(message.from);
+        this._shareConsiderLink(message.from);
+        return;
+      }
       const idx = this.peers.indexOf(peer);
       if (idx >= 0) this._onHostMsg(idx, incoming);
     };
     peer.onClose = () => {
-      if (this._shareHands?.get(message.from) !== peer) return;
-      this._dropShareGuest(message.from);
+      if (this._shareHands?.get(message.from) !== peer || peer.relay) return;
+      this._shareWebrtcFailed ??= new Set();
+      this._shareWebrtcFailed.add(message.from);
+      this._shareHands.delete(message.from);
+      this._shareConsiderLink(message.from);
     };
     peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
@@ -4002,10 +4189,12 @@ class App {
       this._sharePublishLobby();
       this._renderShareHost();
     } catch {
-      this._shareHands.delete(message.from);
-      this._shareLobby = releaseGuest(this._shareLobby, message.from, Date.now());
-      this._sharePublish({ t: 'reject', to: message.from, reason: 'invalid' });
+      this._shareWebrtcFailed ??= new Set();
+      this._shareWebrtcFailed.add(message.from);
+      if (this._shareHands?.get(message.from) === peer) this._shareHands.delete(message.from);
+      peer.onClose = null;
       try { peer.destroy(); } catch { /* ignore */ }
+      this._shareConsiderLink(message.from);
     }
   }
 
@@ -4082,10 +4271,16 @@ class App {
       this._shareLostAt = 0;
       this._shareHandshakeUntil = 0;
       net.send(this._heroPayload());
+      try { net.send({ t: 'probe', n: 1 }); } catch { /* channel closed */ }
     };
-    net.onMessage = (incoming) => this._onGuestMsg(incoming);
+    net.onMessage = (incoming) => {
+      if (incoming?.t === 'probe') { try { net.send({ t: 'probeAck', n: incoming.n }); } catch { /* ignore */ } return; }
+      if (incoming?.t === 'probeAck') return;
+      this._onGuestMsg(incoming);
+    };
     net.onClose = () => {
       if (this.net !== net) return;
+      if (this._shareLobby?.seats?.find((seat) => seat.id === this._shareSelf)?.transport === 'relay') return;
       this._onShareLinkLost();
     };
     net.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
@@ -4095,7 +4290,11 @@ class App {
       this._sharePublish({ t: 'answer', to: message.from, sdp });
     } catch {
       this._shareHandshakeUntil = 0;
-      if (this.net === net && !this._shareRejoinArmed && !(this.netMode && this.game && !this.game.over)) this._failShare('invalid');
+      if (this.net === net) {
+        this.net = null;
+        net.onClose = null;
+        try { net.destroy(); } catch { /* webrtc is unavailable; the realtime relay still carries the match */ }
+      }
     }
   }
 

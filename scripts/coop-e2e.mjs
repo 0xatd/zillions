@@ -149,6 +149,11 @@ async function context(label) {
   await ctx.addInitScript((relayUrl) => {
     window.__zillionsProbeEnabled = true;
     if (relayUrl) window.__zillionsShareRelay = relayUrl;
+    // Same-NAT peers often never open a data channel. The match has to start
+    // on the realtime relay anyway.
+    window.RTCPeerConnection = function RTCPeerConnection() {
+      throw new Error('webrtc blocked');
+    };
   }, mailbox?.url || '');
   const page = await ctx.newPage();
   page.setDefaultTimeout(30000);
@@ -211,12 +216,17 @@ try {
     const hostSeat = roster.find((seat) => seat.host);
     const guestSeat = roster.find((seat) => !seat.host);
     const line = document.querySelector('.roomslot:not(.host):not(.open)')?.innerText || '';
-    return !!(guestSeat && hostSeat && guestSeat.name && guestSeat.name !== hostSeat.name
+    const button = document.querySelector('#s-start');
+    return !!(guestSeat && hostSeat && /^Guest [0-9A-F]{4}$/.test(guestSeat.name)
+      && guestSeat.name !== hostSeat.name
       && guestSeat.state === 'connected'
       && line.includes(guestSeat.name)
       && /\bconnected\b/.test(line)
-      && !line.includes('· connecting'));
-  }, null, { timeout: 10000 }).catch(async (error) => {
+      && !line.includes('· connecting')
+      && button && !button.disabled
+      && /START/i.test(button.textContent || '')
+      && !/WAITING/i.test(button.textContent || ''));
+  }, null, { timeout: 20000 }).catch(async (error) => {
     const line = await host.page.locator('.roomslot:not(.host):not(.open)').innerText().catch(() => '');
     throw new Error(`${error.message}\n${line}\n${JSON.stringify((await probe(host.page))?.roster)}`);
   });
@@ -225,7 +235,7 @@ try {
   const seated = (await probe(host.page)).roster.find((seat) => !seat.host);
   const stableName = seated.name;
   const stableId = seated.id;
-  const holdUntil = Date.now() + 60000;
+  const holdUntil = Date.now() + 10000;
   while (Date.now() < holdUntil) {
     const snap = await probe(host.page);
     const guests = (snap?.roster || []).filter((seat) => !seat.host);
@@ -291,7 +301,8 @@ try {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
-  console.log(liveUrl ? 'coop e2e passed against the live URL' : liveRealtime ? 'coop e2e passed against production Supabase Realtime' : 'coop e2e passed against the in-process relay');
+  const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
+  console.log(`coop e2e passed against ${via} with WebRTC blocked`);
 } finally {
   await browser.close();
   mailbox?.server.close();

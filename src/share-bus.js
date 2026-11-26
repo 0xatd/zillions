@@ -395,3 +395,62 @@ export function createRelayHub(relayUrl, { presenceMs = 2000, absentMs = 8000 } 
     presenceTiming: { presenceMs, absentMs },
   };
 }
+
+// Lockstep fallback when the data channel never opens. Windows are numbered,
+// so the broadcast channel does not have to deliver them in order. Bodies
+// larger than one broadcast (a snapshot) are split and reassembled.
+export const SHARE_LINK_CHUNK = 12000;
+
+export function packShareLink(body, chunkId) {
+  const json = JSON.stringify(body ?? null);
+  if (json.length <= SHARE_LINK_CHUNK) return [{ body }];
+  const parts = [];
+  for (let i = 0; i < json.length; i += SHARE_LINK_CHUNK) parts.push(json.slice(i, i + SHARE_LINK_CHUNK));
+  return parts.map((part, index) => ({ chunk: chunkId, i: index, n: parts.length, part }));
+}
+
+export function unpackShareLink(pending, message) {
+  if (!message || typeof message !== 'object') return null;
+  if (message.body !== undefined && !message.chunk) return message.body;
+  if (!message.chunk) return null;
+  const box = pending.get(message.chunk) || { n: message.n, parts: [] };
+  box.n = message.n;
+  box.parts[message.i] = message.part;
+  pending.set(message.chunk, box);
+  if (box.parts.filter((part) => part != null).length < box.n) return null;
+  pending.delete(message.chunk);
+  try { return JSON.parse(box.parts.join('')); }
+  catch { return null; }
+}
+
+// Same send/sendFast/onMessage shape as a WebRTC peer, over the share channel.
+export function createShareRelayPeer(id) {
+  let open = false;
+  const queued = [];
+  const peer = {
+    shareId: id,
+    relay: true,
+    get open() { return open; },
+    send(obj) { peer._emit?.(obj); },
+    sendFast(obj) { peer.send(obj); },
+    deliver(obj) {
+      if (!open) { queued.push(obj); return; }
+      try { peer.onMessage?.(obj); } catch { /* a bad command does not kill the seat */ }
+    },
+    markOpen() {
+      if (open) return;
+      open = true;
+      try { peer.onOpen?.(); } catch { /* ignore */ }
+      for (const obj of queued.splice(0)) {
+        try { peer.onMessage?.(obj); } catch { /* ignore */ }
+      }
+    },
+    destroy() {
+      const was = open;
+      open = false;
+      queued.length = 0;
+      if (was) { try { peer.onClose?.(); } catch { /* ignore */ } }
+    },
+  };
+  return peer;
+}
