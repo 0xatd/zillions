@@ -3,7 +3,7 @@
 // lives in Supabase.
 
 import { getSupabaseClient, loadSupabaseConfig } from './supabase.js';
-import { committedSetupPatch, mergeRefreshedRoom, ROOM_HEARTBEAT_MS, staleOpenSeatIds } from './lobby-reliability.js';
+import { committedSetupPatch, mergeRefreshedRoom, noteSeatReceipts, ROOM_HEARTBEAT_MS, staleOpenSeatIds } from './lobby-reliability.js';
 const FRESH_MS = 2 * 60 * 1000;
 const CURRENT_RULES = 'survival-plots';
 // Increment this only when two browser builds cannot safely share a room.
@@ -33,7 +33,7 @@ const CHAT_LIMIT = 500;
 const CHANNEL_READY_MS = 8000;
 const SIGNAL_ATTEMPTS = 3;
 const SIGNAL_RETRY_MS = 350;
-const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state,unlocked_level,last_seen_at,joined_at)';
+const ROOM_SELECT = 'id,code,name,host_user_id,visibility,status,rules,max_players,difficulty,metadata,created_at,updated_at,last_seen_at,room_players(user_id,seat,display_name,hero,ready,connection_state,unlocked_level,last_seen_at,joined_at,updated_at)';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -600,10 +600,13 @@ export class OnlineLobby {
   async _reapOpenSeats() {
     if (!this.game || this.game.host_id !== this.me?.id || this.matchActive) return;
     if (this.game.status !== 'open') return;
+    const connectedIds = typeof this.connectedSeatIds === 'function' ? this.connectedSeatIds() : [];
     const ids = staleOpenSeatIds(this.game._players, {
       hostId: this.me.id,
       now: Date.now(),
       inGame: false,
+      connectedIds,
+      receipts: this._seatReceipts || {},
     });
     if (!ids.length) return;
     for (const userId of ids) {
@@ -698,6 +701,7 @@ export class OnlineLobby {
       }
     }
     this.game = mergeRefreshedRoom(this.game, roomToGame(data));
+    this._seatReceipts = noteSeatReceipts(this._seatReceipts, this.game?._players, Date.now());
     if (this.cb.onRoom) this.cb.onRoom(this.game);
     return this.game;
   }

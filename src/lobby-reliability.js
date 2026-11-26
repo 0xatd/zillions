@@ -76,16 +76,46 @@ export function mergeRefreshedRoom(local, remote) {
   };
 }
 
-export function staleOpenSeatIds(players, { hostId, now, graceMs = ROOM_SEAT_GRACE_MS, inGame = false } = {}) {
+// Remember when THIS client observed a seat row change. The mark is the
+// server's updated_at when the database has one. Staleness is then measured
+// on the host clock from that observation, never from the guest's last_seen_at.
+export function noteSeatReceipts(previous, players, now) {
+  const next = { ...(previous || {}) };
+  const at = Number(now) || 0;
+  for (const player of players || []) {
+    if (!player?.user_id) continue;
+    const mark = String(player.updated_at || player.last_seen_at || player.joined_at || '');
+    const prior = next[player.user_id];
+    if (!prior || prior.mark !== mark) next[player.user_id] = { mark, at };
+  }
+  return next;
+}
+
+export function staleOpenSeatIds(players, {
+  hostId, now, graceMs = ROOM_SEAT_GRACE_MS, inGame = false, connectedIds = [], receipts = null,
+} = {}) {
   if (inGame) return [];
   const cutoff = Number(now) - graceMs;
+  const connected = new Set(connectedIds || []);
   return (players || [])
     .filter((player) => player && player.user_id && player.user_id !== hostId)
     .filter((player) => {
-      const seen = Date.parse(player.last_seen_at || player.joined_at || '') || 0;
-      return seen < cutoff;
+      if (connected.has(player.user_id)) return false;
+      const receipt = receipts ? receipts[player.user_id] : null;
+      if (!receipt) return false;
+      return Number(receipt.at) < cutoff;
     })
     .map((player) => player.user_id);
+}
+
+// What a disconnected share-link guest should do on the next heartbeat.
+// `retry` means send another join. The caller repeats that until the data
+// channel is open or the grace period ends.
+export function shareRejoinStep({ open = false, inMatch = false, lostAt = 0, now = 0, hostAlive = true, armed = false } = {}) {
+  if (open) return 'stop';
+  if (inMatch) return withinRejoinGrace(lostAt, now) ? 'retry' : 'giveUp';
+  if (!armed) return 'idle';
+  return hostAlive ? 'retry' : 'hostLeft';
 }
 
 export function roomStartLabel({

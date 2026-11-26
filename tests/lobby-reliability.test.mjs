@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  committedSetupPatch, desyncRecovery, mergeRefreshedRoom, publicRoomSetup, roomStartLabel, staleOpenSeatIds, withinRejoinGrace,
+  committedSetupPatch, desyncRecovery, mergeRefreshedRoom, noteSeatReceipts, publicRoomSetup, roomStartLabel,
+  shareRejoinStep, staleOpenSeatIds, withinRejoinGrace,
 } from '../src/lobby-reliability.js';
 
 const HOST = '11111111-1111-4111-8111-111111111111';
@@ -53,11 +54,27 @@ test('Start names the player who is blocking, and stale seats can be reaped', ()
   }), 'WAITING FOR Bea, Cy TO READY');
   const now = Date.parse('2026-11-26T00:00:00Z');
   const players = [
-    { user_id: HOST, last_seen_at: '2026-11-26T00:00:00Z' },
-    { user_id: GUEST, last_seen_at: '2026-11-25T23:00:00Z' },
+    { user_id: HOST, updated_at: '2026-11-25T23:00:00Z', last_seen_at: '2026-11-25T22:00:00Z' },
+    { user_id: GUEST, updated_at: '2026-11-25T23:00:00Z', last_seen_at: '2026-11-25T22:00:00Z' },
   ];
-  assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000 }), [GUEST]);
-  assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000, inGame: true }), []);
+  const seen = noteSeatReceipts({}, players, now - 30_000);
+  const fresh = noteSeatReceipts(seen, players.map((player) => (
+    player.user_id === GUEST ? { ...player, updated_at: '2026-11-26T00:00:01Z' } : player
+  )), now);
+  assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000, receipts: fresh }), []);
+  assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000, receipts: seen }), [GUEST]);
+  assert.deepEqual(staleOpenSeatIds(players, {
+    hostId: HOST, now, graceMs: 25_000, receipts: seen, connectedIds: [GUEST],
+  }), []);
+  assert.deepEqual(staleOpenSeatIds(players, { hostId: HOST, now, graceMs: 25_000, receipts: seen, inGame: true }), []);
+});
+
+test('a dropped share guest keeps asking until the channel returns or grace ends', () => {
+  assert.equal(shareRejoinStep({ open: false, inMatch: true, lostAt: 1_000, now: 2_000 }), 'retry');
+  assert.equal(shareRejoinStep({ open: true, inMatch: true, lostAt: 1_000, now: 2_000 }), 'stop');
+  assert.equal(shareRejoinStep({ open: false, inMatch: true, lostAt: 1_000, now: 91_001 }), 'giveUp');
+  assert.equal(shareRejoinStep({ open: false, inMatch: false, armed: true, hostAlive: true, now: 2_000 }), 'retry');
+  assert.equal(shareRejoinStep({ open: false, inMatch: false, armed: true, hostAlive: false, now: 2_000 }), 'hostLeft');
 });
 
 test('a hash mismatch restores a snapshot before it becomes terminal', () => {

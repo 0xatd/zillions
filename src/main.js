@@ -35,7 +35,7 @@ import {
   shareName, shareRoster, shareStartLabel, shareUrl, SHARE_DISCOVER_MS, SHARE_HEARTBEAT_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from './share-link.js';
 import { createTabSession } from './tab-session.js';
-import { desyncRecovery, roomStartLabel, withinRejoinGrace } from './lobby-reliability.js';
+import { desyncRecovery, roomStartLabel, shareRejoinStep, withinRejoinGrace } from './lobby-reliability.js';
 import { createBrowserHub, createSupabaseHub, loadShareIceServers } from './share-bus.js';
 import { OnlineLobby, LORE, TIPS, canRejoinRoom, roomCompatibility, isCustomGame, CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from './online.js';
 import { AuthClient } from './auth.js';
@@ -3375,7 +3375,12 @@ class App {
         this._shareTrackPresence();
         return;
       }
-      if (this.mpRole !== 'guest' || !this._shareLobby || this.netMode) return;
+      if (this.mpRole !== 'guest' || !this._shareLobby) return;
+      if (this._shareRejoinArmed || (this.netMode && this.game && !this.game.over && !this.net?.open)) {
+        this._shareRejoinTick();
+        return;
+      }
+      if (this.netMode) return;
       const decision = admitGuest(this._shareLobby, { id: this._shareSelf }, Date.now(), this._shareLiveness());
       if (!decision.ok) this._failShare(decision.reason);
       else this._shareTrackPresence();
@@ -3656,6 +3661,7 @@ class App {
         t: 'join', name: shareName(this._publicName()), hero: this.ui.selectedHero || 'scott', claim: true,
         protocolVersion: LOBBY_PROTOCOL_VERSION, clientVersion: CLIENT_VERSION,
         unlockedLevel: highestUnlockedLevel(this.profile?.campaign),
+        rejoin: !!(this._shareRejoinArmed || (this.netMode && !this.net?.open)),
       });
     }
     if (!this._shareGuestShown) {
@@ -3693,7 +3699,9 @@ class App {
     if (this._shareHands?.has(message.from)) {
       const peer = this._shareHands.get(message.from);
       this._shareLobby = touchSeatActivity(withSeatHero(this._shareLobby, message.from, message.hero, message.name, Date.now()), message.from, Date.now());
-      if (peer?.open) {
+      // A live hero change keeps the open channel. A rejoin replaces it even
+      // when the old channel has not reported closed yet.
+      if (peer?.open && !message.rejoin) {
         const idx = this.peers.indexOf(peer);
         if (idx >= 0) {
           this.guestHeroes[idx] = shareHero(message.hero);
@@ -3741,7 +3749,10 @@ class App {
       const idx = this.peers.indexOf(peer);
       if (idx >= 0) this._onHostMsg(idx, incoming);
     };
-    peer.onClose = () => this._dropShareGuest(message.from);
+    peer.onClose = () => {
+      if (this._shareHands?.get(message.from) !== peer) return;
+      this._dropShareGuest(message.from);
+    };
     peer.onIce = (cand) => this._sharePublish({ t: 'ice', to: message.from, cand });
     try {
       const sdp = await peer.hostTrickle();
@@ -3824,7 +3835,12 @@ class App {
     const net = new NetSession(ice);
     this.net = net;
     this._attachNetDiagnostics(net);
-    net.onOpen = () => net.send(this._heroPayload());
+    net.onOpen = () => {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
+      this._shareHandshakeUntil = 0;
+      net.send(this._heroPayload());
+    };
     net.onMessage = (incoming) => this._onGuestMsg(incoming);
     net.onClose = () => {
       if (this.net !== net) return;
@@ -3836,7 +3852,8 @@ class App {
       if (this.net !== net) return;
       this._sharePublish({ t: 'answer', to: message.from, sdp });
     } catch {
-      if (this.net === net) this._failShare('invalid');
+      this._shareHandshakeUntil = 0;
+      if (this.net === net && !this._shareRejoinArmed && !(this.netMode && this.game && !this.game.over)) this._failShare('invalid');
     }
   }
 
@@ -3926,34 +3943,52 @@ class App {
   }
 
   _onShareLinkLost() {
+    this._shareRejoinArmed = true;
+    if (this.netMode && this.game && !this.game.over && !this._shareLostAt) this._shareLostAt = Date.now();
+    this._shareHandshakeUntil = 0;
+    this._shareRejoinTick();
+  }
+
+  // Heartbeat calls this until the data channel is open again or grace ends.
+  // One join is not enough: the host may still see the old channel as open,
+  // and a dropped signaling message must not end the grace period.
+  _shareRejoinTick() {
     const inMatch = !!(this.netMode && this.game && !this.game.over);
-    if (inMatch) {
-      if (!this._shareLostAt) this._shareLostAt = Date.now();
-      if (!withinRejoinGrace(this._shareLostAt, Date.now())) {
-        this.pause();
-        this.ui.setWaiting(false);
-        this.ui.showBanner('Could not rejoin the host. Open the same invite from this tab while the seat is held.', 'bad', 8000);
-        return;
-      }
-      this.ui.setWaiting(true, 'Reconnecting to the host…');
-      this._shareRetryJoin();
-      return;
-    }
-    const alive = this._shareLobby && hostStillHere(this._shareLobby, Date.now(), {
-      receivedAt: this._shareReceivedAt || null,
-      hostPresent: !!this._shareHostPresent,
+    if (inMatch && !this._shareLostAt) this._shareLostAt = Date.now();
+    const step = shareRejoinStep({
+      open: !!this.net?.open,
+      inMatch,
+      lostAt: this._shareLostAt || 0,
+      now: Date.now(),
+      hostAlive: !!(this._shareLobby && hostStillHere(this._shareLobby, Date.now(), this._shareLiveness())),
+      armed: !!this._shareRejoinArmed || inMatch,
     });
-    if (alive) {
-      this._shareRetryJoin();
+    if (step === 'stop') {
+      this._shareRejoinArmed = false;
+      this._shareLostAt = 0;
       return;
     }
-    if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+    if (step === 'giveUp') {
+      this._shareRejoinArmed = false;
+      this.pause();
+      this.ui.setWaiting(false);
+      this.ui.showBanner('Could not rejoin the host. Open the same invite from this tab while the seat is held.', 'bad', 8000);
+      return;
+    }
+    if (step === 'hostLeft') {
+      this._shareRejoinArmed = false;
+      if (!this._shareFailed && !this.netMode) this._failShare('host_left');
+      return;
+    }
+    if (step !== 'retry') return;
+    if (inMatch) this.ui.setWaiting(true, 'Reconnecting to the host…');
+    this._shareRetryJoin();
   }
 
   _shareRetryJoin() {
     const now = Date.now();
-    if (now - (this._shareRetryAt || 0) < 2000) return;
-    this._shareRetryAt = now;
+    if (this._shareHandshakeUntil && now < this._shareHandshakeUntil) return;
+    this._shareHandshakeUntil = now + 8000;
     this._shareAnnounced = false;
     this._shareOffered = null;
     if (this._shareLobby) this._onShareLobby(this._shareLobby);
@@ -4289,6 +4324,7 @@ class App {
       return !!(lease && lease.kind === 'room' && this._tabSession().ownsLease());
     };
     this.lobby.onHeartbeat = () => this._tabSession().refreshLease();
+    this.lobby.connectedSeatIds = () => (this.peerUserIds || []).filter((id, index) => id && this.peers[index]?.open);
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
