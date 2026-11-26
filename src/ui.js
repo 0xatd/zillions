@@ -109,13 +109,16 @@ export class UI {
     q('#a-settings').onclick = () => this._showScreen('settings');
     q('#nav-squad').onclick = () => this._showScreen('squad');
     q('#nav-armory').onclick = () => this.showCharacterSheet('character');
-    q('#nav-account').onclick = () => { this._showScreen('account'); q('#account-card')?.classList.remove('hidden'); };
+    q('#nav-account').onclick = () => q('#account-card')?.classList.toggle('hidden');
     q('#nav-home').onclick = () => this._showScreen('home');
     q('#tab-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#tab-coop').onclick = () => { this._playTab = 'coop'; this._showScreen('home'); };
     q('#tab-versus').onclick = () => { this._playTab = 'versus'; this._showScreen('home'); };
     q('#coop-arcade')?.addEventListener('click', () => { this._customView = 'arcade'; this.cb.onCustomOpen && this.cb.onCustomOpen(); });
-    q('#squad-party').onclick = () => this.cb.onPartyOpen?.();
+    q('#system-labels').onclick = (event) => {
+      const button = event.target.closest('[data-planet]');
+      if (button) this.focusPlanet(button.dataset.planet);
+    };
     q('#active-character').onclick = () => this._showScreen('main');
     this._wireMenuLists();
     q('#a-username-form').onsubmit = (e) => {
@@ -141,7 +144,6 @@ export class UI {
     q('#chapter-color').innerHTML = Object.keys(CHAPTER_COLORS).map(k=>`<option value="${k}">${k}</option>`).join('');
     q('#chapter-emblem').innerHTML = Object.entries(CHAPTER_EMBLEMS).map(([k,v])=>`<option value="${k}">${v} ${k}</option>`).join('');
     q('#m-character-sheet').onclick = () => this.showCharacterSheet('character');
-    q('#m-invite').onclick = () => this.cb.onShareInvite?.();
     q('#sheet-close').onclick = () => this._closeCharacterSheet();
     for (const tab of this.root.querySelectorAll('.sheet-tab')) {
       tab.onclick = () => { this._sheetTab = tab.dataset.tab; this._renderCharacterSheet(); };
@@ -727,8 +729,33 @@ export class UI {
 
   showOverworld() {
     this._playTab = 'campaign';
+    this._focusedPlanet = 'earth';
     this._showScreen('overworld');
     this._renderChapter();
+    this.focusPlanet('earth');
+  }
+
+  focusPlanet(id) {
+    this._focusedPlanet = id || 'earth';
+    for (const button of this.root.querySelectorAll('#system-labels .system-label')) {
+      button.classList.toggle('is-on', button.dataset.planet === this._focusedPlanet);
+    }
+    const earth = this._focusedPlanet === 'earth';
+    const map = this.root.querySelector('#chapter-map');
+    const objective = this.root.querySelector('#chapter-objective');
+    const blurb = this.root.querySelector('#planet-blurb');
+    map?.classList.toggle('hidden', !earth);
+    objective?.classList.toggle('hidden', !earth);
+    if (blurb) {
+      const copy = {
+        cinder: 'Cinder is a contested colony. Travel there is not built.',
+        verge: 'Verge keeps its hives in the dark. The moon is not open.',
+        reach: 'The Reach is the frontier past Earth. It is not open.',
+      };
+      blurb.textContent = earth ? '' : `${copy[this._focusedPlanet] || 'This world is not open.'} Coming soon.`;
+      blurb.classList.toggle('hidden', earth);
+    }
+    if (earth) this._renderChapter();
   }
 
   showCustomBrowser({ games = [], offline = false, hostName = '' } = {}) {
@@ -3243,6 +3270,7 @@ export class UI {
     if (usernameForm) usernameForm.classList.toggle('hidden', !needsUsername);
     if (needsUsername) {
       this._accountAccepted = false;
+      this.root.querySelector('#account-card')?.classList.remove('hidden');
       this._showScreen('account');
       setTimeout(() => usernameInput && usernameInput.focus(), 0);
       return;

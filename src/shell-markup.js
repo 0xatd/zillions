@@ -124,11 +124,10 @@ export function shellMarkup() {
         </button>
         <div id="party-strip" class="party-strip" aria-label="Party">
           <span class="party-slot you" id="party-you"><b id="party-you-name">You</b></span>
+          <span class="party-slot soon">Open</span>
+          <span class="party-slot soon">Open</span>
+          <span class="party-slot soon">Open</span>
           <button type="button" class="party-slot invite" id="a-invite">Invite</button>
-          <button type="button" class="party-slot soon" disabled>Open</button>
-          <button type="button" class="party-slot soon" disabled>Open</button>
-          <button type="button" class="party-link" id="m-party">Party</button>
-          <button type="button" class="party-link" id="m-invite">Invite</button>
         </div>
         <nav id="shell-tabs" class="shell-tabs hidden" aria-label="Play">
           <button type="button" data-tab="campaign" id="tab-campaign">Campaign</button>
@@ -146,13 +145,13 @@ export function shellMarkup() {
           <button type="button" class="menu-word" id="a-settings">Settings</button>
           <button type="button" class="menu-word" id="nav-account">Account</button>
         </nav>
+        <div id="account-status-wrap" class="title-status">
+          <div class="auth-progress" id="auth-progress"><span></span></div>
+          <div id="account-status">Checking account…</div>
+        </div>
         <button type="button" id="a-credits" class="credits-link">Credits</button>
-        <section id="account-card" class="glass account-card">
+        <section id="account-card" class="glass account-card hidden">
           <div class="login-heading"><span>ACCOUNT</span><h2>Sign in</h2><p>A Zillions account keeps characters, gear, and match rewards.</p></div>
-          <div class="accountstatus" id="account-status-wrap">
-            <div class="auth-progress" id="auth-progress"><span></span></div>
-            <div id="account-status">Checking account…</div>
-          </div>
           <button class="menubtn primary login-provider" id="a-google" type="button"><span>Continue with Google</span></button>
           <div class="login-divider" id="a-login-divider"><span>OR</span></div>
           <form class="email-login" id="a-email-form">
@@ -210,23 +209,22 @@ export function shellMarkup() {
         </div>
       </div>
 
-      <div id="screen-overworld" class="shell-screen hidden">
+      <div id="screen-overworld" class="shell-screen system-screen hidden">
         <header class="sys-bar glass">
           <span><small>Alloy</small><b id="sys-alloy">0</b></span>
           <span class="soon-inline"><small>Time</small><b>Coming soon</b></span>
           <span><small>Party</small><b id="sys-party">1</b></span>
           <span id="chapter-earth-status"></span>
         </header>
-        <div class="system-map" aria-label="Star system">
-          <article class="planet built">
-            <header><b>Earth</b><small>Campaign</small></header>
-            <div id="chapter-map" aria-label="Earth conquest map"></div>
-          </article>
-          <article class="planet soon"><header><b>Cinder</b><small>Coming soon</small></header><p>Contested colony. Travel is not built.</p></article>
-          <article class="planet soon"><header><b>Verge</b><small>Coming soon</small></header><p>Enemy hives on a dark moon.</p></article>
-          <article class="planet soon"><header><b>The Reach</b><small>Coming soon</small></header><p>Frontier systems beyond Earth.</p></article>
+        <div id="system-labels" aria-label="Planets">
+          <button type="button" class="system-label is-on" data-planet="earth">Earth</button>
+          <button type="button" class="system-label dim" data-planet="cinder">Cinder<small>Coming soon</small></button>
+          <button type="button" class="system-label dim" data-planet="verge">Verge<small>Coming soon</small></button>
+          <button type="button" class="system-label dim" data-planet="reach">The Reach<small>Coming soon</small></button>
         </div>
+        <div id="chapter-map" aria-label="Earth conquest map"></div>
         <aside id="site-panel" class="site-panel glass" aria-label="Site">
+          <p id="planet-blurb" class="hidden"></p>
           <div id="chapter-objective"></div>
           <div class="site-actions">
             <button type="button" id="site-assault" disabled>Assault</button>
@@ -243,7 +241,7 @@ export function shellMarkup() {
       <div id="screen-squad" class="shell-screen hidden">
         <header class="glass sheet-head"><h1>Squad</h1><button type="button" class="tbtn info-back">Back</button></header>
         <div class="squad-grid">
-          <section class="glass"><h2>Party</h2><p>The party travels with you on every menu. Ready state stays on the match room.</p><button type="button" class="menubtn" id="squad-party">Open party</button></section>
+          <section class="glass"><h2>Party</h2><p>The party travels with you on every menu. Ready state stays on the match room.</p><button type="button" class="menubtn" id="m-party">Open party</button></section>
           <section class="glass"><h2>Friends</h2>
             <div class="friendadd"><input id="l-friendcode" maxlength="32" placeholder="@username"><button class="tbtn" id="l-friendadd" type="button">Add</button></div>
             <div id="l-friends" class="friendlist"></div>

@@ -80,7 +80,9 @@ body { font-family: var(--font-display); }
 .ico { display: inline-flex; vertical-align: -3px; margin-right: 6px; }
 .ico svg { display: block; }
 .credits-link:hover { color: var(--accent-2); }
-.account-card { position: absolute; right: 6vw; top: 12vh; width: min(380px, 86vw); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+#screen-account.title-screen { display: block; background: transparent; padding: 0; }
+.title-status { margin: 10px 0 0 7vw; max-width: 280px; color: var(--ink-dim); font-size: 14px; line-height: 1.35; }
+.account-card { position: absolute; left: calc(7vw + 240px); top: 10vh; width: min(360px, 42vw); max-height: calc(100vh - 18vh); overflow: auto; padding: 22px; display: flex; flex-direction: column; gap: 10px; }
 #shell-chrome { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
 #shell-chrome > * { pointer-events: auto; }
 .active-character {
@@ -108,13 +110,19 @@ body { font-family: var(--font-display); }
   opacity: 0.45; filter: grayscale(0.4); pointer-events: none;
 }
 .soon small, .mode-card.soon em, .planet.soon small { color: var(--accent-2); letter-spacing: 0.12em; text-transform: uppercase; }
-#screen-overworld { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 340px); grid-template-rows: auto minmax(0, 1fr); gap: 10px; padding: 64px 16px 72px; }
-.sys-bar { grid-column: 1 / -1; display: flex; gap: 18px; align-items: center; padding: 8px 12px; }
+#screen-overworld { background: transparent; pointer-events: none; }
+#screen-overworld > * { pointer-events: auto; }
+#overlay:has(#screen-overworld:not(.hidden)) { background: linear-gradient(90deg, rgba(3, 8, 14, 0.28), rgba(3, 8, 14, 0.02) 46%, rgba(3, 8, 14, 0.38)); }
+.sys-bar { position: absolute; top: 58px; left: 16px; right: 16px; display: flex; gap: 18px; align-items: center; padding: 8px 12px; }
 .sys-bar small { display: block; color: var(--ink-dim); letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px; }
-.system-map { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-height: 0; }
-.planet { padding: 10px; border: 1px solid var(--line); background: rgba(6, 12, 18, 0.45); min-height: 120px; }
-.planet.built { border-color: var(--line-warm); }
-#chapter-map { position: relative; height: 180px; }
+.system-label { position: absolute; transform: translate(-50%, 0); background: transparent; border: 0; color: var(--ink); font-family: var(--font-display); letter-spacing: 0.16em; text-transform: uppercase; text-shadow: 0 2px 10px #000; cursor: pointer; z-index: 2; white-space: nowrap; }
+.system-label small { display: block; color: var(--accent-2); letter-spacing: 0.14em; font-size: 10px; }
+.system-label.dim { opacity: 0.55; }
+.system-label.is-on { color: var(--accent); text-shadow: 0 0 14px var(--accent-glow); }
+#screen-overworld #chapter-map { position: absolute; left: 10%; top: 20%; width: min(260px, 46vw); height: min(200px, 34vh); margin: 0; min-height: 0; background: none; border: 0; pointer-events: none; }
+#screen-overworld #chapter-map svg { display: none; }
+#screen-overworld .chapter-city { pointer-events: auto; }
+.site-panel { position: absolute; top: 112px; right: 16px; width: min(300px, 32vw); max-height: calc(100vh - 180px); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 #chapter-objective { margin-bottom: 8px; }
 #chapter-next, #site-assault { min-height: 32px; }
 .site-panel { padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -159,8 +167,6 @@ body { font-family: var(--font-display); }
 #ui:has(#screen-pause:not(.hidden)) :is(#topbar, #actionbar, #minimap-wrap, #party-strip, #builder-controls) { visibility: hidden; }
 @media (max-width: 900px) {
   #toasts { width: min(440px, calc(100vw - 24px)); }
-  #screen-overworld { grid-template-columns: 1fr 1fr; padding-top: 56px; }
-  #chapter-map { height: 120px; }
+  .account-card { left: 16px; top: auto; bottom: 72px; width: min(360px, calc(100vw - 32px)); }
   .squad-grid, #screen-setup { grid-template-columns: 1fr; }
-  .planet.soon { min-height: 0; }
 }

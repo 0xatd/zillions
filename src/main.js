@@ -650,6 +650,44 @@ class App {
     );
     group.add(orbitalGlow);
 
+    const system = new THREE.Group();
+    system.name = 'star-system';
+    const planetSpecs = [
+      { id: 'earth', color: 0x3c8f6b, emissive: 0x123828, radius: 8.4, x: 0, y: 0, z: 0 },
+      { id: 'cinder', color: 0x6d4636, emissive: 0x24140e, radius: 4.4, x: 18, y: 11, z: -8 },
+      { id: 'verge', color: 0x3c4d68, emissive: 0x121824, radius: 5.2, x: 13, y: -12, z: -2 },
+      { id: 'reach', color: 0x56485f, emissive: 0x1a1520, radius: 3.6, x: -16, y: 8, z: -12 },
+    ];
+    const planets = planetSpecs.map((spec) => {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius, 9, 7),
+        toyMat({ color: spec.color, emissive: spec.emissive, emissiveIntensity: spec.id === 'earth' ? 0.45 : 0.12 }),
+      );
+      mesh.position.set(spec.x, spec.y, spec.z);
+      if (spec.id !== 'earth') mesh.material.transparent = true, mesh.material.opacity = 0.72;
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius * 1.08, 9, 7),
+        new THREE.MeshBasicMaterial({ color: spec.id === 'earth' ? 0x8fd4ff : 0x667088, transparent: true, opacity: spec.id === 'earth' ? 0.22 : 0.08, side: THREE.BackSide, depthWrite: false, fog: false }),
+      );
+      mesh.add(shell);
+      if (spec.id === 'earth') {
+        for (let i = 0; i < 5; i++) {
+          const mark = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45, 5, 4),
+            toyMat({ color: 0xf1bf66, emissive: 0xf1bf66, emissiveIntensity: 0.8 }),
+          );
+          const a = i * 1.27;
+          mark.position.set(Math.cos(a) * 6.2, Math.sin(a * 1.4) * 3.4, Math.sin(a) * 5.4);
+          mesh.add(mark);
+        }
+      }
+      system.add(mesh);
+      return { id: spec.id, mesh };
+    });
+    group.add(system);
+    this._systemShift = new THREE.Vector3();
+    this._systemT = 0;
+
     const ships = new THREE.Group();
     for (let i = 0; i < 5; i++) {
       const ship = new THREE.Mesh(new THREE.BoxGeometry(5 + i * 0.7, 0.8, 1.8), new THREE.MeshBasicMaterial({ color: 0x24384d }));
@@ -687,7 +725,7 @@ class App {
     const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
     heroLight.visible = !!titleCharacter;
     group.add(heroLight);
-    group.userData = { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
+    group.userData = { atmosphere, limb: planet, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -697,11 +735,18 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
-    const showTitleCharacter = !!selectedMmoCharacter(this.profile);
+    const { atmosphere, limb, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets } = this.titleSpace.userData;
+    const systemView = this._systemViewActive();
+    const showTitleCharacter = !!selectedMmoCharacter(this.profile) && !systemView;
     titleHero.visible = showTitleCharacter;
     heroPedestal.visible = showTitleCharacter;
     heroLight.visible = showTitleCharacter;
+    if (limb) limb.visible = !systemView;
+    atmosphere.visible = !systemView;
+    orbitalGlobe.visible = !systemView;
+    orbitalGlow.visible = !systemView;
+    if (system) system.visible = systemView;
+    if (systemView) this._easeSystem(t, system, planets);
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
@@ -736,6 +781,69 @@ class App {
       s.position.set(MAP_SIZE / 2 - 55 + i * 34 + p * 22, 78 - p * 72, MAP_SIZE / 2 - 82 + i * 5);
       s.material.opacity = Math.sin(p * Math.PI) * 0.75;
     }
+    if (systemView) this._layoutSystemMarkers();
+  }
+
+  _systemViewActive() {
+    if (this.game || !this.titleSpace) return false;
+    const screen = this.ui?.root?.querySelector?.('#screen-overworld');
+    const overlay = this.ui?.root?.querySelector?.('#overlay');
+    return !!screen && !screen.classList.contains('hidden') && !!overlay && !overlay.classList.contains('hidden');
+  }
+
+  _easeSystem(t, system, planets) {
+    const dt = Math.min(0.05, Math.max(0, t - (this._systemT || t)));
+    this._systemT = t;
+    const id = this.ui?._focusedPlanet || 'earth';
+    const body = planets.find((planet) => planet.id === id) || planets[0];
+    if (!this._systemShift) this._systemShift = new THREE.Vector3();
+    const goal = body.mesh.position.clone().multiplyScalar(-1);
+    this._systemShift.lerp(goal, 1 - Math.exp(-dt * 3.4));
+    const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    const anchor = cameraLocal(-18, -1, -76);
+    const shift = this._systemShift.clone().applyQuaternion(this.camera.quaternion);
+    system.position.copy(anchor).add(shift);
+    system.quaternion.copy(this.camera.quaternion);
+    for (const planet of planets) planet.mesh.rotation.y = t * (planet.id === 'earth' ? 0.12 : 0.05);
+  }
+
+  _layoutSystemMarkers() {
+    const planets = this.titleSpace?.userData?.planets;
+    const system = this.titleSpace?.userData?.system;
+    if (!planets || !system || !this.ui?.root) return;
+    system.updateMatrixWorld(true);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const point = this._menuProjV || new THREE.Vector3();
+    this._menuProjV = point;
+    const project = (object) => {
+      object.getWorldPosition(point);
+      point.project(this.camera);
+      return { x: (point.x * 0.5 + 0.5) * width, y: (-point.y * 0.5 + 0.5) * height };
+    };
+    const spanOf = (planet, at) => {
+      const radius = planet.mesh.geometry.parameters.radius;
+      const edge = system.localToWorld(planet.mesh.position.clone().add(new THREE.Vector3(radius, 0, 0)));
+      edge.project(this.camera);
+      return Math.max(72, Math.min(320, Math.abs((edge.x * 0.5 + 0.5) * width - at.x) * 2));
+    };
+    for (const planet of planets) {
+      const label = this.ui.root.querySelector(`#system-labels [data-planet="${planet.id}"]`);
+      if (!label) continue;
+      const at = project(planet.mesh);
+      const span = spanOf(planet, at);
+      label.style.left = `${at.x}px`;
+      label.style.top = `${at.y + span * 0.58}px`;
+    }
+    const earth = planets.find((planet) => planet.id === 'earth');
+    const map = this.ui.root.querySelector('#chapter-map');
+    if (!earth || !map || map.classList.contains('hidden')) return;
+    const at = project(earth.mesh);
+    const span = spanOf(earth, at);
+    map.style.left = `${at.x - span / 2}px`;
+    map.style.top = `${at.y - span / 2}px`;
+    map.style.width = `${span}px`;
+    map.style.height = `${span}px`;
   }
 
   _clearMenuBackdrop() {
