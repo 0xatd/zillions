@@ -281,18 +281,18 @@ try {
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
   const moveDeadline = startedAt + 10000;
   let moved = null;
-  let origin = null;
+  let spawn = null;
   while (Date.now() < moveDeadline) {
     const guestProbe = await probe(guest.page);
     if (guestProbe?.myPlayer > 0 && guestProbe.heroes?.length === 2) {
       const me = guestProbe.heroes[guestProbe.myPlayer];
       const hostHero = guestProbe.heroes[0];
-      if (!origin) {
-        origin = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
-        await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: origin.x + 8, z: origin.z + 6 });
+      if (!spawn) {
+        spawn = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
+        await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: spawn.x + 8, z: spawn.z + 6 });
       }
-      const mineStep = Math.hypot(me.x - origin.x, me.z - origin.z);
-      const hostStep = Math.hypot(hostHero.x - origin.hx, hostHero.z - origin.hz);
+      const mineStep = Math.hypot(me.x - spawn.x, me.z - spawn.z);
+      const hostStep = Math.hypot(hostHero.x - spawn.hx, hostHero.z - spawn.hz);
       if (mineStep > 0.4 && hostStep < mineStep) {
         moved = guestProbe;
         break;
