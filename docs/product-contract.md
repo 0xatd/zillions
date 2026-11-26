@@ -3,6 +3,33 @@
 This is the source of truth for future agents. Read it before you change game
 systems, menus, backend code, or docs.
 
+## Shared-overworld decision (Alex, 2026-11-26)
+
+**The overworld itself is multiplayer:** WoW-style cooperative parties inside
+one persistent Bannerlord-style strategic map shared by everyone in that
+world/realm. It is not a collection of private party worlds, nor a solo
+mission selector that becomes multiplayer only when a battle starts. Players
+can travel together or separately and encounter other players and parties.
+Party membership is a social/cooperative grouping within the world, separate
+from character identity, faction membership, rank and political hierarchy.
+The current four-seat battle-room limit is not a limit on the shared world's
+population. Do not infer PvP or faction leadership from this design.
+
+Returning characters enter that world directly. New characters use guided
+creation and the first-world introductory campaign. Whether tutorial content
+or battles use separate instances is not decided here; do not silently make
+the whole overworld private. Shared-world time cannot pause for one player's
+menu; battle readiness barriers concern encounter participants, not everyone
+in the realm.
+
+This is the new product decision superseding older "siege game only / no
+living world" target language below. The shipped baseline still has a campaign
+mission selector, private co-op rooms and siege battles—not shared strategic
+travel, world population or persistent world authority. This navigation PR
+keeps those working and shows unbuilt destinations/actions as disabled. Do
+not relabel the existing selector as a completed shared world or reactivate
+removed world-worker code without a reviewed implementation plan.
+
 ## Affiliation correction (Alex, 2026-11-26)
 
 A character is not automatically a faction ruler. Several characters and
@@ -34,7 +61,7 @@ not a permanent ranking or a claim of implemented kits. See
 `docs/leader-navigation.md`. Only Vanguard is available in custom creation;
 previously recruited heroes remain playable. Requested future art direction:
 space-marine interpretations of human archetypes and distinct science-fiction
-alien interpretations. This navigation pass adds no new models or abilities.
+alien interpretations. This pass adds no new archetype kits or abilities; it improves presentation of existing models.
 
 
 ## Chapter-first product decision (Alex, 2026-11-22)
@@ -79,10 +106,10 @@ Q/E/R are active slots; the rebindable secondary-bar action exposes three more.
 
 ## Target
 
-Zillions is a browser siege game. The living world (overworld, planet hubs,
-galaxy map, Orbital Lifts, parties, encounters, companies, markets, and region
-workers) was removed. Do not reintroduce a persistent shared world without a
-new product decision.
+The target is the shared cooperative overworld defined above, using the
+existing browser siege encounters. Earlier living-world code was removed;
+that removal is implementation history, not the current product goal. The
+new target does not itself restore or validate that old architecture.
 
 A new player can press Play on the title and fight as a guest stored in
 this browser. Google or an email magic link is offered to save progress
@@ -493,8 +520,9 @@ client-side reward authority.
 
 ## Friend groups — authorized 2026-11-23
 
-A persistent private party coordinates up to four friends between existing
-sieges. It is not a living world or shared combat server. Invite links/codes,
+Current released subsystem: a persistent private party coordinates up to
+four friends between existing sieges. This is not yet the shared overworld
+required by the newer product decision above. Invite links/codes,
 leader handoff, removal and another private room are in scope. The chapter's
 selected founder/companion remains the player's leader; the party has no legacy
 seven-hero list or duplicate Ready screen. Existing rooms still enforce seats,

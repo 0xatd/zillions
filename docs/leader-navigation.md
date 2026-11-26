@@ -1,5 +1,32 @@
 # Leader navigation
 
+## Shared-overworld decision (Alex, 2026-11-26)
+
+**The overworld itself is multiplayer:** WoW-style cooperative parties inside
+one persistent Bannerlord-style strategic map shared by everyone in that
+world/realm. It is not a collection of private party worlds, nor a solo
+mission selector that becomes multiplayer only when a battle starts. Players
+can travel together or separately and encounter other players and parties.
+Party membership is a social/cooperative grouping within the world, separate
+from character identity, faction membership, rank and political hierarchy.
+The current four-seat battle-room limit is not a limit on the shared world's
+population. Do not infer PvP or faction leadership from this design.
+
+Returning characters enter that world directly. New characters use guided
+creation and the first-world introductory campaign. Whether tutorial content
+or battles use separate instances is not decided here; do not silently make
+the whole overworld private. Shared-world time cannot pause for one player's
+menu; battle readiness barriers concern encounter participants, not everyone
+in the realm.
+
+This is the new product decision superseding older "siege game only / no
+living world" target language below. The shipped baseline still has a campaign
+mission selector, private co-op rooms and siege battles—not shared strategic
+travel, world population or persistent world authority. This navigation PR
+keeps those working and shows unbuilt destinations/actions as disabled. Do
+not relabel the existing selector as a completed shared world or reactivate
+removed world-worker code without a reviewed implementation plan.
+
 ## Affiliation correction (Alex, 2026-11-26)
 
 A character is not automatically a faction ruler. Several characters and
