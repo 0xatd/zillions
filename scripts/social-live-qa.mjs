@@ -1,5 +1,5 @@
 // Opt-in real-account party lifecycle. Use candidate API handlers and live Supabase.
-// No fabricated results: the siege runs to defeat before the same group starts again.
+// Verifies persisted friends, real invitations, Ready barrier and relay ordering.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {writeFile,appendFile,mkdtemp,mkdir} from 'node:fs/promises';
@@ -27,7 +27,8 @@ async function prepare(role){
  await page.waitForFunction(()=>__app.authStatus.signedIn,null,{timeout:60000});
  await page.evaluate(handle=>__app._claimUsername(handle),handle);
  await page.waitForFunction(()=>!__app.authStatus.needsUsername,null,{timeout:60000});
- await page.evaluate(async(role)=>{const a=__app;if(!a.profile.mmoCharacters?.length)await a._createMmoCharacter({name:'QA '+role,classKey:'vanguard'});await a._selectMmoCharacter(a.profile.mmoCharacters[0].id);a.ui._showScreen('main');await a._openLobby();},role);
+ await page.evaluate(async(role)=>{const a=__app;if(!a.profile.mmoCharacters?.length)await a._createMmoCharacter({name:'QA '+role,classKey:'vanguard'});await a._selectMmoCharacter(a.profile.mmoCharacters[0].id);a.ui._showScreen('main');},role);
+ await page.waitForFunction(()=>__app.lobby?.connected,null,{timeout:60000});
  await log('account-ready',{role});return {page,context,id:u.id,handle};
 }
 try{

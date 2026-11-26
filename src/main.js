@@ -522,7 +522,7 @@ class App {
     void getSupabaseClient().then((client) => {
       try { client.realtime?.connect?.(); } catch { /* the invite subscribe connects too */ }
     }).catch(() => {});
-    if (sessionStorage.getItem('zillions-return-custom')) { sessionStorage.removeItem('zillions-return-custom'); setTimeout(() => this._openCustomGames(), 1800); }
+    this._returnCustom = sessionStorage.getItem('zillions-return-custom') === '1';
     this._consumeShareLink();
     this._bootReplay();
     this.ui.setAccount(this.authStatus);
@@ -2124,12 +2124,19 @@ class App {
       clearInterval(this._socialTimer);
       this.lobby?.disconnect?.();
       this.lobby = null;
+      this.ui.lobbyFriends([]); this.ui.socialParty(null);
       this._authenticatedEntryHandled = false;
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    // Account presence and incoming invitations exist before opening Social.
+    if (this.authStatus.signedIn && !this.authStatus.needsUsername) void this._openLobby();
     // A shared replay owns the screen. Account hydration above still ran.
     if (this._replayBoot) return;
+    if (this._returnCustom && status.ready && !status.needsUsername) {
+      this._returnCustom = false; sessionStorage.removeItem('zillions-return-custom');
+      this._authenticatedEntryHandled = true; this._openCustomGames(); return;
+    }
     const retry = this._consumeBootRetry(status);
     if (retry) {
       this._authenticatedEntryHandled = true;
@@ -5323,7 +5330,7 @@ class App {
     clearInterval(this._socialTimer);
     this.keys?.clear(); this.buttonPay = false;
     for (const id of ['l-friendcode','l-friendadd','m-party']) this.ui.root.querySelector('#'+id).disabled = !this.authStatus?.signedIn;
-    if (!this.authStatus?.signedIn) { this.ui.socialStatus('Sign in through Account to add friends and join parties.'); return; }
+    if (!this.authStatus?.signedIn) { this.ui.lobbyFriends([]); this.ui.socialParty(null); this.ui.socialStatus('Sign in through Account to add friends and join parties.'); return; }
     const refresh = async () => {
       if (this._socialRefreshing || !this.ui.root.querySelector('#social-panel')?.open) return;
       this._socialRefreshing = true;

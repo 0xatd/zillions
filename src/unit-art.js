@@ -12,6 +12,7 @@ import { toyMat } from './toy-style.js';
 import { applyRim } from './tactical-visuals.js';
 import { itemInfo } from './config.js';
 import { COSMETIC_RENDERERS } from './cosmetics.js';
+import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { assembleCharacterHead } from './marine-assembler.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
@@ -44,6 +45,33 @@ const cyl = (parent, mat, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 8) =
   mesh(parent, new THREE.CylinderGeometry(r1, r2, h, seg), mat, x, y, z, rx, ry, rz);
 const cone = (parent, mat, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
   mesh(parent, new THREE.ConeGeometry(r, h, seg), mat, x, y, z, rx, ry, rz);
+
+// Batch static armor within each animated limb; never combine independent pivots.
+function batchArmor(group) {
+  const batches = new Map();
+  for (const part of group.children) {
+    if (!part.isMesh || !part.visible || Array.isArray(part.material)) continue;
+    const m = part.material;
+    if (m.type !== 'MeshLambertMaterial' || m.map) continue;
+    const key = [m.color.getHex(), m.emissive.getHex(), m.emissiveIntensity, m.flatShading, m.side, m.opacity].join(':');
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(part);
+  }
+  for (const parts of batches.values()) {
+    if (parts.length < 2) continue;
+    const geometries = parts.map(part => {
+      part.updateMatrix();
+      const geometry = part.geometry.index ? part.geometry.toNonIndexed() : part.geometry.clone();
+      return geometry.applyMatrix4(part.matrix);
+    });
+    const geometry = mergeGeometries(geometries, false);
+    for (const g of geometries) g.dispose();
+    if (!geometry) continue;
+    const combined = mesh(group, geometry, parts[0].material);
+    combined.receiveShadow = parts[0].receiveShadow;
+    for (const part of parts) { group.remove(part); part.geometry.dispose(); }
+  }
+}
 
 // ---------------- the shared rig ----------------
 // Origin at the feet, +Z forward. Legs pivot at the hip, arms at the
@@ -598,14 +626,17 @@ function playerHero(u) {
   // Marked gear gets one cyan pip; Prime gear adds a paired amber pip.
   const rarityAccent = (parent, rarity, x, y, z) => {
     if (rarity < 2) return;
-    sph(parent, M(rarity >= 3 ? 0xe0b34b : 0x6fa8dc, .75), .018, x, y, z, 1, 1, .5);
-    if (rarity >= 3) sph(parent, M(0xe0b34b, .75), .018, -x, y, z, 1, 1, .5);
+    // Tiny armor studs need eight faces, not a full 140-triangle sphere.
+    const pip = (px, color) => mesh(parent, new THREE.OctahedronGeometry(.018, 0), M(color, .75), px, y, z).scale.set(1, 1, .5);
+    pip(x, rarity >= 3 ? 0xe0b34b : 0x6fa8dc);
+    if (rarity >= 3) pip(-x, 0xe0b34b);
   };
   rarityAccent(rig.head, gearInfo.head.rarity, .055, .1, .12);
   rarityAccent(rig.torso, gearInfo.chest.rarity, .1, .29, .19);
   rarityAccent(rig.limbs.armR, gearInfo.hands.rarity, .035, -.31, .1);
   rarityAccent(rig.limbs.legR, gearInfo.legs.rarity, .03, -.23, .09);
   rarityAccent(rig.limbs.legL, gearInfo.boots.rarity, .03, -.39, .14);
+  for (const group of [rig.head, rig.torso, ...Object.values(rig.limbs)]) batchArmor(group);
   rifle(rig.root, weapons, { len: .72, y: .58 });
   return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
 }

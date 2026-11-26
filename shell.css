@@ -511,3 +511,7 @@ button:disabled {cursor:not-allowed;}
  #screen-custom .custom-actions {position:sticky;bottom:0;z-index:3;}
  #screen-custom .custom-map-row {min-height:56px;padding:8px;}
 }
+
+#social-panel .glass h2 {font-size:18px;margin:0 0 12px;}
+#social-panel .squad-grid {gap:12px;}
+#social-panel .friendrow {padding:8px 0;}

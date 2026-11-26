@@ -130,7 +130,6 @@ export class UI {
     q('#nav-account').onclick = () => q('#account-card')?.classList.toggle('hidden');
     q('#nav-home').onclick = () => this.cb.onEnterWorld?.();
     q('#leader-custom').onclick = () => this.cb.onCustomOpen?.();
-    q('#leader-modes').onclick = () => {this._playTab='coop';this._showScreen('home');};
     q('#leader-back').onclick = () => this._showScreen('account');
     q('#tab-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
     q('#tab-coop').onclick = () => { this._playTab = 'coop'; this._showScreen('home'); };

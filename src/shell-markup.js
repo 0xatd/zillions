@@ -191,7 +191,7 @@ export function shellMarkup() {
           <button type="button" class="menubtn custom-entry" id="leader-custom">Custom Battles</button><button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
         </aside>
-        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-modes">Other battles</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
+        <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
         <button type="button" class="utilitybtn hidden" id="m-character-sheet">ARMORY</button>
       </div>
 
@@ -242,7 +242,7 @@ export function shellMarkup() {
 
         <div class="squad-grid">
           <section class="glass social-party"><h2>Your party</h2><div id="social-party-roster">No party loaded.</div><button type="button" class="menubtn" id="m-party">Manage party</button></section>
-          <section class="glass"><h2>Friends</h2><p class="mphint">Account-wide, across characters and battles.</p>
+          <section class="glass"><h2>Friends</h2>
             <div class="friendadd"><input aria-label="Friend username" id="l-friendcode" maxlength="32" placeholder="@username"><button class="tbtn" id="l-friendadd" type="button">Add</button></div>
             <div id="l-friends" class="friendlist"></div>
             <div class="friendshead hidden"><b>Online</b><span id="l-player-count"></span><span id="l-online"></span></div>

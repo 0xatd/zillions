@@ -466,6 +466,16 @@ export function assembleCharacterHead(identity) {
   root.traverse(o=>{if(!o.isMesh)return;const tint=m=>{if(!materials.has(m)){const c=tintMaterial(m,colors).clone();c.userData={...c.userData,kitShared:false};materials.set(m,c);}return materials.get(m);};o.material=Array.isArray(o.material)?o.material.map(tint):tint(o.material);});
   // Center from the face alone: hairstyles must not shift the jaw/neck.
   const bounds = new THREE.Box3().setFromObject(head);
+  // The sculpt has no internal animation: batch by material before attaching
+  // it to the independently animated head pivot. Preserve all authored faces.
+  const batches = mergeGroup(root);
+  if (batches.length) {
+    root.clear();
+    for (const { geometry, material } of batches) {
+      const part = new THREE.Mesh(geometry, material);
+      part.castShadow = true; root.add(part);
+    }
+  }
   root.scale.setScalar(.49);
   root.position.y = .01 - (bounds.min.y + bounds.max.y) * .245;
   return root;
